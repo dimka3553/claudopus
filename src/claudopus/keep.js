@@ -148,17 +148,14 @@ const bringBack = async ($, id, ids, cutAt, isCopy) => {
     redraw($);
     const cards = await read($, todos);
     const titled = (one) => `"${titleOf(cards.find(card => card.id === one) ?? started(one, '', '', '', cutAt))}"`;
-    const where = isCopy ? ', in the background on this Mac' : '';
-    const startedAgain = back.length ? `Claudopus started ${back.length === 1 ? titled(back[0] ?? '') : `${back.length} tasks`} again at ${hhmm(now)}${where}, after the chat stopped at ${hhmm(cutAt)}.` : '';
+    const where = isCopy ? 'on this Mac by itself' : 'again';
     const text = [
-        startedAgain,
-        lost.length ? `Claudopus couldn't start ${lost.length === 1 ? titled(lost[0] ?? '') : `${lost.length} tasks`} again after the chat stopped at ${hhmm(cutAt)}.` : '',
+        back.length ? `${back.length === 1 ? `${titled(back[0] ?? '')} was interrupted at ${hhmm(cutAt)} and has been running ${where}` : `${back.length} tasks were interrupted at ${hhmm(cutAt)} and have been running ${where}`} since ${hhmm(now)}.` : '',
+        lost.length ? `${lost.length === 1 ? titled(lost[0] ?? '') : `${lost.length} tasks`} interrupted at ${hhmm(cutAt)} couldn't be restarted.` : '',
     ]
         .filter(Boolean)
         .join(' ');
-    // The cards show what was started again: only a task that could not be is said in the chat
-    if (lost.length)
-        $.ui.log(text.replace(startedAgain, '').trim());
+    $.ui.log(text);
     await tellDevice($, text);
 };
 // The person is told on their own device: Claude Code's push to the Claude app on their phone, where Remote Control reaches it;
@@ -166,91 +163,7 @@ const bringBack = async ($, id, ids, cutAt, isCopy) => {
 const tellDevice = async ($, text) => {
     const pushed = await $.tool.call({ tool: 'PushNotification', message: text.slice(0, 199) }).catch(err => ({ deny: String(err) }));
     await log($, `cut-off notice pushed: ${JSON.stringify(pushed).slice(0, 200)}`);
-    await alertPerson($, 'cut', 'Task interrupted', text, `cut-${Math.round((await $.clock.now()) / 60000)}`);
+    await alertPerson($, 'cut', 'Task interrupted and restarted', text, `cut-${Math.round((await $.clock.now()) / 60000)}`);
 };
 // The line on a card of cut-off work: when, and whether it goes on again
-const cutLine = (one) => one.cutAt ? (one.backAt ? `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · running again since ${hhmm(one.backAt)}` : `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · Claudopus couldn't start it again`) : '';
-// ---- Back by itself after Claude switches it off ----
-// Claude's engine switches off an add-on that held its shared helper for five seconds, and that chat has no Claudopus until the
-// person types /reload-plugins. The engine loads an add-on again by itself when one of its own settings changes, so each chat's
-// load writes its beat, keep/<chat>.beat naming the chat's process, every BEAT_EVERY, and starts bin/revive, one on the Mac at a
-// time, which changes the setting "revived" (plugin.json's userConfig) when a beat goes quiet while its process still runs.
-// Changed, it loads Claudopus again in every chat, as an update does
-const BEAT_EVERY = 3000;
-const beatFile = (id) => `${dir}/keep/${id}.beat`;
-const configDir = async ($) => (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await $.env.get('HOME')) ?? ''}/.claude`;
-// The key this copy has in the settings: claudopus@<marketplace> for an installed one, whether Claude Code keeps it in its cache or
-// loads it from the marketplace's own folder (a marketplace of a folder on this Mac, as Claudopus's own checkout); claudopus@inline
-// for one loaded with --plugin-dir. On 16 Nov this Mac's chats ran from the checkout, and claudopus@inline would have changed nothing
-const ownKey = async ($, configDir) => {
-    const market = /\/plugins\/cache\/([^/]+)\/claudopus\//.exec($.plugin.root)?.[1];
-    if (market && /^[\w.-]+$/.test(market))
-        return `claudopus@${market}`;
-    const known = parsedOr(await readOr($, `${configDir}/plugins/known_marketplaces.json`), {});
-    const name = Object.entries(known).find(([, one]) => typeof one?.installLocation === 'string' && one.installLocation && ($.plugin.root === one.installLocation || $.plugin.root.startsWith(`${one.installLocation.replace(/\/$/, '')}/`)))?.[0];
-    return name && /^[\w.-]+$/.test(name) ? `claudopus@${name}` : 'claudopus@inline';
-};
-let beatLine = '';
-const beat = async ($, id) => {
-    if (!dir || !beatLine || isEnded)
-        return;
-    await $.fs.write(beatFile(id), beatLine);
-    // The proof that it comes back, for someone who wants to see it: keep/<chat>.hold-test holding this chat's process number, written
-    // by hand, makes this chat's Claudopus hold Claude's helper long enough to be switched off, once, in the next drawing of its panel
-    // or the next message: the engine switches off only an add-on that holds the helper while one of its hooks is answering, not in a
-    // timer of its own (16 Nov trial). It is taken away whatever it holds
-    const proof = `${dir}/keep/${id}.hold-test`;
-    if (!isHoldTestDue && (await $.fs.exists(proof))) {
-        const said = (await readOr($, proof)).trim();
-        await $.process.run(['rm', '-f', proof]);
-        if (said !== enginePid)
-            return void log($, "a hold-test file that did not name this chat's process was taken away");
-        isHoldTestDue = true;
-        $.ui.invalidate('ui.render');
-    }
-};
-let isHoldTestDue = false;
-const holdTest = async ($) => {
-    if (!isHoldTestDue)
-        return;
-    isHoldTestDue = false;
-    await log($, "holding Claude's helper on purpose, as keep/<chat>.hold-test asked");
-    const end = Date.now() + 10000;
-    while (Date.now() < end)
-        Math.sqrt(Date.now());
-};
-const startReviver = async ($, id) => {
-    if (!dir || !SAFE_CHAT.test(id))
-        return;
-    if (!enginePid)
-        enginePid = await pidOfEngine($);
-    if (!/^\d+$/.test(enginePid))
-        return;
-    // A load the setting brought back says so in the log, with how long its chat had gone without it
-    const back = (await readOr($, `${dir}/keep/${id}.revived`)).trim().split('\n').at(-1)?.split(' ') ?? [];
-    const backAt = Number(back[0] ?? 0) * 1000;
-    if (backAt && (await $.clock.now()) - backAt < 120000)
-        await log($, `back after Claude switched Claudopus off in this chat (its beat was quiet ${back[1] ?? '?'} s)`);
-    const config = await configDir($);
-    const settings = `${config}/settings.json`;
-    if (/[\t\n]/.test(settings))
-        return;
-    // and, on a line of its own, the load that writes it: one that beats again after the watcher's change was never off, only slow
-    // (bin/revive; a watcher of an older version reads the first line as before)
-    beatLine = `${enginePid}\t${await ownKey($, config)}\t${settings}\n${thisLoad}\n`;
-    await beat($, id);
-    everyLoad($, BEAT_EVERY, () => beat($, id).catch(() => undefined));
-    // In a session of its own, so it outlives the chat's process; it leaves at once when one of this copy already runs
-    const script = `nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$1" "$2" >/dev/null 2>&1 </dev/null &`;
-    const r = await $.process.run(['/bin/sh', '-c', script, 'sh', `${$.plugin.root}/bin/revive`, dir]).catch(err => ({ exitCode: -1, stderr: String(err) }));
-    if (r.exitCode !== 0)
-        await log($, `the watcher that brings Claudopus back was not started: ${r.stderr.slice(0, 200)}`);
-};
-// A chat that ends leaves no beat behind
-const endBeat = async ($, id) => {
-    beatLine = '';
-    if (dir && SAFE_CHAT.test(id))
-        await $.process.run(['rm', '-f', beatFile(id)]).catch(() => undefined);
-};
-const SAFE_CHAT = /^[A-Za-z0-9-]{1,80}$/;
-const REVIVED_KEY = 'claudopus.revived';
+const cutLine = (one) => one.cutAt ? (one.backAt ? `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; running again since ${hhmm(one.backAt)}.` : `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; it couldn't be restarted.`) : '';

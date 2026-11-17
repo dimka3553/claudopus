@@ -38,10 +38,10 @@ const stepOf = (use) => {
     if (use.tool === 'SubagentHandback')
         return { kind: 'said', text: whole(given('message')), isUse: true };
     if (use.tool === 'Agent')
-        return { kind: 'step', text: `Started a helper: ${given('description') || 'unnamed'}`, isError: use.isError, isUse: true, tool: use.tool, name: given('description') };
+        return { kind: 'step', text: `Started a helper: ${given('description') || 'no name'}`, isError: use.isError, isUse: true, tool: use.tool, name: given('description') };
     const file = given('file_path') || given('notebook_path');
     const text = isTool(use.tool, 'todo')
-        ? `${{ doing: 'Started', done: 'Done', dropped: 'Dropped' }[given('state')] ?? 'To-do'}: ${given('item')}`
+        ? `${{ doing: 'Started on', done: 'Ticked', dropped: 'Dropped' }[given('state')] ?? 'To-do'}: ${given('item')}`
         : given('description')
             ? oneLine(given('description'))
             : file
@@ -100,7 +100,7 @@ const folded = (steps) => {
         some(count(['Grep', 'Glob']), 'made', 'search'),
         some(count(['Agent']), 'started', 'helper'),
         count([`${TOOLS}todo`, `${OLD_TOOLS}todo`]) ? 'updated its to-dos' : '',
-        some(steps.filter(line => !known.includes(line.tool ?? '')).length, 'used', 'other tool'),
+        some(steps.filter(line => !known.includes(line.tool ?? '')).length, 'took', 'other step'),
         steps.some(line => line.isError) ? `${steps.filter(line => line.isError).length} failed` : '',
     ]
         .filter(Boolean)

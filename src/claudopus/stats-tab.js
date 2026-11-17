@@ -89,7 +89,7 @@ async function loadStats($, scope, home, memory, chatId, hint, now) {
         held.set(scope, { runs, at: now });
     }
     catch (err) {
-        held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? `Claudopus couldn’t read Claude’s logs because jq isn’t installed on ${thisMac()}. Install jq, then open Stats again.` : `Claudopus couldn’t read Claude’s logs: ${String(err)}. Open Stats again to try once more.` });
+        held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? `Stats reads Claude’s records with jq, and jq was not found on ${thisMac()}.` : `Claudopus couldn’t read the records: ${String(err)}` });
     }
     finally {
         reading.delete(scope);
@@ -112,7 +112,7 @@ async function loadMemorySizes($, memory) {
         { name: 'Results', count: reports.filter(e => e.kind === 'dir').length, bytes: kb.get('reports') ?? 0 },
         { name: 'Finished tasks, by chat', count: (await names('finished')).length, bytes: kb.get('finished') ?? 0 },
         { name: 'Workflows', count: (await names('flows')).length, bytes: kb.get('flows') ?? 0 },
-        { name: 'Picture previews and Stats', count: (await names('thumbs')).length + (await names('stats')).length, bytes: (kb.get('thumbs') ?? 0) + (kb.get('stats') ?? 0) },
+        { name: 'Thumbnails and sums', count: (await names('thumbs')).length + (await names('stats')).length, bytes: (kb.get('thumbs') ?? 0) + (kb.get('stats') ?? 0) },
     ];
     const bytes = [...kb.values()].reduce((sum, n) => sum + n, 0);
     memoryHeld.now = { parts, bytes };

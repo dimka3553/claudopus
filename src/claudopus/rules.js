@@ -2,9 +2,11 @@
 // What chats and work are told: the brief rule, refusals, the work's panel rule, steers and reminders
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
-const BRIEF = 'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.';
-const REFUSED = 'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, sent with `run_in_background: true`; a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.';
-const NO_COPY = () => `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`;
+const BRIEF = 'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command, a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.';
+const REFUSED = 'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow, if any; it changes no file. Start a fresh agent for this: the Agent tool with subagent_type "claudopus:task", the model named, and the task\'s instructions as the prompt.';
+const NO_COPY = () => lean.small === 'copy'
+    ? `A fresh task needs the model named (${modelsShort(models)}): the Agent tool with subagent_type "claudopus:task" and the task's instructions as the prompt. Only a small job that builds on this talk goes to a copy of this chat, subagent_type "fork".`
+    : `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:task", the model named (${modelsShort(models)}), and the task's instructions as the prompt.`;
 // A command that would print a password or key the keychain keeps (on Linux, the files bin/keyring keeps). Work uses a kept key only through `bin/secret`, which reads it itself
 // or that would point the runner at another store or another box
 const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus\/keyring\b/;
@@ -224,7 +226,7 @@ const writesMemory = (text, names) => {
     return namesMemory(kept, names) || (names === MEMORY_PERSON && /\brelease\.local\b/.test(kept));
 };
 const NO_MEMORY = "Only Claudopus writes the files chats share and answer one another through, and the update's own files: Claude never writes them with any tool.";
-const NO_MEMORY_BASH = () => named("Claude changes {name}'s own settings and texts (config.json, the rules and roles in the memory folder, a repo's release.local) only with the Edit or Write tool, never with a command, so the change shows on the task's card and waits for {name} to press. To read one, use the Read tool, or cat or jq.");
+const NO_MEMORY_BASH = () => named("Claude changes {name}'s own settings and texts (config.json, the rules and roles in the memory folder, a repo's release.local) only with the Edit or Write tool, never with a command, so the change shows on the task's card and waits for {name} to press.");
 const NO_BOXES = 'Only the password and key runners use their boxes: Claude never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner, and for a key only through the secret runner the task rules name.';
 const NO_PUSH = 'Claude never pushes or merges to main itself, so two tasks never release at once: commit on your own branch and run the release runner the task rules name, from your worktree.';
 // How long the names of kept keys are trusted before they are asked again
@@ -242,29 +244,38 @@ const AFAR_RULE = "## This chat runs on another Mac\n\n- I work from my own devi
 // What the chat shows when its work asks the person something: the ask as the mod's own notice in the chat, with its answers and
 // pictures, never a message in the person's place; its model reads the ask in a row of its own, with how to pass an answer on.
 // An answer typed in the chat goes to the work as a press on the card does
-// One line: what it is about, its answers, a command or text and its pictures are on its card (17 Nov: "Why does this huge text even
-// appear in my chat?")
-const ASK_IN_CHAT = (title, ask) => `"${title}" asks you: ${oneLine(ask.text)} Answer on its card, or here.`;
-const ASK_RELAY = (id, title, ask, answers) => `In the background task "${title}", Claude asked {name} a question. {Name} sees it in full on the task's card, and its question alone in this chat as a Claudopus notice, which you do not see: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, which {name} sees in full with it on the card: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} already has it: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, do not answer it yourself, and do not start a task for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that task with SendMessage to "${id}", in their words; its card then stops showing the question.`;
-// What the chat's model is told when an ask it was sent is answered on the card, or the work no longer needs it. The person, who
-// answered there, is not shown it
-const ASK_ANSWERED = (title, said) => `✓ {Name} answered "${title}" on its card: ${said}. Claude already has the answer from the card, so it needs no second copy.`;
+const ASK_IN_CHAT = (title, ask, answers) => [
+    `"${title}" has a question for you: ${ask.text}`,
+    // The chat's notice is plain text: Markdown's marks for bold would show as they are
+    ask.details ? `What it is about:\n${ask.details.replaceAll('**', '')}` : '',
+    `Answers: ${answers.join(' · ')}, or reply in your own words, here or on its card.`,
+    ask.copy ? `${ask.isCommand ? 'The command to type' : 'The text to paste'}: ${ask.copy}` : '',
+    ask.pictures?.length ? `Pictures: ${ask.pictures.join(', ')}` : '',
+]
+    .filter(Boolean)
+    .join('\n');
+const ASK_RELAY = (id, title, ask, answers) => `In the background task "${title}", Claude asked {name} a question. {Name} sees it on the task's card and in this chat as a Claudopus notice, which you do not see: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, which {name} sees in full with it on the card and in the notice: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} already has it: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, do not answer it yourself, and do not start a task for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that task with SendMessage to "${id}", in their words; its card then stops showing the question.`;
+// What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it. The person sees the
+// notice (isYou) and the chat's model reads it with the person named
+const ASK_ANSWERED = (title, said, isYou = false) => isYou ? `✓ You answered "${title}" on its card: ${said}. Claude has your answer.` : `✓ {Name} answered "${title}" on its card: ${said}. Claude already has the answer from the card, so it needs no second copy.`;
 // What the chat is told when it sends work an answer of the person's that reached it from the card a moment ago
 const ANSWER_ALREADY_SENT = (said) => `Not sent: "${said}" is the answer {name} gave on that task's card. Claude already has it from there and has asked nothing since, so a second copy would only start it again. If {name} means those words for something new, send them with what they are for.`;
 // How long an answer given on the card counts as the one the chat would send again
 const ANSWER_ECHO = 60 * 60000;
 // What the chat is told when the person replies on the card in words that do not settle the ask: it stays open
-const ASK_REPLIED = (title, said) => `✓ {Name} replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs {name}.`;
+const ASK_REPLIED = (title, said, isYou = false) => isYou
+    ? `✓ You replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs you.`
+    : `✓ {Name} replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs {name}.`;
 // What the work is told with a reply that does not settle its ask: the ask stays open on its card until it clears or replaces it
 const REPLY_HOLDS = `That reply does not settle your question by itself: act on it. Their card shows your question with their reply under it, and nothing more to press or type while you work on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still needs them after you have done what they said, ask it again, which brings back its answers.`;
 // What work that had ended is told when the person answers its ask on the card: the answer starts it again
 const RESUMED_BY_ANSWER = `You had finished; this answer starts you again. Continue the task with it, then end with your report as before.`;
 // What the chat's model reads, and the person sees as a notice (isYou), when that work could not be started again with the answer
 const ANSWER_FOR_CHAT = (title, asked, said, isYou = false) => isYou
-    ? `You answered "${asked}" from "${title}" on its card after it was done: ${said}. Claudopus couldn't start that task again, so your answer goes with your next message here.`
+    ? `You answered, on its card, the question Claude asked in "${title}" after it finished (${asked}): ${said}. Claudopus couldn't start that task again, so your answer goes with your next message here.`
     : `{Name} answered, on its card, the question Claude asked in "${title}" after it finished (${asked}): ${said}. Claudopus couldn't start that task again, so the answer waits here for {name}'s next message.`;
 const ANSWER_FOR_CHAT_RELAY = `With {name}'s next message here, continue that task with this answer, as you would with their own words, alongside whatever that message asks.`;
-const ASK_CLEARED = (title) => `Claude took back its question in "${title}". You don't need to answer it.`;
+const ASK_CLEARED = (title) => `Claude no longer needs an answer for "${title}".`;
 // What the work is told when the chat passes on the person's answer to its ask, typed in the chat
 const ANSWERED_IN_CHAT = (asked, words, isHeld = false, isWhole = true) => `The message sent to you just now that carries {name}'s words "${words}" is {name}'s own reply, typed by them in the chat, to your question: "${asked}".${isWhole ? '' : ' Only those words are theirs: the chat wrote anything else in that message, not {name}.'} ${isHeld ? REPLY_HOLDS : 'Their card no longer shows the question.'} If it answers your question, take it as their answer and continue, and ask again if it leaves something open. If it asks for something else, decide whether it is more for this task, a new task to hand back with the \`note\` tool and its \`task\`, or a change in how you work, and say with the \`note\` tool what you did with it.`;
 // What the work is told as a steer reaches it: it stops, decides what the steer is, and says so. The mod writes it into the work's
@@ -309,22 +320,11 @@ const isTheirsWhole = (message, words) => {
 const OWED = 'A message from {name} is waiting for your decision, and you have kept working. Stop now and decide: more for your to-do list, a new task to hand back with the `note` tool and its `task`, or a change in how you work. Change your to-dos to match, then say with the `note` tool, in one plain line, what you did with their message.';
 // What the work is told when it has taken many steps without touching its to-dos or saying where it stands
 const drifted = (steps) => `You have taken ${steps} steps since you last touched your to-dos or said how far you have got. In your next step, send the to-do calls that bring the list up to date (tick what is done, mark the one you are on as doing, add what you took on) and a \`note\` saying how far you have got, together with your next working call in that same step, never in a step of their own. If all of it is already up to date, continue.`;
-// A count of minutes as the panel writes a time: 29m, over an hour 1h 05m
-const minutesSaid = (mins) => (mins >= 60 ? `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m` : `${mins}m`);
 // The chat is told once when nothing new has come back under a piece of work for a while
-// (`isHelpersAtWork`: a helper of its still runs something, which brought nothing back meanwhile)
-const STUCK_IN_CHAT = (title, mins, isHelpersAtWork = false) => `Nothing new from "${title}" for ${minutesSaid(mins)}${isHelpersAtWork ? ', though its helpers are still running something' : ''}. Claude may be stuck waiting for something. Its card shows how far it got.`;
-// What the chat alone reads with it: it may ask the task what it waits on, as nothing of Claudopus's will
-const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to finish with what it has if nothing is coming.';
-// A task that ended its step to wait for its helpers, from which nothing new has come back: Claudopus starts it again with a nudge,
-// first to ask them, then to hand back what it has. What it is told, and what the chat is told
-const HELPERS_SILENT = (mins, helpers) => `From Claudopus: nothing new has come back from your helpers for ${mins} min while your step had ended: ${helpers}. Ask each with SendMessage what it is doing and when it will end, and tell one that is stuck or waits on nothing to hand back what it has now. Then carry on with what needs nothing from them, or end your step.`;
-const HELPERS_STILL_SILENT = (mins, helpers) => `From Claudopus: nothing new has come back from your helpers for ${mins} min, nor since you were asked to check on them: ${helpers}. Unless one told you it is still making progress and when it ends, hand back your report now with what you have, saying what each was still doing: Claudopus lets you hand it back while they run, and stops those that sit silent as you do.`;
-const GAVE_UP_IN_CHAT = (title, mins) => `"${title}" is stuck: nothing new from its helpers for ${minutesSaid(mins)}, and Claude hasn't sent what it has, though Claudopus asked it to.`;
-const NUDGED_IN_CHAT = (title, mins, isLast) => `Nothing new from the helpers of "${title}" for ${minutesSaid(mins)}. Claudopus started Claude again and asked it ${isLast ? 'to send what it has now' : 'to check on them'}.`;
+const STUCK_IN_CHAT = (title, mins) => `"${title}" hasn't made progress for ${mins} minutes: nothing new has come back to Claude or its helpers. It may be stuck waiting for something. Its card shows how far it has got.`;
 // A task that had stopped partway through a step without a report, restarted by Claudopus: what Claude is told, and what the chat is told
 const RESTARTED_WORK = `From Claudopus, not {name}: you stopped partway through a step without a report (the app restarted, the Mac slept or a command was interrupted). First check what you already have, then continue from where you were; a command or helper you started may still be running, or may need starting again.`;
-const RESTARTED_IN_CHAT = (title, mins) => `"${title}" stopped partway ${minutesSaid(mins)} ago without a result, so Claudopus started it again. Its card shows how far it got.`;
+const RESTARTED_IN_CHAT = (title, mins) => `"${title}" had stopped partway through a step ${mins} minutes ago without a report, so Claudopus restarted it. Its card shows how far it has got.`;
 // Work the person stopped with their own press on Stop: what the chat, or the work above a helper, is told, as the engine's notice
 // of the stop says only that it was stopped "by Claude"; what a call that would start it again is refused with; what their next
 // message carries while some is stopped so. `left` lists what it started detached that goes on running

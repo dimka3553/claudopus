@@ -142,7 +142,7 @@ const memoryHooks = (on) => {
                     const to = memoryPressed(link.href);
                     if (to)
                         openMemory($, to);
-                }}/>) : (<Text dimColor>This file is no longer available.</Text>)}
+                }}/>) : (<Text dimColor>This file is not there any more.</Text>)}
       </Box>);
     }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)));
 };

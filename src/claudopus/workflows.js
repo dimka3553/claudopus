@@ -143,21 +143,11 @@ const stopFlow = async ($, id) => {
         return (pressed.delete(`flow:${id}`), log($, `workflow ${id} not stopped: ${r.deny}`));
     await changeFlow($, id, (one, at) => ({ ...one, status: 'stopped', endedAt: at }));
 };
-const journalSigns = new Map();
 const readJournal = async ($, id) => {
     const f = (await read($, flows)).find(one => one.id === id);
     if (!f?.transcriptDir)
         return;
-    // Read again only once it has changed: it grows with the run, and was read whole every two seconds
-    const path = `${f.transcriptDir}/journal.jsonl`;
-    const stat = await $.fs.stat(path).catch(() => undefined);
-    const sign = `${stat?.size ?? 0}:${stat?.mtimeMs ?? 0}`;
-    if (stat && journalSigns.get(id) === sign)
-        return;
-    if (stat)
-        journalSigns.set(id, sign);
-    during('read a workflow');
-    const text = await readOr($, path);
+    const text = await readOr($, `${f.transcriptDir}/journal.jsonl`);
     if (!text)
         return;
     const now = await $.clock.now();
@@ -175,7 +165,6 @@ const followFlows = async ($) => {
     for (const f of running)
         await readJournal($, f.id).catch(err => log($, `journal of ${f.id} not read: ${String(err)}`));
     if (running.length && flowLooks % END_LOOK === 0) {
-        during('read the chat for ended workflows');
         const rows = await $.session.messages().catch(() => []);
         for (const row of Array.isArray(rows) ? rows : [])
             if (row.role === 'user' && row.text.includes('<task-notification'))
@@ -254,7 +243,6 @@ const pickedOf = (f) => f.agents.find(one => one.id === flowPicked.get(f.id)) ??
 const flowTalkOf = async ($, f, agent) => {
     const key = [agent.id, agent.status, agent.tokens ?? 0].join(':');
     if (flowTalks.get(agent.id)?.key !== key) {
-        during('read a workflow agent');
         const text = f.transcriptDir ? await readOr($, `${f.transcriptDir}/agent-${agent.id}.jsonl`) : '';
         flowTalks.set(agent.id, { key, lines: text ? talkOf(rowsOf(text)) : undefined });
     }

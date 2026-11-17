@@ -59,20 +59,20 @@ const readyOf = ({ id, waits: seen }, cards, runs) => {
         const f = runs.find(one => `flow:${one.id}` === id);
         if (!f)
             return undefined;
-        const what = f.status === 'done' ? fewWords(f.result) || 'Done.' : f.status === 'failed' ? 'Failed.' : 'Stopped.';
+        const what = f.status === 'done' ? fewWords(f.result) || 'Finished.' : f.status === 'failed' ? 'Failed with an error.' : 'Stopped.';
         return { title: f.title || f.name || 'Workflow', isDone: f.status === 'done', what };
     }
     const one = cards.find(card => card.id === id);
     if (!one)
         return undefined;
-    const waits = (one.waits ?? seen ?? []).filter(wait => !askedWait(wait).answer);
+    const waits = one.waits ?? seen ?? [];
     const said = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text ?? '';
     const what = one.status === 'done'
         ? waits.length
-            ? `Waiting for you: ${fewWords(waits[0] ? askedWait(waits[0]).text : '')}${waits.length > 1 ? `, and ${waits.length - 1} more` : ''}`
-            : fewWords(one.answer) || fewWords(said) || 'Done.'
+            ? `Waiting for ${who()}: ${fewWords(waits[0] ?? '')}${waits.length > 1 ? ` (and ${waits.length - 1} more)` : ''}`
+            : fewWords(one.answer) || fewWords(said) || 'Finished.'
         : one.status === 'failed'
-            ? 'Failed.'
+            ? 'Failed with an error.'
             : 'Stopped.';
     return { title: one.title || 'Task', isDone: one.status === 'done', what };
 };
@@ -104,7 +104,7 @@ const announce = async ($) => {
     await alertPerson($, 'ready', title, text, `ready-${ids.map(one => one.id).join('-')}`);
 };
 // What /claudopus and /servers answer where the screen has nowhere to draw a panel, as a Remote Control chat seen from another device
-const nowhere = (panel) => `Claudopus can't show the ${panel} panel on this screen. Open it in the Claude app on the Mac this chat runs on.`;
+const nowhere = (panel) => `The ${panel} panel can't be shown on this screen. It shows in the Claude app on the Mac this chat runs on.`;
 // The desktop app's own id for the chat this engine runs, which its link `claude://code/continue?session=` opens (read off the
 // app: it takes `last` or an id of this shape). Unset in a terminal
 const DESKTOP_SESSION = /^local_[A-Za-z0-9-]{1,64}$/;
