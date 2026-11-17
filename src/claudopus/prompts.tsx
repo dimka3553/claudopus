@@ -265,6 +265,60 @@ const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
   if (toolUseId && waiting.some(one => one.id === toolUseId)) settle($, toolUseId, undefined, undefined, 'running')
 }
 
+// ---- A call Claude Code refused a background task with no prompt for the person: a question on the task's card ----
+// A background task or helper has no box of the app's own: Claude Code's auto mode, its safety checks, or a call that needs a person
+// in a run nobody can be asked in refuse the call outright, and no PermissionRequest is raised for it (16 Nov: 47 refusals that
+// way, none put to the person). Its task's card asks the person instead, and a press of "Run it once" lets that very call through
+// once, as a yes in the app's own box would
+const RUN_ONCE = 'Run it once'
+const CC_REFUSED = /denied by the Claude Code auto mode classifier|denied by a built-in Claude Code safety check|no approval surface in this session|nobody can be asked in this headless run/i
+// A check that gave no verdict is no refusal: Claude may try again as it is
+const NO_VERDICT = /gave no verdict|transient failure/i
+const REFUSAL_KEPT = 30 * 60_000
+type Refused = { agent: string; tool: string; input: Record<string, string>; ask: string; at: number }
+let refusals: Refused[] = []
+const refusalOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isError?: unknown } | undefined) => {
+  if (!r || (!r.deny && !r.isError)) return ''
+  const words = [r.deny, r.text, r.result].map(one => (typeof one === 'string' ? one : '')).join('\n')
+  return CC_REFUSED.test(words) && !NO_VERDICT.test(words) ? words : ''
+}
+const stringsOf = (call: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(call).filter(([key, value]) => typeof value === 'string' && !['tool', 'tool_use_id', 'agentId'].includes(key))) as Record<string, string>
+const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: string, call: Record<string, unknown>, r: Parameters<typeof refusalOf>[0]) => {
+  const words = refusalOf(r)
+  if (!words || !dir || isOff) return
+  const list = await read($, todos)
+  const top = list.find(one => one.id === topOf(list, agent))
+  const own = list.find(one => one.id === agent)
+  if (!top || top.chat) return
+  // A question already waiting on the person is never replaced: the refusal is in the work's own result, for it to say
+  if (top.ask) return void (await log($, `refusal of ${tool} for ${agent} not asked: its card asks something already`))
+  const what = promptOf(tool, call, list, true)
+  const who = own?.parentId ? `a helper of this task ("${titleOf(own)}")` : 'this task'
+  const text = cut(`Claude Code refused ${who}: ${what.text}. Let it run once?`, ASK_TEXT)
+  const reason = cut(oneLine(words.replace(/^Permission for this (?:action|command) was /i, '')), 600)
+  const details = [what.detail ? `What it is: ${what.detail}` : '', `Why: it was ${reason}`, `${RUN_ONCE}: Claude makes exactly this call again, and Claudopus lets that one call through. Not now: it stays refused, and Claude carries on without it.`]
+    .filter(Boolean)
+    .join('\n\n')
+  const at = await $.clock.now()
+  await change($, agent, one => ({ ...one, ask: { text, details, choices: [RUN_ONCE, 'Not now'], from: agent, at } }))
+  refusals = [...refusals.filter(one => at - one.at < REFUSAL_KEPT), { agent, tool, input: stringsOf(call), ask: text, at }].slice(-20)
+  await log($, `refusal of ${tool} for ${agent} put to the person on its card`)
+  const card = (await read($, todos)).find(one => one.id === top.id)
+  if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
+  if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
+}
+// The refused call the person let run once, when this is it again: the same agent, tool and words, after a press of "Run it once"
+// on the card that asked, not taken back since
+const runOnce = (list: Todo[], agent: string, tool: string, input: unknown, now: number) => {
+  const given = stringsOf((input && typeof input === 'object' ? input : {}) as Record<string, unknown>)
+  const one = refusals.find(r => r.agent === agent && r.tool === tool && now - r.at < REFUSAL_KEPT && Object.keys(r.input).length > 0 && Object.entries(r.input).every(([key, value]) => given[key] === value))
+  if (!one) return undefined
+  const top = list.find(card => card.id === topOf(list, agent))
+  const said = (top?.entries ?? []).filter(entry => entry.kind === 'steer' && entry.at >= one.at && (entry.text.endsWith(` — to: ${one.ask}`) || entry.text.startsWith('took back'))).at(-1)
+  return said?.text === `${RUN_ONCE} — to: ${one.ask}` ? one : undefined
+}
+
 const OWN_CALLS = ['SendMessage', 'TaskStop']
 const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
 
@@ -280,6 +334,13 @@ const promptHooks = (on: On) => {
     const r = await next(e)
     // Only an ask becomes an allow: a rule or hook of the person's that refuses it still does
     if (r.decision === 'ask' && OWN_CALLS.includes(e.tool) && e.tool_use_id && isOwnCall(next as { origin?: { plugin?: string } })) return { ...r, decision: 'allow' }
+    // A call Claude Code refused a task, which the person let run once on its card: allowed this once, and never a rule's own no
+    const granted = r.decision === 'ask' && e.agentId !== undefined && refusals.length ? runOnce(await read($, todos), e.agentId, e.tool, e.input, await $.clock.now()) : undefined
+    if (granted) {
+      refusals = refusals.filter(one => one !== granted)
+      await log($, `refused ${e.tool} for ${e.agentId} let run once, as the person pressed`)
+      return { ...r, decision: 'allow' }
+    }
     if (r.decision === 'ask' && e.tool_use_id && e.approver) {
       asked = [...asked.filter(one => one.id !== e.tool_use_id), { agent: e.agentId ?? '', tool: e.tool, input: inputKey(e.input), id: e.tool_use_id }].slice(-50)
     }

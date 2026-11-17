@@ -8686,6 +8686,60 @@ const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
   if (toolUseId && waiting.some(one => one.id === toolUseId)) settle($, toolUseId, undefined, undefined, 'running')
 }
 
+// ---- A call Claude Code refused a background task with no prompt for the person: a question on the task's card ----
+// A background task or helper has no box of the app's own: Claude Code's auto mode, its safety checks, or a call that needs a person
+// in a run nobody can be asked in refuse the call outright, and no PermissionRequest is raised for it (16 Nov: 47 refusals that
+// way, none put to the person). Its task's card asks the person instead, and a press of "Run it once" lets that very call through
+// once, as a yes in the app's own box would
+const RUN_ONCE = 'Run it once'
+const CC_REFUSED = /denied by the Claude Code auto mode classifier|denied by a built-in Claude Code safety check|no approval surface in this session|nobody can be asked in this headless run/i
+// A check that gave no verdict is no refusal: Claude may try again as it is
+const NO_VERDICT = /gave no verdict|transient failure/i
+const REFUSAL_KEPT = 30 * 60_000
+type Refused = { agent: string; tool: string; input: Record<string, string>; ask: string; at: number }
+let refusals: Refused[] = []
+const refusalOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isError?: unknown } | undefined) => {
+  if (!r || (!r.deny && !r.isError)) return ''
+  const words = [r.deny, r.text, r.result].map(one => (typeof one === 'string' ? one : '')).join('\n')
+  return CC_REFUSED.test(words) && !NO_VERDICT.test(words) ? words : ''
+}
+const stringsOf = (call: Record<string, unknown>) =>
+  Object.fromEntries(Object.entries(call).filter(([key, value]) => typeof value === 'string' && !['tool', 'tool_use_id', 'agentId'].includes(key))) as Record<string, string>
+const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: string, call: Record<string, unknown>, r: Parameters<typeof refusalOf>[0]) => {
+  const words = refusalOf(r)
+  if (!words || !dir || isOff) return
+  const list = await read($, todos)
+  const top = list.find(one => one.id === topOf(list, agent))
+  const own = list.find(one => one.id === agent)
+  if (!top || top.chat) return
+  // A question already waiting on the person is never replaced: the refusal is in the work's own result, for it to say
+  if (top.ask) return void (await log($, `refusal of ${tool} for ${agent} not asked: its card asks something already`))
+  const what = promptOf(tool, call, list, true)
+  const who = own?.parentId ? `a helper of this task ("${titleOf(own)}")` : 'this task'
+  const text = cut(`Claude Code refused ${who}: ${what.text}. Let it run once?`, ASK_TEXT)
+  const reason = cut(oneLine(words.replace(/^Permission for this (?:action|command) was /i, '')), 600)
+  const details = [what.detail ? `What it is: ${what.detail}` : '', `Why: it was ${reason}`, `${RUN_ONCE}: Claude makes exactly this call again, and Claudopus lets that one call through. Not now: it stays refused, and Claude carries on without it.`]
+    .filter(Boolean)
+    .join('\n\n')
+  const at = await $.clock.now()
+  await change($, agent, one => ({ ...one, ask: { text, details, choices: [RUN_ONCE, 'Not now'], from: agent, at } }))
+  refusals = [...refusals.filter(one => at - one.at < REFUSAL_KEPT), { agent, tool, input: stringsOf(call), ask: text, at }].slice(-20)
+  await log($, `refusal of ${tool} for ${agent} put to the person on its card`)
+  const card = (await read($, todos)).find(one => one.id === top.id)
+  if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
+  if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
+}
+// The refused call the person let run once, when this is it again: the same agent, tool and words, after a press of "Run it once"
+// on the card that asked, not taken back since
+const runOnce = (list: Todo[], agent: string, tool: string, input: unknown, now: number) => {
+  const given = stringsOf((input && typeof input === 'object' ? input : {}) as Record<string, unknown>)
+  const one = refusals.find(r => r.agent === agent && r.tool === tool && now - r.at < REFUSAL_KEPT && Object.keys(r.input).length > 0 && Object.entries(r.input).every(([key, value]) => given[key] === value))
+  if (!one) return undefined
+  const top = list.find(card => card.id === topOf(list, agent))
+  const said = (top?.entries ?? []).filter(entry => entry.kind === 'steer' && entry.at >= one.at && (entry.text.endsWith(` — to: ${one.ask}`) || entry.text.startsWith('took back'))).at(-1)
+  return said?.text === `${RUN_ONCE} — to: ${one.ask}` ? one : undefined
+}
+
 const OWN_CALLS = ['SendMessage', 'TaskStop']
 const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
 
@@ -8701,6 +8755,13 @@ const promptHooks = (on: On) => {
     const r = await next(e)
     // Only an ask becomes an allow: a rule or hook of the person's that refuses it still does
     if (r.decision === 'ask' && OWN_CALLS.includes(e.tool) && e.tool_use_id && isOwnCall(next as { origin?: { plugin?: string } })) return { ...r, decision: 'allow' }
+    // A call Claude Code refused a task, which the person let run once on its card: allowed this once, and never a rule's own no
+    const granted = r.decision === 'ask' && e.agentId !== undefined && refusals.length ? runOnce(await read($, todos), e.agentId, e.tool, e.input, await $.clock.now()) : undefined
+    if (granted) {
+      refusals = refusals.filter(one => one !== granted)
+      await log($, `refused ${e.tool} for ${e.agentId} let run once, as the person pressed`)
+      return { ...r, decision: 'allow' }
+    }
     if (r.decision === 'ask' && e.tool_use_id && e.approver) {
       asked = [...asked.filter(one => one.id !== e.tool_use_id), { agent: e.agentId ?? '', tool: e.tool, input: inputKey(e.input), id: e.tool_use_id }].slice(-50)
     }
@@ -9040,6 +9101,7 @@ const afterReply = async ($: EngineInterface, text: string, answer: string) => {
 // listed as completed, and the look ends its card (sync) and passes on a reply it never read, as the turn's end would have
 const HELD_LOOK = 1500
 const heldLook = async ($: EngineInterface, id: string) => {
+  const wasWorking = (await read($, todos)).find(one => one.id === id)?.status === 'working'
   await sync($)
   // Listed as idle, or no longer listed, its run is over too: nothing holds it
   const listed = (await $.agent.list().catch(() => undefined))?.find(one => one.id === id)?.status
@@ -9047,9 +9109,12 @@ const heldLook = async ($: EngineInterface, id: string) => {
     const now = await $.clock.now()
     await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
   }
-  if ((await read($, todos)).find(one => one.id === id)?.status === 'working') return
+  const card = (await read($, todos)).find(one => one.id === id)
+  if (card?.status === 'working') return
   await replyUnread($, id)
   if (wakes.length) await sendWakes($)
+  // A helper the engine still listed as running as its turn ended, ended now: its result is passed on as at a heard end
+  if (wasWorking && card?.parentId && card.parentId !== HELPER) await passOnHelper($, id, card.answer ?? '', card.status)
 }
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
@@ -10646,7 +10711,10 @@ const HELPER_ENDED = (title: string, how: Todo['status'], report: string) =>
   `From Claudopus: your helper "${title}" ${how === 'failed' ? 'failed' : how === 'stopped' ? 'was stopped' : 'has finished'} while your step had ended, so Claudopus passes its result on to you here (if you already have it, carry on).${report ? ` Its result:\n\n${report}` : ' It gave no result.'}`
 // What the chat is told, so a helper's result that reached it, or a notice that the task ended without its report, needs nothing
 const HELPER_PASSED = (helper: string, work: string) =>
-  `From Claudopus: the result of the helper "${helper}" reached this chat because the task "${work}" had ended its step to let it work. Claudopus has passed it on to that task and started it again: there is nothing for you to do with it, and nothing to tell {name}.`
+  `From Claudopus: the result of the helper "${helper}" reached this chat because the task "${work}" had ended its step to let it work. Claudopus passes it on to that task and starts it again: there is nothing for you to do with it, and nothing to tell {name}.`
+// What the chat is told when that could not be done: the result is in the chat alone, so the chat sends it on
+const HELPER_NOT_PASSED = (helper: string, work: string, reason: string) =>
+  `From Claudopus: the result of the helper "${helper}" reached this chat because the task "${work}" had ended its step, and Claudopus could not pass it on to that task (${cut(oneLine(reason), 120)}). Send it on to that task yourself with SendMessage.`
 
 // What the chat is told of work that ended its step to wait for its helpers, or to be started again: the engine sees neither, so it
 // tells the chat that work ended without its report and to ask it for one, which the work cannot give while its helpers run (16 Nov:
@@ -10672,28 +10740,58 @@ const tellWaitsOn = async ($: EngineInterface, id: string) => {
 
 // A helper that ends while the work that started it has ended its step: the engine hands its result to the chat (seen live on 16
 // Nov), so Claudopus passes it on to that work and starts it again with it. The work never holds itself open to wait for helpers
-const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status'], isUnheard = false) => {
-  if (!dir || isOff) return
-  const list = await read($, todos)
+// The work a helper's result is for, when Claudopus passes it on: none for work held by the person, stopped, or that gave its report
+// (nor work being stopped: a helper stopped with it says nothing worth starting it again for)
+const passedTo = (list: Todo[], helperId: string) => {
   const helper = list.find(one => one.id === helperId)
   const parent = helper?.parentId ? list.find(one => one.id === helper.parentId) : undefined
-  // (nor work being stopped: a helper stopped with it says nothing worth starting it again for)
-  if (!helper || !parent || isHeld(parent) || pressed.has(parent.id) || stoppedHere.has(parent.id) || parent.status === 'stopped' || parent.status === 'failed' || parent.handedBackAt !== undefined || endedByHandback.has(parent.id)) return
+  if (!helper || !parent || isHeld(parent) || pressed.has(parent.id) || stoppedHere.has(parent.id) || parent.status === 'stopped' || parent.status === 'failed' || parent.handedBackAt !== undefined || endedByHandback.has(parent.id)) return undefined
+  return { helper, parent }
+}
+const toChat = async ($: EngineInterface, text: string) =>
+  $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(text) }] } }).catch(err => log($, `chat not told of a helper's result: ${String(err)}`))
+// The helpers whose hand-back the chat was told of before it went: the engine hands it to the chat at once, and the chat's turn
+// starts with it before the helper's turn ends (16 and 17 Nov: in 61 of 62 hand-backs the chat's request went out before the note
+// written as the helper's turn ended, and the chat sent 31 of those results on by hand). So the chat is told as the hand-back is
+// given, and its result is passed on to the work as the helper's turn ends
+const notedAtHandback = new Set<string>()
+const noteHandback = async ($: EngineInterface, helperId: string) => {
+  if (!dir || isOff) return
+  const to = passedTo(await read($, todos), helperId)
+  if (!to) return
+  // Work at a step of its own, or that the engine holds for a command of its own, is handed the result by the engine itself
+  const listed = (await $.agent.list().catch(() => [])).find(one => one.id === to.parent.id)?.status
+  if (listed === 'running' || listed === 'waiting') return
+  notedAtHandback.add(helperId)
+  await toChat($, HELPER_PASSED(titleOf(to.helper), titleOf(to.parent)))
+}
+const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status'], isUnheard = false) => {
+  if (!dir || isOff) return
+  const isNoted = notedAtHandback.delete(helperId)
+  const to = passedTo(await read($, todos), helperId)
+  if (!to) return
+  const { helper, parent } = to
   // A work at a step of its own has the result from the engine itself. One the engine still holds for a command of its own may have
   // it too: it is passed on all the same, as a result lost costs more than one read twice, but the chat had none of it to be told of
   const listed = (await $.agent.list().catch(() => [])).find(one => one.id === parent.id)?.status
-  // A helper whose end was never heard (it ended while the mod was out) had its result reach no step of the work's: one now at a
-  // step, woken by another such helper's result, reads it at its next step
-  if (listed === 'running' && isUnheard) return void (await tell($, parent.id, HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS))))
+  // A helper whose end was never heard (it ended while the mod was out) had its result reach no step of the work's, nor did one the
+  // engine handed the chat because the work had ended its step as it handed back: one now at a step, woken by something else since,
+  // reads it at its next step
+  if (listed === 'running' && (isUnheard || isNoted)) return void (await tell($, parent.id, HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS))))
   if (listed === 'running') return
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
     : await sendOwn($, { to: { agentId: parent.id }, text: HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
-  if (!r.isDelivered) return void (await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${r.reason}`))
+  // Not passed on, the result is in the chat alone: the chat is told to send it on, so nothing is lost unsaid
+  if (!r.isDelivered) {
+    await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${r.reason}`)
+    if (listed !== 'waiting' || isNoted) await toChat($, HELPER_NOT_PASSED(titleOf(helper), titleOf(parent), r.reason))
+    return
+  }
   await wakeCard($, parent.id)
   await log($, `helper ${helperId}'s result passed on to ${parent.id}, which had ended its step`)
-  // Told once the result is on its way, so the chat never lets go of a result that did not arrive
-  if (listed !== 'waiting') await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(HELPER_PASSED(titleOf(helper), titleOf(parent))) }] } }).catch(err => log($, `chat not told of a helper's result passed on: ${String(err)}`))
+  // Told once the result is on its way, so the chat never lets go of a result that did not arrive; told already as it was handed back
+  if (listed !== 'waiting' && !isNoted) await toChat($, HELPER_PASSED(titleOf(helper), titleOf(parent)))
 }
 
 // What a piece of work, or a helper, starts with the Agent tool runs in the background: the call comes back at once and the
@@ -11450,6 +11548,8 @@ const workHooks = (on: On) => {
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool, outcomeOf(r as never), e as never)
+        // A call Claude Code refused a task with no prompt is put to the person on its card
+        if (e.agentId !== undefined) void refusedByClaudeCode($, e.agentId, e.tool, e as never, r as never).catch(err => log($, `refusal not put to the person: ${String(err)}`))
         // A grant its admin command did not take goes with the call; one sent to the background takes its own in its own time
         if (grants.length && !(call as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
         runnerEnded(e.tool_use_id, Boolean((call as { run_in_background?: unknown }).run_in_background), await $.clock.now())
@@ -11705,8 +11805,11 @@ const workHooks = (on: On) => {
     if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
       const hold = await holdAtHandback($, e.agentId).catch(() => '')
       if (hold) return { deny: hold }
+      // A helper whose work has ended its step hands its result to the chat: the chat is told first, so its turn starts knowing
+      await noteHandback($, e.agentId).catch(err => log($, `chat not told of a helper's hand-back: ${String(err)}`))
       const r = await next(e)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
+      else notedAtHandback.delete(e.agentId)
       return r
     }
     // No agent, the chat's or a work's helper, is started on an older model or on Haiku: one named so starts on its family's newest

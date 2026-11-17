@@ -1,0 +1,4 @@
+- A helper's result that reaches the chat because its task had ended its step now comes with Claudopus's note before it, not just after, so the chat no longer passes it on by hand.
+- A helper that the engine still showed as running when it ended now has its result passed on to its task too.
+- When Claudopus cannot pass a helper's result on, the chat is told to send it on itself.
+- When Claude Code refuses a background task's call with no prompt for you (auto mode or its safety checks), the task's card asks you, and "Run it once" lets that very call through once.
