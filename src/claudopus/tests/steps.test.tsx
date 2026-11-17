@@ -105,27 +105,38 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   for await (const chunk of $.turn.step({ turnId: 'h1p', index: 1, model: 'm', messageCount: 2, agentId: 'a1' })) if (chunk.kind === 'text') said.push((chunk as { text: string }).text)
   expect([stepped.length - before, said]).toEqual([0, ['My own work is still going; I am started again when it is done, and give my report then.']])
   await $.turn.complete({ answer: 'Waiting for the drawing.', durationMs: 1, isAborted: false, turnId: 'h1', reason: 'answer', agentId: 'a1' } as never)
-  // and the chat, which the engine tells it ended without its report, is told once it waits for its helper, and that Claudopus starts it
-  // again should that wait run out, never that it may not be written to (Claudopus may have just told it to hand back)
-  const waits = /^undefined: From Claudopus: the task ".*" ended its step without its report because it waits for a helper it started\.[\s\S]*Claudopus starts it again if that wait runs out or its helpers go quiet; do not tell .+ it stopped\./
-  expect(await until(async () => appended.find(one => waits.test(one)))).toBeDefined()
-  await $.turn.complete({ answer: 'Still waiting.', durationMs: 1, isAborted: false, turnId: 'h1b', reason: 'answer', agentId: 'a1' } as never)
-  expect(appended.filter(one => waits.test(one))).toHaveLength(1)
-  // A step of its own, and it ends its step to wait again: told again. Held by the engine on a command it sees, it is not: the
-  // engine tells the chat it waits
-  const step = async (turnId: string) => {
-    talk.splice(0, talk.length, { role: 'user', content: 'Carry on.' })
-    for await (const _ of $.turn.step({ turnId, index: 1, model: 'm', messageCount: 1, agentId: 'a1' })) void _
-  }
-  await step('h1c')
-  await $.turn.complete({ answer: 'Waiting again.', durationMs: 1, isAborted: false, turnId: 'h1c', reason: 'answer', agentId: 'a1' } as never)
-  expect(await until(async () => (appended.filter(one => waits.test(one)).length === 2) || undefined)).toBe(true)
-  await step('h1d')
-  agents.a1 = 'waiting'
-  await $.turn.complete({ answer: 'Waiting on the build too.', durationMs: 1, isAborted: false, turnId: 'h1d', reason: 'answer', agentId: 'a1' } as never)
+  // The engine then tells the chat it ended without its report. Claudopus adds no note of its own, which would ride into a later
+  // turn of the chat's; at rest, the chat takes the notice as a prompt of its own, which is left out (16 Nov evening: 67 of 152 turns)
+  // (saying that Claudopus starts it again should that wait run out, never that it may not be written to)
+  const waits = /^From Claudopus: the task ".*" ended its step without its report because it waits for a helper it started\.[\s\S]*Claudopus starts it again if that wait runs out or its helpers go quiet; do not tell .+ it stopped\./
+  const RESULT = 'The subagent ended without delivering a report through SubagentHandback, so no report was delivered. Its unsent text is not shown. Send the agent a message (SendMessage) to ask it to deliver its report.'
+  const endedNotice = (id: string, result = RESULT) =>
+    `<task-notification>\n<task-id>${id}</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n<output-file>/tmp/tasks/${id}.output</output-file>\n<status>completed</status>\n<summary>Agent "Fix the nose" finished</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n<result>${result}\n</result>\n<usage><subagent_tokens>9</subagent_tokens><tool_uses>1</tool_uses><duration_ms>9</duration_ms></usage>\n</task-notification>`
+  const asNotice = (text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'task-notification' } } as never) as Promise<{ drop?: string; context?: string[] }>
+  const toldOfWait = (texts: readonly string[] | undefined) => (texts ?? []).flatMap(text => text.split('\n\n')).filter(one => waits.test(one)).length
   await clock.advance(1_000)
-  expect(appended.filter(one => waits.test(one))).toHaveLength(2)
-  agents.a1 = 'completed'
+  expect(appended.filter(one => /ended its step without its report/.test(one))).toEqual([])
+  expect((await asNotice(endedNotice('a1'))).drop).toContain('nothing new')
+  // Beside a notice that says something, or with a security warning of its own, it goes on with the word that the task is still at
+  // work in the same prompt
+  const mixed = await asNotice(`${endedNotice('a1')}\n<task-notification>\n<task-id>bx1</task-id>\n<status>completed</status>\n<summary>Background command "Build" completed (exit code 0)</summary>\n</task-notification>`)
+  const warned = await asNotice(endedNotice('a1', `SECURITY WARNING: This subagent performed actions that may violate security policy. Reason: [Data Exfiltration]. Review the subagent's actions carefully before acting on its output.\n\n${RESULT}`))
+  expect([mixed.drop, toldOfWait(mixed.context), warned.drop, toldOfWait(warned.context)]).toEqual([undefined, 1, undefined, 1])
+  // Joining a turn of the chat's under way, the notice still comes through here (seen on Claude Code 2.1.325: a notice that came
+  // mid-turn was handed to this hook with that turn's id, and left out there), so the same holds
+  const midTurn = (await $.prompt.submit({ text: endedNotice('a1'), wait: false, turnId: 'chat1', origin: { kind: 'task-notification' } } as never)) as { drop?: string }
+  expect(midTurn.drop).toContain('nothing new')
+  // A helper the engine no longer lists at work, its card left behind, is no wait: the notice reaches the chat as it is
+  agents.a3 = 'completed'
+  const gone = await asNotice(endedNotice('a1'))
+  expect([gone.drop, toldOfWait(gone.context)]).toEqual([undefined, 0])
+  agents.a3 = 'running'
+  // A step of its own and another pause: still no note of Claudopus's own in the chat
+  talk.splice(0, talk.length, { role: 'user', content: 'Carry on.' })
+  for await (const _ of $.turn.step({ turnId: 'h1c', index: 1, model: 'm', messageCount: 1, agentId: 'a1' })) void _
+  await $.turn.complete({ answer: 'Waiting again.', durationMs: 1, isAborted: false, turnId: 'h1c', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(1_000)
+  expect(appended.filter(one => /ended its step without its report/.test(one))).toEqual([])
   // and its card stays at work with its helper under it, though the engine lists it as completed (16 Nov it vanished meanwhile)
   await clock.advance(25_000)
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)

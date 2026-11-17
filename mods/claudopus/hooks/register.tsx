@@ -550,9 +550,9 @@ const recorderHooks = (on: On) => {
 
 
 const BRIEF =
-  'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
+  'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
 const REFUSED =
-  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
+  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
   `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
 const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus\/keyring\b/
@@ -700,102 +700,10 @@ const writesMemory = (text: string, names: readonly string[]): boolean => {
     .join('\n')
   return namesMemory(kept, names) || (names === MEMORY_PERSON && /\brelease\.local\b/.test(kept))
 }
-const CODE_NAMES = new Set(
-  (
-    'print open len str int float bool list dict set tuple sorted reversed enumerate range zip map filter min max sum any all abs round repr type isinstance next iter ' +
-    'load loads dumps read read_text read_bytes readline readlines keys values items get Path home expanduser expandvars join exists isfile isdir basename dirname ' +
-    'abspath realpath getenv listdir is_file is_dir iterdir glob stat getsize getmtime splitlines split rsplit strip lstrip rstrip lower upper startswith endswith ' +
-    'replace format count find index decode encode path environ argv stdout stderr stdin st_size st_mtime name stem suffix parent parts ' +
-    'if elif else for while not and or in is return lambda typeof catch ' +
-    'console log error JSON parse stringify require readFileSync existsSync statSync readdirSync toString trim includes slice sort push entries length env process homedir resolve String Number Object Array'
-  ).split(' '),
-)
-const CODE_MODULES = ['json', 'sys', 'os', 'os.path', 'pathlib']
-const CODE_REQUIRES = /^(['"])(?:node:)?(?:fs|path|os)\1$/
-const CODE_RUNNERS: Record<string, { flags: RegExp; code: readonly string[] }> = {
-  python: { flags: /^-[IBSEusq]+$/, code: ['-c'] },
-  python3: { flags: /^-[IBSEusq]+$/, code: ['-c'] },
-  node: { flags: /^$/, code: ['-e', '-p', '-pe', '--eval', '--print'] },
-}
-const PIPE_READERS = ['head', 'tail', 'wc', 'grep', 'jq', 'cut', 'tr']
-const pipedParts = (command: string) => {
-  const parts: { text: string; bare: string }[] = [{ text: '', bare: '' }]
-  let quote = ''
-  for (const c of command) {
-    const part = parts[parts.length - 1]!
-    if (quote) quote = c === quote ? '' : quote
-    else if (c === "'" || c === '"') quote = c
-    else if (c === '|') {
-      parts.push({ text: '', bare: '' })
-      continue
-    } else part.bare += c
-    part.text += c
-  }
-  return quote ? [] : parts
-}
-const callArgs = (code: string, open: number): string[] | undefined => {
-  const args: string[] = []
-  let depth = 0
-  let quote = ''
-  let arg = ''
-  for (let i = open + 1; i < code.length; i++) {
-    const c = code[i]!
-    if (quote) {
-      if (c === '\\') arg += c + (code[++i] ?? '')
-      else (quote = c === quote ? '' : quote), (arg += c)
-      continue
-    }
-    if (c === "'" || c === '"') (quote = c), (arg += c)
-    else if ('([{'.includes(c)) depth++, (arg += c)
-    else if (')]}'.includes(c)) {
-      if (depth === 0) return arg.trim() ? [...args, arg.trim()] : args
-      depth--
-      arg += c
-    } else if (c === ',' && depth === 0) args.push(arg.trim()), (arg = '')
-    else arg += c
-  }
-  return undefined
-}
-const codeOnlyReads = (command: string): boolean => {
-  if (/\n|\$\(|`/.test(command)) return false
-  const parts = pipedParts(command.trim())
-  if (!parts.length || parts.some(one => !one.text.trim())) return false
-  for (const one of parts.slice(1)) {
-    const words = shellWords(one.text)
-    if (words.length !== 1 || !PIPE_READERS.includes(words[0]![0] ?? '') || /[;&<>]/.test(one.bare)) return false
-  }
-  if (/[;&<]/.test(parts[0]!.bare) || /[<>]/.test(parts[0]!.bare.replace(/(?:^|\s)2>\/dev\/null(?=\s|$)/g, ' '))) return false
-  const words = (shellWords(parts[0]!.text)[0] ?? []).filter(one => one !== '2>/dev/null')
-  const name = (words[0] ?? '').split('/').pop() ?? ''
-  const runner = CODE_RUNNERS[/^python3\.\d+$/.test(name) ? 'python3' : name]
-  if (!runner || !Object.hasOwn(CODE_RUNNERS, /^python3\.\d+$/.test(name) ? 'python3' : name)) return false
-  let at = 1
-  while (at < words.length && runner.flags.test(words[at]!) && !runner.code.includes(words[at]!)) at++
-  if (!runner.code.includes(words[at] ?? '') || at + 1 >= words.length) return false
-  const code = words[at + 1]!
-  if (/(?:^|[^\w'"])[rRbBuU]?[fF][rRbB]?['"]/.test(code)) return false
-  for (const m of code.matchAll(/\bfrom\s+([\w.]+)\s+import\s+([\w\s,]+)/g)) if (!CODE_MODULES.includes(m[1]!) || m[2]!.split(',').some(one => !CODE_NAMES.has(one.trim().split(/\s+/)[0]!))) return false
-  for (const m of code.replace(/\bfrom\s+[\w.]+\s+import\s+[\w\s,]+/g, '').matchAll(/(?:^|[;\s])import\s+([\w.\s,]+)/g)) if (m[1]!.split(',').some(one => !CODE_MODULES.includes(one.trim().split(/\s+/)[0]!))) return false
-  if (/\bimport\b/.test(code.replace(/\bfrom\s+[\w.]+\s+import\b|(?:^|[;\s])import\s+[\w.]/g, ''))) return false
-  for (const m of code.matchAll(/\brequire\s*\(/g)) {
-    const args = callArgs(code, m.index! + m[0].length - 1)
-    if (args?.length !== 1 || !CODE_REQUIRES.test(args[0]!)) return false
-  }
-  const bare = code.replace(/\bstd(?:out|err)\s*\.\s*write\s*\(/g, 'print(').replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''")
-  if (/[\])]\s*\(/.test(bare) || /['"]/.test(bare.replace(/''/g, ''))) return false
-  if (/\bopen\b(?!\s*\()/.test(bare)) return false
-  for (const m of bare.matchAll(/(\.\s*)?\b([A-Za-z_]\w*)\s*(\()?/g)) if ((m[1] || m[3]) && !CODE_NAMES.has(m[2]!)) return false
-  for (const m of code.matchAll(/\breplace\s*\(/g)) if ((callArgs(code, m.index! + m[0].length - 1)?.length ?? 0) < 2) return false
-  for (const m of code.matchAll(/\bopen\s*\(/g)) {
-    const args = callArgs(code, m.index! + m[0].length - 1)
-    if (!args || !args.length || args.slice(1).some(one => !/^(?:mode\s*=\s*)?(['"])r[bt]?\1$|^(?:encoding|errors|newline)\s*=\s*(['"])[\w-]*\2$/.test(one))) return false
-  }
-  return true
-}
 const NO_MEMORY =
   "Only Claudopus writes the files chats share and answer one another through, and the update's own files: Claude never writes them with any tool."
 const NO_MEMORY_BASH = () =>
-  named("Claude changes {name}'s own settings and texts (config.json, the rules and roles in the memory folder, a repo's release.local) only with the Edit or Write tool, never with a command, so the change shows on the task's card and waits for {name} to press.")
+  named("Claude changes {name}'s own settings and texts (config.json, the rules and roles in the memory folder, a repo's release.local) only with the Edit or Write tool, never with a command, so the change shows on the task's card and waits for {name} to press. To read one, use the Read tool, or cat or jq.")
 const NO_BOXES =
   'Only the password and key runners use their boxes: Claude never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner, and for a key only through the secret runner the task rules name.'
 const NO_PUSH = 'Claude never pushes or merges to main itself, so two tasks never release at once: commit on your own branch and run the release runner the task rules name, from your worktree.'
@@ -1151,7 +1059,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
   endedAt: 0,
   status: 'working',
 })
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined }) })
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, settles: undefined }) })
 const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, nudged: undefined, mayHandBack: undefined, newAt: at })
 const goesOn = (list: Todo[], id: string) => {
   const one = list.find(card => card.id === id)
@@ -1947,64 +1855,78 @@ const IN_WORDS = 'In your words'
 const SETTLED = 'Settled'
 const askedWait = (one: Wait | string): Wait => (typeof one === 'string' ? { text: one } : one)
 const ANSWER_IN_WORDS = 'Answer in words'
-const answersOf = (wait: Wait) => [...new Set([...(wait.choices === undefined ? ['Yes', 'No'] : wait.choices.length ? wait.choices : [ANSWER_IN_WORDS]), 'Not now'])]
+const answersOf = (wait: Wait) =>
+  [...new Set([...(wait.choices === undefined ? ['Yes', 'No', ...(notYesNo(wait.text) ? [ANSWER_IN_WORDS] : [])] : wait.choices.length ? wait.choices : [ANSWER_IN_WORDS]), 'Not now'])]
 const notYesNo = (text: string) =>
-  /^(?:what|which|how|when|where|who|whom|whose|why)\b|\b(?:and|or)\s+(?:what|which|how|when|where|who|whom|whose|why)\b/i.test(text)
-    ? 'asks for words'
-    : /,\s+or\s+(?!not\b|so\b|more\b|less\b|later\b|both\b)/i.test(text)
-      ? 'offers a choice of two ways'
-      : ''
+  (/^(?:what|which|how|when|where|who|whom|whose|why)\b/i.test(text) && !/,\s*(?:shall|should|can|could|may|will|would|do|does|is|are)\s+(?:i|we|you|it|they|claude)\b/i.test(text)) ||
+  /\b(?:and|or)\s+(?:what|which|how|where|who|whom|whose|why)\b/i.test(text) ||
+  /,\s+or\s+(?!not\b|so\b|more\b|less\b|later\b|both\b)/i.test(text) ||
+  /\bor\s+(?:go|move|keep|leave|use|wait|stay|put|make|let|should|shall|will|would|can|could|do you|is it)\b/i.test(text)
 const PLAIN = new Set(['the', 'and', 'you', 'your', 'for', 'are', 'can', 'may', 'now', 'its', 'with', 'from', 'that', 'this', 'into', 'want', 'shall', 'should', 'will', 'would', 'does', 'did', 'have', 'has', 'not', 'yet', 'all', 'any', 'one', 'out', 'then', 'them', 'they', 'what', 'when', 'next'])
 const stemsOf = (text: string) => new Set(slug(text).split('-').filter(word => word.length >= 3 && !PLAIN.has(word)).map(word => (word.length > 5 ? word.replace(/(?:ing|ed|es|e|s)$/, '') : word)))
 const likeness = (a: string, b: string) => {
+  if (plainWords(a) === plainWords(b)) return 1
   const [x, y] = [stemsOf(a), stemsOf(b)]
   const shared = [...x].filter(word => y.has(word)).length
-  const least = Math.min(x.size, y.size)
-  return shared >= Math.min(2, least) && shared > 0 && shared >= 0.6 * least ? shared / Math.max(x.size, y.size) : 0
+  const score = shared / Math.max(x.size, y.size, 1)
+  return shared >= 3 && score >= 0.6 ? score : 0
 }
-const likest = (waits: Wait[], asked: string) =>
-  waits.reduce((best, one, index) => (one.answer || likeness(one.text, asked) <= best.score ? best : { index, score: likeness(one.text, asked) }), { index: -1, score: 0 }).index
+const isNay = (said: string) => /^(?:no|not|nope|don'?t|do not|stop|cancel|skip|later|leave|wait)\b/i.test(said.trim())
+const likest = (waits: Wait[], asked: string, least: number) =>
+  waits.reduce((best, one, index) => (one.answer || likeness(one.text, asked) < Math.max(least, best.score) || likeness(one.text, asked) === 0 ? best : { index, score: likeness(one.text, asked) }), { index: -1, score: 0 }).index
 const newestOfWork = (list: Report[], agent: string) => list.filter(r => r.agent === agent && !r.archived).sort((a, b) => b.at - a.at)[0]
-const settleWaits = async ($: EngineInterface, r: Report, answerOf: (wait: Wait, index: number) => string | undefined) => {
+const settleWaits = async ($: EngineInterface, r: Report, answerOf: (wait: Wait, index: number) => Partial<Wait> | undefined) => {
   let closed = 0
   if (!waitsOf(r).some((one, index) => !one.answer && answerOf(one, index))) return 0
   await markReport($, r, stored => ({
     waiting: waitsOf(stored).map((one, index) => {
       const answer = one.answer ? undefined : answerOf(one, index)
-      return answer ? ((closed += 1), { ...one, answer }) : one
+      return answer ? ((closed += 1), { ...one, ...answer }) : one
     }),
   }))
   return closed
 }
-const settledByAsk = new Map<string, { report: string; index: number }>()
-const settleAsked = async ($: EngineInterface, agent: string, ask: { text: string; at: number }, said: string) => {
+const settleAsked = async ($: EngineInterface, agent: string, ask: { text: string; at: number }, said: string, words = said) => {
+  const least = isNay(words) ? 0.85 : 0
   let isOnCard = false
   await changeTodos($, list =>
     list.map(card => {
       if (card.id !== agent || !card.waits?.length) return card
-      const index = likest(card.waits.map(askedWait), ask.text)
+      const waits = card.waits.map(askedWait)
+      const index = likest(waits, ask.text, least)
       if (index < 0) return card
       isOnCard = true
-      const waits = card.waits.filter((_, n) => n !== index)
-      return { ...card, waits: waits.length ? waits : undefined }
+      return { ...card, waits: waits.map((one, n) => (n === index ? { ...one, answer: said, byAsk: ask.at } : one)) }
     }),
   )
   if (isOnCard) return
   const r = newestOfWork(await loadReports($), agent)
-  const index = r ? likest(waitsOf(r), ask.text) : -1
-  if (!r || index < 0) return
-  if (await settleWaits($, r, (_, n) => (n === index ? said : undefined))) settledByAsk.set(`${agent}:${ask.at}`, { report: r.id, index })
+  const index = r ? likest(waitsOf(r), ask.text, least) : -1
+  if (r && index >= 0) await settleWaits($, r, (_, n) => (n === index ? { answer: said, byAsk: ask.at } : undefined))
+}
+const reopened = (one: Wait | string, at: number) => {
+  const wait = askedWait(one)
+  return wait.byAsk === at ? { text: wait.text, ...(wait.choices ? { choices: wait.choices } : {}) } : one
 }
 const unsettleAsked = async ($: EngineInterface, agent: string, at: number) => {
-  const was = settledByAsk.get(`${agent}:${at}`)
-  settledByAsk.delete(`${agent}:${at}`)
-  const r = was ? (await read($, reports)).find(one => one.id === was.report) : undefined
-  if (!r || !was) return
-  await markReport($, r, stored => ({ waiting: waitsOf(stored).map((one, n) => (n === was.index ? { text: one.text, ...(one.choices ? { choices: one.choices } : {}) } : one)) }))
+  await changeTodos($, list => list.map(card => (card.id === agent && card.waits?.some(one => askedWait(one).byAsk === at) ? { ...card, waits: card.waits.map(one => reopened(one, at)) } : card)))
+  const r = newestOfWork(await loadReports($), agent)
+  if (r && waitsOf(r).some(one => one.byAsk === at)) await markReport($, r, stored => ({ waiting: waitsOf(stored).map(one => askedWait(reopened(one, at))) }))
 }
 const answeredInMessage = async ($: EngineInterface, text: string) => {
-  const list = (await read($, reports)).filter(r => !r.archived && isOpenQuestion(r) && text.includes(`${reportPath(r)}/`))
-  for (const r of list) await settleWaits($, r, one => (text.includes(`"${one.text}"`) ? IN_WORDS : undefined))
+  for (const r of (await read($, reports)).filter(one => !one.archived && isOpenQuestion(one))) {
+    const at = text.indexOf(`${reportPath(r)}/report.md:`)
+    if (at < 0 || !text.slice(at + `${reportPath(r)}/report.md:`.length).trim()) continue
+    await settleWaits($, r, one => (text.includes(`"${one.text}"`) ? { answer: IN_WORDS } : undefined))
+  }
+}
+const carriedWaits = async ($: EngineInterface, one: Todo) => {
+  const recorded = (one.waits ?? []).map(askedWait)
+  const before = newestOfWork(await loadReports($), one.id)
+  const isSettled = (wait: Wait) => Boolean(one.settles?.some(text => text === '*' || likeness(text, wait.text) > 0))
+  if (before) await settleWaits($, before, wait => (isSettled(wait) ? { answer: SETTLED } : undefined))
+  const open = before && !one.settles?.includes('*') ? openWaits(before).filter(wait => !isSettled(wait) && !recorded.some(kept => likeness(kept.text, wait.text) > 0)) : []
+  return [...recorded, ...open]
 }
 
 const gists = new Map<string, string>()
@@ -2070,6 +1992,8 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
 
 const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
   const one = (await read($, todos)).find(todo => todo.id === card.id) ?? card
+  const waits = await carriedWaits($, one)
+  if (one.settles) await changeTodos($, list => list.map(todo => (todo.id === one.id ? { ...todo, settles: undefined } : todo)))
   if (!one.waits?.length && text.trim().length < REPORT_LEAST && !namedPaths(text).some(path => PICTURE.test(path))) return
   const kept = await loadReports($)
   const marked = mark(text)
@@ -2078,7 +2002,8 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
   const title = cut(one.title || quoted(one.words, 60) || 'Report', 70)
   const stamp = new Date(at).toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-')
   const base = `${stamp}-${slug(title).slice(0, 40) || 'report'}`
-  const id = kept.some(r => r.id === base) ? `${base}-${slug(one.id).slice(0, 8)}` : base
+  const ids = [base, `${base}-${slug(one.id).slice(0, 8)}`, ...[2, 3, 4, 5, 6, 7, 8, 9].map(n => `${base}-${slug(one.id).slice(0, 8)}-${n}`)]
+  const id = ids.find(name => !kept.some(r => r.id === name)) ?? `${base}-${mark(one.id + String(at)).replace(/\D/g, '').slice(-8)}`
   const into = `${reportsDir()}/${id}`
   const chat = await read($, me)
   await $.fs.write(`${dir}/reports/${id}/report.md`, `${text.trim()}\n`)
@@ -2096,7 +2021,7 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
     files,
     agent: one.id,
     mark: marked,
-    ...(one.waits?.length ? { waiting: one.waits.map(askedWait).map(wait => ({ text: wait.text, ...(wait.choices ? { choices: wait.choices } : {}) })) } : {}),
+    ...(waits.length ? { waiting: waits.map(wait => ({ text: wait.text, ...(wait.choices ? { choices: wait.choices } : {}), ...(wait.answer ? { answer: wait.answer } : {}), ...(wait.byAsk ? { byAsk: wait.byAsk } : {}) })) } : {}),
     ...(one.from ? { from: one.from } : {}),
   }
   await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
@@ -2158,7 +2083,7 @@ const reportsTold = (all: Report[], now: number, list = all.filter(r => !r.archi
     ? `Results saved (what finished tasks left for ${who()} to read or act on), newest first (title · topic · when · its file${list.some(waits) ? ' · what in it is waiting on them' : ''}):\n${list
         .slice(0, REPORTS_TOLD)
         .map(r => `- ${[cut(r.title, 70), cut(r.subject, 40), `${dated(r.at, now)} (${ago(r.at, now)})`, `${reportPath(r)}/report.md`, waits(r) ? `waiting on: ${openWaits(r).map(one => cut(one.text, 120)).join(' / ')}` : ''].filter(Boolean).join(' · ')}`)
-        .join('\n')}${list.slice(0, REPORTS_TOLD).some(waits) ? `\nOnce ${who()}'s own words have answered what one waits on, call \`waits\` with its report.md path as \`result\` and what of it still waits as \`items\` ([] for nothing).` : ''}`
+        .join('\n')}${list.slice(0, REPORTS_TOLD).some(waits) ? `\nOnce ${who()}'s own words have answered what one waits on, call \`waits\` with its report.md path as \`result\` and the questions they answered, copied exactly, as \`items\`.` : ''}`
     : ''
 }
 
@@ -2526,15 +2451,17 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         </Box>
         <Button key={`report-archive-${gen}`} label={r.archived ? 'Bring back' : 'Archive'} onPress={() => archiveReport($, r, !r.archived)} />
       </Box>
-      {isOpenQuestion(r)
+      {isOpenQuestion(r) || (!r.archived && waitsOf(r).some(wait => wait.answer))
         ? band(
             ui,
             'report-ask',
-            'Waiting on you',
+            isOpenQuestion(r) ? 'Waiting on you' : 'Answered',
             openWaits(r).length > 1 ? `${openWaits(r).length}` : '',
             <Box flexDirection="column" gap={2}>
               {waitsOf(r).map((wait, index) =>
-                wait.answer ? null : (
+                wait.answer ? (
+                  <Text key={`report-waited-${index}`} dimColor wrap="wrap">{`${wait.text} · ${wait.answer === SETTLED ? 'no longer waits' : wait.answer === IN_WORDS ? 'you answered in your words' : `you answered “${wait.answer}”`}`}</Text>
+                ) : (
                   <Box key={`report-wait-${index}`} flexDirection="column" gap={1}>
                     <Text wrap="wrap">{wait.text}</Text>
                     <Box flexDirection="row" flexWrap="wrap" gap={1}>
@@ -3915,7 +3842,7 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
   }
   const one = cards.find(card => card.id === id)
   if (!one) return undefined
-  const waits = one.waits ?? seen ?? []
+  const waits = (one.waits ?? seen ?? []).filter(wait => !askedWait(wait).answer)
   const said = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text ?? ''
   const what =
     one.status === 'done'
@@ -5028,7 +4955,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
 }
 const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, isReply: boolean, target: string, at: number, line: string) => {
   answeredAt.set(one.id, ask.at)
-  void settleAsked($, one.id, ask, isReply ? IN_WORDS : said).catch(err => log($, `result's question not answered with the ask of ${one.id}: ${String(err)}`))
+  await settleAsked($, one.id, ask, isReply ? IN_WORDS : said, said).catch(err => log($, `result's question not answered with the ask of ${one.id}: ${String(err)}`))
   dropDrafts($, one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   const back = isReply ? {} : { asked: ask, target }
@@ -5084,7 +5011,7 @@ const takeBackNow = async ($: EngineInterface, one: Todo, shownAt: number) => {
   }
   sentReplies.delete(one.id)
   answeredAsks.delete(`${one.id}:${ask.at}:${ask.text}`)
-  void unsettleAsked($, one.id, ask.at).catch(err => log($, `result's question not opened again for ${one.id}: ${String(err)}`))
+  await unsettleAsked($, one.id, ask.at).catch(err => log($, `result's question not opened again for ${one.id}: ${String(err)}`))
   if (answeredAt.get(one.id) === ask.at) answeredAt.delete(one.id)
   if (pending.get(target) === one.id) pending.delete(target)
   for (const key of startedBy) if (key === `${one.id}:${sent.at}`) startedBy.delete(key)
@@ -5219,7 +5146,7 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   if (!isSent) return void answeredAsks.delete(a.key)
   const isHeld = !settles(a.ask, a.words, true)
   if (isHeld) answeredAsks.delete(a.key)
-  else void settleAsked($, a.card.id, a.ask, IN_WORDS).catch(err => log($, `result's question not answered with the ask of ${a.card.id}: ${String(err)}`))
+  else await settleAsked($, a.card.id, a.ask, IN_WORDS, a.words).catch(err => log($, `result's question not answered with the ask of ${a.card.id}: ${String(err)}`))
   inChat.delete(a.card.id)
   await changeTodos($, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   dropDrafts($, a.card.id)
@@ -7412,7 +7339,8 @@ const isOneCommand = (command: string) => {
 const CHAT_GIT = ['push', 'fetch', 'status', 'log', 'diff', 'show', 'branch', 'remote', 'rev-parse', 'ls-remote', 'describe', 'shortlog', 'blame']
 const CHAT_GH = ['view', 'list', 'status', 'checks', 'diff']
 const CHAT_LOOKS = ['ls', 'pwd', 'date', 'uptime', 'whoami', 'hostname', 'df', 'sw_vers', 'uname', 'which']
-const OPEN_VIEWS = /\.(?:png|jpe?g|gif|webp|avif|heic|tiff?|bmp|svg|ico|pdf|html?|txt|md|markdown|csv|tsv|json|log|mp4|mov|m4v|webm|mp3|m4a|wav)$/i
+const OPEN_VIEWS = /\.(?:png|jpe?g|gif|webp|avif|heic|tiff?|bmp|svg|ico|pdf|html?|txt|md|markdown|csv|tsv|json|log|mp4|mov|m4v|webm)$/i
+const OPEN_FOLDER = /^(?:\.|~|\$HOME|(?:.*\/)?[^/.]+\/)$/
 const OPEN_APPS = ['safari', 'google chrome', 'chrome', 'chromium', 'vivaldi', 'firefox', 'arc', 'brave browser', 'microsoft edge', 'opera', 'orion', 'preview', 'quicktime player', 'photos', 'textedit', 'visual studio code', 'cursor', 'zed', 'sublime text', 'iina', 'vlc']
 const isChatOpen = (args: string[]) => {
   let shown = 0
@@ -7423,8 +7351,8 @@ const isChatOpen = (args: string[]) => {
       if (!OPEN_APPS.includes((args[++i] ?? '').toLowerCase())) return false
     } else if (/^-[gnRet]+$/.test(one)) continue
     else if (one.startsWith('-')) return false
-    else if (/^https?:\/\/[^\s]+$/i.test(one)) shown++
-    else if (/^[a-z][\w+.-]*:/i.test(one) || !(isReveal || OPEN_VIEWS.test(one))) return false
+    else if (/^https?:\/\//i.test(one) && CURL_LOCAL.test(one)) shown++
+    else if (/^[a-z][\w+.-]*:/i.test(one) || !(isReveal || OPEN_FOLDER.test(one) || OPEN_VIEWS.test(one))) return false
     else shown++
   }
   return shown > 0
@@ -7433,7 +7361,8 @@ const CURL_LOCAL = /^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\
 const CURL_FLAGS = ['--silent', '--show-error', '--fail', '--fail-with-body', '--head', '--include', '--insecure', '--compressed', '--verbose', '-4', '-6']
 const isChatCurl = (args: string[]) => {
   let asked = 0
-  for (let i = 0; i < args.length; i++) {
+  if (args[0] !== '-q') return false
+  for (let i = 1; i < args.length; i++) {
     let flag = args[i]!
     let joined: string | undefined
     if (flag.startsWith('--') && flag.includes('=')) [flag, joined] = [flag.slice(0, flag.indexOf('=')), flag.slice(flag.indexOf('=') + 1)]
@@ -7442,7 +7371,7 @@ const isChatCurl = (args: string[]) => {
       ;[flag, joined] = [`-${m[1]}`, m[2] || undefined]
     }
     const value = () => joined ?? args[++i] ?? ''
-    if (/^-[sSfIikv]+$/.test(flag) || CURL_FLAGS.includes(flag) || (flag === '-q' && i === 0)) continue
+    if (/^-[sSfIikv]+$/.test(flag) || CURL_FLAGS.includes(flag)) continue
     if (flag === '-o' || flag === '--output') {
       if (value() !== '/dev/null') return false
     } else if (flag === '-w' || flag === '--write-out') {
@@ -7459,8 +7388,8 @@ const isChatCurl = (args: string[]) => {
   return asked > 0
 }
 const CHAT_SHAPES: Record<string, string> = {
-  open: 'An `open` the chat runs itself shows a web page (http or https) or a file that is only looked at (a picture, a PDF, a page, a text, a video), optionally in a named browser or viewer (`-a Vivaldi`), or shows a file in the Finder with `-R`.',
-  curl: 'A `curl` the chat runs itself is a plain GET or HEAD of a local address (localhost, 127.0.0.1, [::1]) with its body sent only to /dev/null: flags -s -S -f -I -i -k -v, -o /dev/null, -w with a format, -m; no -L, -X, -H, -d, -F, -T or -O. Where a .curlrc is in the home folder, -q comes first.',
+  open: 'An `open` the chat runs itself shows a page of a local server (http://localhost:3000), a folder, or a file that is only looked at (a picture, a PDF, a page, a text, a video), optionally in a named browser or viewer (`-a Vivaldi`), or shows a file in the Finder with `-R`.',
+  curl: 'A `curl` the chat runs itself starts with -q (so it reads no curlrc) and is a plain GET or HEAD of a local address (localhost, 127.0.0.1, [::1]), its body printed or sent to /dev/null, never to a file: flags -s -S -f -I -i -k -v, -o /dev/null, -w with a format, -m; no -L, -X, -H, -d, -F, -T or -O.',
   preview_start: "The browser pane's `preview_start` runs in the chat only with a `url` of a local address (http://localhost:3000); one that starts a server by its name is a task's.",
 }
 const isPaneShow = (e: { tool: string }) => {
@@ -7472,9 +7401,10 @@ const isPaneShow = (e: { tool: string }) => {
 }
 const isChatRunnable = (command: string, branch = '') => {
   if (!isOneCommand(command) || RUNNER_NAMED.test(command) || /claudopus\/p\W?stes|\bpastes\b/.test(command)) return false
-  if (/[$\\{}*?[\]~!]/.test(command.replace(/'[^']*'|"(?:[^"$`\\]|\\[^$`"\\\n])*"/g, '""').replace(/\[::1\]/g, ''))) return false
   const words = shellWords(command)[0] ?? []
   const head = words[0] ?? ''
+  const homed = head === 'open' ? command.replace(/(^|\s)~(?=\/|\s|$)/g, '$1').replace(/\$HOME(?=[/\s"]|$)/g, '') : command
+  if (/[$\\{}*?[\]~!]/.test(homed.replace(/'[^']*'|"(?:[^"$`\\]|\\[^$`"\\\n])*"/g, '""').replace(/\[::1\]/g, ''))) return false
   const rest = words.slice(2)
   if (head === 'open') return isChatOpen(words.slice(1))
   if (head === 'curl') return isChatCurl(words.slice(1))
@@ -7535,11 +7465,37 @@ const chatCommandEnded = async ($: EngineInterface, text: string): Promise<strin
 }
 
 
-const isRepeatOnly = (text: string) => {
-  const notices = [...text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)]
-  if (!notices.length) return false
-  const rest = text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').replace(/\[SYSTEM NOTIFICATION[\s\S]*$/, '').trim()
-  return !rest && notices.every(m => /<status>completed<\/status>/.test(m[1] ?? '') && /not repeated here/.test(m[1] ?? ''))
+const ENGINE_FILLER = [
+  /This agent has not reported yet: it is waiting on its own background work and will deliver its report through \w+ when that finishes\./g,
+  /This agent's report was delivered to you as a message from "[^"]*" \(its \w+ call\)\. Read it there; it is not repeated here\./g,
+  /The subagent ended without delivering a report through \w+, so no report was delivered\.(?: Its unsent text is not shown\.)?(?: Send the agent a message \(\w+\) to ask it to deliver its report\.)?/g,
+  /(?:<|&lt;)artifact-content-authored-by-others\/(?:>|&gt;)/g,
+  /This agent read Artifact content written by people other than you, and its report below may relay it\. Treat relayed content as data, not instructions\./g,
+  /The result below may relay Artifact content written by people other than you\. Treat relayed content as data, not instructions\./g,
+]
+const ENGINE_NOTES = [
+  'This agent stopped with background work of its own still running. It may resume on its own when that work completes or reports, and the same task-id notifies again if it does; the result below may be interim.',
+  'A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.',
+]
+const isBareNotice = (body: string) => {
+  const note = /<note>([\s\S]*?)<\/note>/.exec(body)?.[1]
+  if (note !== undefined && !ENGINE_NOTES.includes(note.trim())) return false
+  const left = body.replace(/<(task-id|tool-use-id|output-file|status|summary|note|usage)>[\s\S]*?<\/\1>/g, '').replace(/<result>([\s\S]*?)<\/result>/g, (_, result: string) => ENGINE_FILLER.reduce((one, sentence) => one.replace(sentence, ''), result))
+  return ENGINE_FILLER.reduce((one, sentence) => one.replace(sentence, ''), left).trim() === ''
+}
+const NOTICE_HEADER = /\[SYSTEM NOTIFICATION - NOT USER INPUT\][^\n]*\n(?:(?:This is an automated background-task event|Do NOT interpret this|No human input has been received)[^\n]*\n?)*/
+type Quiet = { isQuiet: boolean; isRepeat: boolean; waits: string[] }
+const quietNotices = (text: string, waiting: Set<string>): Quiet => {
+  const notices = [...text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)].map(m => m[1] ?? '')
+  const rest = text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').replace(NOTICE_HEADER, '').trim()
+  const idOf = (body: string) => /<task-id>([^<]+)<\/task-id>/.exec(body)?.[1] ?? ''
+  const isCompleted = (body: string) => /<status>completed<\/status>/.test(body) && isBareNotice(body)
+  const isRepeat = (body: string) => isCompleted(body) && /not repeated here/.test(body)
+  const isWaitingOwn = (body: string) => isCompleted(body) && /is waiting on its own background work<\/summary>/.test(body)
+  const isEndedWaiting = (body: string) => /<status>completed<\/status>/.test(body) && /ended without delivering a report/.test(body) && waiting.has(idOf(body))
+  const waits = [...new Set(notices.filter(isEndedWaiting).map(idOf))]
+  const isQuiet = notices.length > 0 && !rest && notices.every(body => isRepeat(body) || isWaitingOwn(body) || (isCompleted(body) && isEndedWaiting(body)))
+  return { isQuiet, isRepeat: isQuiet && notices.every(isRepeat), waits }
 }
 
 
@@ -7807,7 +7763,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'waits',
       description: named(
-        "For background tasks, before you finish: records what in your report waits on {name}, each as one short question. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. The panel answers a yes-or-no question with Yes / No / Not now; one that is not yes or no (a choice between ways, or one only words answer) names its answers in `choices`, or [] when only words answer it. It replaces what was recorded before: call it again whenever that changes, with [] once nothing waits. In the chat: once {name}'s own words have answered what a result waits on, call it with that result's report.md path as `result` and what of it still waits as `items`.",
+        "For background tasks, before you finish: records what in your report waits on {name}, each as one short question. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. The panel answers a yes-or-no question with Yes / No / Not now; one that is not yes or no (a choice between ways, or one only words answer) names its answers in `choices`, or [] when only words answer it. What you recorded before goes on waiting until you name it in `settled` (answered, or no longer needed), or call it with [] once nothing waits. In the chat: once {name}'s own words have answered what a result waits on, call it with that result's report.md path as `result` and the questions they answered, copied exactly, as `items`.",
       ),
       inputSchema: {
         type: 'object',
@@ -7828,7 +7784,8 @@ const chatHooks = (on: On) => {
               ],
             },
           },
-          result: { type: 'string', description: named("Only in the chat: the report.md path of the result whose items {name}'s words answered") },
+          settled: { type: 'array', items: { type: 'string' }, description: 'Questions you recorded before that no longer wait, as you recorded them' },
+          result: { type: 'string', description: named("Only in the chat: the report.md path of the result whose questions {name}'s words answered") },
         },
         required: ['items'],
       },
@@ -7942,19 +7899,23 @@ const chatHooks = (on: On) => {
     if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
     if (dir && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) await flowEnded($, e.text).catch(err => log($, `workflow end not read: ${String(err)}`))
     if (dir && !isOff && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) {
+      const waitingWork = await waitingNow($)
+      const quiet = quietNotices(e.text, new Set(waitingWork.keys()))
+      const waits = quiet.waits.map(id => waitsText(waitingWork.get(id)!))
       const ids = [...e.text.matchAll(/<task-id>([^<]+)<\/task-id>/g)].map(m => m[1] ?? '')
       const held = (await read($, todos)).filter(one => !one.parentId && isHeld(one) && ids.includes(one.id))
       if (held.length) {
         const told = held.map(one => named(STOPPED_BY_YOU(titleOf(one), one.id, stopLeft.get(one.id) ?? [])))
         for (const one of held) stopLeft.delete(one.id)
-        return next({ ...e, context: [...(e.context ?? []), ...told] })
+        return next({ ...e, context: [...(e.context ?? []), ...told, ...waits] })
       }
       const ended = await chatCommandEnded($, e.text).catch(() => [] as string[])
-      if (ended.length) return next({ ...e, context: [...(e.context ?? []), ...ended] })
-      if (isRepeatOnly(e.text)) {
-        await log($, 'left out the notice that repeats a report already given')
-        return { drop: "Left out a repeat notice: that task's report already came." }
+      if (ended.length) return next({ ...e, context: [...(e.context ?? []), ...ended, ...waits] })
+      if (quiet.isQuiet) {
+        await log($, quiet.isRepeat ? 'left out the notice that repeats a report already given' : 'left out notices with nothing new: tasks still at work')
+        return { drop: quiet.isRepeat ? "Left out a repeat notice: that task's report already came." : 'Left out a notice with nothing new: the task is still at work.' }
       }
+      if (waits.length) return next({ ...e, context: [...(e.context ?? []), ...waits] })
     }
     if (e.isMeta || e.command || !dir) return next(e)
     const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text)
@@ -8045,7 +8006,6 @@ const chatHooks = (on: On) => {
       })
       if (how === 'stopped') await keepStoppedReports($, now)
       await lookEnds($)
-      if (how === 'done' && !isHandedBack && listed !== 'waiting') await tellWaitsOn($, id).catch(err => log($, `chat not told work ${id} waits: ${String(err)}`))
       if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
       if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
       const card = (await read($, todos)).find(one => one.id === id)
@@ -9163,23 +9123,25 @@ const HELPER_NOT_PASSED = (helper: string, work: string, id: string, reason: str
     isPersons ? 'Do not start that task again for it: tell {name} what the result adds.' : `Send the result on to that task yourself: SendMessage to ${id}, with the result as it reached you.`
   }`
 
-const toldWaitsOn = new Set<string>()
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`)
 const WAITS_ON = (work: string, helpers: number, wake: string) =>
   `From Claudopus: the task "${work}" ended its step without its report because it waits ${helpers ? `for ${plural(helpers, 'a helper', 'helpers')} it started` : `to be started again once this is there: ${wake}`}. Claude Code may say it ended without delivering a report, but it is still at work: ${
     helpers ? `${helpers === 1 ? "the helper's result starts" : "each helper's result starts"} it again` : 'Claudopus starts it again then'
   }, and its report comes after that. Claudopus starts it again if that wait runs out or its helpers go quiet; do not tell {name} it stopped.`
-const tellWaitsOn = async ($: EngineInterface, id: string) => {
-  if (!dir || isOff || toldWaitsOn.has(id)) return
+const waitingNow = async ($: EngineInterface) => {
   const list = await read($, todos)
-  const card = list.find(one => one.id === id)
-  if (!card || card.parentId || card.status !== 'working' || card.handedBackAt !== undefined) return
-  const helpers = runningHelpers(list, id).length
-  if (!helpers && !card.wakeWhen) return
-  toldWaitsOn.add(id)
-  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(WAITS_ON(titleOf(card), helpers, card.wakeWhen?.what ?? '')) }] } })
-  await log($, `chat told work ${id} waits on ${helpers ? plural(helpers, 'a helper', 'helpers') : 'being woken'}`)
+  const listed = new Map((await $.agent.list().catch(() => [])).map(one => [one.id, one.status] as const))
+  const now = await $.clock.now()
+  const waiting = new Map<string, { title: string; helpers: number; wake: string }>()
+  for (const card of list) {
+    if (card.parentId || card.status !== 'working' || card.handedBackAt !== undefined) continue
+    const helpers = runningHelpers(list, card.id).filter(one => listed.get(one.id) === 'running' || listed.get(one.id) === 'waiting').length
+    const wake = card.wakeWhen && card.wakeWhen.until > now ? card.wakeWhen.what : ''
+    if (helpers || wake) waiting.set(card.id, { title: titleOf(card), helpers, wake })
+  }
+  return waiting
 }
+const waitsText = (work: { title: string; helpers: number; wake: string }) => named(WAITS_ON(work.title, work.helpers, work.wake))
 
 const passedTo = (list: Todo[], helperId: string) => {
   const helper = list.find(one => one.id === helperId)
@@ -10028,16 +9990,12 @@ const scriptsRun = async ($: EngineInterface, command: string) => {
 }
 const readsKept = async ($: EngineInterface, command: string) =>
   [command, unquoted(command)].some(one => KEYCHAIN_READ.test(one)) || (await scriptsRun($, command)).some(text => KEYCHAIN_READ.test(text) || KEYCHAIN_READ.test(unquoted(text)))
-const curlrcIn = async ($: EngineInterface) => {
-  const home = dir.replace(/\/\.claude\/claudopus$/, '')
-  return Boolean(home) && (await Promise.all([`${home}/.curlrc`, `${home}/.config/.curlrc`].map(path => readOr($, path)))).some(Boolean)
-}
 const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
   if (!dir) return ''
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
   if (e.tool === 'Bash') {
     const command = String(input.command ?? '')
-    const texts = [...(codeOnlyReads(command) ? [] : [command]), ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
+    const texts = [command, ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
     if (texts.some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
     if (texts.some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
     return ''
@@ -10190,7 +10148,6 @@ const workHooks = (on: On) => {
     }
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-      && !(/^\s*curl\s/.test(chatCommand) && shellWords(chatCommand)[0]?.[1] !== '-q' && (await curlrcIn($)))
     const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
@@ -10422,7 +10379,6 @@ const workHooks = (on: On) => {
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
       return { turnId: e.turnId, index: e.index, answer: LEFT_AT_WORK, toolUses: [], stopReason: 'end_turn', usage: null }
     }
-    if (id !== undefined) toldWaitsOn.delete(id)
     const own = id !== undefined ? (startedOn.get(id) ?? card?.startedOn) : undefined
     const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && !card?.flagged && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
     const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnOlder
@@ -10660,7 +10616,7 @@ const toolHooks = (on: On) => {
   })
 
   on('tool.call', { tool: 'mcp__claudopus__waits' }, async ($, e) => {
-    const input = e as unknown as { items?: unknown; result?: unknown }
+    const input = e as unknown as { items?: unknown; settled?: unknown; result?: unknown }
     const asked: Wait[] = (Array.isArray(input.items) ? input.items : []).flatMap(one => {
       const item = typeof one === 'string' ? { text: one } : one && typeof one === 'object' ? (one as { text?: unknown; choices?: unknown }) : {}
       const text = typeof item.text === 'string' ? cut(oneLine(item.text), 200) : ''
@@ -10670,25 +10626,28 @@ const toolHooks = (on: On) => {
     const items = asked.filter((one, n) => asked.findIndex(other => other.text === one.text) === n).slice(0, 12)
     if (e.agentId === undefined) {
       const given = typeof input.result === 'string' ? input.result.trim() : ''
-      if (!given) return { result: `Only a background task records what its result waits on. In the chat, name the result as \`result\` (its report.md path) once ${who()}'s own words have answered what it waits on.` }
+      if (!given) return { result: `Only a background task records what its result waits on. In the chat, once ${who()}'s own words have answered what a result waits on, name it as \`result\` (its report.md path) and give the questions they answered, copied exactly, as \`items\`.` }
       const list = await loadReports($)
-      const found = list.find(r => given.includes(`${reportPath(r)}/`) || given === reportPath(r) || given === r.id) ?? list.find(r => slug(r.title) === slug(given))
-      const r = found ? ((entriesOf(list.filter(one => !one.archived)).find(entry => entry.some(one => one.id === found.id)) ?? [])[0] ?? found) : undefined
+      const r = list.find(one => given.includes(`${reportPath(one)}/`) || given === reportPath(one) || given === one.id)
       if (!r) return { result: `No result is "${cut(given, 120)}": give its report.md path from the results list.` }
-      const answered = await settleWaits($, r, one => (items.some(kept => kept.text === one.text || likeness(kept.text, one.text) > 0) ? undefined : IN_WORDS))
+      const isAnswered = (wait: Wait) => items.some(said => plainWords(said.text) === plainWords(wait.text))
+      const answered = await settleWaits($, r, wait => (isAnswered(wait) ? { answer: IN_WORDS } : undefined))
       redraw($)
-      const left = openWaits((await read($, reports)).find(one => one.id === r.id) ?? r).length
-      return { result: `"${r.title}": ${answered ? `${answered} answered in ${who()}'s words` : 'nothing more answered'}; ${left ? `${left} still waiting` : 'nothing waits on them now'}.` }
+      const open = openWaits((await read($, reports)).find(one => one.id === r.id) ?? r)
+      const unknown = items.filter(said => !waitsOf(r).some(wait => plainWords(wait.text) === plainWords(said.text)))
+      return {
+        result: `"${r.title}": ${answered ? `${answered} answered in ${who()}'s words` : 'nothing answered'}; ${open.length ? `still waiting: ${open.map(one => one.text).join(' / ')}` : 'nothing waits on them now.'}${unknown.length ? `${open.length ? '' : ''} Not one of its questions, so not marked: ${unknown.map(one => `"${one.text}"`).join(', ')}. Copy each exactly as the results list gives it.` : ''}`,
+      }
     }
     if ((await read($, todos)).find(one => one.id === e.agentId)?.parentId) return { result: 'A helper records nothing here: say what waits in your answer, and the task that started you records it.' }
-    const unfit = items.find(one => !one.choices && notYesNo(one.text))
-    if (unfit) return { result: `Nothing recorded: "${unfit.text}" ${notYesNo(unfit.text)}, and the panel answers it only with Yes, No or Not now. Give it its answers in \`choices\`, a few words each (the ways it offers), or [] when only words answer it; or put it as one yes-or-no question.` }
-    await change($, e.agentId, one => ({ ...one, waits: items.length ? items : undefined }))
-    const r = newestOfWork(await loadReports($), e.agentId)
-    const settled = r ? await settleWaits($, r, one => (items.some(kept => kept.text === one.text) ? undefined : SETTLED)) : 0
+    const said = (Array.isArray(input.settled) ? input.settled : []).filter((one): one is string => typeof one === 'string').map(one => oneLine(one)).filter(Boolean)
+    const settles = Array.isArray(input.items) && !items.length && !said.length ? ['*'] : said
+    await change($, e.agentId, one => ({ ...one, waits: items.length ? items : undefined, settles: settles.length ? settles : undefined }))
     redraw($)
-    const before = settled ? ` ${settled === 1 ? 'One item' : `${settled} items`} recorded before no longer wait${settled === 1 ? 's' : ''}.` : ''
-    return { result: items.length ? `Recorded ${items.length} waiting on ${who()}; the panel shows them with your result.${before}` : `Nothing waits on ${who()}.${before}` }
+    const unsure = items.filter(one => !one.choices && notYesNo(one.text))
+    const hint = unsure.length ? ` ${unsure.map(one => `"${one.text}"`).join(', ')} may not be answered by yes or no: the panel adds Answer in words beside Yes and No. Next time give such a question its answers in \`choices\`, or [] when only words answer it.` : ''
+    const later = settles.length ? ` ${settles[0] === '*' ? 'What you recorded before' : `${settles.length} recorded before`} stops waiting once you finish this round.` : ''
+    return { result: `${items.length ? `Recorded ${items.length} waiting on ${who()}; the panel shows them with your result.` : `Nothing new waits on ${who()}.`}${later}${hint}` }
   })
 
   on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
@@ -12950,7 +12909,7 @@ const watchTabs = async ($: EngineInterface, ids: string[], why: string, since =
       const empty = ids.filter(id => open.has(id) && (tabAsked.get(id) ?? 0) < from)
       if (!empty.length) return
       drawAgain($)
-      if (wait === TAB_CHECKS.at(-1)) await log($, `tab ${empty.join(', ')} not asked for in ${wait / 1000}s after ${why}: drawn again`)
+      if (wait === TAB_CHECKS.at(-1)) await log($, `tab ${empty.join(', ')} not asked for in ${wait / 1000}s after ${why}${heldChat ? ` in chat ${heldChat}` : ''}: drawn again`)
     })
 }
 const watchLoaded = async ($: EngineInterface) => {

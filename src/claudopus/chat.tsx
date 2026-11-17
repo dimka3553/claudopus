@@ -222,7 +222,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'waits',
       description: named(
-        "For background tasks, before you finish: records what in your report waits on {name}, each as one short question. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. The panel answers a yes-or-no question with Yes / No / Not now; one that is not yes or no (a choice between ways, or one only words answer) names its answers in `choices`, or [] when only words answer it. It replaces what was recorded before: call it again whenever that changes, with [] once nothing waits. In the chat: once {name}'s own words have answered what a result waits on, call it with that result's report.md path as `result` and what of it still waits as `items`.",
+        "For background tasks, before you finish: records what in your report waits on {name}, each as one short question. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. The panel answers a yes-or-no question with Yes / No / Not now; one that is not yes or no (a choice between ways, or one only words answer) names its answers in `choices`, or [] when only words answer it. What you recorded before goes on waiting until you name it in `settled` (answered, or no longer needed), or call it with [] once nothing waits. In the chat: once {name}'s own words have answered what a result waits on, call it with that result's report.md path as `result` and the questions they answered, copied exactly, as `items`.",
       ),
       inputSchema: {
         type: 'object',
@@ -243,7 +243,8 @@ const chatHooks = (on: On) => {
               ],
             },
           },
-          result: { type: 'string', description: named("Only in the chat: the report.md path of the result whose items {name}'s words answered") },
+          settled: { type: 'array', items: { type: 'string' }, description: 'Questions you recorded before that no longer wait, as you recorded them' },
+          result: { type: 'string', description: named("Only in the chat: the report.md path of the result whose questions {name}'s words answered") },
         },
         required: ['items'],
       },
@@ -392,21 +393,27 @@ const chatHooks = (on: On) => {
     if (dir && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) await flowEnded($, e.text).catch(err => log($, `workflow end not read: ${String(err)}`))
     // The engine's notice that work the person stopped has ended says it was stopped "by Claude": the chat is told it was them
     if (dir && !isOff && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) {
+      // Each notice that a work waiting on its helpers or a wake_me ended goes with the word that it is still at work, whatever else
+      // the prompt brings
+      const waitingWork = await waitingNow($)
+      const quiet = quietNotices(e.text, new Set(waitingWork.keys()))
+      const waits = quiet.waits.map(id => waitsText(waitingWork.get(id)!))
       const ids = [...e.text.matchAll(/<task-id>([^<]+)<\/task-id>/g)].map(m => m[1] ?? '')
       const held = (await read($, todos)).filter(one => !one.parentId && isHeld(one) && ids.includes(one.id))
       if (held.length) {
         const told = held.map(one => named(STOPPED_BY_YOU(titleOf(one), one.id, stopLeft.get(one.id) ?? [])))
         for (const one of held) stopLeft.delete(one.id)
-        return next({ ...e, context: [...(e.context ?? []), ...told] })
+        return next({ ...e, context: [...(e.context ?? []), ...told, ...waits] })
       }
       // The chat's own command ended: how it ended and its last lines go with the notice
       const ended = await chatCommandEnded($, e.text).catch(() => [] as string[])
-      if (ended.length) return next({ ...e, context: [...(e.context ?? []), ...ended] })
-      // A notice that a task whose report already came has stopped says nothing new: it is left out, so the chat takes no turn for it
-      if (isRepeatOnly(e.text)) {
-        await log($, 'left out the notice that repeats a report already given')
-        return { drop: "Left out a repeat notice: that task's report already came." }
+      if (ended.length) return next({ ...e, context: [...(e.context ?? []), ...ended, ...waits] })
+      // Notices with nothing new (a report already given, a task still at work) are left out, so the chat takes no turn for them
+      if (quiet.isQuiet) {
+        await log($, quiet.isRepeat ? 'left out the notice that repeats a report already given' : 'left out notices with nothing new: tasks still at work')
+        return { drop: quiet.isRepeat ? "Left out a repeat notice: that task's report already came." : 'Left out a notice with nothing new: the task is still at work.' }
       }
+      if (waits.length) return next({ ...e, context: [...(e.context ?? []), ...waits] })
     }
     if (e.isMeta || e.command || !dir) return next(e)
     // A message the mod sent from a press or reply in the panel starts work as a message of the person's does
@@ -525,9 +532,6 @@ const chatHooks = (on: On) => {
       })
       if (how === 'stopped') await keepStoppedReports($, now)
       await lookEnds($)
-      // Work that ended its step to wait for its helpers, or to be started again, which the engine does not list as waiting: the chat
-      // is told it is still at work, as the engine tells it otherwise
-      if (how === 'done' && !isHandedBack && listed !== 'waiting') await tellWaitsOn($, id).catch(err => log($, `chat not told work ${id} waits: ${String(err)}`))
       // A reply it never read goes to the chat; work that waits for its helpers reads it at its next step
       if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
       if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))

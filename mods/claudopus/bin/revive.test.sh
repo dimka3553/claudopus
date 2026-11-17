@@ -122,5 +122,47 @@ within '! kill -0 $watcher 2>/dev/null' 5 && kill -0 "$newer" 2>/dev/null && ok 
 kill "$newer" 2>/dev/null
 rm -f "$tmp/chat.run"
 
+# A slow load, on a watcher of its own with short limits: one quiet SLOW_QUIET gets one try, one that beats steadily SLOW_CLEAR is
+# as any other again, a beat with no load line leaves the mark, a change not made is not taken for one, and the last change outlives
+# its watcher
+mem2=$tmp/memory2; mkdir -p "$mem2/keep"
+cp "$tmp/chat" "$tmp/chat2"; touch "$tmp/chat2.run"; "$tmp/chat2" & chat2=$!
+set2=$tmp/set2.json
+printf '{ "enabledPlugins": { "claudopus@claudopus": true } }\n' > "$set2"
+beat2() { printf '%s\t%s\t%s\n%s\n' "$chat2" claudopus@claudopus "$2" "$3" > "$mem2/keep/$1.beat"; }
+stale2() { touch -t 202001010000 "$mem2/keep/$1.beat"; }
+log2() { grep -c "chat $1: $2" "$mem2/keep/revive.log" 2>/dev/null | tr -d ' '; }
+CLAUDOPUS_REVIVE_SLOW_QUIET=4 CLAUDOPUS_REVIVE_SLOW_CLEAR=3 "$revive" "$mem2" & w2=$!
+# Marked slow: changed once, then beats from the same load
+beat2 t1 "$set2" load-1; stale2 t1
+within '[ "$(log2 t1 quiet)" = 1 ]' 8; touch "$mem2/keep/t1.beat"
+within '[ "$(log2 t1 "beats again from the same load")" = 1 ]' 5 || no "a slow chat is marked"
+# A beat half written, with no load line, leaves the mark
+printf '%s\t%s\t%s\n' "$chat2" claudopus@claudopus "$set2" > "$mem2/keep/t1.beat"; sleep 2
+[ "$(head -n 1 "$mem2/keep/t1.slow" 2>/dev/null)" = load-1 ] && ok "a beat with no load line leaves the slow mark" || no "a beat with no load line leaves the slow mark"
+# Quiet past SLOW_QUIET: one try, then left
+beat2 t1 "$set2" load-1; stale2 t1
+within 'grep -q "chat t1: Claudopus did not come back after 1 tries" "$mem2/keep/revive.log"' 12 && [ "$(log2 t1 quiet)" = 2 ] && ok "a slow chat quiet past SLOW_QUIET gets one try" || no "a slow chat quiet past SLOW_QUIET gets one try"
+# Beating steadily: the mark lapses, and a switch-off then is tried as any other's
+for k in 1 2 3 4 5 6; do touch "$mem2/keep/t1.beat"; sleep 1; done
+within '[ "$(log2 t1 "beats steadily again")" = 1 ] && [ ! -e "$mem2/keep/t1.slow" ]' 4 && ok "a slow chat that beats steadily is as any other again" || no "a slow chat that beats steadily is as any other again"
+n=$(log2 t1 quiet); stale2 t1
+within '[ "$(log2 t1 quiet)" -ge $((n + 2)) ]' 12 && ok "and has its tries again" || no "and has its tries again"
+rm -f "$mem2/keep/t1.beat"
+# A change not made (Claudopus turned off) is not taken for one
+printf '{ "enabledPlugins": { "claudopus@claudopus": false } }\n' > "$tmp/off2.json"
+beat2 t2 "$tmp/off2.json" load-2; stale2 t2
+within 'grep -q "chat t2: quiet .* turned off" "$mem2/keep/revive.log"' 8 && [ ! -e "$mem2/keep/t2.changed" ] && ok "a change not made leaves no mark of one" || no "a change not made leaves no mark of one"
+rm -f "$mem2/keep/t2.beat"
+# The last change outlives its watcher: a new one keeps to the gap after it
+kill "$w2" 2>/dev/null; wait "$w2" 2>/dev/null
+beat2 t3 "$set2" load-3; stale2 t3
+printf '%s\n' "$(date +%s)" > "$mem2/keep/revive.lastchange"
+CLAUDOPUS_REVIVE_GAP=30 "$revive" "$mem2" & w3=$!
+sleep 4
+[ "$(log2 t3 quiet)" = 0 ] && ok "a new watcher keeps to the gap after the last change" || no "a new watcher keeps to the gap after the last change"
+kill "$w3" 2>/dev/null
+rm -f "$tmp/chat2.run"
+
 [ "$fails" = 0 ] && echo "revive: all passed" || echo "revive: $fails failed"
 exit "$fails"
