@@ -219,7 +219,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'waits',
       description: named(
-        "For background tasks, before you finish: records what in your report waits on {name}, each as one short question. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. The panel answers a yes-or-no question with Yes / No / Not now; one that is not yes or no (a choice between ways, or one only words answer) names its answers in `choices`, or [] when only words answer it. What you recorded before goes on waiting until you name it in `settled` (answered, or no longer needed), or call it with [] once nothing waits. In the chat: once {name}'s own words have answered what a result waits on, call it with that result's report.md path as `result` and the questions they answered, copied exactly, as `items`.",
+        "For background tasks, before you finish: records what in your report waits on {name}, each as one short question. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. Each call lists everything still waiting: once you finish, it replaces what your earlier results waited on, and [] says nothing does. The panel answers each with Yes / No, or the answers you name in `choices` when it is not yes or no, and always with Not now and Answer in words. Mark a question you also asked on your card with the `ask` tool with `asked: true`: answering it there answers it here. In the chat: once {name}'s own words have answered what a result waits on, call it with that result's report.md path as `result` and the numbers of the questions they answered as `answered`.",
       ),
       inputSchema: {
         type: 'object',
@@ -233,17 +233,18 @@ const chatHooks = (on: On) => {
                   type: 'object',
                   properties: {
                     text: { type: 'string', description: 'The question, at most 140 characters, in plain words, speaking to them as "you"' },
-                    choices: { type: 'array', items: { type: 'string' }, description: 'Its answers when it is not yes or no, a few words each (at most 4; Not now is added); [] when only words answer it' },
+                    choices: { type: 'array', items: { type: 'string' }, description: 'Its answers when it is not yes or no, a few words each (at most 4)' },
+                    asked: { type: 'boolean', description: 'true when it is the question you asked on your card with the `ask` tool' },
                   },
                   required: ['text'],
                 },
               ],
             },
           },
-          settled: { type: 'array', items: { type: 'string' }, description: 'Questions you recorded before that no longer wait, as you recorded them' },
+          answered: { type: 'array', items: { type: 'number' }, description: named("Only in the chat: the numbers of the result's questions {name}'s words answered") },
           result: { type: 'string', description: named("Only in the chat: the report.md path of the result whose questions {name}'s words answered") },
         },
-        required: ['items'],
+        required: [],
       },
       isDeferred: false,
     })

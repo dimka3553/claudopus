@@ -59,42 +59,25 @@ const answeredOf = (r: Report) => {
   const [first] = answered
   return answered.length > 1 ? `you answered ${answered.length}` : first?.answer === IN_WORDS ? 'you answered in your words' : `you answered ${first?.answer}`
 }
-// The answer kept for an item the person's own words answered, and for one its work said no longer waits
+// The answer kept for an item the person's own words answered, one its work said no longer waits, and one a newer result of its
+// work took the place of
 const IN_WORDS = 'In your words'
 const SETTLED = 'Settled'
+const REPLACED = 'Replaced'
 // An item as a card keeps it: a plain line, as kept before answers were, is a yes-or-no question
 const askedWait = (one: Wait | string): Wait => (typeof one === 'string' ? { text: one } : one)
-// The answers an item is answered with on the panel, Not now last: Yes and No for a yes-or-no question, its own otherwise; one only
-// words answer is answered in the chat's box, and so may one whose words read as more than yes or no
+// The answers an item is answered with on the panel: its own, or Yes and No; then Not now, and Answer in words, which puts a line
+// naming it in the chat's box, as no guess from a question's words tells for sure that Yes and No answer it
 const ANSWER_IN_WORDS = 'Answer in words'
-const answersOf = (wait: Wait) =>
-  [...new Set([...(wait.choices === undefined ? ['Yes', 'No', ...(notYesNo(wait.text) ? [ANSWER_IN_WORDS] : [])] : wait.choices.length ? wait.choices : [ANSWER_IN_WORDS]), 'Not now'])]
-// Words that read as a question Yes and No may not answer: one that opens with what, which or how (not "When it passes, shall I…?"),
-// or offers two ways ("…, or …", "… or go …"). Only a guess: such an item is recorded all the same, with Answer in words beside Yes and No
-const notYesNo = (text: string) =>
-  (/^(?:what|which|how|when|where|who|whom|whose|why)\b/i.test(text) && !/,\s*(?:shall|should|can|could|may|will|would|do|does|is|are)\s+(?:i|we|you|it|they|claude)\b/i.test(text)) ||
-  /\b(?:and|or)\s+(?:what|which|how|where|who|whom|whose|why)\b/i.test(text) ||
-  /,\s+or\s+(?!not\b|so\b|more\b|less\b|later\b|both\b)/i.test(text) ||
-  /\bor\s+(?:go|move|keep|leave|use|wait|stay|put|make|let|should|shall|will|would|can|could|do you|is it)\b/i.test(text)
-// Whether two lines put the same question: at least three words, endings aside ("release" and "released"), and most of both lines'
-// words, are shared. A go-ahead asked on the card and recorded as waiting a moment later are seldom worded alike; two questions that
-// only share a name ("the new key box") are not one. A line's words leave out the plain ones every question has
-const PLAIN = new Set(['the', 'and', 'you', 'your', 'for', 'are', 'can', 'may', 'now', 'its', 'with', 'from', 'that', 'this', 'into', 'want', 'shall', 'should', 'will', 'would', 'does', 'did', 'have', 'has', 'not', 'yet', 'all', 'any', 'one', 'out', 'then', 'them', 'they', 'what', 'when', 'next'])
-const stemsOf = (text: string) => new Set(slug(text).split('-').filter(word => word.length >= 3 && !PLAIN.has(word)).map(word => (word.length > 5 ? word.replace(/(?:ing|ed|es|e|s)$/, '') : word)))
-const likeness = (a: string, b: string) => {
-  if (plainWords(a) === plainWords(b)) return 1
-  const [x, y] = [stemsOf(a), stemsOf(b)]
-  const shared = [...x].filter(word => y.has(word)).length
-  const score = shared / Math.max(x.size, y.size, 1)
-  return shared >= 3 && score >= 0.6 ? score : 0
-}
-// An answer that turns a go-ahead down or puts it off answers an item only when the two are nearly the same question
-const isNay = (said: string) => /^(?:no|not|nope|don'?t|do not|stop|cancel|skip|later|leave|wait)\b/i.test(said.trim())
-// The open item most like a question, by its place among all of them
-const likest = (waits: Wait[], asked: string, least: number) =>
-  waits.reduce((best, one, index) => (one.answer || likeness(one.text, asked) < Math.max(least, best.score) || likeness(one.text, asked) === 0 ? best : { index, score: likeness(one.text, asked) }), { index: -1, score: 0 }).index
-// The newest result a work left: what of it is open is what waits on the person now
-const newestOfWork = (list: Report[], agent: string) => list.filter(r => r.agent === agent && !r.archived).sort((a, b) => b.at - a.at)[0]
+const answersOf = (wait: Wait) => [...new Set([...(wait.choices ?? ['Yes', 'No']), 'Not now', ANSWER_IN_WORDS])]
+// How an answered item reads on its result
+const answeredWords = (wait: Wait) =>
+  wait.answer === SETTLED ? 'no longer waits' : wait.answer === REPLACED ? 'replaced by a newer result' : wait.answer === IN_WORDS ? 'you answered in your words' : wait.answer === 'Not now' ? 'you said not now' : `you answered “${wait.answer ?? ''}”`
+const byPerson = (wait: Wait) => Boolean(wait.answer) && wait.answer !== SETTLED && wait.answer !== REPLACED
+// The same line, case, punctuation and quotes aside: an item that repeats its work's ask word for word is that ask's
+const sameLine = (a: string, b: string) => Boolean(plainWords(a)) && plainWords(a) === plainWords(b)
+// The results a work left that are still kept
+const resultsOfWork = (list: Report[], agent: string) => list.filter(r => r.agent === agent && !r.archived).sort((a, b) => b.at - a.at)
 // Gives answers to open items of a result, each change made from what is stored then; how many it answered
 const settleWaits = async ($: EngineInterface, r: Report, answerOf: (wait: Wait, index: number) => Partial<Wait> | undefined) => {
   let closed = 0
@@ -107,58 +90,58 @@ const settleWaits = async ($: EngineInterface, r: Report, answerOf: (wait: Wait,
   }))
   return closed
 }
-// An ask of a work's answered on its card, by the person's words in the chat, or by a go-ahead's last step: the item its work recorded
-// for the same question is answered with it, marked with the ask it answered, on the work's card while it has not finished and on its
-// newest result after. 16 Nov a release was asked on the card and recorded as waiting at once; Release it did the release, and the
-// result went on waiting on the person, told to the chat with every message after. The mark is kept with the item, so an answer
-// taken back opens it again, after a reload too
-const settleAsked = async ($: EngineInterface, agent: string, ask: { text: string; at: number }, said: string, words = said) => {
-  const least = isNay(words) ? 0.85 : 0
-  let isOnCard = false
-  await changeTodos($, list =>
-    list.map(card => {
-      if (card.id !== agent || !card.waits?.length) return card
-      const waits = card.waits.map(askedWait)
-      const index = likest(waits, ask.text, least)
-      if (index < 0) return card
-      isOnCard = true
-      return { ...card, waits: waits.map((one, n) => (n === index ? { ...one, answer: said, byAsk: ask.at } : one)) }
-    }),
-  )
-  if (isOnCard) return
-  const r = newestOfWork(await loadReports($), agent)
-  const index = r ? likest(waitsOf(r), ask.text, least) : -1
-  if (r && index >= 0) await settleWaits($, r, (_, n) => (n === index ? { answer: said, byAsk: ask.at } : undefined))
+// An item a work recorded as the question on its card (`asked`, or the same line as its ask) is tied to that ask by when it was made.
+// 16 Nov a release was asked on the card and recorded as waiting a moment later; Release it did the release, and the result went on
+// waiting on the person, told to the chat with every message after. Answering that ask by any route answers exactly the items tied to
+// it, on the card while the work has not finished and on its results after; the answer taken back opens them again
+const tiedTo = (wait: Wait, card: Todo): Wait => {
+  const ask = card.ask ?? card.lastAsk
+  if (wait.ask || !ask || !(wait.isAsked || sameLine(wait.text, ask.text))) return wait
+  const { isAsked: _, ...rest } = wait
+  return { ...rest, ask: ask.at, ...(card.lastAsk?.at === ask.at && card.lastAsk.answer ? { answer: card.lastAsk.answer, byAsk: ask.at } : {}) }
 }
-// The answer taken back opens the item it answered again, on the card and on the work's newest result
+const settleAsked = async ($: EngineInterface, agent: string, ask: { text: string; at: number }, said: string) => {
+  await changeTodos($, list =>
+    list.map(card =>
+      card.id !== agent
+        ? card
+        : {
+            ...card,
+            lastAsk: { text: ask.text, at: ask.at, answer: said },
+            ...(card.waits?.length ? { waits: card.waits.map(askedWait).map(one => (one.ask === ask.at && !one.answer ? { ...one, answer: said, byAsk: ask.at } : one)) } : {}),
+          },
+    ),
+  )
+  for (const r of resultsOfWork(await loadReports($), agent)) await settleWaits($, r, one => (one.ask === ask.at ? { answer: said, byAsk: ask.at } : undefined))
+}
 const reopened = (one: Wait | string, at: number) => {
   const wait = askedWait(one)
-  return wait.byAsk === at ? { text: wait.text, ...(wait.choices ? { choices: wait.choices } : {}) } : one
+  if (wait.byAsk !== at) return one
+  const { answer: _, byAsk: __, ...rest } = wait
+  return rest
 }
 const unsettleAsked = async ($: EngineInterface, agent: string, at: number) => {
-  await changeTodos($, list => list.map(card => (card.id === agent && card.waits?.some(one => askedWait(one).byAsk === at) ? { ...card, waits: card.waits.map(one => reopened(one, at)) } : card)))
-  const r = newestOfWork(await loadReports($), agent)
-  if (r && waitsOf(r).some(one => one.byAsk === at)) await markReport($, r, stored => ({ waiting: waitsOf(stored).map(one => askedWait(reopened(one, at))) }))
+  await changeTodos($, list =>
+    list.map(card => (card.id !== agent ? card : { ...card, ...(card.lastAsk?.at === at ? { lastAsk: { text: card.lastAsk.text, at } } : {}), ...(card.waits?.length ? { waits: card.waits.map(one => reopened(one, at)) } : {}) })),
+  )
+  for (const r of resultsOfWork(await loadReports($), agent))
+    if (waitsOf(r).some(one => one.byAsk === at)) await markReport($, r, stored => ({ waiting: waitsOf(stored).map(one => askedWait(reopened(one, at))) }))
 }
-// The person's message that names a result, quotes what in it waits, and says something after it, as the box "Answer in words"
-// filled starts, answers it
+// The line "Answer in words" puts in the chat's box: the item by its number, so the words of the question can be anything
+const wordsLine = (r: Report, n: number, now: number) => `About question ${n} of the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: `
+// The person's message that carries that line and something typed after it answers that item
 const answeredInMessage = async ($: EngineInterface, text: string) => {
   for (const r of (await read($, reports)).filter(one => !one.archived && isOpenQuestion(one))) {
-    const at = text.indexOf(`${reportPath(r)}/report.md:`)
-    if (at < 0 || !text.slice(at + `${reportPath(r)}/report.md:`.length).trim()) continue
-    await settleWaits($, r, one => (text.includes(`"${one.text}"`) ? { answer: IN_WORDS } : undefined))
+    const path = `${reportPath(r)}/report.md: `
+    for (const m of text.matchAll(/About question (\d+) of the result /g)) {
+      const at = text.indexOf(path, m.index)
+      if (at < 0) continue
+      const after = text.slice(at + path.length).split(/\nAbout question \d+ of the result /)[0] ?? ''
+      if (!after.trim()) continue
+      const n = Number(m[1])
+      await settleWaits($, r, (_, index) => (index === n - 1 ? { answer: IN_WORDS } : undefined))
+    }
   }
-}
-// What a work's finished round leaves waiting: what it recorded this round, then what its result before still had open and it did not
-// say is settled, unless it recorded that again in other words. Nothing it recorded before stops waiting by being left out: 16 Nov a
-// task woken for one thing that records only that must not settle questions nobody answered
-const carriedWaits = async ($: EngineInterface, one: Todo) => {
-  const recorded = (one.waits ?? []).map(askedWait)
-  const before = newestOfWork(await loadReports($), one.id)
-  const isSettled = (wait: Wait) => Boolean(one.settles?.some(text => text === '*' || likeness(text, wait.text) > 0))
-  if (before) await settleWaits($, before, wait => (isSettled(wait) ? { answer: SETTLED } : undefined))
-  const open = before && !one.settles?.includes('*') ? openWaits(before).filter(wait => !isSettled(wait) && !recorded.some(kept => likeness(kept.text, wait.text) > 0)) : []
-  return [...recorded, ...open]
 }
 
 const gists = new Map<string, string>()
@@ -239,13 +222,19 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
 const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
   // What the work recorded as waiting is read as it stands now; a short answer that leaves something waiting is still kept
   const one = (await read($, todos)).find(todo => todo.id === card.id) ?? card
-  // What it said this round of what it recorded before is applied now that the round is done; what is still open goes on
-  const waits = await carriedWaits($, one)
-  if (one.settles) await changeTodos($, list => list.map(todo => (todo.id === one.id ? { ...todo, settles: undefined } : todo)))
-  if (!one.waits?.length && text.trim().length < REPORT_LEAST && !namedPaths(text).some(path => PICTURE.test(path))) return
+  const waits = (one.waits ?? []).map(askedWait)
+  const isKept = waits.length > 0 || text.trim().length >= REPORT_LEAST || namedPaths(text).some(path => PICTURE.test(path))
+  // A round done that leaves a newer result, or that said what still waits, takes the place of what its earlier results waited on:
+  // each call of the tool lists everything still waiting. One that failed or was stopped changes nothing
   const kept = await loadReports($)
   const marked = mark(text)
-  if (kept.some(r => r.agent === one.id && r.mark === marked)) return
+  // The same report again is no newer result
+  const isAgain = kept.some(r => r.agent === one.id && r.mark === marked)
+  if ((isKept && !isAgain) || one.waitsSet) {
+    for (const r of resultsOfWork(kept, one.id)) await settleWaits($, r, () => ({ answer: isKept && !isAgain ? REPLACED : SETTLED }))
+    if (one.waitsSet) await changeTodos($, list => list.map(todo => (todo.id === one.id ? { ...todo, waitsSet: undefined } : todo)))
+  }
+  if (!isKept || isAgain) return
   const at = await $.clock.now()
   const title = cut(one.title || quoted(one.words, 60) || 'Report', 70)
   const stamp = new Date(at).toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-')
@@ -272,7 +261,7 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
     agent: one.id,
     mark: marked,
     // What waits on the person is what the work recorded with the `waits` tool, wherever in the report it is
-    ...(waits.length ? { waiting: waits.map(wait => ({ text: wait.text, ...(wait.choices ? { choices: wait.choices } : {}), ...(wait.answer ? { answer: wait.answer } : {}), ...(wait.byAsk ? { byAsk: wait.byAsk } : {}) })) } : {}),
+    ...(waits.length ? { waiting: waits.map(({ isAsked: _, ...wait }) => wait) } : {}),
     ...(one.from ? { from: one.from } : {}),
   }
   await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
@@ -342,8 +331,8 @@ const reportsTold = (all: Report[], now: number, list = all.filter(r => !r.archi
   return list.length
     ? `Results saved (what finished tasks left for ${who()} to read or act on), newest first (title · topic · when · its file${list.some(waits) ? ' · what in it is waiting on them' : ''}):\n${list
         .slice(0, REPORTS_TOLD)
-        .map(r => `- ${[cut(r.title, 70), cut(r.subject, 40), `${dated(r.at, now)} (${ago(r.at, now)})`, `${reportPath(r)}/report.md`, waits(r) ? `waiting on: ${openWaits(r).map(one => cut(one.text, 120)).join(' / ')}` : ''].filter(Boolean).join(' · ')}`)
-        .join('\n')}${list.slice(0, REPORTS_TOLD).some(waits) ? `\nOnce ${who()}'s own words have answered what one waits on, call \`waits\` with its report.md path as \`result\` and the questions they answered, copied exactly, as \`items\`.` : ''}`
+        .map(r => `- ${[cut(r.title, 70), cut(r.subject, 40), `${dated(r.at, now)} (${ago(r.at, now)})`, `${reportPath(r)}/report.md`, waits(r) ? `waiting on: ${waitsOf(r).flatMap((one, n) => (one.answer ? [] : [`(${n + 1}) ${one.text}`])).join(' ')}` : ''].filter(Boolean).join(' · ')}`)
+        .join('\n')}${list.slice(0, REPORTS_TOLD).some(waits) ? `\nOnce ${who()}'s own words have answered what one waits on, call \`waits\` with its report.md path as \`result\` and the numbers of the questions they answered as \`answered\`.` : ''}`
     : ''
 }
 
