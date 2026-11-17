@@ -82,7 +82,7 @@ const toolHooks = (on: On) => {
   // The work says what in its report waits on the person: it knows best. Its next report takes them, one item each. Each is a yes-or-no
   // question, or names its own answers: 16 Nov "settled by hand, or left behind?" came with Yes / No / Not now, which cannot answer it
   on('tool.call', { tool: 'mcp__claudopus__waits' }, async ($, e) => {
-    const input = e as unknown as { items?: unknown; result?: unknown }
+    const input = e as unknown as { items?: unknown; settled?: unknown; result?: unknown }
     const asked: Wait[] = (Array.isArray(input.items) ? input.items : []).flatMap(one => {
       const item = typeof one === 'string' ? { text: one } : one && typeof one === 'object' ? (one as { text?: unknown; choices?: unknown }) : {}
       const text = typeof item.text === 'string' ? cut(oneLine(item.text), 200) : ''
@@ -90,32 +90,35 @@ const toolHooks = (on: On) => {
       return text ? [{ text, ...(choices ? { choices } : {}) }] : []
     })
     const items = asked.filter((one, n) => asked.findIndex(other => other.text === one.text) === n).slice(0, 12)
-    // The chat records, for a result, what of it the person's own words left waiting: the rest is answered
+    // The chat records, for the result it names, which of its questions the person's own words answered, copied as it was told them
     if (e.agentId === undefined) {
       const given = typeof input.result === 'string' ? input.result.trim() : ''
-      if (!given) return { result: `Only a background task records what its result waits on. In the chat, name the result as \`result\` (its report.md path) once ${who()}'s own words have answered what it waits on.` }
+      if (!given) return { result: `Only a background task records what its result waits on. In the chat, once ${who()}'s own words have answered what a result waits on, name it as \`result\` (its report.md path) and give the questions they answered, copied exactly, as \`items\`.` }
       const list = await loadReports($)
-      const found = list.find(r => given.includes(`${reportPath(r)}/`) || given === reportPath(r) || given === r.id) ?? list.find(r => slug(r.title) === slug(given))
-      // The newest round of its work, which says what waits now
-      const r = found ? ((entriesOf(list.filter(one => !one.archived)).find(entry => entry.some(one => one.id === found.id)) ?? [])[0] ?? found) : undefined
+      const r = list.find(one => given.includes(`${reportPath(one)}/`) || given === reportPath(one) || given === one.id)
       if (!r) return { result: `No result is "${cut(given, 120)}": give its report.md path from the results list.` }
-      const answered = await settleWaits($, r, one => (items.some(kept => kept.text === one.text || likeness(kept.text, one.text) > 0) ? undefined : IN_WORDS))
+      const isAnswered = (wait: Wait) => items.some(said => plainWords(said.text) === plainWords(wait.text))
+      const answered = await settleWaits($, r, wait => (isAnswered(wait) ? { answer: IN_WORDS } : undefined))
       redraw($)
-      const left = openWaits((await read($, reports)).find(one => one.id === r.id) ?? r).length
-      return { result: `"${r.title}": ${answered ? `${answered} answered in ${who()}'s words` : 'nothing more answered'}; ${left ? `${left} still waiting` : 'nothing waits on them now'}.` }
+      const open = openWaits((await read($, reports)).find(one => one.id === r.id) ?? r)
+      const unknown = items.filter(said => !waitsOf(r).some(wait => plainWords(wait.text) === plainWords(said.text)))
+      return {
+        result: `"${r.title}": ${answered ? `${answered} answered in ${who()}'s words` : 'nothing answered'}; ${open.length ? `still waiting: ${open.map(one => one.text).join(' / ')}` : 'nothing waits on them now.'}${unknown.length ? `${open.length ? '' : ''} Not one of its questions, so not marked: ${unknown.map(one => `"${one.text}"`).join(', ')}. Copy each exactly as the results list gives it.` : ''}`,
+      }
     }
     // A helper's answer is no report: the work it answers to records what waits
     if ((await read($, todos)).find(one => one.id === e.agentId)?.parentId) return { result: 'A helper records nothing here: say what waits in your answer, and the task that started you records it.' }
-    // Refused when its words say for sure that it is not yes or no and it names no answers: the work words it again or names them
-    const unfit = items.find(one => !one.choices && notYesNo(one.text))
-    if (unfit) return { result: `Nothing recorded: "${unfit.text}" ${notYesNo(unfit.text)}, and the panel answers it only with Yes, No or Not now. Give it its answers in \`choices\`, a few words each (the ways it offers), or [] when only words answer it; or put it as one yes-or-no question.` }
-    await change($, e.agentId, one => ({ ...one, waits: items.length ? items : undefined }))
-    // What it recorded before, on the result it left, is replaced too: an item it no longer records waits no more
-    const r = newestOfWork(await loadReports($), e.agentId)
-    const settled = r ? await settleWaits($, r, one => (items.some(kept => kept.text === one.text) ? undefined : SETTLED)) : 0
+    // What it says no longer waits of what it recorded before is applied once its round is done ([] alone: nothing waits). What it
+    // leaves out still waits
+    const said = (Array.isArray(input.settled) ? input.settled : []).filter((one): one is string => typeof one === 'string').map(one => oneLine(one)).filter(Boolean)
+    const settles = Array.isArray(input.items) && !items.length && !said.length ? ['*'] : said
+    await change($, e.agentId, one => ({ ...one, waits: items.length ? items : undefined, settles: settles.length ? settles : undefined }))
     redraw($)
-    const before = settled ? ` ${settled === 1 ? 'One item' : `${settled} items`} recorded before no longer wait${settled === 1 ? 's' : ''}.` : ''
-    return { result: items.length ? `Recorded ${items.length} waiting on ${who()}; the panel shows them with your result.${before}` : `Nothing waits on ${who()}.${before}` }
+    // Only a guess from its words: an item that reads as more than yes or no is kept, with Answer in words beside Yes and No
+    const unsure = items.filter(one => !one.choices && notYesNo(one.text))
+    const hint = unsure.length ? ` ${unsure.map(one => `"${one.text}"`).join(', ')} may not be answered by yes or no: the panel adds Answer in words beside Yes and No. Next time give such a question its answers in \`choices\`, or [] when only words answer it.` : ''
+    const later = settles.length ? ` ${settles[0] === '*' ? 'What you recorded before' : `${settles.length} recorded before`} stops waiting once you finish this round.` : ''
+    return { result: `${items.length ? `Recorded ${items.length} waiting on ${who()}; the panel shows them with your result.` : `Nothing new waits on ${who()}.`}${later}${hint}` }
   })
 
   // Work that needs the person's hands now: its card stands out with the ask and its Copy, until they answer or the work clears it
