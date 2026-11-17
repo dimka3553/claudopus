@@ -354,12 +354,70 @@ const noteHandback = async ($: EngineInterface, helperId: string) => {
   if (!dir || isOff) return
   const to = passedTo(await read($, todos), helperId)
   // Nor for work that already handed back what it had while its helpers ran: the result comes late (passOnHelper)
-  if (!to || handedBackLetGo.has(to.parent.id)) return
+  if (!to || handedBackLetGo.has(to.parent.id) || wokenFor.has(helperId)) return
   // Work at a step of its own, or that the engine holds for a command of its own, is handed the result by the engine itself
   const listed = (await $.agent.list().catch(() => [])).find(one => one.id === to.parent.id)?.status
   if (listed === 'running' || listed === 'waiting') return
   notedAtHandback.add(helperId)
   await toChat($, HELPER_PASSED(titleOf(to.helper), titleOf(to.parent)))
+}
+// A helper's hand-back the engine gives the chat because the task that started it had ended its step, whose result Claudopus passes
+// on to that task (passOnHelper): Claude Code shows it, and the chat need not act on it, so it costs the chat no turn of the model's
+// (17 Nov: after a "Report from subagent" box the chat sent the result on a second time and wrote "Nothing needs you here."). Only a
+// helper whose hand-back went through here (handingBack), each once; one for work that already handed back what it had, held by the
+// person, stopped or failed is the chat's to act on, as before. Claude Code gives a hook no way to keep the box itself from the chat:
+// session.receive does not see a message from one of the chat's own agents (seen on 2.1.325), and a prompt dropped is a warning card
+const handingBack = new Set<string>()
+const HANDBACK_FROM = /^\s*(?:Another Claude session sent a message:\s*)?<agent-message from="([^"]+)">\s*\[Subagent hand-back\]/
+const isQuietHandback = async ($: EngineInterface, origin: { kind: string }, text: string) => {
+  if (!dir || isOff || origin.kind !== 'peer') return false
+  const helperId = HANDBACK_FROM.exec(text)?.[1]
+  if (!helperId || !handingBack.has(helperId)) return false
+  const to = passedTo(await read($, todos), helperId)
+  if (!to || handedBackLetGo.has(to.parent.id)) return false
+  // A task the engine lists at work may be given the result by the engine, so Claudopus may not pass it on (passOnHelper): the
+  // chat, which has it, is the one to act then, as noteHandback leaves it untold. One Claudopus started for it (wakeForHandback) did
+  // not get it, as the chat did: Claudopus passes it on as before, and the chat is told if it cannot
+  const isWoken = wokenFor.delete(helperId)
+  const isSkipped = handedOnSkipped.delete(helperId)
+  const listed = isWoken || isSkipped ? undefined : (await $.agent.list().catch(() => [])).find(one => one.id === to.parent.id)?.status
+  if (listed === 'running' || listed === 'waiting') return false
+  handingBack.delete(helperId)
+  notedAtHandback.add(helperId)
+  if (isSkipped) {
+    passedOn.delete(helperId)
+    await passOnHelper($, helperId, handedBack.get(helperId) ?? '', 'done')
+  }
+  return true
+}
+// Claude Code hands a backgrounded helper's report to the chat only when the task that started it is not at a step of its own
+// (2.1.325's SubagentHandback: the recipient is the main conversation unless the caller is running), which shows in the chat as a
+// "Report from subagent" box no hook can take away (17 Nov: "I want to see only the bits that are needed"). So a task that has ended
+// its step is started again first, with a word of what comes, and the engine hands the report to it. Should the chat get it all the
+// same (isQuietHandback), Claudopus passes it on as before
+const wokenFor = new Set<string>()
+// The helpers whose result Claudopus did not pass on at their turn's end, as the engine was to hand it to the task woken for it
+const handedOnSkipped = new Set<string>()
+const HANDBACK_COMING = (helper: string) => `From Claudopus: your helper "${helper}" is handing you its report now. It comes as a message of its own right after this one: read it there.`
+// A hand-back Claude Code refused after its task was started for it: the task is told nothing comes
+const handbackRefused = async ($: EngineInterface, helperId: string) => {
+  const list = await read($, todos)
+  const helper = list.find(one => one.id === helperId)
+  const parent = list.find(one => one.id === helper?.parentId)
+  if (parent) await sendOwn($, { to: { agentId: parent.id }, text: `From Claudopus: the report of your helper "${titleOf(helper ?? parent)}" did not come after all: Claude Code refused it. Carry on without it; the helper carries on too.` }).catch(() => undefined)
+}
+const wakeForHandback = async ($: EngineInterface, helperId: string) => {
+  if (!dir || isOff) return
+  const to = passedTo(await read($, todos), helperId)
+  if (!to || handedBackLetGo.has(to.parent.id)) return
+  const listed = (await $.agent.list().catch(() => [])).find(one => one.id === to.parent.id)?.status
+  if (listed === 'running' || listed === 'waiting') return
+  if (await isReplaced($)) return
+  const r = await sendOwn($, { to: { agentId: to.parent.id }, text: HANDBACK_COMING(titleOf(to.helper)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  if (!r.isDelivered) return void (await log($, `task ${to.parent.id} not started for the hand-back of ${helperId}: ${r.reason}`))
+  wokenFor.add(helperId)
+  await wakeCard($, to.parent.id)
+  await log($, `task ${to.parent.id} started so its helper ${helperId}'s hand-back goes to it, not to the chat`)
 }
 // The result each helper's end was last passed on with: its turn's end, the look shortly after it and the look for work that ended
 // unheard may each come to the same end, and it is passed on once. A helper started again ends again with a result of its own
@@ -371,6 +429,8 @@ const passOnHelper = async ($: EngineInterface, helperId: string, report: string
   const key = report.trim().slice(0, ANSWER_CHARS)
   if (passedOn.get(helperId) === key) return
   passedOn.set(helperId, key)
+  // Handed by the engine to the task woken for it: nothing to pass on, unless it reaches the chat after all (isQuietHandback)
+  if (wokenFor.delete(helperId)) return void (handedOnSkipped.add(helperId), await log($, `helper ${helperId}'s result went to its task, started for it`))
   const isNoted = notedAtHandback.delete(helperId)
   // A result that comes after the work handed back what it had, as it was told to, reaches the chat: it is told what it is, and
   // when it was told already that the result is passed on, that it was not. None for a helper Claudopus stopped, nor one with no result

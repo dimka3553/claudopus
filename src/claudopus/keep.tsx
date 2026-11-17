@@ -146,13 +146,15 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   const cards = await read($, todos)
   const titled = (one: string) => `"${titleOf(cards.find(card => card.id === one) ?? started(one, '', '', '', cutAt))}"`
   const where = isCopy ? ', in the background on this Mac' : ''
+  const startedAgain = back.length ? `Claudopus started ${back.length === 1 ? titled(back[0] ?? '') : `${back.length} tasks`} again at ${hhmm(now)}${where}, after the chat stopped at ${hhmm(cutAt)}.` : ''
   const text = [
-    back.length ? `Claudopus started ${back.length === 1 ? titled(back[0] ?? '') : `${back.length} tasks`} again at ${hhmm(now)}${where}, after the chat stopped at ${hhmm(cutAt)}.` : '',
+    startedAgain,
     lost.length ? `Claudopus couldn't start ${lost.length === 1 ? titled(lost[0] ?? '') : `${lost.length} tasks`} again after the chat stopped at ${hhmm(cutAt)}.` : '',
   ]
     .filter(Boolean)
     .join(' ')
-  $.ui.log(text)
+  // The cards show what was started again: only a task that could not be is said in the chat
+  if (lost.length) $.ui.log(text.replace(startedAgain, '').trim())
   await tellDevice($, text)
 }
 

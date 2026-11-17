@@ -209,32 +209,20 @@ const AFAR_RULE =
 // What the chat shows when its work asks the person something: the ask as the mod's own notice in the chat, with its answers and
 // pictures, never a message in the person's place; its model reads the ask in a row of its own, with how to pass an answer on.
 // An answer typed in the chat goes to the work as a press on the card does
-const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
-  [
-    `"${title}" has a question for you: ${ask.text}`,
-    // The chat's notice is plain text: Markdown's marks for bold would show as they are
-    ask.details ? `Details:\n${ask.details.replaceAll('**', '')}` : '',
-    `Answers: ${answers.join(' · ')}, or answer in your own words, here or on its card.`,
-    ask.copy ? `${ask.isCommand ? 'Command to run' : 'Text to paste'}: ${ask.copy}` : '',
-    ask.pictures?.length ? `Pictures: ${ask.pictures.join(', ')}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n')
+// One line: what it is about, its answers, a command or text and its pictures are on its card (17 Nov: "Why does this huge text even
+// appear in my chat?")
+const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>) => `"${title}" asks you: ${oneLine(ask.text)} Answer on its card, or here.`
 const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
-  `In the background task "${title}", Claude asked {name} a question. {Name} sees it on the task's card and in this chat as a Claudopus notice, which you do not see: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, which {name} sees in full with it on the card and in the notice: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} already has it: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, do not answer it yourself, and do not start a task for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that task with SendMessage to "${id}", in their words; its card then stops showing the question.`
-// What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it. The person sees the
-// notice (isYou) and the chat's model reads it with the person named
-const ASK_ANSWERED = (title: string, said: string, isYou = false) =>
-  isYou ? `✓ You answered "${title}" on its card: ${said}. Claude has your answer.` : `✓ {Name} answered "${title}" on its card: ${said}. Claude already has the answer from the card, so it needs no second copy.`
+  `In the background task "${title}", Claude asked {name} a question. {Name} sees it in full on the task's card, and its question alone in this chat as a Claudopus notice, which you do not see: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, which {name} sees in full with it on the card: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} already has it: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, do not answer it yourself, and do not start a task for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that task with SendMessage to "${id}", in their words; its card then stops showing the question.`
+// What the chat's model is told when an ask it was sent is answered on the card, or the work no longer needs it. The person, who
+// answered there, is not shown it
+const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered "${title}" on its card: ${said}. Claude already has the answer from the card, so it needs no second copy.`
 // What the chat is told when it sends work an answer of the person's that reached it from the card a moment ago
 const ANSWER_ALREADY_SENT = (said: string) => `Not sent: "${said}" is the answer {name} gave on that task's card. Claude already has it from there and has asked nothing since, so a second copy would only start it again. If {name} means those words for something new, send them with what they are for.`
 // How long an answer given on the card counts as the one the chat would send again
 const ANSWER_ECHO = 60 * 60_000
 // What the chat is told when the person replies on the card in words that do not settle the ask: it stays open
-const ASK_REPLIED = (title: string, said: string, isYou = false) =>
-  isYou
-    ? `✓ You answered "${title}" on its card: ${said}. Claude is working on it, and asks again if it still needs you.`
-    : `✓ {Name} replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs {name}.`
+const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs {name}.`
 // What the work is told with a reply that does not settle its ask: the ask stays open on its card until it clears or replaces it
 const REPLY_HOLDS = `That reply does not settle your question by itself: act on it. Their card shows your question with their reply under it, and nothing more to press or type while you work on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still needs them after you have done what they said, ask it again, which brings back its answers.`
 // What work that had ended is told when the person answers its ask on the card: the answer starts it again

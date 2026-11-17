@@ -500,7 +500,16 @@ const workHooks = (on: On) => {
       const hold = await holdAtHandback($, e.agentId).catch(() => '')
       if (hold) return { deny: hold }
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
+      // The engine hands the hand-back on as it goes through: the chat may be given it from now (isQuietHandback)
+      handingBack.add(e.agentId)
+      // A helper's task that has ended its step is started first, so the engine hands the result to it, not to the chat (wakeForHandback)
+      await wakeForHandback($, e.agentId).catch(err => log($, `task not started for its helper's hand-back: ${String(err)}`))
       const r = await next(e)
+      // Claude Code may also refuse it with a plain result ("Nothing was sent: ..."): the task started for it hears nothing comes, and
+      // the result is passed on as the helper's turn ends, as before
+      const isNotSent = Boolean(r.deny || r.isError) || (r.result as { success?: unknown } | undefined)?.success === false
+      if (isNotSent && wokenFor.delete(e.agentId)) await handbackRefused($, e.agentId).catch(err => log($, `task not told its helper's hand-back was refused: ${String(err)}`))
+      if (r.deny || r.isError) handingBack.delete(e.agentId)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       // A helper whose work has ended its step hands its result to the chat: the chat is told once the hand-back went through, before
       // the helper's turn ends, so its turn starts knowing; a refused hand-back leaves no note
@@ -577,8 +586,9 @@ const workHooks = (on: On) => {
     }
     const id = e.agentId
     if (id !== undefined) replyRead($, id)
-    // A helper started again ends again with a result of its own, passed on even if its words are the same, or none
-    if (id !== undefined) passedOn.delete(id)
+    // A helper started again ends again with a result of its own, passed on even if its words are the same, or none; a hand-back
+    // of its earlier run no prompt of the chat's came for is forgotten
+    if (id !== undefined) (passedOn.delete(id), handingBack.delete(id))
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined

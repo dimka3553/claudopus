@@ -272,7 +272,7 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   await (card ? askAloud($, card, text) : aloud($, 'ask', 'This chat has a question for you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
   const act = gateAct(gate)
   $.ui.log(
-    `${card ? `"${titleOf(card)}"` : 'This chat'} wants to ${act.charAt(0).toLowerCase()}${act.slice(1)}: ${cut(oneLine(gate.command), 300)}. Press ${gate.kind ? 'Allow once or Deny' : `${gate.isWork ? 'Allow for this task' : 'Allow once'}, Always allow this command or Deny`} ${card ? 'on its card in' : 'at the top of'} the Claudopus panel. /claudopus opens it. Nothing you type in the chat allows it.`,
+    `${card ? `"${titleOf(card)}"` : 'This chat'} wants to ${act.charAt(0).toLowerCase()}${act.slice(1)}: ${cut(oneLine(gate.command), 120)}. Allow it ${card ? 'on its card in' : 'at the top of'} the Claudopus panel (/claudopus opens it). Typing here doesn't allow it.`,
   )
   let said: GateSaid | 'gone' | 'late' | undefined
   try {

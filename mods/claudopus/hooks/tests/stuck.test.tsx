@@ -86,6 +86,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const pressRuns: string[][] = []
   // How many lines the mod had written into chats as each SubagentHandback reached the engine
   const atHandback: number[] = []
+  const resumedAtHandback: number[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
   // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
@@ -525,7 +526,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // Claude Code's auto mode refuses this tool outright, as it does a background task's call, with no prompt to the person
     if (files.get('auto-refuse') === e.tool) return { result: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access]. If you have other tasks that don't depend on this action, continue working on those.", isError: true } as never
     // What the chat had been told when a hand-back reached the engine, which hands it on at once
-    if (String(e.tool) === 'SubagentHandback') atHandback.push(appended.length)
+    if (String(e.tool) === 'SubagentHandback') (atHandback.push(appended.length), resumedAtHandback.push(resumed.length))
+    // Claude Code refuses a hand-back with a plain result too, as for a second report
+    if (String(e.tool) === 'SubagentHandback' && files.get('handback-not-sent')) return { result: { success: false, message: 'Nothing was sent: an earlier report of yours was already delivered.' } } as never
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,
@@ -608,7 +611,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, pressRuns, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, pressRuns, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -800,12 +803,14 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   }
   await frames(13)
   expect(resumed.filter(line => line.includes('stopped partway through'))).toHaveLength(1)
-  expect(logged.filter(line => line.includes('"Fit the video" stopped partway') && line.includes('started it again'))).toHaveLength(1)
+  // Told to the chat's model, not shown: the card says so
+  expect(appended.filter(line => line.includes('"Fit the video" stopped partway') && line.includes('started it again'))).toHaveLength(1)
+  expect(logged.filter(line => line.includes('stopped partway'))).toEqual([])
   // 12 minutes on: started again to check on its helper, and the chat told so
   const nudges = (id = 'a2') => resumed.filter(line => line.startsWith(`${id}: From Claudopus:`) && line.includes('helpers'))
   expect(nudges()).toHaveLength(1)
   expect(nudges()[0]).toMatch(/^a2: From Claudopus: nothing new has come back from your helpers for 1[2-6] min while your step had ended: "[^"]+" \(a3\)\. Ask each with SendMessage/)
-  expect(logged.filter(line => line.startsWith('Nothing new from the helpers of "Draw the lids"') && line.endsWith('Claudopus started Claude again and asked it to check on them.'))).toHaveLength(1)
+  expect(appended.filter(line => line.startsWith('undefined: Nothing new from the helpers of "Draw the lids"') && line.endsWith('Claudopus started Claude again and asked it to check on them.'))).toHaveLength(1)
   // Until then it may not hand back while its helper runs
   expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-early', agentId: 'a2', message: 'Lids drawn.' } as never)) as { deny?: string }).deny).toContain("Don't hand back your report yet")
   // It asks its helper, which never answers, and ends its step again: a step and a message start nothing over
@@ -818,7 +823,7 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   // 24 minutes on: started again, once, to hand back what it has; a message from the chat then takes nothing back
   expect(await until(async () => nudges().length === 2 || undefined)).toBe(true)
   expect(nudges()[1]).toContain('hand back your report now with what you have')
-  expect(logged.filter(line => line.startsWith('Nothing new from the helpers of "Draw the lids"') && line.endsWith('asked it to send what it has now.'))).toHaveLength(1)
+  expect(appended.filter(line => line.startsWith('undefined: Nothing new from the helpers of "Draw the lids"') && line.endsWith('asked it to send what it has now.'))).toHaveLength(1)
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm-chat', to: 'a2', message: 'Carry on.' } as never)
   agents.a2 = 'completed'
   // 36 minutes on, still not handed back: no third start; the chat is told plainly it is stuck and may write to it, and the card says so
@@ -851,7 +856,7 @@ test('the schedule for silent helpers keeps its time: each step comes though the
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = { a1: 'general-purpose', a2: 'general-purpose' }
   const unresumable = new Set(['a1'])
-  const { keep, settle, clock, held, logged, resumed } = world(on, { agents, kinds, parents: { a2: 'a1' }, unresumable })
+  const { keep, settle, clock, held, logged, resumed, appended } = world(on, { agents, kinds, parents: { a2: 'a1' }, unresumable })
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Draw the lids', prompt: 'lids' } as never)
   await $.agent.spawn({ ...spawn, description: 'Render the lids', prompt: 'render', parentAgentId: 'a1' } as never)
@@ -859,7 +864,7 @@ test('the schedule for silent helpers keeps its time: each step comes though the
   for (const id of ['a1', 'a2']) await $.tool.call({ tool: 'Bash', tool_use_id: `s-${id}`, agentId: id, command: 'git status' } as never)
   agents.a1 = 'completed'
   await $.turn.complete({ answer: 'Waiting for my helper.', durationMs: 1, isAborted: false, turnId: 'e1', reason: 'answer', agentId: 'a1' } as never)
-  const said = () => logged.filter(line => line.startsWith('Nothing new from the helpers of "Draw the lids"'))
+  const said = () => appended.filter(line => line.startsWith('undefined: Nothing new from the helpers of "Draw the lids"'))
   await clock.advance(13 * 60_000)
   expect(said()).toHaveLength(1)
   expect(resumed.filter(line => line.startsWith('a1:'))).toEqual([])

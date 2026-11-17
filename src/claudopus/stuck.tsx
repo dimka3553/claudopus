@@ -227,7 +227,7 @@ const lookStuck = async ($: EngineInterface) => {
     const r = isStopped && !(await isReplaced($)) ? await sendOwn($, { to: { agentId: one.id }, text: named(RESTARTED_WORK) }).catch(err => ({ isDelivered: false as const, reason: String(err) })) : undefined
     if (r?.isDelivered) {
       await log($, `work ${one.id} had stopped mid-step (the engine lists it ${status}): started again`)
-      await sayInChat($, named(RESTARTED_IN_CHAT(titleOf(one), mins)))
+      await tellChat($, named(RESTARTED_IN_CHAT(titleOf(one), mins)))
     } else await tellStuck($, one, mins, now)
   }
   // Work flagged stuck that the chat was not told of then (a helper looked at work, or the schedule was to tell it), and that no
@@ -303,7 +303,7 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
     const line = (step === 2 ? HELPERS_STILL_SILENT : HELPERS_SILENT)(mins, silentHelpers(list, id, now))
     const r = await sendOwn($, { to: { agentId: id }, text: line }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     await log($, `work ${id} waits on helpers silent for ${mins} min: ${r.isDelivered ? 'started again' : `not reached (${r.reason})`} to ${step === 2 ? 'hand back what it has' : 'check on them'}`)
-    await sayInChat($, named(NUDGED_IN_CHAT(titleOf(one), mins, step === 2)))
+    await tellChat($, named(NUDGED_IN_CHAT(titleOf(one), mins, step === 2)))
   }
 }
 

@@ -234,8 +234,8 @@ const bandHooks = (on: On) => {
               <Text key="band-ask-replied" dimColor wrap="truncate-end">{`    ${sentLine(first, await $.clock.now()) || `✓ You replied “${cut(ask.replied?.text ?? '', 60)}”`}`}</Text>
             ) : (
               <Box flexDirection="column">
-                {/* The chat's notice with what it is about went only to the chat that started the work */}
-                {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{cards.includes(first) ? '    The details are in the chat above and on its card' : '    The details are on its card'}</Text> : null}
+                {/* The chat's notice is the question alone: what it is about is on its card */}
+                {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{'    The details are on its card'}</Text> : null}
                 {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
                 <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
                   {answers.map((choice, n) => (

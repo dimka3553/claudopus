@@ -46,7 +46,8 @@ test('work cut off as the process ended is started again with a message, its car
   const lines = await cardText($ as never, /^Interrupted at /)
   expect(lines).toHaveLength(2)
   expect(lines[0]?.text).toMatch(/^Interrupted at \d\d:\d\d when the chat stopped · running again since \d\d:\d\d$/)
-  expect(logged.some(line => /^Claudopus started 2 tasks again at \d\d:\d\d, after the chat stopped at \d\d:\d\d\.$/.test(line))).toBe(true)
+  // The cards say they were started again: nothing in the chat
+  expect(logged.some(line => line.includes('after the chat stopped at'))).toBe(false)
   expect(files.get(`${MEMORY}/log.md`)).toContain('cut-off notice pushed')
   // The keeper's file says both are at work again
   expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ count: 2 })
@@ -66,7 +67,7 @@ test('in the copy kept on this Mac, work Claude Code started again itself is onl
   ])
   expect(said("couldn't start it again")?.color).toBe('#E5A50A')
   expect(lines.find(one => one.text?.includes('running again'))?.color).toBeUndefined()
-  expect(logged.some(line => line.includes('in the background on this Mac') && line.includes("couldn't start"))).toBe(true)
+  expect(logged.some(line => line.includes("couldn't start"))).toBe(true)
 })
 
 test('a chat with no keeper starts nothing again, and a cut is taken up once, through a reload of the mod before it was done', SLOW, async ($, on) => {
@@ -103,7 +104,8 @@ test('the notice names each piece by its own title', SLOW, async ($, on) => {
   await $.session.start(start)
   await clock.advance(31_000)
   const said = logged.find(line => line.includes('after the chat stopped at')) ?? ''
-  expect(said).toMatch(/^Claudopus started "Solve the cameras" again at \d\d:\d\d, after the chat stopped at \d\d:\d\d\. Claudopus couldn't start "Train the splats" again after the chat stopped at \d\d:\d\d\.$/)
+  // Only the task that could not be started again is said in the chat
+  expect(said).toMatch(/^Claudopus couldn't start "Train the splats" again after the chat stopped at \d\d:\d\d\.$/)
 })
 
 test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper, its work counted as at work', SLOW, async ($, on) => {
