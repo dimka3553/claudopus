@@ -103,7 +103,7 @@ const toolHooks = (on: On) => {
       const open = waitsOf(now).flatMap((one, n) => (one.answer ? [] : [`(${n + 1}) ${one.text}`]))
       const unknown = numbers.filter(n => !waitsOf(r)[n - 1] || waitsOf(r)[n - 1]?.answer)
       return {
-        result: `"${r.title}": ${answered ? `${answered} answered in ${who()}'s words` : 'nothing answered'}; ${open.length ? `still waiting: ${open.join(' ')}` : 'nothing waits on them now'}.${unknown.length ? ` Not an open question there, so not marked: ${unknown.join(', ')}.` : ''}`,
+        result: `"${r.title}": ${answered ? `${answered} answered in ${who()}'s words` : 'nothing answered'}; ${open.length ? `still waiting: ${open.join(' ')}`.replace(/([^.?!])$/, '$1.') : 'nothing waits on them now.'}${unknown.length ? ` Not an open question there, so not marked: ${unknown.join(', ')}.` : ''}`,
       }
     }
     // A helper's answer is no report: the work it answers to records what waits

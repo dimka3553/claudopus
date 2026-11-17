@@ -434,7 +434,7 @@ test("what a result waits on is answered however the person answers it, and only
   expect(told).toContain('waiting on: (1) Delete the folder? (2) Make it public? (3) Rename it to "Shared"?')
   expect(told).toContain('the numbers of the questions they answered as `answered`')
   const marked = (await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w5', result: `${MEMORY}/reports/three/report.md`, answered: [1, 3, 7] } as never)).result
-  expect(marked).toBe('"Three": 2 answered in the person\'s words; still waiting: (2) Make it public?. Not an open question there, so not marked: 7.')
+  expect(marked).toBe('"Three": 2 answered in the person\'s words; still waiting: (2) Make it public? Not an open question there, so not marked: 7.')
   expect(answers('three')).toEqual([['Delete the folder?', 'In your words'], ['Make it public?', ''], ['Rename it to "Shared"?', 'In your words']])
   // The line Answer in words puts in the box names the question by its number, and counts once words follow it
   const line = `About question 2 of the result "Three" (14 Sep 2020, 12:28), ${MEMORY}/reports/three/report.md: `
