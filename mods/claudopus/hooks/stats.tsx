@@ -354,12 +354,12 @@ export const timelineSvg = (pieces: Piece[], width = 600) => {
   const first = parts[0]?.from ?? 0
   const last = parts.at(-1)?.to ?? 0
   const isOneDay = dayText(first) === dayText(last)
-  const label = (t: number) => (isOneDay ? clockText(t) : `${dayText(t)} ${clockText(t)}`)
+  const label = (t: number) => (isOneDay ? clockText(t) : `${dayText(t)}, ${clockText(t)}`)
   // What fits on the axis line, about 6.2 px a letter
   const most = Math.max(20, Math.floor(width / 6.2))
   const fit = (words: string) => (words.length <= most ? words : `${words.slice(0, most - 1).trimEnd()}…`)
   // An end on another day than its start says its day
-  const until = (a: number, z: number) => (dayText(a) === dayText(z) ? clockText(z) : `${dayText(z)} ${clockText(z)}`)
+  const until = (a: number, z: number) => (dayText(a) === dayText(z) ? clockText(z) : `${dayText(z)}, ${clockText(z)}`)
   const tip = (words: string) => `<text class="t" y="${base + 13}">${esc(fit(words))}</text>`
   // A bar as a path: a few characters where a rect takes sixty
   const box = (x: number, y: number, w: number, h: number) => `M${px(x)} ${px(y)}h${px(w)}v${px(h)}h-${px(w)}z`
@@ -467,7 +467,7 @@ export const timelineRows = (pieces: Piece[], cols: number) => {
     }
   const first = parts[0]?.from ?? 0
   const last = parts.at(-1)?.to ?? 0
-  const label = (t: number) => (dayText(first) === dayText(last) ? clockText(t) : `${dayText(t)} ${clockText(t)}`)
+  const label = (t: number) => (dayText(first) === dayText(last) ? clockText(t) : `${dayText(t)}, ${clockText(t)}`)
   return { rows, from: parts.length ? label(first) : '', to: parts.length ? label(last) : '' }
 }
 const timelineText = (ui: Ui, pieces: Piece[], cols: number) => {
@@ -614,8 +614,8 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
       {reading.has(view.scope) ? <Text dimColor>Reading…</Text> : null}
     </Box>
   )
-  if (!s) return [nav, note(ui, 'stats-wait', kept?.error ?? 'Reading Claude’s records of your tasks…')]
-  if (!s.all.total && !s.pieces.length) return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), note(ui, 'stats-none', view.range === 'today' ? 'No tasks today yet.' : 'No tasks on record yet.')]
+  if (!s) return [nav, note(ui, 'stats-wait', kept?.error ?? 'Reading Claude’s logs of your tasks…')]
+  if (!s.all.total && !s.pieces.length) return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), note(ui, 'stats-none', view.range === 'today' ? 'No tasks today yet.' : 'No tasks yet.')]
   const top = s.models[0]?.[1].total || 1
   const count = (n: number) => n.toLocaleString('en-US')
   // Whole dollars from a hundred up, cents below
@@ -626,7 +626,7 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
   const hero = (
     <Box key="stats-hero" flexDirection="row" gap={1} flexShrink={0}>
       {tile(ui, 'hero-saved', hours(saved), 'time saved', surface === 'terminal')}
-      {tile(ui, 'hero-cost', money(s.all.cost), 'at API prices', surface === 'terminal')}
+      {tile(ui, 'hero-cost', money(s.all.cost), 'at list prices', surface === 'terminal')}
       {tile(ui, 'hero-work', count(s.finished), 'tasks done', surface === 'terminal')}
     </Box>
   )
@@ -638,15 +638,15 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
     ui,
     'stats-timeline',
     'Timeline',
-    `up to ${mostAtOnce(s.pieces.map(p => p.spans))} at once`,
+    `Up to ${mostAtOnce(s.pieces.map(p => p.spans))} tasks at once`,
     <Box flexDirection="column" gap={1}>
       {table.Svg && surface !== 'terminal' ? (
         svgFits(svg) ? (
           <Box flexShrink={0}>
-            <table.Svg key={`timeline-${view.scope}-${view.range}`} source={svg} alt={`${s.pieces.length} tasks on a time axis`} width={width} height={BARS + 18} isInteractive />
+            <table.Svg key={`timeline-${view.scope}-${view.range}`} source={svg} alt={`${s.pieces.length} tasks on a timeline`} width={width} height={BARS + 18} isInteractive />
           </Box>
         ) : (
-          note(ui, 'timeline-too-big', `${s.pieces.length.toLocaleString('en-US')} tasks are more than one drawing can hold here. Today or This chat draws fewer.`)
+          note(ui, 'timeline-too-big', `${s.pieces.length.toLocaleString('en-US')} tasks are too many to draw here. Choose Today or This chat to see fewer.`)
         )
       ) : (
         timelineText(ui, s.pieces, Math.max(20, Math.floor((px + 32) / 7.4) - 6))
@@ -675,35 +675,35 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
     '',
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="column" flexShrink={0}>
-        {line(ui, 'time-added', 'Task time added up', hours(s.time.added))}
-        {line(ui, 'time-clock', 'On the clock', hours(s.time.clock))}
-        {line(ui, 'time-saved', 'Saved by running side by side', hours(saved), true)}
+        {line(ui, 'time-added', 'All task time', hours(s.time.added))}
+        {line(ui, 'time-clock', 'Real time', hours(s.time.clock))}
+        {line(ui, 'time-saved', 'Saved by running at once', hours(saved), true)}
       </Box>
-      {note(ui, 'time-how', 'Only overlap saves time. Idle gaps over 15 minutes are left out.')}
+      {note(ui, 'time-how', 'Only tasks running at the same time save time. Claudopus leaves out quiet gaps over 15 minutes.')}
     </Box>,
   )
   const work = band(
     ui,
     'stats-work',
-    'Work',
-    s.running ? `${s.running} still running, not counted` : '',
+    'Tasks',
+    s.running ? `${s.running} still running · not counted` : '',
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="column" flexShrink={0}>
         {line(ui, 'work-finished', 'Tasks done', count(s.finished))}
         {line(ui, 'work-flows', 'Workflows run', count(s.flows))}
         {line(ui, 'work-todos', 'To-dos done', count(s.todosDone))}
         {line(ui, 'talk-count', 'Your messages', count(s.messages))}
-        {line(ui, 'talk-turn', view.scope === 'all' ? 'From your message to a chat’s last step, on average' : 'From your message to the chat’s last step, on average', s.messages ? shortly(s.turn) : '–')}
-        {line(ui, 'talk-piece', 'A task, on average', s.perPiece ? shortly(s.perPiece) : '–')}
+        {line(ui, 'talk-turn', 'Chat time per message, on average', s.messages ? shortly(s.turn) : '–')}
+        {line(ui, 'talk-piece', 'Time per task, on average', s.perPiece ? shortly(s.perPiece) : '–')}
       </Box>
-      {note(ui, 'talk-how', 'Each of your messages is timed from when the chat takes it up to the chat’s last step before the next message; the background tasks it started are not counted.')}
+      {note(ui, 'talk-how', 'A message’s time runs from when the chat takes it to the chat’s last step. The tasks it started aren’t counted.')}
     </Box>,
   )
   const share = Math.round((s.all.read / Math.max(1, s.all.total)) * 100)
   const tokens = band(
     ui,
     'stats-tokens',
-    'Tokens',
+    'Tokens used',
     tokensText(s.all.total),
     <Box flexDirection="column" gap={1}>
       {s.models.map(([model, t]) => (
@@ -714,19 +714,19 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
           </Box>
         </Box>
       ))}
-      {note(ui, 'tokens-read', `${share}% are cache reads. Output ${tokensText(s.all.output)}.`)}
+      {note(ui, 'tokens-read', `Tokens are the bits of text a model reads and writes. ${share}% were read again at a lower price. The models wrote ${tokensText(s.all.output)}.`)}
     </Box>,
   )
   const cost = band(
     ui,
     'stats-money',
-    'At API prices',
+    'Cost at list prices',
     money(s.all.cost),
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="column" flexShrink={0}>
-        {s.models.map(([model, t]) => line(ui, `cost-${model}`, nameOf(model), t.unpriced ? 'no price' : money(t.cost)))}
+        {s.models.map(([model, t]) => line(ui, `cost-${model}`, nameOf(model), t.unpriced ? 'No price' : money(t.cost)))}
       </Box>
-      {note(ui, 'money-how', `Each kind of token at Anthropic’s price, ${PRICED}.`)}
+      {note(ui, 'money-how', `What Anthropic would charge per use for these tasks, at its prices on ${PRICED}.`)}
     </Box>,
   )
   // The memory, as it stands now: the same in every view
@@ -740,7 +740,7 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
           <Box flexDirection="column" flexShrink={0}>
             {memoryHeld.now.parts.map(part => line(ui, `memory-${part.name}`, part.name, `${count(part.count)} · ${sizeText(part.bytes)}`))}
           </Box>
-          {note(ui, 'memory-how', 'Not filtered by the switches above. Plain files in ~/.claude/claudopus; no database.')}
+          {note(ui, 'memory-how', 'All of Memory, whatever you choose above. It’s plain files in ~/.claude/claudopus.')}
         </Box>,
       )
     : null
@@ -748,8 +748,8 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
     ui,
     'stats-off',
     view.scope === 'all'
-      ? `From Claude’s own records of the ${chats} chats with saved tasks: each task, its helpers, workflows and the chat itself.`
-      : 'From Claude’s own records of this chat: each task, its helpers, workflows and the chat itself.',
+      ? `Claudopus counts this from Claude’s own logs of ${chats} chats, their tasks, helpers and workflows.`
+      : 'Claudopus counts this from Claude’s own logs of this chat, its tasks, helpers and workflows.',
   )
   return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), hero, timeline, time, work, tokens, cost, ...(mem ? [mem] : []), off]
 }

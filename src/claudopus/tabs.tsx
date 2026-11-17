@@ -169,16 +169,16 @@ const tabFailed = async ($: EngineInterface, e: Parameters<EngineInterface['ui']
   const now = await $.clock.now()
   const fails = [...(tabFails.get(id) ?? []).filter(at => now - at < 60_000), now]
   tabFails.set(id, fails)
-  const why = error?.kind === 'timeout' ? 'It took too long to draw.' : (error?.message ?? '').replace(/^\w*Error:\s*/, '') || 'No reason was given.'
+  const why = error?.kind === 'timeout' ? 'It took too long.' : (error?.message ?? '').replace(/^\w*Error:\s*/, '') || 'No reason was given.'
   await log($, `tab ${id} not drawn (${error?.kind ?? 'unknown'}): ${why}`)
   const isAgain = fails.length < 3
   if (isAgain) await watchTabs($, [id], 'its drawing failed')
   const { Box, Text } = uiOf($, e)
   return (
     <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
-      <Text bold>Claudopus couldn't draw this tab</Text>
+      <Text bold>Claudopus couldn't show this tab</Text>
       <Text dimColor wrap="wrap">{cut(why, 300)}</Text>
-      <Text dimColor wrap="wrap">{isAgain ? 'Trying again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
+      <Text dimColor wrap="wrap">{isAgain ? 'Claudopus tries again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
     </Box>
   )
 }

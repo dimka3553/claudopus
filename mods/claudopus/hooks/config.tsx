@@ -8,16 +8,16 @@ type Ui = ElementTable
 
 export type Text = { key: string; name: string; what: string; path: string }
 export const TEXTS: Text[] = [
-  { key: 'principles', name: 'Principles', what: 'How you work: every chat and every background task follows them.', path: 'rules/CLAUDE.md' },
-  { key: 'chat', name: "The chat's rules", what: 'How a chat starts a background task for each of your messages.', path: 'roles/chat.md' },
-  { key: 'work', name: 'Task rules', what: 'What Claudopus tells Claude at the start of every background task.', path: 'roles/work.md' },
+  { key: 'principles', name: 'Principles', what: 'How you work. Every chat and every task follows them.', path: 'rules/CLAUDE.md' },
+  { key: 'chat', name: 'Chat rules', what: 'How a chat starts a task for each of your messages.', path: 'roles/chat.md' },
+  { key: 'work', name: 'Task rules', what: 'What Claudopus tells Claude at the start of every task.', path: 'roles/work.md' },
 ]
 
 // ---- Settings, config.json ----
 
 export const ROLES = [
   { key: 'work', name: 'Most tasks', shipped: 'opus' },
-  { key: 'legwork', name: 'Clear jobs, searching and reading', shipped: 'sonnet' },
+  { key: 'legwork', name: 'Clearly stated tasks', shipped: 'sonnet' },
   { key: 'heavy', name: 'Heavy tasks', shipped: 'fable' },
 ] as const
 export type Role = (typeof ROLES)[number]['key']
@@ -36,8 +36,8 @@ export type Config = { name?: string; agents?: boolean; sound?: boolean; notific
 // is handed out has no choice: measured (16 Nov, 108 jobs), written instructions to a fresh task cost least and ran as fast or faster
 // than a copy of the chat at every chat size and model, and Sonnet least of all for a clearly stated job
 export const LEAN = [
-  { key: 'fable', name: 'When to use Fable 5.2', what: 'Which tasks run on Fable 5.2: heavy or really complicated work, every task, or only a task you ask to run on it.', options: [{ value: 'heavy', label: 'Heavy work' }, { value: 'all', label: 'Every task' }, { value: 'named', label: 'Only when I name it' }] },
-  { key: 'second', name: 'Second check', what: 'When a second agent, one that did not build it, looks for faults before you see the result. As shipped it looks at every change except a lookup or a small fix that a test proves.', options: [{ value: 'beyond', label: 'All but small tested fixes' }, { value: 'every', label: 'On every change' }, { value: 'asked', label: 'Only when I ask' }] },
+  { key: 'fable', name: 'Fable 5.2 tasks', what: 'Which tasks run on Fable 5.2.', options: [{ value: 'heavy', label: 'Heavy tasks' }, { value: 'all', label: 'Every task' }, { value: 'named', label: 'Only when I ask' }] },
+  { key: 'second', name: 'Second check', what: "When a helper that didn't build the change looks for faults before you see the result.", options: [{ value: 'beyond', label: 'All but small tested fixes' }, { value: 'every', label: 'Every change' }, { value: 'asked', label: 'Only when I ask' }] },
 ] as const
 export type LeanKey = (typeof LEAN)[number]['key']
 export type Lean = { [K in (typeof LEAN)[number] as K['key']]: K['options'][number]['value'] }
@@ -60,7 +60,7 @@ export type AdminMode = (typeof ADMIN_MODES)[number]['value']
 // while a heavy command of the chat's work runs, so it waits on something that ends
 export const HEAVY_MODES = [
   { value: 'busy', label: 'When the Mac is busy', load: 1.5, memory: 0.9 },
-  { value: 'overloaded', label: 'Only when overloaded', load: 3, memory: 0.95 },
+  { value: 'overloaded', label: 'When the Mac is very busy', load: 3, memory: 0.95 },
   { value: 'never', label: 'Never', load: Infinity, memory: Infinity },
 ] as const
 export type HeavyMode = (typeof HEAVY_MODES)[number]
@@ -169,7 +169,7 @@ export const LOOK_CHOICES = [
   { value: '0', label: 'Only when I ask' },
 ] as const
 // How long ago, in a few words
-export const agoText = (ms: number) => (ms < 90_000 ? 'just now' : ms < 90 * 60_000 ? `${Math.round(ms / 60_000)} min ago` : ms < 36 * 3_600_000 ? `${Math.round(ms / 3_600_000)} h ago` : `${Math.round(ms / 86_400_000)} days ago`)
+export const agoText = (ms: number) => (ms < 90_000 ? 'just now' : ms < 90 * 60_000 ? `${Math.round(ms / 60_000)}m ago` : ms < 36 * 3_600_000 ? `${Math.round(ms / 3_600_000)}h ago` : `${Math.round(ms / 86_400_000)}d ago`)
 
 // ---- The tab ----
 
@@ -260,7 +260,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
     return item(
       `config-text-${text.key}`,
       text.name,
-      `${text.what} ${isOwn ? (isStale ? 'Edited by you, before an update added parts yours lacks: Reset takes them in.' : 'Edited by you.') : 'As shipped.'}`,
+      `${text.what} ${isOwn ? (isStale ? 'You changed it, and an update since added new parts. Reset brings them in.' : 'You changed it.') : 'The default.'}`,
       isEditing ? null : (
         <Box flexDirection="row" gap={2} flexShrink={0}>
           <Button key={`config-text-${text.key}-open-${presses}`} label="Open file" plain dimColor onPress={() => acts.open(text)} />
@@ -271,7 +271,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
       () => acts.putBack(text),
       isEditing ? (
         <Box flexDirection="column" gap={1} flexShrink={0}>
-          <Input key={`config-text-${text.key}-input`} value={editing.draft} rows={16} submitLabel="save" autoFocus onInput={value => void (editing.draft = value)} onSubmit={value => acts.save(text, value)} />
+          <Input key={`config-text-${text.key}-input`} value={editing.draft} rows={16} submitLabel="Save" autoFocus onInput={value => void (editing.draft = value)} onSubmit={value => acts.save(text, value)} />
           <Box flexDirection="row" gap={2} justifyContent="flex-end" flexShrink={0}>
             <Button key={`config-text-${text.key}-cancel-${presses}`} label="Cancel" plain dimColor onPress={acts.cancel} />
           </Box>
@@ -282,9 +282,9 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
   return (
     <Box key="config" flexDirection="column" gap={1} flexGrow={1}>
       <Box key="config-head" flexDirection="column" paddingX={2} flexShrink={0}>
-        <Text dimColor wrap="wrap">{`Your changes are kept in ${memory.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, '~')}, so updating Claudopus never undoes them. Reset returns one to what shipped.`}</Text>
+        <Text dimColor wrap="wrap">{`Claudopus keeps your changes in ${memory.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, '~')}, so an update never undoes them. Reset puts one back to the default.`}</Text>
       </Box>
-      {band(ui, 'config-texts', 'Rules', 'read at your next message', <Box flexDirection="column" gap={1}>{shown.texts.map(textItem)}</Box>)}
+      {band(ui, 'config-texts', 'Rules', 'Used from your next message', <Box flexDirection="column" gap={1}>{shown.texts.map(textItem)}</Box>)}
       {band(
         ui,
         'config-you',
@@ -293,9 +293,9 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
         item(
           'config-name',
           'Your name',
-          'What the chat and Claude call you. Read when a chat starts.',
+          'What the chat and Claude call you, from the next chat on.',
           <Box width={22} flexShrink={0}>
-            <Input key="config-name-input" value={typeof config.name === 'string' ? config.name : ''} placeholder="the person" submitLabel="save" onSubmit={value => acts.set('name', value.trim() || undefined)} />
+            <Input key="config-name-input" value={typeof config.name === 'string' ? config.name : ''} placeholder="Not set" submitLabel="Save" onSubmit={value => acts.set('name', value.trim() || undefined)} />
           </Box>,
           Boolean(config.name),
           () => acts.set('name', undefined),
@@ -307,12 +307,12 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
         'Tasks',
         '',
         <Box flexDirection="column" gap={1}>
-          {toggle('agents', 'Background tasks', 'Each message starts a task that Claude does in the background. Off, every chat does the task itself. Read when a chat starts.')}
+          {toggle('agents', 'Background tasks', "Each message starts a task that Claude does in the background. When it's off, the chat does each task itself, from the next chat on.")}
           {ROLES.map(one =>
             item(
               `config-model-${one.key}`,
               one.name,
-              one.key === 'work' ? 'The model most tasks run on.' : one.key === 'legwork' ? 'Jobs the chat can state clearly (a described change, a push, a merge, a look-up), long searching and reading, and helpers that only read. For clearly stated jobs Sonnet was measured the cheapest and about the fastest; they run on Fable instead while every task runs on Fable. A check of a finished task never runs on it.' : 'Only heavy or really complicated work.',
+              one.key === 'work' ? 'The model most tasks run on.' : one.key === 'legwork' ? 'Tasks the chat can state exactly, long searches and reading, and helpers that only read. When every task runs on Fable 5.2, these do too.' : 'Only heavy or really complicated tasks.',
               <Select key={`config-model-${one.key}-pick`} options={choices} value={models[one.key]} onSelect={value => acts.set('models', value === one.shipped ? undefined : value, one.key)} />,
               models[one.key] !== one.shipped,
               () => acts.set('models', undefined, one.key),
@@ -330,8 +330,8 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
           )}
           {item(
             'config-heavy',
-            'Heavy commands wait their turn',
-            "A task's browser, build or render waits its turn while the Mac is busy and another one runs, or while several have just started: the task is told at once, its card says so, and Claudopus starts it again in order once there is room, at the latest after 15 minutes. One with nothing else heavy running, and Claudopus's own release and tests, never wait.",
+            'Heavy commands',
+            "When a task's browser, build or render waits while another one runs on a busy Mac. Claudopus tells the task and starts it once there is room, at most 15 minutes later.",
             <Select key="config-heavy-pick" options={HEAVY_MODES.map(one => ({ value: one.value, label: one.label }))} value={heavyModeOf(config).value} onSelect={value => acts.set('heavy', value === HEAVY_MODES[0].value ? undefined : value)} />,
             heavyModeOf(config).value !== HEAVY_MODES[0].value,
             () => acts.set('heavy', undefined),
@@ -346,8 +346,8 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
         <Box flexDirection="column" gap={1}>
           {item(
             'config-admin-mode',
-            'Ask before an admin command',
-            `Claude runs a command as administrator only after you allow it on the task's card: each time, or once for a task and its helpers until it ends. With Never ask, Claudopus runs them without asking on the card. Whatever you choose, each one also asks for the admin password, which is never saved: macOS asks in its own box on this Mac's screen, and the panel asks over SSH, on Linux or from another device.${shown.gate.unsealed ? ` config.json says "${shown.gate.unsealed}", but it was not chosen here, so every command asks.` : ''}`,
+            'Permission',
+            `Claude runs a command as administrator only after you allow it on the task's card. Each one still asks for the admin password, which Claudopus never saves.${shown.gate.unsealed ? ` Your settings file says "${shown.gate.unsealed}", but you didn't choose it here, so every command asks.` : ''}`,
             <Select key="config-admin-mode-pick" options={ADMIN_MODES.map(one => ({ value: one.value, label: one.label }))} value={shown.gate.mode} onSelect={value => acts.gateMode(value as AdminMode)} />,
             shown.gate.mode !== 'each' || Boolean(shown.gate.unsealed),
             () => acts.gateMode('each'),
@@ -356,8 +356,8 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
             'config-admin-allowed',
             'Always allowed',
             shown.gate.allowed.length
-              ? `These run without asking, each only as written here and only on its Mac.${shown.gate.unsealedAllowed ? ` ${shown.gate.unsealedAllowed} more in the file ${shown.gate.unsealedAllowed === 1 ? 'was' : 'were'} not added by your press and ${shown.gate.unsealedAllowed === 1 ? 'allows' : 'allow'} nothing.` : ''}`
-              : `None yet: Always allow this command on a card adds one.${shown.gate.unsealedAllowed ? ` ${shown.gate.unsealedAllowed} in the file ${shown.gate.unsealedAllowed === 1 ? 'was' : 'were'} not added by your press and ${shown.gate.unsealedAllowed === 1 ? 'allows' : 'allow'} nothing.` : ''}`,
+              ? `These run without asking, exactly as written and only on their Mac.${shown.gate.unsealedAllowed ? ` ${shown.gate.unsealedAllowed} more in the file ${shown.gate.unsealedAllowed === 1 ? "wasn't added here, so it allows" : "weren't added here, so they allow"} nothing.` : ''}`
+              : `None yet. Press Always allow this command on a card to add one.${shown.gate.unsealedAllowed ? ` ${shown.gate.unsealedAllowed} in the file ${shown.gate.unsealedAllowed === 1 ? "wasn't added here, so it allows" : "weren't added here, so they allow"} nothing.` : ''}`,
             null,
             false,
             () => undefined,
@@ -380,11 +380,11 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
       {band(
         ui,
         'config-ready',
-        'When a task is done',
+        'Alerts',
         '',
         <Box flexDirection="column" gap={1}>
-          {toggle('sound', 'Sound', 'A short chime.')}
-          {toggle('notifications', 'Notifications', 'A notification naming the task, also when it is stopped or fails.')}
+          {toggle('sound', 'Sound', 'A short chime when a task is done.')}
+          {toggle('notifications', 'Notifications', "A notification naming the task when it's done, stopped or failed.")}
         </Box>,
       )}
       {band(
@@ -395,8 +395,8 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
         <Box flexDirection="column" gap={1}>
           {item(
             'config-look',
-            'Look for new versions',
-            'Reads the version page on claudopus.ai; when a newer one is out, it shows here and in the panel. Nothing downloads or installs until you press it.',
+            'Update checks',
+            'How often Claudopus looks on claudopus.ai for a newer version, to show it here and in the panel. Nothing installs until you choose to.',
             <Select
               key="config-look-pick"
               options={[...LOOK_CHOICES]}
@@ -408,10 +408,10 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
           )}
           {item(
             'config-check',
-            shown.version ? `This chat runs v${shown.version}` : 'Check now',
+            shown.version ? `This chat runs v${shown.version}` : 'Version',
             [
-              shown.updates?.where ? `It loads from ${shown.updates.where}.` : '',
-              shown.updates?.lookedAt ? `Last looked ${agoText(shown.updates.now - shown.updates.lookedAt)}${shown.updates.seen && !shown.check.said ? `: v${shown.updates.seen} is the newest out` : ''}.` : 'Not looked yet.',
+              shown.updates?.where ? `It runs from ${shown.updates.where}.` : '',
+              shown.updates?.lookedAt ? `Last checked ${agoText(shown.updates.now - shown.updates.lookedAt)}.${shown.updates.seen && !shown.check.said ? ` The newest is v${shown.updates.seen}.` : ''}` : 'Not checked yet.',
             ]
               .filter(Boolean)
               .join(' '),
@@ -433,7 +433,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
             </Box>,
           )}
           {typeof config.skipVersion === 'string' && config.skipVersion
-            ? item('config-skip', 'Skipped', `You skipped v${config.skipVersion}: it and older ones stay quiet, and a newer one shows.`, <Button key={`config-skip-back-${presses}`} label="Show it again" plain dimColor onPress={() => acts.set('skipVersion', undefined)} />, false, () => undefined)
+            ? item('config-skip', 'Skipped version', `You skipped v${config.skipVersion}. Claudopus shows only versions newer than it.`, <Button key={`config-skip-back-${presses}`} label="Show it again" plain dimColor onPress={() => acts.set('skipVersion', undefined)} />, false, () => undefined)
             : null}
         </Box>,
       )}

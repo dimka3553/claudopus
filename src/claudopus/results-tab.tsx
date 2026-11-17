@@ -321,11 +321,11 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
           <Text bold>Results</Text>
           <Text dimColor>{`${entries.length}`}</Text>
         </Box>
-        {fresh ? <Button key={`reports-fresh-${gen}`} label={`Show ${fresh} new`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
+        {fresh ? <Button key={`reports-fresh-${gen}`} label={`Show ${fresh} new ${fresh === 1 ? 'result' : 'results'}`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
       </Box>
-      {!shown.length && !gone.length ? <Text dimColor>Nothing yet.</Text> : null}
-      {waiting.length ? band(ui, 'reports-waiting', 'Waiting on you', `${waiting.length}`, rows(waiting)) : null}
-      {recent.length ? band(ui, 'reports-recent', waiting.length ? 'Recent' : 'Newest', '', rows(recent)) : null}
+      {!shown.length && !gone.length ? <Text dimColor>No results yet.</Text> : null}
+      {waiting.length ? band(ui, 'reports-waiting', 'Waiting for you', `${waiting.length}`, rows(waiting)) : null}
+      {recent.length ? band(ui, 'reports-recent', 'Newest', '', rows(recent)) : null}
       {earlier.length || gone.length ? (
         <Box key="reports-folded" flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
           {earlier.length ? fold('earlier-fold', `Earlier ${earlier.length}`, isEarlierOpen, () => (isEarlierOpen = !isEarlierOpen)) : null}
@@ -367,7 +367,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
   const kin = [...rounds, ...others.slice(0, Math.max(0, 8 - rounds.length))]
   const pictures = r.files.map(file => ({ file, path: `${reportPath(r)}/${file}`, href: `file://${encodeURI(`${reportPath(r)}/${file}`)}` }))
   const how = (one: Report) =>
-    [one.id === r.from ? 'this started from it' : one.from === r.id ? 'started from this' : rounds.includes(one) ? (one.at < r.at ? 'earlier round' : 'later round') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
+    [one.id === r.from ? 'this result came from it' : one.from === r.id ? 'came from this result' : rounds.includes(one) ? (one.at < r.at ? 'earlier result' : 'later result') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
   const pane = paneOf(r)
   // As in the list: each key carries a mark of what this drawing shows, so the app never keeps a button whose handle is gone
   const gen = drawingMark(pane, [presses, height, r, mark(text), at, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
@@ -386,7 +386,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         ? band(
             ui,
             'report-ask',
-            isOpenQuestion(r) ? 'Waiting on you' : 'Answered',
+            isOpenQuestion(r) ? 'Waiting for you' : 'Answered',
             openWaits(r).length > 1 ? `${openWaits(r).length}` : '',
             // Each thing it waits on with its own answers; one answered says what was answered, and leaves the others
             <Box flexDirection="column" gap={2}>
@@ -411,7 +411,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         ? band(
             ui,
             'report-finding',
-            'Finding',
+            'Summary',
             '',
             <Text wrap="wrap">{r.gist}</Text>,
           )
@@ -431,7 +431,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
                     {pictureSaidRow($, ui, `report-pic-said-${n}-${gen}`, one.path)}
                   </Box>
                 ))}
-                <Text dimColor wrap="wrap">{termFrom ? 'Press a picture to send it to the device you’re using' : 'Press a picture to open it'}</Text>
+                <Text dimColor wrap="wrap">{termFrom ? 'Press a picture to send it to the device you’re using.' : 'Press a picture to open it.'}</Text>
               </Box>
             ) : (
             <Box flexDirection="column" gap={1}>
@@ -441,8 +441,8 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
               <Text dimColor wrap="wrap">{thumb && table.Svg ? (pictures[at]?.file ?? '') : (pictures[at]?.path ?? '')}</Text>
               {pictures.length > 1 ? (
                 <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
-                  <Button key={`report-prev-${gen}`} label="‹ Previous" onPress={() => show((at + pictures.length - 1) % pictures.length)} />
-                  <Button key={`report-next-${gen}`} label="Next ›" onPress={() => show((at + 1) % pictures.length)} />
+                  <Button key={`report-prev-${gen}`} label="Previous" onPress={() => show((at + pictures.length - 1) % pictures.length)} />
+                  <Button key={`report-next-${gen}`} label="Next" onPress={() => show((at + 1) % pictures.length)} />
                 </Box>
               ) : null}
             </Box>
@@ -452,7 +452,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
       {band(
         ui,
         'report-text',
-        'In full',
+        'Result',
         '',
         // A link it names never leaves the app: one of its pictures is shown above, anything else stays as text
         <Markdown
@@ -467,11 +467,11 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
       {band(
         ui,
         'report-carry',
-        'Continue',
+        'Follow-up',
         '',
         <Box flexDirection="column" alignItems="flex-start" gap={1}>
-          <Text dimColor wrap="wrap">Claudopus puts a line naming this result in the chat's box, for you to finish and send.</Text>
-          <Button key={`report-carry-${gen}`} label="Continue from this" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))} />
+          <Text dimColor wrap="wrap">Claudopus writes a line about this result where you type in the chat, for you to finish and send.</Text>
+          <Button key={`report-carry-${gen}`} label="Continue" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))} />
           {kin.length ? (
             <Box flexDirection="column" alignItems="flex-start">
               {kin.map(one => (

@@ -977,7 +977,7 @@ test("a pressed card shows the work's own chat: what it was told, what it wrote,
     // A run of tool steps is one quiet row saying what was done; pressed, it opens
     expect(await tab.find({ type: 'Text', text: /^Read/ })).toBeUndefined()
     expect((await keyed(tab, 'run-1'))?.props.label).toBe('▸ Ran 1 command, read 1 file, 1 failed')
-    expect((await keyed(tab, 'run-4'))?.props.label).toBe('▸ Took 1 other step')
+    expect((await keyed(tab, 'run-4'))?.props.label).toBe('▸ Used 1 other tool')
     expect((await keyed(tab, 'run-5'))?.props.label).toBe('▸ Updated its to-dos')
     await pressed(tab, 'run-1')
     await pressed(tab, 'run-4')
@@ -985,11 +985,11 @@ test("a pressed card shows the work's own chat: what it was told, what it wrote,
     expect((await tab.find({ type: 'Text', text: /^Read/ }))?.text).toBe('Read nose.py')
     expect((await tab.find({ type: 'Text', text: /^Fit the nostril again \(/ }))?.text).toBe('Fit the nostril again (failed)')
     expect((await tab.find({ type: 'Text', text: /^search/ }))?.text).toBe('search: nose')
-    expect((await tab.find({ type: 'Text', text: /^Ticked/ }))?.text).toBe('Ticked: Fit the nostril again')
+    expect((await tab.find({ type: 'Text', text: /^Done: / }))?.text).toBe('Done: Fit the nostril again')
     // My steer sits once, before what the work did about it: its to-do and the line it then wrote
     const texts = (await tab.findAll({ type: 'Text' })).map(one => one.text)
     expect(texts.indexOf('You')).toBe(texts.indexOf('search: nose') + 1)
-    expect(texts.indexOf('Ticked: Fit the nostril again')).toBeGreaterThan(texts.indexOf('You'))
+    expect(texts.indexOf('Done: Fit the nostril again')).toBeGreaterThan(texts.indexOf('You'))
     // Pressed again, a run folds
     await pressed(tab, 'run-1')
     expect(await tab.find({ type: 'Text', text: /^Read/ })).toBeUndefined()

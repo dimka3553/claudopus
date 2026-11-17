@@ -1,0 +1,2 @@
+- Config, Stats, Results, Memory, About, the Changelog and the update box use shorter, plainer words: each setting says what it does in a sentence or two, Stats explains tokens and prices in everyday words, and every update step names the version as v0.2.177.
+- The update box and About say the same thing once a new version is in place: type /reload-plugins to use it.

@@ -152,7 +152,7 @@ const memoryHooks = (on: On) => {
             }}
           />
         ) : (
-          <Text dimColor>This file is not there any more.</Text>
+          <Text dimColor>This file is no longer available.</Text>
         )}
       </Box>
     )

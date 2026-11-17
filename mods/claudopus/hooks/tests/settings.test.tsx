@@ -755,7 +755,7 @@ test('Config lists each thing a person can set with what is in force, edits a te
   await pressed(list, 'config-open')
   expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBe('config: Config')
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
-  for (const name of ['Principles', "The chat's rules", 'Task rules', 'Your name', 'Background tasks', 'Sound', 'Notifications', 'Most tasks', 'Clear jobs, searching and reading', 'Heavy tasks'])
+  for (const name of ['Principles', 'Chat rules', 'Task rules', 'Your name', 'Background tasks', 'Sound', 'Notifications', 'Most tasks', 'Clearly stated tasks', 'Heavy tasks'])
     expect(await config.find({ type: 'Text', text: name })).toBeDefined()
   // Only what differs from what shipped has a Reset: here the name
   expect((await config.findAll({ type: 'Button' })).filter(one => one.props.label === 'Reset').length).toBe(1)
@@ -764,19 +764,19 @@ test('Config lists each thing a person can set with what is in force, edits a te
   expect(files.get(`${MEMORY}/rules/CLAUDE.md`)).toBe(PRINCIPLES)
   expect(shown.at(-1)).toEqual(['open', '-t', `${MEMORY}/rules/CLAUDE.md`])
   // A copy still the same as what shipped is no change of theirs
-  expect((await config.findAll({ type: 'Text', text: /As shipped\.$/ })).length).toBe(3)
+  expect((await config.findAll({ type: 'Text', text: /The default\.$/ })).length).toBe(3)
   // Edit opens the text in the tab; Save makes it the person's own
   await pressed(config, 'config-text-work-edit')
   await config.input({ key: 'config-text-work-input', text: 'MY WORK RULES' })
   expect(files.get(`${MEMORY}/roles/work.md`)).toBe('MY WORK RULES\n')
   expect(await config.find({ type: 'Input', key: 'config-text-work-input' })).toBeUndefined()
   // Without the places the shipped rules fill, it is said to lack what an update added
-  expect(await config.find({ type: 'Text', text: /Edited by you, before an update added parts yours lacks/ })).toBeDefined()
+  expect(await config.find({ type: 'Text', text: /You changed it, and an update since added new parts/ })).toBeDefined()
   // Reset moves it aside, and the shipped text is in force again
   await pressed(config, 'config-text-work-back')
   expect(files.has(`${MEMORY}/roles/work.md`)).toBe(false)
   expect([...files.entries()].find(([path]) => /\/roles\/work\.md\.\d{8}-\d{6}\.old$/.test(path))?.[1]).toBe('MY WORK RULES\n')
-  expect((await config.findAll({ type: 'Text', text: /As shipped\.$/ })).length).toBe(3)
+  expect((await config.findAll({ type: 'Text', text: /The default\.$/ })).length).toBe(3)
   // A setting is written to config.json, every other key kept; Reset takes the key out
   await pressed(config, 'config-sound-off')
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, sound: false })
@@ -813,7 +813,7 @@ test("Config's Tasks band shows only when Fable runs and when a second agent che
   await $.session.start(start)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   const settings: [string, string, string, string][] = [
-    ['fable', 'When to use Fable 5.2', 'heavy', 'named'],
+    ['fable', 'Fable 5.2 tasks', 'heavy', 'named'],
     ['second', 'Second check', 'beyond', 'every'],
   ]
   for (const [key, name] of [['small', 'Small jobs'], ['quick', 'Quick task model'], ['start', 'What a task starts with'], ['checker', 'Checker model'], ['readers', 'Helpers that only read']])
@@ -849,12 +849,12 @@ test('Check now in Config only looks: it shows it is checking, then what it foun
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   expect(await until(() => config.find({ type: 'Text', text: 'This chat runs v0.1.0' }))).toBeDefined()
   // Where it loads from, said as it is
-  expect(await until(() => config.find({ type: 'Text', text: /^It loads from Claudopus's released code on this Mac\. Not looked yet\.$/ }))).toBeDefined()
+  expect(await until(() => config.find({ type: 'Text', text: /^It runs from the released code on this Mac\. Not checked yet\.$/ }))).toBeDefined()
   await pressed(config, 'config-check')
   expect(await until(() => config.find({ type: 'Text', text: 'Checking…' }))).toBeDefined()
   expect((await config.findAll({ type: 'Button' })).some(one => one.props.label === 'Check now')).toBe(false)
   release()
-  expect(await until(() => config.find({ type: 'Text', text: /^You're on the newest version \(v0\.1\.0\)/ }))).toBeDefined()
+  expect(await until(() => config.find({ type: 'Text', text: /^You have the newest version, v0\.1\.0\./ }))).toBeDefined()
   expect(fetches).toBe(1)
   // A newer release, one that Not now in the panel had put off: Check now offers it right here, in the panel's own box with its
   // Update, and sends the person nowhere else; nothing was fetched, moved or installed
@@ -864,7 +864,7 @@ test('Check now in Config only looks: it shows it is checking, then what it foun
   await until(async () => answer)
   release()
   expect((await until(() => keyed(config, 'update-download')))?.props.label).toBe('Update')
-  expect(await config.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' })).toBeDefined()
+  expect(await config.find({ type: 'Text', text: 'Claudopus v0.1.2 is out' })).toBeDefined()
   expect(await config.find({ type: 'Text', text: /from the panel/ })).toBeUndefined()
   expect(await config.find({ type: 'Text', text: 'v0.1.2 is out.' })).toBeUndefined()
   // Not now pressed there puts the box away and leaves no line saying it is out with nothing to press
@@ -878,7 +878,7 @@ test('Check now in Config only looks: it shows it is checking, then what it foun
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check: the version page has nothing to check the new version against/ }))
+  const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check: the version page doesn't say how to check the download/ }))
   expect(failed?.props.color).toBe('error')
   // How often: one choice, written as the two keys; Only when I ask is updates false
   await config.select({ key: 'config-look-pick', value: '24' })
@@ -894,6 +894,6 @@ test('Check now in Config only looks: it shows it is checking, then what it foun
   release()
   await until(() => keyed(config, 'update-download'))
   await pressed(config, 'update-download')
-  expect(await until(async () => (release(), config.find({ type: 'Text', text: 'Claudopus 0.1.2 is ready: type /reload-plugins to switch this chat to it.' })))).toBeDefined()
+  expect(await until(async () => (release(), config.find({ type: 'Text', text: 'Claudopus v0.1.2 is ready: type /reload-plugins to use it.' })))).toBeDefined()
   expect(gitRan.some(one => /^merge\b/.test(one))).toBe(true)
 })
