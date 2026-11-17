@@ -8510,6 +8510,13 @@ const lookJobs = async ($: EngineInterface) => {
     const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
     const end = job?.pid ? undefined : runEndOf(text)
     if (end) (ended.includes(id) || ended.push(id), (endedAs[id] = { ...end, ...(m ? { at: m } : {}) }))
+    const failedCmd = end?.how === 'failed' && job?.owner ? (list.find(one => one.id === job.owner)?.bg?.find(b => b.id === id)?.cmd ?? '') : ''
+    if (failedCmd && job?.owner) {
+      const owner = job.owner
+      void crossEnded($, { tool: 'Bash', agentId: owner, command: failedCmd }, {}, text, true)
+        .then(line => (line ? tell($, owner, line) : undefined))
+        .catch(err => log($, `a failed background command not read for crossing: ${String(err)}`))
+    }
     const seen = { ...latestOf(text), ...(m && !text.trim() ? { isEmpty: true } : {}) }
     const was = jobLog.get(id)
     const wait = waits.find(w => w.id === id)

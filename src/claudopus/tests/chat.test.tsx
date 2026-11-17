@@ -439,6 +439,30 @@ test("tasks of one chat don't cross each other's files: each has its own scratch
   expect(appended.filter(one => one.startsWith('a1: From Claudopus')).length).toBe(1)
 })
 
+test('a long build a task runs in the background that fails on another running task\'s half-done file tells both tasks as it ends, as a build held open does; one in its own worktree tells nobody', SLOW, async ($, on) => {
+  let now = 1_700_000_000_000
+  const born = now
+  const TASKS = '/tmp/claude-501/x/s1/tasks'
+  const failed = "Failed to compile\n./src/Button.tsx:1:1\nModule not found: Can't resolve './Button.module.css'\n\n[exited with code 1]\n"
+  const outputs: Record<string, () => string> = { [`${TASKS}/bg-b1.output`]: () => (now - born >= 2 * 60_000 ? failed : ''), [`${TASKS}/bg-b2.output`]: () => (now - born >= 2 * 60_000 ? failed : '') }
+  const { clock, files, appended } = world(on, { jobs: { output: file => outputs[file]?.() ?? '', wroteAt: () => now - 2_000 } })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose and the chin', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'NOSE' } as never)
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'CHIN', description: 'Fix the chin' } as never)
+  files.set('/app/.git', '')
+  files.set('/app-chin/.git', 'gitdir: /app/.git/worktrees/app-chin')
+  await $.tool.call({ tool: 'Write', tool_use_id: 'e1', agentId: 'a1', file_path: '/app/src/Button.tsx', content: "import './Button.module.css'" } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', agentId: 'a2', command: 'cd /app-chin && npm run build', description: 'Run the build of my worktree', run_in_background: true } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a2', command: 'cd /app && npm run build', description: 'Run the build of the app', run_in_background: true } as never)
+  for (let n = 0; n < 3; n++) ((now += 60_000), await clock.advance(60_000))
+  const told = await until(async () => appended.find(one => one.startsWith('a1: From Claudopus: a command of the task "Fix the chin" failed in the checkout you share')))
+  expect(told).toContain('./src/Button.tsx:1:1')
+  expect(await until(async () => appended.find(one => one.startsWith('a2: Claudopus: this error names src/Button.tsx, which the task "Fix the nose" changed')))).toBeDefined()
+  expect(appended.filter(one => one.startsWith('a1: From Claudopus')).length).toBe(1)
+})
+
 test('a large paste is saved to a file and left out of the chat', async ($, on) => {
   const { files } = world(on)
   await $.session.start(start)
