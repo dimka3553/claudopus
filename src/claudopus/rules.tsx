@@ -297,6 +297,16 @@ const drifted = (steps: number) =>
 // The chat is told once when nothing new has come back under a piece of work for a while
 const STUCK_IN_CHAT = (title: string, mins: number) =>
   `"${title}" hasn't made progress for ${mins} minutes: nothing new has come back to Claude or its helpers. It may be stuck waiting for something. Its card shows how far it has got.`
+// What the chat alone reads with it: it may ask the task what it waits on, as nothing of Claudopus's will
+const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to hand back what it has if nothing is coming.'
+// A task that ended its step to wait for its helpers, from which nothing new has come back: Claudopus starts it again with a nudge,
+// first to ask them, then to hand back what it has. What it is told, and what the chat is told
+const HELPERS_SILENT = (mins: number, helpers: string) =>
+  `From Claudopus: nothing new has come back from your helpers for ${mins} min while your step had ended: ${helpers}. Ask each with SendMessage what it is doing and when it will end, and tell one that is stuck or waits on nothing to hand back what it has now. Then carry on with what needs nothing from them, or end your step.`
+const HELPERS_STILL_SILENT = (mins: number, helpers: string) =>
+  `From Claudopus: nothing new has come back from your helpers for ${mins} min, nor since you were asked to check on them: ${helpers}. Unless one told you it is still making progress and when it ends, hand back your report now with what you have, saying what each was still doing: Claudopus lets you hand it back while they run, and stops them as you do.`
+const NUDGED_IN_CHAT = (title: string, mins: number, isLast: boolean) =>
+  `"${title}" hasn't made progress for ${mins} minutes: it waits for its helpers, and nothing new has come back from them. Claudopus started it again and asked it ${isLast ? 'to hand back what it has now' : 'to check on them'}.`
 // A task that had stopped partway through a step without a report, restarted by Claudopus: what Claude is told, and what the chat is told
 const RESTARTED_WORK = `From Claudopus, not {name}: you stopped partway through a step without a report (the app restarted, the Mac slept or a command was interrupted). First check what you already have, then continue from where you were; a command or helper you started may still be running, or may need starting again.`
 const RESTARTED_IN_CHAT = (title: string, mins: number) =>

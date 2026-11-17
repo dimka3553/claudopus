@@ -1,0 +1,6 @@
+- A task that ended its step to wait for its helpers, when nothing new comes back from them for 12 minutes, is now started again by Claudopus and asked to check on them; if they still bring nothing new, it is asked to hand back what it has, which it may then do while they run, and they are stopped with it. Its card and the chat say what Claudopus asked.
+- A wait for a file or a page now gives up after 15 minutes unless the task names another time, and never waits more than an hour. When it runs out, the task is started again and told to hand back what it has unless it can see the thing is about to come; after two waits in a row run out, it must hand back.
+- A task's card says by when Claudopus starts it again, even if what it waits for never comes.
+- If Claudopus cannot start a waiting task again, the chat is told, so it can send the task a message instead of saying it is still in progress.
+- When a task has made no progress and Claudopus does nothing about it, the chat may now send it a message asking what it waits on.
+- A task waiting on something it asked Claudopus to look for is no longer flagged as stuck while that look runs, as the look has its own end.
