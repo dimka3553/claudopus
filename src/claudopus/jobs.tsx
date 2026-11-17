@@ -243,6 +243,15 @@ const lookJobs = async ($: EngineInterface) => {
     // One that ended, by the engine's last line on its output, and when: as that output last changed
     const end = job?.pid ? undefined : runEndOf(text)
     if (end) (ended.includes(id) || ended.push(id), (endedAs[id] = { ...end, ...(m ? { at: m } : {}) }))
+    // A task's background command that failed is read as one held open is: an error in its last lines naming a file another running
+    // task changed lately in the same checkout tells that task, and the task whose command it was (crossing.tsx)
+    const failedCmd = end?.how === 'failed' && job?.owner ? (list.find(one => one.id === job.owner)?.bg?.find(b => b.id === id)?.cmd ?? '') : ''
+    if (failedCmd && job?.owner) {
+      const owner = job.owner
+      void crossEnded($, { tool: 'Bash', agentId: owner, command: failedCmd }, {}, text, true)
+        .then(line => (line ? tell($, owner, line) : undefined))
+        .catch(err => log($, `a failed background command not read for crossing: ${String(err)}`))
+    }
     // An output that is there but holds nothing has printed nothing yet: its time is when it was made, not when it last wrote (on
     // 15 Nov such rows read "updated 9m ago" for runs that sent all they printed elsewhere)
     const seen = { ...latestOf(text), ...(m && !text.trim() ? { isEmpty: true } : {}) }
