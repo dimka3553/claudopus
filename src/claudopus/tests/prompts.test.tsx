@@ -35,9 +35,10 @@ test("a chat stopped on the app's own prompt shows it amber at the top of its pa
   expect(await list.find({ type: 'Text', text: 'rm -rf build' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Yes: the command runs on its Mac.' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: "No: it doesn't run, and Claudopus tells Claude you said no." })).toBeDefined()
-  // Amber, above the work's own card
+  // Amber, inside the card of the work whose command raised it, under its title: never a box of its own above the cards
   const texts = (await list.findAll({ type: 'Text' })).map(one => one.text)
-  expect(texts.indexOf('Run a command: Clear the build folder')).toBeLessThan(texts.lastIndexOf('Clean the build'))
+  expect(texts.indexOf('Clean the build')).toBeLessThan(texts.indexOf('Run a command: Clear the build folder'))
+  expect(texts.filter(one => one === 'Clean the build')).toHaveLength(1)
   expect((await list.find({ type: 'Text', text: 'Run a command: Clear the build folder' }))?.props.color).toBe('#E5A50A')
   // The others see it in this chat's file, with the work it came from
   await clock.advance(1000)
@@ -202,6 +203,24 @@ test("Yes on a prompt's card allows the call as Claude Code's own box would, and
   await $.tool.call({ tool: 'Bash', command: 'npm test', description: 'Run the tests' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it · it ran and is done' }))).toBeDefined()
   await clock.advance(1000)
+  // The chat's own prompt to start a task, allowed: once the task is on its card, what came of it is said inside that card, never as
+  // a row of the chat itself between the cards (17 Nov, the person's screenshot)
+  const input = { description: 'Show scan numbers', prompt: 'show the scan numbers', run_in_background: true }
+  const started = $.classic.PermissionRequest({ tool_name: 'Agent', tool_input: input } as never)
+  expect(await until(async () => button(list, 'prompt-yes-this-'))).toBeDefined()
+  await list.press({ key: String((await button(list, 'prompt-yes-this-'))?.key) })
+  wake()
+  expect(((await started) as { decision?: unknown }).decision).toEqual({ behavior: 'allow' })
+  await $.tool.call({ tool: 'Agent', ...input } as never)
+  await $.agent.spawn({ ...spawn, description: 'Show scan numbers', prompt: 'show the scan numbers' } as never)
+  await clock.advance(1000)
+  const said = await until(async () => list.find({ type: 'Text', text: /^You allowed it · (Claude started it|it is running now)$/ }))
+  expect(said).toBeDefined()
+  const texts = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  expect(texts.indexOf('Show scan numbers')).toBeGreaterThan(-1)
+  expect(texts.indexOf('Show scan numbers')).toBeLessThan(texts.indexOf(String(said?.text)))
+  // Only its own words under what came of it: no "This chat itself" naming it as the chat's
+  expect(texts[texts.indexOf(String(said?.text)) + 1]).toBe('Start a task: Show scan numbers')
   await list.unmount()
 })
 
