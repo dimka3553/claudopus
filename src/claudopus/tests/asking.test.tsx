@@ -462,7 +462,7 @@ test('a press on one ended work\'s ask leaves the other asks\' buttons where the
 })
 
 test('a go-ahead to finish on ended work does its last step without waking it: a release in a repo with .release is held on the card for the allow, any other step goes to a small fresh task; a reply in words or the other choice still goes to the work', async ($, on) => {
-  const { files, resumed, clock, wake, asked } = world(on)
+  const { files, resumed, appended, clock, wake, asked } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'four fixes', wait: false, origin: composer })
   for (const description of ['Fix the nose', 'Fix the ear', 'Fix the chin', 'Fix the brow']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
@@ -515,6 +515,15 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   const box = await until(async () => ((await list.findAll({ type: 'Input' } as never)) as { key?: string }[]).find(one => /-reply-/.test(one.key ?? '') && String(one.key).includes('a4')))
   await list.input({ key: box?.key ?? '', text: 'Release it after lunch' })
   expect(await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('Release it after lunch')))).toBeDefined()
+
+  // Release it pressed while the work is still in the turn that asked (writing its waits and report, as on 16 Nov 19:49 and 17 Nov
+  // 07:49): Claudopus still releases it, after the allow box, and the work is told so instead of being left the step
+  await $.agent.spawn({ ...spawn, model: 'opus', description: 'Fix the jaw', prompt: 'Fix the jaw' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k-a5', agentId: 'a5', text: 'Release a5?', choices: ['Release it', 'Not now'], last_step: 'release', folder: '/repo/wt' } as never)
+  await press('a5', 'Release it')
+  expect(await until(async () => (await list.findAll({ type: 'Button' })).find(b => /^gate-step-a5-.*once/.test(String(b.key ?? ''))))).toBeDefined()
+  expect(files.get(`${MEMORY}/log.md`)).toContain('last step of a5 on')
+  expect(await until(async () => appended.find(line => line.startsWith('a5: ') && line.includes('Claudopus does the last step itself')))).toContain('do not do it yourself')
   await list.unmount()
 })
 
