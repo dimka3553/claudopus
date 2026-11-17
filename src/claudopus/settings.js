@@ -11,7 +11,7 @@ async function writeOwnText($, memory, path, text) {
         return $.fs.write(`${memory}/roles/chat.md`, text);
     if (path === 'roles/work.md')
         return $.fs.write(`${memory}/roles/work.md`, text);
-    throw new Error(`${path} is not one of the texts Claudopus ships`);
+    throw new Error(`${path} isn't one of Claudopus's rules files`);
 }
 // The text in force: the person's own copy when it holds anything, the shipped one otherwise
 async function inForce($, root, memory, path) {
@@ -44,7 +44,7 @@ async function setConfig($, memory, key, value, role) {
     })();
     // A file that does not parse is someone's edit under way: it is left as it is
     if (!config || typeof config !== 'object' || Array.isArray(config))
-        throw new Error('config.json is not valid JSON');
+        throw new Error("Claudopus can't read config.json");
     if ((key === 'models' || key === 'lean') && role) {
         const models = { ...(config[key] ?? {}) };
         if (value === undefined)
@@ -66,7 +66,7 @@ async function setConfig($, memory, key, value, role) {
 async function openedInEditor($, path) {
     // The text editor the Mac opens .md files in; elsewhere the desktop's own opener
     const r = await openOn($, path, true);
-    return r.exitCode === 0 ? '' : r.stderr || 'no editor opened';
+    return r.exitCode === 0 ? '' : r.stderr || 'no editor opened it';
 }
 // Edit: the person's own copy, made from the shipped text the first time, opened in their editor
 async function editText($, root, memory, path) {
@@ -82,7 +82,7 @@ async function putBack($, memory, path) {
     const at = new Date(await $.clock.now()).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
     await personWrote($, memory, path, null);
     const r = await $.process.run(['mv', '-n', own, `${own}.${at}.old`]).catch(err => ({ exitCode: 1, stderr: String(err) }));
-    return r.exitCode === 0 ? '' : r.stderr || 'could not be undone';
+    return r.exitCode === 0 ? '' : r.stderr || "Claudopus couldn't move your copy aside";
 }
 // Save: what the person wrote in the tab becomes their own copy
 async function saveText($, root, memory, path, text) {
@@ -149,7 +149,8 @@ const configButton = ($, ui, isKeyed = false) => (<ui.Box key="config-button" fl
     <ui.Button key={`config-open-${presses}`} label="Config" hotkey={isKeyed ? 'c' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))}/>
   </ui.Box>);
 // Check now as it stands in this chat: under way, and what the last press found, kept until the next press
-const updateCheck = { isChecking: false, said: '', isError: false };
+// (isOut: it found a newer version, which the update box under it then says with its presses)
+const updateCheck = { isChecking: false, said: '', isError: false, isOut: false };
 const configShown = async ($) => ({
     version: (await versionsOf($).catch(() => ({ version: '' }))).version,
     check: { ...updateCheck },
@@ -180,7 +181,7 @@ const configShown = async ($) => ({
                 return '';
             }
             catch {
-                return `${dir}/config.json is not valid JSON, so Claudopus uses the default for every setting. Fix it or delete it.`;
+                return `Claudopus can't read ${dir}/config.json, so every setting is at its default. Fix the file or delete it.`;
             }
         })),
 });
@@ -189,10 +190,10 @@ const configAct = ($, what, act) => {
     presses += 1;
     void act()
         .then(failed => {
-        configFailed = failed ? `${what}: ${failed}` : '';
+        configFailed = failed ? `${what}: ${failed}${/[.!?]$/.test(failed) ? '' : '.'}` : '';
     })
         .catch(err => {
-        configFailed = `${what}: ${String(err instanceof Error ? err.message : err)}`;
+        configFailed = `${what}: ${String(err instanceof Error ? err.message : err).replace(/([^.!?])$/, '$1.')}`;
     })
         .then(async () => {
         if (configFailed)
@@ -202,38 +203,38 @@ const configAct = ($, what, act) => {
     });
 };
 const configActs = ($) => ({
-    open: (text) => configAct($, `${text.name} not opened`, () => editText($, $.plugin.root, dir, text.path)),
+    open: (text) => configAct($, `Couldn't open ${text.name}`, () => editText($, $.plugin.root, dir, text.path)),
     // Edit opens the text in the tab itself; Save makes it the person's own copy
     edit: (text, body) => configAct($, '', async () => void Object.assign(editing, { key: text.key, draft: body })),
-    save: (text, body) => configAct($, `${text.name} not saved`, async () => {
+    save: (text, body) => configAct($, `Couldn't save ${text.name}`, async () => {
         const failed = body.trim() ? await saveText($, $.plugin.root, dir, text.path, body) : 'the text was empty, so nothing changed';
         Object.assign(editing, { key: '', draft: '' });
         return failed;
     }),
     cancel: () => configAct($, '', async () => void Object.assign(editing, { key: '', draft: '' })),
-    putBack: (text) => configAct($, `${text.name} not reset`, () => putBack($, dir, text.path)),
-    set: (key, value, role) => configAct($, 'Not saved', async () => {
+    putBack: (text) => configAct($, `Couldn't reset ${text.name}`, () => putBack($, dir, text.path)),
+    set: (key, value, role) => configAct($, "Couldn't save the setting", async () => {
         await setConfig($, dir, key, value, role);
     }),
     // Admin commands: each choice is sealed as it is made, and one that takes something back makes every earlier seal void
-    gateMode: (mode) => configAct($, 'Not saved', () => regate($, { mode })),
-    gateRemove: (host, command) => configAct($, 'Not removed', () => regate($, { remove: { host, command } })),
+    gateMode: (mode) => configAct($, "Couldn't save the setting", () => regate($, { mode })),
+    gateRemove: (host, command) => configAct($, "Couldn't remove the command", () => regate($, { remove: { host, command } })),
     // How often the look runs, or only at Check now: one choice, written as the two keys
-    lookEvery: (hours) => configAct($, 'Not saved', async () => {
+    lookEvery: (hours) => configAct($, "Couldn't save the setting", async () => {
         await setConfig($, dir, 'updates', hours ? undefined : false);
         await setConfig($, dir, 'updateEvery', hours && hours !== 1 ? hours : undefined);
     }),
-    // A press while a check runs does nothing: the tab shows it checking. It only looks; the panel offers what it found
+    // A press while a check runs does nothing: the tab shows it checking. It only looks; Config and the panel offer what it found
     check: () => {
         if (updateCheck.isChecking)
             return;
         presses += 1;
-        Object.assign(updateCheck, { isChecking: true, said: '', isError: false });
+        Object.assign(updateCheck, { isChecking: true, said: '', isError: false, isOut: false });
         redraw($);
         void checkNow($)
-            .catch(err => ({ text: `Couldn't check: ${String(err instanceof Error ? err.message : err).slice(0, 160)}`, isError: true }))
+            .catch(err => ({ text: `Couldn't check: ${String(err instanceof Error ? err.message : err).slice(0, 160)}`, isError: true, isOut: false }))
             .then(said => {
-            Object.assign(updateCheck, { isChecking: false, said: said.text, isError: said.isError });
+            Object.assign(updateCheck, { isChecking: false, said: said.text, isError: said.isError, isOut: Boolean(said.isOut) });
             presses += 1;
             redraw($);
         });

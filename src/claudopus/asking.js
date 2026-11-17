@@ -82,6 +82,13 @@ const drafts = new Map();
 const draftOf = (id, ask) => `${id}|${askMark(ask)}`;
 // Whether the person has typed something not sent into a work's reply box
 const hasDraft = (id) => [...drafts].some(([key, value]) => key.startsWith(`${id}|`) && Boolean(value));
+// How many lines tall a box for words is drawn: always the same, and the text scrolls within once it is longer. The app draws a
+// box of `rows` that tall whatever it holds and never grows one by itself, so a box that grew was a new drawing for each line,
+// and each drawing of a site is a new box under the cursor: the app gives it the cursor again and its ring fades in again
+// (17 Nov, the person, typing a reply of several lines: "it starts jittering and flashing blue, not blue, blue, not blue"; the bar
+// also grew under the chat at each line). Four lines hold a reply of a few sentences; the bar holds them, its title, the gap,
+// Send and the panel's marker within its 13 rows
+const BOX_ROWS = 4;
 // While the person types into a reply box or a key box the panel and every Details tab hold their drawing whole. The app builds a
 // pane afresh at each drawing, the box in it too: a pane drawn every few seconds under the person's typing flickered the box's ring,
 // put older letters over newer ones, and, as Markdown came or went above, threw the panel to its bottom, out of the person's reach
@@ -100,9 +107,9 @@ const CALM = 10000;
 const heldDrawings = new Map();
 // Counts the mod's own calls for a drawing: a press, a reply, a picture made, a box that came. Each one is drawn at once
 let freshness = 0;
-const drawAgain = ($) => {
+const drawAgain = ($, isThroughTyping = false) => {
     freshness += 1;
-    void drawFresh($);
+    void drawFresh($, isThroughTyping);
 };
 // The text each reply box was last drawn with: while the person types it is drawn with that again, never with the letters as they
 // arrive, so a drawing never puts older letters over the newer ones the box already holds
@@ -152,7 +159,27 @@ const freeTimes = ($) => {
         drawAgain($);
 };
 // Every pane of the mod's is drawn again, from the values as they are now
-const drawFresh = async ($) => (recordEvent($, 'redraw-all'), $.ui.invalidate('ui.render'));
+// Not while the person types into the bar's box, or put the cursor in it, within TYPING (isBoxHeld): the app asks again for every
+// drawing of the mod's at each redraw, the bar above the prompt too, and builds each one anew, the box with the cursor in it too,
+// whose ring then fades in again; holding the drawing does not spare that (17 Nov: the box flashed blue several times a second
+// while tasks wrote their cards, each a redraw the app answered with a box built anew; its own renderer, headless, measured).
+// Asked for meanwhile, it is made once the hold ends (lookBar, each second). What must show at once goes through
+// (isThroughTyping): a box whose card stopped asking, and what newly waits on the person (urgentSign)
+let isRedrawOwed = false;
+// Only the bar's box: a box in a pane is drawn again with its pane as before. The hold ends TYPING after the last letter or focus,
+// as the app may say nothing when the cursor leaves; a letter typed after that holds it again at once
+const isBoxHeld = (at) => Boolean(replyTo || boxOpen) && barBoxAt > 0 && at - barBoxAt < TYPING;
+const drawFresh = async ($, isThroughTyping = false) => {
+    if (!isThroughTyping && isBoxHeld(await $.clock.now()))
+        return void ((isRedrawOwed = true), recordEvent($, 'redraw-owed'));
+    isRedrawOwed = false;
+    recordEvent($, 'redraw-all');
+    $.ui.invalidate('ui.render');
+};
+// What newly waits on the person and is drawn from the mod's own memory: the app's prompts, gates without a card, key and admin
+// boxes. A change in it is drawn within a second, through any hold
+let urgentDrawn = '';
+const urgentSign = () => JSON.stringify([waiting.map(one => [one.agent, one.tool]), asked.length, looseGates.map(one => one.id), boxes.map(one => one.id)]);
 // What each pane showed when last drawn afresh: its shape, its content and when, so calmLook knows what has moved since
 const drawnPanes = new Map();
 // What the panel shows from the mod's own memory rather than its values: what the app's prompts, the admin and file gates, the boxes,
@@ -166,6 +193,29 @@ const sideSign = () => JSON.stringify([
 // move again ENGAGED after the person's last move
 const ENGAGED = 15000;
 let engagedAt = 0;
+// While the person uses the panel on the desktop, the drawing on screen stays, whole: cards above the pointer that grew or shrank
+// as work wrote moved the button under it by up to 184 px, and at the list's end each shrink and regrowth swung the view up and
+// back (16 Nov, Dima's recording replayed in the app's own pane). Their own presses and anything new that waits on them (an ask, a
+// box, a gate, a prompt) are drawn at once; the rest once they have left it alone for ENGAGED
+const isEngaged = (at) => engagedAt > 0 && at - engagedAt < ENGAGED;
+// Only while scrolled down: at the top what comes in comes below the header, as the person expects, and every behaviour that shows
+// what work did (a card that finishes comes up green, one stopped leaves after its pause) shows as before
+const isInUse = (at, offset) => isEngaged(at) && offset > 0;
+const personSign = async ($) => {
+    const chats = await read($, others);
+    // (only the cards that ask or wait on a gate: a card that merely starts or ends waits)
+    const asks = [...(await read($, todos)), ...cardsOf(chats), ...helpersOf(chats)].filter(one => one.ask || one.admins?.length).map(one => [one.id, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, (one.admins ?? []).map(gate => gate.id)]);
+    return JSON.stringify([
+        presses, asks, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool, one.isPressedNo ?? false]), asked.length, [...promptSaid], [...promptHeld],
+        [...gateHeld], [...gateSaid.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
+        [...pictureIn.keys()], isUpdating, loadMark,
+        // and what their presses change that shows later: a Stop's card, a note a box left, the update's steps, a copy made
+        [...(await read($, todos)), ...(await read($, flows))].filter(one => one.byYou).map(one => one.id), [...stoppingJobs], doneNotes.length, updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
+    ]);
+};
+// The press that folded Finished: the drawing for it is not held at the bottom of the view (panel.tsx, heldRows). The person
+// shortened the list on purpose, so the view comes back to what is left; held, it showed only blank and the fold, its cards above
+let foldPress = -1;
 // A click is the focus moving onto a button, then the press: a drawing between them is a new button under the pointer, and the
 // click did nothing (16 Nov, recorded: the update note's What's new took several clicks while other chats' writes drew the panel
 // twice a second). From the person's focus on one of the panel's buttons until its press, or PRESS_HOLD, the panel is drawn as it
@@ -175,42 +225,115 @@ let engagedAt = 0;
 const PRESS_HOLD = 2000;
 let pressFrom = 0;
 let pressFresh = 0;
+// The calls for a drawing that came from what other chats and work wrote (calmLook): they do not end a press hold, which only the
+// person's own moves and the mod's own calls end. Each such write ended it, as other chats wrote every second under load, and the
+// hold lasted only until the next one
+let calmBumps = 0;
 let isPressMissed = false;
 const holdForPress = async ($) => {
     const at = (pressFrom = await $.clock.now());
-    pressFresh = freshness;
-    $.clock.after(PRESS_HOLD + 20, () => void (pressFrom === at && ((pressFrom = 0), isPressMissed && ((isPressMissed = false), drawAgain($)))));
+    pressFresh = freshness - calmBumps;
+    // A hold that ends with no press reaching the mod while a drawing was held back (a click on a button already gone) gives the buttons new keys: the app keeps a
+    // focused button in view and scrolls back to it at every drawing, which threw the panel down and back as the person clicked on
+    $.clock.after(PRESS_HOLD + 20, () => void (pressFrom === at && ((pressFrom = 0), isPressMissed && ((isPressMissed = false), (presses += 1), drawAgain($)))));
 };
-const isPressHeld = (at) => pressFrom > 0 && at - pressFrom < PRESS_HOLD && pressFresh === freshness;
+const isPressHeld = (at) => pressFrom > 0 && at - pressFrom < PRESS_HOLD && pressFresh === freshness - calmBumps;
+// A pane drawn afresh is given again, as it was, until FRESH_GAP has passed (or four times what its drawing took, when longer), and
+// then drawn afresh once. The engine retires a drawing's buttons the moment a newer drawing of that pane is made, and a newer ask for
+// one drops the reply of the drawing still under way: with seven tasks, their helpers and commands, the panel was asked for about
+// five times a second and each drawing took 300 ms, so no drawing reached the app for half a minute while every one retired the
+// buttons on screen, and every click named a button already gone (16 Nov, 0.2.153: Close pressed twenty times, all "not handled").
+// Given again, a drawing is the same tree, keeps its buttons, and is answered at once. A press of the person's is drawn at once
+const FRESH_GAP = 1000;
+// (250 ms: the 16 Nov drawings took 300 ms; ordinary ones on a busy Mac take 100-250 ms and are not what drops clicks. At 100 ms
+// those set the gap off in the test kit too, whose clock stands still, and two tests hung on a drawing that never came)
+const SLOW_DRAW = 250;
+const freshDrawn = new Map();
+const freshDue = new Set();
+// The panes being drawn afresh just now: an ask that comes meanwhile gets the drawing before, and the pane is asked for again the
+// moment the fresh one is made, since the engine drops the reply of a drawing a newer ask overtook
+const freshUnderWay = new Map();
+let pressedAt = 0;
+// (isLoaded: the bar above the prompt is drawn in 50-200 ms under the same load, under SLOW_DRAW, so it is given again
+// whenever the panel's own drawings are slow (isPanelSlow))
+const isFreshTooSoon = ($, key, at, isLoaded = false, canGiveMade = true) => {
+    const going = freshUnderWay.get(key);
+    if (going && going.fresh === freshness)
+        return (going.isOvertaken = true);
+    const last = freshDrawn.get(key);
+    // The ask for a drawing made while it was overtaken: given that one, once (the panel and a Details tab, which hold a drawing
+    // only while what they show is the same, look at that themselves: canGiveMade)
+    const again = madeAgain.get(key);
+    madeAgain.delete(key);
+    if (canGiveMade && again && last && again.fresh === freshness && at - again.at < FRESH_GAP && last.fresh === freshness && pressedAt < last.at)
+        return true;
+    // The mod's own calls for a drawing (an ask, a box, a press, a picture: freshness) come at once
+    if (!last || pressedAt >= last.at || last.fresh !== freshness)
+        return false;
+    // Only while drawings are slow, as under a load that drops them: a quick one reaches the app before the next is asked for
+    if (last.ms < SLOW_DRAW && !isLoaded)
+        return false;
+    const gap = Math.max(FRESH_GAP, last.ms * 4);
+    if (at - last.at >= gap)
+        return false;
+    // (asked for without counting as a call of the mod's own, which would draw afresh at once and skip the gap)
+    if (!freshDue.has(key))
+        (freshDue.add(key), $.clock.after(gap - (at - last.at) + 20, () => void (freshDue.delete(key), drawFresh($))));
+    return true;
+};
+// Whether the panel's last drawings made afresh, in the last ten seconds, were slow: the load that drops drawings is on
+const isPanelSlow = (at) => [...freshDrawn].some(([key, last]) => key.startsWith(`${LIST}|`) && last.ms >= SLOW_DRAW && at - last.at < 10000);
+// Around each drawing made afresh: one asked for while it was made is made again the moment it is done
+const freshBegins = (key) => (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false }), freshness);
+// Asked for again only for a drawing made afresh, which the engine dropped: an ask answered with the drawing before (a held one) left
+// nothing unseen. And the ask that follows within FRESH_GAP is given the drawing just made, never a new one, while nothing of the
+// mod's own came (madeAgain). Asked for again after every overtaken ask, two asks that came together (as two per push) overtook each
+// other again and again: in the real panel three quarters of the full redraws began the moment a drawing ended, in chains of up to
+// 27, with the panel and the bar drawn about seven times a second and the hover under the pointer going out at each (17 Nov)
+const madeAgain = new Map();
+const freshEnds = ($, key, made) => {
+    const isOvertaken = freshUnderWay.get(key)?.isOvertaken;
+    freshUnderWay.delete(key);
+    if (made)
+        freshDrawn.set(key, made);
+    if (isOvertaken && made)
+        (madeAgain.set(key, { fresh: made.fresh, at: made.at }), void drawFresh($));
+};
 let calmAt = 0;
 const engage = async ($) => void (engagedAt = await $.clock.now());
 // Each second: anything new the panel shows draws it again by itself, as the values it read are written; its running times alone
 // draw it again only every CALM while work moves, and not while the person uses it
 const calmLook = async ($, isMoving) => {
     const now = await $.clock.now();
+    const urgent = urgentSign();
+    if (urgentDrawn && urgent !== urgentDrawn)
+        drawAgain($, true);
+    urgentDrawn = urgent;
     const list = drawnPanes.get(LIST) ?? { shape: '', content: '', at: 0, side: sideSign() };
     // What the mod holds in memory, or a file the panel read, changed: drawn again at once, as anything new is
     const side = sideSign();
-    let isNew = !isTyping && list.side !== side;
-    for (const [path, text] of isTyping ? [] : drawnFiles) {
+    const isHeld = isBoxHeld(now);
+    let isNew = !isHeld && list.side !== side;
+    for (const [path, text] of isHeld ? [] : drawnFiles) {
         const now = await readOr($, path);
         if (now !== text)
             (drawnFiles.set(path, now), (isNew = true));
     }
     // Asked for once: a panel the app does not draw just then is not asked for again each second
     if (isNew)
-        return void ((list.side = side), drawAgain($), (list.side = sideSign()));
+        return void ((list.side = side), (calmBumps += 1), drawAgain($), (list.side = sideSign()));
     // Counted from the panel's last drawing afresh or the last of these, so a Details tab or the band drawn without the panel moves on
     // every CALM too, not each second
-    if (!isMoving || isTyping || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM)
+    if (!(isMoving || outputMoved) || isBoxHeld(now) || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM)
         return;
     calmAt = now;
+    outputMoved = false;
     await writeHeldOthers($);
     recordEvent($, 'redraw-calm');
     $.ui.invalidate('ui.render');
 };
 // Whether an element of the mod's is a box the person types into: an ask's reply box or a key box
-const isTypedBox = (element) => /-reply-|^box-.*-field/.test(element ?? '');
+const isTypedBox = (element) => /-reply-|^box-.*-field|^config-.*-input$/.test(element ?? '');
 // Kept through a reload of the mod, and read back as it loads; drafts for work no longer kept go then
 const keepDraft = ($, key, value) => void update($, draftsKept, kept => {
     const next = { ...kept };
@@ -276,7 +399,7 @@ const answerAsk = ($, one, choice, isReply = false) => {
 // Whether an answer settles its ask: a press does, and so does a reply to an ask that wanted words (it gave no buttons of its own)
 // or one that begins with the words of one of its buttons. Any other reply, such as a request first, leaves the ask open while the work acts on it
 const plainWords = (text) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-const settles = (ask, said, isReply) => !isReply || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `));
+const settles = (ask, said, isReply) => !isReply || Boolean(ask.refused) || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `));
 // The asks a press answered, by card, as `${at}:${text}`: the panel draws the card answered from the press itself, its buttons and box
 // gone in the press's own drawing, before the answer is written; the mark goes once the card's file no longer carries the ask
 const askPressed = new Map();
@@ -293,19 +416,19 @@ const asPressed = (one) => {
 // once the moves were refused). A pane has no part that stays still, so on a surface whose bar above the prompt takes a box
 // (barBoxes: the bar was drawn there with an Input in its table) an ask's reply box is drawn in that bar, a site of its own that the
 // pane's scrolling does not reach, and never in the pane. It is there only once the person asks for it: the card's answers end
-// with "Reply in your own words", which opens the box in the bar for that card, and Close takes it away again (16 Nov: a box
+// with "Answer in words", which opens the box in the bar for that card, and Close takes it away again (16 Nov: a box
 // always in the bar looked bad, and the person asked for it as one of the options)
 // A bar the person folded shows nothing of the mod's, and one of the app's surveys takes its place: neither takes the box, and the
 // card has its own again, so a reply in words can always be typed somewhere
 const barBoxes = new Set();
 const repliesInBar = (surface) => barBoxes.has(surface);
 // When the bar's box last took the cursor or a letter, 0 once the cursor is known to have left it or its reply was sent: the bar
-// holds its drawing that long (band.tsx, barHeld). The app may say nothing when the cursor leaves for the chat's own box, so the
-// hold ends by itself BAR_BOX_HELD after the last sign of it
+// gives its own drawing again for BAR_BOX_HELD after it (band.tsx, barHeld), and the mod puts off its other redraws for TYPING
+// after it (isBoxHeld). The app may say nothing when the cursor leaves for the chat's own box, so both end by themselves
 let barBoxAt = 0;
 const BAR_BOX_HELD = 300000;
 const isBarBox = (element) => /^band-.*-reply-/.test(element ?? '');
-// The card whose reply box is open in the bar, none when it is closed: opened by the card's "Reply in your own words", closed by
+// The card whose reply box is open in the bar, none when it is closed: opened by the card's "Answer in words", closed by
 // Close (on the card or in the bar), by the reply sent, by the card answered, or by the bar folding. One box at a time: opened on
 // another card it is that card's, and what was half typed is kept for the card it was typed for. Nothing but the person closes or
 // moves it while the card asks: when the work puts a new question in place of the one it was opened on (replyMark), the box stays
@@ -362,6 +485,7 @@ const openReply = ($, one, surface) => {
         boxOpen = undefined;
     replyMark = one?.ask ? askMark(one.ask) : '';
     barBoxAt = 0;
+    isBarSettling = false;
     presses += 1;
     redraw($);
     const ask = one?.ask;
@@ -424,11 +548,14 @@ const answerNow = async ($, one, choice, isReply = false) => {
             answeredAt.delete(one.id);
         if (pending.get(target) === one.id)
             pending.delete(target);
+        // (what the work recorded as waiting for it, answered with the press, is open again with it)
+        if (isCleared)
+            await unsettleAsked($, one.id, ask.at).catch(() => undefined);
         const isBack = !isCleared || (await changeTodos($, list => list.map(card => (card.id === one.id && !card.ask ? { ...card, ask, entries: card.entries.filter(entry => !(entry.kind === 'steer' && entry.at === steerAt)) } : card))).then(() => true).catch(() => false));
         sentReplies.set(one.id, { text: said, ask: ask.text, to: 'failed', at: await $.clock.now().catch(() => 0), line, isCard: true, askAt: ask.at });
         // and when even that could not be written, the chat is told, so the ask is not lost unseen
         if (!isBack)
-            $.ui.log(`Your answer “${cut(said, 120)}” to "${titleOf(one)}" (${ask.text}) didn't reach Claude, and the question couldn't be put back on its card. Type your answer in this chat instead.`);
+            $.ui.log(`Your answer “${cut(said, 120)}” to "${titleOf(one)}" didn't reach Claude, and Claudopus couldn't put the question back on its card. Type your answer in this chat instead. The question: ${ask.text}`);
         redraw($);
         throw err;
     }
@@ -436,18 +563,56 @@ const answerNow = async ($, one, choice, isReply = false) => {
 // The rest of an answer once its ask is cleared from the card's file: to the work, or to wake it
 const answerCleared = async ($, one, ask, said, isReply, target, at, line) => {
     answeredAt.set(one.id, ask.at);
+    // What the work recorded as waiting for the same question is answered with it
+    await settleAsked($, one.id, ask, isReply ? IN_WORDS : said).catch(err => log($, `result's question not answered with the ask of ${one.id}: ${String(err)}`));
     dropDrafts($, one.id);
     replies.set(one.id, (replies.get(one.id) ?? 0) + 1);
-    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at, line, isCard: true, askAt: ask.at });
+    const back = isReply ? {} : { asked: ask, target };
+    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at, line, isCard: true, askAt: ask.at, ...back });
     redraw($);
     // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
     $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($));
     const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working';
-    // A go-ahead to finish, on work that has ended, does its last step without starting the work again
-    if (!working && !isReply && ask.lastStep && ask.folder && ask.choices?.[0] === said) {
+    // A go-ahead to finish does its last step without starting the work again. Work still in the turn that asked is told the step is
+    // Claudopus's, and the step waits for that turn's end, so a release takes the branch as the task left it: a task asks, then writes
+    // its waits and report, and a press seconds later (16 Nov 19:49, 17 Nov 07:49) reached it as a plain answer, which it took, as its
+    // rules say, for Claudopus's to do, so nobody released
+    if (!isReply && ask.lastStep && ask.folder && ask.choices?.[0] === said) {
         sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line, isCard: true, askAt: ask.at });
         redraw($);
-        await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`));
+        if (!working)
+            await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`));
+        else {
+            // Kept on the card first, so a reload meanwhile keeps it too, and done once the card has ended (stepsAtEnd); a write that fails
+            // here tells the work nothing and puts the question back (answerNow). The rest is caught, as the work has been told by then
+            await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, stepOnEnd: { ask, said } } : card)));
+            await tell($, one.id, `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\nClaudopus does that step (${cut(ask.lastStep, 160)}) once you end this turn: do not do it or start it yourself. Commit anything left on the branch now, change nothing on it after that, and end with your report.`);
+            const held = (err) => log($, `last step of ${one.id} not held: ${String(err)}`);
+            await stepLine($, one.id, `You pressed “${said}” · Claudopus does it when Claude is done`).catch(held);
+            // (a turn that ended while this was written has had its end's look already)
+            await stepsAtEnd($).catch(held);
+        }
+        return void askGone($, one, said);
+    }
+    // A notice of a call Claude Code refused: the work it is for, still at work, is told to carry on without it, and work that has
+    // ended is not started again for it, neither now nor as it ends without having read it (no answer waits for it)
+    if (ask.refused) {
+        // Run it, pressed on this card in this chat's own panel: the command is run now, on that press (runit.tsx)
+        const run = !isReply && said === RUN_IT ? runAsked.get(one.id) : undefined;
+        if (run && run.askAt === ask.at && run.command === ask.copy) {
+            sentReplies.set(one.id, { text: said, ask: ask.text, to: 'ran', at, line, isCard: true, askAt: ask.at });
+            await startRun($, one, run).catch(err => log($, `refused command not run: ${String(err)}`));
+            return void askGone($, one, said);
+        }
+        // Words, even "Run it", never run the command: the card says so where it offered it
+        if (isReply && runList.some(r => isSameRun(r, { card: one.id, askAt: ask.at }) && !r.startedAt))
+            await stepLine($, one.id, `Your answer didn't run the command: only its ${RUN_IT} button runs it`).catch(() => undefined);
+        const isWorking = (await read($, todos)).find(card => card.id === target)?.status === 'working';
+        const told = isWorking ? await tell($, target, REFUSAL_ANSWERED(ask.text, said, isReply)) : undefined;
+        if (!told || told.deny)
+            await log($, `answer to the refusal on ${one.id} not sent: ${target} is not at work, or could not be written to`);
+        sentReplies.set(one.id, { text: said, ask: ask.text, to: told && !told.deny ? 'work' : 'other', at, line, isCard: true, askAt: ask.at });
+        redraw($);
         return void askGone($, one, said);
     }
     const to = isReply ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}`;
@@ -456,14 +621,79 @@ const answerCleared = async ($, one, ask, said, isReply, target, at, line) => {
     const told = working ? await tell($, target, to) : undefined;
     if (told && !told.deny) {
         writtenIn($, target, one.id);
-        sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true, askAt: ask.at });
+        sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true, askAt: ask.at, ...back });
         redraw($);
     }
     else
-        await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at });
+        await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at, ...back });
     // Said in the chat only once the answer is on its way
     void askGone($, one, said);
 };
+// A button's answer can be taken back while the card says it (heldAnswer, ANSWER_SHOWN), unless the work has asked again since: a press
+// meant for something else lands on an answer (16 Nov: "Not now" pressed while reaching for the picture above it, as the panel
+// jumped). The ask is put back on the card with its buttons, to be answered again, and the work is told not to act on the answer:
+// written in while it runs, dropped from a message still waiting to start it again, and nothing when it has since ended (its
+// card then waits on the person again). An answer that did a last step, such as a release, has no way back
+const canTakeBack = (one, now) => {
+    const sent = heldAnswer(one, now);
+    // Only while the card still says it (sentLine), never for an answer left in the chat, whose model has it already, nor for a last
+    // step such as a release, which the work cannot undo
+    return Boolean(sent?.asked && !sent.isHeld && !sent.asked.lastStep && !['other', 'ran', 'sending', 'chat'].includes(sent.to) && !one.ask && !one.chat && sentLine(one, now));
+};
+// (at: the answer the button was drawn for: a click on a drawing held from before takes back nothing newer)
+const takeBack = ($, one, at) => {
+    const run = takeBackNow($, one, at);
+    // The press hook sends the wakes that wait only once this is done (sendWakes), so the answer taken back is never sent
+    answersOnWay.add(run);
+    void run.finally(() => answersOnWay.delete(run)).catch(() => undefined);
+    return run;
+};
+const takeBackNow = async ($, one, shownAt) => {
+    const sent = sentReplies.get(one.id);
+    const ask = sent?.asked;
+    if (!sent || !ask || sent.at !== shownAt)
+        return;
+    const target = sent.target ?? one.id;
+    // Judged on the card as it is now, not as the drawing pressed showed it (a held drawing may be older than a newer question), and
+    // before the answer leaves anything: one that cannot be taken back stays answered, its waiting message and all
+    const now = (await read($, todos)).find(card => card.id === one.id);
+    if (!now || sentReplies.get(one.id) !== sent || !canTakeBack(now, await $.clock.now()))
+        return;
+    // A message still waiting to start the work again loses this answer; one that carries only it goes
+    const waiting = wakes.find(w => w.target === target && w.answers.some(a => a.one.id === one.id && a.sent.at === sent.at));
+    if (waiting) {
+        waiting.answers = waiting.answers.filter(a => !(a.one.id === one.id && a.sent.at === sent.at));
+        if (!waiting.answers.length && !waiting.spawn)
+            wakes.splice(wakes.indexOf(waiting), 1);
+        else
+            waiting.text = `${waiting.text}\n\n${TAKEN_BACK(sent.text, ask.text)}`;
+    }
+    sentReplies.delete(one.id);
+    answeredAsks.delete(`${one.id}:${ask.at}:${ask.text}`);
+    await unsettleAsked($, one.id, ask.at).catch(err => log($, `result's question not opened again for ${one.id}: ${String(err)}`));
+    if (answeredAt.get(one.id) === ask.at)
+        answeredAt.delete(one.id);
+    if (pending.get(target) === one.id)
+        pending.delete(target);
+    for (const key of startedBy)
+        if (key === `${one.id}:${sent.at}`)
+            startedBy.delete(key);
+    const at = await $.clock.now();
+    let isBack = false;
+    await changeTodos($, list => ((isBack = false), list).map(card => (card.id === one.id && !card.ask ? ((isBack = true), { ...card, ask, entries: [...card.entries, { at, kind: 'steer', text: `took back “${sent.text}”` }].slice(-ENTRIES_KEPT) }) : card)));
+    redraw($);
+    void log($, `answer "${cut(sent.text, 40)}" for ${one.id} taken back`);
+    // The chat was told it was answered: it is told it was taken back, and shown the question again
+    if (isBack) {
+        await tellChat($, named(`${who(true)} took back their answer “${cut(sent.text, 120)}” to "${titleOf(one)}": the question is open again on its card.`));
+        inChat.delete(one.id);
+        void askInChat($, { ...one, ask });
+    }
+    // Work at work, or started again by this answer a moment ago, is told not to act on it; a message that still waits carries it already
+    if (!waiting)
+        await tell($, target, TAKEN_BACK(sent.text, ask.text)).catch(err => log($, `work not told of an answer taken back: ${String(err)}`));
+};
+const TAKEN_BACK = (said, asked) => `${who(true)} took back their answer "${said}" to your question ("${asked}"): it was pressed by mistake. Do not act on it, and undo what you already did on it if you can. The question is on your card again, and their answer comes to you as a message.`;
 // A reply in the person's own words that does not settle the ask: the ask stays on the card, its question with the reply under it,
 // and the work is told so; its card stays among the running cards while the work acts on it. The person has answered, so its
 // buttons and box go at once, and come back only when the work asks again, or ends with the ask still open
@@ -481,6 +711,8 @@ const holdAsk = async ($, one, ask, said, target) => {
     await changeTodos($, list => ((isHeld = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer', text: said }].slice(-ENTRIES_KEPT) }) : card)));
     if (!isHeld)
         return;
+    // Their reply answers what the work recorded for that question, as a press does; the ask stays while the work acts on it
+    await settleAsked($, one.id, ask, IN_WORDS).catch(err => log($, `result's question not answered with the ask of ${one.id}: ${String(err)}`));
     // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
     dropDrafts($, one.id);
     // A new box, empty, whenever it comes back: the surface keeps what was typed in a box it finds again by its key
@@ -493,7 +725,7 @@ const holdAsk = async ($, one, ask, said, target) => {
     $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($));
     // Said in the chat once; the ask is then done with there, so the work asking again is sent to the chat afresh
     if (inChat.has(one.id))
-        (inChat.delete(one.id), void sayInChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`)), ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`, true)));
+        (inChat.delete(one.id), void tellChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`))));
     const working = (await read($, todos)).find(card => card.id === target)?.status === 'working';
     const to = `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`;
     const told = working ? await tell($, target, to) : undefined;
@@ -514,7 +746,9 @@ const holdAsk = async ($, one, ask, said, target) => {
 const WAKE_WAIT = 4000;
 // Each wake carries every answer joined into it, so each card's line and the chat's notice are settled for every one
 const wakes = [];
-const toEnded = async ($, one, target, text, sent) => {
+// `isHookOnly`: never from the timer, for what no press of this chat's started (a command run on a press ending, runit.tsx): it
+// waits for the next hook, and its card offers a press meanwhile
+const toEnded = async ($, one, target, text, sent, isHookOnly = false) => {
     // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
     pending.set(target, one.id);
     // A reply that holds its ask is acted on from now: no answers on the card while its work is started again with it
@@ -522,11 +756,14 @@ const toEnded = async ($, one, target, text, sent) => {
     sentReplies.set(one.id, { ...sent, to: 'work' });
     redraw($);
     // One message for a work: a second answer for the same one joins the first
-    const same = wakes.find(w => w.target === target && !w.spawn);
+    // (one sent only from a hook never joins one the timer may send, nor the other way)
+    const same = wakes.find(w => w.target === target && !w.spawn && Boolean(w.isHookOnly) === isHookOnly);
     if (same)
         return void ((same.text = `${same.text}\n\n${text}`), same.answers.push({ one, sent }));
-    const wake = { target, text, answers: [{ one, sent }] };
+    const wake = { target, text, answers: [{ one, sent }], ...(isHookOnly ? { isHookOnly } : {}) };
     wakes.push(wake);
+    if (isHookOnly)
+        return;
     void $.clock.after(WAKE_WAIT, () => {
         const at = wakes.indexOf(wake);
         if (at < 0)
@@ -549,7 +786,7 @@ const sendWakes = async ($, isAnswering = false) => {
 const sendWake = async ($, wake, isInHook = true) => {
     // Work the person stopped is not woken by an answer that was on its way
     if (isHeld((await read($, todos)).find(one => one.id === wake.target)))
-        return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`));
+        return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`), await runsSent($, wake, 'held'));
     // A small fresh task for a last step, started from inside a hook so it keeps the mod's own tools and guards; from the timer, where
     // the mod's hooks would be skipped for it, its work is started again instead, as before
     if (wake.spawn && isInHook) {
@@ -566,7 +803,8 @@ const sendWake = async ($, wake, isInHook = true) => {
         ? { isDelivered: false, reason: 'this copy of the mod was replaced by a reload' }
         : await sendOwn($, { to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false, reason: String(err) }));
     if (!r.isDelivered)
-        return wakeFailed($, wake, r.reason);
+        return void (await runsSent($, wake, 'failed'), await wakeFailed($, wake, r.reason));
+    await runsSent($, wake, 'sent');
     // Only once it is on its way: work at work when the mod's own message reaches it would take that message for the chat's note
     await wakeCard($, wake.target);
     // Started by the message, the work reads it in the run it starts: that run's end never sends it a second time, even when no hook
@@ -579,7 +817,6 @@ const startedBy = new Set();
 // An answer written into work under way, which reads it at a step of its own: an earlier wake's run no longer covers this card
 const writtenIn = ($, target, card) => {
     pending.set(target, card);
-    void replyWaiting($, target);
     for (const key of startedBy)
         if (key.startsWith(`${card}:`))
             startedBy.delete(key);
@@ -623,16 +860,18 @@ const askInChat = async ($, one) => {
     // person's own message, and a chat cannot send itself a message from another session. Its model reads the ask in a row of its
     // own, with how to pass an answer on; neither starts a turn
     // The terminal draws a notice as one line and a line break in it as a broken character: there each line is a notice of its own
-    const notice = named(ASK_IN_CHAT(titleOf(one), ask, answers));
-    const surfaces = await $.session.surfaces().catch(() => []);
-    for (const line of surfaces.length && surfaces.every(s => s === 'terminal') ? notice.split('\n').filter(line => line.trim()) : [notice])
-        $.ui.log(line);
+    $.ui.log(named(ASK_IN_CHAT(titleOf(one), ask)));
     await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(ASK_RELAY(one.id, titleOf(one), ask, answers)) }] } }).catch(err => (inChat.get(one.id) === askKey(ask) && inChat.delete(one.id), log($, `chat not told of an ask: ${String(err)}`)));
 };
 // A line in the chat the person sees (the mod's notice, which the model never reads) and its model reads (a row the person does not
 // see), sent with no turn of its own. The notice is the mod's log line: the desktop app leaves out a system row the mod appends
 const sayInChat = async ($, text, shown = text) => {
     $.ui.log(shown);
+    await tellChat($, text);
+};
+// A row only the chat's model reads, with no turn of its own: an answer the person gave on a card themselves, which the card already
+// shows them (17 Nov: "✓ You replied to … on its card" in the chat was among the updates they called pointless)
+const tellChat = async ($, text) => {
     await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } }).catch(err => log($, `chat not told: ${String(err)}`));
 };
 // The ask sent into the chat is gone from the card: answered there, or withdrawn by the work
@@ -640,7 +879,8 @@ const askGone = async ($, one, said) => {
     if (!inChat.has(one.id))
         return;
     inChat.delete(one.id);
-    await sayInChat($, named(said === undefined ? ASK_CLEARED(titleOf(one)) : ASK_ANSWERED(titleOf(one), `“${cut(said, 120)}”`)), said === undefined ? ASK_CLEARED(titleOf(one)) : ASK_ANSWERED(titleOf(one), `“${cut(said, 120)}”`, true));
+    // What the person did on the card themselves, or a question the work withdrew, is no news to them: only the chat's model is told
+    await tellChat($, said === undefined ? ASK_CLEARED(titleOf(one)) : named(ASK_ANSWERED(titleOf(one), `“${cut(said, 120)}”`)));
 };
 // The person's answer typed in the chat, passed on by the chat to the work: once on its way the card stops asking and says what was
 // answered, and a helper that asked is told too when the chat sent it to the work it helps; refused, the ask stays to be answered
@@ -652,6 +892,8 @@ const answeredInChat = async ($, a, to, isSent) => {
     // Either way the ask is done with in the chat: the work asking again is sent to it afresh
     if (isHeld)
         answeredAsks.delete(a.key);
+    // Their words answer what the work recorded for that question either way: the work clearing the ask later leaves it answered
+    await settleAsked($, a.card.id, a.ask, IN_WORDS).catch(err => log($, `result's question not answered with the ask of ${a.card.id}: ${String(err)}`));
     inChat.delete(a.card.id);
     await changeTodos($, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)));
     dropDrafts($, a.card.id);
@@ -679,27 +921,6 @@ const replyRead = ($, agentId) => {
     const sent = sentReplies.get(card);
     if (sent?.to === 'work')
         (sentReplies.set(card, { ...sent, to: 'read' }), redraw($));
-};
-// The person's words written into work under way are marked beside the file its wait on helpers reads, so that wait comes back at
-// once and the work reads them; the mark goes at the work's next step, which reads them
-const replyMarked = new Set();
-// (a mark an earlier copy of the mod left, before a reload, is looked for once at each work's first step here)
-const replyLooked = new Set();
-const replyWaiting = async ($, agentId) => {
-    if (!dir)
-        return;
-    const at = await $.clock.now();
-    await $.fs.write(`${rollPath(agentId)}.reply`, `${at}\n`).catch(err => log($, `reply mark for ${agentId} not written: ${String(err)}`));
-    replyMarked.add(agentId);
-};
-const replyTaken = async ($, agentId) => {
-    if (!dir)
-        return;
-    const isFirst = !replyLooked.has(agentId);
-    replyLooked.add(agentId);
-    if (!replyMarked.delete(agentId) && !(isFirst && (await readOr($, `${rollPath(agentId)}.reply`)).trim()))
-        return;
-    await $.fs.write(`${rollPath(agentId)}.reply`, '').catch(() => undefined);
 };
 // Work whose run ended with an answer written in but never read is started again with it
 const replyUnread = async ($, agentId) => {
@@ -731,7 +952,7 @@ const waitsBehind = (one, at, now) => {
     if (!running || running.at > at)
         return '';
     const name = running.label ? `“${cut(describedOf(running.label).text || running.label, 50)}”` : running.what.replace(/ running$/, '');
-    return `waiting: Claude will see it when ${name} ends (running ${took(now - running.at)})`;
+    return `Claude reads it when ${name} ends · running ${took(now - running.at)}`;
 };
 // What the card says of the answer last given to its ask, for ANSWER_SHOWN after, until the work writes a newer line or asks again.
 // An answer that could not be left for another Mac says so under the ask, which is back
@@ -740,25 +961,26 @@ const sentLine = (one, now) => {
     // A held reply this copy did not send (before a reload, or from another chat) is still said under its ask
     const replied = one.ask?.replied;
     if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld)))
-        return `✓ You replied “${cut(replied.text, 60)}”${isActingOnReply(one) ? ' · Claude is working on it' : '; Claude still has this question'}`;
+        return `✓ You answered “${cut(replied.text, 60)}”${isActingOnReply(one) ? ' · Claude is working on it' : ' · the question is still open'}`;
     if (!sent)
         return '';
     if (sent.to === 'failed')
-        return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}” didn't reach Claude. Press it again` : '';
+        return one.ask?.text === sent.ask ? `Couldn't send “${cut(sent.text, 60)}” to Claude · press it again` : '';
     if (sent.to === 'lost')
-        return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}”. That Mac couldn't be reached; answer it in its own chat` : '';
+        return one.ask?.text === sent.ask ? `Couldn't reach that Mac with “${cut(sent.text, 60)}” · answer in its own chat` : '';
     const newer = lineOf(one) !== sent.line;
     const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text));
     if ((one.ask && !isHeld) || (!isHeld && (newer || now - sent.at > ANSWER_SHOWN)))
         return '';
     const how = {
         sending: 'Sending to Claude…',
-        work: waitsBehind(one, sent.at, now) || 'Claude will see this after its current step',
+        work: waitsBehind(one, sent.at, now) || 'Claude reads it next',
         read: 'Claude has read it',
-        chat: 'left in the chat, which continues the task',
-        other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", whose task will see it after its current step`,
+        chat: 'sent to the chat, which carries on the task',
+        ran: 'Claudopus is running it; Claude gets what it prints',
+        other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", which passes it on`,
     }[sent.to];
     if (isHeld)
-        return `✓ You replied “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : '; Claude still has this question'}`;
+        return `✓ You answered “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : ' · the question is still open'}`;
     return `✓ You answered “${cut(sent.text, 60)}” · ${how}`;
 };

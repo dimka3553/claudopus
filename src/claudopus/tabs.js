@@ -6,10 +6,15 @@ const tabHooks = (on) => {
     on('ui.press', async ($, e, next) => {
         if (isRunFromAfar && e.plugin === 'claudopus')
             await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`);
+        // In every other chat a press that reached its button is one line too, written beside the press and never waited for. The engine
+        // runs this hook only for a button it still holds; a press on a button a newer drawing replaced is dropped before it, and is in
+        // the app's own log instead ("ui_press not handled"), so the two logs together say what share of the person's clicks land
+        else if (e.plugin === 'claudopus')
+            void log($, `press landed: ${keyShown(e.element) ?? ''} in ${keyShown(e.requestId) ?? ''} (${e.surface})`);
         // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
         // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
         if (e.plugin === 'claudopus')
-            ((pressFrom = 0), freeTimes($), (freshness += 1), await engage($));
+            ((pressFrom = 0), (pressedAt = await $.clock.now()), freeTimes($), (freshness += 1), await engage($));
         const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal';
         if (isTerminal)
             tabMoves.begin();
@@ -59,7 +64,7 @@ const tabHooks = (on) => {
     on('ui.render', { component: 'Pane', requestId: CONFIG_PANE }, async ($, e) => {
         const ui = uiOf($, e);
         return (<ui.Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {configView(ui, await configShown($), configActs($), band, presses, dir)}
+        {configView(ui, { ...(await configShown($)), updateBox: updateCheck.isChecking ? null : await configUpdateBox($, ui) }, configActs($), band, presses, dir)}
       </ui.Box>);
     }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)));
     on('ui.render', { component: 'Pane', requestId: ABOUT_PANE }, async ($, e) => {
@@ -127,8 +132,9 @@ const watchTabs = async ($, ids, why, since = 0) => {
             if (!empty.length)
                 return;
             drawAgain($);
+            // (naming the chat: the app asks only the chat it shows, so after a reload every chat out of sight says so, and the one in sight should not)
             if (wait === TAB_CHECKS.at(-1))
-                await log($, `tab ${empty.join(', ')} not asked for in ${wait / 1000}s after ${why}: drawn again`);
+                await log($, `tab ${empty.join(', ')} not asked for in ${wait / 1000}s after ${why}${heldChat ? ` in chat ${heldChat}` : ''}: drawn again`);
         });
 };
 // As this code loads: the tab in front where the engine says which it is, else every tab open (a tab behind the others is never
@@ -155,15 +161,15 @@ const tabFailed = async ($, e, error) => {
     const now = await $.clock.now();
     const fails = [...(tabFails.get(id) ?? []).filter(at => now - at < 60000), now];
     tabFails.set(id, fails);
-    const why = error?.kind === 'timeout' ? 'It took too long to draw.' : (error?.message ?? '').replace(/^\w*Error:\s*/, '') || 'No reason was given.';
+    const why = error?.kind === 'timeout' ? 'It took too long.' : (error?.message ?? '').replace(/^\w*Error:\s*/, '') || 'No reason was given.';
     await log($, `tab ${id} not drawn (${error?.kind ?? 'unknown'}): ${why}`);
     const isAgain = fails.length < 3;
     if (isAgain)
         await watchTabs($, [id], 'its drawing failed');
     const { Box, Text } = uiOf($, e);
     return (<Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
-      <Text bold>Claudopus couldn't draw this tab</Text>
+      <Text bold>Claudopus couldn't show this tab</Text>
       <Text dimColor wrap="wrap">{cut(why, 300)}</Text>
-      <Text dimColor wrap="wrap">{isAgain ? 'Trying again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
+      <Text dimColor wrap="wrap">{isAgain ? 'Claudopus tries again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
     </Box>);
 };

@@ -410,7 +410,8 @@ const chatHooks = (on: On) => {
       // Held while the person types into a reply box (holdTimes)
       // A pane held while only its running times moved is drawn again once CALM is over (heldDrawings)
       const calmNow = await $.clock.now()
-      const isMoving = isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.some(card => card.status === 'working'))
+      // (a command run on the person's press too, whose running time its card shows after its task has ended)
+      const isMoving = isFlowing || runList.some(run => Boolean(run.startedAt && !run.endedAt)) || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.some(card => card.status === 'working'))
       // A drawing of a size or tab no longer drawn is let go after a minute: it would only be drawn afresh
       if (!isTyping) for (const [key, held] of heldDrawings) if (calmNow - held.at >= 60_000) heldDrawings.delete(key)
       // The mod alone says when its panes are drawn again, and only when what they show has moved (calmLook)

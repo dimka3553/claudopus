@@ -50,8 +50,7 @@ const offeredRun = (one: Todo) => {
 }
 // The runs on a card under way, and those ended whose output waits to start their ended task again
 const runningOn = (card: string) => runList.filter(run => run.card === card && run.startedAt && (!run.endedAt || isRunWaking(run)))
-// What each running one last printed, and the ones the person stopped, for this load (the stop is also written in its output)
-const runLast = new Map<string, string>()
+// The ones the person stopped, for this load (the stop is also written in its output)
 const runStopped = new Set<string>()
 const runKey = (run: Pick<PressRun, 'card' | 'askAt'>) => `${run.card}:${run.askAt}`
 // The presses this load took, so two at once run it once, and the ask a press cleared that starts its run (answerCleared)
@@ -186,10 +185,9 @@ const lookRun = async ($: EngineInterface, run: PressRun) => {
   if (now.endedAt || !run.log || !run.pid || !run.startedAt) return true
   during('look at a command run on a press')
   const out = runOutputOf(await fileEnd($, run.log, 64_000))
-  const last = oneLine(out.lines.filter(line => line.trim()).at(-1) ?? '')
-  runLast.set(runKey(run), last)
-  // (drawn again at each look, so its running time moves on too)
-  redraw($)
+  // Nothing is drawn again for a look: the card shows only that it runs, and its time moves with the panel's calm drawings (calmLook).
+  // A drawing at each look, every 5 s and through the person's use of the panel, rebuilt the whole panel in the app, which flashed
+  // (17 Nov, Dima's screenshot); its end is drawn at once (saveRuns)
   const at = await $.clock.now()
   const stopped = (isStopped: boolean) => (isStopped || runStopped.has(runKey(run)) ? 'stopped' : 'exited')
   if (out.exit !== undefined) return void (await endRun($, run, stopped(out.isStopped), out.exit, out.lines)), true
@@ -262,33 +260,30 @@ const runWhere = (ui: Ui, one: Todo, key: string) => {
 }
 const runButton = ($: EngineInterface, ui: Ui, one: Todo, key: string) =>
   offeredRun(one) ? <ui.Button key={`${key}-run-${one.ask?.at ?? 0}-${loadMark}`} label={RUN_IT} onPress={() => void runIt($, one).catch(err => log($, `refused command not run: ${String(err)}`))} /> : null
-// While it runs: the command, where, how long it has run of how long at most, what it last printed, and Stop. Once it has ended
-// with its output waiting for its ended task: that, and a press that sends it now (its own hook sends what waits: tabs.tsx)
-const runBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number, isWhole = false) => {
+// While it runs: one quiet line, how long it has run, and Stop it; the command itself is not shown again, the person saw it before
+// pressing (17 Nov). Once it has ended with its output waiting for its ended task: that, and a press that sends it now (its own hook
+// sends what waits: tabs.tsx)
+const runBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number) => {
   const list = one.chat ? [] : runningOn(one.id)
   if (!list.length) return null
   return (
-    <ui.Box key={key} flexDirection="column" gap={1}>
+    <ui.Box key={key} flexDirection="column">
       {list.map(run => {
-        const last = runLast.get(runKey(run)) ?? run.last ?? ''
         const isStopping = runStopped.has(runKey(run))
         const isEnded = Boolean(run.endedAt)
-        const state = isEnded ? 'ended · what it printed waits for Claude' : isStopping ? 'stopping' : `running ${took(at - (run.startedAt ?? at))} · at most ${limitText(run.limitMs)}`
+        const said = isEnded ? 'Your command ended · its output waits for Claude' : isStopping ? 'Stopping your command' : `Running your command · ${took(at - (run.startedAt ?? at))}`
         return (
-          <ui.Box key={`${key}-${run.askAt}`} flexDirection="column" gap={1} borderStyle="round" borderColor={LIVE} paddingX={1} flexShrink={0}>
-            <ui.Text wrap="truncate-end" dimColor>{`Your command · ${state}`}</ui.Text>
-            <ui.Box backgroundColor={FILL} paddingLeft={2}>
-              <ui.Text mono wrap="wrap">{isWhole ? run.command : cut(run.command, 600)}</ui.Text>
+          <ui.Box key={`${key}-${run.askAt}`} flexDirection="row" gap={1} height={1} overflow="hidden">
+            <ui.Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
+              <ui.Text dimColor wrap="truncate-end">{said}</ui.Text>
             </ui.Box>
-            <ui.Text dimColor wrap="truncate-start">{`in ${shortPath(run.cwd, 60)}`}</ui.Text>
-            <ui.Text wrap="truncate-end">{last ? `Last printed: ${cut(last, 200)}` : isEnded ? 'It printed nothing' : 'Nothing printed yet'}</ui.Text>
             {isEnded ? (
-              <ui.Box flexDirection="row">
-                <ui.Button key={`${key}-${run.askAt}-send-${loadMark}`} label="Send it to Claude now" onPress={() => ((presses += 1), redraw($))} />
+              <ui.Box flexShrink={0}>
+                <ui.Button key={`${key}-${run.askAt}-send-${loadMark}`} label="Send it now" plain hover={{ scope: `${key}-${run.askAt}-send`, underline: true }} onPress={() => ((presses += 1), redraw($))} />
               </ui.Box>
             ) : isStopping ? null : (
-              <ui.Box flexDirection="row">
-                <ui.Button key={`${key}-${run.askAt}-stop-${loadMark}`} label="Stop it" onPress={() => void stopRun($, run).catch(err => log($, `run not stopped: ${String(err)}`))} />
+              <ui.Box flexShrink={0}>
+                <ui.Button key={`${key}-${run.askAt}-stop-${loadMark}`} label="Stop it" plain dimColor hover={{ scope: `${key}-${run.askAt}-stop`, underline: true }} onPress={() => void stopRun($, run).catch(err => log($, `run not stopped: ${String(err)}`))} />
               </ui.Box>
             )}
           </ui.Box>

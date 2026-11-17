@@ -125,14 +125,14 @@ const serversTabHooks = (on) => {
         await read($, tick);
         const found = await read($, servers);
         return (<Box flexDirection="column" gap={1}>
-        {found.length === 0 && <Text dimColor>Nothing is listening from your folders.</Text>}
+        {found.length === 0 && <Text dimColor>No servers are running from your folders.</Text>}
         {found.map(one => (<Box key={`server-${one.pid}`} flexDirection="row" alignItems="flex-start" gap={1}>
             <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-              <Text wrap="wrap">{one.url ? <Link href={one.url} label={`localhost:${one.port}`}/> : `Port ${one.port}`}</Text>
+              <Text wrap="wrap">{one.url ? <Link href={one.url} label={`localhost:${one.port}`}/> : `Serving on port ${one.port}`}</Text>
               <Text dimColor wrap="wrap">{one.about}</Text>
             </Box>
             <Box flexShrink={0}>
-              <Button key={`kill-${one.pid}`} label="■" onPress={() => void stopServer($, one.pid)}/>
+              <Button key={`kill-${one.pid}`} label="Stop" onPress={() => void stopServer($, one.pid)}/>
             </Box>
           </Box>))}
       </Box>);

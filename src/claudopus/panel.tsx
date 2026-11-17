@@ -1544,7 +1544,7 @@ const panelHooks = (on: On) => {
           ) : null}
           {runningOn(one.id).length && !one.chat ? (
             <Box key="part-runs" flexDirection="column" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
-              {runBlock($, table, one, `runs-big-${one.id}`, at, true)}
+              {runBlock($, table, one, `runs-big-${one.id}`, at)}
             </Box>
           ) : null}
           {one.ask ? (

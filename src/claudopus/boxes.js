@@ -4,7 +4,7 @@
 // this chat's own while one of them runs (one sent to the background for BOX_OLD after it began), and says which command asked. A
 // request no runner of this chat could have made, however it is worded, is drawn nowhere
 const runnerCalls = new Map();
-const runnerBegun = (id, command, at) => void runnerCalls.set(id, { command, at, until: Infinity });
+const runnerBegun = (id, command, at, agent) => void runnerCalls.set(id, { command, at, until: Infinity, ...(agent ? { agent } : {}) });
 const runnerEnded = (id, isBackground, at) => {
     const one = runnerCalls.get(id);
     if (!one)
@@ -19,6 +19,30 @@ const runnerEnded = (id, isBackground, at) => {
 };
 // The command that asked: the one of this chat's running runners begun last before the request
 const runnerOf = (at, now) => [...runnerCalls].map(([call, one]) => ({ ...one, call })).filter(one => one.until >= now && one.at <= at + BOX_SKEW).sort((a, b) => b.at - a.at)[0];
+// The runner that made a request, for the card its box goes on: of those that could have, the ones whose command names the same
+// runner (and, for a key, the same key); only when exactly one does is its task known, else the box is no card's (17 Nov, second
+// look: the latest runner was taken, and a box went on another task's card)
+// Once known, a box's task is kept by its id, so a runner begun later never takes the box off its card (boxAgents). A runner whose
+// command names neither runner reached it through a script, and could have made either kind
+const boxAgents = new Map();
+const runnerFor = (one, at, now) => {
+    const runner = runnerOf(at, now);
+    if (!runner)
+        return undefined;
+    const kept = typeof one.id === 'string' ? boxAgents.get(one.id) : undefined;
+    if (kept)
+        return { call: runner.call, command: runner.command, agent: kept };
+    const live = [...runnerCalls].map(([call, other]) => ({ ...other, call })).filter(other => other.until >= now && other.at <= at + BOX_SKEW);
+    const isScript = (command) => !/\bbin\/(?:admin|secret)\b/.test(command);
+    const same = live.filter(other => isScript(other.command) || (one.kind === 'admin' ? /\bbin\/admin\b/.test(other.command) : /\bbin\/secret\b/.test(other.command) && (typeof one.name !== 'string' || other.command.includes(one.name))));
+    const [only] = same;
+    if (same.length === 1 && only) {
+        if (only.agent && typeof one.id === 'string')
+            boxAgents.set(one.id, only.agent);
+        return only;
+    }
+    return { call: runner.call, command: runner.command };
+};
 const BOX_SKEW = 60000;
 // What the runners take as a Mac (an ssh host or alias, perhaps with a user) and as a key's name
 const BOX_HOST = /^(?:here|[A-Za-z0-9_][A-Za-z0-9._:@-]{0,199})$/;
@@ -37,9 +61,9 @@ const sealedFor = async ($, key, value) => {
     return /^[A-Za-z0-9+/]{300,}={0,2}$/.test(out) ? out : '';
 };
 const BOX_AGAIN = {
-    refused: 'That password was refused. ',
+    refused: 'That password was wrong. ',
     short: 'That was shorter than 4 characters. ',
-    control: 'That held a line break or another control character. ',
+    control: 'That had a line break or another special character. ',
 };
 // The wording for a request, or undefined for one the panel does not draw
 const boxWording = (one) => {
@@ -50,17 +74,17 @@ const boxWording = (one) => {
         if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined || typeof one.key !== 'string' || !BOX_KEY.test(one.key))
             return undefined;
         const mac = one.host === 'here' ? thisMac() : one.host;
-        return `${again}Claudopus needs the admin password of ${mac} to run the admin command below. Nothing is saved: it goes only to that command, and the next one asks again.`;
+        return `${again}Claudopus needs the admin password of ${mac} to run the command below. It goes only to that command and isn't saved, so the next one asks again.`;
     }
     if (one.kind === 'secret') {
         if (one.host !== undefined)
             return undefined;
         // No name: the first box of a key saved by hand asks its name
         if (one.name === undefined)
-            return 'Name of the key to save, such as GITHUB_TOKEN. Claude will use it by this name.';
+            return 'Name of the key to save, such as GITHUB_TOKEN. Claude uses it by this name.';
         if (typeof one.name !== 'string' || !BOX_NAME.test(one.name))
             return undefined;
-        return `${again}Claudopus needs ${one.name}. It is saved only in ${keptWhere()}. Claude uses it by name, and it is hidden in anything a command prints.`;
+        return `${again}Claudopus needs ${one.name}. Claudopus saves it only in ${keptWhere()}. Claude uses it by name, and Claudopus hides it in anything a command shows.`;
     }
     return undefined;
 };
@@ -110,7 +134,7 @@ const doneNotesPart = (ui, at) => doneNotes.filter(one => !one.card && isNoteSho
 // once refused, saying what was allowed, until its note goes
 const cardNotesOf = (card, at) => doneNotes.filter(one => one.card === card && isNoteShown(one, at));
 const cardNotesPart = (ui, card, at) => cardNotesOf(card, at).map(one => (<ui.Box key={`done-${one.id}`} flexDirection="column" borderStyle="round" borderColor={one.isOn ? DONE : '#808080'} paddingX={1} flexShrink={0}>
-      <ui.Text wrap="truncate-end" dimColor>{`${one.head} · ${one.isOn ? 'allowed' : 'refused'}`}</ui.Text>
+      <ui.Text wrap="truncate-end" dimColor>{one.head}</ui.Text>
       <ui.Box flexDirection="row" gap={1}>
         <ui.Text color={one.isOn ? DONE : undefined} dimColor={!one.isOn}>{one.isOn ? '✓' : '✕'}</ui.Text>
         <ui.Box flexShrink={1} minWidth={0}>
@@ -130,6 +154,9 @@ const boxHead = (text) => {
 const boxTries = new Map();
 // The boxes something is typed in, unsent, so an ask's reply box does not take the keys from them
 const boxTyped = new Set();
+// What is typed in the bar's key box while it is open, only so its Send button can send it: never written anywhere, and gone once
+// it is sent, closed or the box moves
+const barKeyTyped = new Map();
 // A line under a box: what went wrong with what was sent
 const boxSaid = new Map();
 // Sent from here: the box goes at once, before the runner removes its request
@@ -146,7 +173,7 @@ const boxesDir = () => `${dir}/boxes`;
 // Another chat's request is left to it this long, so its own chat tells it, when that chat is open
 const BOX_GRACE = 5000;
 // In the chat only the name of what is asked, once per box, in the chat that asked or else whichever chat sees it first
-const BOX_TOLD = (text) => `${text} Answer it in the box at the top of the Claudopus panel, never in this chat's prompt (/claudopus opens the panel): what is typed there for it goes only into ${keptWhere()}${text.includes('admin password') ? '' : ", or give a response instead, such as where it already is"}.`;
+const BOX_TOLD = (text) => `${text} Type it in its box in the Claudopus panel, not in this chat. /claudopus opens the panel. What you type there goes only into ${keptWhere()}${text.includes('admin password') ? '' : '. Or answer in words, such as where it already is'}.`;
 // This chat's own id, as the runner reads it from CLAUDE_CODE_SESSION_ID, read at each look (a /clear can change it)
 let boxChat = '';
 // Requests this chat has told or seen told
@@ -177,13 +204,13 @@ const lookBoxes = async ($) => {
             const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`));
             const text = one && typeof one === 'object' ? boxWording(one) : undefined;
             // Only this chat's own request, dated no later than now, while a runner of this chat's that could have made it runs
-            const runner = typeof one.at === 'number' ? runnerOf(one.at, now) : undefined;
+            const runner = typeof one.at === 'number' ? runnerFor(one, one.at, now) : undefined;
             const key = typeof one.key === 'string' ? one.key : undefined;
             if (key && !boxKeys.has(id))
                 boxKeys.set(id, key);
             const isKeySame = !key || boxKeys.get(id) === key;
             if (one.id === id && text && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner)
-                found.push({ id, text, at: one.at, chat: one.chat, command: runner.command, call: runner.call, ...(one.kind === 'admin' && key ? { key } : {}) });
+                found.push({ id, text, at: one.at, chat: one.chat, command: runner.command, call: runner.call, ...(runner.agent ? { agent: runner.agent } : {}), ...(one.kind === 'admin' && key ? { key } : {}) });
             // A runner killed outright leaves its request: it goes once it is stale, with its mark
             // and a value typed into it meanwhile leaves the keychain with it
             else if (typeof one.at === 'number' && (now - one.at >= BOX_OLD || one.at - now > BOX_SKEW)) {
@@ -224,7 +251,7 @@ const lookBoxes = async ($) => {
             boxKeys.delete(id);
     for (const id of [...boxTries.keys(), ...boxSaid.keys(), ...boxTyped, ...boxModes.keys(), ...boxHeldReply.keys()])
         if (!found.some(one => one.id === id))
-            (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id), boxModes.delete(id), boxHeldReply.delete(id));
+            (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id), barKeyTyped.delete(id), boxModes.delete(id), boxHeldReply.delete(id));
     if (JSON.stringify(found) === JSON.stringify(boxes))
         return;
     boxes = found;
@@ -232,16 +259,18 @@ const lookBoxes = async ($) => {
 };
 // A box's entry in the keychain: on Linux bin/keyring, which keeps it in a file only this user reads; on a Mac security itself,
 // which sendBox calls as before for set and has, so only delete goes through here
-const boxKeyring = ($, what, id, stdin) => isLinux
-    ? $.process.run([`${$.plugin.root}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15000 }).catch(() => ({ exitCode: -1 }))
-    : what === 'delete'
-        ? $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15000 }).catch(() => ({ exitCode: -1 }))
-        : Promise.resolve({ exitCode: -1 });
+const boxKeyring = async ($, what, id, stdin) => !(await hasKeychain($))
+    ? { exitCode: -1 }
+    : isLinux
+        ? $.process.run([`${$.plugin.root}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15000 }).catch(() => ({ exitCode: -1 }))
+        : what === 'delete'
+            ? $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15000 }).catch(() => ({ exitCode: -1 }))
+            : Promise.resolve({ exitCode: -1 });
 // Into the keychain under the box's id, on security's stdin as bin/secret keeps a value, so it is never in a command line
 const sendBox = async ($, id, value) => {
     if (!value)
         return;
-    const refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? `That was longer than ${BOX_LONGEST} characters, so it wasn't sent.` : /[^\x20-\x7E]/.test(value) ? "That held a line break, a curly quote or another character outside plain letters, digits and signs, so it wasn't sent. Type it again." : '';
+    const refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? `That's longer than ${BOX_LONGEST} characters, so Claudopus didn't send it.` : /[^\x20-\x7E]/.test(value) ? "That has a line break, a curly quote or another special character, so Claudopus didn't send it. Type it again." : '';
     if (refused) {
         boxSaid.set(id, refused);
         boxPresses += 1;
@@ -251,22 +280,24 @@ const sendBox = async ($, id, value) => {
     const request = `${boxesDir()}/${id}.json`;
     // A runner that has stopped, or a box answered in another chat, takes nothing: its value would stay in the keychain
     if (!(await $.fs.exists(request).catch(() => false)))
-        return void (await cancelBox($, id, 'It was no longer waiting · nothing was saved'));
+        return void (await cancelBox($, id, 'The command had stopped waiting. Nothing was saved.'));
     // An admin password goes only sealed to its runner's key: what sits in the keychain a moment is of no use to anything else
     const asked = boxes.find(other => other.id === id);
     const sent = asked?.key ? await sealedFor($, asked.key, value) : value;
     if (!sent) {
-        boxSaid.set(id, "It could not be secured for the command that asked, so it wasn't sent.");
+        boxSaid.set(id, "Claudopus couldn't encrypt it for the command that asked, so it didn't send it.");
         boxPresses += 1;
         boxTries.set(id, (boxTries.get(id) ?? 0) + 1);
         return void drawAgain($);
     }
     const escaped = sent.replace(/[\\"]/g, '\\$&');
-    const r = isLinux
-        ? await boxKeyring($, 'set', id, `${sent}\n`)
-        : await $.process
-            .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15000 })
-            .catch(() => ({ exitCode: -1 }));
+    const r = !(await hasKeychain($))
+        ? { exitCode: -1 }
+        : isLinux
+            ? await boxKeyring($, 'set', id, `${sent}\n`)
+            : await $.process
+                .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15000 })
+                .catch(() => ({ exitCode: -1 }));
     // security -i can end well when the add failed: the entry is looked for by its attributes, never its value
     const isKept = r.exitCode === 0 && (isLinux ? await boxKeyring($, 'has', id) : await $.process.run(['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0;
     // and one whose runner stopped meanwhile is taken out again
@@ -275,7 +306,7 @@ const sendBox = async ($, id, value) => {
     boxPresses += 1;
     boxTries.set(id, (boxTries.get(id) ?? 0) + 1);
     if (!isKept) {
-        boxSaid.set(id, `It could not be put in ${keptWhere()}. Try again.`);
+        boxSaid.set(id, `Claudopus couldn't save it in ${keptWhere()}. Try again.`);
         await log($, `box ${id} not kept: security ended ${r.exitCode}`);
     }
     else {
@@ -287,14 +318,15 @@ const sendBox = async ($, id, value) => {
         const one = boxes.find(other => other.id === id);
         boxes = boxes.filter(other => other.id !== id);
         if (one)
-            await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: one.key ? 'You gave it · it went only to the command that asked, which continues now' : `You gave it · it is in ${keptWhere()}, and the command that asked for it continues now`, what: '', isOn: true });
+            await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: one.key ? 'You gave it. It went only to the command that asked, which carries on now.' : `You gave it. Claudopus saved it in ${keptWhere()}, and the command that asked carries on now.`, what: '', isOn: true });
         await log($, `box ${id} sent to the keychain`);
     }
     drawAgain($);
 };
 // Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
-const cancelBox = async ($, id, said = 'You cancelled · nothing was saved, and what asked for it stops without it') => {
+const cancelBox = async ($, id, said = 'You cancelled it. Nothing was saved, and the command that asked stops without it.') => {
     boxSent.add(id);
+    barKeyTyped.delete(id);
     const one = boxes.find(other => other.id === id);
     boxes = boxes.filter(other => other.id !== id);
     if (boxOpen?.id === id)
@@ -337,16 +369,18 @@ const keyWords = (text) => text
     return (/[A-Za-z]/.test(bare) && (bare.match(/\d/g)?.length ?? 0) >= 3) || (bare.length >= 32 && /[a-z]/.test(bare) && /[A-Z]/.test(bare));
 });
 const looksLikeKey = (text) => keyWords(text).length > 0;
-const BOX_LOOKS_KEY = (where) => `That looks like the key itself. A response goes to Claude as words, into the chat. Keep it as the key to put it only in ${where}, or send it as a response anyway.`;
+const BOX_LOOKS_KEY = (where) => `That looks like the key itself. An answer in words goes into the chat, where Claude reads it. Save it as the key to keep it only in ${where}, or send it as an answer anyway.`;
 // Opens a key box's field in the bar above the prompt, for the key or a response, or closes it. One box in the bar at a time:
 // an ask's reply box open there closes (openReply does the same the other way). The cursor is asked into the field
 const openBox = ($, id, mode, surface) => {
     if (id && replyTo)
         (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''));
     boxOpen = id ? { id, mode } : undefined;
+    barKeyTyped.clear();
     if (id)
         (boxHeldReply.delete(id), boxSaid.delete(id));
     barBoxAt = 0;
+    isBarSettling = false;
     boxPresses += 1;
     drawAgain($);
     const bar = barIds.get(surface);
@@ -375,7 +409,7 @@ const sendBoxReply = async ($, id, text, isSure = false) => {
     boxHeldReply.delete(id);
     const request = `${boxesDir()}/${id}.json`;
     if (!(await $.fs.exists(request).catch(() => false)))
-        return void (await cancelBox($, id, 'It was no longer waiting · your response was not sent'));
+        return void (await cancelBox($, id, "The command had stopped waiting. Your answer wasn't sent."));
     const name = boxNameOf(one);
     const asked = name ? `giving ${name}` : isNameBox(one) ? 'naming a key to save' : 'giving the key';
     const isWritten = await $.fs
@@ -385,7 +419,7 @@ const sendBoxReply = async ($, id, text, isSure = false) => {
     if (isWritten)
         boxRepliedAt.set(id, await $.clock.now());
     if (!isWritten) {
-        boxSaid.set(id, "Your response couldn't be left for the command that asked. Try again.");
+        boxSaid.set(id, "Claudopus couldn't pass your answer to the command that asked. Try again.");
         boxPresses += 1;
         return void drawAgain($);
     }
@@ -396,12 +430,13 @@ const sendBoxReply = async ($, id, text, isSure = false) => {
         ((boxOpen = undefined), (barBoxAt = 0));
     drawAgain($);
     await $.process.run(['rm', '-f', request]).catch(() => undefined);
-    await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: 'You gave a response instead · it went to the command that asked, and nothing was saved', what: `“${cut(oneLine(said), 160)}”`, isOn: true });
+    await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: 'You answered in words. Your answer went to the command that asked, and nothing was saved.', what: `“${cut(oneLine(said), 160)}”`, isOn: true });
     await log($, `box ${id} answered in words`);
 };
 // What is typed in a key's field goes by its mode: the key to the keychain, a response to the command that asked
 const submitBox = ($, id, mode, value) => {
     boxTyped.delete(id);
+    barKeyTyped.delete(id);
     freeTimes($);
     barBoxAt = 0;
     const run = mode === 'reply' ? sendBoxReply($, id, value) : sendBox($, id, value);
@@ -418,71 +453,74 @@ const keepHeldAsKey = ($, id, surface) => {
         openBox($, id, 'key', surface);
     else
         (boxModes.set(id, 'key'), (boxPresses += 1));
-    boxSaid.set(id, 'More than one word looked like a key: paste just the key.');
+    boxSaid.set(id, 'More than one word looks like a key. Paste only the key.');
     drawAgain($);
 };
 // Under a response held for looking like a key: keep it as the key, or send it as words anyway
 const heldReplyButtons = ($, ui, id, where) => boxHeldReply.has(id) ? (<ui.Box key={`${where}-${id}-held`} flexDirection="row" gap={1} flexWrap="wrap">
-      <ui.Button key={`${where}-${id}-askey-${boxPresses}`} label="Keep it as the key" onPress={press => keepHeldAsKey($, id, press.surface)}/>
-      <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send it as a response" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)}/>
+      <ui.Button key={`${where}-${id}-askey-${boxPresses}`} label="Save as the key" onPress={press => keepHeldAsKey($, id, press.surface)}/>
+      <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send as answer" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)}/>
     </ui.Box>) : null;
-// The row in the bar above the prompt for the key box opened there: what goes where, the field, and Close
+// The box in the bar above the prompt for the key box opened there: what goes where on a line of its own, the field under it as wide
+// as the bar, and Send, the big one, and Close, small, under that, as the reply box is (band.tsx, barReply). A key is one line; a
+// response BOX_ROWS lines. No submitLabel: the app draws one as a second, small send button, and
+// with one a box of several lines sends only on Cmd+Enter
 const barKeyRow = ($, ui, one, mode) => {
     const name = boxNameOf(one);
     const head = mode === 'reply' ? `↳ Instead of ${name ?? (isNameBox(one) ? 'the name' : 'the key')}` : name ? `↳ ${name}` : `↳ The key's name`;
-    return (<ui.Box key="band-key" flexDirection="column" flexShrink={0}>
-      <ui.Box flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
-        <ui.Box flexShrink={1} minWidth={0}>
-          <ui.Text color={NEEDS} bold wrap="truncate-end">{head}</ui.Text>
-        </ui.Box>
-        {'Input' in ui ? (<ui.Box flexShrink={0}>
-            <ui.Input key={barKeyBoxKey(one.id, mode)} placeholder={mode === 'reply' ? 'Type your response' : isNameBox(one) ? 'Type the name' : 'Paste the key'} submitLabel="send" autoFocus onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))} onSubmit={value => submitBox($, one.id, mode, value)}/>
-          </ui.Box>) : null}
-        <ui.Box flexShrink={0}>
-          <ui.Button key={`band-key-close-${boxPresses}`} label="Close" onPress={press => openBox($, undefined, mode, press.surface)}/>
-        </ui.Box>
+    const key = barKeyBoxKey(one.id, mode);
+    return (<ui.Box key="band-key" flexDirection="column" flexShrink={0} width="100%">
+      <ui.Box flexDirection="row" height={1} overflow="hidden">
+        <ui.Text color={NEEDS} bold wrap="truncate-end">{head}</ui.Text>
       </ui.Box>
+      {'Input' in ui ? (<ui.Box flexDirection="column" width="100%" flexShrink={0}>
+          <ui.Input key={key} placeholder={mode === 'reply' ? 'Type your answer' : isNameBox(one) ? 'Type the name' : 'Paste the key'} rows={mode === 'reply' ? BOX_ROWS : undefined} autoFocus onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))} onSubmit={value => submitBox($, one.id, mode, value)}/>
+        </ui.Box>) : null}
       {boxSaid.get(one.id) ? <ui.Text key="band-key-said" color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
       {heldReplyButtons($, ui, one.id, 'band-key')}
+      {barFoot($, ui, 'band-key', boxPresses, () => void (barKeyTyped.get(one.id) && submitBox($, one.id, mode, barKeyTyped.get(one.id) ?? '')), press => openBox($, undefined, mode, press.surface), mode === 'reply')}
     </ui.Box>);
 };
 // The key box open in the bar on a surface that takes one, none once it is answered, cancelled or gone
 const barKeyTarget = () => (boxOpen ? boxes.find(one => one.id === boxOpen?.id && !one.key) : undefined);
-// Each box with when it was asked, so the panel puts it among what waits on the person, the newest first
-const boxRows = ($, ui, isKeysHeld = false, surface = '') => {
+// Each box with when it was asked and the box itself: the panel draws a box of a task's command on that task's card, and any other
+// among what waits on the person, in the order they came (only: the boxes wanted)
+const boxRows = ($, ui, isKeysHeld = false, surface = '', only = () => true, isOnCard = false) => {
     if (!boxes.length || !('Input' in ui))
         return [];
     // This chat's own first request holds the keys, so a value typed for the notice it told goes to its own box, wherever it is drawn
     const shown = [...boxes.filter(one => one.chat === boxChat), ...boxes.filter(one => one.chat !== boxChat)];
     const isBar = repliesInBar(surface);
-    return shown.map((one, n) => {
+    return shown.flatMap((one, n) => {
+        if (!only(one))
+            return [];
         const isKey = !one.key;
         const name = boxNameOf(one);
         const inBar = isKey && isBar;
         const mode = (inBar ? undefined : boxModes.get(one.id)) ?? 'key';
         const isOpen = inBar && boxOpen?.id === one.id;
         const what = isNameBox(one) ? 'the name' : 'the key';
-        return { at: one.at, node: (<ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
-      <ui.Text dimColor wrap="truncate-end">{isKey ? 'Key · waits for you' : 'Admin password · waits for you to type it'}</ui.Text>
+        return [{ at: one.at, one, node: (<ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
+      <ui.Text dimColor wrap="truncate-end">{isKey ? 'Key · waiting for you' : 'Admin password · waiting for you'}</ui.Text>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
-      {one.command ? <ui.Text dimColor wrap="wrap">{`Asked by this chat's command: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
-      <ui.Text dimColor wrap="wrap">{!isKey ? 'What you type here shows as you type it. It goes only to the command that asked, locked to that command, never into a chat, and is not saved.'
-                    : inBar ? `Paste ${what} in the box above the chat: it goes only into ${keptWhere()}, never into a chat. Or give a response instead, such as where ${name ?? 'the key'} already is, and the command that asked gets your words.`
-                        : mode === 'reply' ? 'Your response goes to the command that asked, in place of the key, and nothing is saved.'
-                            : `What you type here shows as you type it. It goes only into ${keptWhere()}, never into a chat.`}</ui.Text>
+      {one.command ? <ui.Text dimColor wrap="wrap">{`Command that asked: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
+      <ui.Text dimColor wrap="wrap">{!isKey ? "You can see what you type here. It goes only to the command that asked, never into a chat, and isn't saved."
+                        : inBar ? `Paste ${what} in the box above the chat. It goes only into ${keptWhere()}, never into a chat. Or answer in words, such as where ${name ?? 'the key'} already is, and the command that asked gets your words.`
+                            : mode === 'reply' ? 'Your answer goes to the command that asked, in place of the key. Nothing is saved.'
+                                : `You can see what you type here. It goes only into ${keptWhere()}, never into a chat.`}</ui.Text>
       {inBar ? null : (<ui.Box width="100%" flexDirection="column">
-        <ui.Input key={`box-${one.id}-field-${mode === 'reply' ? 'reply-' : ''}${boxTries.get(one.id) ?? 0}`} placeholder={mode === 'reply' ? 'Type your response' : 'Type or paste it here'} submitLabel="send" autoFocus={n === 0 && !isKeysHeld ? true : undefined} onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($))} onSubmit={value => submitBox($, one.id, mode, value)}/>
+        <ui.Input key={`box-${one.id}-field-${mode === 'reply' ? 'reply-' : ''}${boxTries.get(one.id) ?? 0}`} placeholder={mode === 'reply' ? 'Type your answer' : 'Type or paste it here'} submitLabel="Send" autoFocus={n === 0 && !isKeysHeld ? true : undefined} onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($))} onSubmit={value => submitBox($, one.id, mode, value)}/>
       </ui.Box>)}
       {isOpen ? <ui.Text key={`box-${one.id}-inbar`} dimColor wrap="wrap">✎ Type it in the box above the chat</ui.Text> : null}
       {boxSaid.get(one.id) && !isOpen ? <ui.Text key={`box-${one.id}-said`} color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
       {isOpen ? null : heldReplyButtons($, ui, one.id, 'box')}
       <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-        {inBar && isOpen ? <ui.Button key={`box-${one.id}-close-${boxPresses}`} label="Close the box" onPress={press => openBox($, undefined, 'key', press.surface)}/> : null}
-        {inBar && !isOpen ? <ui.Button key={`box-${one.id}-paste-${boxPresses}`} label={isNameBox(one) ? 'Type the name' : 'Paste the key'} onPress={press => openBox($, one.id, 'key', press.surface)}/> : null}
-        {inBar && !isOpen ? <ui.Button key={`box-${one.id}-respond-${boxPresses}`} label="Give a response instead" onPress={press => openBox($, one.id, 'reply', press.surface)}/> : null}
-        {isKey && !inBar ? (<ui.Button key={`box-${one.id}-mode-${boxPresses}`} label={mode === 'reply' ? `Type ${what} instead` : 'Give a response instead'} onPress={() => void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($))}/>) : null}
-        <ui.Button key={`box-${one.id}-cancel-${boxPresses}`} label="Cancel" plain onPress={() => void cancelBox($, one.id)}/>
+        {inBar && isOpen ? <ui.Button key={`box-${one.id}-close-${boxPresses}`} label="Close" onPress={press => openBox($, undefined, 'key', press.surface)}/> : null}
+        {inBar && !isOpen ? <ui.Button key={`box-${one.id}-paste-${boxPresses}`} label={isNameBox(one) ? 'Type the name' : 'Paste the key'} variant="primary" onPress={press => openBox($, one.id, 'key', press.surface)}/> : null}
+        {inBar && !isOpen ? <ui.Button key={`box-${one.id}-respond-${boxPresses}`} label="Answer in words" plain onPress={press => openBox($, one.id, 'reply', press.surface)}/> : null}
+        {isKey && !inBar ? (<ui.Button key={`box-${one.id}-mode-${boxPresses}`} label={mode === 'reply' ? `Type ${what} instead` : 'Answer in words'} onPress={() => void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($))}/>) : null}
+        <ui.Button key={`box-${one.id}-cancel-${boxPresses}`} label="Cancel" plain dimColor onPress={() => void cancelBox($, one.id)}/>
       </ui.Box>
-    </ui.Box>) };
+    </ui.Box>) }];
     });
 };

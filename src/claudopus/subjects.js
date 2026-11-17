@@ -1,7 +1,7 @@
 "use strict";
 // The index: one line per subject, and the subject's brief
 // ---- The index: one line per subject, "- name | repo | session | state | summary" ----
-const INDEX_HEAD = '# Streams\n\nname | repo | session | state | summary\n\n';
+const INDEX_HEAD = '# Topics\n\nname | repo | session | state | summary\n\n';
 const parseIndex = (text) => text
     .split('\n')
     .filter(line => line.startsWith('- '))
