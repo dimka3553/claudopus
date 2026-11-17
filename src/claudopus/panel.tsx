@@ -348,10 +348,9 @@ const panelHooks = (on: On) => {
     const askBlock = (one: Todo, key: string, isWhole = false) => {
       const ask = one.ask
       if (!ask) return null
-      // The card's own box: the columns it wraps at, how many lines tall it is drawn for what is typed in it, and its send
-      const columns = e.props.bodyColumns - 9
+      // The card's own box: how many lines tall it is drawn, and its send
       // (the terminal keeps its one line, Enter sending: how a terminal draws a box of rows is not known here)
-      const rows = e.surface === 'terminal' ? undefined : boxLines(drafts.get(draftOf(one.id, ask)) ?? '', columns)
+      const rows = e.surface === 'terminal' ? undefined : BOX_ROWS
       const sendCard = (value: string) =>
         void (value.trim() && (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`))))
       const answers = ask.choices?.length ? ask.choices : DEFAULT_ANSWERS
@@ -417,7 +416,7 @@ const panelHooks = (on: On) => {
             ) : null
           ) : 'Input' in table && !one.chat ? (
             // The card's own box, where the bar takes none (the terminal, a folded bar, a survey): as wide as the card and as tall as
-            // its text, as the chat's own box is (boxLines); on the desktop with Send under it and no submitLabel, which the app draws
+            // BOX_ROWS lines whatever it holds; on the desktop with Send under it, a gap between, and no submitLabel, which the app draws
             // as a small send button and with which a box of several lines sends only on Cmd+Enter
             <Box width="100%" flexDirection="column">
               <table.Input
@@ -427,11 +426,11 @@ const panelHooks = (on: On) => {
                 value={draftShown(one.id, ask)}
                 rows={rows}
                 submitLabel={e.surface === 'terminal' ? 'send' : undefined}
-                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($), rows ? growBox($, `${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`, rows, boxLines(value, columns)) : undefined)}
+                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($))}
                 onSubmit={value => sendCard(value)}
               />
               {e.surface === 'terminal' ? null : (
-                <Box flexDirection="row" alignItems="center" gap={2}>
+                <Box flexDirection="row" alignItems="center" gap={2} marginTop={1}>
                   <Box flexGrow={1} flexShrink={1} minWidth={0}>
                     <Text dimColor wrap="truncate-end">Shift+Enter: new line</Text>
                   </Box>

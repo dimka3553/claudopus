@@ -1100,10 +1100,10 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
   await ask(said)
   await press(list, 'Answer in words')
   const words = await until(async () => (await fieldsIn(bar, said))[0])
-  // A key is one line; a response a box of lines that grows as it is typed, as the reply box does, and neither has the small send
-  // button the app draws for a submitLabel
+  // A key is one line; a response a box of four lines, as the reply box is, and neither has the small send button the app draws
+  // for a submitLabel
   expect(pasted?.props.rows).toBeUndefined()
-  expect(words?.props.rows).toBe(2)
+  expect(words?.props.rows).toBe(4)
   expect([pasted, words].some(one => 'submitLabel' in (one?.props ?? {}))).toBe(false)
   const kept = keychain.length
   // Sent with the row's Send, the big button first, Close the small one after it
@@ -1666,7 +1666,7 @@ test('a reply never waits behind a long command: one that may run for minutes is
   await settle()
 })
 test("where the bar above the prompt takes a box, a card's answers end with Reply in your own words, which opens the reply box in that bar and never in the panel or its Details, whose window the app drags to a box that holds the cursor (15 Nov); Close takes it away with what was typed kept; one box at a time", async ($, on) => {
-  const { appended, clock } = world(on, { panes: ['claudopus'] })
+  const { appended, clock, files, keep } = world(on, { panes: ['claudopus'] })
   await $.session.start(start)
   await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
@@ -1705,9 +1705,8 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   // and Send is the only send: a submitLabel on the box is drawn by the desktop app as a second, small send button beside it
   // (17 Nov, the person: "there are two send buttons. Can you remove the small send button and just keep the big one?")
   expect('submitLabel' in ((await boxesIn(bar))[0]?.props ?? {})).toBe(false)
-  // As tall as what is typed in it, as the chat's own box is: two lines while empty (17 Nov, the person: "the text box is usually
-  // very small")
-  expect((await boxesIn(bar))[0]?.props.rows).toBe(2)
+  // Four lines tall (17 Nov, the person: "the text box is usually very small")
+  expect((await boxesIn(bar))[0]?.props.rows).toBe(4)
   // and steady from the moment it opens: the work writing its card meanwhile draws no new box. Each new box is the app's to give
   // the cursor again, its ring fading in again, and the bar was drawn anew each time any work wrote its card (17 Nov: "it's also
   // blinking"). The same element keeps the number the engine gave it
@@ -1740,14 +1739,53 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   expect(await until(async () => bar.find({ type: 'Text', text: MARK }))).toBeDefined()
   await scrolled(0)
   expect(await until(async () => ((await bar.find({ type: 'Text', text: MARK })) ? undefined : true))).toBe(true)
-  // It grows a line for each line typed, Shift+Enter's or wrapped, up to six, and keeps the same box, the text typed in it its own
+  // Typed in, line after line, while work runs: the bar is never asked for again until the typing stops. The app builds every
+  // drawing it is given anew, the box under the cursor too, whose blue ring then fades in again, so a bar drawn again as the box
+  // grew a line, or given again as it was for each redraw that work writing its cards asked for, flashed as the person typed (17 Nov,
+  // the person: "it starts jittering and flashing blue, not blue, blue, not blue"). The box stays four lines, its text scrolling
+  // within, and the same box
+  files.set(`${MEMORY}/record-panel.on`, '')
+  files.set(`mtime:${MEMORY}/record-panel.on`, String(clock.now()))
+  await clock.advance(2100)
+  const barDrawings = async () => {
+    await clock.advance(2100)
+    const path = [...files.keys()].find(one => one.includes('/panel-record/'))
+    return (files.get(path ?? '') ?? '').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as { ev: string; component?: string }).filter(one => one.ev === 'render' && one.component === 'AbovePrompt').length
+  }
   const [growing] = await boxesIn(bar)
-  await bar.input({ key: growing?.key ?? '', text: 'The left.\nThen the right.\nThen both, side by side.', kind: 'change' } as never)
-  expect(await until(async () => ((await boxesIn(bar))[0]?.props.rows === 3 ? true : undefined))).toBe(true)
+  await bar.input({ key: growing?.key ?? '', text: 'The left.', kind: 'change' } as never)
+  const drawnBefore = await barDrawings()
+  let typed = 'The left.'
+  for (const [n, line] of ['Then the right.', 'Then both, side by side.', 'a long line that wraps '.repeat(30), 'And the scans.', 'Thanks.'].entries()) {
+    typed = `${typed}\n${line}`
+    await bar.input({ key: growing?.key ?? '', text: typed, kind: 'change' } as never)
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `t${n}`, agentId: 'a1', text: `Step ${n} of the ears` } as never)
+    await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: `u${n}`, agentId: 'a1', item: `Look at scan ${n}`, state: 'doing' } as never)
+    await clock.advance(700)
+  }
+  expect(await barDrawings()).toBe(drawnBefore)
+  expect((await boxesIn(bar))[0]?.props.rows).toBe(4)
   expect((await boxesIn(bar))[0]?.key).toBe(growing?.key)
-  expect((await boxesIn(bar))[0]?.props.value ?? '').toBe('')
-  await bar.input({ key: growing?.key ?? '', text: `${'a long line that wraps '.repeat(30)}\n`.repeat(4), kind: 'change' } as never)
-  expect(await until(async () => ((await boxesIn(bar))[0]?.props.rows === 6 ? true : undefined))).toBe(true)
+  // Half a minute after the last letter the hold ends by itself, as the app may say nothing when the cursor leaves: what was put
+  // off is drawn then, once. A letter typed holds it again at once
+  await clock.advance(31_000)
+  const drawnAfter = await barDrawings()
+  expect(drawnAfter).toBeGreaterThan(drawnBefore)
+  await bar.input({ key: growing?.key ?? '', text: `${typed} More.`, kind: 'change' } as never)
+  for (const n of [1, 2, 3]) {
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `s${n}`, agentId: 'a1', text: `Later step ${n}` } as never)
+    await clock.advance(5000)
+  }
+  expect(await barDrawings()).toBe(drawnAfter)
+  // What newly waits on the person still shows at once: a key box asked for meanwhile is in the panel within a second or two
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-k', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
+  const keyBox = '7c1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${keyBox}.json`, JSON.stringify({ id: keyBox, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: clock.now() }))
+  await clock.advance(2000)
+  expect(await until(async () => list.find({ type: 'Text', text: GITHUB_BOX }))).toBeDefined()
+  files.delete(`${MEMORY}/boxes/${keyBox}.json`)
+  await clock.advance(2000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: GITHUB_BOX })) ? undefined : true))).toBe(true)
   // Half typed: the same box through the bar's own drawings, drawn with the text it was last drawn with, never with letters
   // older than the box holds
   const [first] = await boxesIn(bar)
@@ -1808,7 +1846,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   const folded = await $.ui.mount({ ...BAND, props: { ...BAND.props, isCollapsed: true }, surface: 'desktop' } as never)
   expect(await until(async () => ((await boxesIn(list))[0]?.props.value === 'Nov' ? true : undefined))).toBe(true)
   // The card's own box is a box of lines too, with Send under it and no small send button beside it
-  expect((await boxesIn(list))[0]?.props.rows).toBe(2)
+  expect((await boxesIn(list))[0]?.props.rows).toBe(4)
   expect('submitLabel' in ((await boxesIn(list))[0]?.props ?? {})).toBe(false)
   expect((await labelled(list, 'Send')).length).toBe(1)
   expect((await boxesIn(folded)).length + (await labelled(list, OPEN)).length + (await labelled(list, CLOSE)).length).toBe(0)
@@ -1879,7 +1917,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   await clock.advance(1000)
   await clock.advance(1000)
   expect(await until(async () => ((await boxesIn(again)).length === 0 ? true : undefined))).toBe(true)
-  // The card's own box, the bar folded, grows as it is typed in, and grows again from its own height once a reply was sent and the
+  // The card's own box, the bar folded, stays four lines as it is typed in, and is a new empty one once a reply was sent and the
   // work asks anew
   await again.unmount()
   await clock.advance(2000)
@@ -1888,9 +1926,10 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   for (const [n, text] of [[7, 'Which minute?'], [8, 'Which second?']] as const) {
     await clock.advance(2000)
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k${n}`, agentId: 'a2', text, choices: ['Now', 'Later'] } as never)
-    expect(await until(async () => ((await boxesIn(list)).length === 1 && (await boxesIn(list))[0]?.props.rows === 2 ? true : undefined))).toBe(true)
+    expect(await until(async () => ((await boxesIn(list)).length === 1 && (await boxesIn(list))[0]?.props.rows === 4 && !(await boxesIn(list))[0]?.props.value ? true : undefined))).toBe(true)
     await list.input({ key: (await boxesIn(list))[0]?.key ?? '', text: five, kind: 'change' } as never)
-    expect(await until(async () => ((await boxesIn(list))[0]?.props.rows === 5 ? true : undefined))).toBe(true)
+    await clock.advance(1000)
+    expect((await boxesIn(list))[0]?.props.rows).toBe(4)
     await list.press({ key: (await labelled(list, 'Send'))[0]?.key ?? '' })
     expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('in their own words: one\ntwo')))).toBeDefined()
   }

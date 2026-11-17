@@ -135,7 +135,7 @@ const lookHold = ($: EngineInterface) => {
   const late = holdAt && isTimed ? now - holdAt - HOLD_LOOK : 0
   holdAt = now
   if (late < LATE) {
-    if (behindLooks > 0 && (behindLooks -= 1) === 0) $.ui.invalidate('ui.render')
+    if (behindLooks > 0 && (behindLooks -= 1) === 0) drawAgain($)
     return
   }
   behindLooks = BEHIND_FOR / HOLD_LOOK
@@ -4704,22 +4704,16 @@ const askMark = (ask: NonNullable<Todo['ask']>) => `${ask.at}-${[...ask.text].re
 const drafts = new Map<string, string>()
 const draftOf = (id: string, ask: NonNullable<Todo['ask']>) => `${id}|${askMark(ask)}`
 const hasDraft = (id: string) => [...drafts].some(([key, value]) => key.startsWith(`${id}|`) && Boolean(value))
-const BOX_LEAST = 2
-const BOX_MOST = 6
-const boxLines = (text: string, columns: number) => {
-  const wide = Math.max(12, columns - 6)
-  const lines = text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil([...line].length / wide)), 0)
-  return Math.min(BOX_MOST, Math.max(BOX_LEAST, lines))
-}
+const BOX_ROWS = 4
 const TYPING = 30_000
 let typing = 0
 let isTyping = false
 const CALM = 10_000
 const heldDrawings = new Map<string, { shape: string; content: string; at: number; fresh: number; drawing: unknown }>()
 let freshness = 0
-const drawAgain = ($: EngineInterface) => {
+const drawAgain = ($: EngineInterface, isThroughTyping = false) => {
   freshness += 1
-  void drawFresh($)
+  void drawFresh($, isThroughTyping)
 }
 const drawnDrafts = new Map<string, string>()
 const draftShown = (id: string, ask: NonNullable<Todo['ask']>) => draftDrawn(draftOf(id, ask))
@@ -4737,7 +4731,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], replyTo, replyMark, growths])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], replyTo, replyMark])
 }
 const calmCard = (one: Todo) => {
   const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, ...rest } = one as Todo & Record<string, unknown>
@@ -4757,7 +4751,16 @@ const freeTimes = ($: EngineInterface) => {
   isTyping = false
   if (wasHeld) drawAgain($)
 }
-const drawFresh = async ($: EngineInterface) => (recordEvent($, 'redraw-all'), $.ui.invalidate('ui.render'))
+let isRedrawOwed = false
+const isBoxHeld = (at: number) => Boolean(replyTo || boxOpen) && barBoxAt > 0 && at - barBoxAt < TYPING
+const drawFresh = async ($: EngineInterface, isThroughTyping = false) => {
+  if (!isThroughTyping && isBoxHeld(await $.clock.now())) return void ((isRedrawOwed = true), recordEvent($, 'redraw-owed'))
+  isRedrawOwed = false
+  recordEvent($, 'redraw-all')
+  $.ui.invalidate('ui.render')
+}
+let urgentDrawn = ''
+const urgentSign = () => JSON.stringify([waiting.map(one => [one.agent, one.tool]), asked.length, looseGates.map(one => one.id), boxes.map(one => one.id)])
 const drawnPanes = new Map<string, { shape: string; content: string; at: number; side: string }>()
 const sideSign = () =>
   JSON.stringify([
@@ -4824,15 +4827,19 @@ let calmAt = 0
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
 const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   const now = await $.clock.now()
+  const urgent = urgentSign()
+  if (urgentDrawn && urgent !== urgentDrawn) drawAgain($, true)
+  urgentDrawn = urgent
   const list = drawnPanes.get(LIST) ?? { shape: '', content: '', at: 0, side: sideSign() }
   const side = sideSign()
-  let isNew = !isTyping && list.side !== side
-  for (const [path, text] of isTyping ? [] : drawnFiles) {
+  const isHeld = isBoxHeld(now)
+  let isNew = !isHeld && list.side !== side
+  for (const [path, text] of isHeld ? [] : drawnFiles) {
     const now = await readOr($, path)
     if (now !== text) (drawnFiles.set(path, now), (isNew = true))
   }
   if (isNew) return void ((list.side = side), (calmBumps += 1), drawAgain($), (list.side = sideSign()))
-  if (!(isMoving || outputMoved) || isTyping || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
+  if (!(isMoving || outputMoved) || isBoxHeld(now) || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
   calmAt = now
   outputMoved = false
   await writeHeldOthers($)
@@ -4930,7 +4937,7 @@ const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) =
   if (one?.ask) boxOpen = undefined
   replyMark = one?.ask ? askMark(one.ask) : ''
   barBoxAt = 0
-  lastGrow = ''
+  isBarSettling = false
   presses += 1
   redraw($)
   const ask = one?.ask
@@ -6120,7 +6127,7 @@ const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surf
   barKeyTyped.clear()
   if (id) (boxHeldReply.delete(id), boxSaid.delete(id))
   barBoxAt = 0
-  lastGrow = ''
+  isBarSettling = false
   boxPresses += 1
   drawAgain($)
   const bar = barIds.get(surface)
@@ -6189,11 +6196,10 @@ const heldReplyButtons = ($: EngineInterface, ui: Ui, id: string, where: string)
       <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send as answer" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)} />
     </ui.Box>
   ) : null
-const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode, columns: number) => {
+const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
   const name = boxNameOf(one)
   const head = mode === 'reply' ? `↳ Instead of ${name ?? (isNameBox(one) ? 'the name' : 'the key')}` : name ? `↳ ${name}` : `↳ The key's name`
   const key = barKeyBoxKey(one.id, mode)
-  const rows = barKeyRows(one.id, mode, columns)
   return (
     <ui.Box key="band-key" flexDirection="column" flexShrink={0} width="100%">
       <ui.Box flexDirection="row" height={1} overflow="hidden">
@@ -6204,9 +6210,9 @@ const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode, column
           <ui.Input
             key={key}
             placeholder={mode === 'reply' ? 'Type your answer' : isNameBox(one) ? 'Type the name' : 'Paste the key'}
-            rows={rows}
+            rows={mode === 'reply' ? BOX_ROWS : undefined}
             autoFocus
-            onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)), mode === 'reply' ? growBox($, key, rows ?? 1, boxLines(value, columns)) : undefined)}
+            onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
             onSubmit={value => submitBox($, one.id, mode, value)}
           />
         </ui.Box>
@@ -6217,7 +6223,6 @@ const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode, column
     </ui.Box>
   )
 }
-const barKeyRows = (id: string, mode: BoxMode, columns: number) => (mode === 'reply' ? boxLines(barKeyTyped.get(id) ?? '', columns) : undefined)
 const barKeyTarget = () => (boxOpen ? boxes.find(one => one.id === boxOpen?.id && !one.key) : undefined)
 
 const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '') => {
@@ -10783,7 +10788,7 @@ const commandHooks = (on: On) => {
 
   on('ui.focus', async ($, e, next) => {
     const isInBarBox = e.plugin === 'claudopus' && isBarBox(e.element)
-    if (isInBarBox) barBoxAt = await $.clock.now()
+    if (isInBarBox && (e.origin.kind === 'person' || barBoxAt === 0)) barBoxAt = await $.clock.now()
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
       if (e.plugin === 'claudopus') await engage($)
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
@@ -11270,9 +11275,8 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
       </ui.Button>
     </ui.Box>
   ) : null
-const barReply = ($: EngineInterface, ui: Ui, one: Todo, columns: number) => {
+const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
   const draft = barDraft(one.id)
-  const rows = boxLines(drafts.get(draft) ?? '', columns)
   const send = (value: string) => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
   return (
     <ui.Box key="band-reply" flexDirection="column" flexShrink={0} width="100%">
@@ -11285,9 +11289,9 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo, columns: number) => {
             key={barBoxKey(one.id)}
             placeholder="Type your reply"
             value={draftDrawn(draft)}
-            rows={rows}
+            rows={BOX_ROWS}
             autoFocus
-            onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)), growBox($, barBoxKey(one.id), rows, boxLines(value, columns)))}
+            onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
             onSubmit={send}
           />
         </ui.Box>
@@ -11298,7 +11302,7 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo, columns: number) => {
 }
 const BOX_KEYS = 'Enter sends · Shift+Enter for a new line'
 const barFoot = ($: EngineInterface, ui: Ui, where: string, mark: number, onSend: () => void, onClose: (press: { surface: string }) => void, isLines = true) => (
-  <ui.Box key={`${where}-foot`} flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
+  <ui.Box key={`${where}-foot`} flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
     <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
       <ui.Text dimColor wrap="truncate-end">{isLines ? BOX_KEYS : 'Enter sends'}</ui.Text>
     </ui.Box>
@@ -11308,22 +11312,11 @@ const barFoot = ($: EngineInterface, ui: Ui, where: string, mark: number, onSend
     </ui.Box>
   </ui.Box>
 )
-let lastGrow = ''
-let growths = 0
-const growBox = ($: EngineInterface, key: string, drawn: number, wanted: number) => {
-  const ask = `${key}|${drawn}|${wanted}`
-  if (wanted === drawn || ask === lastGrow) return
-  lastGrow = ask
-  growths += 1
-  drawAgain($)
-}
 const barHeld = new Map<string, { shape: string; mark: string; drawing: unknown }>()
-const barColumns = new Map<string, number>()
-const barShape = (surface: string) => {
-  const columns = barColumns.get(surface) ?? 80
+const barShape = () => {
   const keyBox = barKeyTarget()
-  if (boxOpen && keyBox) return `key|${barKeyBoxKey(keyBox.id, boxOpen.mode)}|${boxSaid.get(keyBox.id) ?? ''}|${boxHeldReply.has(keyBox.id)}|${barKeyRows(keyBox.id, boxOpen.mode, columns) ?? 1}`
-  return replyTo ? `reply|${barBoxKey(replyTo)}|${boxLines(drafts.get(barDraft(replyTo)) ?? '', columns)}|${barCardsDrawn}` : ''
+  if (boxOpen && keyBox) return `key|${barKeyBoxKey(keyBox.id, boxOpen.mode)}|${boxSaid.get(keyBox.id) ?? ''}|${boxHeldReply.has(keyBox.id)}`
+  return replyTo ? `reply|${barBoxKey(replyTo)}|${barCardsDrawn}` : ''
 }
 let barCardsDrawn = ''
 const barCardsSign = (cards: Todo[]) => {
@@ -11331,11 +11324,18 @@ const barCardsSign = (cards: Todo[]) => {
   return target?.ask ? `${target.id}|${titleOf(target)}` : ''
 }
 const lookBar = async ($: EngineInterface) => {
+  if (isRedrawOwed && !isBoxHeld(await $.clock.now())) drawAgain($)
   if (!barHeld.size || !replyTo) return
   const sign = barCardsSign(await read($, todos))
   if (sign === barCardsDrawn) return
   barCardsDrawn = sign
-  drawAgain($)
+  drawAgain($, true)
+}
+let isBarSettling = false
+const settleBar = ($: EngineInterface) => {
+  if (isBarSettling) return void (isBarSettling = false)
+  isBarSettling = true
+  void drawFresh($, true)
 }
 let barFlipAt = 0
 const BAND_TERM_MARK = 3
@@ -11347,15 +11347,15 @@ const bandHooks = (on: On) => {
     const key = `bar|${e.requestId ?? ''}|${e.surface}|${e.props.bodyColumns}|${e.props.isCollapsed ? 1 : 0}`
     const at = await $.clock.now()
     const recent = lastShown.get(key) as Awaited<ReturnType<typeof next>> | undefined
-    const isBoxHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
-    if (recent && !isBoxHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
-    if (recent && !isBoxHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
+    const isBarHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
+    if (recent && !isBarHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
+    if (recent && !isBarHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
     freshBegins(key)
     const madeFrom = Date.now()
     let made: { at: number; ms: number; fresh: number } | undefined
     try {
       const drawing = await drawBar()
-      if (recent && !isBoxHeld && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent)
+      if (recent && !isBarHeld && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent)
       lastShown.set(key, drawing)
       made = { at, ms: Date.now() - madeFrom, fresh: freshness }
       return drawing
@@ -11366,11 +11366,10 @@ const bandHooks = (on: On) => {
     const canBox = e.surface === 'desktop' && 'Input' in uiOf($, e) && !e.props.hasSurvey && !e.props.isCollapsed
     if (e.requestId) barIds.set(e.surface, e.requestId)
     const flipAt = await $.clock.now()
-    if (canBox) barColumns.set(e.surface, e.props.bodyColumns)
     const kept = barHeld.get(e.surface)
-    if (kept && canBox && barBoxes.has(e.surface) && (replyTo || boxOpen) && kept.shape === barShape(e.surface)) {
+    if (kept && canBox && barBoxes.has(e.surface) && (replyTo || boxOpen) && kept.shape === barShape()) {
       const isHeldNow = isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)
-      if (isHeldNow || kept.mark === (await markerSign($, e.surface))) return kept.drawing as Awaited<ReturnType<typeof next>>
+      if (isHeldNow || kept.mark === (await markerSign($, e.surface))) return ((isBarSettling = false), kept.drawing as Awaited<ReturnType<typeof next>>)
     }
     const cards = await read($, todos)
     if (canBox !== barBoxes.has(e.surface)) {
@@ -11440,9 +11439,9 @@ const bandHooks = (on: On) => {
     const keyBox = canBox ? barKeyTarget() : undefined
     if (boxOpen && canBox && !keyBox) boxOpen = undefined
     if (keyBox && boxOpen) {
-      const shape = barShape(e.surface)
+      const shape = barShape()
       const marker = await waitMarker($, ui, e.surface)
-      const row = barKeyRow($, ui, keyBox, boxOpen.mode, e.props.bodyColumns)
+      const row = barKeyRow($, ui, keyBox, boxOpen.mode)
       const drawing = marker ? (
         <Box flexDirection="column">
           {marker}
@@ -11452,15 +11451,16 @@ const bandHooks = (on: On) => {
         row
       )
       barHeld.set(e.surface, { shape, mark: await markerSign($, e.surface), drawing })
+      settleBar($)
       return drawing
     }
     const target = canBox ? barTarget(cards) : undefined
     if (replyTo && canBox && !target) ((replyTo = ''), (replyMark = ''))
     if (target?.ask) {
       barCardsDrawn = barCardsSign(cards)
-      const shape = barShape(e.surface)
+      const shape = barShape()
       const marker = await waitMarker($, ui, e.surface)
-      const reply = barReply($, ui, target, e.props.bodyColumns)
+      const reply = barReply($, ui, target)
       const drawing = marker ? (
         <Box flexDirection="column">
           {marker}
@@ -11470,6 +11470,7 @@ const bandHooks = (on: On) => {
         reply
       )
       barHeld.set(e.surface, { shape, mark: await markerSign($, e.surface), drawing })
+      settleBar($)
       return drawing
     }
     barHeld.delete(e.surface)
@@ -11770,8 +11771,7 @@ const panelHooks = (on: On) => {
     const askBlock = (one: Todo, key: string, isWhole = false) => {
       const ask = one.ask
       if (!ask) return null
-      const columns = e.props.bodyColumns - 9
-      const rows = e.surface === 'terminal' ? undefined : boxLines(drafts.get(draftOf(one.id, ask)) ?? '', columns)
+      const rows = e.surface === 'terminal' ? undefined : BOX_ROWS
       const sendCard = (value: string) =>
         void (value.trim() && (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`))))
       const answers = ask.choices?.length ? ask.choices : DEFAULT_ANSWERS
@@ -11843,11 +11843,11 @@ const panelHooks = (on: On) => {
                 value={draftShown(one.id, ask)}
                 rows={rows}
                 submitLabel={e.surface === 'terminal' ? 'send' : undefined}
-                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($), rows ? growBox($, `${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`, rows, boxLines(value, columns)) : undefined)}
+                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($))}
                 onSubmit={value => sendCard(value)}
               />
               {e.surface === 'terminal' ? null : (
-                <Box flexDirection="row" alignItems="center" gap={2}>
+                <Box flexDirection="row" alignItems="center" gap={2} marginTop={1}>
                   <Box flexGrow={1} flexShrink={1} minWidth={0}>
                     <Text dimColor wrap="truncate-end">Shift+Enter: new line</Text>
                   </Box>
