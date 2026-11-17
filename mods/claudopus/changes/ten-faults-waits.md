@@ -1,8 +1,0 @@
-- A task whose step ended while all its helpers sit silent (nothing new from them for 12 minutes, no command of theirs running) now follows a fixed schedule: at 12 minutes Claudopus starts it again to check on them, at 24 it asks it to hand back what it has, and at 36 the chat is told plainly that it is stuck and may send it a message. The schedule starts over only when a helper hands back a result or prints something new.
-- Once told to hand back, the task's report goes through even while its helpers run: silent helpers are stopped with it, and a helper still at work goes on, its later result reaching the chat with a note that it came late.
-- Helpers at work, such as a render running in the background or a job printing a moving frame count, are never taken for silent, and the task's card says it waits on its helpers' work rather than that nothing moved.
-- A wait for a file or a page now gives up after 15 minutes unless the task names another time, and never waits more than an hour. When it runs out, the task is started again and told to hand back what it has, and Claudopus does not look for the same file or page again.
-- A task's card says by when Claudopus starts it again, even if what it waits for never comes.
-- If Claudopus cannot start a waiting task again, the chat is told, so it can send the task a message instead of saying it is still in progress.
-- When a task has made no progress and Claudopus does nothing about it, the chat may now send it a message asking what it waits on.
-- A task waiting on something it asked Claudopus to look for is no longer flagged as stuck while that look runs, as the look has its own end.
