@@ -527,7 +527,7 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   }
   const gate5 = async () => (await list.findAll({ type: 'Button' })).find(b => /^gate-step-a5-.*once/.test(String(b.key ?? '')))
   await working('a5', 'release', '/repo/wt')
-  expect(await until(async () => list.find({ type: 'Text', text: 'On your "Release it", Claudopus does the last step once Claude ends this turn' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'On your "Release it", Claudopus does the last step once Claude finishes' }))).toBeDefined()
   await clock.advance(60_000)
   expect(await gate5()).toBeUndefined()
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h-a5', agentId: 'a5', message: 'Claudopus releases it.' } as never)
