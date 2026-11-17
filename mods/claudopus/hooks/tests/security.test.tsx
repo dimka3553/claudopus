@@ -83,6 +83,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const submitted: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
+  // How many lines the mod had written into chats as each SubagentHandback reached the engine
+  const atHandback: number[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
   // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
@@ -512,6 +514,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
     // A command marked to fail at its end (npm run build # fails) fails as the engine's does, with what the test lays in `fails`
     if (e.tool === 'Bash' && command.endsWith(' # fails')) return { result: `Exit code 1\n${files.get('fails') ?? ''}`, isError: true } as never
+    // Claude Code's auto mode refuses this tool outright, as it does a background task's call, with no prompt to the person
+    if (files.get('auto-refuse') === e.tool) return { result: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access]. If you have other tasks that don't depend on this action, continue working on those.", isError: true } as never
+    // What the chat had been told when a hand-back reached the engine, which hands it on at once
+    if (e.tool === 'SubagentHandback') atHandback.push(appended.length)
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,
@@ -593,7 +599,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -828,13 +834,38 @@ test("F-007 F-014 F-021 · work's change to config.json, the rules or the roles 
     `python3 -c "import os;os.remove('/home/sam/.claude/claudopus/config.json')"`,
     `python3 -c "print(open('/home/sam/.claude/claudopus/config.json').read())" > /home/sam/.claude/claudopus/rules/CLAUDE.md`,
     `python3 -c "exec('x=1');print(open('/home/sam/.claude/claudopus/config.json').read())"`,
-    `node -e "require('fs').writeFileSync('/home/sam/.claude/claudopus/config.json','{}')"`])
+    `node -e "require('fs').writeFileSync('/home/sam/.claude/claudopus/config.json','{}')"`,
+    // sent into a file with no space before >, or by tee
+    `python3 -c "print(open('/home/sam/.claude/claudopus/config.json').read())"> /home/sam/.claude/claudopus/rules/CLAUDE.md`,
+    `python3 -c 'print(1)'>/home/sam/.claude/claudopus/config.json`,
+    `python3 -c "print(1)" | tee /home/sam/.claude/claudopus/config.json`,
+    // a mode or a flag the check cannot read, and code run from elsewhere
+    `python3 -c "open('/home/sam/.claude/claudopus/config.json',chr(119))"`,
+    `python3 -c "m='w';open('/home/sam/.claude/claudopus/config.json',m)"`,
+    `python3 -c "import os;os.open('/home/sam/.claude/claudopus/config.json',1025)"`,
+    `node -e "require('fs').openSync('/home/sam/.claude/claudopus/config.json',1537)"`,
+    `python3 -c "import runpy;runpy.run_path('/tmp/w.py')" /home/sam/.claude/claudopus/config.json`,
+    `python3 -c "list(map(open,['/home/sam/.claude/claudopus/config.json'],['w']))"`,
+    `python3 -c "print(f'{open(chr(47)).name}')" /home/sam/.claude/claudopus/config.json`,
+    // the standard library's own writers
+    `python3 -c "import zipfile;zipfile.ZipFile('/home/sam/.claude/claudopus/config.json','w')"`,
+    `python3 -c "import io;io.FileIO('/home/sam/.claude/claudopus/config.json','w')"`,
+    `python3 -c "import urllib.request as u;u.urlretrieve('http://x','/home/sam/.claude/claudopus/config.json')"`,
+    `python3 -c "import logging;logging.basicConfig(filename='/home/sam/.claude/claudopus/config.json')"`,
+    `python3 -c "import shelve;shelve.open('/home/sam/.claude/claudopus/config.json')"`,
+    `python3 -c "import os;os.chflags('/home/sam/.claude/claudopus/config.json',2)"`,
+    `python3 -c "import pathlib;pathlib.Path('/home/sam/.claude/claudopus/config.json').replace('/tmp/x')"`,
+    `python3 -c "import os;os.__dict__['sys'+'tem']('true')" /home/sam/.claude/claudopus/config.json`])
     expect(((await $.tool.call({ tool: 'Bash', tool_use_id: `b${command.length}`, agentId: 'a1', command } as never)) as { deny?: string }).deny).toContain('only with the Edit or Write tool')
   for (const [i, command] of [
     'cat ~/.claude/claudopus/config.json',
     `python3 -c "import json;print(json.load(open('/home/sam/.claude/claudopus/config.json'))['macs'][0])"`,
     `python3 -c "import sys;sys.stdout.write(open('/home/sam/.claude/claudopus/rules/CLAUDE.md', encoding='utf-8').read())"`,
     `node -e "console.log(JSON.parse(require('fs').readFileSync('/home/sam/.claude/claudopus/config.json','utf8')).name)"`,
+    `python3 -c "import json,os;print(json.load(open(os.path.join(os.path.expanduser('~'),'.claude/claudopus/config.json'))).get('name'))" 2>/dev/null`,
+    `python3 -c "print(open('/home/sam/.claude/claudopus/rules/CLAUDE.md').read().replace('a','b'))" | head -5`,
+    `python3 -I -c "from pathlib import Path;print(Path('/home/sam/.claude/claudopus/config.json').read_text())"`,
+    `node -pe "require('fs').readFileSync('/home/sam/.claude/claudopus/config.json','utf8')"`,
   ].entries())
     expect([command, ((await $.tool.call({ tool: 'Bash', tool_use_id: `r${i}`, agentId: 'a1', command } as never)) as { result?: unknown }).result]).toEqual([command, 'ran'])
   void files

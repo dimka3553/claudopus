@@ -83,6 +83,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const submitted: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
+  // How many lines the mod had written into chats as each SubagentHandback reached the engine
+  const atHandback: number[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
   // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
@@ -512,6 +514,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
     // A command marked to fail at its end (npm run build # fails) fails as the engine's does, with what the test lays in `fails`
     if (e.tool === 'Bash' && command.endsWith(' # fails')) return { result: `Exit code 1\n${files.get('fails') ?? ''}`, isError: true } as never
+    // Claude Code's auto mode refuses this tool outright, as it does a background task's call, with no prompt to the person
+    if (files.get('auto-refuse') === e.tool) return { result: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access]. If you have other tasks that don't depend on this action, continue working on those.", isError: true } as never
+    // What the chat had been told when a hand-back reached the engine, which hands it on at once
+    if (e.tool === 'SubagentHandback') atHandback.push(appended.length)
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,
@@ -593,7 +599,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -1205,6 +1211,14 @@ test("a chat's own thread may only read, run a single command in the background,
     'open http://localhost:3000/pricing',
     'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/pricing',
     'curl -sSI --max-time 5 http://127.0.0.1:8080/',
+    'curl -s -o /dev/null -w "%{http_code}\\n" http://localhost:3000',
+    'curl -so /dev/null -m5 localhost:3000/health',
+    'curl -sI http://[::1]:3000/',
+    'curl -s --url http://localhost:3000/ -o /dev/null',
+    'open https://github.com/o/r/blob/main/tools/run.py',
+    'open http://localhost:3000/main.js',
+    'open -R /repo/run.sh',
+    'open -e /repo/notes.txt',
   ].entries())
     expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `t1g${i}`, command } as never)).deny]).toEqual([command, undefined])
   // but nothing that runs what it opens, sends data, writes a file or asks another machine
@@ -1223,13 +1237,52 @@ test("a chat's own thread may only read, run a single command in the background,
     'curl -K /repo/curlrc http://localhost:3000/',
     'curl -s https://example.com/',
     'curl -s http://localhost@example.com/',
+    'curl -sL http://localhost:3000/go',
+    'curl -s -w @/repo/fmt.txt http://localhost:3000/',
+    'curl -X GET http://localhost:3000/',
+    'curl -H "X-HTTP-Method-Override: DELETE" http://localhost:3000/',
+    'curl -T /repo/a http://localhost:3000/',
+    'curl -F a=@/repo/a http://localhost:3000/',
+    'open /repo/scripts/deploy',
+    'open /Applications/Calculator.app/Contents/MacOS/Calculator',
+    'open -a /repo/build/Release/Foo.app /repo/x.png',
+    'open -a "Python Launcher" /repo/x.txt',
+    'open /repo/dist/build.zip',
+    'open /repo/Xcode_16.xip',
+    'open "file:///repo/deploy%2Ecommand"',
+    'open /repo/link.fileloc',
+    'open /repo/dev.cer',
   ].entries())
     expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `t1o${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('Start a fresh agent')])
-  // The browser pane's preview, which shows a page or a local server, the chat starts itself; the pane's clicks and scripts are a task's
-  for (const [i, tool] of ['mcp__Claude_Browser__preview_start', 'mcp__Claude_Browser__preview_list', 'mcp__remote-devices__Claude_Browser__preview_start'].entries())
-    expect([tool, (await $.tool.call({ tool, tool_use_id: `t1p${i}`, url: 'http://localhost:3000' } as never)).deny]).toEqual([tool, undefined])
-  for (const [i, tool] of ['mcp__Claude_Browser__computer', 'mcp__Claude_Browser__javascript_tool', 'mcp__Claude_Browser__form_input'].entries())
-    expect([tool, (await $.tool.call({ tool, tool_use_id: `t1q${i}` } as never)).deny]).toEqual([tool, expect.stringContaining('Start a fresh agent')])
+  // A refusal of one of these says the shape the chat can run it in
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1o-shape', command: 'curl -sL http://localhost:3000/go' } as never)).deny).toContain('A `curl` the chat runs itself is a plain GET or HEAD')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1o-shape2', command: 'open /repo/scripts/deploy' } as never)).deny).toContain('An `open` the chat runs itself shows a web page')
+  // A .curlrc in the home folder, which may send curl's output into a file, is kept out with -q first
+  files.set('/home/sam/.curlrc', 'output = /repo/x')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1rc', command: 'curl -s http://localhost:3000/' } as never)).deny).toContain('-q comes first')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1rc-q', command: 'curl -q -s http://localhost:3000/' } as never)).deny).toBeUndefined()
+  files.delete('/home/sam/.curlrc')
+  // The browser pane's preview of a local page, its list, its server's log and its tabs the chat calls itself; a preview that starts a
+  // server by name or shows another site, a stop, and the pane's clicks and scripts are a task's
+  for (const [i, call] of [
+    { tool: 'mcp__Claude_Browser__preview_start', url: 'http://localhost:3000' },
+    { tool: 'mcp__remote-devices__Claude_Browser__preview_start', url: 'http://127.0.0.1:5173/x' },
+    { tool: 'mcp__Claude_Browser__preview_list' },
+    { tool: 'mcp__Claude_Browser__preview_logs' },
+  ].entries())
+    expect([call.tool, (await $.tool.call({ ...call, tool_use_id: `t1p${i}` } as never)).deny]).toEqual([call.tool, undefined])
+  for (const [i, call] of [
+    { tool: 'mcp__Claude_Browser__preview_start', name: 'dev' },
+    { tool: 'mcp__Claude_Browser__preview_start' },
+    { tool: 'mcp__Claude_Browser__preview_start', name: 'dev', url: 'http://localhost:3000' },
+    { tool: 'mcp__Claude_Browser__preview_start', url: 'https://example.com' },
+    { tool: 'mcp__Claude_Browser__preview_stop', name: 'dev' },
+    { tool: 'mcp__Claude_Browser__computer' },
+    { tool: 'mcp__Claude_Browser__javascript_tool' },
+    { tool: 'mcp__Claude_Browser__form_input' },
+  ].entries())
+    expect([call, (await $.tool.call({ ...call, tool_use_id: `t1q${i}` } as never)).deny]).toEqual([call, expect.stringContaining('Start a fresh agent')])
+  expect((await $.tool.call({ tool: 'mcp__Claude_Browser__preview_start', tool_use_id: 't1q-shape', name: 'dev' } as never)).deny).toContain('only with a `url` of a local address')
   // A push only of the branch it is on, never from main and never to it by another spelling, nor anything git is set to run
   files.set('git:branch', 'fix-nose')
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1h', command: 'git push -u origin fix-nose' } as never)).deny).toBeUndefined()

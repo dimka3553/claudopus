@@ -265,6 +265,49 @@ const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
   if (toolUseId && waiting.some(one => one.id === toolUseId)) settle($, toolUseId, undefined, undefined, 'running')
 }
 
+// ---- A call Claude Code refused a background task with no prompt for the person: a question on the task's card ----
+// A background task or helper has no box of the app's own: Claude Code's auto mode, its safety checks, or a call that needs a person
+// in a run nobody can be asked in refuse the call outright, and no PermissionRequest is raised for it (16 Nov: 47 refusals that
+// way, none put to the person). Its task's card tells the person what was refused and why, and the answer goes to the task. Claudopus
+// never lets a refused call through itself: what Claude Code refuses stays refused, and the person allows it in Claude Code if they want
+const OTHER_WAY = 'Do it another way'
+const LEAVE_OUT = 'Leave it out'
+const CC_REFUSED = /denied by the Claude Code auto mode classifier|denied by a built-in Claude Code safety check|no approval surface in this session|nobody can be asked in this headless run/i
+// A check that gave no verdict is no refusal: Claude may try again as it is
+const NO_VERDICT = /gave no verdict|transient failure/i
+const refusalOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isError?: unknown } | undefined) => {
+  if (!r || (!r.deny && !r.isError)) return ''
+  const words = [r.deny, r.text, r.result].map(one => (typeof one === 'string' ? one : '')).join('\n')
+  return CC_REFUSED.test(words) && !NO_VERDICT.test(words) ? words : ''
+}
+const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: string, call: Record<string, unknown>, r: Parameters<typeof refusalOf>[0]) => {
+  const words = refusalOf(r)
+  if (!words || !dir || isOff) return
+  const list = await read($, todos)
+  const top = list.find(one => one.id === topOf(list, agent))
+  const own = list.find(one => one.id === agent)
+  if (!top || top.chat) return
+  // A question already waiting on the person is never replaced: the refusal is in the work's own result, for it to say
+  if (top.ask) return void (await log($, `refusal of ${tool} for ${agent} not asked: its card asks something already`))
+  const what = promptOf(tool, call, list, true)
+  const who = own?.parentId ? `a helper of this task ("${titleOf(own)}")` : 'this task'
+  const text = cut(`Claude Code refused ${who}: ${what.text}.`, ASK_TEXT)
+  const reason = cut(oneLine(words.replace(/^Permission for this (?:action|command) was /i, '')), 600)
+  const details = [
+    what.detail ? `What it is: ${what.detail}` : '',
+    `Why: it was ${reason}`,
+    `${OTHER_WAY}: Claude looks for another way to get there. ${LEAVE_OUT}: Claude carries on without it and says so in its report. To let it run, allow it in Claude Code's own settings and tell the task in your own words.`,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  const at = await $.clock.now()
+  await change($, agent, one => ({ ...one, ask: { text, details, choices: [OTHER_WAY, LEAVE_OUT], from: agent, at } }))
+  await log($, `refusal of ${tool} for ${agent} put to the person on its card`)
+  const card = (await read($, todos)).find(one => one.id === top.id)
+  if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
+  if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
+}
+
 const OWN_CALLS = ['SendMessage', 'TaskStop']
 const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
 

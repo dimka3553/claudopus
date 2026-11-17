@@ -287,3 +287,29 @@ test("a No pressed after Claude Code's box said yes does not stand: the card say
   await list.unmount()
 })
 
+
+test("a call Claude Code refuses a background task with no prompt, as auto mode does, is put to the person on the task's card, the answer goes to the task, and Claudopus never lets the call through itself", async ($, on) => {
+  const { files, clock, resumed } = world(on, { agents: { a1: 'running' } })
+  // Beneath the mod the engine would put each of the checks below to its mode, which settles the ask
+  on('tool.check', () => ({ decision: 'ask' }) as never)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'write the notes', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Write the notes', prompt: 'write the notes' } as never)
+  const call = { tool: 'Edit', agentId: 'a1', file_path: '/repo/notes.md', old_string: 'old line', new_string: 'new line' }
+  files.set('auto-refuse', 'Edit')
+  await $.tool.call({ ...call, tool_use_id: 'e1' } as never)
+  files.delete('auto-refuse')
+  await clock.advance(1000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const asks = 'Claude Code refused this task: Change the file notes.md.'
+  expect(await until(async () => list.find({ type: 'Text', text: asks }))).toBeDefined()
+  const check = (id: string) => $.tool.check({ tool: 'Edit', input: { file_path: '/repo/notes.md', old_string: 'old line', new_string: 'new line' }, agentId: 'a1', tool_use_id: id } as never) as Promise<{ decision?: string }>
+  expect((await check('chk-2')).decision).toBe('ask')
+  const other = await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Do it another way'))
+  await list.press({ key: other?.key ?? '' })
+  expect(await until(async () => resumed.find(one => one.startsWith('a1: ') && one.includes('Do it another way')) ?? (await list.find({ type: 'Text', text: asks }) ? undefined : 'cleared'))).toBeDefined()
+  await clock.advance(1000)
+  // The press is the task's answer, never a permission: the same call is still the mode's to settle
+  expect((await check('chk-3')).decision).toBe('ask')
+  await list.unmount()
+})

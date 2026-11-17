@@ -83,6 +83,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const submitted: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
+  // How many lines the mod had written into chats as each SubagentHandback reached the engine
+  const atHandback: number[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
   // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
@@ -512,6 +514,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
     // A command marked to fail at its end (npm run build # fails) fails as the engine's does, with what the test lays in `fails`
     if (e.tool === 'Bash' && command.endsWith(' # fails')) return { result: `Exit code 1\n${files.get('fails') ?? ''}`, isError: true } as never
+    // Claude Code's auto mode refuses this tool outright, as it does a background task's call, with no prompt to the person
+    if (files.get('auto-refuse') === e.tool) return { result: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access]. If you have other tasks that don't depend on this action, continue working on those.", isError: true } as never
+    // What the chat had been told when a hand-back reached the engine, which hands it on at once
+    if (e.tool === 'SubagentHandback') atHandback.push(appended.length)
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,
@@ -593,7 +599,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -762,7 +768,8 @@ test('three single lookups in a row are told to go together or to a helper; two 
 test("work never waits for its helpers: it is told it may end its step, it is let go when it does, and a helper's result that the engine hands the chat is passed on to it, which starts it again; a report handed back while helpers run is still held", async ($, on) => {
   const agents: Record<string, string> = {}
   const talk: unknown[] = []
-  const { stopped, resumed, appended, clock, stepped } = world(on, { agents, talk })
+  const unresumable = new Set<string>()
+  const { stopped, resumed, appended, clock, stepped, atHandback } = world(on, { agents, talk, unresumable })
   on('classic.SubagentStop', () => ({}) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -830,11 +837,32 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a3', message: 'The nose is drawn at every size.' } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h3', reason: 'answer', agentId: 'a3' } as never)
   expect(await until(async () => resumed.find(one => one.startsWith('a1: From Claudopus: your helper "Draw the nose" has finished') && one.endsWith('The nose is drawn at every size.')))).toBeDefined()
-  expect(await until(async () => appended.find(one => /^undefined: From Claudopus: the result of the helper "Draw the nose" reached this chat because the task ".*" had ended its step/.test(one)))).toBeDefined()
+  // and the chat is told so before the hand-back reaches it, as its turn starts with the hand-back (16 Nov: its turn began before a
+  // note written as the helper's turn ended, and it sent the result on by hand), once
+  const passed = (helper: string) => (one: string) => new RegExp(`^undefined: From Claudopus: the result of the helper "${helper}" reached this chat because the task ".*" had ended its step`).test(one)
+  expect(appended.slice(0, atHandback.at(-1)).filter(passed('Draw the nose'))).toHaveLength(1)
+  expect(appended.filter(passed('Draw the nose'))).toHaveLength(1)
+  // A helper the engine still lists as running as its turn ends has its result passed on once the engine lists it as ended
+  await $.agent.spawn({ ...spawn, description: 'Draw the chin', prompt: 'draw', parentAgentId: 'a1' } as never)
+  agents.a4 = 'running'
+  await $.turn.complete({ answer: 'The chin is drawn.', durationMs: 1, isAborted: false, turnId: 'h4', reason: 'answer', agentId: 'a4' } as never)
+  agents.a4 = 'completed'
+  await clock.advance(2_000)
+  expect(await until(async () => resumed.find(one => one.startsWith('a1: From Claudopus: your helper "Draw the chin" has finished') && one.endsWith('The chin is drawn.')))).toBeDefined()
+  expect(appended.filter(passed('Draw the chin'))).toHaveLength(1)
+  // One that cannot be passed on leaves the chat told to send it on itself
+  agents.a1 = 'completed'
+  unresumable.add('a1')
+  await $.agent.spawn({ ...spawn, description: 'Draw the brow', prompt: 'draw', parentAgentId: 'a1' } as never)
+  agents.a5 = 'completed'
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb5', agentId: 'a5', message: 'The brow is drawn.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h5', reason: 'answer', agentId: 'a5' } as never)
+  expect(await until(async () => appended.find(one => /^undefined: From Claudopus: the result of the helper "Draw the brow" reached this chat .*could not pass it on to that task \(no such agent\)\. Send it on to that task yourself with SendMessage\./.test(one)))).toBeDefined()
+  unresumable.delete('a1')
   // Stopped from its card or by the chat, the work's running helpers are stopped with it
   await $.agent.spawn({ ...spawn, description: 'Draw the ear', prompt: 'draw', parentAgentId: 'a1' } as never)
   await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' } as never)
-  expect(stopped).toEqual(expect.arrayContaining(['a1', 'a4']))
+  expect(stopped).toEqual(expect.arrayContaining(['a1', 'a6']))
 })
 
 test("what nothing of the work's own makes, a file, a line in it, a page or a time, Claudopus looks for when asked and starts the work again once it is there, or once the longest look (15 min unless given, at most an hour) runs out, though the engine lists it as ended; two looks in a row that run out have it hand back what it has; work never reached is told to the chat; the card says so, with by when, in place of a command that would wait; a helper hands back instead", SLOW, async ($, on) => {

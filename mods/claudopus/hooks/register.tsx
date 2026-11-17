@@ -35,7 +35,6 @@ const RARE_TOOLS = ['ReportFindings', 'SuggestPluginInstall', 'SuggestSkills', '
 const RARE_SERVERS = ['mcp__Claude_Browser__', 'mcp__Claude_Code_iOS_Simulator__', 'mcp__visualize__']
 const OWN = ['Agent', 'Workflow', 'SendMessage', 'ListAgents', 'TaskStop', 'ToolSearch', 'AskUserQuestion', 'SendUserFile', 'ReadNotifications', 'Skill']
 const READS = ['Read', 'Grep', 'Glob']
-const PANE_SERVERS = /^mcp__(?:remote-devices__)?Claude_Browser__(?:preview_(?:start|list|logs|stop)|tabs_context)$/
 const TOOLS = 'mcp__claudopus__'
 const OLD_TOOLS = 'mcp__progress__'
 const isTool = (tool: string | undefined, name: string) => tool === `${TOOLS}${name}` || tool === `${OLD_TOOLS}${name}`
@@ -551,9 +550,9 @@ const recorderHooks = (on: On) => {
 
 
 const BRIEF =
-  'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command, a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
+  'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
 const REFUSED =
-  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow, if any; it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
+  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
   `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
 const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus\/keyring\b/
@@ -701,22 +700,97 @@ const writesMemory = (text: string, names: readonly string[]): boolean => {
     .join('\n')
   return namesMemory(kept, names) || (names === MEMORY_PERSON && /\brelease\.local\b/.test(kept))
 }
-const CODE_WRITES =
-  /write|append|dump(?!s)|rename|replace|remove|delete|unlink|\brm\w*\s*\(|\bcp\w*\s*\(|copy|move|mkd|makedirs|link|truncate|chmod|chown|utime|touch|system|popen|spawn|exec|eval|compile|subprocess|child_process|shutil|pathlib|fileutils|__import__|import\s*\(|importlib|getattr|setattr|globals|\bvm\b|\bFunction\s*\(|mmap|ctypes|\bpty\b|\bsocket|`/i
-const CODE_RUNNERS: Record<string, readonly string[]> = { python: ['-c'], python3: ['-c'], node: ['-e', '-p', '--eval', '--print'] }
+const CODE_NAMES = new Set(
+  (
+    'print open len str int float bool list dict set tuple sorted reversed enumerate range zip map filter min max sum any all abs round repr type isinstance next iter ' +
+    'load loads dumps read read_text read_bytes readline readlines keys values items get Path home expanduser expandvars join exists isfile isdir basename dirname ' +
+    'abspath realpath getenv listdir is_file is_dir iterdir glob stat getsize getmtime splitlines split rsplit strip lstrip rstrip lower upper startswith endswith ' +
+    'replace format count find index decode encode path environ argv stdout stderr stdin st_size st_mtime name stem suffix parent parts ' +
+    'if elif else for while not and or in is return lambda typeof catch ' +
+    'console log error JSON parse stringify require readFileSync existsSync statSync readdirSync toString trim includes slice sort push entries length env process homedir resolve String Number Object Array'
+  ).split(' '),
+)
+const CODE_MODULES = ['json', 'sys', 'os', 'os.path', 'pathlib']
+const CODE_REQUIRES = /^(['"])(?:node:)?(?:fs|path|os)\1$/
+const CODE_RUNNERS: Record<string, { flags: RegExp; code: readonly string[] }> = {
+  python: { flags: /^-[IBSEusq]+$/, code: ['-c'] },
+  python3: { flags: /^-[IBSEusq]+$/, code: ['-c'] },
+  node: { flags: /^$/, code: ['-e', '-p', '-pe', '--eval', '--print'] },
+}
+const PIPE_READERS = ['head', 'tail', 'wc', 'grep', 'jq', 'cut', 'tr']
+const pipedParts = (command: string) => {
+  const parts: { text: string; bare: string }[] = [{ text: '', bare: '' }]
+  let quote = ''
+  for (const c of command) {
+    const part = parts[parts.length - 1]!
+    if (quote) quote = c === quote ? '' : quote
+    else if (c === "'" || c === '"') quote = c
+    else if (c === '|') {
+      parts.push({ text: '', bare: '' })
+      continue
+    } else part.bare += c
+    part.text += c
+  }
+  return quote ? [] : parts
+}
+const callArgs = (code: string, open: number): string[] | undefined => {
+  const args: string[] = []
+  let depth = 0
+  let quote = ''
+  let arg = ''
+  for (let i = open + 1; i < code.length; i++) {
+    const c = code[i]!
+    if (quote) {
+      if (c === '\\') arg += c + (code[++i] ?? '')
+      else (quote = c === quote ? '' : quote), (arg += c)
+      continue
+    }
+    if (c === "'" || c === '"') (quote = c), (arg += c)
+    else if ('([{'.includes(c)) depth++, (arg += c)
+    else if (')]}'.includes(c)) {
+      if (depth === 0) return arg.trim() ? [...args, arg.trim()] : args
+      depth--
+      arg += c
+    } else if (c === ',' && depth === 0) args.push(arg.trim()), (arg = '')
+    else arg += c
+  }
+  return undefined
+}
 const codeOnlyReads = (command: string): boolean => {
   if (/\n|\$\(|`/.test(command)) return false
-  const parts = shellWords(command)
-  if (parts.length !== 1) return false
-  const words = parts[0]!
+  const parts = pipedParts(command.trim())
+  if (!parts.length || parts.some(one => !one.text.trim())) return false
+  for (const one of parts.slice(1)) {
+    const words = shellWords(one.text)
+    if (words.length !== 1 || !PIPE_READERS.includes(words[0]![0] ?? '') || /[;&<>]/.test(one.bare)) return false
+  }
+  if (/[;&<]/.test(parts[0]!.bare) || /[<>]/.test(parts[0]!.bare.replace(/(?:^|\s)2>\/dev\/null(?=\s|$)/g, ' '))) return false
+  const words = (shellWords(parts[0]!.text)[0] ?? []).filter(one => one !== '2>/dev/null')
   const name = (words[0] ?? '').split('/').pop() ?? ''
-  const flags = CODE_RUNNERS[/^python3\.\d+$/.test(name) ? 'python3' : name]
-  if (!flags || !flags.includes(words[1] ?? '') || words.length < 3) return false
-  const code = words[2]!
-  if (words.slice(3).some(one => /[<>]/.test(one))) return false
-  if (CODE_WRITES.test(code.replace(/\bstd(?:out|err)\.write\b/g, ''))) return false
-  const opens = code.replace(/\bopen\w*\s*\(((?:[^()]|\([^()]*\))*)\)/gi, (all, args: string) => (/(['"])[rwabxtU+]*[wax+][rwabxtU+]*\1|\bO_|\bflags?\b/.test(args) ? all : ''))
-  return !/\bopen\w*\s*\(/i.test(opens)
+  const runner = CODE_RUNNERS[/^python3\.\d+$/.test(name) ? 'python3' : name]
+  if (!runner || !Object.hasOwn(CODE_RUNNERS, /^python3\.\d+$/.test(name) ? 'python3' : name)) return false
+  let at = 1
+  while (at < words.length && runner.flags.test(words[at]!) && !runner.code.includes(words[at]!)) at++
+  if (!runner.code.includes(words[at] ?? '') || at + 1 >= words.length) return false
+  const code = words[at + 1]!
+  if (/(?:^|[^\w'"])[rRbBuU]?[fF][rRbB]?['"]/.test(code)) return false
+  for (const m of code.matchAll(/\bfrom\s+([\w.]+)\s+import\s+([\w\s,]+)/g)) if (!CODE_MODULES.includes(m[1]!) || m[2]!.split(',').some(one => !CODE_NAMES.has(one.trim().split(/\s+/)[0]!))) return false
+  for (const m of code.replace(/\bfrom\s+[\w.]+\s+import\s+[\w\s,]+/g, '').matchAll(/(?:^|[;\s])import\s+([\w.\s,]+)/g)) if (m[1]!.split(',').some(one => !CODE_MODULES.includes(one.trim().split(/\s+/)[0]!))) return false
+  if (/\bimport\b/.test(code.replace(/\bfrom\s+[\w.]+\s+import\b|(?:^|[;\s])import\s+[\w.]/g, ''))) return false
+  for (const m of code.matchAll(/\brequire\s*\(/g)) {
+    const args = callArgs(code, m.index! + m[0].length - 1)
+    if (args?.length !== 1 || !CODE_REQUIRES.test(args[0]!)) return false
+  }
+  const bare = code.replace(/\bstd(?:out|err)\s*\.\s*write\s*\(/g, 'print(').replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''")
+  if (/[\])]\s*\(/.test(bare) || /['"]/.test(bare.replace(/''/g, ''))) return false
+  if (/\bopen\b(?!\s*\()/.test(bare)) return false
+  for (const m of bare.matchAll(/(\.\s*)?\b([A-Za-z_]\w*)\s*(\()?/g)) if ((m[1] || m[3]) && !CODE_NAMES.has(m[2]!)) return false
+  for (const m of code.matchAll(/\breplace\s*\(/g)) if ((callArgs(code, m.index! + m[0].length - 1)?.length ?? 0) < 2) return false
+  for (const m of code.matchAll(/\bopen\s*\(/g)) {
+    const args = callArgs(code, m.index! + m[0].length - 1)
+    if (!args || !args.length || args.slice(1).some(one => !/^(?:mode\s*=\s*)?(['"])r[bt]?\1$|^(?:encoding|errors|newline)\s*=\s*(['"])[\w-]*\2$/.test(one))) return false
+  }
+  return true
 }
 const NO_MEMORY =
   "Only Claudopus writes the files chats share and answer one another through, and the update's own files: Claude never writes them with any tool."
@@ -7176,6 +7250,42 @@ const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
   if (toolUseId && waiting.some(one => one.id === toolUseId)) settle($, toolUseId, undefined, undefined, 'running')
 }
 
+const OTHER_WAY = 'Do it another way'
+const LEAVE_OUT = 'Leave it out'
+const CC_REFUSED = /denied by the Claude Code auto mode classifier|denied by a built-in Claude Code safety check|no approval surface in this session|nobody can be asked in this headless run/i
+const NO_VERDICT = /gave no verdict|transient failure/i
+const refusalOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isError?: unknown } | undefined) => {
+  if (!r || (!r.deny && !r.isError)) return ''
+  const words = [r.deny, r.text, r.result].map(one => (typeof one === 'string' ? one : '')).join('\n')
+  return CC_REFUSED.test(words) && !NO_VERDICT.test(words) ? words : ''
+}
+const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: string, call: Record<string, unknown>, r: Parameters<typeof refusalOf>[0]) => {
+  const words = refusalOf(r)
+  if (!words || !dir || isOff) return
+  const list = await read($, todos)
+  const top = list.find(one => one.id === topOf(list, agent))
+  const own = list.find(one => one.id === agent)
+  if (!top || top.chat) return
+  if (top.ask) return void (await log($, `refusal of ${tool} for ${agent} not asked: its card asks something already`))
+  const what = promptOf(tool, call, list, true)
+  const who = own?.parentId ? `a helper of this task ("${titleOf(own)}")` : 'this task'
+  const text = cut(`Claude Code refused ${who}: ${what.text}.`, ASK_TEXT)
+  const reason = cut(oneLine(words.replace(/^Permission for this (?:action|command) was /i, '')), 600)
+  const details = [
+    what.detail ? `What it is: ${what.detail}` : '',
+    `Why: it was ${reason}`,
+    `${OTHER_WAY}: Claude looks for another way to get there. ${LEAVE_OUT}: Claude carries on without it and says so in its report. To let it run, allow it in Claude Code's own settings and tell the task in your own words.`,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  const at = await $.clock.now()
+  await change($, agent, one => ({ ...one, ask: { text, details, choices: [OTHER_WAY, LEAVE_OUT], from: agent, at } }))
+  await log($, `refusal of ${tool} for ${agent} put to the person on its card`)
+  const card = (await read($, todos)).find(one => one.id === top.id)
+  if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
+  if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
+}
+
 const OWN_CALLS = ['SendMessage', 'TaskStop']
 const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
 
@@ -7280,48 +7390,67 @@ const isOneCommand = (command: string) => {
 const CHAT_GIT = ['push', 'fetch', 'status', 'log', 'diff', 'show', 'branch', 'remote', 'rev-parse', 'ls-remote', 'describe', 'shortlog', 'blame']
 const CHAT_GH = ['view', 'list', 'status', 'checks', 'diff']
 const CHAT_LOOKS = ['ls', 'pwd', 'date', 'uptime', 'whoami', 'hostname', 'df', 'sw_vers', 'uname', 'which']
-const OPEN_RUNS = /\.(?:app|command|tool|terminal|sh|zsh|bash|csh|fish|py|rb|pl|js|mjs|jar|pkg|mpkg|dmg|workflow|action|scpt|scptd|applescript|shortcut|prefpane|mobileconfig|osax|kext|plugin|bundle)\/?$/i
-const OPEN_APPS_RUN = /^(?:terminal|iterm2?|ghostty|warp|alacritty|kitty|wezterm|hyper|script editor|automator|installer|shortcuts|system settings|system preferences)$/i
+const OPEN_VIEWS = /\.(?:png|jpe?g|gif|webp|avif|heic|tiff?|bmp|svg|ico|pdf|html?|txt|md|markdown|csv|tsv|json|log|mp4|mov|m4v|webm|mp3|m4a|wav)$/i
+const OPEN_APPS = ['safari', 'google chrome', 'chrome', 'chromium', 'vivaldi', 'firefox', 'arc', 'brave browser', 'microsoft edge', 'opera', 'orion', 'preview', 'quicktime player', 'photos', 'textedit', 'visual studio code', 'cursor', 'zed', 'sublime text', 'iina', 'vlc']
 const isChatOpen = (args: string[]) => {
   let shown = 0
+  const isReveal = args.some(one => /^-[gnR]*R[gnR]*$/.test(one))
   for (let i = 0; i < args.length; i++) {
     const one = args[i]!
     if (one === '-a') {
-      const app = (args[++i] ?? '').replace(/\/+$/, '').split('/').pop()!.replace(/\.app$/i, '')
-      if (!app || OPEN_APPS_RUN.test(app)) return false
-    } else if (/^-[gRFn]+$/.test(one)) continue
+      if (!OPEN_APPS.includes((args[++i] ?? '').toLowerCase())) return false
+    } else if (/^-[gnRet]+$/.test(one)) continue
     else if (one.startsWith('-')) return false
-    else if (/^[a-z][\w+.-]*:/i.test(one) && !/^(?:https?|file):/i.test(one)) return false
-    else if (OPEN_RUNS.test(one.replace(/[?#].*$/, ''))) return false
+    else if (/^https?:\/\/[^\s]+$/i.test(one)) shown++
+    else if (/^[a-z][\w+.-]*:/i.test(one) || !(isReveal || OPEN_VIEWS.test(one))) return false
     else shown++
   }
   return shown > 0
 }
-const CURL_LOCAL = /^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|[\w-]+\.localhost)(?::\d+)?(?:[/?#]|$)/i
-const CURL_FLAGS = ['--silent', '--show-error', '--fail', '--fail-with-body', '--location', '--head', '--include', '--insecure', '--compressed', '--verbose', '-4', '-6']
+const CURL_LOCAL = /^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|[\w-]+\.localhost)(?::\d+)?(?:[/?#]|$)/i
+const CURL_FLAGS = ['--silent', '--show-error', '--fail', '--fail-with-body', '--head', '--include', '--insecure', '--compressed', '--verbose', '-4', '-6']
 const isChatCurl = (args: string[]) => {
   let asked = 0
   for (let i = 0; i < args.length; i++) {
-    const [flag, joined] = args[i]!.startsWith('--') && args[i]!.includes('=') ? [args[i]!.slice(0, args[i]!.indexOf('=')), args[i]!.slice(args[i]!.indexOf('=') + 1)] : [args[i]!, undefined]
+    let flag = args[i]!
+    let joined: string | undefined
+    if (flag.startsWith('--') && flag.includes('=')) [flag, joined] = [flag.slice(0, flag.indexOf('=')), flag.slice(flag.indexOf('=') + 1)]
+    else if (/^-[sSfIikv]*[omw]/.test(flag)) {
+      const m = /^-[sSfIikv]*([omw])(.*)$/.exec(flag)!
+      ;[flag, joined] = [`-${m[1]}`, m[2] || undefined]
+    }
     const value = () => joined ?? args[++i] ?? ''
-    if (/^-[sSfLIikv]+$/.test(flag) || CURL_FLAGS.includes(flag)) continue
+    if (/^-[sSfIikv]+$/.test(flag) || CURL_FLAGS.includes(flag) || (flag === '-q' && i === 0)) continue
     if (flag === '-o' || flag === '--output') {
       if (value() !== '/dev/null') return false
     } else if (flag === '-w' || flag === '--write-out') {
-      if (/output\{/i.test(value())) return false
-    } else if (flag === '-X' || flag === '--request') {
-      if (!/^(?:GET|HEAD)$/.test(value())) return false
-    } else if (['-m', '--max-time', '--connect-timeout', '--retry'].includes(flag)) {
+      const format = value()
+      if (/output\{/i.test(format) || format.startsWith('@')) return false
+    } else if (['-m', '--max-time', '--connect-timeout'].includes(flag)) {
       if (!/^\d+(?:\.\d+)?$/.test(value())) return false
-    } else if (['-H', '--header', '-A', '--user-agent'].includes(flag)) value()
-    else if (flag.startsWith('-') || !CURL_LOCAL.test(flag)) return false
+    } else if (flag === '--url') {
+      if (!CURL_LOCAL.test(value())) return false
+      asked++
+    } else if (flag.startsWith('-') || !CURL_LOCAL.test(flag)) return false
     else asked++
   }
   return asked > 0
 }
+const CHAT_SHAPES: Record<string, string> = {
+  open: 'An `open` the chat runs itself shows a web page (http or https) or a file that is only looked at (a picture, a PDF, a page, a text, a video), optionally in a named browser or viewer (`-a Vivaldi`), or shows a file in the Finder with `-R`.',
+  curl: 'A `curl` the chat runs itself is a plain GET or HEAD of a local address (localhost, 127.0.0.1, [::1]) with its body sent only to /dev/null: flags -s -S -f -I -i -k -v, -o /dev/null, -w with a format, -m; no -L, -X, -H, -d, -F, -T or -O. Where a .curlrc is in the home folder, -q comes first.',
+  preview_start: "The browser pane's `preview_start` runs in the chat only with a `url` of a local address (http://localhost:3000); one that starts a server by its name is a task's.",
+}
+const isPaneShow = (e: { tool: string }) => {
+  const m = /^mcp__(?:remote-devices__)?Claude_Browser__(\w+)$/.exec(e.tool)
+  if (!m) return false
+  if (['preview_list', 'preview_logs', 'tabs_context'].includes(m[1]!)) return true
+  const call = e as { url?: unknown; name?: unknown }
+  return m[1] === 'preview_start' && call.name === undefined && typeof call.url === 'string' && /^https?:\/\//i.test(call.url) && CURL_LOCAL.test(call.url)
+}
 const isChatRunnable = (command: string, branch = '') => {
   if (!isOneCommand(command) || RUNNER_NAMED.test(command) || /claudopus\/p\W?stes|\bpastes\b/.test(command)) return false
-  if (/[$\\{}*?[\]~!]/.test(command.replace(/'[^']*'|"[^"$`\\]*"/g, '""'))) return false
+  if (/[$\\{}*?[\]~!]/.test(command.replace(/'[^']*'|"(?:[^"$`\\]|\\[^$`"\\\n])*"/g, '""').replace(/\[::1\]/g, ''))) return false
   const words = shellWords(command)[0] ?? []
   const head = words[0] ?? ''
   const rest = words.slice(2)
@@ -7506,15 +7635,18 @@ const afterReply = async ($: EngineInterface, text: string, answer: string) => {
 
 const HELD_LOOK = 1500
 const heldLook = async ($: EngineInterface, id: string) => {
+  const wasWorking = (await read($, todos)).find(one => one.id === id)?.status === 'working'
   await sync($)
   const listed = (await $.agent.list().catch(() => undefined))?.find(one => one.id === id)?.status
   if (listed === 'idle' || listed === undefined) {
     const now = await $.clock.now()
     await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
   }
-  if ((await read($, todos)).find(one => one.id === id)?.status === 'working') return
+  const card = (await read($, todos)).find(one => one.id === id)
+  if (card?.status === 'working') return
   await replyUnread($, id)
   if (wakes.length) await sendWakes($)
+  if (wasWorking && card?.parentId && card.parentId !== HELPER) await passOnHelper($, id, card.answer ?? '', card.status)
 }
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
@@ -9002,7 +9134,9 @@ const HELPERS_STARTED = 'Your helpers run in the background: each call came back
 const HELPER_ENDED = (title: string, how: Todo['status'], report: string) =>
   `From Claudopus: your helper "${title}" ${how === 'failed' ? 'failed' : how === 'stopped' ? 'was stopped' : 'has finished'} while your step had ended, so Claudopus passes its result on to you here (if you already have it, carry on).${report ? ` Its result:\n\n${report}` : ' It gave no result.'}`
 const HELPER_PASSED = (helper: string, work: string) =>
-  `From Claudopus: the result of the helper "${helper}" reached this chat because the task "${work}" had ended its step to let it work. Claudopus has passed it on to that task and started it again: there is nothing for you to do with it, and nothing to tell {name}.`
+  `From Claudopus: the result of the helper "${helper}" reached this chat because the task "${work}" had ended its step to let it work. Claudopus passes it on to that task and starts it again: there is nothing for you to do with it, and nothing to tell {name}.`
+const HELPER_NOT_PASSED = (helper: string, work: string, reason: string) =>
+  `From Claudopus: the result of the helper "${helper}" reached this chat because the task "${work}" had ended its step, and Claudopus could not pass it on to that task (${cut(oneLine(reason), 120)}). Send it on to that task yourself with SendMessage.`
 
 const toldWaitsOn = new Set<string>()
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`)
@@ -9022,24 +9156,47 @@ const tellWaitsOn = async ($: EngineInterface, id: string) => {
   await log($, `chat told work ${id} waits on ${helpers ? plural(helpers, 'a helper', 'helpers') : 'being woken'}`)
 }
 
-const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status'], isUnheard = false) => {
-  if (!dir || isOff) return
-  const list = await read($, todos)
+const passedTo = (list: Todo[], helperId: string) => {
   const helper = list.find(one => one.id === helperId)
   const parent = helper?.parentId ? list.find(one => one.id === helper.parentId) : undefined
-  if (helper && parent && parent.handedBackAt !== undefined && parent.mayHandBack !== undefined && report)
-    return void (await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(HELPER_LATE(titleOf(helper), titleOf(parent))) }] } }).catch(err => log($, `chat not told of a late helper's result: ${String(err)}`)))
-  if (!helper || !parent || isHeld(parent) || pressed.has(parent.id) || stoppedHere.has(parent.id) || parent.status === 'stopped' || parent.status === 'failed' || parent.handedBackAt !== undefined || endedByHandback.has(parent.id)) return
+  if (!helper || !parent || isHeld(parent) || pressed.has(parent.id) || stoppedHere.has(parent.id) || parent.status === 'stopped' || parent.status === 'failed' || parent.handedBackAt !== undefined || endedByHandback.has(parent.id)) return undefined
+  return { helper, parent }
+}
+const toChat = async ($: EngineInterface, text: string) =>
+  $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(text) }] } }).catch(err => log($, `chat not told of a helper's result: ${String(err)}`))
+const notedAtHandback = new Set<string>()
+const noteHandback = async ($: EngineInterface, helperId: string) => {
+  if (!dir || isOff) return
+  const to = passedTo(await read($, todos), helperId)
+  if (!to) return
+  const listed = (await $.agent.list().catch(() => [])).find(one => one.id === to.parent.id)?.status
+  if (listed === 'running' || listed === 'waiting') return
+  notedAtHandback.add(helperId)
+  await toChat($, HELPER_PASSED(titleOf(to.helper), titleOf(to.parent)))
+}
+const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status'], isUnheard = false) => {
+  if (!dir || isOff) return
+  const isNoted = notedAtHandback.delete(helperId)
+  const all = await read($, todos)
+  const late = all.find(one => one.id === all.find(kid => kid.id === helperId)?.parentId)
+  if (late && late.handedBackAt !== undefined && late.mayHandBack !== undefined && report) return void (await toChat($, HELPER_LATE(titleOf(all.find(one => one.id === helperId) ?? late), titleOf(late))))
+  const to = passedTo(all, helperId)
+  if (!to) return
+  const { helper, parent } = to
   const listed = (await $.agent.list().catch(() => [])).find(one => one.id === parent.id)?.status
-  if (listed === 'running' && isUnheard) return void (await tell($, parent.id, HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS))))
+  if (listed === 'running' && (isUnheard || isNoted)) return void (await tell($, parent.id, HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS))))
   if (listed === 'running') return
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
     : await sendOwn($, { to: { agentId: parent.id }, text: HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
-  if (!r.isDelivered) return void (await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${r.reason}`))
+  if (!r.isDelivered) {
+    await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${r.reason}`)
+    if (listed !== 'waiting' || isNoted) await toChat($, HELPER_NOT_PASSED(titleOf(helper), titleOf(parent), r.reason))
+    return
+  }
   await wakeCard($, parent.id)
   await log($, `helper ${helperId}'s result passed on to ${parent.id}, which had ended its step`)
-  if (listed !== 'waiting') await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(HELPER_PASSED(titleOf(helper), titleOf(parent))) }] } }).catch(err => log($, `chat not told of a helper's result passed on: ${String(err)}`))
+  if (listed !== 'waiting' && !isNoted) await toChat($, HELPER_PASSED(titleOf(helper), titleOf(parent)))
 }
 
 const HAND_BACK_ASKED = /\bhand (it |them |that )?back\b|\bwhat (you have|it has)\b|\breport now\b/i
@@ -9818,6 +9975,10 @@ const scriptsRun = async ($: EngineInterface, command: string) => {
 }
 const readsKept = async ($: EngineInterface, command: string) =>
   [command, unquoted(command)].some(one => KEYCHAIN_READ.test(one)) || (await scriptsRun($, command)).some(text => KEYCHAIN_READ.test(text) || KEYCHAIN_READ.test(unquoted(text)))
+const curlrcIn = async ($: EngineInterface) => {
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  return Boolean(home) && (await Promise.all([`${home}/.curlrc`, `${home}/.config/.curlrc`].map(path => readOr($, path)))).some(Boolean)
+}
 const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
   if (!dir) return ''
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
@@ -9900,6 +10061,7 @@ const workHooks = (on: On) => {
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool, outcomeOf(r as never), e as never)
+        if (e.agentId !== undefined) void refusedByClaudeCode($, e.agentId, e.tool, e as never, r as never).catch(err => log($, `refusal not put to the person: ${String(err)}`))
         if (grants.length && !(call as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
         runnerEnded(e.tool_use_id, Boolean((call as { run_in_background?: unknown }).run_in_background), await $.clock.now())
         await noteCallEnded($, e.tool_use_id).catch(() => undefined)
@@ -9975,7 +10137,8 @@ const workHooks = (on: On) => {
     }
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !PANE_SERVERS.test(e.tool)
+      && !(/^\s*curl\s/.test(chatCommand) && shellWords(chatCommand)[0]?.[1] !== '-q' && (await curlrcIn($)))
+    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
       if (gated.deny) return (await callRefused($, e.tool_use_id), await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: gated.deny })
@@ -10132,9 +10295,11 @@ const workHooks = (on: On) => {
     if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
       const hold = await holdAtHandback($, e.agentId).catch(() => '')
       if (hold) return { deny: hold }
+      await noteHandback($, e.agentId).catch(err => log($, `chat not told of a helper's hand-back: ${String(err)}`))
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       const r = await next(e)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
+      else notedAtHandback.delete(e.agentId)
       if (!r.deny && !r.isError && isLetGoNow) await stopHelpers($, e.agentId, true).catch(err => log($, `helpers of ${e.agentId} not stopped: ${String(err)}`))
       return r
     }
@@ -10168,7 +10333,7 @@ const workHooks = (on: On) => {
       }
       return r
     }
-    if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) || PANE_SERVERS.test(e.tool)) return next(e)
+    if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) || isPaneShow(e)) return next(e)
     if (isChatCommand) {
       const r = await next({ ...e, run_in_background: true } as typeof e)
       if (!r.deny && !r.isError) await chatCommandStarted($, e as never, r.result).catch(err => log($, `the chat's command not followed: ${String(err)}`))
@@ -10179,8 +10344,9 @@ const workHooks = (on: On) => {
     if (READS.includes(e.tool) && !isPaste) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
     if (grants.length) await dropGrants($, grants).catch(() => undefined)
-
-    return { deny: REFUSED }
+    const kind = e.tool === 'Bash' ? (shellWords(chatCommand)[0]?.[0] ?? '') : (/__(preview_start)$/.exec(e.tool)?.[1] ?? '')
+    const shape = Object.hasOwn(CHAT_SHAPES, kind) ? CHAT_SHAPES[kind] : ''
+    return { deny: shape ? `${REFUSED} ${shape}` : REFUSED }
   })
 
   on('session.measure', async ($, e, next) => {
