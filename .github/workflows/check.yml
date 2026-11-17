@@ -1,6 +1,6 @@
 name: Check
-# A release (mods/claudopus/bin/release, GITHUB_CHECKS in .release) starts this file as main has it on the very commit it is to make
-# main, given as `sha`, and moves main only once every job here passed on it
+# Runs every test on each push of main, so after each release, which never waits for it, and on each pull request. A release
+# runner set to wait for GitHub (GITHUB_CHECKS in a .release or release.local) can still start it on a commit, given as `sha`
 run-name: ${{ inputs.sha && format('Release check {0}', inputs.sha) || github.event.pull_request.title || github.event.head_commit.message }}
 on:
   push:
