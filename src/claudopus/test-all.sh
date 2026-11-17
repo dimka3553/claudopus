@@ -10,9 +10,9 @@ o=$(mktemp -d)
 # Stopped partway, it stops the shell tests it started and leaves no folder behind
 trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$o"' EXIT
 trap 'exit 1' INT TERM HUP
-for t in admin keep revive linux; do { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc" & done
+for t in admin keep revive linux run-it; do { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc" & done
 { "$ENGINE" plugin test mods/claudopus && "$ENGINE" plugin validate --strict mods/claudopus && "$ENGINE" plugin validate --strict .; } >"$o/mod" 2>&1; r=$?
 wait
-for t in admin keep revive linux; do [ "$(cat "$o/$t.rc")" = 0 ] || { grep -E 'NOT OK|^FAIL|failed|FAILED' "$o/$t" | cut -c1-300 | head -4; echo "$t.test.sh failed"; r=1; }; done
+for t in admin keep revive linux run-it; do [ "$(cat "$o/$t.rc")" = 0 ] || { grep -E 'NOT OK|^FAIL|failed|FAILED' "$o/$t" | cut -c1-300 | head -4; echo "$t.test.sh failed"; r=1; }; done
 if [ $r != 0 ]; then grep -E '^\(fail\)|^ *[0-9]+ (pass|fail)$|^Ran |rror' "$o/mod" | cut -c1-300 | tail -8 | grep . || tail -8 "$o/mod"; else echo "every test and strict check passed"; fi
 rm -rf "$o"; exit $r

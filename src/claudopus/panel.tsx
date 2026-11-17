@@ -188,7 +188,7 @@ const panelHooks = (on: On) => {
     const promptsAnswered = answeredShown(at)
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
-    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD))
+    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD))
     // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of a chat does.
     // On another model it is not known, and the card gives the tokens alone. The time comes last, so its ticking moves nothing else
     const ours = modelName(await $.session.model().catch(() => ''))
@@ -383,8 +383,10 @@ const panelHooks = (on: On) => {
               <Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} />
             </Box>
           ) : null}
-          {/* A command to type: Terminal opens with it typed, not run, only on this press */}
-          {canOpenTerminal(one) ? (
+          {/* A command Claude Code refused, to run on the person's press: where and for how long at most */}
+          {runWhere(table, one, key)}
+          {/* A command to type: Terminal opens with it typed, not run, only on this press; not beside Run it */}
+          {canOpenTerminal(one) && !offeredRun(one) ? (
             <Box flexDirection="row">
               <Button key={`${key}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Typed into Terminal, not run yet' : 'Open in Terminal'} onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} />
             </Box>
@@ -395,6 +397,7 @@ const panelHooks = (on: On) => {
           ) : null}
           {one.chat ? null : (
           <Box flexDirection="row" flexWrap="wrap" gap={1}>
+            {runButton($, table, one, key)}
             {answers.map((choice, n) => (
               <Button key={`${key}-choice-${n}-${askMark(ask)}-${loadMark}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
             ))}
@@ -512,6 +515,11 @@ const panelHooks = (on: On) => {
             {one.ask ? (
               <Box key={`ask-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
                 {askBlock(one, `ask-${one.id}`)}
+              </Box>
+            ) : null}
+            {runningOn(one.id).length && !one.chat ? (
+              <Box key={`run-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
+                {runBlock($, table, one, `runs-${one.id}`, at)}
               </Box>
             ) : null}
             {one.admins?.length || cardNotesOf(one.id, at).length ? (
@@ -1468,6 +1476,11 @@ const panelHooks = (on: On) => {
               </Box>
             </Box>
           ) : null}
+          {runningOn(one.id).length && !one.chat ? (
+            <Box key="part-runs" flexDirection="column" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
+              {runBlock($, table, one, `runs-big-${one.id}`, at, true)}
+            </Box>
+          ) : null}
           {one.ask ? (
             <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE} />
@@ -1784,8 +1797,9 @@ const panelHooks = (on: On) => {
     const finishFrom = (one: Todo) => (one.chat ? (endSeen.get(`${one.id}:${one.endedAt}`) ?? one.endedAt) : pauseFrom(one))
     // Finished but left something running: after its moment it stays up, under what waits, with its Stop it, never back among the rest
     const isLeftUp = (one: Todo) => !one.chat && one.status !== 'working' && Boolean(one.leftSince) && !isWaits(one) && !isFinishing(one)
-    const isUp = (one: Todo) => isWaits(one) || isFinishing(one) || isLeftUp(one) || (!one.chat && cardNotesOf(one.id, at).length > 0)
-    const upSince = (one: Todo) => Math.max(isAsking(one) ? (one.ask?.at ?? 0) : 0, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)), answeredPlace(one))
+    // A command you ran on a press, while it runs or its output waits for its ended task: up with what it is and its press
+    const isUp = (one: Todo) => isWaits(one) || isFinishing(one) || isLeftUp(one) || (!one.chat && (cardNotesOf(one.id, at).length > 0 || runningOn(one.id).length > 0))
+    const upSince = (one: Todo) => Math.max(isAsking(one) ? (one.ask?.at ?? 0) : 0, ...(one.chat ? [] : runningOn(one.id).map(run => run.startedAt ?? 0)), ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)), answeredPlace(one))
     const askingHere = shownWork.filter(isUp)
     const askingThere = listedChats.flatMap(c => shownOf(c).filter(isUp))
     const askCards = [...askingHere, ...askingThere].sort((a, b) => upSince(b) - upSince(a))
