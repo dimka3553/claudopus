@@ -1,0 +1,2 @@
+- When a helper's result reaches your chat only because its task paused to let it work, Claudopus passes it on to that task and the chat no longer takes a turn for it: no "Nothing needs you here." line, and no second copy sent on.
+- Your own answer or reply on a task's card is no longer echoed into the chat as "✓ You replied to …": the card already shows it, and the chat still knows.

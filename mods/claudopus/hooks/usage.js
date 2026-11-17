@@ -11,7 +11,7 @@ const USAGE_GAP = 120000;
 export const MEMORY_WARN = 0.9;
 // One look on a Mac: the engine's own process, every process with its parent, memory and processor time, the memory as Activity
 // Monitor counts it, the disks' and the network's running totals, and now and then top's own memory of each process
-export const usageMac = (isTop) => `echo "@@SELF@@ $PPID"; echo @@PS@@; ps -axo pid=,ppid=,rss=,time=,pgid=,comm=; echo @@VM@@; vm_stat; echo @@SYS@@; sysctl -n hw.memsize hw.ncpu; echo @@IO@@; iostat -Id -c 1; echo @@NET@@; netstat -ibn; echo @@GPU@@; ioreg -r -d 1 -w 0 -c IOAccelerator | grep -oE '"(Device Utilization %|In use system memory)"=[0-9]+'; echo @@BATT@@; pmset -g batt; echo @@POWER@@; ioreg -rn AppleSmartBattery -w0 | grep -oE '"(SystemLoad|SystemPowerIn|Voltage|InstantAmperage)" ?= ?[0-9]+'; echo @@GPUP@@; ioreg -r -c AGXDeviceUserClient -l -w0 | grep -E '"AppUsage"|"IOUserClientCreator"'; echo @@NETP@@; nettop -n -P -L 1 -x -J bytes_in,bytes_out 2>/dev/null; echo @@RU@@; ${USAGE_RU}${isTop ? '; echo @@TOP@@; top -l 1 -stats pid,mem' : ''}`;
+export const usageMac = (isTop) => `echo "@@SELF@@ $PPID"; echo @@PS@@; ps -axo pid=,ppid=,rss=,time=,pgid=,comm=; echo @@VM@@; vm_stat; echo @@SYS@@; sysctl -n hw.memsize hw.ncpu; echo @@LOAD@@; sysctl -n vm.loadavg; echo @@IO@@; iostat -Id -c 1; echo @@NET@@; netstat -ibn; echo @@GPU@@; ioreg -r -d 1 -w 0 -c IOAccelerator | grep -oE '"(Device Utilization %|In use system memory)"=[0-9]+'; echo @@BATT@@; pmset -g batt; echo @@POWER@@; ioreg -rn AppleSmartBattery -w0 | grep -oE '"(SystemLoad|SystemPowerIn|Voltage|InstantAmperage)" ?= ?[0-9]+'; echo @@GPUP@@; ioreg -r -c AGXDeviceUserClient -l -w0 | grep -E '"AppUsage"|"IOUserClientCreator"'; echo @@NETP@@; nettop -n -P -L 1 -x -J bytes_in,bytes_out 2>/dev/null; echo @@RU@@; ${USAGE_RU}${isTop ? '; echo @@TOP@@; top -l 1 -stats pid,mem' : ''}`;
 // Each process's disk bytes read and written and the energy its processors used (nanojoules), as the Mac keeps them for Activity
 // Monitor: libproc's proc_pid_rusage, through the system's Python, and only where the developer tools are there, as without them
 // /usr/bin/python3 asks to install them. A process of another user gives nothing. Then the whole processors' and the graphics
@@ -21,7 +21,7 @@ const USAGE_RU = `xcode-select -p >/dev/null 2>&1 && /usr/bin/python3 -I -c 'imp
 // One look on Linux, from /proc and /sys, and nvidia-smi where the machine has one (bounded, as a GPU with no driver kept loaded is slow
 // to answer). A graphics card asleep (its display device, not its sound) is left asleep: then there is no GPU figure. Files are read by
 // the shell itself, so the look starts no process per device
-export const USAGE_LINUX = "echo \"@@SELF@@ $PPID\"; echo @@STAT@@; grep -H '' /proc/[0-9]*/stat 2>/dev/null; echo @@STATM@@; grep -H '' /proc/[0-9]*/statm 2>/dev/null; echo @@SYS@@; getconf PAGESIZE; getconf CLK_TCK; head -n 1 /proc/stat; echo @@MEM@@; cat /proc/meminfo; echo @@DISK@@; cat /proc/diskstats; echo @@NET@@; cat /proc/net/dev; echo @@GPU@@; asleep=; for d in /sys/bus/pci/devices/*; do c=; v=; p=; { read c < $d/class; } 2>/dev/null; case \"$c\" in 0x03*) { read v < $d/vendor; read p < $d/power/runtime_status; } 2>/dev/null; case \"$v\" in 0x10de|0x1002) [ \"$p\" = suspended ] && asleep=1;; esac;; esac; done; if [ -n \"$asleep\" ]; then :; elif command -v nvidia-smi >/dev/null 2>&1; then timeout 2 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; else cat /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null; fi; echo @@BATT@@; grep -H '' /sys/class/power_supply/*/type /sys/class/power_supply/*/scope /sys/class/power_supply/*/capacity /sys/class/power_supply/*/status 2>/dev/null; true";
+export const USAGE_LINUX = "echo \"@@SELF@@ $PPID\"; echo @@STAT@@; grep -H '' /proc/[0-9]*/stat 2>/dev/null; echo @@STATM@@; grep -H '' /proc/[0-9]*/statm 2>/dev/null; echo @@SYS@@; getconf PAGESIZE; getconf CLK_TCK; head -n 1 /proc/stat; echo @@LOAD@@; cat /proc/loadavg; getconf _NPROCESSORS_ONLN; echo @@MEM@@; cat /proc/meminfo; echo @@DISK@@; cat /proc/diskstats; echo @@NET@@; cat /proc/net/dev; echo @@GPU@@; asleep=; for d in /sys/bus/pci/devices/*; do c=; v=; p=; { read c < $d/class; } 2>/dev/null; case \"$c\" in 0x03*) { read v < $d/vendor; read p < $d/power/runtime_status; } 2>/dev/null; case \"$v\" in 0x10de|0x1002) [ \"$p\" = suspended ] && asleep=1;; esac;; esac; done; if [ -n \"$asleep\" ]; then :; elif command -v nvidia-smi >/dev/null 2>&1; then timeout 2 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; else cat /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null; fi; echo @@BATT@@; grep -H '' /sys/class/power_supply/*/type /sys/class/power_supply/*/scope /sys/class/power_supply/*/capacity /sys/class/power_supply/*/status 2>/dev/null; true";
 const clamp = (n) => Math.min(1, Math.max(0, n));
 const sectionsOf = (text) => {
     const out = {};
@@ -244,7 +244,7 @@ export const rawOfMac = (text, at, footprint) => {
         energyAll: true,
         ...(load !== undefined ? { watts: load / 1000 } : {}),
     };
-    return { ...own, names: Object.fromEntries(procs.map(p => [p.pid, p.name])), memTop, ...(gpuMem ? { gpuMem: gpuMem.used } : {}), ...netSplitOf(s.NET ?? '', false), at, cpu: Object.fromEntries(procs.map(p => [p.pid, p.cpu])), claude: [...claude], claudeMem, memUsed, memTotal, ncpu: ncpu || 1, disk, net, ...(gpu !== undefined ? { gpu } : {}), ...(battery ? { battery } : {}) };
+    return { ...own, names: Object.fromEntries(procs.map(p => [p.pid, p.name])), memTop, ...(gpuMem ? { gpuMem: gpuMem.used } : {}), ...netSplitOf(s.NET ?? '', false), at, cpu: Object.fromEntries(procs.map(p => [p.pid, p.cpu])), claude: [...claude], claudeMem, memUsed, memTotal, ncpu: ncpu || 1, ...loadIn(s.LOAD, ncpu || 1), disk, net, ...(gpu !== undefined ? { gpu } : {}), ...(battery ? { battery } : {}) };
 };
 // The whole Mac's draw in milliwatts, from the battery's gauge. It writes signed numbers as unsigned 64-bit ones, so a value below
 // zero reads as nearly 2^64: each is read back as signed. On the charger its system load is the draw; on battery that figure is
@@ -260,6 +260,13 @@ const loadOf = (text) => {
     const [load, powerIn, mv, ma] = [of('SystemLoad'), of('SystemPowerIn'), of('Voltage', ' = '), of('InstantAmperage', ' = ')];
     const mw = powerIn ? load : mv !== undefined && ma !== undefined ? (mv * -ma) / 1000 : powerIn === undefined ? load : undefined;
     return mw !== undefined && mw > 0 && mw <= 2000000 ? mw : undefined;
+};
+// The load average over the last minute, what the processors have to run or wait to run, and the cores it is shared by: the
+// Mac's from sysctl (the cores are the look's own), Linux's from /proc/loadavg with the cores after it
+const loadIn = (text, cores) => {
+    const load = Number(/(\d+(?:[.,]\d+)?)/.exec(text ?? '')?.[1]?.replace(',', '.') ?? NaN);
+    const n = cores ?? Number((text ?? '').trim().split('\n')[1] ?? NaN);
+    return Number.isFinite(load) && Number.isFinite(n) && n > 0 ? { load, loadCores: n } : {};
 };
 // A Linux look: processes from /proc/<pid>/stat (Claude's memory is each process's resident memory less what it shares)
 export const rawOfLinux = (text, at) => {
@@ -305,7 +312,7 @@ export const rawOfLinux = (text, at) => {
     const gpuMem = gpuMemOf(s.GPU ?? '', true);
     const battery = batteryOfLinux(s.BATT ?? '');
     const memTop = topOf(procs.map(p => [p.name, p.mem]));
-    return { names: Object.fromEntries(procs.map(p => [p.pid, p.name])), memTop, ...(gpuMem ? { gpuMem: gpuMem.used, ...(gpuMem.total ? { gpuMemTotal: gpuMem.total } : {}) } : {}), ...netSplitOf(s.NET ?? '', true), at, cpu: Object.fromEntries(procs.map(p => [p.pid, p.cpu])), claude: [...claude], claudeMem, memUsed: Math.max(0, memTotal - kb('MemAvailable')), memTotal, ncpu: 1, disk, net, busy, all, ...(gpu !== undefined ? { gpu } : {}), ...(battery ? { battery } : {}) };
+    return { names: Object.fromEntries(procs.map(p => [p.pid, p.name])), memTop, ...(gpuMem ? { gpuMem: gpuMem.used, ...(gpuMem.total ? { gpuMemTotal: gpuMem.total } : {}) } : {}), ...netSplitOf(s.NET ?? '', true), at, cpu: Object.fromEntries(procs.map(p => [p.pid, p.cpu])), claude: [...claude], claudeMem, memUsed: Math.max(0, memTotal - kb('MemAvailable')), memTotal, ncpu: 1, ...loadIn(s.LOAD), disk, net, busy, all, ...(gpu !== undefined ? { gpu } : {}), ...(battery ? { battery } : {}) };
 };
 // Bytes moved between two looks by the disks or ports that were in both
 const movedOf = (prev, cur) => Object.entries(cur).reduce((sum, [name, n]) => sum + (typeof prev[name] === 'number' ? Math.max(0, n - (prev[name] ?? 0)) : 0), 0);
@@ -317,6 +324,7 @@ export const figuresOf = (prev, cur) => {
         memTotal: cur.memTotal,
         memClaude: Math.min(cur.claudeMem, cur.memUsed || cur.claudeMem),
         ncpu: cur.ncpu,
+        ...(cur.load !== undefined && cur.loadCores ? { load: cur.load, loadCores: cur.loadCores } : {}),
         disks: Object.keys(cur.disk),
         ports: Object.keys(cur.net),
         ...(cur.memTop?.length ? { memTop: cur.memTop } : {}),

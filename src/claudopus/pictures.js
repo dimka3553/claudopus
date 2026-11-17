@@ -360,6 +360,7 @@ const loadWork = async ($, id) => {
         const now = await $.clock.now();
         const was = talks.get(id);
         if (was?.key !== key || (!was.lines && now - (was.at ?? 0) >= RETRY_READ)) {
+            during('read a task for its Details');
             const rows = await $.session.messages({ agentId: id }).catch(() => undefined);
             talks.set(id, { key, lines: Array.isArray(rows) ? withSteers(talkOf(rows), one.entries) : undefined, at: now });
             isChanged = true;
@@ -448,6 +449,7 @@ const loadTheirs = async ($, one) => {
         // Its folder named as the engine names its projects, and failing that any project that holds that chat
         const slug = c.folder.replace(/[^A-Za-z0-9]/g, '-');
         const name = `${c.id}/subagents/agent-${c.agent}.jsonl`;
+        during("read another chat's task");
         const r = await $.process
             .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', `${home}/.claude/projects`, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
             .catch(() => undefined);

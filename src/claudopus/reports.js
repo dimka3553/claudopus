@@ -48,10 +48,101 @@ const waitsOf = (r) => r.waiting ?? (r.question ? [{ text: r.question, ...(r.ans
 // One put away waits on nothing; brought back, what was open waits again
 const openWaits = (r) => (r.archived ? [] : waitsOf(r).filter(one => !one.answer));
 const isOpenQuestion = (r) => openWaits(r).length > 0;
-// What the person answered, once nothing in it waits: their one answer, or how many they answered
+// What the person answered, once nothing in it waits: their one answer, or how many they answered; what the work itself no longer
+// records is settled
 const answeredOf = (r) => {
-    const answered = waitsOf(r).filter(one => one.answer);
-    return isOpenQuestion(r) || !answered.length ? '' : answered.length === 1 ? `you answered ${answered[0]?.answer}` : `you answered ${answered.length}`;
+    const answered = waitsOf(r).filter(one => one.answer && one.answer !== SETTLED);
+    if (isOpenQuestion(r))
+        return '';
+    if (!answered.length)
+        return waitsOf(r).length ? 'settled' : '';
+    const [first] = answered;
+    return answered.length > 1 ? `you answered ${answered.length}` : first?.answer === IN_WORDS ? 'you answered in your words' : `you answered ${first?.answer}`;
+};
+// The answer kept for an item the person's own words answered, one its work said no longer waits, and one a newer result of its
+// work took the place of
+const IN_WORDS = 'In your words';
+const SETTLED = 'Settled';
+const REPLACED = 'Replaced';
+const MOVED = 'Moved';
+// An item as a card keeps it: a plain line, as kept before answers were, is a yes-or-no question
+const askedWait = (one) => (typeof one === 'string' ? { text: one } : one);
+// The answers an item is answered with on the panel: its own, or Yes and No; then Not now, and Answer in words, which puts a line
+// naming it in the chat's box, as no guess from a question's words tells for sure that Yes and No answer it
+const ANSWER_IN_WORDS = 'Answer in words';
+const answersOf = (wait) => [...new Set([...(wait.choices?.length ? wait.choices : ['Yes', 'No']), 'Not now', ANSWER_IN_WORDS])];
+// How an answered item reads on its result
+const answeredWords = (wait) => wait.answer === SETTLED ? 'no longer waits' : wait.answer === REPLACED ? 'replaced by a newer result' : wait.answer === MOVED ? 'moved to its newer result' : wait.answer === IN_WORDS ? 'you answered in your words' : wait.answer === 'Not now' ? 'you said not now' : `you answered “${wait.answer ?? ''}”`;
+const byPerson = (wait) => Boolean(wait.answer) && wait.answer !== SETTLED && wait.answer !== REPLACED && wait.answer !== MOVED;
+// The same line, case, punctuation and quotes aside: an item that repeats its work's ask word for word is that ask's
+const sameLine = (a, b) => Boolean(plainWords(a)) && plainWords(a) === plainWords(b);
+// The results a work left that are still kept
+const resultsOfWork = (list, agent) => list.filter(r => r.agent === agent && !r.archived).sort((a, b) => b.at - a.at);
+// Gives answers to open items of a result, each change made from what is stored then; how many it answered
+const settleWaits = async ($, r, answerOf) => {
+    let closed = 0;
+    if (!waitsOf(r).some((one, index) => !one.answer && answerOf(one, index)))
+        return 0;
+    await markReport($, r, stored => ({
+        waiting: waitsOf(stored).map((one, index) => {
+            const answer = one.answer ? undefined : answerOf(one, index);
+            return answer ? ((closed += 1), { ...one, ...answer }) : one;
+        }),
+    }));
+    return closed;
+};
+// An item a work recorded as the question on its card (`asked`, or the same line as its ask) is tied to that ask by when it was made.
+// 16 Nov a release was asked on the card and recorded as waiting a moment later; Release it did the release, and the result went on
+// waiting on the person, told to the chat with every message after. Answering that ask by any route answers exactly the items tied to
+// it, on the card while the work has not finished and on its results after; the answer taken back opens them again
+const tiedTo = (wait, card) => {
+    // Only an ask open now: one asked later in the same round ties what waits for it as it comes, and an older ask, answered, never does
+    const ask = card.ask;
+    if (wait.ask || !ask || !(wait.isAsked || sameLine(wait.text, ask.text)))
+        return wait;
+    const { isAsked: _, ...rest } = wait;
+    return { ...rest, ask: ask.at };
+};
+const settleAsked = async ($, agent, ask, said) => {
+    await changeTodos($, list => list.map(card => card.id !== agent
+        ? card
+        : {
+            ...card,
+            ...(card.waits?.length ? { waits: card.waits.map(askedWait).map(one => (one.ask === ask.at && !one.answer ? { ...one, answer: said, byAsk: ask.at } : one)) } : {}),
+        }));
+    for (const r of resultsOfWork(await loadReports($), agent))
+        await settleWaits($, r, one => (one.ask === ask.at ? { answer: said, byAsk: ask.at } : undefined));
+};
+const reopened = (one, at) => {
+    const wait = askedWait(one);
+    if (wait.byAsk !== at)
+        return one;
+    const { answer: _, byAsk: __, ...rest } = wait;
+    return rest;
+};
+const unsettleAsked = async ($, agent, at) => {
+    await changeTodos($, list => list.map(card => (card.id !== agent || !card.waits?.length ? card : { ...card, waits: card.waits.map(one => reopened(one, at)) })));
+    for (const r of resultsOfWork(await loadReports($), agent))
+        if (waitsOf(r).some(one => one.byAsk === at))
+            await markReport($, r, stored => ({ waiting: waitsOf(stored).map(one => askedWait(reopened(one, at))) }));
+};
+// The line "Answer in words" puts in the chat's box: the item by its number, so the words of the question can be anything
+const wordsLine = (r, n, now) => `About question ${n} of the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: `;
+// The person's message that carries that line and something typed after it answers that item
+const answeredInMessage = async ($, text) => {
+    // Each line's own part of the message, from its start to the next such line: a message may answer questions of several results
+    const parts = text.split(/(?=About question \d+ of the result )/).flatMap(part => {
+        const n = Number(/^About question (\d+) of the result /.exec(part)?.[1] ?? 0);
+        return n ? [{ n, part }] : [];
+    });
+    if (!parts.length)
+        return;
+    for (const r of (await read($, reports)).filter(one => !one.archived && isOpenQuestion(one))) {
+        const path = `${reportPath(r)}/report.md: `;
+        const numbers = parts.filter(({ part }) => part.includes(path) && part.slice(part.indexOf(path) + path.length).trim()).map(({ n }) => n);
+        if (numbers.length)
+            await settleWaits($, r, (_, index) => (numbers.includes(index + 1) ? { answer: IN_WORDS } : undefined));
+    }
 };
 const gists = new Map();
 // A file a report names is a path inside its own folder: never absolute, never one that climbs out with .., whoever wrote it (a
@@ -135,17 +226,40 @@ const copyNamed = async ($, text, into) => {
 const saveReport = async ($, card, text) => {
     // What the work recorded as waiting is read as it stands now; a short answer that leaves something waiting is still kept
     const one = (await read($, todos)).find(todo => todo.id === card.id) ?? card;
-    if (!one.waits?.length && text.trim().length < REPORT_LEAST && !namedPaths(text).some(path => PICTURE.test(path)))
-        return;
+    const waits = (one.waits ?? []).map(askedWait);
+    const isKept = waits.length > 0 || text.trim().length >= REPORT_LEAST || namedPaths(text).some(path => PICTURE.test(path));
+    // A round done that leaves a newer result, or that said what still waits, takes the place of what its earlier results waited on:
+    // each call of the tool lists everything still waiting. One that failed or was stopped changes nothing
     const kept = await loadReports($);
     const marked = mark(text);
-    if (kept.some(r => r.agent === one.id && r.mark === marked))
+    // The same report again is no newer result: what the round recorded goes on that one
+    const same = kept.find(r => r.agent === one.id && r.mark === marked);
+    // Only a round that said what still waits takes the place of what its earlier results waited on, once done: each call of the tool
+    // lists everything still waiting. A round that never called it, or that failed or was stopped, changes nothing
+    if (one.waitsSet) {
+        const isNewer = isKept && !same;
+        for (const r of resultsOfWork(kept, one.id).filter(r => r.id !== same?.id))
+            await settleWaits($, r, () => ({ answer: isNewer || same ? REPLACED : SETTLED }));
+        if (same)
+            await markReport($, same, stored => ({ waiting: [...waitsOf(stored).filter(byPerson), ...waits.map(({ isAsked: _, ...wait }) => wait)] }));
+        await changeTodos($, list => list.map(todo => (todo.id === one.id ? { ...todo, waitsSet: undefined, ...(same ? { waits: undefined } : {}) } : todo)));
+    }
+    if (!isKept || same)
         return;
+    // A newer result of a round that never said what waits takes over what its earlier results still waited on, ties and all, so the
+    // newest result, the one the list and the chat read, holds every open question; the earlier ones say they were moved there
+    const moved = one.waitsSet ? [] : resultsOfWork(kept, one.id).flatMap(r => openWaits(r));
+    if (moved.length)
+        for (const r of resultsOfWork(kept, one.id))
+            await settleWaits($, r, () => ({ answer: MOVED }));
+    const waiting = [...waits.map(({ isAsked: _, ...wait }) => wait), ...moved].filter((wait, n, all) => all.findIndex(other => other.text === wait.text) === n);
     const at = await $.clock.now();
     const title = cut(one.title || quoted(one.words, 60) || 'Report', 70);
     const stamp = new Date(at).toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
     const base = `${stamp}-${slug(title).slice(0, 40) || 'report'}`;
-    const id = kept.some(r => r.id === base) ? `${base}-${slug(one.id).slice(0, 8)}` : base;
+    // A third round of one work within the same minute takes a number, so it never writes over the second
+    const ids = [base, `${base}-${slug(one.id).slice(0, 8)}`, ...[2, 3, 4, 5, 6, 7, 8, 9].map(n => `${base}-${slug(one.id).slice(0, 8)}-${n}`)];
+    const id = ids.find(name => !kept.some(r => r.id === name)) ?? `${base}-${mark(one.id + String(at)).replace(/\D/g, '').slice(-8)}`;
     const into = `${reportsDir()}/${id}`;
     const chat = await read($, me);
     await $.fs.write(`${dir}/reports/${id}/report.md`, `${text.trim()}\n`);
@@ -165,7 +279,7 @@ const saveReport = async ($, card, text) => {
         agent: one.id,
         mark: marked,
         // What waits on the person is what the work recorded with the `waits` tool, wherever in the report it is
-        ...(one.waits?.length ? { waiting: one.waits.map(wait => ({ text: wait })) } : {}),
+        ...(waiting.length ? { waiting } : {}),
         ...(one.from ? { from: one.from } : {}),
     };
     await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`);
@@ -239,8 +353,8 @@ const reportsTold = (all, now, list = all.filter(r => !r.archived), newest = new
     return list.length
         ? `Results saved (what finished tasks left for ${who()} to read or act on), newest first (title · topic · when · its file${list.some(waits) ? ' · what in it is waiting on them' : ''}):\n${list
             .slice(0, REPORTS_TOLD)
-            .map(r => `- ${[cut(r.title, 70), cut(r.subject, 40), `${dated(r.at, now)} (${ago(r.at, now)})`, `${reportPath(r)}/report.md`, waits(r) ? `waiting on: ${openWaits(r).map(one => cut(one.text, 120)).join(' / ')}` : ''].filter(Boolean).join(' · ')}`)
-            .join('\n')}`
+            .map(r => `- ${[cut(r.title, 70), cut(r.subject, 40), `${dated(r.at, now)} (${ago(r.at, now)})`, `${reportPath(r)}/report.md`, waits(r) ? `waiting on: ${waitsOf(r).flatMap((one, n) => (one.answer ? [] : [`(${n + 1}) ${one.text}`])).join(' ')}` : ''].filter(Boolean).join(' · ')}`)
+            .join('\n')}${list.slice(0, REPORTS_TOLD).some(waits) ? `\nOnce ${who()}'s own words have answered what one waits on, call \`waits\` with its report.md path as \`result\` and the numbers of the questions they answered as \`answered\`.` : ''}`
         : '';
 };
 // Sends the chat a message from the panel about what the person pressed or replied there: it starts work as a message of

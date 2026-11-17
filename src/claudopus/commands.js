@@ -28,7 +28,11 @@ const commandHooks = (on) => {
             else
                 freeTimes($);
             // after the let-go above, whose own drawing would end the hold
-            if (e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element))
+            // and so does a button of the bar above the prompt on the desktop, which is redrawn as often (band.tsx)
+            const isBarButton = e.plugin === 'claudopus' && e.component === 'AbovePrompt' && barIds.get('desktop') === e.requestId && !isBarBox(e.element);
+            // and a button of a tab of the mod's on the desktop, such as Settings' Reset, which every drawing of the panel draws again too
+            const isTabButton = e.plugin === 'claudopus' && heldTabs.has(e.requestId ?? '') && !isTypedBox(e.element);
+            if ((e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element)) || isBarButton || isTabButton)
                 await holdForPress($);
             else
                 pressFrom = 0;

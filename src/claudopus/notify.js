@@ -65,11 +65,11 @@ const readyOf = ({ id, waits: seen }, cards, runs) => {
     const one = cards.find(card => card.id === id);
     if (!one)
         return undefined;
-    const waits = one.waits ?? seen ?? [];
+    const waits = (one.waits ?? seen ?? []).filter(wait => !askedWait(wait).answer);
     const said = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text ?? '';
     const what = one.status === 'done'
         ? waits.length
-            ? `Waiting for ${who()}: ${fewWords(waits[0] ?? '')}${waits.length > 1 ? ` (and ${waits.length - 1} more)` : ''}`
+            ? `Waiting for ${who()}: ${fewWords(waits[0] ? askedWait(waits[0]).text : '')}${waits.length > 1 ? ` (and ${waits.length - 1} more)` : ''}`
             : fewWords(one.answer) || fewWords(said) || 'Finished.'
         : one.status === 'failed'
             ? 'Failed with an error.'
