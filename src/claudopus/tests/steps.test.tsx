@@ -69,7 +69,7 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   const talk: unknown[] = []
   const unresumable = new Set<string>()
   const ended = new Set<string>()
-  const { stopped, resumed, appended, clock, stepped, atHandback, files } = world(on, { agents, talk, unresumable, ended })
+  const { stopped, resumed, appended, submitted, clock, stepped, atHandback, files } = world(on, { agents, talk, unresumable, ended })
   on('classic.SubagentStop', () => ({}) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -162,6 +162,10 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   await clock.advance(2_000)
   expect(await until(async () => resumed.find(one => one.startsWith('a1: From Claudopus: your helper "Draw the chin" has finished') && one.endsWith('The chin is drawn.')))).toBeDefined()
   expect(appended.filter(passed('Draw the chin'))).toHaveLength(1)
+  // The same result ended again as failed is not passed on a second time
+  await $.turn.complete({ answer: 'The chin is drawn.', durationMs: 1, isAborted: false, turnId: 'h4b', reason: 'error', agentId: 'a4' } as never)
+  await clock.advance(2_000)
+  expect(resumed.filter(one => one.startsWith('a1: From Claudopus: your helper "Draw the chin"'))).toHaveLength(1)
   // One that cannot be passed on leaves the chat told to send it on itself
   agents.a1 = 'completed'
   unresumable.add('a1')
@@ -169,8 +173,9 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   agents.a5 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb5', agentId: 'a5', message: 'The brow is drawn.' } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h5', reason: 'answer', agentId: 'a5' } as never)
-  const notPassed = (helper: string, then: string) => new RegExp(`^undefined: From Claudopus: the result of the helper "${helper}" reached this chat, and Claudopus did not pass it on to the task ".*" \\(id a1\\): ${then}`)
-  expect(await until(async () => appended.find(one => notPassed('Draw the brow', 'no such agent\\. Send the result on to that task yourself: SendMessage to a1, with the result as it reached you\\.').test(one)))).toBeDefined()
+  // (sent as Claudopus's own message, which gives the chat a turn: a row written as the helper's turn ended sat unread)
+  const notPassed = (helper: string, then: string) => new RegExp(`^From Claudopus: the result of the helper "${helper}" reached this chat, and Claudopus did not pass it on to the task ".*" \\(id a1\\): ${then}`)
+  expect(await until(async () => submitted.find(one => notPassed('Draw the brow', 'no such agent\\. Send the result on to that task yourself: SendMessage to a1, with the result as it reached you\\.').test(one)))).toBeDefined()
   unresumable.delete('a1')
   // A hand-back Claude Code refuses leaves no note
   await $.agent.spawn({ ...spawn, description: 'Draw the lip', prompt: 'draw', parentAgentId: 'a1' } as never)
@@ -187,7 +192,7 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   ended.add('a1')
   agents.a6 = 'completed'
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h6', reason: 'answer', agentId: 'a6' } as never)
-  expect(await until(async () => appended.find(one => notPassed('Draw the lip', 'no running loop\\. Send the result on to that task yourself: SendMessage to a1').test(one)))).toBeDefined()
+  expect(await until(async () => submitted.find(one => notPassed('Draw the lip', 'no running loop\\. Send the result on to that task yourself: SendMessage to a1').test(one)))).toBeDefined()
   ended.delete('a1')
   agents.a1 = 'completed'
   // Stopped from its card or by the chat, the work's running helpers are stopped with it; one whose hand-back the chat was told
@@ -198,19 +203,22 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' } as never)
   expect(stopped).toEqual(expect.arrayContaining(['a1', 'a7']))
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h7', reason: 'answer', agentId: 'a7' } as never)
-  expect(await until(async () => appended.find(one => notPassed('Draw the ear', 'that task was stopped\\. Do not start that task again for it: tell .+ what the result adds\\.').test(one)))).toBeDefined()
+  expect(await until(async () => submitted.find(one => notPassed('Draw the ear', 'that task was stopped\\. Do not start that task again for it: tell .+ what the result adds\\.').test(one)))).toBeDefined()
+  expect(appended.filter(one => one.includes('Claudopus did not pass it on'))).toEqual([])
 })
 
 test("what nothing of the work's own makes, a file, a line in it, a page or a time, Claudopus looks for when asked and starts the work again once it is there, or once the longest look (15 min unless given, at most an hour, always) runs out, though the engine lists it as ended; a look that ran out has it hand back what it has, which goes through while a helper runs, and the same file, line or page is not looked for again; a helper's result that comes after is told to the chat as late; work never reached is told to the chat; the card says so, with by when, in place of a command that would wait; a helper hands back instead", SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const unresumable = new Set<string>()
-  const { clock, files, resumed, logged, appended } = world(on, { agents, unresumable })
+  const { clock, files, resumed, logged, appended, submitted } = world(on, { agents, unresumable })
   await $.session.start(start)
   await $.prompt.submit({ text: 'wait for the deploy', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Check the deploy', prompt: 'check' } as never)
   await $.agent.spawn({ ...spawn, description: 'Read the build log', prompt: 'read', parentAgentId: 'a1' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Read the test log', prompt: 'read', parentAgentId: 'a1' } as never)
   agents.a1 = 'completed'
   agents.a2 = 'running'
+  agents.a3 = 'running'
   const r = (await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w1', agentId: 'a1', what: 'the deploy marker', file: '/w/deployed.flag' } as never)) as { result?: string }
   expect(r.result).toContain('End your step now')
   expect(r.result).toContain('after 15 min with word that it never came')
@@ -241,13 +249,22 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
   await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w4', agentId: 'a1', what: 'the results file', file: '/w/never.json', minutes: 1 } as never)
   await clock.advance(100_000)
   expect(await until(async () => resumed.find(one => one === 'a1: From Claudopus: the results file was still not there after 1 min of looking, and Claudopus will not look for it again. Hand back your report now with what you have, saying what never came and why; it goes through even while helpers run.'))).toBeDefined()
-  // Told to hand back, its report goes through though its helper runs, and the helper, at work, is not stopped; its result, which
-  // comes after, reaches the chat, which is told it came late
-  expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-miss', agentId: 'a1', message: 'The results file never came.' } as never)) as { deny?: string }).deny).toBeUndefined()
+  // Told to hand back, its report goes through though its helpers run, and those at work are not stopped. One that handed back just
+  // before, which the chat was told is passed on, ends after it: the chat is told in its place that it was not; one that hands back
+  // after reaches the chat, which is told it came late. Each as Claudopus's own message, which gives the chat a turn
   agents.a2 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-a2', agentId: 'a2', message: 'The build log ends at step 9.' } as never)
+  expect(appended.filter(one => one.includes('reached this chat because the task'))).toHaveLength(1)
+  expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-miss', agentId: 'a1', message: 'The results file never came.' } as never)) as { deny?: string }).deny).toBeUndefined()
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h-a2', reason: 'answer', agentId: 'a2' } as never)
-  expect(await until(async () => appended.find(one => /^undefined: From Claudopus: the result of the helper ".*" came after the task ".*" handed back what it had, so it reached this chat\./.test(one)))).toBeDefined()
+  expect(await until(async () => submitted.find(one => /^From Claudopus, in place of its word that it passes on the result of the helper "[^"]+": the task "[^"]+" had already handed back what it had, so Claudopus did not pass it on, and the result stays in this chat\./.test(one)))).toBeDefined()
+  agents.a3 = 'completed'
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-a3', agentId: 'a3', message: 'The test log is clean.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h-a3', reason: 'answer', agentId: 'a3' } as never)
+  expect(await until(async () => submitted.find(one => /^From Claudopus: the result of the helper "[^"]+" came after the task "[^"]+" handed back what it had, so it reached this chat\./.test(one)))).toBeDefined()
+  expect(submitted.filter(one => one.includes('handed back what it had'))).toHaveLength(2)
+  expect(appended.filter(one => one.includes('reached this chat because the task'))).toHaveLength(1)
+  expect(appended.filter(one => one.includes('handed back what it had'))).toEqual([])
   expect(resumed.filter(one => one.startsWith('a1: From Claudopus: your helper'))).toEqual([])
   // The same file looked for again is refused, whatever its words; another is looked for
   agents.a1 = 'completed'
@@ -255,9 +272,9 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
   expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w4d', agentId: 'a1', what: 'the results file', file: '/w/second.json', minutes: 1 } as never)) as { result?: string }).result).toContain('End your step now')
   // Work that cannot be started again for what came would wait for good: the chat is told
   await $.agent.spawn({ ...spawn, description: 'Watch the queue', prompt: 'watch' } as never)
-  agents.a3 = 'completed'
-  unresumable.add('a3')
-  await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w7', agentId: 'a3', what: 'the queue to drain', minutes: 1 } as never)
+  agents.a4 = 'completed'
+  unresumable.add('a4')
+  await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w7', agentId: 'a4', what: 'the queue to drain', minutes: 1 } as never)
   await clock.advance(120_000)
   expect(await until(async () => logged.find(line => line === 'Claudopus could not start "Watch the queue" again for what it waited on: the queue to drain.'))).toBeDefined()
   // Nothing to look for is said back, and the chat has no card to be started from

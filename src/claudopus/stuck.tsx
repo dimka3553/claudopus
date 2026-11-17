@@ -87,20 +87,27 @@ const callEnded = async ($: EngineInterface, id: string, agent: string, tool: st
 
 // When a helper last showed it was at work: it started, ended (with its result), or a call of its returned something different
 const helperMovedAt = (one: Todo) => Math.max(one.startedAt, one.endedAt, one.newAt ?? 0, changedAt.get(one.id) ?? 0)
-// A helper that sits silent: neither it nor any helper under it is in a call younger than LIVE_CALL_MOST, runs a command of its own
-// in the background (a watch, or a process it left running such as a dev server, is no work), or has shown it was at work for
-// STUCK_AFTER. One rendering in the background, or printing a new frame count call after call, is at work
+// A helper that sits silent: it is not at work (isBusy), and neither it nor any helper under it has shown it was at work for
+// STUCK_AFTER. One rendering in the background, printing a new frame count call after call, or waiting on its own wake_me is at work
 const isSilent = (list: Todo[], helper: Todo, at: number) =>
   !isBusy(list, helper, at) && [helper, ...underOf(list, helper.id)].filter(one => one.status === 'working').every(one => at - helperMovedAt(one) >= STUCK_AFTER)
-// A helper visibly at work now: it, or one under it, is in a call younger than LIVE_CALL_MOST or runs a command of its own in the
-// background
+// When a command in the background last printed: as its output last changed, or as it started while it has printed nothing
+const printedAt = (one: Todo, b: NonNullable<Todo['bg']>[number]) => {
+  const seen = jobLog.get(b.id) ?? one.seenJobs?.[b.id]
+  return seen?.wroteAt && !seen.isEmpty ? Math.max(b.at, seen.wroteAt) : b.at
+}
+// A wake_me still due: Claudopus starts that work again when it comes, or when its look runs out
+const isWakeDue = (one: Todo, at: number) => Boolean(one.wakeWhen && at <= one.wakeWhen.until)
+// A helper visibly at work now: it, or one under it, is in a call younger than LIVE_CALL_MOST, has a command of its own in the
+// background that printed within LIVE_CALL_MOST, or has a wake_me still due. A watch is no work, nor a command silent that long
+// (a hung run, a dev server it left: on 17 Nov one counted as work for good, and its task was never told of)
 const isBusy = (list: Todo[], helper: Todo, at: number) =>
   [helper, ...underOf(list, helper.id)]
     .filter(one => one.status === 'working')
     .some(one => {
       const call = runningOf(one.id)
       // (a command Claudopus holds for its turn is at work too: its wait is Claudopus's own)
-      return Boolean((call && at - call.at < LIVE_CALL_MOST) || one.bg?.some(b => !b.isWatch) || one.heldCalls?.length)
+      return Boolean((call && at - call.at < LIVE_CALL_MOST) || one.bg?.some(b => !b.isWatch && at - printedAt(one, b) < LIVE_CALL_MOST) || isWakeDue(one, at) || one.heldCalls?.length)
     })
 const runningKids = (list: Todo[], id: string) => list.filter(kid => kid.parentId === id && kid.status === 'working')
 
@@ -125,7 +132,7 @@ const lookStuck = async ($: EngineInterface) => {
       // Nor work that asked Claudopus to start it again: that look has its own end, which starts it (lookWakes)
       const isStuck = one.status === 'working' && !one.wakeWhen && !(one.ask && !one.ask.replied) && !one.admins?.length && ![one, ...underOf(list, one.id)].some(kid => kid.heldCalls?.length) && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
       if (isStuck && !one.stuckAt) return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) })
-      if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined })
+      if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined, stuckTold: undefined })
       return one
     })
     return isChanged ? next : list
@@ -140,6 +147,7 @@ const lookStuck = async ($: EngineInterface) => {
     const helpers = runningKids(list, one.id)
     const isScheduled = list.find(card => card.id === one.id)?.endedStepAt !== undefined && helpers.every(kid => isSilent(list, kid, now))
     if (helpers.length && (helpers.some(kid => isBusy(list, kid, now)) || isScheduled)) continue
+    if (list.find(card => card.id === one.id)?.stuckTold !== undefined) continue
     const engine = await $.agent.list().catch(() => undefined)
     const status = engine?.find(agent => agent.id === one.id)?.status
     // Not work that only waits: on a helper the engine still runs, or on background work it holds
@@ -155,13 +163,34 @@ const lookStuck = async ($: EngineInterface) => {
     if (r?.isDelivered) {
       await log($, `work ${one.id} had stopped mid-step (the engine lists it ${status}): started again`)
       await sayInChat($, named(RESTARTED_IN_CHAT(titleOf(one), mins)))
-    } else await sayInChat($, named(`${STUCK_IN_CHAT(titleOf(one), mins)} ${STUCK_ASK}`), named(STUCK_IN_CHAT(titleOf(one), mins)))
+    } else await tellStuck($, one, mins, now)
+  }
+  // Work flagged stuck that the chat was not told of then (a helper looked at work, or the schedule was to tell it), and that no
+  // schedule tells of now, is told of once STUCK_TOLD_BY after it stopped moving, whatever its helpers look like: on 17 Nov a helper's
+  // hung command kept its task from ever being told
+  for (const one of (await read($, todos)).filter(card => !card.parentId && !card.chat && card.status === 'working' && card.stuckAt !== undefined && card.stuckTold === undefined && now - card.stuckAt >= STUCK_TOLD_BY)) {
+    const list = await read($, todos)
+    const helpers = runningKids(list, one.id)
+    const isScheduled = one.endedStepAt !== undefined && (one.helperWait?.done ?? 0) < 3 && helpers.length > 0 && helpers.every(kid => isSilent(list, kid, now))
+    if (isScheduled || isHeld(one) || stoppedHere.has(one.id) || pressed.has(one.id)) continue
+    await log($, `work ${one.id} flagged stuck and not yet told of: the chat is told`)
+    await tellStuck($, one, Math.round((now - movedAt(list, one)) / 60_000), now)
   }
   await lookHelperWaits($, now)
   // What agents that have ended had seen come back is let go
   const list = await read($, todos)
   for (const agent of seenLines.keys()) if (!list.some(one => one.id === agent && one.status === 'working')) seenLines.delete(agent)
   for (const agent of [...lastResult.keys()]) if (!list.some(one => one.id === agent && one.status === 'working')) (lastResult.delete(agent), changedAt.delete(agent))
+}
+
+// Work flagged stuck is told to the chat by this long after it stopped moving, at the latest: when the schedule would have told it
+const STUCK_TOLD_BY = 3 * HELPER_WAIT_STEP
+// The chat is told work is stuck, and that it may write to it; marked first, so it is told once
+const tellStuck = async ($: EngineInterface, one: Todo, mins: number, now: number) => {
+  await changeTodos($, all => all.map(card => (card.id === one.id ? { ...card, stuckTold: now } : card)))
+  const list = await read($, todos)
+  const said = STUCK_IN_CHAT(titleOf(one), mins, runningKids(list, one.id).some(kid => isBusy(list, kid, now)))
+  await sayInChat($, named(`${said} ${STUCK_ASK}`), named(said))
 }
 
 // Work whose step ended while all its helpers sit silent follows a fixed schedule from then: at HELPER_WAIT_STEP it is started again
@@ -184,8 +213,9 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
       if (wait && moved > wait.from) wait = undefined
       if (!wait && one.endedStepAt !== undefined) wait = { from: Math.max(one.endedStepAt, moved), done: 0 }
       if (wait !== one.helperWait) ((isChanged = true), (one = { ...one, helperWait: wait }))
-      // A step is due once its time has come, its step has ended and every helper sits silent
-      if (wait && wait.done < 3 && now - wait.from >= HELPER_WAIT_STEP * (wait.done + 1) && one.endedStepAt !== undefined && helpers.every(kid => isSilent(list, kid, now)))
+      // A step is due once its time has come, its step has ended, every helper sits silent and it waits on no wake_me of its own; and
+      // HELPER_WAIT_STEP after the last, so steps a helper at work held back come one by one
+      if (wait && wait.done < 3 && now - wait.from >= HELPER_WAIT_STEP * (wait.done + 1) && now - (wait.at ?? 0) >= HELPER_WAIT_STEP && one.endedStepAt !== undefined && !isWakeDue(one, now) && helpers.every(kid => isSilent(list, kid, now)))
         due.push({ id: one.id, step: wait.done + 1, mins: Math.round((now - wait.from) / 60_000) })
       return one
     })
@@ -197,8 +227,10 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
     if (!one || isHeld(one) || stoppedHere.has(id) || pressed.has(id) || (await isReplaced($))) continue
     // (read right before: work at a step of its own again is not sent one, and the step waits for its step to end)
     if (step < 3 && WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))) continue
-    await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { ...card.helperWait, done: step }, ...(step === 2 ? { mayHandBack: card.mayHandBack ?? now } : {}) } : card)))
+    await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { ...card.helperWait, done: step, at: now }, ...(step === 2 ? { mayHandBack: card.mayHandBack ?? now } : {}), ...(step === 3 ? { stuckTold: card.stuckTold ?? now } : {}) } : card)))
     if (step === 3) {
+      // The chat already told it is stuck is not told again
+      if (one.stuckTold !== undefined) continue
       await log($, `work ${id} still stuck ${mins} min on silent helpers after Claudopus asked it to hand back: the chat is told`)
       await sayInChat($, named(`${GAVE_UP_IN_CHAT(titleOf(one), mins)} ${STUCK_ASK}`), named(GAVE_UP_IN_CHAT(titleOf(one), mins)))
       continue

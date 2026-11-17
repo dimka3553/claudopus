@@ -781,8 +781,8 @@ const OWED =
   'A message from {name} is waiting for your decision, and you have kept working. Stop now and decide: more for your to-do list, a new task to hand back with the `note` tool and its `task`, or a change in how you work. Change your to-dos to match, then say with the `note` tool, in one plain line, what you did with their message.'
 const drifted = (steps: number) =>
   `You have taken ${steps} steps since you last touched your to-dos or said how far you have got. In your next step, send the to-do calls that bring the list up to date (tick what is done, mark the one you are on as doing, add what you took on) and a \`note\` saying how far you have got, together with your next working call in that same step, never in a step of their own. If all of it is already up to date, continue.`
-const STUCK_IN_CHAT = (title: string, mins: number) =>
-  `"${title}" hasn't made progress for ${mins} minutes: nothing new has come back to Claude or its helpers. It may be stuck waiting for something. Its card shows how far it has got.`
+const STUCK_IN_CHAT = (title: string, mins: number, isHelpersAtWork = false) =>
+  `"${title}" hasn't made progress for ${mins} minutes: nothing new has come back to Claude${isHelpersAtWork ? ', though its helpers still run something' : ' or its helpers'}. It may be stuck waiting for something. Its card shows how far it has got.`
 const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to hand back what it has if nothing is coming.'
 const HELPERS_SILENT = (mins: number, helpers: string) =>
   `From Claudopus: nothing new has come back from your helpers for ${mins} min while your step had ended: ${helpers}. Ask each with SendMessage what it is doing and when it will end, and tell one that is stuck or waits on nothing to hand back what it has now. Then carry on with what needs nothing from them, or end your step.`
@@ -1060,7 +1060,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
   status: 'working',
 })
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
-const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, mayHandBack: undefined, endedStepAt: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, newAt: at })
 const goesOn = (list: Todo[], id: string) => {
   const one = list.find(card => card.id === id)
   const isRunning = Boolean(one?.bg?.some(b => !b.isWatch)) || list.some(kid => kid.parentId === id && kid.status === 'working')
@@ -8141,12 +8141,17 @@ const callEnded = async ($: EngineInterface, id: string, agent: string, tool: st
 const helperMovedAt = (one: Todo) => Math.max(one.startedAt, one.endedAt, one.newAt ?? 0, changedAt.get(one.id) ?? 0)
 const isSilent = (list: Todo[], helper: Todo, at: number) =>
   !isBusy(list, helper, at) && [helper, ...underOf(list, helper.id)].filter(one => one.status === 'working').every(one => at - helperMovedAt(one) >= STUCK_AFTER)
+const printedAt = (one: Todo, b: NonNullable<Todo['bg']>[number]) => {
+  const seen = jobLog.get(b.id) ?? one.seenJobs?.[b.id]
+  return seen?.wroteAt && !seen.isEmpty ? Math.max(b.at, seen.wroteAt) : b.at
+}
+const isWakeDue = (one: Todo, at: number) => Boolean(one.wakeWhen && at <= one.wakeWhen.until)
 const isBusy = (list: Todo[], helper: Todo, at: number) =>
   [helper, ...underOf(list, helper.id)]
     .filter(one => one.status === 'working')
     .some(one => {
       const call = runningOf(one.id)
-      return Boolean((call && at - call.at < LIVE_CALL_MOST) || one.bg?.some(b => !b.isWatch) || one.heldCalls?.length)
+      return Boolean((call && at - call.at < LIVE_CALL_MOST) || one.bg?.some(b => !b.isWatch && at - printedAt(one, b) < LIVE_CALL_MOST) || isWakeDue(one, at) || one.heldCalls?.length)
     })
 const runningKids = (list: Todo[], id: string) => list.filter(kid => kid.parentId === id && kid.status === 'working')
 
@@ -8164,7 +8169,7 @@ const lookStuck = async ($: EngineInterface) => {
       const isWaitingOwn = Boolean(one.waitsSince && one.bg?.some(b => !b.isWatch))
       const isStuck = one.status === 'working' && !one.wakeWhen && !(one.ask && !one.ask.replied) && !one.admins?.length && ![one, ...underOf(list, one.id)].some(kid => kid.heldCalls?.length) && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
       if (isStuck && !one.stuckAt) return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) })
-      if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined })
+      if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined, stuckTold: undefined })
       return one
     })
     return isChanged ? next : list
@@ -8175,6 +8180,7 @@ const lookStuck = async ($: EngineInterface) => {
     const helpers = runningKids(list, one.id)
     const isScheduled = list.find(card => card.id === one.id)?.endedStepAt !== undefined && helpers.every(kid => isSilent(list, kid, now))
     if (helpers.length && (helpers.some(kid => isBusy(list, kid, now)) || isScheduled)) continue
+    if (list.find(card => card.id === one.id)?.stuckTold !== undefined) continue
     const engine = await $.agent.list().catch(() => undefined)
     const status = engine?.find(agent => agent.id === one.id)?.status
     const under = underOf(list, one.id).map(kid => kid.id)
@@ -8187,12 +8193,28 @@ const lookStuck = async ($: EngineInterface) => {
     if (r?.isDelivered) {
       await log($, `work ${one.id} had stopped mid-step (the engine lists it ${status}): started again`)
       await sayInChat($, named(RESTARTED_IN_CHAT(titleOf(one), mins)))
-    } else await sayInChat($, named(`${STUCK_IN_CHAT(titleOf(one), mins)} ${STUCK_ASK}`), named(STUCK_IN_CHAT(titleOf(one), mins)))
+    } else await tellStuck($, one, mins, now)
+  }
+  for (const one of (await read($, todos)).filter(card => !card.parentId && !card.chat && card.status === 'working' && card.stuckAt !== undefined && card.stuckTold === undefined && now - card.stuckAt >= STUCK_TOLD_BY)) {
+    const list = await read($, todos)
+    const helpers = runningKids(list, one.id)
+    const isScheduled = one.endedStepAt !== undefined && (one.helperWait?.done ?? 0) < 3 && helpers.length > 0 && helpers.every(kid => isSilent(list, kid, now))
+    if (isScheduled || isHeld(one) || stoppedHere.has(one.id) || pressed.has(one.id)) continue
+    await log($, `work ${one.id} flagged stuck and not yet told of: the chat is told`)
+    await tellStuck($, one, Math.round((now - movedAt(list, one)) / 60_000), now)
   }
   await lookHelperWaits($, now)
   const list = await read($, todos)
   for (const agent of seenLines.keys()) if (!list.some(one => one.id === agent && one.status === 'working')) seenLines.delete(agent)
   for (const agent of [...lastResult.keys()]) if (!list.some(one => one.id === agent && one.status === 'working')) (lastResult.delete(agent), changedAt.delete(agent))
+}
+
+const STUCK_TOLD_BY = 3 * HELPER_WAIT_STEP
+const tellStuck = async ($: EngineInterface, one: Todo, mins: number, now: number) => {
+  await changeTodos($, all => all.map(card => (card.id === one.id ? { ...card, stuckTold: now } : card)))
+  const list = await read($, todos)
+  const said = STUCK_IN_CHAT(titleOf(one), mins, runningKids(list, one.id).some(kid => isBusy(list, kid, now)))
+  await sayInChat($, named(`${said} ${STUCK_ASK}`), named(said))
 }
 
 const lookHelperWaits = async ($: EngineInterface, now: number) => {
@@ -8209,7 +8231,7 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
       if (wait && moved > wait.from) wait = undefined
       if (!wait && one.endedStepAt !== undefined) wait = { from: Math.max(one.endedStepAt, moved), done: 0 }
       if (wait !== one.helperWait) ((isChanged = true), (one = { ...one, helperWait: wait }))
-      if (wait && wait.done < 3 && now - wait.from >= HELPER_WAIT_STEP * (wait.done + 1) && one.endedStepAt !== undefined && helpers.every(kid => isSilent(list, kid, now)))
+      if (wait && wait.done < 3 && now - wait.from >= HELPER_WAIT_STEP * (wait.done + 1) && now - (wait.at ?? 0) >= HELPER_WAIT_STEP && one.endedStepAt !== undefined && !isWakeDue(one, now) && helpers.every(kid => isSilent(list, kid, now)))
         due.push({ id: one.id, step: wait.done + 1, mins: Math.round((now - wait.from) / 60_000) })
       return one
     })
@@ -8220,8 +8242,9 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
     const one = list.find(card => card.id === id)
     if (!one || isHeld(one) || stoppedHere.has(id) || pressed.has(id) || (await isReplaced($))) continue
     if (step < 3 && WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))) continue
-    await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { ...card.helperWait, done: step }, ...(step === 2 ? { mayHandBack: card.mayHandBack ?? now } : {}) } : card)))
+    await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { ...card.helperWait, done: step, at: now }, ...(step === 2 ? { mayHandBack: card.mayHandBack ?? now } : {}), ...(step === 3 ? { stuckTold: card.stuckTold ?? now } : {}) } : card)))
     if (step === 3) {
+      if (one.stuckTold !== undefined) continue
       await log($, `work ${id} still stuck ${mins} min on silent helpers after Claudopus asked it to hand back: the chat is told`)
       await sayInChat($, named(`${GAVE_UP_IN_CHAT(titleOf(one), mins)} ${STUCK_ASK}`), named(GAVE_UP_IN_CHAT(titleOf(one), mins)))
       continue
@@ -9177,24 +9200,28 @@ const HELPER_NOT_PASSED = (helper: string, work: string, id: string, reason: str
   }`
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`)
-const WAITS_ON = (work: string, helpers: number, wake: string) =>
+const WAITS_ON = (work: string, helpers: number, wake: string, stuck?: string) =>
   `From Claudopus: the task "${work}" ended its step without its report because it waits ${helpers ? `for ${plural(helpers, 'a helper', 'helpers')} it started` : `to be started again once this is there: ${wake}`}. Claude Code may say it ended without delivering a report, but it is still at work: ${
     helpers ? `${helpers === 1 ? "the helper's result starts" : "each helper's result starts"} it again` : 'Claudopus starts it again then'
-  }, and its report comes after that. It cannot give its report while it waits, so do not message it for one: Claudopus starts it again if that wait runs out or its helpers go quiet, and tells you if it is stuck. Do not tell {name} it stopped.`
+  }, and its report comes after that. ${
+    stuck
+      ? `Claudopus told you it is stuck, so you may message it (SendMessage to ${stuck}) to ask what it waits on, and to hand back what it has if nothing is coming.`
+      : 'It cannot give its report while it waits, so do not message it for one: Claudopus starts it again if that wait runs out or its helpers go quiet, and tells you if it is stuck.'
+  } Do not tell {name} it stopped.`
 const waitingNow = async ($: EngineInterface) => {
   const list = await read($, todos)
   const listed = new Map((await $.agent.list().catch(() => [])).map(one => [one.id, one.status] as const))
   const now = await $.clock.now()
-  const waiting = new Map<string, { title: string; helpers: number; wake: string }>()
+  const waiting = new Map<string, { title: string; helpers: number; wake: string; stuck?: string }>()
   for (const card of list) {
     if (card.parentId || card.status !== 'working' || card.handedBackAt !== undefined) continue
     const helpers = runningHelpers(list, card.id).filter(one => listed.get(one.id) === 'running' || listed.get(one.id) === 'waiting').length
     const wake = card.wakeWhen && card.wakeWhen.until > now ? card.wakeWhen.what : ''
-    if (helpers || wake) waiting.set(card.id, { title: titleOf(card), helpers, wake })
+    if (helpers || wake) waiting.set(card.id, { title: titleOf(card), helpers, wake, ...(card.stuckTold !== undefined ? { stuck: card.id } : {}) })
   }
   return waiting
 }
-const waitsText = (work: { title: string; helpers: number; wake: string }) => named(WAITS_ON(work.title, work.helpers, work.wake))
+const waitsText = (work: { title: string; helpers: number; wake: string; stuck?: string }) => named(WAITS_ON(work.title, work.helpers, work.wake, work.stuck))
 
 const passedTo = (list: Todo[], helperId: string) => {
   const helper = list.find(one => one.id === helperId)
@@ -9214,11 +9241,15 @@ const notPassedWhy = (parent: Todo): { reason: string; isPersons: boolean } | un
           : undefined
 const toChat = async ($: EngineInterface, text: string) =>
   $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(text) }] } }).catch(err => log($, `chat not told of a helper's result: ${String(err)}`))
+const toChatNow = async ($: EngineInterface, text: string) => {
+  const r = await $.prompt.submit({ text: named(text) }).then(() => true).catch(err => (void log($, `chat not sent a helper's result: ${String(err)}`), false))
+  if (!r) await toChat($, text)
+}
 const notedAtHandback = new Set<string>()
 const noteHandback = async ($: EngineInterface, helperId: string) => {
   if (!dir || isOff) return
   const to = passedTo(await read($, todos), helperId)
-  if (!to) return
+  if (!to || handedBackLetGo.has(to.parent.id)) return
   const listed = (await $.agent.list().catch(() => [])).find(one => one.id === to.parent.id)?.status
   if (listed === 'running' || listed === 'waiting') return
   notedAtHandback.add(helperId)
@@ -9227,16 +9258,19 @@ const noteHandback = async ($: EngineInterface, helperId: string) => {
 const passedOn = new Map<string, string>()
 const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status'], isUnheard = false) => {
   if (!dir || isOff) return
-  const key = `${how}:${report.trim().slice(0, ANSWER_CHARS)}`
+  const key = report.trim().slice(0, ANSWER_CHARS)
   if (passedOn.get(helperId) === key) return
   passedOn.set(helperId, key)
   const isNoted = notedAtHandback.delete(helperId)
   const all = await read($, todos)
   const late = all.find(one => one.id === all.find(kid => kid.id === helperId)?.parentId)
-  if (late && handedBackLetGo.has(late.id)) return void (await toChat($, HELPER_LATE(titleOf(all.find(one => one.id === helperId) ?? late), titleOf(late))))
+  if (late && handedBackLetGo.has(late.id)) {
+    if (how === 'stopped' || stoppedByUs.has(helperId) || !key) return void (await log($, `helper ${helperId} of ${late.id} ended after its work handed back, with nothing to tell`))
+    return void (await toChatNow($, HELPER_LATE(titleOf(all.find(one => one.id === helperId) ?? late), titleOf(late), isNoted)))
+  }
   const notPassed = async (helper: Todo | undefined, parent: Todo, reason: string, isPersons = false) => {
     await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${reason}`)
-    await toChat($, HELPER_NOT_PASSED(titleOf(helper ?? parent), titleOf(parent), parent.id, reason, isPersons))
+    await toChatNow($, HELPER_NOT_PASSED(titleOf(helper ?? parent), titleOf(parent), parent.id, reason, isPersons))
   }
   const to = passedTo(all, helperId)
   if (!to) {
@@ -9269,8 +9303,11 @@ const passOnHelper = async ($: EngineInterface, helperId: string, report: string
 
 const handedBackLetGo = new Set<string>()
 
-const HELPER_LATE = (helper: string, work: string) =>
-  `From Claudopus: the result of the helper "${helper}" came after the task "${work}" handed back what it had, so it reached this chat. Pass on to {name} what it adds to that task's report.`
+const HELPER_LATE = (helper: string, work: string, isPassedSaid = false) =>
+  isPassedSaid
+    ? `From Claudopus, in place of its word that it passes on the result of the helper "${helper}": the task "${work}" had already handed back what it had, so Claudopus did not pass it on, and the result stays in this chat. Pass on to {name} what it adds to that task's report.`
+    : `From Claudopus: the result of the helper "${helper}" came after the task "${work}" handed back what it had, so it reached this chat. Pass on to {name} what it adds to that task's report.`
+const stoppedByUs = new Set<string>()
 
 const isHelperSpawn = (e: { parentAgentId?: string; workflow?: unknown; resume?: unknown; fork: boolean; isTeammate?: true; background: boolean }) =>
   Boolean(e.parentAgentId) && !flowAgents.has(e.parentAgentId ?? '') && !e.workflow && !e.resume && !e.fork && !e.isTeammate && !e.background && !isOff && Boolean(dir)
@@ -9291,6 +9328,7 @@ const stopHelpers = async ($: EngineInterface, id: string, isSilentOnly = false)
   const list = await read($, todos)
   const now = await $.clock.now()
   for (const one of underOf(list, id).filter(kid => kid.status === 'working' && (!isSilentOnly || isSilent(list, kid, now)))) {
+    stoppedByUs.add(one.id)
     const r = await $.tool.call({ tool: 'TaskStop', task_id: one.id }).catch(err => ({ deny: String(err) }))
     if ((r as { deny?: unknown }).deny) await log($, `helper ${one.id} of ${id} not stopped: ${String((r as { deny?: unknown }).deny)}`)
   }

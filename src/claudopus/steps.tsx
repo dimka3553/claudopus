@@ -289,10 +289,15 @@ const HELPER_NOT_PASSED = (helper: string, work: string, id: string, reason: str
 // its own it reached the chat beside the notice, or rode into a later turn after the notice was left out (16 Nov evening: 27 turns).
 // Work that waits only on a command it started detached is not: its card ends as the engine ends it, and the command starts it again
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`)
-const WAITS_ON = (work: string, helpers: number, wake: string) =>
+// Once Claudopus told the chat the task is stuck, the chat may write to it
+const WAITS_ON = (work: string, helpers: number, wake: string, stuck?: string) =>
   `From Claudopus: the task "${work}" ended its step without its report because it waits ${helpers ? `for ${plural(helpers, 'a helper', 'helpers')} it started` : `to be started again once this is there: ${wake}`}. Claude Code may say it ended without delivering a report, but it is still at work: ${
     helpers ? `${helpers === 1 ? "the helper's result starts" : "each helper's result starts"} it again` : 'Claudopus starts it again then'
-  }, and its report comes after that. It cannot give its report while it waits, so do not message it for one: Claudopus starts it again if that wait runs out or its helpers go quiet, and tells you if it is stuck. Do not tell {name} it stopped.`
+  }, and its report comes after that. ${
+    stuck
+      ? `Claudopus told you it is stuck, so you may message it (SendMessage to ${stuck}) to ask what it waits on, and to hand back what it has if nothing is coming.`
+      : 'It cannot give its report while it waits, so do not message it for one: Claudopus starts it again if that wait runs out or its helpers go quiet, and tells you if it is stuck.'
+  } Do not tell {name} it stopped.`
 // The top work at work, its report not given, that waits on what the engine does not count as its own: a helper the engine still
 // lists at work, or a wake_me still due. A helper's card left at work after the helper is gone, or a wake long past, is not waiting:
 // the engine's word that the work ended then reaches the chat as it is
@@ -300,16 +305,16 @@ const waitingNow = async ($: EngineInterface) => {
   const list = await read($, todos)
   const listed = new Map((await $.agent.list().catch(() => [])).map(one => [one.id, one.status] as const))
   const now = await $.clock.now()
-  const waiting = new Map<string, { title: string; helpers: number; wake: string }>()
+  const waiting = new Map<string, { title: string; helpers: number; wake: string; stuck?: string }>()
   for (const card of list) {
     if (card.parentId || card.status !== 'working' || card.handedBackAt !== undefined) continue
     const helpers = runningHelpers(list, card.id).filter(one => listed.get(one.id) === 'running' || listed.get(one.id) === 'waiting').length
     const wake = card.wakeWhen && card.wakeWhen.until > now ? card.wakeWhen.what : ''
-    if (helpers || wake) waiting.set(card.id, { title: titleOf(card), helpers, wake })
+    if (helpers || wake) waiting.set(card.id, { title: titleOf(card), helpers, wake, ...(card.stuckTold !== undefined ? { stuck: card.id } : {}) })
   }
   return waiting
 }
-const waitsText = (work: { title: string; helpers: number; wake: string }) => named(WAITS_ON(work.title, work.helpers, work.wake))
+const waitsText = (work: { title: string; helpers: number; wake: string; stuck?: string }) => named(WAITS_ON(work.title, work.helpers, work.wake, work.stuck))
 
 // A helper that ends while the work that started it has ended its step: the engine hands its result to the chat (seen live on 16
 // Nov), so Claudopus passes it on to that work and starts it again with it. The work never holds itself open to wait for helpers
@@ -334,6 +339,12 @@ const notPassedWhy = (parent: Todo): { reason: string; isPersons: boolean } | un
           : undefined
 const toChat = async ($: EngineInterface, text: string) =>
   $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(text) }] } }).catch(err => log($, `chat not told of a helper's result: ${String(err)}`))
+// What the chat must act on as a helper's turn ends, after its own turn on that result has ended: sent as the mod's own message,
+// which shows in the chat and gives it a turn (written as a row, it sat unread until the person's next message). A row when that fails
+const toChatNow = async ($: EngineInterface, text: string) => {
+  const r = await $.prompt.submit({ text: named(text) }).then(() => true).catch(err => (void log($, `chat not sent a helper's result: ${String(err)}`), false))
+  if (!r) await toChat($, text)
+}
 // The helpers whose hand-back the chat was told of before it went: the engine hands it to the chat at once, and the chat's turn
 // starts with it before the helper's turn ends (16 and 17 Nov: in 61 of 62 hand-backs the chat's request went out before the note
 // written as the helper's turn ended, and the chat sent 31 of those results on by hand). So the chat is told as the hand-back is
@@ -343,7 +354,8 @@ const notedAtHandback = new Set<string>()
 const noteHandback = async ($: EngineInterface, helperId: string) => {
   if (!dir || isOff) return
   const to = passedTo(await read($, todos), helperId)
-  if (!to) return
+  // Nor for work that already handed back what it had while its helpers ran: the result comes late (passOnHelper)
+  if (!to || handedBackLetGo.has(to.parent.id)) return
   // Work at a step of its own, or that the engine holds for a command of its own, is handed the result by the engine itself
   const listed = (await $.agent.list().catch(() => [])).find(one => one.id === to.parent.id)?.status
   if (listed === 'running' || listed === 'waiting') return
@@ -352,21 +364,26 @@ const noteHandback = async ($: EngineInterface, helperId: string) => {
 }
 // The result each helper's end was last passed on with: its turn's end, the look shortly after it and the look for work that ended
 // unheard may each come to the same end, and it is passed on once. A helper started again ends again with a result of its own
+// By the helper and its report alone: the same report ended again as failed or stopped is not passed on twice
 const passedOn = new Map<string, string>()
 const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status'], isUnheard = false) => {
   if (!dir || isOff) return
-  const key = `${how}:${report.trim().slice(0, ANSWER_CHARS)}`
+  const key = report.trim().slice(0, ANSWER_CHARS)
   if (passedOn.get(helperId) === key) return
   passedOn.set(helperId, key)
   const isNoted = notedAtHandback.delete(helperId)
-  // A result that comes after the work handed back what it had, as it was told to, reaches the chat: it is told what it is
+  // A result that comes after the work handed back what it had, as it was told to, reaches the chat: it is told what it is, and
+  // when it was told already that the result is passed on, that it was not. None for a helper Claudopus stopped, nor one with no result
   const all = await read($, todos)
   const late = all.find(one => one.id === all.find(kid => kid.id === helperId)?.parentId)
-  if (late && handedBackLetGo.has(late.id)) return void (await toChat($, HELPER_LATE(titleOf(all.find(one => one.id === helperId) ?? late), titleOf(late))))
+  if (late && handedBackLetGo.has(late.id)) {
+    if (how === 'stopped' || stoppedByUs.has(helperId) || !key) return void (await log($, `helper ${helperId} of ${late.id} ended after its work handed back, with nothing to tell`))
+    return void (await toChatNow($, HELPER_LATE(titleOf(all.find(one => one.id === helperId) ?? late), titleOf(late), isNoted)))
+  }
   // The chat was told it is passed on: when it is not, the chat is told so, so the result is never left unsent
   const notPassed = async (helper: Todo | undefined, parent: Todo, reason: string, isPersons = false) => {
     await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${reason}`)
-    await toChat($, HELPER_NOT_PASSED(titleOf(helper ?? parent), titleOf(parent), parent.id, reason, isPersons))
+    await toChatNow($, HELPER_NOT_PASSED(titleOf(helper ?? parent), titleOf(parent), parent.id, reason, isPersons))
   }
   const to = passedTo(all, helperId)
   if (!to) {
@@ -408,9 +425,14 @@ const passOnHelper = async ($: EngineInterface, helperId: string, report: string
 // is told what it is (HELPER_LATE). Until the work takes a step again
 const handedBackLetGo = new Set<string>()
 
-// What the chat is told of a helper's result that came after its task handed back what it had
-const HELPER_LATE = (helper: string, work: string) =>
-  `From Claudopus: the result of the helper "${helper}" came after the task "${work}" handed back what it had, so it reached this chat. Pass on to {name} what it adds to that task's report.`
+// What the chat is told of a helper's result that came after its task handed back what it had; `isPassedSaid` when it was told
+// already, as the helper handed back, that the result is passed on to that task
+const HELPER_LATE = (helper: string, work: string, isPassedSaid = false) =>
+  isPassedSaid
+    ? `From Claudopus, in place of its word that it passes on the result of the helper "${helper}": the task "${work}" had already handed back what it had, so Claudopus did not pass it on, and the result stays in this chat. Pass on to {name} what it adds to that task's report.`
+    : `From Claudopus: the result of the helper "${helper}" came after the task "${work}" handed back what it had, so it reached this chat. Pass on to {name} what it adds to that task's report.`
+// The helpers Claudopus stopped itself: their end tells the chat nothing
+const stoppedByUs = new Set<string>()
 
 // What a piece of work, or a helper, starts with the Agent tool runs in the background: the call comes back at once and the
 // helper's result comes as a message when it ends, as the chat's own work does
@@ -441,6 +463,7 @@ const stopHelpers = async ($: EngineInterface, id: string, isSilentOnly = false)
   const list = await read($, todos)
   const now = await $.clock.now()
   for (const one of underOf(list, id).filter(kid => kid.status === 'working' && (!isSilentOnly || isSilent(list, kid, now)))) {
+    stoppedByUs.add(one.id)
     const r = await $.tool.call({ tool: 'TaskStop', task_id: one.id }).catch(err => ({ deny: String(err) }))
     if ((r as { deny?: unknown }).deny) await log($, `helper ${one.id} of ${id} not stopped: ${String((r as { deny?: unknown }).deny)}`)
   }
