@@ -229,9 +229,9 @@ test('a tab opened but not asked for its drawing is drawn again within seconds, 
   expect(redraws).toBe(asked)
 })
 
-test('a tab left open as the mod loads, after an update or a reload, is drawn again if the app does not ask for it', async ($, on) => {
+test('a tab left open as the mod loads, after an update or a reload, is drawn again if the app does not ask for it, and the log names the chat', async ($, on) => {
   const live = [{ id: 'claudopus', isShown: false, isPlaced: false }, { id: 'stats', isShown: false, isPlaced: false }]
-  const { clock } = world(on, { live })
+  const { clock, files } = world(on, { live })
   let redraws = 0
   on('ui.invalidate', () => ((redraws += 1), { value: undefined }) as never)
   await $.session.start(start)
@@ -242,4 +242,6 @@ test('a tab left open as the mod loads, after an update or a reload, is drawn ag
   // Four times at most, while nothing asks for it: a tab behind the others is never asked for
   await clock.advance(60_000)
   expect(redraws - before).toBeLessThanOrEqual(4)
+  // The app asks only the chat it shows: the line names this one, so a chat in sight left unasked can be told from those out of sight
+  expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/tab [^\n]* not asked for in 40s after this code loaded in chat engine-id: drawn again/)?.[0])).toBeDefined()
 })
