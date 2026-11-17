@@ -255,12 +255,12 @@ test('two asks for the panel or the bar that come together, as from two windows 
   await list.redraw()
   const before = redraws(await recorded())
   await Promise.all([list.redraw(), list.redraw()])
-  await new Promise(done => setTimeout(done, 300))
+  await new Promise<void>(done => setTimeout(() => done(), 300))
   expect(redraws(await recorded())).toBe(before)
   // The bar, made afresh at each ask: the one made while the other ask overtook it is asked for once, and given as made
   const from = (await recorded()).length
   await Promise.all([bar.redraw(), bar.redraw()])
-  await new Promise(done => setTimeout(done, 300))
+  await new Promise<void>(done => setTimeout(() => done(), 300))
   const after = (await recorded()).slice(from)
   // (a drawing's line is written once it is given, after the call for a drawing its end made)
   const bars = after.filter(one => one.ev === 'render' && one.component === 'AbovePrompt')
