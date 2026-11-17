@@ -4,352 +4,53 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Claudopus: Claude Code, with eight arms</title>
-<meta name="description" content="Claudopus is a mod for Claude Code. Ask for a bug fix, then the tests, then the docs, without waiting. Each one runs in the background, and a panel beside the chat shows how each is going.">
+<meta name="description" content="Claudopus is a free mod for Claude Code. Each message becomes a task that runs in the background, a panel beside the chat shows every task, and every result is kept.">
 <link rel="canonical" href="https://claudopus.ai/">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#111112" media="(prefers-color-scheme:dark)">
 <meta name="theme-color" content="#FAF9F5" media="(prefers-color-scheme:light)">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Claudopus: Claude Code, with eight arms">
-<meta property="og:description" content="A mod for Claude Code. Ask for the next thing without waiting: each one runs in the background, and a panel shows how each is going.">
+<meta property="og:description" content="A free mod for Claude Code. Ask for the next thing without waiting: each one runs in the background, a panel shows them all, and every result is kept.">
 <meta property="og:url" content="https://claudopus.ai/">
 <meta property="og:image" content="https://claudopus.ai/og.png">
 <meta name="twitter:card" content="summary_large_image">
-<style>
-/* ---- Claudopus design system: tokens (see design-system.html) ---- */
-:root{
-  color-scheme:dark;
-  /* one cell is the unit of everything: the octopus, the corners, the spacing */
-  --cell:4px;
-  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s6:24px;--s8:32px;--s12:48px;--s16:64px;--s24:96px;--s32:128px;
-  /* faces */
-  --sans:"Helvetica Neue",Helvetica,Arial,sans-serif;
-  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
-  /* type scale */
-  --t-note:13px;--t-small:15px;--t-body:18px;--t-lead:22px;--t-title:22px;
-  --t-head:clamp(30px,5vw,44px);--t-display:clamp(40px,7.2vw,68px);
-  /* the page, dark */
-  --ground:#111112;--raised:#1C1C1F;--line:#2F2F35;
-  --ink:#F3F2EF;--soft:#A6A6AB;--faint:#6A6A70;
-  /* purple is the octopus and the one thing to press */
-  --purple:#8A63F0;--purple-lift:#A58BFA;--purple-deep:#6A45D8;--purple-ink:#A58BFA;--on-purple:#111112;
-  /* green only says finished, coral only says trouble */
-  --green:#4EBA65;--green-ink:#5FC553;--coral:#FF6B4A;--coral-ink:#FF8163;
-  /* screens show the app, which is dark, so they stay dark in both themes */
-  --screen:#0A0A0B;--screen-raised:#252527;--screen-line:#34343A;--screen-key:#3A3A41;
-  --screen-ink:#F3F2EF;--screen-soft:#A6A6AB;--screen-purple:#A58BFA;--screen-green:#5FC553;
-  /* motion: quarter-second beats, moved in steps */
-  --beat:250ms;
-  /* measures */
-  --page:1120px;--text:640px;--rail:96px;--gutter:24px;
-}
-@media (prefers-color-scheme:light){:root{
-  color-scheme:light;
-  --ground:#FAF9F5;--raised:#EFEDE5;--line:#D9D6CB;
-  --ink:#18181A;--soft:#5C5C63;--faint:#9A9AA2;
-  --purple-ink:#6A45D8;--green-ink:#2B7A3D;--coral-ink:#C2401F;
-}}
-@media (max-width:640px){:root{--t-body:17px;--t-lead:19px;--t-title:20px;--gutter:16px}}
-
-/* ---- base ---- */
-*,*::before,*::after{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%;scroll-padding-top:var(--s6)}
-body{margin:0;background:var(--ground);color:var(--ink);font:400 var(--t-body)/1.55 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-h1,h2,h3,p,ul,ol,figure{margin:0}
-ul,ol{padding:0;list-style:none}
-img,video,svg{display:block;max-width:100%}
-h1{font:700 var(--t-display)/1.04 var(--sans);letter-spacing:-.035em;text-wrap:balance}
-h2{font:700 var(--t-head)/1.1 var(--sans);letter-spacing:-.03em;text-wrap:balance}
-h3{font:700 var(--t-title)/1.25 var(--sans);letter-spacing:-.01em}
-.lead{font-size:var(--t-lead);line-height:1.45;color:var(--soft);max-width:var(--text);text-wrap:pretty}
-.small{font-size:var(--t-small);line-height:1.5}
-.note{font:400 var(--t-note)/1.4 var(--mono);color:var(--soft)}
-.soft{color:var(--soft)}
-.name{color:var(--purple-ink)}
-a{color:inherit;text-decoration:underline;text-decoration-color:var(--purple);text-decoration-thickness:2px;text-underline-offset:4px}
-a:hover{color:var(--purple-ink)}
-:focus-visible{outline:2px solid var(--purple-ink);outline-offset:3px}
-code,kbd{font:400 .88em/1.4 var(--mono)}
-p code,li code{background:var(--raised);padding:0 var(--s1);white-space:nowrap}
-code.long{white-space:normal;overflow-wrap:anywhere}
-::selection{background:var(--purple);color:var(--on-purple)}
-
-/* ---- the pixel motif ---- */
-/* corners step in by one cell, never curve */
-.notch,.btn>span,.btn::before{--n:var(--cell);clip-path:polygon(var(--n) 0,calc(100% - var(--n)) 0,calc(100% - var(--n)) var(--n),100% var(--n),100% calc(100% - var(--n)),calc(100% - var(--n)) calc(100% - var(--n)),calc(100% - var(--n)) 100%,var(--n) 100%,var(--n) calc(100% - var(--n)),0 calc(100% - var(--n)),0 var(--n),var(--n) var(--n))}
-.notch.big{--n:var(--s2)}
-/* a rule is a row of cells */
-.rule{height:var(--cell);border:0;margin:0;background:repeating-linear-gradient(90deg,var(--line) 0 var(--cell),transparent var(--cell) var(--s3))}
-/* drawings made of cells: the octopus, numerals, icons */
-.px{fill:currentColor;flex:none;shape-rendering:crispEdges}
-.octo{color:var(--purple);flex:none;image-rendering:pixelated}
-.octo.happy{color:var(--green)}
-.octo-spot{position:relative;display:inline-block;line-height:0}
-.octo-spot .happy{display:none}
-.octo-spot.is-happy .happy{display:block}
-.octo-spot.is-happy .octo:not(.happy){display:none}
-/* a list marks each line with one cell, coloured by what it says */
-.cells>li{position:relative;padding-left:var(--s6)}
-.cells>li::before{content:"";position:absolute;left:0;top:.5em;width:var(--s2);height:var(--s2);background:var(--purple)}
-.cells.trouble>li::before{background:var(--coral)}
-.cells.done>li::before{background:var(--green)}
-.cells.plain>li::before,.cells>li.is-plain::before{background:var(--faint)}
-.cells>li.is-trouble::before{background:var(--coral)}
-.cells>li.is-done::before{background:var(--green)}
-
-/* ---- buttons ---- */
-.btn{position:relative;display:inline-block;padding:0;border:0;background:none;color:var(--on-purple);font:700 var(--t-body)/1 var(--sans);text-decoration:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
-.btn::before{content:"";position:absolute;inset:0;transform:translate(var(--cell),var(--cell));background:var(--purple-deep)}
-.btn>span{position:relative;display:flex;align-items:center;gap:var(--s3);min-height:var(--s12);padding:var(--s3) var(--s6);background:var(--purple)}
-.btn:hover{color:var(--on-purple)}
-.btn:hover>span{background:var(--purple-lift)}
-.btn:active>span{transform:translate(var(--cell),var(--cell))}
-.btn.quiet{color:var(--ink)}
-.btn.quiet::before{background:var(--line)}
-.btn.quiet>span{background:var(--raised)}
-.btn.quiet:hover{color:var(--ink)}
-.btn.quiet:hover>span{background:var(--line)}
-
-/* ---- screens: the terminal, the video, the panel ---- */
-.screen{background:var(--screen);color:var(--screen-ink)}
-.term{padding:var(--s4) var(--s6) var(--s6)}
-.term-bar{display:flex;gap:var(--s2);margin-bottom:var(--s3)}
-.term-bar i{width:var(--s2);height:var(--s2);background:var(--screen-key)}
-.cmd{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:var(--s3);padding:var(--s2) 0;font:600 var(--t-body)/1.45 var(--mono)}
-.cmd+.cmd{border-top:var(--cell) solid transparent;background:repeating-linear-gradient(90deg,var(--screen-line) 0 var(--cell),transparent var(--cell) var(--s3)) top/100% var(--cell) no-repeat}
-.cmd .pr{color:var(--purple);user-select:none}
-.cmd code{font:inherit;overflow-wrap:anywhere}
-.cmd code b{font-weight:inherit;color:var(--screen-purple)}
-.cmd code .cmt{margin-left:var(--s3);user-select:none;color:var(--screen-soft);font-weight:400}
-.cmd code .cmt::before{content:"# "}
-.copy{min-width:96px;min-height:44px;padding:0 var(--s3);border:0;background:var(--screen-key);color:var(--screen-ink);font:600 var(--t-note)/1 var(--mono);cursor:pointer}
-.copy:focus-visible{outline-offset:-4px}
-.copy:hover{background:var(--purple);color:var(--on-purple)}
-.copy:active{transform:translate(0,var(--cell))}
-.copy .said,.copy .fail{display:none}
-.copy.is-failed .say{display:none}
-.copy.is-failed .fail{display:inline}
-.copy.is-copied{background:var(--green);color:var(--on-purple)}
-.copy.is-copied .say{display:none}
-.copy.is-copied .said{display:inline-flex;align-items:center;gap:var(--s2)}
-@media (max-width:640px){.term{padding:var(--s3) var(--s4) var(--s4)}.cmd{grid-template-columns:auto 1fr;align-items:start;font-size:var(--t-small);padding:var(--s3) 0}.copy{grid-column:1/-1;width:100%}}
-
-/* ---- motion: steps on the beat, and stillness when asked ---- */
-@keyframes dots{0%{opacity:1}33.4%,100%{opacity:.3}}
-@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
-/* ---- this page: layout only, built from the tokens above ---- */
-.wrap{max-width:calc(var(--page) + 2*var(--gutter));margin:0 auto;padding:0 var(--gutter)}
-.top{display:flex;align-items:center;justify-content:space-between;gap:var(--s4);padding:var(--s4) 0}
-.brand{display:flex;align-items:center;gap:var(--s3);font:700 var(--t-title)/1 var(--sans);letter-spacing:-.02em;text-decoration:none}
-.brand:hover{color:var(--ink)}
-.top nav{display:flex;gap:var(--s6);font-size:var(--t-small)}
-.top nav a{text-decoration:none;color:var(--soft);padding:var(--s3) 0}
-.top nav a:hover{color:var(--ink)}
-.ext{display:inline-flex;align-items:center;gap:var(--s2)}
-
-.hero{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:var(--s16);padding:var(--s16) 0 var(--s12)}
-.hero h1{max-width:11em}
-.hero h1 .name{display:block;text-wrap:balance}
-.hero .lead{margin-top:var(--s6);max-width:30em}
-.hero .acts{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s6);margin-top:var(--s12)}
-.hero .octo-spot{position:relative;display:block;cursor:pointer;margin-right:var(--s8);padding:0;border:0;background:none;-webkit-tap-highlight-color:transparent}
-.hero .octo-spot svg{width:240px;height:240px}
-.hero .stage{position:relative;justify-self:end}
-
-.sec{padding:var(--s24) 0}
-.show{padding:0 0 var(--s24)}
-/* the one thing to do sits in a box of its own */
-.sec.install{background:var(--raised);padding:var(--s16);margin:var(--s2) 0}
-.install .ways details{background:var(--ground)}
-.install p code{background:var(--ground)}
-/* the reference below is a level quieter */
-.sec.ref{padding:var(--s16) 0}
-.ref h2{font:700 var(--t-title)/1.25 var(--sans);letter-spacing:-.01em}
-.ref h3{font-size:var(--t-body)}
-.ref .body>*+.block{margin-top:var(--s6)}
-.sec h2{max-width:16em}
-.sec h2+.lead{margin-top:var(--s6)}
-.sec .body>*+.block{margin-top:var(--s12)}
-
-.film{position:relative;padding:var(--s2);background:var(--screen-raised)}
-.film video{width:100%;height:auto;aspect-ratio:16/9;background:var(--screen)}
-/* the play button sits in the exact middle of the picture, over a light shade, so the still reads as a video */
-.film .play{position:absolute;inset:var(--s2);display:flex;align-items:center;justify-content:center;padding:0;border:0;background:rgb(10 10 11/.25);cursor:pointer}
-.film .play[hidden]{display:none}
-.film .play .btn{font-size:var(--t-lead)}
-.film .play .btn>span{min-height:var(--s16);padding:var(--s4) var(--s8);gap:var(--s4)}
-.film .play .px{width:16px;height:28px}
-.film .play:hover .btn>span{background:var(--purple-lift)}
-.film .play:active .btn>span{transform:translate(var(--cell),var(--cell))}
-.film .play:focus-visible{outline:none}
-.film .play:focus-visible .btn{outline:2px solid var(--screen-purple);outline-offset:6px}
-
-.pairs{display:grid;gap:var(--s2)}
-.pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s2)}
-.pair p{position:relative;background:var(--raised);padding:var(--s4) var(--s6) var(--s4) var(--s12);font-size:var(--t-lead);line-height:1.35}
-.pair p::before{content:"";position:absolute;left:var(--s6);top:calc(var(--s4) + .45em);width:var(--s2);height:var(--s2);background:var(--coral)}
-.pair .was{color:var(--soft)}
-.pair .now{font-weight:700}
-.pair .now::before{background:var(--purple)}
-.pair.heads p{background:none;padding-top:0;padding-bottom:var(--s2);font:400 var(--t-note)/1.4 var(--mono);color:var(--soft)}
-.pair.heads p::before{top:.25em}
-.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-
-.get{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,440px);gap:var(--s16);align-items:center}
-.gets h2{margin-bottom:var(--s4)}
-.gets{display:grid;gap:var(--s8)}
-.gets h3+p{margin-top:var(--s1);color:var(--soft)}
-
-.panel{font:400 var(--t-small)/1.45 var(--sans);padding:var(--s3)}
-.panel .p-head{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s3) var(--s4)}
-.panel .p-head b,.panel .p-head span{display:block}
-.panel .p-head .octo-spot svg{width:48px;height:48px}
-.panel .dim{color:var(--screen-soft)}
-.panel .p-list{display:grid;gap:var(--s2)}
-.panel .p-card{position:relative;background:var(--screen-raised);padding:var(--s3) var(--s4) var(--s3) var(--s6)}
-.panel .p-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--s2);background:var(--purple)}
-.panel .p-card.done::before{background:var(--green)}
-.panel .p-card b{display:block}
-.panel .facts,.panel .p-head span,.panel .count,.panel .key,.panel .p-fold{font-size:var(--t-note)}
-.panel .say .px{display:inline-block;margin-right:var(--s2)}
-.panel .fold{display:flex;align-items:center;gap:var(--s2)}
-.panel .p-line{display:flex;gap:var(--s2);height:2.9em;margin:var(--s2) 0;overflow:hidden}
-.panel .p-card.done .p-line{color:var(--screen-soft)}
-.panel .p-card.cheer .p-line{color:var(--screen-green)}
-.panel .dots{display:flex;gap:var(--cell);padding-top:var(--s2);flex:none}
-.panel .dots i{width:var(--cell);height:var(--cell);background:var(--purple);animation:dots calc(3*var(--beat)) steps(1) infinite}
-.panel .dots i:nth-child(2){animation-delay:var(--beat)}
-.panel .dots i:nth-child(3){animation-delay:calc(2*var(--beat))}
-.panel .p-card.done .dots,.panel .p-card.done .stop{display:none}
-.panel .p-row{display:flex;align-items:center;gap:var(--s2)}
-.panel .key{background:var(--screen-key);padding:var(--s1) var(--s3)}
-.panel .count{margin-left:auto}
-.panel .p-fold{display:flex;justify-content:space-between;background:var(--screen-raised);padding:var(--s2) var(--s4);margin:var(--s4) 0 var(--s2)}
-.panel.is-reset .p-list,.panel.is-reset .p-head,.panel.is-reset .p-fold{opacity:0}
-figure .note{margin-top:var(--s4)}
-
-.install .perch{position:relative}
-.install .perch>.term .cmd{font-size:var(--t-lead);padding:var(--s3) 0}
-.install .before-line{margin-top:var(--s3);max-width:var(--text)}
-.install .perch .octo-spot{position:absolute;right:var(--s8);top:-44px}
-.install .perch .octo-spot svg{width:48px;height:48px}
-.install .after-term{color:var(--soft)}
-.install .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s16);align-items:start}
-.ways{display:grid;gap:var(--s2);margin-top:var(--s8)}
-.ways details{background:var(--raised)}
-.ways summary{display:flex;align-items:center;gap:var(--s3);padding:var(--s4) var(--s6);font-weight:700;cursor:pointer;list-style:none}
-.ways summary::-webkit-details-marker{display:none}
-.ways summary .px{color:var(--purple)}
-.ways details[open] summary .px:first-child,.ways details:not([open]) summary .px:nth-child(2){display:none}
-.ways .in{padding:0 var(--s6) var(--s6)}
-.ways .in .term{margin-top:var(--s2)}
-.ways .in .cmd{font-size:var(--t-small)}
-.install .ways .in code{background:var(--raised)}
-.ways .in .cmd code{background:none}
-.ways .in p+p{margin-top:var(--s2)}
-.steps{display:grid;gap:var(--s4);margin-top:var(--s6)}
-.steps li{display:grid;grid-template-columns:var(--s8) 1fr;align-items:start}
-.steps .px{color:var(--purple);margin-top:.22em}
-
-.needs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:var(--s4)}
-.needs>div{grid-column:span 2}
-.needs>div:nth-child(-n+2){grid-column:span 3}
-.needs>div{background:var(--raised);padding:var(--s6)}
-.needs h3{margin-bottom:var(--s3)}
-.needs p{line-height:1.5}
-.needs p+p{margin-top:var(--s3)}
-.needs ul{display:grid;gap:var(--s3);line-height:1.5}
-.needs .cells>li{padding-left:var(--s4)}
-.needs .cells>li::before{width:var(--cell);height:var(--cell);top:.6em}
-
-.repo .addr{font:600 var(--t-lead)/1.3 var(--mono);color:var(--ink);overflow-wrap:anywhere}
-.code-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s16);align-items:start}
-.code-notes{display:grid;gap:var(--s4);color:var(--soft)}
-.tree{padding:var(--s6);font:400 var(--t-small)/1.9 var(--mono)}
-.tree b{display:block;font-weight:600;color:var(--screen-purple);margin-bottom:var(--s2)}
-.tree div{display:grid;grid-template-columns:13ch minmax(0,1fr);gap:var(--s3);line-height:1.5;padding:var(--cell) 0}
-.tree div span{color:var(--screen-soft)}
-
-.foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s4);padding:var(--s12) 0 var(--s16);color:var(--soft);font-size:var(--t-small)}
-.foot .brand{font-size:var(--t-body);color:var(--ink)}
-.foot a.ext{padding:var(--s3) 0}
-
-@media (max-width:900px){
-  .hero{grid-template-columns:1fr;gap:var(--s8);padding:var(--s8) 0 var(--s16)}
-  .hero .stage{order:-1;justify-self:start}
-  .hero .octo-spot{margin:0}
-  .hero .octo-spot svg{width:144px;height:144px}
-  .get,.install .two,.code-two{grid-template-columns:1fr;gap:var(--s12)}
-  .needs{grid-template-columns:1fr}
-  .needs>div,.needs>div:nth-child(-n+2){grid-column:auto}
-  .sec{padding:var(--s16) 0}
-  .show{padding:0 0 var(--s16)}
-  .sec.ref{padding:var(--s12) 0}
-  .sec.install{padding:var(--s12) var(--s8)}
-}
-@media (max-width:640px){
-  .top nav{gap:var(--s4)}
-  .top nav .opt{display:none}
-  .hero .acts{gap:var(--s4)}
-  .film .play .btn{font-size:var(--t-small)}
-  .film .play .btn>span{min-height:44px;padding:var(--s2) var(--s4);gap:var(--s3)}
-  .film .play .px{width:10px;height:18px}
-  .ways summary{padding:var(--s4)}
-  .ways .in{padding:0 var(--s4) var(--s4)}
-  .sec.install{padding:var(--s12) var(--gutter);margin:0 calc(-1*var(--gutter));clip-path:none}
-  .pair{grid-template-columns:1fr;gap:0}
-  .pair.heads{display:none}
-  .pair .vh{position:static;display:block;width:auto;height:auto;clip-path:none;font:400 var(--t-note)/1.6 var(--mono);color:var(--soft)}
-  .pair p{padding:var(--s3) var(--s4) var(--s3) var(--s8)}
-  .pair p::before{left:var(--s3);top:calc(var(--s3) + .45em)}
-  .pair .was{padding-bottom:0}
-  .install .perch>.term .cmd{font-size:var(--t-small);padding:var(--s3) 0}
-  .tree{padding:var(--s4);font-size:var(--t-note)}
-  .tree div{grid-template-columns:1fr;gap:0}
-}
-</style>
+<link rel="stylesheet" href="site.css">
 </head>
 <body>
 <div class="wrap">
-
 <header class="top">
   <a class="brand" href="#top" id="top"><svg class="octo mark" viewBox="0 0 16 16" width="32" height="32" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg>Claudopus</a>
-  <nav aria-label="On this page">
-    <a class="opt" href="#why">What changes</a>
+  <nav aria-label="Pages">
+    <a class="opt" href="#why">Why</a>
+    <a class="opt" href="#panel">The panel</a>
+    <a class="opt" href="#results">Results</a>
+    <a href="tour.html">Tour</a>
     <a href="#install">Install</a>
     <a class="ext" href="https://github.com/dimka3553/claudopus">GitHub <svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="1" y="0" width="4" height="1"/><rect x="3" y="1" width="2" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="4" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/></svg></a>
   </nav>
 </header>
 
 <main>
-<section class="hero">
+<section class="hero h3d">
   <div>
     <h1>Claude Code, <span class="name">with eight arms.</span></h1>
-    <p class="lead"><b>Claudopus</b> is a mod for Claude Code. Ask for a bug fix, then the tests, then the docs, without waiting. Each one runs in the background, and a panel beside the chat shows how each is going.</p>
+    <p class="lead">Ask Claude Code for three things, and they wait in line. <b>Claudopus</b> turns each message into a task that runs in the background, shows every task in a panel beside the chat, and keeps what each one found.</p>
+    <div class="quick">
+      <div class="term screen notch">
+        <div class="cmd"><span class="pr" aria-hidden="true">&gt;</span><code>/plugin marketplace add <b>dimka3553/claudopus</b></code><button class="copy notch" type="button" data-copy="/plugin marketplace add dimka3553/claudopus" aria-label="Copy: /plugin marketplace add dimka3553/claudopus"><span class="say">Copy</span><span class="said"><svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>Copied</span><span class="fail">Selected</span></button></div>
+        <div class="cmd"><span class="pr" aria-hidden="true">&gt;</span><code>/plugin install <b>claudopus@claudopus</b></code><button class="copy notch" type="button" data-copy="/plugin install claudopus@claudopus" aria-label="Copy: /plugin install claudopus@claudopus"><span class="say">Copy</span><span class="said"><svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>Copied</span><span class="fail">Selected</span></button></div>
+      </div>
+      <p class="note under">Two lines at the Claude Code prompt. Free, MIT, macOS and Linux.</p>
+    </div>
     <div class="acts">
-      <a class="btn" href="#install"><span>Install it <svg class="px" viewBox="0 0 5 5" width="15" height="15" aria-hidden="true"><rect x="2" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="3" height="1"/><rect x="2" y="4" width="1" height="1"/></svg></span></a>
-      <a class="btn quiet" href="#video"><span><svg class="px" viewBox="0 0 4 7" width="8" height="14" aria-hidden="true"><rect x="0" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="4" height="1"/><rect x="0" y="4" width="3" height="1"/><rect x="0" y="5" width="2" height="1"/><rect x="0" y="6" width="1" height="1"/></svg> Watch the video</span></a>
+      <a class="btn" href="#install"><span>How to install <svg class="px" viewBox="0 0 5 5" width="15" height="15" aria-hidden="true"><rect x="2" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="3" height="1"/><rect x="2" y="4" width="1" height="1"/></svg></span></a>
+      <a class="btn quiet" href="tour.html"><span><svg class="px" viewBox="0 0 4 7" width="8" height="14" aria-hidden="true"><rect x="0" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="4" height="1"/><rect x="0" y="4" width="3" height="1"/><rect x="0" y="5" width="2" height="1"/><rect x="0" y="6" width="1" height="1"/></svg> Watch the tour</span></a>
     </div>
   </div>
-  <div class="stage">
-    <button class="octo-spot" id="hero-octo" type="button" aria-label="The Claudopus octopus, working. Press it and it cheers.">
-      <svg class="octo working" viewBox="0 0 24 24" width="240" height="240" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="9" y="1" width="6" height="1"/><rect x="7" y="2" width="10" height="1"/><rect x="6" y="3" width="12" height="1"/><rect x="6" y="4" width="2" height="1"/><rect x="10" y="4" width="4" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="6" y="5" width="2" height="1"/><rect class="pupil" data-x="8" data-y="4" x="9" y="5" width="1" height="1"/><rect x="10" y="5" width="4" height="1"/><rect class="pupil" data-x="14" data-y="4" x="15" y="5" width="1" height="1"/><rect x="16" y="5" width="2" height="1"/><rect x="6" y="6" width="12" height="1"/><rect x="6" y="7" width="12" height="1"/><rect x="6" y="8" width="12" height="1"/><rect x="6" y="9" width="12" height="1"/><rect x="0" y="10" width="5" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="19" y="10" width="5" height="1"/><rect x="0" y="11" width="1" height="1"/><rect x="4" y="11" width="1" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="19" y="11" width="1" height="1"/><rect x="23" y="11" width="1" height="1"/><rect x="0" y="12" width="1" height="1"/><rect x="4" y="12" width="1" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="19" y="12" width="1" height="1"/><rect x="23" y="12" width="1" height="1"/><rect x="0" y="13" width="5" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="19" y="13" width="5" height="1"/><rect x="1" y="14" width="3" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="20" y="14" width="3" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="0" y="17" width="5" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="13" y="17" width="2" height="1"/><rect x="19" y="17" width="5" height="1"/><rect x="0" y="18" width="1" height="1"/><rect x="4" y="18" width="1" height="1"/><rect x="6" y="18" width="5" height="1"/><rect x="13" y="18" width="5" height="1"/><rect x="19" y="18" width="1" height="1"/><rect x="23" y="18" width="1" height="1"/><rect x="0" y="19" width="1" height="1"/><rect x="4" y="19" width="1" height="1"/><rect x="6" y="19" width="5" height="1"/><rect x="13" y="19" width="5" height="1"/><rect x="19" y="19" width="1" height="1"/><rect x="23" y="19" width="1" height="1"/><rect x="0" y="20" width="5" height="1"/><rect x="19" y="20" width="5" height="1"/><rect x="1" y="21" width="3" height="1"/><rect x="20" y="21" width="3" height="1"/><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="11" width="1" height="1"/><rect x="3" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="18" width="1" height="1"/><rect x="3" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="11" width="1" height="1"/><rect x="2" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="11" width="1" height="1"/><rect x="22" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="11" width="1" height="1"/><rect x="18" y="11" width="1" height="1"/><rect x="5" y="12" width="1" height="1"/><rect x="18" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="18" width="1" height="1"/><rect x="2" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="11" width="1" height="1"/><rect x="1" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="18" width="1" height="1"/><rect x="22" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="18" width="1" height="1"/><rect x="21" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="18" width="1" height="1"/><rect x="18" y="18" width="1" height="1"/><rect x="5" y="19" width="1" height="1"/><rect x="18" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="18" width="1" height="1"/><rect x="20" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="11" width="1" height="1"/><rect x="21" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="11" width="1" height="1"/><rect x="20" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="18" width="1" height="1"/><rect x="1" y="19" width="1" height="1"/></g></g></svg><svg class="octo happy" viewBox="0 0 24 24" width="240" height="240" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden;visible;hidden;visible;visible" dur="2s" calcMode="discrete" fill="freeze"/><rect x="9" y="1" width="6" height="1"/><rect x="7" y="2" width="10" height="1"/><rect x="6" y="3" width="12" height="1"/><rect x="6" y="4" width="3" height="1"/><rect x="10" y="4" width="4" height="1"/><rect x="15" y="4" width="3" height="1"/><rect x="6" y="5" width="2" height="1"/><rect x="9" y="5" width="1" height="1"/><rect x="11" y="5" width="2" height="1"/><rect x="14" y="5" width="1" height="1"/><rect x="16" y="5" width="2" height="1"/><rect x="6" y="6" width="12" height="1"/><rect x="6" y="7" width="4" height="1"/><rect x="11" y="7" width="2" height="1"/><rect x="14" y="7" width="4" height="1"/><rect x="6" y="8" width="5" height="1"/><rect x="13" y="8" width="5" height="1"/><rect x="6" y="9" width="12" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="6" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="16" y="13" width="2" height="1"/><rect x="3" y="14" width="1" height="1"/><rect x="6" y="14" width="2" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="16" y="14" width="2" height="1"/><rect x="20" y="14" width="1" height="1"/><rect x="3" y="15" width="5" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="16" y="15" width="5" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="7" y="17" width="1" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="13" y="17" width="2" height="1"/><rect x="16" y="17" width="1" height="1"/><rect x="7" y="18" width="4" height="1"/><rect x="13" y="18" width="4" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;hidden" dur="2s" calcMode="discrete" fill="freeze"/><rect x="9" y="0" width="6" height="1"/><rect x="7" y="1" width="10" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="6" y="2" width="12" height="1"/><rect x="21" y="2" width="1" height="1"/><rect x="2" y="3" width="2" height="1"/><rect x="6" y="3" width="3" height="1"/><rect x="10" y="3" width="4" height="1"/><rect x="15" y="3" width="3" height="1"/><rect x="20" y="3" width="2" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="2" height="1"/><rect x="9" y="4" width="1" height="1"/><rect x="11" y="4" width="2" height="1"/><rect x="14" y="4" width="1" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="20" y="4" width="2" height="1"/><rect x="3" y="5" width="2" height="1"/><rect x="6" y="5" width="12" height="1"/><rect x="19" y="5" width="2" height="1"/><rect x="4" y="6" width="6" height="1"/><rect x="11" y="6" width="2" height="1"/><rect x="14" y="6" width="6" height="1"/><rect x="6" y="7" width="5" height="1"/><rect x="13" y="7" width="5" height="1"/><rect x="6" y="8" width="12" height="1"/><rect x="6" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="13" y="9" width="2" height="1"/><rect x="16" y="9" width="2" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="6" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="16" y="13" width="2" height="1"/><rect x="20" y="13" width="1" height="1"/><rect x="3" y="14" width="5" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="16" y="14" width="5" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="7" y="16" width="1" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="16" y="16" width="1" height="1"/><rect x="7" y="17" width="4" height="1"/><rect x="13" y="17" width="4" height="1"/></g></g><g fill="currentColor" visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;hidden" dur="2s" calcMode="discrete" fill="freeze"/><rect x="22" y="0" width="1" height="1"/><rect x="1" y="1" width="1" height="1"/><rect x="0" y="8" width="1" height="1"/><rect x="23" y="9" width="1" height="1"/></g></svg>
-    </button>
-  </div>
-</section>
-
-<section class="show" id="video">
-  <div class="body">
-    <figure>
-      <div class="film notch big">
-        <video id="film" controls playsinline preload="none" poster="poster.jpg" width="1920" height="1080">
-          <source src="claudopus.mp4" type="video/mp4">
-          <a href="claudopus.mp4">Download the video</a>
-        </video>
-        <button class="play" id="play" type="button" hidden aria-label="Play the video, which has music"><span class="btn"><span><svg class="px" viewBox="0 0 4 7" width="12" height="21" aria-hidden="true"><rect x="0" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="4" height="1"/><rect x="0" y="4" width="3" height="1"/><rect x="0" y="5" width="2" height="1"/><rect x="0" y="6" width="1" height="1"/></svg> Play</span></span></button>
-      </div>
-      <figcaption class="note">The whole idea in 1 minute 50. It has music, and it starts only when you press play.</figcaption>
-    </figure>
+  <div class="stage3d" id="hero3d" role="img" aria-label="The Claudopus octopus in 3D. Each of its eight arms holds a task: some are running, one asks a question, one has just finished.">
+    <img class="flat" src="favicon.svg" alt="" width="300" height="300">
+    <canvas width="1200" height="1200" aria-hidden="true"></canvas>
   </div>
 </section>
 
@@ -357,62 +58,163 @@ figure .note{margin-top:var(--s4)}
 
 <section class="sec" id="why">
   <div class="body">
-    <h2>What changes when you install it.</h2>
-    <div class="pairs block">
-      <div class="pair heads" aria-hidden="true"><p class="was">Without it</p><p class="now">With Claudopus</p></div>
-      <div class="pair"><p class="was"><span class="vh">Without it: </span>Your next message waits until Claude is done.</p><p class="now"><span class="vh">With Claudopus: </span>Your next message starts right away.</p></div>
-      <div class="pair"><p class="was"><span class="vh">Without it: </span>You open more chats and lose track of them.</p><p class="now"><span class="vh">With Claudopus: </span>One panel beside the chat shows every task.</p></div>
-      <div class="pair"><p class="was"><span class="vh">Without it: </span>A long chat forgets what you said at the start.</p><p class="now"><span class="vh">With Claudopus: </span>Your words are saved, so Claude can look them up.</p></div>
-      <div class="pair"><p class="was"><span class="vh">Without it: </span>The result you wanted is buried far up the chat.</p><p class="now"><span class="vh">With Claudopus: </span>Every result is saved in a list.</p></div>
+    <p class="eyebrow trouble">The problem</p>
+    <h2>You have three things to ask for. Two of them wait.</h2>
+    <p class="lead">A chat takes your requests in turn. While Claude works on the first, the next two wait. So you wait too, or you open more chats and lose track of them.</p>
+    <div class="race block" id="race">
+      <div class="lane alone notch big">
+        <h3>Claude Code alone <small>one after another</small></h3>
+        <div class="rows">
+          <div class="row"><span>Fix the login bug</span><div class="track"><i class="work" style="--a:0;--b:32"></i></div></div>
+          <div class="row"><span>Write the tests</span><div class="track"><i class="wait" style="--a:0;--b:32"></i><i class="work" style="--a:32;--b:66"></i></div></div>
+          <div class="row"><span>Update the docs</span><div class="track"><i class="wait" style="--a:0;--b:66"></i><i class="work" style="--a:66;--b:96"></i></div></div>
+        </div>
+        <p class="axis" aria-hidden="true"><span>you ask</span><span>time</span></p>
+        <p class="end">The striped part is waiting. <b class="fin">Done after all three, one by one.</b></p>
+      </div>
+      <div class="lane with notch big">
+        <h3>With Claudopus <small>side by side</small></h3>
+        <div class="rows">
+          <div class="row"><span>Fix the login bug</span><div class="track"><i class="work" style="--a:0;--b:32"></i></div></div>
+          <div class="row"><span>Write the tests</span><div class="track"><i class="work" style="--a:2;--b:36"></i></div></div>
+          <div class="row"><span>Update the docs</span><div class="track"><i class="work" style="--a:4;--b:34"></i></div></div>
+        </div>
+        <p class="axis" aria-hidden="true"><span>you ask</span><span>time</span></p>
+        <p class="end">Each one starts when you ask. <b class="fin">Done when the longest one is.</b></p>
+      </div>
     </div>
+    <p class="note race-note">A drawing of the idea, not a measurement. Tasks that run side by side use tokens side by side: five at once use them about five times as fast as one.</p>
   </div>
 </section>
 
 <hr class="rule">
 
-<section class="sec" id="get">
+<section class="sec" id="six">
   <div class="body">
-    <div class="get">
-      <div class="gets">
-        <h2>A panel beside the chat shows every task.</h2>
-        <div><h3>See how far each task has got.</h3><p>Every task is a card with its to-do list and a line saying what Claude is doing now.</p></div>
-        <div><h3>Change a task while it runs.</h3><p>Send a message about a running task, and the chat passes it to that task.</p></div>
-        <div><h3>Know when a task is done.</h3><p>A short chime and a notification tell you, so you can be somewhere else.</p></div>
-        <div><h3>Find every result later.</h3><p>Finished tasks stay in a list with their results, and you can open it any time.</p></div>
+    <p class="eyebrow">What changes</p>
+    <h2>Six ways Claude Code alone gets in your way, and what Claudopus does about each.</h2>
+    <div class="six block">
+      <div class="heads" aria-hidden="true"><span></span><p class="was">Claude Code alone</p><p class="now">With Claudopus</p></div>
+      <div class="duo">
+        <div class="was"><h3>You wait</h3><p>One chat works on one request at a time. You can type your next idea, but it waits until Claude finishes the last one.</p></div>
+        <div class="now"><h3>You keep talking</h3><p>Each request becomes its own task in the background. The chat is free for your next message right away.</p></div>
       </div>
-      <figure>
-        <div class="panel screen notch big" id="panel" aria-hidden="true">
-          <div class="p-head">
-            <span class="octo-spot" id="panel-octo"><svg class="octo working" viewBox="0 0 24 24" width="48" height="48" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="9" y="1" width="6" height="1"/><rect x="7" y="2" width="10" height="1"/><rect x="6" y="3" width="12" height="1"/><rect x="6" y="4" width="2" height="1"/><rect x="10" y="4" width="4" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="6" y="5" width="2" height="1"/><rect x="9" y="5" width="5" height="1"/><rect x="15" y="5" width="3" height="1"/><rect x="6" y="6" width="12" height="1"/><rect x="6" y="7" width="12" height="1"/><rect x="6" y="8" width="12" height="1"/><rect x="6" y="9" width="12" height="1"/><rect x="0" y="10" width="5" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="19" y="10" width="5" height="1"/><rect x="0" y="11" width="1" height="1"/><rect x="4" y="11" width="1" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="19" y="11" width="1" height="1"/><rect x="23" y="11" width="1" height="1"/><rect x="0" y="12" width="1" height="1"/><rect x="4" y="12" width="1" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="19" y="12" width="1" height="1"/><rect x="23" y="12" width="1" height="1"/><rect x="0" y="13" width="5" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="19" y="13" width="5" height="1"/><rect x="1" y="14" width="3" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="20" y="14" width="3" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="0" y="17" width="5" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="13" y="17" width="2" height="1"/><rect x="19" y="17" width="5" height="1"/><rect x="0" y="18" width="1" height="1"/><rect x="4" y="18" width="1" height="1"/><rect x="6" y="18" width="5" height="1"/><rect x="13" y="18" width="5" height="1"/><rect x="19" y="18" width="1" height="1"/><rect x="23" y="18" width="1" height="1"/><rect x="0" y="19" width="1" height="1"/><rect x="4" y="19" width="1" height="1"/><rect x="6" y="19" width="5" height="1"/><rect x="13" y="19" width="5" height="1"/><rect x="19" y="19" width="1" height="1"/><rect x="23" y="19" width="1" height="1"/><rect x="0" y="20" width="5" height="1"/><rect x="19" y="20" width="5" height="1"/><rect x="1" y="21" width="3" height="1"/><rect x="20" y="21" width="3" height="1"/><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="11" width="1" height="1"/><rect x="3" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="18" width="1" height="1"/><rect x="3" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="11" width="1" height="1"/><rect x="2" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="11" width="1" height="1"/><rect x="22" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="11" width="1" height="1"/><rect x="18" y="11" width="1" height="1"/><rect x="5" y="12" width="1" height="1"/><rect x="18" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="18" width="1" height="1"/><rect x="2" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="11" width="1" height="1"/><rect x="1" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="18" width="1" height="1"/><rect x="22" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="18" width="1" height="1"/><rect x="21" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="18" width="1" height="1"/><rect x="18" y="18" width="1" height="1"/><rect x="5" y="19" width="1" height="1"/><rect x="18" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="18" width="1" height="1"/><rect x="20" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="11" width="1" height="1"/><rect x="21" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="11" width="1" height="1"/><rect x="20" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="18" width="1" height="1"/><rect x="1" y="19" width="1" height="1"/></g></g></svg><svg class="octo happy" viewBox="0 0 24 24" width="48" height="48" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden;visible;hidden;visible;visible" dur="2s" calcMode="discrete" fill="freeze"/><rect x="9" y="1" width="6" height="1"/><rect x="7" y="2" width="10" height="1"/><rect x="6" y="3" width="12" height="1"/><rect x="6" y="4" width="3" height="1"/><rect x="10" y="4" width="4" height="1"/><rect x="15" y="4" width="3" height="1"/><rect x="6" y="5" width="2" height="1"/><rect x="9" y="5" width="1" height="1"/><rect x="11" y="5" width="2" height="1"/><rect x="14" y="5" width="1" height="1"/><rect x="16" y="5" width="2" height="1"/><rect x="6" y="6" width="12" height="1"/><rect x="6" y="7" width="4" height="1"/><rect x="11" y="7" width="2" height="1"/><rect x="14" y="7" width="4" height="1"/><rect x="6" y="8" width="5" height="1"/><rect x="13" y="8" width="5" height="1"/><rect x="6" y="9" width="12" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="6" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="16" y="13" width="2" height="1"/><rect x="3" y="14" width="1" height="1"/><rect x="6" y="14" width="2" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="16" y="14" width="2" height="1"/><rect x="20" y="14" width="1" height="1"/><rect x="3" y="15" width="5" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="16" y="15" width="5" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="7" y="17" width="1" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="13" y="17" width="2" height="1"/><rect x="16" y="17" width="1" height="1"/><rect x="7" y="18" width="4" height="1"/><rect x="13" y="18" width="4" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;hidden" dur="2s" calcMode="discrete" fill="freeze"/><rect x="9" y="0" width="6" height="1"/><rect x="7" y="1" width="10" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="6" y="2" width="12" height="1"/><rect x="21" y="2" width="1" height="1"/><rect x="2" y="3" width="2" height="1"/><rect x="6" y="3" width="3" height="1"/><rect x="10" y="3" width="4" height="1"/><rect x="15" y="3" width="3" height="1"/><rect x="20" y="3" width="2" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="2" height="1"/><rect x="9" y="4" width="1" height="1"/><rect x="11" y="4" width="2" height="1"/><rect x="14" y="4" width="1" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="20" y="4" width="2" height="1"/><rect x="3" y="5" width="2" height="1"/><rect x="6" y="5" width="12" height="1"/><rect x="19" y="5" width="2" height="1"/><rect x="4" y="6" width="6" height="1"/><rect x="11" y="6" width="2" height="1"/><rect x="14" y="6" width="6" height="1"/><rect x="6" y="7" width="5" height="1"/><rect x="13" y="7" width="5" height="1"/><rect x="6" y="8" width="12" height="1"/><rect x="6" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="13" y="9" width="2" height="1"/><rect x="16" y="9" width="2" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="6" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="16" y="13" width="2" height="1"/><rect x="20" y="13" width="1" height="1"/><rect x="3" y="14" width="5" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="16" y="14" width="5" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="7" y="16" width="1" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="16" y="16" width="1" height="1"/><rect x="7" y="17" width="4" height="1"/><rect x="13" y="17" width="4" height="1"/></g></g><g fill="currentColor" visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;hidden" dur="2s" calcMode="discrete" fill="freeze"/><rect x="22" y="0" width="1" height="1"/><rect x="1" y="1" width="1" height="1"/><rect x="0" y="8" width="1" height="1"/><rect x="23" y="9" width="1" height="1"/></g></svg></span>
-            <div><b id="p-count">Working on 2 things</b><span class="dim">This chat: 6% · 31k of 500k</span></div>
-          </div>
-          <div class="p-list" id="p-live">
-            <div class="p-card" id="p-a">
-              <b>Fix the login redirect</b>
-              <span class="dim facts">Opus 5.5 · context 38k · <span class="clock" data-s="130">2m 10s</span></span>
-              <div class="p-line"><span class="dots"><i></i><i></i><i></i></span><span class="say">I found the cause and am writing the fix.</span></div>
-              <div class="p-row"><span class="key">Details</span><span class="key stop">Stop</span><span class="dim count">2 of 4 done</span></div>
-            </div>
-            <div class="p-card" id="p-b">
-              <b>Index the docs folder</b>
-              <span class="dim facts">Sonnet 5.5 · context 61k · <span class="clock" data-s="302">5m 02s</span></span>
-              <div class="p-line"><span class="dots"><i></i><i></i><i></i></span><span class="say">I have read 40 of the 62 pages.</span></div>
-              <div class="p-row"><span class="key">Details</span><span class="key stop">Stop</span><span class="dim count">1 of 3 done</span></div>
-            </div>
-          </div>
-          <div class="p-fold"><span class="fold"><svg class="px" viewBox="0 0 5 3" width="10" height="6" aria-hidden="true"><rect x="0" y="0" width="5" height="1"/><rect x="1" y="1" width="3" height="1"/><rect x="2" y="2" width="1" height="1"/></svg><span id="p-fold">Finished 1</span></span><span class="dim">this chat</span></div>
-          <div class="p-list" id="p-done">
-            <div class="p-card done">
-              <b>Rename the settings page</b>
-              <span class="dim facts">Finished · Opus 5.5 · context 52k · 4m 31s</span>
-              <div class="p-line"><span class="say">The page is renamed everywhere, and the tests pass.</span></div>
-              <div class="p-row"><span class="key">Details</span><span class="dim count">3 of 3 done</span></div>
-            </div>
-          </div>
-        </div>
-        <figcaption class="note">The panel, redrawn for this page. The tasks and their numbers are made up.</figcaption>
-      </figure>
+      <div class="duo">
+        <div class="was"><h3>You lose track</h3><p>To do more at once you open more chats, then forget which one is doing what.</p></div>
+        <div class="now"><h3>One place for everything</h3><p>A panel beside the chat shows every task as a card, with its to-dos and a line on how far it has got.</p></div>
+      </div>
+      <div class="duo">
+        <div class="was"><h3>Questions are scattered</h3><p>Each chat asks in its own window. With several open, nothing gathers what is waiting for you.</p></div>
+        <div class="now"><h3>They come to you</h3><p>Questions from every chat go to the top of the panel with answer buttons, a short sound and a notification.</p></div>
+      </div>
+      <div class="duo">
+        <div class="was"><h3>It forgets</h3><p>A long chat fills up, and Claude starts to lose what you told it at the start. So you say it again.</p></div>
+        <div class="now"><h3>It remembers</h3><p>The tasks do the work, so your chat stays small. Your messages are saved word for word, and Claude can look them up.</p></div>
+      </div>
+      <div class="duo">
+        <div class="was"><h3>Results get buried</h3><p>The result you asked for ends up far up the chat, under everything that came after.</p></div>
+        <div class="now"><h3>Results are kept</h3><p>What a finished task found is saved in a list, with its pictures. Open it any time, from any chat on that machine.</p></div>
+      </div>
+      <div class="duo">
+        <div class="was"><h3>No second check</h3><p>Nobody else looks over Claude's work before it says “done”.</p></div>
+        <div class="now"><h3>Checked first</h3><p>Claudopus's rules have a second Claude, one that did not do the work, look for what is wrong before you see it.</p></div>
+      </div>
     </div>
+    <p class="punch">You keep the ideas. <span class="name">Claudopus keeps track of the rest.</span></p>
+  </div>
+</section>
+
+<hr class="rule">
+
+<section class="sec" id="panel">
+  <div class="body feature">
+    <div class="gets">
+      <div><p class="eyebrow">The panel</p><h2>One panel beside the chat shows every task.</h2></div>
+      <div><h3>See how far each task has got.</h3><p>Every task is a card with its to-dos, the step it is on, and a line saying what Claude is doing now.</p></div>
+      <div><h3>What needs you is on top.</h3><p>A question turns its card amber and brings it to the top, with buttons to answer. It stays until you answer.</p></div>
+      <div><h3>Change a task while it runs.</h3><p>Send a message about a running task, and the chat passes it to that task. Stop on a card ends it.</p></div>
+      <div><h3>Know when a task is done.</h3><p>The card turns green, a chime plays and a notification names the task, so you can be somewhere else.</p></div>
+    </div>
+    <figure class="space">
+      <div class="cp tilt" id="live" role="img" aria-label="A drawing of the Claudopus panel with made-up tasks: one asks a question, one has just finished and two are running.">
+        <div class="cp-head">
+          <span class="octo-spot"><svg class="octo mark" viewBox="0 0 16 16" width="44" height="44" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg></span>
+          <span><b>Claudopus</b></span>
+          <span class="state">1 thing needs you, 2 running</span>
+          <span class="dim">This chat: 37% · 184k of 500k</span>
+          <div class="cp-tabs"><span class="cp-key">Results 3</span><span class="cp-key">Stats</span><span class="cp-key">Memory</span><span class="cp-key">Config</span><span class="cp-key">About</span></div>
+        </div>
+        <div class="cp-card ask lift">
+          <div class="t">Move the docs to the new site <span>Stop</span></div>
+          <div class="dim">Opus 5.5 · 2 of 3 done · 6m 10s</div>
+          <div class="q">May I point docs.example.com at the new site? The old one stops showing then.</div>
+          <div class="keys"><span class="cp-key">Point it</span><span class="cp-key">Not yet</span><span class="cp-key">Reply in your own words</span></div>
+        </div>
+        <div class="cp-card done lift2">
+          <div class="t">Write the release notes</div>
+          <div class="dim">Finished · Opus 5.5 · 2 of 2 done · 3m 02s</div>
+          <div class="ok">✓ Finished</div>
+        </div>
+        <div class="cp-card">
+          <div class="t">Speed up the CSV export <span>Stop</span></div>
+          <div class="dim">Opus 5.5 · <span data-s="a-count">1 of 4 done</span> · 2m 32s</div>
+          <div class="step" data-s="a-step">Step 2 of 4 · <b>Stream rows instead of building one string</b></div>
+          <div class="now"><span class="cp-dots"><i></i><i></i><i></i></span><span data-s="a-now">The export took 41 s on 2 million rows; I am streaming the rows so it never holds them all.</span></div>
+          <div class="cp-help"><b>Read the export code</b><span>Sonnet 5.5 · 1m 40s</span></div>
+        </div>
+        <div class="cp-card">
+          <div class="t">Run the full test suite <span>Stop</span></div>
+          <div class="dim">Opus 5.5 · <span data-s="b-count">1 of 3 done</span> · 1m 12s</div>
+          <div class="step" data-s="b-step">Step 2 of 3 · <b>Run every test</b></div>
+          <div class="now"><span class="cp-dots"><i></i><i></i><i></i></span><span data-s="b-now">The app built cleanly; the tests are running, 1,240 of them.</span></div>
+        </div>
+        <div class="cp-fold"><b>▸ Finished 4</b><span>this chat</span></div>
+      </div>
+      <figcaption class="note" style="margin-top:var(--s12)">A drawing of the panel with made-up tasks. <a href="tour.html">The tour</a> shows it moving.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<hr class="rule">
+
+<section class="sec" id="results">
+  <div class="body feature flip">
+    <figure class="space">
+      <div class="cp tilt left" role="img" aria-label="A drawing of the Results tab with made-up tasks: one result waits on you, then the five newest, then the earlier and archived ones folded away.">
+            <div class="cp-band bare"><b>Results</b> <span class="dim">21</span></div>
+            <div class="cp-band wait lift"><h4>Waiting on you <span>1</span></h4>
+              <div class="cp-row"><b>Speed up the CSV export</b><span>14:32</span><span>Archive</span></div>
+            </div>
+            <div class="cp-band"><h4>Recent</h4>
+              <div class="cp-row"><b>Move the docs to the new site</b><span>13:05</span><span>Archive</span></div>
+              <div class="cp-row"><b>Find the memory leak</b><span>11:48</span><span>Archive</span></div>
+              <div class="cp-row"><b>Write the release notes</b><span>10:20</span><span>Archive</span></div>
+              <div class="cp-row"><b>Review the pull request</b><span>12 Nov</span><span>Archive</span></div>
+              <div class="cp-row"><b>Tidy the onboarding emails</b><span>11 Nov</span><span>Archive</span></div>
+            </div>
+            <div class="cp-fold"><b>▸ Earlier 15</b></div>
+            <div class="cp-fold"><b>▸ Archived 4</b></div>
+      </div>
+    </figure>
+    <div class="gets">
+      <div><p class="eyebrow">Results</p><h2>Nothing you asked for gets buried.</h2></div>
+      <div><h3>Every finding, in one list.</h3><p>What a finished task found is saved with its pictures, the newest at the top. It is a plain file on your machine, so it is still there after the chat is gone.</p></div>
+      <div><h3>Your decisions wait at the top.</h3><p>When a task ends with something only you can decide, its result is listed first, under “Waiting on you”. Open it and press Yes or No: your answer goes to the chat, which acts on it.</p></div>
+      <div><h3>Pick up where a task stopped.</h3><p>Open a result and press Continue from this. Claudopus names that result in the chat's box, and you finish the sentence.</p></div>
+      <p><a class="more" href="tour.html#results">How Results works, step by step</a></p>
+    </div>
+  </div>
+</section>
+
+<section class="sec tour-sec" id="tour">
+  <div class="body">
+    <figure>
+      <a class="teaser film notch big" href="tour.html" aria-label="Watch the tour">
+        <img src="tour-poster.jpg" alt="A still from the tour: the Claudopus panel beside a chat, with the 3D octopus" width="1920" height="1080" loading="lazy">
+        <span class="play"><span class="btn"><span><svg class="px" viewBox="0 0 4 7" width="12" height="21" aria-hidden="true"><rect x="0" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="4" height="1"/><rect x="0" y="4" width="3" height="1"/><rect x="0" y="5" width="2" height="1"/><rect x="0" y="6" width="1" height="1"/></svg> Watch the tour</span></span></span>
+      </a>
+      <figcaption class="note">A short film on its own page: the problem, the panel, a question, and Results. It has music, and it starts only when you press play.</figcaption>
+    </figure>
   </div>
 </section>
 
@@ -548,108 +350,9 @@ figure .note{margin-top:var(--s4)}
   <a href="changelog.html">Changelog</a>
   <a class="ext" href="https://github.com/dimka3553/claudopus">GitHub <svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="1" y="0" width="4" height="1"/><rect x="3" y="1" width="2" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="4" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/></svg></a>
 </footer>
-
 </div>
 <div id="said" class="note" role="status" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)"></div>
-
-<script>
-(() => {
-  const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)]
-  const still = matchMedia('(prefers-reduced-motion: reduce)')
-
-  // The octopus drawings are the mod's own. They hold still when motion is not wanted.
-  const settle = () => $$('svg.octo').forEach(svg => {
-    if (still.matches) { svg.pauseAnimations(); svg.setCurrentTime(0) } else svg.unpauseAnimations()
-  })
-  settle(); still.addEventListener?.('change', settle)
-
-  // A finish: the octopus turns green and cheers for two seconds, then goes back to work.
-  const cheer = spot => {
-    const happy = $('.octo.happy', spot)
-    spot.classList.add('is-happy')
-    happy.setCurrentTime(0)
-    clearTimeout(spot.timer)
-    spot.timer = setTimeout(() => spot.classList.remove('is-happy'), 2500)
-  }
-
-  // The big octopus looks where you point: each pupil is one cell that moves inside its two-by-two eye.
-  const hero = $('#hero-octo'), pupils = $$('.pupil', hero)
-  let waiting = 0
-  addEventListener('pointermove', e => {
-    if (waiting) return
-    waiting = requestAnimationFrame(() => {
-      waiting = 0
-      const box = hero.getBoundingClientRect()
-      const right = e.clientX >= box.left + box.width / 2, down = e.clientY >= box.top + box.height * 0.2
-      pupils.forEach(p => { p.setAttribute('x', +p.dataset.x + (right ? 1 : 0)); p.setAttribute('y', +p.dataset.y + (down ? 1 : 0)) })
-    })
-  }, { passive: true })
-  hero.addEventListener('click', () => cheer(hero))
-
-  // The video waits for a press and never starts by itself.
-  const film = $('#film'), play = $('#play')
-  film.controls = false; play.hidden = false
-  play.addEventListener('click', () => { play.hidden = true; film.controls = true; film.focus(); film.play()?.catch(() => {}) })
-
-  // Copy buttons
-  const said = $('#said')
-  $$('[data-copy]').forEach(button => button.addEventListener('click', async () => {
-    const text = button.dataset.copy
-    let copied = true
-    try { await navigator.clipboard.writeText(text) } catch {
-      const area = Object.assign(document.createElement('textarea'), { value: text })
-      area.style.cssText = 'position:fixed;opacity:0'; document.body.append(area); area.select()
-      try { copied = document.execCommand('copy') } catch { copied = false }
-      area.remove()
-    }
-    if (!copied) {
-      getSelection().selectAllChildren(button.previousElementSibling)
-      button.classList.add('is-failed'); said.textContent = 'It could not be copied. The line is selected, so copy it with your keyboard.'
-      clearTimeout(button.timer)
-      button.timer = setTimeout(() => { button.classList.remove('is-failed'); said.textContent = '' }, 3000)
-      return
-    }
-    button.classList.add('is-copied'); said.textContent = 'Copied: ' + text
-    cheer($('#copy-octo'))
-    clearTimeout(button.timer)
-    button.timer = setTimeout(() => { button.classList.remove('is-copied'); said.textContent = '' }, 2000)
-  }))
-
-  // The panel plays one short story on a loop: a job goes on, finishes, and joins the Finished list.
-  const panel = $('#panel'), start = panel.innerHTML
-  const clock = s => (s >= 60 ? Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's' : s + 's')
-  const ticked = '<svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>'
-  const set = (card, line, count) => { if (line) $('#' + card + ' .say').innerHTML = line; if (count) $('#' + card + ' .count').textContent = count }
-  const story = [
-    [2400, () => set('p-a', 'The fix is in, and I am running the tests.', '3 of 4 done')],
-    [2000, () => set('p-b', 'I have read 55 of the 62 pages.')],
-    [2400, () => {
-      const a = $('#p-a'); a.classList.add('done', 'cheer'); set('p-a', ticked + 'Finished', '4 of 4 done')
-      $('#p-a .facts').textContent = 'Finished · Opus 5.5 · context 44k · ' + clock(+$('#p-a .clock').dataset.s)
-      $('#p-count').textContent = 'Working on 1 thing'; cheer($('#panel-octo'))
-    }],
-    [2600, () => {
-      const a = $('#p-a'); a.classList.remove('cheer'); set('p-a', 'The redirect is fixed, and the tests pass.')
-      $('#p-done').prepend(a); $('#p-fold').textContent = 'Finished 2'
-    }],
-    [2200, () => set('p-b', 'All 62 pages are read, and I am writing the index.', '2 of 3 done')],
-    [3600, () => panel.classList.add('is-reset')],
-    [500, () => { panel.innerHTML = start; panel.classList.remove('is-reset'); settle() }],
-  ]
-  let at = 0, next = 0, tick = 0, seen = false
-  const step = () => {
-    const [wait, act] = story[at]
-    next = setTimeout(() => { act(); at = (at + 1) % story.length; step() }, wait)
-  }
-  const run = on => {
-    clearTimeout(next); clearInterval(tick)
-    if (!on || still.matches) return
-    step()
-    tick = setInterval(() => $$('.clock', panel).forEach(c => { c.dataset.s = +c.dataset.s + 1; c.textContent = clock(+c.dataset.s) }), 1000)
-  }
-  new IntersectionObserver(([entry]) => { seen = entry.isIntersecting; run(seen) }, { threshold: 0.25 }).observe(panel)
-  still.addEventListener?.('change', () => run(seen))
-})()
-</script>
+<script src="octo3d.js"></script>
+<script src="site.js"></script>
 </body>
 </html>

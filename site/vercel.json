@@ -5,5 +5,17 @@
       "**": false,
       "main": true
     }
-  }
+  },
+  "redirects": [
+    {
+      "source": "/claudopus.mp4",
+      "destination": "/tour.mp4",
+      "permanent": false
+    },
+    {
+      "source": "/tour",
+      "destination": "/tour.html",
+      "permanent": false
+    }
+  ]
 }

@@ -1,0 +1,2 @@
+- claudopus.ai has a new home page: the octopus in 3D with a task on each arm, the problem drawn as three requests taken one by one against three side by side, six ways Claude Code alone gets in your way with what Claudopus does about each, and the panel and Results drawn in depth.
+- claudopus.ai/tour.html is new: a new film that shows today's Claudopus, and Results explained step by step, with why it is useful.
