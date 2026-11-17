@@ -497,6 +497,10 @@ test('a press on one ended work\'s ask leaves the other asks\' buttons where the
 
 test('a go-ahead to finish on ended work does its last step without waking it: a release in a repo with .release is held on the card for the allow, any other step goes to a small fresh task; a reply in words or the other choice still goes to the work', async ($, on) => {
   const { files, resumed, appended, clock, wake, asked } = world(on)
+  // (the cards as last written, read for what each recorded as waiting)
+  let written: unknown
+  on('state.set', (_, e, next) => (((e as { key?: string }).key === 'todos' && (written = (e as { value?: unknown }).value)), next(e)))
+  const cards = () => ((written as { value?: unknown } | undefined)?.value ?? []) as { id: string; waits?: unknown[] }[]
   await $.session.start(start)
   await $.prompt.submit({ text: 'four fixes', wait: false, origin: composer })
   for (const description of ['Fix the nose', 'Fix the ear', 'Fix the chin', 'Fix the brow']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
@@ -553,7 +557,7 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   // Release it pressed while the work is still in the turn that asked (writing its waits and report, as on 16 Nov 19:49 and 17 Nov
   // 07:49): the work is told the step is Claudopus's, not left it, and the step is done once its card has ended: the release's allow
   // box, a small fresh task for any other step. A turn that was stopped first does no step, and the question is back on the card
-  for (const description of ['Fix the jaw', 'Fix the cheek', 'Fix the lip', 'Fix the neck']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
+  for (const description of ['Fix the jaw', 'Fix the cheek', 'Fix the lip', 'Fix the neck', 'Fix the mouth']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
   const working = async (id: string, last_step: string, folder: string) => {
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${id}`, agentId: id, text: `Release ${id}?`, choices: ['Release it', 'Not now'], last_step, folder } as never)
     await press(id, 'Release it')
@@ -579,13 +583,24 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 'turn-a7', reason: 'answer', agentId: 'a7' } as never)
   expect(await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it' && String(b.key ?? '').startsWith('ask-a7-')))).toBeDefined()
   expect(files.get(`${MEMORY}/log.md`)).not.toContain('last step of a7 on')
-  // nor when it asks something else before its turn ends
+  // nor when it asks something else before its turn ends; what it recorded as waiting for the go-ahead, as its card's question, is
+  // then open again in its result, not answered by a Release it that did nothing
+  await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w-a8', agentId: 'a8', items: [{ text: 'Release a8 with the neck fix?', asked: true }] } as never)
   await working('a8', 'release', '/repo/wt')
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k-a8b', agentId: 'a8', text: 'A check failed: may I fix it first?', choices: ['Fix it', 'Not now'] } as never)
   await $.turn.complete({ answer: 'May I fix it first?', durationMs: 1, isAborted: false, turnId: 'turn-a8', reason: 'answer', agentId: 'a8' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Nothing was done on your "Release it": Claude asked something else first' }))).toBeDefined()
   expect(files.get(`${MEMORY}/log.md`)).not.toContain('last step of a8 on')
-  expect(resumed.filter(line => /^a[5678]: /.test(line))).toEqual([])
+  expect(cards().find(one => one.id === 'a8')?.waits).toEqual([{ text: 'Release a8 with the neck fix?', ask: expect.any(Number) }])
+  // A call Claude Code refused in that turn is Claudopus's notice on the card, not another question: the step is still done
+  await working('a9', 'Merge the PR and look at the build', '/repo/plain')
+  files.set('auto-refuse', 'Edit')
+  await $.tool.call({ tool: 'Edit', tool_use_id: 'e-a9', agentId: 'a9', file_path: '/repo/plain/notes.md', old_string: 'old', new_string: 'new' } as never)
+  files.delete('auto-refuse')
+  expect(await until(async () => list.find({ type: 'Text', text: 'Claude Code refused this task: Change the file notes.md.' }))).toBeDefined()
+  await $.turn.complete({ answer: 'Claudopus merges it.', durationMs: 1, isAborted: false, turnId: 'turn-a9', reason: 'answer', agentId: 'a9' } as never)
+  expect(await until(async () => ((files.get(`${MEMORY}/log.md`) ?? '').includes('last step of a9 on') ? true : undefined))).toBe(true)
+  expect(resumed.filter(line => /^a[56789]: /.test(line))).toEqual([])
   await list.unmount()
 })
 

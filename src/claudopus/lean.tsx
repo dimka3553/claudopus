@@ -303,17 +303,21 @@ const stepLine = async ($: EngineInterface, id: string, text: string) => {
 // each turn's end (from that hook, so a small fresh task starts in a hook), each sync of the engine's list and right after the press
 // itself, should the turn have ended meanwhile; a release then takes the branch as the task left it. Taken off the card in the same
 // write that finds it, so it is done once. No step when the card asks something else by then, nor when you stopped it; a turn that
-// was stopped or failed puts the question back, to be pressed again
+// was stopped or failed puts the question back, to be pressed again. Claudopus's notice of a call Claude Code refused in that turn
+// is no question of the work's: it neither stops the step nor keeps the question from coming back. With no step done, what the work
+// recorded as waiting for that question is open again, as the press had answered it (answerCleared)
 const stepsAtEnd = async ($: EngineInterface) => {
   if (!(await read($, todos)).some(one => one.stepOnEnd && one.status !== 'working')) return
   let due: Todo[] = []
-  await changeTodos($, list => ((due = list.filter(one => one.stepOnEnd && one.status !== 'working')), due.length ? list.map(one => (due.includes(one) ? { ...one, stepOnEnd: undefined, ...(one.status !== 'done' && !one.byYou && !one.ask ? { ask: one.stepOnEnd?.ask } : {}) } : one)) : list))
+  await changeTodos($, list => ((due = list.filter(one => one.stepOnEnd && one.status !== 'working')), due.length ? list.map(one => (due.includes(one) ? { ...one, stepOnEnd: undefined, ...(one.status !== 'done' && !one.byYou && (!one.ask || one.ask.refused) ? { ask: one.stepOnEnd?.ask } : {}) } : one)) : list))
   for (const card of due) {
     const held = card.stepOnEnd
     if (!held) continue
     const id = card.id
+    const isDone = !card.byYou && !(card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) && card.status === 'done'
+    if (!isDone) await unsettleAsked($, id, held.ask.at).catch(err => log($, `result's question not opened again for ${id}: ${String(err)}`))
     if (card.byYou) await stepLine($, id, `Nothing was done on your "${held.said}": you stopped it first`)
-    else if (card.ask && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) await stepLine($, id, `Nothing was done on your "${held.said}": Claude asked something else first`)
+    else if (card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) await stepLine($, id, `Nothing was done on your "${held.said}": Claude asked something else first`)
     else if (card.status !== 'done') {
       // pressed again as a fresh answer, as when an answer could not be sent (answerNow)
       answeredAsks.delete(`${id}:${held.ask.at}:${held.ask.text}`)

@@ -44,3 +44,5 @@
 - When you answer a result's questions in the chat, the chat marks those questions answered by their numbers, so they no longer show as waiting.
 - A result's question can have its own answers, such as "By hand" and "Leave them", instead of Yes and No. Every question also has "Answer in words", which puts a line about it in the chat box for you to finish. Sending that line with your words answers it.
 - An answered question stays in view on its result with what you answered, or "you said not now".
+- A Release it you press while the task is still finishing its turn is no longer lost when Claude Code refuses one of that task's calls in the same turn: the release still goes ahead as the turn ends, and if the turn was stopped or failed, your question comes back on the card to press again.
+- When nothing was done on such a Release it (you stopped the task, it asked something else, or its turn failed), the same question in its results shows as waiting on you again, instead of as answered.

@@ -4962,6 +4962,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
     answeredAsks.delete(asked)
     if (answeredAt.get(one.id) === ask.at) answeredAt.delete(one.id)
     if (pending.get(target) === one.id) pending.delete(target)
+    if (isCleared) await unsettleAsked($, one.id, ask.at).catch(() => undefined)
     const isBack = !isCleared || (await changeTodos($, list => list.map(card => (card.id === one.id && !card.ask ? { ...card, ask, entries: card.entries.filter(entry => !(entry.kind === 'steer' && entry.at === steerAt)) } : card))).then(() => true).catch(() => false))
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'failed', at: await $.clock.now().catch(() => 0), line, isCard: true, askAt: ask.at })
     if (!isBack) $.ui.log(`Your answer “${cut(said, 120)}” to "${titleOf(one)}" (${ask.text}) didn't reach Claude, and the question couldn't be put back on its card. Type your answer in this chat instead.`)
@@ -7536,13 +7537,15 @@ const stepLine = async ($: EngineInterface, id: string, text: string) => {
 const stepsAtEnd = async ($: EngineInterface) => {
   if (!(await read($, todos)).some(one => one.stepOnEnd && one.status !== 'working')) return
   let due: Todo[] = []
-  await changeTodos($, list => ((due = list.filter(one => one.stepOnEnd && one.status !== 'working')), due.length ? list.map(one => (due.includes(one) ? { ...one, stepOnEnd: undefined, ...(one.status !== 'done' && !one.byYou && !one.ask ? { ask: one.stepOnEnd?.ask } : {}) } : one)) : list))
+  await changeTodos($, list => ((due = list.filter(one => one.stepOnEnd && one.status !== 'working')), due.length ? list.map(one => (due.includes(one) ? { ...one, stepOnEnd: undefined, ...(one.status !== 'done' && !one.byYou && (!one.ask || one.ask.refused) ? { ask: one.stepOnEnd?.ask } : {}) } : one)) : list))
   for (const card of due) {
     const held = card.stepOnEnd
     if (!held) continue
     const id = card.id
+    const isDone = !card.byYou && !(card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) && card.status === 'done'
+    if (!isDone) await unsettleAsked($, id, held.ask.at).catch(err => log($, `result's question not opened again for ${id}: ${String(err)}`))
     if (card.byYou) await stepLine($, id, `Nothing was done on your "${held.said}": you stopped it first`)
-    else if (card.ask && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) await stepLine($, id, `Nothing was done on your "${held.said}": Claude asked something else first`)
+    else if (card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) await stepLine($, id, `Nothing was done on your "${held.said}": Claude asked something else first`)
     else if (card.status !== 'done') {
       answeredAsks.delete(`${id}:${held.ask.at}:${held.ask.text}`)
       if (answeredAt.get(id) === held.ask.at) answeredAt.delete(id)
