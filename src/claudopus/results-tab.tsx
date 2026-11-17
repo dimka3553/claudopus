@@ -382,16 +382,18 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         </Box>
         <Button key={`report-archive-${gen}`} label={r.archived ? 'Bring back' : 'Archive'} onPress={() => archiveReport($, r, !r.archived)} />
       </Box>
-      {isOpenQuestion(r)
+      {isOpenQuestion(r) || (!r.archived && waitsOf(r).some(wait => wait.answer))
         ? band(
             ui,
             'report-ask',
-            'Waiting on you',
+            isOpenQuestion(r) ? 'Waiting on you' : 'Answered',
             openWaits(r).length > 1 ? `${openWaits(r).length}` : '',
-            // Each thing it waits on with its own answers; one answered leaves the others
+            // Each thing it waits on with its own answers; one answered says what was answered, and leaves the others
             <Box flexDirection="column" gap={2}>
               {waitsOf(r).map((wait, index) =>
-                wait.answer ? null : (
+                wait.answer ? (
+                  <Text key={`report-waited-${index}`} dimColor wrap="wrap">{`${wait.text} · ${wait.answer === SETTLED ? 'no longer waits' : wait.answer === IN_WORDS ? 'you answered in your words' : `you answered “${wait.answer}”`}`}</Text>
+                ) : (
                   <Box key={`report-wait-${index}`} flexDirection="column" gap={1}>
                     <Text wrap="wrap">{wait.text}</Text>
                     <Box flexDirection="row" flexWrap="wrap" gap={1}>

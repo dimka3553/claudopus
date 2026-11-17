@@ -63,7 +63,7 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
   }
   const one = cards.find(card => card.id === id)
   if (!one) return undefined
-  const waits = one.waits ?? seen ?? []
+  const waits = (one.waits ?? seen ?? []).filter(wait => !askedWait(wait).answer)
   const said = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text ?? ''
   const what =
     one.status === 'done'
