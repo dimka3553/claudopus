@@ -1854,12 +1854,13 @@ const answeredOf = (r: Report) => {
 const IN_WORDS = 'In your words'
 const SETTLED = 'Settled'
 const REPLACED = 'Replaced'
+const MOVED = 'Moved'
 const askedWait = (one: Wait | string): Wait => (typeof one === 'string' ? { text: one } : one)
 const ANSWER_IN_WORDS = 'Answer in words'
-const answersOf = (wait: Wait) => [...new Set([...(wait.choices ?? ['Yes', 'No']), 'Not now', ANSWER_IN_WORDS])]
+const answersOf = (wait: Wait) => [...new Set([...(wait.choices?.length ? wait.choices : ['Yes', 'No']), 'Not now', ANSWER_IN_WORDS])]
 const answeredWords = (wait: Wait) =>
-  wait.answer === SETTLED ? 'no longer waits' : wait.answer === REPLACED ? 'replaced by a newer result' : wait.answer === IN_WORDS ? 'you answered in your words' : wait.answer === 'Not now' ? 'you said not now' : `you answered “${wait.answer ?? ''}”`
-const byPerson = (wait: Wait) => Boolean(wait.answer) && wait.answer !== SETTLED && wait.answer !== REPLACED
+  wait.answer === SETTLED ? 'no longer waits' : wait.answer === REPLACED ? 'replaced by a newer result' : wait.answer === MOVED ? 'moved to its newer result' : wait.answer === IN_WORDS ? 'you answered in your words' : wait.answer === 'Not now' ? 'you said not now' : `you answered “${wait.answer ?? ''}”`
+const byPerson = (wait: Wait) => Boolean(wait.answer) && wait.answer !== SETTLED && wait.answer !== REPLACED && wait.answer !== MOVED
 const sameLine = (a: string, b: string) => Boolean(plainWords(a)) && plainWords(a) === plainWords(b)
 const resultsOfWork = (list: Report[], agent: string) => list.filter(r => r.agent === agent && !r.archived).sort((a, b) => b.at - a.at)
 const settleWaits = async ($: EngineInterface, r: Report, answerOf: (wait: Wait, index: number) => Partial<Wait> | undefined) => {
@@ -1874,10 +1875,10 @@ const settleWaits = async ($: EngineInterface, r: Report, answerOf: (wait: Wait,
   return closed
 }
 const tiedTo = (wait: Wait, card: Todo): Wait => {
-  const ask = card.ask ?? card.lastAsk
+  const ask = card.ask
   if (wait.ask || !ask || !(wait.isAsked || sameLine(wait.text, ask.text))) return wait
   const { isAsked: _, ...rest } = wait
-  return { ...rest, ask: ask.at, ...(card.lastAsk?.at === ask.at && card.lastAsk.answer ? { answer: card.lastAsk.answer, byAsk: ask.at } : {}) }
+  return { ...rest, ask: ask.at }
 }
 const settleAsked = async ($: EngineInterface, agent: string, ask: { text: string; at: number }, said: string) => {
   await changeTodos($, list =>
@@ -1886,7 +1887,6 @@ const settleAsked = async ($: EngineInterface, agent: string, ask: { text: strin
         ? card
         : {
             ...card,
-            lastAsk: { text: ask.text, at: ask.at, answer: said },
             ...(card.waits?.length ? { waits: card.waits.map(askedWait).map(one => (one.ask === ask.at && !one.answer ? { ...one, answer: said, byAsk: ask.at } : one)) } : {}),
           },
     ),
@@ -1901,23 +1901,22 @@ const reopened = (one: Wait | string, at: number) => {
 }
 const unsettleAsked = async ($: EngineInterface, agent: string, at: number) => {
   await changeTodos($, list =>
-    list.map(card => (card.id !== agent ? card : { ...card, ...(card.lastAsk?.at === at ? { lastAsk: { text: card.lastAsk.text, at } } : {}), ...(card.waits?.length ? { waits: card.waits.map(one => reopened(one, at)) } : {}) })),
+    list.map(card => (card.id !== agent || !card.waits?.length ? card : { ...card, waits: card.waits.map(one => reopened(one, at)) })),
   )
   for (const r of resultsOfWork(await loadReports($), agent))
     if (waitsOf(r).some(one => one.byAsk === at)) await markReport($, r, stored => ({ waiting: waitsOf(stored).map(one => askedWait(reopened(one, at))) }))
 }
 const wordsLine = (r: Report, n: number, now: number) => `About question ${n} of the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: `
 const answeredInMessage = async ($: EngineInterface, text: string) => {
+  const parts = text.split(/(?=About question \d+ of the result )/).flatMap(part => {
+    const n = Number(/^About question (\d+) of the result /.exec(part)?.[1] ?? 0)
+    return n ? [{ n, part }] : []
+  })
+  if (!parts.length) return
   for (const r of (await read($, reports)).filter(one => !one.archived && isOpenQuestion(one))) {
     const path = `${reportPath(r)}/report.md: `
-    for (const m of text.matchAll(/About question (\d+) of the result /g)) {
-      const at = text.indexOf(path, m.index)
-      if (at < 0) continue
-      const after = text.slice(at + path.length).split(/\nAbout question \d+ of the result /)[0] ?? ''
-      if (!after.trim()) continue
-      const n = Number(m[1])
-      await settleWaits($, r, (_, index) => (index === n - 1 ? { answer: IN_WORDS } : undefined))
-    }
+    const numbers = parts.filter(({ part }) => part.includes(path) && part.slice(part.indexOf(path) + path.length).trim()).map(({ n }) => n)
+    if (numbers.length) await settleWaits($, r, (_, index) => (numbers.includes(index + 1) ? { answer: IN_WORDS } : undefined))
   }
 }
 
@@ -1988,12 +1987,17 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
   const isKept = waits.length > 0 || text.trim().length >= REPORT_LEAST || namedPaths(text).some(path => PICTURE.test(path))
   const kept = await loadReports($)
   const marked = mark(text)
-  const isAgain = kept.some(r => r.agent === one.id && r.mark === marked)
-  if ((isKept && !isAgain) || one.waitsSet) {
-    for (const r of resultsOfWork(kept, one.id)) await settleWaits($, r, () => ({ answer: isKept && !isAgain ? REPLACED : SETTLED }))
-    if (one.waitsSet) await changeTodos($, list => list.map(todo => (todo.id === one.id ? { ...todo, waitsSet: undefined } : todo)))
+  const same = kept.find(r => r.agent === one.id && r.mark === marked)
+  if (one.waitsSet) {
+    const isNewer = isKept && !same
+    for (const r of resultsOfWork(kept, one.id).filter(r => r.id !== same?.id)) await settleWaits($, r, () => ({ answer: isNewer || same ? REPLACED : SETTLED }))
+    if (same) await markReport($, same, stored => ({ waiting: [...waitsOf(stored).filter(byPerson), ...waits.map(({ isAsked: _, ...wait }) => wait)] }))
+    await changeTodos($, list => list.map(todo => (todo.id === one.id ? { ...todo, waitsSet: undefined, ...(same ? { waits: undefined } : {}) } : todo)))
   }
-  if (!isKept || isAgain) return
+  if (!isKept || same) return
+  const moved = one.waitsSet ? [] : resultsOfWork(kept, one.id).flatMap(r => openWaits(r))
+  if (moved.length) for (const r of resultsOfWork(kept, one.id)) await settleWaits($, r, () => ({ answer: MOVED }))
+  const waiting = [...waits.map(({ isAsked: _, ...wait }) => wait), ...moved].filter((wait, n, all) => all.findIndex(other => other.text === wait.text) === n)
   const at = await $.clock.now()
   const title = cut(one.title || quoted(one.words, 60) || 'Report', 70)
   const stamp = new Date(at).toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-')
@@ -2017,7 +2021,7 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
     files,
     agent: one.id,
     mark: marked,
-    ...(waits.length ? { waiting: waits.map(({ isAsked: _, ...wait }) => wait) } : {}),
+    ...(waiting.length ? { waiting } : {}),
     ...(one.from ? { from: one.from } : {}),
   }
   await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
@@ -5051,6 +5055,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
     ((isHeld = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isHeld) return
+  await settleAsked($, one.id, ask, IN_WORDS).catch(err => log($, `result's question not answered with the ask of ${one.id}: ${String(err)}`))
   dropDrafts($, one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   freeTimes($)
@@ -5156,7 +5161,7 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   if (!isSent) return void answeredAsks.delete(a.key)
   const isHeld = !settles(a.ask, a.words, true)
   if (isHeld) answeredAsks.delete(a.key)
-  else await settleAsked($, a.card.id, a.ask, IN_WORDS).catch(err => log($, `result's question not answered with the ask of ${a.card.id}: ${String(err)}`))
+  await settleAsked($, a.card.id, a.ask, IN_WORDS).catch(err => log($, `result's question not answered with the ask of ${a.card.id}: ${String(err)}`))
   inChat.delete(a.card.id)
   await changeTodos($, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   dropDrafts($, a.card.id)
@@ -10659,7 +10664,7 @@ const toolHooks = (on: On) => {
       const item = typeof one === 'string' ? { text: one } : one && typeof one === 'object' ? (one as { text?: unknown; choices?: unknown; asked?: unknown }) : {}
       const text = typeof item.text === 'string' ? cut(oneLine(item.text), 200) : ''
       const choices = Array.isArray(item.choices) ? [...new Set(item.choices.filter((c): c is string => typeof c === 'string').map(c => cut(oneLine(c), 40)).filter(c => c && plainWords(c) !== 'not now' && plainWords(c) !== plainWords(ANSWER_IN_WORDS)))].slice(0, 4) : undefined
-      return text ? [{ text, ...(choices ? { choices } : {}), ...('asked' in item && item.asked === true ? { isAsked: true } : {}) }] : []
+      return text ? [{ text, ...(choices?.length ? { choices } : {}), ...('asked' in item && item.asked === true ? { isAsked: true } : {}) }] : []
     })
     const items = asked.filter((one, n) => asked.findIndex(other => other.text === one.text) === n).slice(0, 12)
     let tied = 0
@@ -10703,7 +10708,7 @@ const toolHooks = (on: On) => {
     const stepFolder = typeof input.folder === 'string' ? input.folder.trim() : ''
     const isStepped = Boolean(stepGiven && choices.length && stepFolder.startsWith('/') && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(stepFolder).catch(() => undefined))?.kind === 'dir')
     await change($, e.agentId, was => { const one = { ...was, ask: text ? { text, ...(isStepped ? { lastStep: stepGiven, folder: stepFolder } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), ...(pictures.length ? { pictures } : {}), at } : undefined }
-      return one.ask ? { ...one, lastAsk: { text: one.ask.text, at: one.ask.at }, ...(one.waits?.length ? { waits: one.waits.map(askedWait).map(wait => tiedTo(wait, one)) } : {}) } : one
+      return one.ask ? { ...one, ...(one.waits?.length ? { waits: one.waits.map(askedWait).map(wait => tiedTo(wait, one)) } : {}) } : one
     })
     const list = await read($, todos)
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))

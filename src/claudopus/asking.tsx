@@ -604,6 +604,8 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
     ((isHeld = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isHeld) return
+  // Their reply answers what the work recorded for that question, as a press does; the ask stays while the work acts on it
+  await settleAsked($, one.id, ask, IN_WORDS).catch(err => log($, `result's question not answered with the ask of ${one.id}: ${String(err)}`))
   // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
   dropDrafts($, one.id)
   // A new box, empty, whenever it comes back: the surface keeps what was typed in a box it finds again by its key
@@ -754,7 +756,8 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   const isHeld = !settles(a.ask, a.words, true)
   // Either way the ask is done with in the chat: the work asking again is sent to it afresh
   if (isHeld) answeredAsks.delete(a.key)
-  else await settleAsked($, a.card.id, a.ask, IN_WORDS).catch(err => log($, `result's question not answered with the ask of ${a.card.id}: ${String(err)}`))
+  // Their words answer what the work recorded for that question either way: the work clearing the ask later leaves it answered
+  await settleAsked($, a.card.id, a.ask, IN_WORDS).catch(err => log($, `result's question not answered with the ask of ${a.card.id}: ${String(err)}`))
   inChat.delete(a.card.id)
   await changeTodos($, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   dropDrafts($, a.card.id)

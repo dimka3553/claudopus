@@ -111,7 +111,7 @@ const toolHooks = (on: On) => {
       const item = typeof one === 'string' ? { text: one } : one && typeof one === 'object' ? (one as { text?: unknown; choices?: unknown; asked?: unknown }) : {}
       const text = typeof item.text === 'string' ? cut(oneLine(item.text), 200) : ''
       const choices = Array.isArray(item.choices) ? [...new Set(item.choices.filter((c): c is string => typeof c === 'string').map(c => cut(oneLine(c), 40)).filter(c => c && plainWords(c) !== 'not now' && plainWords(c) !== plainWords(ANSWER_IN_WORDS)))].slice(0, 4) : undefined
-      return text ? [{ text, ...(choices ? { choices } : {}), ...('asked' in item && item.asked === true ? { isAsked: true } : {}) }] : []
+      return text ? [{ text, ...(choices?.length ? { choices } : {}), ...('asked' in item && item.asked === true ? { isAsked: true } : {}) }] : []
     })
     const items = asked.filter((one, n) => asked.findIndex(other => other.text === one.text) === n).slice(0, 12)
     let tied = 0
@@ -167,7 +167,7 @@ const toolHooks = (on: On) => {
     const isStepped = Boolean(stepGiven && choices.length && stepFolder.startsWith('/') && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(stepFolder).catch(() => undefined))?.kind === 'dir')
     await change($, e.agentId, was => { const one = { ...was, ask: text ? { text, ...(isStepped ? { lastStep: stepGiven, folder: stepFolder } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), ...(pictures.length ? { pictures } : {}), at } : undefined }
       // An item recorded as the question on the card, or the same line as it, is tied to this ask
-      return one.ask ? { ...one, lastAsk: { text: one.ask.text, at: one.ask.at }, ...(one.waits?.length ? { waits: one.waits.map(askedWait).map(wait => tiedTo(wait, one)) } : {}) } : one
+      return one.ask ? { ...one, ...(one.waits?.length ? { waits: one.waits.map(askedWait).map(wait => tiedTo(wait, one)) } : {}) } : one
     })
     const list = await read($, todos)
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))

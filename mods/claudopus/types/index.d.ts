@@ -71,8 +71,6 @@ export type Todo = {
   waits?: (Wait | string)[]
   // It called the `waits` tool this round: once the round is done, what it recorded replaces what its earlier results waited on
   waitsSet?: boolean
-  // Its last ask, kept after it is answered or cleared, with the answer: an item it records later as that question is tied to it
-  lastAsk?: { text: string; at: number; answer?: string }
   // What it needs the person's own hands for now, said with the `ask` tool: what to do, and the exact text to copy for it. Its card
   // stands out with the ask in view until the work clears it or ends
   // `replied`: the person's reply in their own words that did not settle it; the ask stays while the work acts on it, with nothing to press or type, until the work clears it or asks again, or ends with it open, when every answer is back. `isWaking`: the work had ended and is being started again with the reply
@@ -240,9 +238,10 @@ export type Report = {
 
 // One thing a report leaves for the person to decide or do; open until it has an `answer`: what they pressed ("Yes", "No", one of
 // its `choices`, "Not now"), the answer to the work's ask it repeats, "In your words" for one their message answered, "Settled" once
-// the work said nothing waits, or "Replaced" once a newer result of its work took its place. `ask`: when the ask it repeats was made
-// (`isAsked` until there is one to tie it to); `byAsk`: the ask whose answer answered it, so that answer taken back opens it again.
-// `choices`: its answers when it is not yes or no
+// the work said nothing waits, "Replaced" once a newer round of its work said what waits, or "Moved" once a newer result of a round
+// that said nothing of it took it over. `ask`: when the ask it repeats was made
+// (`isAsked` until one is asked in the same round); `byAsk`: the ask whose answer answered it, so that answer taken back opens it
+// again. `choices`: its answers when it is not yes or no
 export type Wait = { text: string; answer?: string; choices?: string[]; ask?: number; isAsked?: boolean; byAsk?: number }
 
 // A process on this Mac that listens on a port, started from one of the person's folders
