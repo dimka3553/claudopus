@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.182 · 17 November 2026
+- When Claude Code refuses a task's command, its card now shows the command whole, where it would run and for how long at most, and a Run it button. Your press, and only your press, has Claudopus run exactly that command once, as a command you type in your terminal would run (your shell and its start files, without Claude Code's own settings). The card shows it running with what it last printed and a Stop it button; a command is stopped after 10 minutes at most, or an hour for one Claude would have run in the background. The task is told where the output goes and gets its last lines when it ends; a task that had ended is started again with them at the chat's next step, or at once when you press Send it to Claude now. Nothing about the task's own permissions changes, and the task never runs it itself.
+
 ## 0.2.181 · 17 November 2026
 - Questions, allow boxes, key and password boxes and their notices now use the same plain words everywhere: a card asks "Release claudopus to main?", says "waiting for you", and after a press says who did what, such as "You allowed it. Claudopus is releasing it now."
 - Config, Stats, Results, Memory, About, the Changelog and the update box use shorter, plainer words: each setting says what it does in a sentence or two, Stats explains tokens and prices in everyday words, and every update step names the version as v0.2.177.

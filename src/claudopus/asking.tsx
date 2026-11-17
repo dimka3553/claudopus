@@ -340,7 +340,7 @@ const readDrafts = async ($: EngineInterface) => {
 // The last answer given to each work's ask, shown on its card for a while after: sent to the work (which reads a message only at
 // its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
 // A button's answer keeps the ask it answered and the work it went to (asked, target), so it can be taken back (takeBack)
-type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'other' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
+type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'other' | 'ran' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
 // The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
 const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
 // How long the card says what was answered, unless the work writes a newer line first
@@ -557,6 +557,15 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   // A notice of a call Claude Code refused: the work it is for, still at work, is told to carry on without it, and work that has
   // ended is not started again for it, neither now nor as it ends without having read it (no answer waits for it)
   if (ask.refused) {
+    // Run it, pressed on this card in this chat's own panel: the command is run now, on that press (runit.tsx)
+    const run = !isReply && said === RUN_IT ? runAsked.get(one.id) : undefined
+    if (run && run.askAt === ask.at && run.command === ask.copy) {
+      sentReplies.set(one.id, { text: said, ask: ask.text, to: 'ran', at, line, isCard: true, askAt: ask.at })
+      await startRun($, one, run).catch(err => log($, `refused command not run: ${String(err)}`))
+      return void askGone($, one, said)
+    }
+    // Words, even "Run it", never run the command: the card says so where it offered it
+    if (isReply && runList.some(r => isSameRun(r, { card: one.id, askAt: ask.at }) && !r.startedAt)) await stepLine($, one.id, `Your answer didn't run the command: only its ${RUN_IT} button runs it`).catch(() => undefined)
     const isWorking = (await read($, todos)).find(card => card.id === target)?.status === 'working'
     const told = isWorking ? await tell($, target, REFUSAL_ANSWERED(ask.text, said, isReply)) : undefined
     if (!told || told.deny) await log($, `answer to the refusal on ${one.id} not sent: ${target} is not at work, or could not be written to`)
@@ -585,7 +594,7 @@ const canTakeBack = (one: Todo, now: number) => {
   const sent = heldAnswer(one, now)
   // Only while the card still says it (sentLine), never for an answer left in the chat, whose model has it already, nor for a last
   // step such as a release, which the work cannot undo
-  return Boolean(sent?.asked && !sent.isHeld && !sent.asked.lastStep && !['other', 'sending', 'chat'].includes(sent.to) && !one.ask && !one.chat && sentLine(one, now))
+  return Boolean(sent?.asked && !sent.isHeld && !sent.asked.lastStep && !['other', 'ran', 'sending', 'chat'].includes(sent.to) && !one.ask && !one.chat && sentLine(one, now))
 }
 // (at: the answer the button was drawn for: a click on a drawing held from before takes back nothing newer)
 const takeBack = ($: EngineInterface, one: Todo, at: number) => {
@@ -682,8 +691,10 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
 // holds goes to the chat instead: a notice the person sees and a row its model reads, with no turn of its own
 const WAKE_WAIT = 4000
 // Each wake carries every answer joined into it, so each card's line and the chat's notice are settled for every one
-const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Sent, 'to'> }[]; spawn?: { prompt: string; description: string; subagentType: string; model: string; cwd: string } }[] = []
-const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>) => {
+const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Sent, 'to'> }[]; isHookOnly?: boolean; runs?: string[]; spawn?: { prompt: string; description: string; subagentType: string; model: string; cwd: string } }[] = []
+// `isHookOnly`: never from the timer, for what no press of this chat's started (a command run on a press ending, runit.tsx): it
+// waits for the next hook, and its card offers a press meanwhile
+const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>, isHookOnly = false) => {
   // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
   pending.set(target, one.id)
   // A reply that holds its ask is acted on from now: no answers on the card while its work is started again with it
@@ -691,10 +702,12 @@ const toEnded = async ($: EngineInterface, one: Todo, target: string, text: stri
   sentReplies.set(one.id, { ...sent, to: 'work' })
   redraw($)
   // One message for a work: a second answer for the same one joins the first
-  const same = wakes.find(w => w.target === target && !w.spawn)
+  // (one sent only from a hook never joins one the timer may send, nor the other way)
+  const same = wakes.find(w => w.target === target && !w.spawn && Boolean(w.isHookOnly) === isHookOnly)
   if (same) return void ((same.text = `${same.text}\n\n${text}`), same.answers.push({ one, sent }))
-  const wake = { target, text, answers: [{ one, sent }] }
+  const wake = { target, text, answers: [{ one, sent }], ...(isHookOnly ? { isHookOnly } : {}) }
   wakes.push(wake)
+  if (isHookOnly) return
   void $.clock.after(WAKE_WAIT, () => {
     const at = wakes.indexOf(wake)
     if (at < 0) return
@@ -713,7 +726,7 @@ const sendWakes = async ($: EngineInterface, isAnswering = false) => {
 }
 const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number], isInHook = true) => {
   // Work the person stopped is not woken by an answer that was on its way
-  if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`))
+  if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`), await runsSent($, wake, 'held'))
   // A small fresh task for a last step, started from inside a hook so it keeps the mod's own tools and guards; from the timer, where
   // the mod's hooks would be skipped for it, its work is started again instead, as before
   if (wake.spawn && isInHook) {
@@ -727,7 +740,8 @@ const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number], isInHo
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
     : await sendOwn($, { to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
-  if (!r.isDelivered) return wakeFailed($, wake, r.reason)
+  if (!r.isDelivered) return void (await runsSent($, wake, 'failed'), await wakeFailed($, wake, r.reason))
+  await runsSent($, wake, 'sent')
   // Only once it is on its way: work at work when the mod's own message reaches it would take that message for the chat's note
   await wakeCard($, wake.target)
   // Started by the message, the work reads it in the run it starts: that run's end never sends it a second time, even when no hook
@@ -874,6 +888,7 @@ const sentLine = (one: Todo, now: number) => {
     work: waitsBehind(one, sent.at, now) || 'Claude reads it next',
     read: 'Claude has read it',
     chat: 'sent to the chat, which carries on the task',
+    ran: 'Claudopus is running it; Claude gets what it prints',
     other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", which passes it on`,
   }[sent.to]
   if (isHeld) return `✓ You answered “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : ' · the question is still open'}`
