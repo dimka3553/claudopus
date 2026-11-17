@@ -1,0 +1,1 @@
+- Questions, allow boxes, key and password boxes and their notices now use the same plain words everywhere: a card asks "Release claudopus to main?", says "waiting for you", and after a press says who did what, such as "You allowed it. Claudopus is releasing it now."

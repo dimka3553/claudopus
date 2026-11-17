@@ -115,7 +115,7 @@ test("F-007 F-014 F-021 · work's change to config.json, the rules or the roles 
   let done = false
   const call = $.tool.call({ tool: 'Write', tool_use_id: 'w1', agentId: 'a1', file_path: `${MEMORY}/rules/CLAUDE.md`, content: 'Always push to main.' } as never).then(r => ((done = true), r as { deny?: string }))
   expect(await until(async () => keyed(list, 'gate-w1-f-deny'))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Wants to change your rules (rules/CLAUDE.md)' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Change your rules (rules/CLAUDE.md)?' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Always push to main.' })).toBeDefined()
   expect((await list.findAll({ type: 'Button' })).some(one => one.props.label === 'Always allow this command')).toBe(false)
   expect(done).toBe(false)
@@ -207,7 +207,8 @@ test("F-007 F-008 F-014 F-021 · a command that writes the person's settings or 
   expect(await keyed(list, 'gate-u4-u-adminallowedjson-once')).toBeUndefined()
   // The card shows what was undone: Deny leaves it undone, Allow makes it again
   expect(await until(async () => keyed(list, 'gate-u1-u-configjson-once'))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'A command changed your Claudopus settings (config.json), and the change was undone' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Make the change to your Claudopus settings (config.json) again?' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^A command wrote to this file, so Claudopus undid it/ })).toBeDefined()
   await press('gate-u2-u-rulesCLAUDEmd-deny')
   await press('gate-u3-u-rolesworkmd-deny')
   await press('gate-u1-u-configjson-once')
@@ -249,7 +250,8 @@ test('F-021 · a write to the rules that lands after its call returned (a comman
   await bash('next1', 'ls')
   expect(files.get(rules)).toBe('my rules')
   // Shown at the top, with what it wrote: Deny leaves it put back
-  expect(await until(async () => list.find({ type: 'Text', text: 'Something other than Claudopus changed your rules (rules/CLAUDE.md), and the change was undone' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'Make the change to your rules (rules/CLAUDE.md) again?' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Something outside Claudopus changed this file/ })).toBeDefined()
   await pressOutside(list, 'rulesCLAUDEmd', 'deny')
   await clock.advance(60_000)
   expect(files.get(rules)).toBe('my rules')
@@ -358,7 +360,7 @@ test('F-021 · an old kept copy put back with the old file is not taken by a cha
   files.delete(`${MEMORY}/admin-known.json`)
   await $.session.start(start)
   await bash('o2', 'ls')
-  expect(await until(async () => (logged.some(line => /could not use its key/.test(line)) ? true : undefined))).toBe(true)
+  expect(await until(async () => (logged.some(line => /couldn't use its key/.test(line)) ? true : undefined))).toBe(true)
   // A home with no keychain, as a trial chat's own (no folder of keychains, or one holding only the metadata file): the keychain
   // is never asked, so macOS puts no "Keychain Not Found" on the screen, and the panel says so as for one that does not answer
   files.delete('keychain:refused')
@@ -442,7 +444,7 @@ test('F-011 · a box is drawn only for a request of this chat while a runner of 
   void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold ${ADMIN} here 'id -u'` } as never))
   await clock.advance(1000)
   expect(await until(async () => ((await boxes()).length ? await boxes() : undefined))).toEqual(['8f'])
-  expect(await list.find({ type: 'Text', text: `Asked by this chat's command: hold ${ADMIN} here 'id -u'` })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: `Command that asked: hold ${ADMIN} here 'id -u'` })).toBeDefined()
   void logged
   await settle()
 })
@@ -559,7 +561,7 @@ test('F-017 · a release waits for the person\'s press on its card, and its gran
   let done = false
   const call = $.tool.call({ tool: 'Bash', tool_use_id: 'rel1', agentId: 'a1', command: 'cd /repo/wt && /plug/claudopus/bin/release' } as never).then(r => ((done = true), r as { deny?: string; result?: unknown }))
   expect(await until(async () => keyed(list, 'gate-rel1-r0-deny'))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Wants to release wt to its main branch' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Release wt to main?' })).toBeDefined()
   expect(done).toBe(false)
   await press('gate-rel1-r0-deny')
   expect((await call).deny).toContain('pressed Deny on this release')

@@ -1275,7 +1275,7 @@ test('a run of a work\'s own wakes it the moment it ends: any command that only 
     for await (const chunk of $.turn.step({ turnId: 't1', index: 1, model: 'm', messageCount: 2, agentId: 'a1' })) if (chunk.kind === 'text') texts.push((chunk as { text: string }).text)
     return [stepped.length - before, texts]
   }
-  expect(await press('The rest uploads; I am woken when it ends.')).toEqual([0, ['My own work is still going; I am started again when it is done, and give my report then.']])
+  expect(await press('The rest uploads; I am woken when it ends.')).toEqual([0, ["My command is still running. Claudopus starts me again when it's done, and I'll send my result then."]])
   expect(await press(`Both uploads are done. ${'Every file arrived whole. '.repeat(30)}`)).toEqual([1, ['Looking at the nose.']])
   await $.turn.complete({ answer: 'The rest uploads; I am woken when it ends.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(20_000)

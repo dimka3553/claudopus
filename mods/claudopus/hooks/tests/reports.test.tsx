@@ -1220,9 +1220,9 @@ test("every question of a result can be answered in words beside its own answers
   const line = (await until(async () => filled.find(text => text.includes('About question 3 of the result')))) ?? ''
   expect(line).toContain(`${MEMORY}/reports/${id}/report.md`)
   await $.prompt.submit({ text: `${line}the pricing page`, wait: false, origin: composer })
-  expect(await until(async () => one.find({ type: 'Text', text: 'Which page is the complaint about? · you answered in your words' }))).toBeDefined()
+  expect(await until(async () => one.find({ type: 'Text', text: 'Which page is the complaint about? · you answered in words' }))).toBeDefined()
   await pressed(one, 'report-say-3-Not now')
-  expect(await until(async () => one.find({ type: 'Text', text: 'Shall I release it? · you said not now' }))).toBeDefined()
+  expect(await until(async () => one.find({ type: 'Text', text: 'Shall I release it? · you pressed Not now' }))).toBeDefined()
   await pressed(one, 'report-say-0-No')
   expect(await until(async () => one.find({ type: 'Text', text: 'Should Claude use Muse or Gemini? · you answered “No”' }))).toBeDefined()
 })

@@ -500,7 +500,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
     const isBack = !isCleared || (await changeTodos($, list => list.map(card => (card.id === one.id && !card.ask ? { ...card, ask, entries: card.entries.filter(entry => !(entry.kind === 'steer' && entry.at === steerAt)) } : card))).then(() => true).catch(() => false))
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'failed', at: await $.clock.now().catch(() => 0), line, isCard: true, askAt: ask.at })
     // and when even that could not be written, the chat is told, so the ask is not lost unseen
-    if (!isBack) $.ui.log(`Your answer “${cut(said, 120)}” to "${titleOf(one)}" (${ask.text}) didn't reach Claude, and the question couldn't be put back on its card. Type your answer in this chat instead.`)
+    if (!isBack) $.ui.log(`Your answer “${cut(said, 120)}” to "${titleOf(one)}" didn't reach Claude, and Claudopus couldn't put the question back on its card. Type your answer in this chat instead. The question: ${ask.text}`)
     redraw($)
     throw err
   }
@@ -532,7 +532,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, stepOnEnd: { ask, said } } : card)))
       await tell($, one.id, `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\nClaudopus does that step (${cut(ask.lastStep, 160)}) once you end this turn: do not do it or start it yourself. Commit anything left on the branch now, change nothing on it after that, and end with your report.`)
       const held = (err: unknown) => log($, `last step of ${one.id} not held: ${String(err)}`)
-      await stepLine($, one.id, `On your "${said}", Claudopus does the last step once Claude finishes`).catch(held)
+      await stepLine($, one.id, `You pressed “${said}” · Claudopus does it when Claude is done`).catch(held)
       // (a turn that ended while this was written has had its end's look already)
       await stepsAtEnd($).catch(held)
     }
@@ -608,7 +608,7 @@ const takeBackNow = async ($: EngineInterface, one: Todo, shownAt: number) => {
   void log($, `answer "${cut(sent.text, 40)}" for ${one.id} taken back`)
   // The chat was told it was answered: it is told it was taken back, and shown the question again
   if (isBack) {
-    await sayInChat($, named(`${who(true)} took back their answer “${cut(sent.text, 120)}” to "${titleOf(one)}": the question is open again on its card.`), `You took back your answer “${cut(sent.text, 120)}” to "${titleOf(one)}". The question is open again on its card.`)
+    await sayInChat($, named(`${who(true)} took back their answer “${cut(sent.text, 120)}” to "${titleOf(one)}": the question is open again on its card.`), `You took back your answer “${cut(sent.text, 120)}” to "${titleOf(one)}". The question is back on its card.`)
     inChat.delete(one.id)
     void askInChat($, { ...one, ask })
   }
@@ -838,7 +838,7 @@ const waitsBehind = (one: Todo, at: number, now: number) => {
   const running = target !== undefined && one.status === 'working' ? runningOf(target) : undefined
   if (!running || running.at > at) return ''
   const name = running.label ? `“${cut(describedOf(running.label).text || running.label, 50)}”` : running.what.replace(/ running$/, '')
-  return `waiting: Claude will see it when ${name} ends (running ${took(now - running.at)})`
+  return `Claude reads it when ${name} ends · running ${took(now - running.at)}`
 }
 // What the card says of the answer last given to its ask, for ANSWER_SHOWN after, until the work writes a newer line or asks again.
 // An answer that could not be left for another Mac says so under the ask, which is back
@@ -846,21 +846,22 @@ const sentLine = (one: Todo, now: number) => {
   const sent = sentReplies.get(one.id)
   // A held reply this copy did not send (before a reload, or from another chat) is still said under its ask
   const replied = one.ask?.replied
-  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You replied “${cut(replied.text, 60)}”${isActingOnReply(one) ? ' · Claude is working on it' : '; Claude still has this question'}`
+  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You answered “${cut(replied.text, 60)}”${isActingOnReply(one) ? ' · Claude is working on it' : ' · the question is still open'}`
   if (!sent) return ''
-  if (sent.to === 'failed') return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}” didn't reach Claude. Press it again` : ''
-  if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}”. That Mac couldn't be reached; answer it in its own chat` : ''
+  if (sent.to === 'failed') return one.ask?.text === sent.ask ? `Couldn't send “${cut(sent.text, 60)}” to Claude · press it again` : ''
+  if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Couldn't reach that Mac with “${cut(sent.text, 60)}” · answer in its own chat` : ''
   const newer = lineOf(one) !== sent.line
   const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text))
   if ((one.ask && !isHeld) || (!isHeld && (newer || now - sent.at > ANSWER_SHOWN))) return ''
   const how = {
     sending: 'Sending to Claude…',
-    work: waitsBehind(one, sent.at, now) || 'Claude will see this after its current step',
+    work: waitsBehind(one, sent.at, now) || 'Claude reads it next',
     read: 'Claude has read it',
-    chat: 'left in the chat, which continues the task',
-    other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", whose task will see it after its current step`,
+    chat: 'sent to the chat, which carries on the task',
+    other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", which passes it on`,
   }[sent.to]
-  if (isHeld) return `✓ You replied “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : '; Claude still has this question'}`
+  if (isHeld) return `✓ You answered “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : ' · the question is still open'}`
+
   return `✓ You answered “${cut(sent.text, 60)}” · ${how}`
 }
 

@@ -42,14 +42,14 @@ test('work that is ready plays one sound and raises one notification; helpers, a
   await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w2', agentId: 'a5', items: ['Do you want the chin rounder?'] } as never)
   await end('a5', 't5')
   await clock.advance(1_000)
-  expect(notified.at(-1)).toBe('Check the chin | Waiting for the person: Do you want the chin rounder?')
+  expect(notified.at(-1)).toBe('Check the chin | Waiting for you: Do you want the chin rounder?')
 
   // Failed work: a notification that says so, and no sound
   await $.agent.spawn({ ...spawn, description: 'Paint the hair', prompt: 'paint the hair' } as never)
   await end('a6', 't6', '', { reason: 'error' })
   await clock.advance(1_000)
   expect(played).toHaveLength(3)
-  expect(notified.at(-1)).toBe('Paint the hair | Failed with an error.')
+  expect(notified.at(-1)).toBe('Paint the hair | Failed.')
 
   // Work the person stops with its Stop button: nothing
   await $.agent.spawn({ ...spawn, description: 'Draw the mouth', prompt: 'draw the mouth' } as never)

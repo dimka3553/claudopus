@@ -26,13 +26,13 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   await clock.advance(2 * 60_000)
   expect((await stuck())?.props.color).toBe('#E5A50A')
   expect((await stuck())?.text).toMatch(/^Nothing new for 1[23]m\.$/)
-  expect(logged.filter(line => line.includes(`"One merger for all pushes" hasn't made progress`))).toHaveLength(1)
+  expect(logged.filter(line => line.includes(`Nothing new from "One merger for all pushes"`))).toHaveLength(1)
   // The chat alone reads that it may ask the task what it waits on, as nothing of Claudopus's will
-  expect(appended.filter(line => line.includes(`"One merger for all pushes" hasn't made progress`) && line.includes('you may send it a message asking what it waits on'))).toHaveLength(1)
+  expect(appended.filter(line => line.includes(`Nothing new from "One merger for all pushes"`) && line.includes('you may send it a message asking what it waits on'))).toHaveLength(1)
   expect(logged.filter(line => line.includes('you may send it a message'))).toEqual([])
   // Looked at again, nothing more is said
   await clock.advance(60_000)
-  expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(1)
+  expect(logged.filter(line => line.includes('Nothing new from'))).toHaveLength(1)
 
   // Something new comes back: the flag goes at the next look
   void keep(bash('h1', 'hold release', 'b3'))
@@ -47,7 +47,7 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   letPoll?.('released Thing 0.1.7')
   await clock.advance(13 * 60_000)
   expect(await stuck()).toBeDefined()
-  expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(2)
+  expect(logged.filter(line => line.includes('Nothing new from'))).toHaveLength(2)
   expect(resumed.filter(line => line.includes('stopped partway through'))).toEqual([])
   await settle()
 })
@@ -90,12 +90,12 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   }
   await frames(13)
   expect(resumed.filter(line => line.includes('stopped partway through'))).toHaveLength(1)
-  expect(logged.filter(line => line.includes('"Fit the video" had stopped partway through') && line.includes('restarted it'))).toHaveLength(1)
+  expect(logged.filter(line => line.includes('"Fit the video" stopped partway') && line.includes('started it again'))).toHaveLength(1)
   // 12 minutes on: started again to check on its helper, and the chat told so
   const nudges = (id = 'a2') => resumed.filter(line => line.startsWith(`${id}: From Claudopus:`) && line.includes('helpers'))
   expect(nudges()).toHaveLength(1)
   expect(nudges()[0]).toMatch(/^a2: From Claudopus: nothing new has come back from your helpers for 1[2-6] min while your step had ended: "[^"]+" \(a3\)\. Ask each with SendMessage/)
-  expect(logged.filter(line => line.startsWith('"Draw the lids" hasn\'t made progress') && line.endsWith('Claudopus started it again and asked it to check on them.'))).toHaveLength(1)
+  expect(logged.filter(line => line.startsWith('Nothing new from the helpers of "Draw the lids"') && line.endsWith('Claudopus started Claude again and asked it to check on them.'))).toHaveLength(1)
   // Until then it may not hand back while its helper runs
   expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-early', agentId: 'a2', message: 'Lids drawn.' } as never)) as { deny?: string }).deny).toContain("Don't hand back your report yet")
   // It asks its helper, which never answers, and ends its step again: a step and a message start nothing over
@@ -108,13 +108,13 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   // 24 minutes on: started again, once, to hand back what it has; a message from the chat then takes nothing back
   expect(await until(async () => nudges().length === 2 || undefined)).toBe(true)
   expect(nudges()[1]).toContain('hand back your report now with what you have')
-  expect(logged.filter(line => line.startsWith('"Draw the lids" hasn\'t made progress') && line.endsWith('asked it to hand back what it has now.'))).toHaveLength(1)
+  expect(logged.filter(line => line.startsWith('Nothing new from the helpers of "Draw the lids"') && line.endsWith('asked it to send what it has now.'))).toHaveLength(1)
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm-chat', to: 'a2', message: 'Carry on.' } as never)
   agents.a2 = 'completed'
   // 36 minutes on, still not handed back: no third start; the chat is told plainly it is stuck and may write to it, and the card says so
   await frames(13)
   expect(nudges()).toHaveLength(2)
-  expect(await until(async () => logged.find(line => line.startsWith('"Draw the lids" is stuck: nothing new has come back from its helpers')))).toBeDefined()
+  expect(await until(async () => logged.find(line => line.startsWith('"Draw the lids" is stuck: nothing new from its helpers')))).toBeDefined()
   expect(appended.filter(line => line.includes('"Draw the lids" is stuck') && line.includes('you may send it a message'))).toHaveLength(1)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const texts = (await pane.findAll({ type: 'Text' })).map(one => (one as { text?: string }).text ?? '')
@@ -123,7 +123,7 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   // Helpers at work are never taken for silent: their tasks are not started again, and its card says it waits on its helpers' work;
   // with nothing new coming back, the chat is told once that its helpers still run something
   expect([nudges('a4'), nudges('a6')]).toEqual([[], []])
-  expect(logged.filter(line => line.startsWith('"Film the town"'))).toEqual([expect.stringMatching(/^"Film the town" hasn't made progress for 3\d minutes: nothing new has come back to Claude, though its helpers still run something\./)])
+  expect(logged.filter(line => line.includes('"Film the town"'))).toEqual([expect.stringMatching(/^Nothing new from "Film the town" for 3\dm, though its helpers are still running something\./)])
   expect(texts.filter(text => text === 'Waiting for its helpers').length).toBeGreaterThanOrEqual(1)
   // Its report goes through while its helpers run: the silent one is stopped with it, those at work never are
   expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-late', agentId: 'a2', message: 'Lids drawn; rendering never ended.' } as never)) as { deny?: string }).deny).toBeUndefined()
@@ -149,7 +149,7 @@ test('the schedule for silent helpers keeps its time: each step comes though the
   for (const id of ['a1', 'a2']) await $.tool.call({ tool: 'Bash', tool_use_id: `s-${id}`, agentId: id, command: 'git status' } as never)
   agents.a1 = 'completed'
   await $.turn.complete({ answer: 'Waiting for my helper.', durationMs: 1, isAborted: false, turnId: 'e1', reason: 'answer', agentId: 'a1' } as never)
-  const said = () => logged.filter(line => line.startsWith('"Draw the lids" hasn\'t made progress'))
+  const said = () => logged.filter(line => line.startsWith('Nothing new from the helpers of "Draw the lids"'))
   await clock.advance(13 * 60_000)
   expect(said()).toHaveLength(1)
   expect(resumed.filter(line => line.startsWith('a1:'))).toEqual([])
@@ -159,7 +159,7 @@ test('the schedule for silent helpers keeps its time: each step comes though the
   agents.a1 = 'completed'
   await clock.advance(12 * 60_000)
   expect(await until(async () => said().length === 2 || undefined)).toBe(true)
-  expect(said()[1]).toContain('asked it to hand back what it has now')
+  expect(said()[1]).toContain('asked it to send what it has now')
   // The helper prints something different: the schedule starts over, its check-in 12 minutes on, and the leave stays
   void keep($.tool.call({ tool: 'Bash', tool_use_id: 'f1', agentId: 'a2', command: 'hold frame' } as never))
   const letFrame = await until(async () => held.get('frame'))
@@ -200,7 +200,7 @@ test("a helper's command in the background is work only while it prints, for at 
     await $.turn.complete({ answer: 'Waiting for my helper.', durationMs: 1, isAborted: false, turnId: `e-${id}`, reason: 'answer', agentId: id } as never)
   }
   const nudges = (id: string) => resumed.filter(line => line.startsWith(`${id}: From Claudopus:`) && line.includes('helpers'))
-  const told = () => appended.filter(line => line.includes('"Run the dev site" hasn\'t made progress') && line.includes('you may send it a message'))
+  const told = () => appended.filter(line => line.includes('Nothing new from "Run the dev site"') && line.includes('you may send it a message'))
   const minutes = async (n: number) => {
     for (let at = 0; at < n; at += 1) ((printed['bg-v-a6'] = clock.now()), await clock.advance(60_000))
   }
@@ -246,7 +246,7 @@ test('the word that the chat was told a task is stuck lasts only until it or its
   await ends('e1')
   for (let at = 0; at < 38; at += 1) await clock.advance(60_000)
   expect(appended.filter(line => line.includes('"Upload the lids" is stuck'))).toHaveLength(1)
-  expect(appended.filter(line => line.includes('"Upload the lids" hasn\'t made progress') && line.includes('nothing new has come back to Claude'))).toEqual([])
+  expect(appended.filter(line => line.includes('Nothing new from "Upload the lids"'))).toEqual([])
   const waitsWord = async () => {
     const notice = `<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent "Upload the lids" finished</summary>\n<result>The subagent ended without delivering a report through SubagentHandback.\n</result>\n</task-notification>\n<task-notification>\n<task-id>bx1</task-id>\n<status>completed</status>\n<summary>Background command "Build" completed (exit code 0)</summary>\n</task-notification>`
     const r = (await $.prompt.submit({ text: notice, wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[] }
@@ -323,7 +323,7 @@ test('work sent a message after a long rest, and work only held by what it left 
   await $.turn.complete({ answer: `The build is watched. ${'Every check passes and it is pushed. '.repeat(15)}`, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
   await clock.advance(13 * 60_000)
   expect(await look()).toBeUndefined()
-  expect(logged.filter(line => line.includes("hasn't made progress"))).toEqual([])
+  expect(logged.filter(line => line.includes('Nothing new from'))).toEqual([])
   await settle()
 })
 
@@ -335,7 +335,7 @@ test('work asking the person something waits on them and is never flagged', SLOW
   await clock.advance(30 * 60_000)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await pane.find({ type: 'Text', text: /^Nothing new for / })).toBeUndefined()
-  expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(0)
+  expect(logged.filter(line => line.includes('Nothing new from'))).toHaveLength(0)
   await pane.unmount()
 })
 

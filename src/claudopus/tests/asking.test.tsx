@@ -1,8 +1,8 @@
 // The asking card: an ask, its Copy, buttons and reply box
 
-const GITHUB_BOX = "Claudopus needs GITHUB_TOKEN. It is saved only in this Mac's keychain. Claude uses it by name, and it is hidden in anything a command prints."
-const NPM_BOX = "Claudopus needs NPM_TOKEN. It is saved only in this Mac's keychain. Claude uses it by name, and it is hidden in anything a command prints."
-const ADMIN_BOX = 'Claudopus needs the admin password of this Mac to run the admin command below. Nothing is saved: it goes only to that command, and the next one asks again.'
+const GITHUB_BOX = "Claudopus needs GITHUB_TOKEN. Claudopus saves it only in this Mac's keychain. Claude uses it by name, and Claudopus hides it in anything a command shows."
+const NPM_BOX = "Claudopus needs NPM_TOKEN. Claudopus saves it only in this Mac's keychain. Claude uses it by name, and Claudopus hides it in anything a command shows."
+const ADMIN_BOX = "Claudopus needs the admin password of this Mac to run the command below. It goes only to that command and isn't saved, so the next one asks again."
 
 test('work that needs the person\'s hands asks: its card stands out first with the ask, the text to paste with its Copy, and answers that go back to it', async ($, on) => {
   // Once its run has ended, a work's chat takes no more lines
@@ -62,11 +62,11 @@ test('work that needs the person\'s hands asks: its card stands out first with t
     expect((await pane.findAll({ type: 'Button' })).some(b => b.props.label === 'Submitted' || b.props.label === 'Not now')).toBe(false)
     expect((await pane.findAll({ type: 'Input' } as never)).some(one => /-reply-/.test(one.key ?? ''))).toBe(false)
   }
-  const waiting = '✓ You replied “Where do I do that?” · Claude will see this after its current step'
+  const waiting = '✓ You answered “Where do I do that?” · Claude reads it next'
   expect(await until(async () => list.find({ type: 'Text', text: waiting }))).toBeDefined()
   expect(await until(async () => ears.find({ type: 'Text', text: waiting }))).toBeDefined()
   for await (const _ of $.turn.step({ turnId: 'turn-9', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a2' })) void _
-  expect(await until(async () => list.find({ type: 'Text', text: '✓ You replied “Where do I do that?” · Claude is working on it' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “Where do I do that?” · Claude is working on it' }))).toBeDefined()
   // The work asks again: amber again, with its answers back and an empty box
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k5b', agentId: 'a2', text: 'It is under Manage, then Submit new. Done?' } as never)
   expect((await list.find({ type: 'Text', text: 'It is under Manage, then Submit new. Done?' }))?.props.color).toBe('#E5A50A')
@@ -84,7 +84,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"Done"')))).toContain('Submit new. Done?')
   expect(appended.filter(line => line.startsWith('a2: ') && line.includes('"Done"'))).toHaveLength(1)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'It is under Manage, then Submit new. Done?' })) ? undefined : true))).toBe(true)
-  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “Done” · Claude will see this after its current step' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “Done” · Claude reads it next' }))).toBeDefined()
   // A newer line from the work takes the answer's place
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a2', text: 'I submitted it.' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'I submitted it.' }))).toBeDefined()
@@ -96,7 +96,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   await list.input({ key: box3?.key ?? '', text: 'claudopus' })
   expect(await until(async () => resumed.find(line => line.startsWith('a2: ') && line.includes('in their own words: claudopus')))).toContain('this answer starts you again')
   expect(submitted.some(line => line.includes('claudopus'))).toBe(false)
-  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “claudopus” · Claude will see this after its current step' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “claudopus” · Claude reads it next' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Tell me the repo name.' })).toBeUndefined()
   // Instructions passed as text to copy get no Copy: only what is pasted elsewhere does
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k6', agentId: 'a2', text: 'Open the plugin directory and submit the form.', copy: 'Open the plugin directory page and fill in the form with the details' } as never)
@@ -144,11 +144,11 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k9', agentId: 'a2', text: 'Which branch?', choices: ['main', 'Not now'] } as never)
   const box4 = (await ears.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   await ears.input({ key: box4?.key ?? '', text: 'main' })
-  expect(await until(async () => ears.find({ type: 'Text', text: '✓ You answered “main” · Claude will see this after its current step' }))).toBeDefined()
+  expect(await until(async () => ears.find({ type: 'Text', text: '✓ You answered “main” · Claude reads it next' }))).toBeDefined()
   await $.turn.complete({ answer: 'Stopping here.', durationMs: 1, isAborted: false, turnId: 'turn-10', reason: 'answer', agentId: 'a2' } as never)
   expect(await until(async () => resumed.find(line => line.startsWith('a2: ') && line.includes('you ended before reading it: main')))).toContain('Which branch?')
   expect(submitted.some(line => line.includes('Which branch?'))).toBe(false)
-  expect(await until(async () => ears.find({ type: 'Text', text: '✓ You answered “main” · Claude will see this after its current step' }))).toBeDefined()
+  expect(await until(async () => ears.find({ type: 'Text', text: '✓ You answered “main” · Claude reads it next' }))).toBeDefined()
   await Promise.all([list.unmount(), ears.unmount()])
 })
 
@@ -565,7 +565,7 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   }
   const gate5 = async () => (await list.findAll({ type: 'Button' })).find(b => /^gate-step-a5-.*once/.test(String(b.key ?? '')))
   await working('a5', 'release', '/repo/wt')
-  expect(await until(async () => list.find({ type: 'Text', text: 'On your "Release it", Claudopus does the last step once Claude finishes' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'You pressed “Release it” · Claudopus does it when Claude is done' }))).toBeDefined()
   await clock.advance(60_000)
   expect(await gate5()).toBeUndefined()
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h-a5', agentId: 'a5', message: 'Claudopus releases it.' } as never)
@@ -584,12 +584,12 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   files.set('auto-refuse', 'Edit')
   await $.tool.call({ tool: 'Edit', tool_use_id: 'e-a7', agentId: 'a7', file_path: '/repo/wt/notes.md', old_string: 'old', new_string: 'new' } as never)
   files.delete('auto-refuse')
-  expect(await until(async () => appended.find(line => line.includes('Claude Code refused this task')))).toBeDefined()
+  expect(await until(async () => appended.find(line => line.includes('Claude Code blocked this task')))).toBeDefined()
   const beforeStop = appended.length
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 'turn-a7', reason: 'answer', agentId: 'a7' } as never)
   expect(await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it' && String(b.key ?? '').startsWith('ask-a7-')))).toBeDefined()
   expect(await until(async () => appended.slice(beforeStop).find(line => line.includes('Release a7?')))).toBeDefined()
-  expect(appended.slice(beforeStop).filter(line => line.includes('no longer needs an answer for'))).toHaveLength(1)
+  expect(appended.slice(beforeStop).filter(line => line.includes('Claude took back its question in'))).toHaveLength(1)
   expect(files.get(`${MEMORY}/log.md`)).not.toContain('last step of a7 on')
   // nor when it asks something else before its turn ends; what it recorded as waiting for the go-ahead, as its card's question, is
   // then open again in its result, not answered by a Release it that did nothing
@@ -597,7 +597,7 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   await working('a8', 'release', '/repo/wt')
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k-a8b', agentId: 'a8', text: 'A check failed: may I fix it first?', choices: ['Fix it', 'Not now'] } as never)
   await $.turn.complete({ answer: 'May I fix it first?', durationMs: 1, isAborted: false, turnId: 'turn-a8', reason: 'answer', agentId: 'a8' } as never)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Nothing was done on your "Release it": Claude asked something else first' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: "Claudopus didn't do “Release it” · Claude asked something else first" }))).toBeDefined()
   expect(files.get(`${MEMORY}/log.md`)).not.toContain('last step of a8 on')
   expect(cards().find(one => one.id === 'a8')?.waits).toEqual([{ text: 'Release a8 with the neck fix?', ask: expect.any(Number) }])
   // A call Claude Code refused in that turn is Claudopus's notice on the card, not another question: the step is still done
@@ -605,7 +605,7 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   files.set('auto-refuse', 'Edit')
   await $.tool.call({ tool: 'Edit', tool_use_id: 'e-a9', agentId: 'a9', file_path: '/repo/plain/notes.md', old_string: 'old', new_string: 'new' } as never)
   files.delete('auto-refuse')
-  expect(await until(async () => list.find({ type: 'Text', text: 'Claude Code refused this task: Change the file notes.md.' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'Claude Code blocked this task: Change the file notes.md.' }))).toBeDefined()
   await $.turn.complete({ answer: 'Claudopus merges it.', durationMs: 1, isAborted: false, turnId: 'turn-a9', reason: 'answer', agentId: 'a9' } as never)
   expect(await until(async () => ((files.get(`${MEMORY}/log.md`) ?? '').includes('last step of a9 on') ? true : undefined))).toBe(true)
   expect(resumed.filter(line => /^a[56789]: /.test(line))).toEqual([])
@@ -637,7 +637,7 @@ test('a reply in words that does not settle an ask keeps it, and the card active
   expect(told).toContain('this answer starts you again')
   // The card stays among the running cards, at work, with its question and the reply under it, and no buttons, box or send;
   // nothing is under Finished
-  expect(await until(async () => list.find({ type: 'Text', text: '✓ You replied “Show me images first.” · Claude will see this after its current step' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “Show me images first.” · Claude reads it next' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: ASK })).toBeDefined()
   expect(await labels()).not.toContain('Release it')
   expect((await list.findAll({ type: 'Input' } as never)).some(one => /-reply-/.test(one.key ?? ''))).toBe(false)
@@ -691,13 +691,13 @@ test('once the person has answered, by a button or in their own words, the card 
   await list.input({ key: box?.key ?? '', text: 'I would say maybe stop it and then tell it to release it' })
   expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('maybe stop it')))).toBeDefined()
   expect(await until(async () => ((await list.find({ type: 'Text', text: ASK }))?.props.color === '#8A63F0' ? true : undefined))).toBe(true)
-  expect(await list.find({ type: 'Text', text: /^✓ You replied “I would say maybe stop it/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^✓ You answered “I would say maybe stop it/ })).toBeDefined()
   expect((await labels()).filter(label => label === 'Stop it' || label === 'Not now')).toEqual([])
   expect(await inputs()).toEqual([])
   expect(await list.find({ type: 'Text', text: DETAILS })).toBeUndefined()
   // The chat is told it acts on the reply, not that it still asks
-  const toChat = (await until(async () => logged.find(line => line.includes('You replied to "Why the M4 is stuck"')))) ?? ''
-  expect(toChat).toContain('will ask again if it still needs you')
+  const toChat = (await until(async () => logged.find(line => line.includes('You answered "Why the M4 is stuck"')))) ?? ''
+  expect(toChat).toContain('asks again if it still needs you')
   expect(toChat).not.toContain('It still asks')
   // The work asks the same again: amber, its answers and an empty box back, and the chat shown it afresh
   await clock.advance(1000)
@@ -707,7 +707,7 @@ test('once the person has answered, by a button or in their own words, the card 
   const [again] = await inputs()
   expect(again?.props.value ?? '').toBe('')
   expect(again?.key).not.toBe(box?.key)
-  expect(await list.find({ type: 'Text', text: /^✓ You replied/ })).toBeUndefined()
+  expect(await list.find({ type: 'Text', text: /^✓ You answered/ })).toBeUndefined()
   expect(await until(async () => (logged.filter(line => line.includes(ASK) && !line.startsWith('✓')).length === 2 ? true : undefined))).toBe(true)
   // A button pressed: the ask goes whole, nothing left to press or type
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Stop it')?.key ?? '' })
@@ -715,7 +715,7 @@ test('once the person has answered, by a button or in their own words, the card 
   expect(await until(async () => ((await list.find({ type: 'Text', text: ASK })) ? undefined : true))).toBe(true)
   expect((await labels()).filter(label => label === 'Stop it' || label === 'Not now')).toEqual([])
   expect(await inputs()).toEqual([])
-  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “Stop it” · Claude will see this after its current step' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “Stop it” · Claude reads it next' }))).toBeDefined()
   // Typed in the chat and passed on by it, the same: purple, nothing to press or type; asked again, shown in the chat afresh
   await clock.advance(1000)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: ASK, details: DETAILS, choices: ['Stop it', 'Not now'] } as never)
@@ -889,7 +889,7 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   const inChat = (await until(async () => logged.find(line => line.includes('Which logo do you want?')))) ?? ''
   expect(submitted.some(line => line.includes('Which logo do you want?'))).toBe(false)
   expect(inChat).toContain('"Redraw the logo" has a question for you: Which logo do you want?')
-  expect(inChat).toContain('Answers: A · B, or reply in your own words, here or on its card.')
+  expect(inChat).toContain('Answers: A · B, or answer in your own words, here or on its card.')
   expect(inChat).toContain('Pictures: /w/shots/a.png, /w/shots/b.png')
   // The chat's model reads the ask, and how to pass an answer on, in a row the person does not see
   expect(inChat).not.toContain('SendMessage')
@@ -926,8 +926,8 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   await clock.advance(10)
   expect(await until(async () => logged.some(line => line.includes('Answers: Done · Not now')) || undefined)).toBe(true)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k5', agentId: 'a1', text: '' } as never)
-  expect(appended.some(line => line === 'undefined: Claude no longer needs an answer for "Redraw the logo".')).toBe(true)
-  expect(logged.some(line => line === 'Claude no longer needs an answer for "Redraw the logo".')).toBe(true)
+  expect(appended.some(line => line === 'undefined: Claude took back its question in "Redraw the logo". You don\'t need to answer it.')).toBe(true)
+  expect(logged.some(line => line === 'Claude took back its question in "Redraw the logo". You don\'t need to answer it.')).toBe(true)
   expect(submitted).toEqual([])
   await list.unmount()
 })
@@ -968,8 +968,8 @@ test('an ask carries what it is about, whole, on the small card, in Details and 
   await band.unmount()
   // The chat's notice carries it whole, before the answers, plain (no marks for bold), and so does the row the chat's model reads
   await clock.advance(10)
-  const notice = (await until(async () => logged.find(line => line.includes('Release PR 54 to production?') && line.includes('What it is about')))) ?? ''
-  expect(notice).toContain(`Release PR 54 to production?\nWhat it is about:\n${differences.replaceAll('**', '')}\nAnswers: Release it · Not now`)
+  const notice = (await until(async () => logged.find(line => line.includes('Release PR 54 to production?') && line.includes('Details:')))) ?? ''
+  expect(notice).toContain(`Release PR 54 to production?\nDetails:\n${differences.replaceAll('**', '')}\nAnswers: Release it · Not now`)
   const relay = [...appended].reverse().find(line => line.startsWith('undefined: In the background task "Fix the wallet", Claude asked the person') && line.includes('Release PR 54 to production?')) ?? ''
   expect(relay).toContain(`what it is about, which the person sees in full with it on the card and in the notice: ${differences}`)
   // The chat is told not to say it again: the person has just read it
@@ -1011,7 +1011,7 @@ test('an answer to ended work that cannot be started again is left in the chat a
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Red or blue?', choices: ['Red', 'Blue'] } as never)
   await $.turn.complete({ answer: 'Waiting on your colour.', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
   await list.press({ key: (await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Blue')))?.key ?? '' })
-  expect(await until(async () => logged.find(line => line.includes('You answered, on its card, the question Claude asked in "Pick a colour" after it finished (Red or blue?)')))).toContain('(Red or blue?): Blue')
+  expect(await until(async () => logged.find(line => line.includes('You answered "Red or blue?" from "Pick a colour" on its card after it was done')))).toContain('after it was done: Blue.')
   expect(await until(async () => appended.find(line => line.startsWith('undefined: ') && line.includes("couldn't start that task again")))).toBeDefined()
   expect(submitted.some(line => line.includes('Blue'))).toBe(false)
   await list.unmount()
@@ -1047,7 +1047,7 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   const curly = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${third}-field`)))
   const before = keychain.length
   await list.input({ key: curly?.key ?? '', text: 'it’s-mine' })
-  expect(await until(async () => (await list.findAll({ type: 'Text' })).find(one => (one.text ?? '').startsWith('That held a line break, a curly quote')))).toBeDefined()
+  expect(await until(async () => (await list.findAll({ type: 'Text' })).find(one => (one.text ?? '').startsWith('That has a line break, a curly quote')))).toBeDefined()
   // and one whose runner has stopped takes nothing
   files.delete(`${MEMORY}/boxes/${third}.json`)
   const again = (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${third}-field`))
@@ -1062,7 +1062,7 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   await list.press({ key: cancel?.key ?? '' })
   expect(await until(async () => (files.has(`${MEMORY}/boxes/${other}.json`) ? undefined : true))).toBe(true)
   // Its place says what was done, for a minute
-  expect(await until(async () => list.find({ type: 'Text', text: 'You cancelled · nothing was saved, and what asked for it stops without it' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'You cancelled it. Nothing was saved, and the command that asked stops without it.' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'The admin password of this Mac' })).toBeDefined()
   await clock.advance(61_000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'The admin password of this Mac' })) ? undefined : true))).toBe(true)
@@ -1084,7 +1084,7 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
   const key = '0a1e2d3c-4b5a-4987-a654-3210fedcba98'
   await ask(key)
   expect(await until(async () => list.find({ type: 'Text', text: GITHUB_BOX }))).toBeDefined()
-  expect(await until(async () => ((await labelled(list, 'Give a response instead')).length === 1 ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await labelled(list, 'Answer in words')).length === 1 ? true : undefined))).toBe(true)
   expect(await fieldsIn(list, key)).toEqual([])
   expect((await labelled(list, 'Cancel')).length).toBe(1)
   await press(list, 'Paste the key')
@@ -1098,7 +1098,7 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
   // A response: its words go beside the request for the runner, which prints them to the command's caller; nothing is kept
   const said = '1a1e2d3c-4b5a-4987-a654-3210fedcba98'
   await ask(said)
-  await press(list, 'Give a response instead')
+  await press(list, 'Answer in words')
   const words = await until(async () => (await fieldsIn(bar, said))[0])
   // A key is one line; a response a box of lines that grows as it is typed, as the reply box does, and neither has the small send
   // button the app draws for a submitLabel
@@ -1113,18 +1113,18 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
   expect(await until(async () => files.get(`${MEMORY}/boxes/${said}.reply`))).toBe('The person answered in the Claudopus panel instead of giving GITHUB_TOKEN, in their own words: It is already in /Users/sam/Documents/GitHub/3d-sandbox/.env.local as AI_GATEWAY_API_KEY, in the faceiq-labs branch too\n')
   expect(await until(async () => (files.has(`${MEMORY}/boxes/${said}.json`) ? undefined : true))).toBe(true)
   expect(keychain.length).toBe(kept)
-  expect(await until(async () => list.find({ type: 'Text', text: 'You gave a response instead · it went to the command that asked, and nothing was saved' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'You answered in words. Your answer went to the command that asked, and nothing was saved.' }))).toBeDefined()
   // Words that look like the key itself are held, sent nowhere, until the person keeps them as the key (the key's word alone, never
   // the words around it) or sends them anyway; a path, a setting's name and a branch's, above, are no key
   const slip = '2a1e2d3c-4b5a-4987-a654-3210fedcba98'
   await ask(slip)
-  await press(list, 'Give a response instead')
+  await press(list, 'Answer in words')
   const slipped = await until(async () => (await fieldsIn(bar, slip))[0])
   await bar.input({ key: slipped?.key ?? '', text: 'here: ghp_A1b2C3d4E5f6G7h8I9j0' })
   expect(await until(async () => (await bar.findAll({ type: 'Text' })).find(one => (one.text ?? '').startsWith('That looks like the key itself')))).toBeDefined()
   expect(files.has(`${MEMORY}/boxes/${slip}.reply`)).toBe(false)
   expect(logged.some(line => line.includes('A1b2C3'))).toBe(false)
-  await press(bar, 'Keep it as the key')
+  await press(bar, 'Save as the key')
   expect(await until(async () => keychain.find(one => one.includes(slip)))).toContain('-w "ghp_A1b2C3d4E5f6G7h8I9j0"')
   expect(files.has(`${MEMORY}/boxes/${slip}.reply`)).toBe(false)
   // and an admin password box keeps its own field
@@ -1175,7 +1175,7 @@ test("a request of another chat's, or of this chat's with no runner of its own r
   const fields = await until(async () => { const all = (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')); return all.length ? all : undefined })
   expect(fields?.map(one => [(one.key ?? '').slice(4, 6), one.props.autoFocus])).toEqual([['6f', true]])
   // It says which command of this chat's asked
-  expect(await list.find({ type: 'Text', text: "Asked by this chat's command: hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy" })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Command that asked: hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' })).toBeDefined()
   await clock.advance(6000)
   expect(logged.some(line => line.includes('NPM_TOKEN'))).toBe(false)
   await settle()
@@ -1248,12 +1248,12 @@ test('the box words what the runners ask from its fields: a key by name, a Mac b
   const texts = async () => (await list.findAll({ type: 'Text' })).map(one => one.text ?? '')
   const all = await until(async () => ((await texts()).filter(one => one.startsWith('Claudopus needs') || one.includes('Claudopus needs') || one.startsWith('Name of')).length >= 5 ? await texts() : undefined))
   expect(all).toContain(GITHUB_BOX)
-  expect(all).toContain('That password was refused. Claudopus needs the admin password of dima@m4.local to run the admin command below. Nothing is saved: it goes only to that command, and the next one asks again.')
+  expect(all).toContain("That password was wrong. Claudopus needs the admin password of dima@m4.local to run the command below. It goes only to that command and isn't saved, so the next one asks again.")
   expect(all).toContain(`That was shorter than 4 characters. ${NPM_BOX}`)
   // A reason it does not know is left out
-  expect(all).toContain("Claudopus needs OPENAI_KEY. It is saved only in this Mac's keychain. Claude uses it by name, and it is hidden in anything a command prints.")
+  expect(all).toContain("Claudopus needs OPENAI_KEY. Claudopus saves it only in this Mac's keychain. Claude uses it by name, and Claudopus hides it in anything a command shows.")
   expect(all?.join('\n')).not.toContain('Apple')
-  expect(all).toContain('Name of the key to save, such as GITHUB_TOKEN. Claude will use it by this name.')
+  expect(all).toContain('Name of the key to save, such as GITHUB_TOKEN. Claude uses it by this name.')
   await settle()
 })
 
@@ -1367,7 +1367,7 @@ test("a press on an ask shows it answered in the press's own drawing, before the
   free()
   await pressing
   expect(await until(async () => (s.answers().length ? s.answers() : undefined))).toHaveLength(1)
-  expect(await until(async () => s.list.find({ type: 'Text', text: '✓ You answered “Release it” · Claude will see this after its current step' }))).toBeDefined()
+  expect(await until(async () => s.list.find({ type: 'Text', text: '✓ You answered “Release it” · Claude reads it next' }))).toBeDefined()
 })
 
 test('an answer that could not be written says so on the card and puts its buttons back; pressed again it goes', async ($, on) => {
@@ -1382,7 +1382,7 @@ test('an answer that could not be written says so on the card and puts its butto
   await s.clock.advance(1000)
   s.failWrites(1000)
   await s.list.press({ key: release }).catch(() => undefined)
-  expect(await until(async () => s.list.find({ type: 'Text', text: "Not sent: “Release it” didn't reach Claude. Press it again" }))).toBeDefined()
+  expect(await until(async () => s.list.find({ type: 'Text', text: "Couldn't send “Release it” to Claude · press it again" }))).toBeDefined()
   expect(await s.list.find({ type: 'Text', text: /^✓ You answered/ })).toBeUndefined()
   expect(s.answers()).toEqual([])
   // Its ask back, the card keeps its ask's place under the newer one: a failed press never lifts it to the top
@@ -1393,7 +1393,7 @@ test('an answer that could not be written says so on the card and puts its butto
   expect(again).not.toBe('')
   await s.list.press({ key: again })
   expect(await until(async () => (s.answers().length ? s.answers() : undefined))).toHaveLength(1)
-  expect(await until(async () => s.list.find({ type: 'Text', text: '✓ You answered “Release it” · Claude will see this after its current step' }))).toBeDefined()
+  expect(await until(async () => s.list.find({ type: 'Text', text: '✓ You answered “Release it” · Claude reads it next' }))).toBeDefined()
 })
 
 test('two presses on an ask, the second on the drawing before the first was taken, send one answer', async ($, on) => {
@@ -1659,10 +1659,10 @@ test('a reply never waits behind a long command: one that may run for minutes is
   await clock.advance(70_000)
   const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   await list.input({ key: box?.key ?? '', text: 'Yep, looks good' })
-  expect(await until(async () => (await list.findAll({ type: 'Text' })).find(one => one.text.startsWith('✓ You replied “Yep, looks good” · waiting: Claude will see it when “Run the build” ends (running 1')))).toBeDefined()
+  expect(await until(async () => (await list.findAll({ type: 'Text' })).find(one => one.text.startsWith('✓ You answered “Yep, looks good” · Claude reads it when “Run the build” ends · running 1')))).toBeDefined()
   held.get('build')?.('built')
   for await (const _ of $.turn.step({ turnId: 'turn-2', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
-  expect(await until(async () => list.find({ type: 'Text', text: '✓ You replied “Yep, looks good” · Claude is working on it' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “Yep, looks good” · Claude is working on it' }))).toBeDefined()
   await settle()
 })
 test("where the bar above the prompt takes a box, a card's answers end with Reply in your own words, which opens the reply box in that bar and never in the panel or its Details, whose window the app drags to a box that holds the cursor (15 Nov); Close takes it away with what was typed kept; one box at a time", async ($, on) => {

@@ -720,9 +720,9 @@ const AFAR_RULE =
 const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
   [
     `"${title}" has a question for you: ${ask.text}`,
-    ask.details ? `What it is about:\n${ask.details.replaceAll('**', '')}` : '',
-    `Answers: ${answers.join(' · ')}, or reply in your own words, here or on its card.`,
-    ask.copy ? `${ask.isCommand ? 'The command to type' : 'The text to paste'}: ${ask.copy}` : '',
+    ask.details ? `Details:\n${ask.details.replaceAll('**', '')}` : '',
+    `Answers: ${answers.join(' · ')}, or answer in your own words, here or on its card.`,
+    ask.copy ? `${ask.isCommand ? 'Command to run' : 'Text to paste'}: ${ask.copy}` : '',
     ask.pictures?.length ? `Pictures: ${ask.pictures.join(', ')}` : '',
   ]
     .filter(Boolean)
@@ -735,16 +735,16 @@ const ANSWER_ALREADY_SENT = (said: string) => `Not sent: "${said}" is the answer
 const ANSWER_ECHO = 60 * 60_000
 const ASK_REPLIED = (title: string, said: string, isYou = false) =>
   isYou
-    ? `✓ You replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs you.`
+    ? `✓ You answered "${title}" on its card: ${said}. Claude is working on it, and asks again if it still needs you.`
     : `✓ {Name} replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs {name}.`
 const REPLY_HOLDS = `That reply does not settle your question by itself: act on it. Their card shows your question with their reply under it, and nothing more to press or type while you work on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still needs them after you have done what they said, ask it again, which brings back its answers.`
 const RESUMED_BY_ANSWER = `You had finished; this answer starts you again. Continue the task with it, then end with your report as before.`
 const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = false) =>
   isYou
-    ? `You answered, on its card, the question Claude asked in "${title}" after it finished (${asked}): ${said}. Claudopus couldn't start that task again, so your answer goes with your next message here.`
+    ? `You answered "${asked}" from "${title}" on its card after it was done: ${said}. Claudopus couldn't start that task again, so your answer goes with your next message here.`
     : `{Name} answered, on its card, the question Claude asked in "${title}" after it finished (${asked}): ${said}. Claudopus couldn't start that task again, so the answer waits here for {name}'s next message.`
 const ANSWER_FOR_CHAT_RELAY = `With {name}'s next message here, continue that task with this answer, as you would with their own words, alongside whatever that message asks.`
-const ASK_CLEARED = (title: string) => `Claude no longer needs an answer for "${title}".`
+const ASK_CLEARED = (title: string) => `Claude took back its question in "${title}". You don't need to answer it.`
 const ANSWERED_IN_CHAT = (asked: string, words: string, isHeld = false, isWhole = true) =>
   `The message sent to you just now that carries {name}'s words "${words}" is {name}'s own reply, typed by them in the chat, to your question: "${asked}".${isWhole ? '' : ' Only those words are theirs: the chat wrote anything else in that message, not {name}.'} ${isHeld ? REPLY_HOLDS : 'Their card no longer shows the question.'} If it answers your question, take it as their answer and continue, and ask again if it leaves something open. If it asks for something else, decide whether it is more for this task, a new task to hand back with the \`note\` tool and its \`task\`, or a change in how you work, and say with the \`note\` tool what you did with it.`
 const STEER = (words: string, isWhole = true) =>
@@ -781,20 +781,22 @@ const OWED =
   'A message from {name} is waiting for your decision, and you have kept working. Stop now and decide: more for your to-do list, a new task to hand back with the `note` tool and its `task`, or a change in how you work. Change your to-dos to match, then say with the `note` tool, in one plain line, what you did with their message.'
 const drifted = (steps: number) =>
   `You have taken ${steps} steps since you last touched your to-dos or said how far you have got. In your next step, send the to-do calls that bring the list up to date (tick what is done, mark the one you are on as doing, add what you took on) and a \`note\` saying how far you have got, together with your next working call in that same step, never in a step of their own. If all of it is already up to date, continue.`
+const minutesSaid = (mins: number) => (mins >= 60 ? `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m` : `${mins}m`)
 const STUCK_IN_CHAT = (title: string, mins: number, isHelpersAtWork = false) =>
-  `"${title}" hasn't made progress for ${mins} minutes: nothing new has come back to Claude${isHelpersAtWork ? ', though its helpers still run something' : ' or its helpers'}. It may be stuck waiting for something. Its card shows how far it has got.`
+  `Nothing new from "${title}" for ${minutesSaid(mins)}${isHelpersAtWork ? ', though its helpers are still running something' : ''}. Claude may be stuck waiting for something. Its card shows how far it got.`
 const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to hand back what it has if nothing is coming.'
 const HELPERS_SILENT = (mins: number, helpers: string) =>
   `From Claudopus: nothing new has come back from your helpers for ${mins} min while your step had ended: ${helpers}. Ask each with SendMessage what it is doing and when it will end, and tell one that is stuck or waits on nothing to hand back what it has now. Then carry on with what needs nothing from them, or end your step.`
 const HELPERS_STILL_SILENT = (mins: number, helpers: string) =>
   `From Claudopus: nothing new has come back from your helpers for ${mins} min, nor since you were asked to check on them: ${helpers}. Unless one told you it is still making progress and when it ends, hand back your report now with what you have, saying what each was still doing: Claudopus lets you hand it back while they run, and stops those that sit silent as you do.`
 const GAVE_UP_IN_CHAT = (title: string, mins: number) =>
-  `"${title}" is stuck: nothing new has come back from its helpers for ${mins} minutes, and it has not handed back what it has though Claudopus asked it to.`
+  `"${title}" is stuck: nothing new from its helpers for ${minutesSaid(mins)}, and Claude hasn't sent what it has, though Claudopus asked it to.`
 const NUDGED_IN_CHAT = (title: string, mins: number, isLast: boolean) =>
-  `"${title}" hasn't made progress for ${mins} minutes: it waits for its helpers, and nothing new has come back from them. Claudopus started it again and asked it ${isLast ? 'to hand back what it has now' : 'to check on them'}.`
+  `Nothing new from the helpers of "${title}" for ${minutesSaid(mins)}. Claudopus started Claude again and asked it ${isLast ? 'to send what it has now' : 'to check on them'}.`
 const RESTARTED_WORK = `From Claudopus, not {name}: you stopped partway through a step without a report (the app restarted, the Mac slept or a command was interrupted). First check what you already have, then continue from where you were; a command or helper you started may still be running, or may need starting again.`
 const RESTARTED_IN_CHAT = (title: string, mins: number) =>
-  `"${title}" had stopped partway through a step ${mins} minutes ago without a report, so Claudopus restarted it. Its card shows how far it has got.`
+  `"${title}" stopped partway ${minutesSaid(mins)} ago without a result, so Claudopus started it again. Its card shows how far it got.`
+
 const STOPPED_BY_YOU = (title: string, id: string, left: string[] = []) =>
   `{Name} stopped "${title}" (${id}) with Stop on its card. {Name} stopped this, not you: do not restart it, message it or start the same task again unless {name} asks.${left.length ? ` Still running, because it was started detached: ${left.join('; ')}.` : ''} Do not mention the stop unless {name} asks.`
 const STOPPED_REFUSED = (title: string) =>
@@ -1849,9 +1851,9 @@ const isOpenQuestion = (r: Report) => openWaits(r).length > 0
 const answeredOf = (r: Report) => {
   const answered = waitsOf(r).filter(one => one.answer && one.answer !== SETTLED)
   if (isOpenQuestion(r)) return ''
-  if (!answered.length) return waitsOf(r).length ? 'settled' : ''
+  if (!answered.length) return waitsOf(r).length ? 'no longer waiting' : ''
   const [first] = answered
-  return answered.length > 1 ? `you answered ${answered.length}` : first?.answer === IN_WORDS ? 'you answered in your words' : `you answered ${first?.answer}`
+  return answered.length > 1 ? `you answered ${answered.length} questions` : first?.answer === IN_WORDS ? 'you answered in words' : `you answered “${first?.answer}”`
 }
 const IN_WORDS = 'In your words'
 const SETTLED = 'Settled'
@@ -1861,7 +1863,8 @@ const askedWait = (one: Wait | string): Wait => (typeof one === 'string' ? { tex
 const ANSWER_IN_WORDS = 'Answer in words'
 const answersOf = (wait: Wait) => [...new Set([...(wait.choices?.length ? wait.choices : ['Yes', 'No']), 'Not now', ANSWER_IN_WORDS])]
 const answeredWords = (wait: Wait) =>
-  wait.answer === SETTLED ? 'no longer waits' : wait.answer === REPLACED ? 'replaced by a newer result' : wait.answer === MOVED ? 'moved to its newer result' : wait.answer === IN_WORDS ? 'you answered in your words' : wait.answer === 'Not now' ? 'you said not now' : `you answered “${wait.answer ?? ''}”`
+  wait.answer === SETTLED ? 'no longer waiting' : wait.answer === REPLACED ? 'replaced by a newer result' : wait.answer === MOVED ? 'moved to the newer result' : wait.answer === IN_WORDS ? 'you answered in words' : wait.answer === 'Not now' ? 'you pressed Not now' : `you answered “${wait.answer ?? ''}”`
+
 const byPerson = (wait: Wait) => Boolean(wait.answer) && wait.answer !== SETTLED && wait.answer !== REPLACED && wait.answer !== MOVED
 const sameLine = (a: string, b: string) => Boolean(plainWords(a)) && plainWords(a) === plainWords(b)
 const resultsOfWork = (list: Report[], agent: string) => list.filter(r => r.agent === agent && !r.archived).sort((a, b) => b.at - a.at)
@@ -3839,7 +3842,7 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
   if (id.startsWith('flow:')) {
     const f = runs.find(one => `flow:${one.id}` === id)
     if (!f) return undefined
-    const what = f.status === 'done' ? fewWords(f.result) || 'Finished.' : f.status === 'failed' ? 'Failed with an error.' : 'Stopped.'
+    const what = f.status === 'done' ? fewWords(f.result) || 'Done.' : f.status === 'failed' ? 'Failed.' : 'Stopped.'
     return { title: f.title || f.name || 'Workflow', isDone: f.status === 'done', what }
   }
   const one = cards.find(card => card.id === id)
@@ -3849,10 +3852,10 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
   const what =
     one.status === 'done'
       ? waits.length
-        ? `Waiting for ${who()}: ${fewWords(waits[0] ? askedWait(waits[0]).text : '')}${waits.length > 1 ? ` (and ${waits.length - 1} more)` : ''}`
-        : fewWords(one.answer) || fewWords(said) || 'Finished.'
+        ? `Waiting for you: ${fewWords(waits[0] ? askedWait(waits[0]).text : '')}${waits.length > 1 ? `, and ${waits.length - 1} more` : ''}`
+        : fewWords(one.answer) || fewWords(said) || 'Done.'
       : one.status === 'failed'
-        ? 'Failed with an error.'
+        ? 'Failed.'
         : 'Stopped.'
   return { title: one.title || 'Task', isDone: one.status === 'done', what }
 }
@@ -3879,7 +3882,8 @@ const announce = async ($: EngineInterface) => {
   await alertPerson($, 'ready', title, text, `ready-${ids.map(one => one.id).join('-')}`)
 }
 
-const nowhere = (panel: string) => `The ${panel} panel can't be shown on this screen. It shows in the Claude app on the Mac this chat runs on.`
+const nowhere = (panel: string) => `Claudopus can't show the ${panel} panel on this screen. Open it in the Claude app on the Mac this chat runs on.`
+
 
 const DESKTOP_SESSION = /^local_[A-Za-z0-9-]{1,64}$/
 
@@ -4973,7 +4977,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
     if (isCleared) await unsettleAsked($, one.id, ask.at).catch(() => undefined)
     const isBack = !isCleared || (await changeTodos($, list => list.map(card => (card.id === one.id && !card.ask ? { ...card, ask, entries: card.entries.filter(entry => !(entry.kind === 'steer' && entry.at === steerAt)) } : card))).then(() => true).catch(() => false))
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'failed', at: await $.clock.now().catch(() => 0), line, isCard: true, askAt: ask.at })
-    if (!isBack) $.ui.log(`Your answer “${cut(said, 120)}” to "${titleOf(one)}" (${ask.text}) didn't reach Claude, and the question couldn't be put back on its card. Type your answer in this chat instead.`)
+    if (!isBack) $.ui.log(`Your answer “${cut(said, 120)}” to "${titleOf(one)}" didn't reach Claude, and Claudopus couldn't put the question back on its card. Type your answer in this chat instead. The question: ${ask.text}`)
     redraw($)
     throw err
   }
@@ -4996,7 +5000,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, stepOnEnd: { ask, said } } : card)))
       await tell($, one.id, `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\nClaudopus does that step (${cut(ask.lastStep, 160)}) once you end this turn: do not do it or start it yourself. Commit anything left on the branch now, change nothing on it after that, and end with your report.`)
       const held = (err: unknown) => log($, `last step of ${one.id} not held: ${String(err)}`)
-      await stepLine($, one.id, `On your "${said}", Claudopus does the last step once Claude finishes`).catch(held)
+      await stepLine($, one.id, `You pressed “${said}” · Claudopus does it when Claude is done`).catch(held)
       await stepsAtEnd($).catch(held)
     }
     return void askGone($, one, said)
@@ -5053,7 +5057,7 @@ const takeBackNow = async ($: EngineInterface, one: Todo, shownAt: number) => {
   redraw($)
   void log($, `answer "${cut(sent.text, 40)}" for ${one.id} taken back`)
   if (isBack) {
-    await sayInChat($, named(`${who(true)} took back their answer “${cut(sent.text, 120)}” to "${titleOf(one)}": the question is open again on its card.`), `You took back your answer “${cut(sent.text, 120)}” to "${titleOf(one)}". The question is open again on its card.`)
+    await sayInChat($, named(`${who(true)} took back their answer “${cut(sent.text, 120)}” to "${titleOf(one)}": the question is open again on its card.`), `You took back your answer “${cut(sent.text, 120)}” to "${titleOf(one)}". The question is back on its card.`)
     inChat.delete(one.id)
     void askInChat($, { ...one, ask })
   }
@@ -5222,26 +5226,27 @@ const waitsBehind = (one: Todo, at: number, now: number) => {
   const running = target !== undefined && one.status === 'working' ? runningOf(target) : undefined
   if (!running || running.at > at) return ''
   const name = running.label ? `“${cut(describedOf(running.label).text || running.label, 50)}”` : running.what.replace(/ running$/, '')
-  return `waiting: Claude will see it when ${name} ends (running ${took(now - running.at)})`
+  return `Claude reads it when ${name} ends · running ${took(now - running.at)}`
 }
 const sentLine = (one: Todo, now: number) => {
   const sent = sentReplies.get(one.id)
   const replied = one.ask?.replied
-  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You replied “${cut(replied.text, 60)}”${isActingOnReply(one) ? ' · Claude is working on it' : '; Claude still has this question'}`
+  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You answered “${cut(replied.text, 60)}”${isActingOnReply(one) ? ' · Claude is working on it' : ' · the question is still open'}`
   if (!sent) return ''
-  if (sent.to === 'failed') return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}” didn't reach Claude. Press it again` : ''
-  if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}”. That Mac couldn't be reached; answer it in its own chat` : ''
+  if (sent.to === 'failed') return one.ask?.text === sent.ask ? `Couldn't send “${cut(sent.text, 60)}” to Claude · press it again` : ''
+  if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Couldn't reach that Mac with “${cut(sent.text, 60)}” · answer in its own chat` : ''
   const newer = lineOf(one) !== sent.line
   const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text))
   if ((one.ask && !isHeld) || (!isHeld && (newer || now - sent.at > ANSWER_SHOWN))) return ''
   const how = {
     sending: 'Sending to Claude…',
-    work: waitsBehind(one, sent.at, now) || 'Claude will see this after its current step',
+    work: waitsBehind(one, sent.at, now) || 'Claude reads it next',
     read: 'Claude has read it',
-    chat: 'left in the chat, which continues the task',
-    other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", whose task will see it after its current step`,
+    chat: 'sent to the chat, which carries on the task',
+    other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", which passes it on`,
   }[sent.to]
-  if (isHeld) return `✓ You replied “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : '; Claude still has this question'}`
+  if (isHeld) return `✓ You answered “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : ' · the question is still open'}`
+
   return `✓ You answered “${cut(sent.text, 60)}” · ${how}`
 }
 
@@ -5800,12 +5805,12 @@ const afarPart = (ui: Ui) => {
   if (!stuckAt && !offChats.length) return null
   const there = macs.length === 1 ? macName(macs[0] ?? '') : 'the Mac it runs chats on over SSH'
   const lines = [
-    ...(stuckAt ? [`New chats on ${there} start without Claudopus. This Mac's Claude app decided at ${stuckAt} that Claudopus didn't load there, and since then it gives every new chat there its own copy, which has no Claudopus code: no panel, tools or rules. The app forgets this only when it is quit and opened again.`] : []),
-    ...offChats.map(one => `“${offName(one)}”${one.host ? ` on ${macName(one.host)}` : ' on this Mac'} runs without Claudopus: its tasks, questions and results don't reach any panel. A chat started after the app is reopened has it.`),
+    ...(stuckAt ? [`New chats on ${there} start without Claudopus. At ${stuckAt} this Mac's Claude app decided Claudopus didn't load there, so it starts every new chat there without it: no panel, tools or rules. Quit the Claude app and open it again to end this.`] : []),
+    ...offChats.map(one => `“${offName(one)}”${one.host ? ` on ${macName(one.host)}` : ' on this Mac'} runs without Claudopus, so its tasks, questions and results don't reach any panel. A chat you start after reopening the app has Claudopus.`),
   ]
   return (
     <ui.Box key="afar" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-      <ui.Text bold color={NEEDS} wrap="wrap">{offChats.length === 1 && !stuckAt ? 'Claudopus is off in a chat' : 'Claudopus is off in some chats'}</ui.Text>
+      <ui.Text bold color={NEEDS} wrap="wrap">{offChats.length === 1 && !stuckAt ? "Claudopus isn't running in a chat" : "Claudopus isn't running in some chats"}</ui.Text>
       {lines.map((line, i) => (
         <ui.Text key={`afar-${i}`} wrap="wrap">
           {line}
@@ -5845,7 +5850,8 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
         if (item) await tellOnce($, `end-${id}`, () => alertPerson($, 'ready', item.title, `${item.what} · ${where}`, `ready-${id}`, undefined, opens))
       }
     }
-    for (const p of s.prompts ?? []) if (Math.abs(now - p.at) < AFAR_FRESH) await tellOnce($, `prompt-${s.host}-${s.chat}-${p.id}`, () => aloud($, 'prompt', `${p.title ?? chatName(s)} needs your OK`, `${p.text} · ${where}`, `prompt-${s.chat}-${p.id}`, opens))
+    for (const p of s.prompts ?? []) if (Math.abs(now - p.at) < AFAR_FRESH) await tellOnce($, `prompt-${s.host}-${s.chat}-${p.id}`, () => aloud($, 'prompt', `${p.title ?? chatName(s)} has a question for you`
+, `${p.text} · ${where}`, `prompt-${s.chat}-${p.id}`, opens))
   }
 }
 
@@ -5873,22 +5879,22 @@ const sealedFor = async ($: EngineInterface, key: string, value: string) => {
   return /^[A-Za-z0-9+/]{300,}={0,2}$/.test(out) ? out : ''
 }
 const BOX_AGAIN: Record<string, string> = {
-  refused: 'That password was refused. ',
+  refused: 'That password was wrong. ',
   short: 'That was shorter than 4 characters. ',
-  control: 'That held a line break or another control character. ',
+  control: 'That had a line break or another special character. ',
 }
 const boxWording = (one: Record<string, unknown>): string | undefined => {
   const again = typeof one.again === 'string' && Object.hasOwn(BOX_AGAIN, one.again) ? BOX_AGAIN[one.again]! : ''
   if (one.kind === 'admin') {
     if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined || typeof one.key !== 'string' || !BOX_KEY.test(one.key)) return undefined
     const mac = one.host === 'here' ? thisMac() : one.host
-    return `${again}Claudopus needs the admin password of ${mac} to run the admin command below. Nothing is saved: it goes only to that command, and the next one asks again.`
+    return `${again}Claudopus needs the admin password of ${mac} to run the command below. It goes only to that command and isn't saved, so the next one asks again.`
   }
   if (one.kind === 'secret') {
     if (one.host !== undefined) return undefined
-    if (one.name === undefined) return 'Name of the key to save, such as GITHUB_TOKEN. Claude will use it by this name.'
+    if (one.name === undefined) return 'Name of the key to save, such as GITHUB_TOKEN. Claude uses it by this name.'
     if (typeof one.name !== 'string' || !BOX_NAME.test(one.name)) return undefined
-    return `${again}Claudopus needs ${one.name}. It is saved only in ${keptWhere()}. Claude uses it by name, and it is hidden in anything a command prints.`
+    return `${again}Claudopus needs ${one.name}. Claudopus saves it only in ${keptWhere()}. Claude uses it by name, and Claudopus hides it in anything a command shows.`
   }
   return undefined
 }
@@ -5935,7 +5941,7 @@ const cardNotesOf = (card: string, at: number) => doneNotes.filter(one => one.ca
 const cardNotesPart = (ui: Ui, card: string, at: number) =>
   cardNotesOf(card, at).map(one => (
     <ui.Box key={`done-${one.id}`} flexDirection="column" borderStyle="round" borderColor={one.isOn ? DONE : '#808080'} paddingX={1} flexShrink={0}>
-      <ui.Text wrap="truncate-end" dimColor>{`${one.head} · ${one.isOn ? 'allowed' : 'refused'}`}</ui.Text>
+      <ui.Text wrap="truncate-end" dimColor>{one.head}</ui.Text>
       <ui.Box flexDirection="row" gap={1}>
         <ui.Text color={one.isOn ? DONE : undefined} dimColor={!one.isOn}>{one.isOn ? '✓' : '✕'}</ui.Text>
         <ui.Box flexShrink={1} minWidth={0}>
@@ -5962,7 +5968,7 @@ const BOX_SERVICE = 'claudopus-box'
 const BOX_ID = /^[0-9a-f-]{36}$/
 const boxesDir = () => `${dir}/boxes`
 const BOX_GRACE = 5000
-const BOX_TOLD = (text: string) => `${text} Answer it in the box at the top of the Claudopus panel, never in this chat's prompt (/claudopus opens the panel): what is typed there for it goes only into ${keptWhere()}${text.includes('admin password') ? '' : ", or give a response instead, such as where it already is"}.`
+const BOX_TOLD = (text: string) => `${text} Type it in the box at the top of the Claudopus panel, not in this chat. /claudopus opens the panel. What you type there goes only into ${keptWhere()}${text.includes('admin password') ? '' : '. Or answer in words, such as where it already is'}.`
 let boxChat = ''
 const boxTold = new Set<string>()
 
@@ -6028,7 +6034,7 @@ const boxKeyring = async ($: EngineInterface, what: 'set' | 'has' | 'delete', id
       : Promise.resolve({ exitCode: -1 })
 const sendBox = async ($: EngineInterface, id: string, value: string) => {
   if (!value) return
-  const refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? `That was longer than ${BOX_LONGEST} characters, so it wasn't sent.` : /[^\x20-\x7E]/.test(value) ? "That held a line break, a curly quote or another character outside plain letters, digits and signs, so it wasn't sent. Type it again." : ''
+  const refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? `That's longer than ${BOX_LONGEST} characters, so Claudopus didn't send it.` : /[^\x20-\x7E]/.test(value) ? "That has a line break, a curly quote or another special character, so Claudopus didn't send it. Type it again." : ''
   if (refused) {
     boxSaid.set(id, refused)
     boxPresses += 1
@@ -6036,11 +6042,11 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     return void drawAgain($)
   }
   const request = `${boxesDir()}/${id}.json`
-  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'It was no longer waiting · nothing was saved'))
+  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'The command had stopped waiting. Nothing was saved.'))
   const asked = boxes.find(other => other.id === id)
   const sent = asked?.key ? await sealedFor($, asked.key, value) : value
   if (!sent) {
-    boxSaid.set(id, "It could not be secured for the command that asked, so it wasn't sent.")
+    boxSaid.set(id, "Claudopus couldn't encrypt it for the command that asked, so it didn't send it.")
     boxPresses += 1
     boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
     return void drawAgain($)
@@ -6058,7 +6064,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   boxPresses += 1
   boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
   if (!isKept) {
-    boxSaid.set(id, `It could not be put in ${keptWhere()}. Try again.`)
+    boxSaid.set(id, `Claudopus couldn't save it in ${keptWhere()}. Try again.`)
     await log($, `box ${id} not kept: security ended ${r.exitCode}`)
   } else {
     boxSent.add(id)
@@ -6067,12 +6073,12 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     if (boxOpen?.id === id) ((boxOpen = undefined), (barBoxAt = 0))
     const one = boxes.find(other => other.id === id)
     boxes = boxes.filter(other => other.id !== id)
-    if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: one.key ? 'You gave it · it went only to the command that asked, which continues now' : `You gave it · it is in ${keptWhere()}, and the command that asked for it continues now`, what: '', isOn: true })
+    if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: one.key ? 'You gave it. It went only to the command that asked, which carries on now.' : `You gave it. Claudopus saved it in ${keptWhere()}, and the command that asked carries on now.`, what: '', isOn: true })
     await log($, `box ${id} sent to the keychain`)
   }
   drawAgain($)
 }
-const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled · nothing was saved, and what asked for it stops without it') => {
+const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled it. Nothing was saved, and the command that asked stops without it.') => {
   boxSent.add(id)
   barKeyTyped.delete(id)
   const one = boxes.find(other => other.id === id)
@@ -6107,7 +6113,7 @@ const keyWords = (text: string) =>
       return (/[A-Za-z]/.test(bare) && (bare.match(/\d/g)?.length ?? 0) >= 3) || (bare.length >= 32 && /[a-z]/.test(bare) && /[A-Z]/.test(bare))
     })
 const looksLikeKey = (text: string) => keyWords(text).length > 0
-const BOX_LOOKS_KEY = (where: string) => `That looks like the key itself. A response goes to Claude as words, into the chat. Keep it as the key to put it only in ${where}, or send it as a response anyway.`
+const BOX_LOOKS_KEY = (where: string) => `That looks like the key itself. An answer in words goes into the chat, where Claude reads it. Save it as the key to keep it only in ${where}, or send it as an answer anyway.`
 const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surface: string) => {
   if (id && replyTo) (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''))
   boxOpen = id ? { id, mode } : undefined
@@ -6137,7 +6143,7 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
   }
   boxHeldReply.delete(id)
   const request = `${boxesDir()}/${id}.json`
-  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'It was no longer waiting · your response was not sent'))
+  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, "The command had stopped waiting. Your answer wasn't sent."))
   const name = boxNameOf(one)
   const asked = name ? `giving ${name}` : isNameBox(one) ? 'naming a key to save' : 'giving the key'
   const isWritten = await $.fs
@@ -6146,7 +6152,7 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
     .catch(() => false)
   if (isWritten) boxRepliedAt.set(id, await $.clock.now())
   if (!isWritten) {
-    boxSaid.set(id, "Your response couldn't be left for the command that asked. Try again.")
+    boxSaid.set(id, "Claudopus couldn't pass your answer to the command that asked. Try again.")
     boxPresses += 1
     return void drawAgain($)
   }
@@ -6156,7 +6162,7 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
   if (boxOpen?.id === id) ((boxOpen = undefined), (barBoxAt = 0))
   drawAgain($)
   await $.process.run(['rm', '-f', request]).catch(() => undefined)
-  await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: 'You gave a response instead · it went to the command that asked, and nothing was saved', what: `“${cut(oneLine(said), 160)}”`, isOn: true })
+  await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: 'You answered in words. Your answer went to the command that asked, and nothing was saved.', what: `“${cut(oneLine(said), 160)}”`, isOn: true })
   await log($, `box ${id} answered in words`)
 }
 const submitBox = ($: EngineInterface, id: string, mode: BoxMode, value: string) => {
@@ -6173,14 +6179,14 @@ const keepHeldAsKey = ($: EngineInterface, id: string, surface: string) => {
   if (words.length === 1) return void sendBox($, id, words[0] ?? '').catch(() => log($, `box ${id} not sent`))
   if (repliesInBar(surface)) openBox($, id, 'key', surface)
   else (boxModes.set(id, 'key'), (boxPresses += 1))
-  boxSaid.set(id, 'More than one word looked like a key: paste just the key.')
+  boxSaid.set(id, 'More than one word looks like a key. Paste only the key.')
   drawAgain($)
 }
 const heldReplyButtons = ($: EngineInterface, ui: Ui, id: string, where: string) =>
   boxHeldReply.has(id) ? (
     <ui.Box key={`${where}-${id}-held`} flexDirection="row" gap={1} flexWrap="wrap">
-      <ui.Button key={`${where}-${id}-askey-${boxPresses}`} label="Keep it as the key" onPress={press => keepHeldAsKey($, id, press.surface)} />
-      <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send it as a response" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)} />
+      <ui.Button key={`${where}-${id}-askey-${boxPresses}`} label="Save as the key" onPress={press => keepHeldAsKey($, id, press.surface)} />
+      <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send as answer" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)} />
     </ui.Box>
   ) : null
 const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode, columns: number) => {
@@ -6197,7 +6203,7 @@ const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode, column
         <ui.Box flexDirection="column" width="100%" flexShrink={0}>
           <ui.Input
             key={key}
-            placeholder={mode === 'reply' ? 'Type your response' : isNameBox(one) ? 'Type the name' : 'Paste the key'}
+            placeholder={mode === 'reply' ? 'Type your answer' : isNameBox(one) ? 'Type the name' : 'Paste the key'}
             rows={rows}
             autoFocus
             onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)), mode === 'reply' ? growBox($, key, rows ?? 1, boxLines(value, columns)) : undefined)}
@@ -6227,20 +6233,20 @@ const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '') =
     const what = isNameBox(one) ? 'the name' : 'the key'
     return { at: one.at, node: (
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
-      <ui.Text dimColor wrap="truncate-end">{isKey ? 'Key · waits for you' : 'Admin password · waits for you to type it'}</ui.Text>
+      <ui.Text dimColor wrap="truncate-end">{isKey ? 'Key · waiting for you' : 'Admin password · waiting for you'}</ui.Text>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
-      {one.command ? <ui.Text dimColor wrap="wrap">{`Asked by this chat's command: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
+      {one.command ? <ui.Text dimColor wrap="wrap">{`Command that asked: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
       <ui.Text dimColor wrap="wrap">{
-        !isKey ? 'What you type here shows as you type it. It goes only to the command that asked, locked to that command, never into a chat, and is not saved.'
-        : inBar ? `Paste ${what} in the box above the chat: it goes only into ${keptWhere()}, never into a chat. Or give a response instead, such as where ${name ?? 'the key'} already is, and the command that asked gets your words.`
-        : mode === 'reply' ? 'Your response goes to the command that asked, in place of the key, and nothing is saved.'
-        : `What you type here shows as you type it. It goes only into ${keptWhere()}, never into a chat.`
+        !isKey ? "You can see what you type here. It goes only to the command that asked, never into a chat, and isn't saved."
+        : inBar ? `Paste ${what} in the box above the chat. It goes only into ${keptWhere()}, never into a chat. Or answer in words, such as where ${name ?? 'the key'} already is, and the command that asked gets your words.`
+        : mode === 'reply' ? 'Your answer goes to the command that asked, in place of the key. Nothing is saved.'
+        : `You can see what you type here. It goes only into ${keptWhere()}, never into a chat.`
       }</ui.Text>
       {inBar ? null : (
       <ui.Box width="100%" flexDirection="column">
         <ui.Input
           key={`box-${one.id}-field-${mode === 'reply' ? 'reply-' : ''}${boxTries.get(one.id) ?? 0}`}
-          placeholder={mode === 'reply' ? 'Type your response' : 'Type or paste it here'}
+          placeholder={mode === 'reply' ? 'Type your answer' : 'Type or paste it here'}
           submitLabel="send"
           autoFocus={n === 0 && !isKeysHeld ? true : undefined}
           onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($))}
@@ -6252,11 +6258,12 @@ const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '') =
       {boxSaid.get(one.id) && !isOpen ? <ui.Text key={`box-${one.id}-said`} color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
       {isOpen ? null : heldReplyButtons($, ui, one.id, 'box')}
       <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-        {inBar && isOpen ? <ui.Button key={`box-${one.id}-close-${boxPresses}`} label="Close the box" onPress={press => openBox($, undefined, 'key', press.surface)} /> : null}
+        {inBar && isOpen ? <ui.Button key={`box-${one.id}-close-${boxPresses}`} label="Close" onPress={press => openBox($, undefined, 'key', press.surface)} /> : null}
         {inBar && !isOpen ? <ui.Button key={`box-${one.id}-paste-${boxPresses}`} label={isNameBox(one) ? 'Type the name' : 'Paste the key'} onPress={press => openBox($, one.id, 'key', press.surface)} /> : null}
-        {inBar && !isOpen ? <ui.Button key={`box-${one.id}-respond-${boxPresses}`} label="Give a response instead" onPress={press => openBox($, one.id, 'reply', press.surface)} /> : null}
+        {inBar && !isOpen ? <ui.Button key={`box-${one.id}-respond-${boxPresses}`} label="Answer in words" onPress={press => openBox($, one.id, 'reply', press.surface)} /> : null}
         {isKey && !inBar ? (
-          <ui.Button key={`box-${one.id}-mode-${boxPresses}`} label={mode === 'reply' ? `Type ${what} instead` : 'Give a response instead'} onPress={() => void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($))} />
+          <ui.Button key={`box-${one.id}-mode-${boxPresses}`} label={mode === 'reply' ? `Type ${what} instead` : 'Answer in words'}
+ onPress={() => void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($))} />
         ) : null}
         <ui.Button key={`box-${one.id}-cancel-${boxPresses}`} label="Cancel" plain onPress={() => void cancelBox($, one.id)} />
       </ui.Box>
@@ -6284,8 +6291,9 @@ const GATE_UNSEALED = () => `This admin command did not run: Claudopus could not
 const NO_GATE_TOUCH = () =>
   named('Claude never reads or writes the list of admin commands {name} always allows, what {name} allowed, or the key that locks them. Only {name} adds to them, with a press on a card or in Config.')
 
-const gateWhat = (gate: Gate) =>
-  gate.isUndone ? (gate.isOutside ? `Something other than Claudopus changed ${gate.host}, and the change was undone` : `A command changed ${gate.host}, and the change was undone`) : gate.kind === 'release' ? `Wants to release ${gate.host} to its main branch` : gate.kind === 'file' ? `Wants to change ${gate.host}` : `Wants to run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
+const gateAct = (gate: Gate) =>
+  gate.isUndone ? `Make the change to ${gate.host} again` : gate.kind === 'release' ? `Release ${gate.host} to main` : gate.kind === 'file' ? `Change ${gate.host}` : `Run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
+const gateWhat = (gate: Gate) => `${gateAct(gate)}?`
 
 const isAdminPath = (word: string, root: string, name = 'admin') => {
   const parts: string[] = []
@@ -6481,10 +6489,11 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   await setGates($, top, list => [...list.filter(one => one.id !== gate.id), gate])
   await openList($).catch(() => undefined)
   const card = top ? (await read($, todos)).find(one => one.id === top) : undefined
-  const text = `${gateWhat(gate)}: ${cut(oneLine(gate.command), 200)}`
-  await (card ? askAloud($, card, text) : aloud($, 'ask', gate.kind === 'release' ? 'A release needs you' : gate.kind === 'file' ? 'A change to your settings needs you' : 'An admin command needs you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
+  const text = `${gateAct(gate)}: ${cut(oneLine(gate.command), 200)}`
+  await (card ? askAloud($, card, text) : aloud($, 'ask', 'This chat has a question for you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
+  const act = gateAct(gate)
   $.ui.log(
-    `${card ? `The task "${titleOf(card)}"` : 'This chat'} ${gateWhat(gate).replace(/^Wants/, 'wants')}: ${cut(oneLine(gate.command), 300)} · Press ${gate.kind ? 'Allow once or Deny' : `${gate.isWork ? 'Allow for this task' : 'Allow once'}, Always allow this command or Deny`} ${card ? 'on its card' : 'at the top'} in the Claudopus panel (/claudopus opens it). Nothing typed in the chat allows it.`,
+    `${card ? `"${titleOf(card)}"` : 'This chat'} wants to ${act.charAt(0).toLowerCase()}${act.slice(1)}: ${cut(oneLine(gate.command), 300)}. Press ${gate.kind ? 'Allow once or Deny' : `${gate.isWork ? 'Allow for this task' : 'Allow once'}, Always allow this command or Deny`} ${card ? 'on its card in' : 'at the top of'} the Claudopus panel. /claudopus opens it. Nothing you type in the chat allows it.`,
   )
   let said: GateSaid | 'gone' | 'late' | undefined
   try {
@@ -6503,11 +6512,11 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   }
   const pressed = gatePressed.get(gate.id)
   gatePressed.delete(gate.id)
-  if (pressed && pressed !== said) await gateNoteFailed($, gate, top, `It had stopped waiting when you pressed · ${gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing was changed' : 'it did not run'}`)
+  if (pressed && pressed !== said) await gateNoteFailed($, gate, top, `It had stopped waiting when you pressed. ${gate.kind === 'release' ? 'Nothing was released.' : gate.kind === 'file' ? 'Nothing changed.' : "It didn't run."}`)
   await log($, `${gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on'} ${gate.host}: ${said === 'once' ? 'allowed once' : said === 'always' ? 'always allowed' : said === 'deny' ? 'denied' : 'not answered'}`)
   return said
 }
-const gateHead = (gate: Gate) => (gate.kind === 'release' ? `Release of ${gate.branch ?? gate.host} into ${gate.host}` : gate.kind === 'file' ? `Change to ${gate.host}` : `Admin command on ${gate.host === 'here' ? thisMac() : gate.host}`)
+const gateHead = (gate: Gate) => (gate.kind === 'release' ? `Release of ${gate.branch ?? gate.host}` : gate.kind === 'file' ? `Change to ${gate.host}` : `Admin command on ${gate.host === 'here' ? thisMac() : gate.host}`)
 const gateWhatLine = (gate: Gate) => (gate.kind === 'release' && gate.folder ? `from ${shortPath(gate.folder)}` : gate.kind === 'file' ? '' : cut(oneLine(gate.command), 200))
 const gatePressed = new Map<string, GateSaid>()
 const gateNoteFailed = ($: EngineInterface, gate: Gate, card: string, said: string) =>
@@ -6517,7 +6526,7 @@ const gateNoteFailed = ($: EngineInterface, gate: Gate, card: string, said: stri
 const callRefused = async ($: EngineInterface, call: string) => {
   for (const one of doneNotes.filter(note => note.call === call && note.isOn && note.id.startsWith('gate-'))) {
     const { at: _at, ...rest } = one
-    await noteDone($, { ...rest, endedAt: 0, isOn: false, said: 'It did not run: another part of the same command was refused, so nothing in it ran' }).catch(() => undefined)
+    await noteDone($, { ...rest, endedAt: 0, isOn: false, said: "It didn't run: another part of the same command was denied, so none of it ran." }).catch(() => undefined)
   }
 }
 const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') => {
@@ -6542,14 +6551,14 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') =
       head: gateHead(gate),
       said:
         said === 'deny'
-          ? `You denied it · ${gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing was changed' : "it didn't run"}, and Claudopus told Claude`
+          ? `You denied it. ${gate.kind === 'release' ? 'Nothing was released' : gate.kind === 'file' ? 'Nothing changed' : "It didn't run"}, and Claudopus told Claude.`
           : gate.kind
-            ? `You allowed it once · ${gate.kind === 'release' ? 'it releases now' : 'the change is made now'}`
+            ? `You allowed it. ${gate.kind === 'release' ? 'Claudopus is releasing it now.' : 'Claude is making the change now.'}`
             : said === 'always'
-            ? 'You always allow this command · it runs now, and will not ask again'
+            ? "You always allow this command. It runs now, and Claudopus won't ask again."
             : gate.isWork
-              ? "You allowed this task's admin commands · it runs now"
-              : 'You allowed it once · it runs now',
+              ? 'You allowed admin commands for this task. This one runs now.'
+              : 'You allowed it. It runs now.',
       what: gateWhatLine(gate),
       isOn: said !== 'deny',
     }).catch(() => undefined)
@@ -6579,13 +6588,13 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
         await allowAlways($, call).catch(async err => {
           await log($, `admin command not always allowed: ${String(err)}`)
           const gate = { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: 0 }
-          if (doneNotes.some(one => one.id === `gate-${gate.id}`)) await noteDone($, { id: `gate-${gate.id}`, call: e.tool_use_id, ...(card ? { card: top } : {}), head: gateHead(gate), said: "You allowed it once · it runs now, but it couldn't be saved as always allowed", what: gateWhatLine(gate), isOn: true })
+          if (doneNotes.some(one => one.id === `gate-${gate.id}`)) await noteDone($, { id: `gate-${gate.id}`, call: e.tool_use_id, ...(card ? { card: top } : {}), head: gateHead(gate), said: "You allowed it. It runs now, but Claudopus couldn't save it as always allowed.", what: gateWhatLine(gate), isOn: true })
         })
       if (isWork) workAllowed.add(top)
     }
     const grant = await issueGrant($, `${e.tool_use_id}-${n}`, call)
     if (!grant) {
-      await gateNoteFailed($, { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: 0 }, card ? top : '', "It could not be secured · it didn't run, and Claudopus told Claude")
+      await gateNoteFailed($, { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: 0 }, card ? top : '', "Claudopus couldn't use its keychain key. It didn't run, and Claudopus told Claude.")
       await dropGrants($, grants)
       return { deny: GATE_UNSEALED(), grants: [] }
     }
@@ -6661,7 +6670,7 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
     }
     const grant = await issueGrant($, id, { host: 'release', command: `${repo}\n${branch}` }, 'release-grant')
     if (!grant) {
-      await gateNoteFailed($, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: 0 }, card ? top : '', 'It could not be secured · nothing was released, and Claudopus told Claude')
+      await gateNoteFailed($, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: 0 }, card ? top : '', "Claudopus couldn't use its keychain key. Nothing was released, and Claudopus told Claude.")
       await dropGrants($, grants)
       return { deny: GATE_UNSEALED(), grants: [] }
     }
@@ -6677,7 +6686,7 @@ const ownFileOf = (path: string) => {
   const lower = full.toLowerCase()
   if (lower === `${memory}/config.json`) return 'your Claudopus settings (config.json)'
   if (lower === `${memory}/rules` || lower.startsWith(`${memory}/rules/`)) return `your rules (${full.slice(dir.length + 1)})`
-  if (lower === `${memory}/roles` || lower.startsWith(`${memory}/roles/`)) return `your role text (${full.slice(dir.length + 1)})`
+  if (lower === `${memory}/roles` || lower.startsWith(`${memory}/roles/`)) return `your role file (${full.slice(dir.length + 1)})`
   if (/\/\.git\/release\.local$/.test(full)) return `this Mac's release settings (${full})`
   return ''
 }
@@ -6753,14 +6762,14 @@ const knownWarn = ($: EngineInterface, why: string) => {
   void log($, `the kept copy of the settings and texts is not in force: ${why}`)
   if (isKnownWarned) return
   isKnownWarned = true
-  $.ui.log(`Claudopus could not use its key in ${keptWhere()} (${why}), so a change made to your settings, principles or rules outside Claudopus is not undone in this chat until it can. Unlock the keychain, or start a new chat once it is unlocked.`)
+  $.ui.log(`Claudopus couldn't use its key in ${keptWhere()}: ${why}. Until it can, Claudopus won't undo changes made outside it to your settings or rules in this chat. Unlock the keychain, or start a new chat once it's unlocked.`)
 }
 const knownWrite = async ($: EngineInterface, known: Map<string, string | null>, after: number) => {
   const files = Object.fromEntries(known)
   const count = after + 1
   const seal = (await sealed($, 'known-make', [knownMessage(files, count)]))?.[0]
   if (!seal) {
-    knownWarn($, 'it could not be secured')
+    knownWarn($, "it couldn't make a seal")
     throw new Error(`the kept copy could not be sealed in ${keptWhere()}`)
   }
   const text = `${JSON.stringify({ files, count, seal }, null, 2)}\n`
@@ -6905,7 +6914,7 @@ const offerUndone = async ($: EngineInterface, by: ToolCallInput | undefined, na
   const list = await read($, todos)
   const top = by?.agentId === undefined ? '' : topOf(list, by.agentId)
   const card = list.find(one => one.id === top)
-  const what = name === 'config.json' ? 'your Claudopus settings (config.json)' : name.startsWith('rules/') ? `your rules (${name})` : `your role text (${name})`
+  const what = name === 'config.json' ? 'your Claudopus settings (config.json)' : name.startsWith('rules/') ? `your rules (${name})` : `your role file (${name})`
   const at = await $.clock.now()
   const id = `${by ? by.tool_use_id : `seen${at.toString(36)}`}-u-${name.replace(/[^A-Za-z0-9]/g, '')}`
   for (const [other, offer] of undoneOffers) {
@@ -6917,9 +6926,9 @@ const offerUndone = async ($: EngineInterface, by: ToolCallInput | undefined, na
   undoneOffers.set(id, { name, text, top: card ? top : '' })
   gateHeld.add(id)
   gatePressed.delete(id)
-  await setGates($, card ? top : '', gates => [...gates.filter(one => one.id !== id), { id, kind: 'file', isUndone: true, ...(by ? {} : { isOutside: true }), host: what, command: cut(text ?? '(the file taken away)', 2000), at, ...(by?.agentId ? { from: by.agentId } : {}) }])
+  await setGates($, card ? top : '', gates => [...gates.filter(one => one.id !== id), { id, kind: 'file', isUndone: true, ...(by ? {} : { isOutside: true }), host: what, command: cut(text ?? '(the file was removed)', 2000), at, ...(by?.agentId ? { from: by.agentId } : {}) }])
   await openList($).catch(() => undefined)
-  $.ui.log(`${card ? `A command of the task "${titleOf(card)}" changed` : by ? 'A command changed' : 'Something outside Claudopus changed'} ${what}, and the change was undone · Press Allow once ${card ? 'on its card' : 'at the top'} in the Claudopus panel to make the change again, or Deny.`)
+  $.ui.log(`${card ? `A command of "${titleOf(card)}" changed` : by ? 'A command changed' : 'Something outside Claudopus changed'} ${what}, so Claudopus undid it. To make the change again, press Allow once ${card ? 'on its card in' : 'at the top of'} the Claudopus panel. Deny keeps it undone.`)
 }
 const undoneOffers = new Map<string, { name: string; text: string | null; top: string }>()
 const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
@@ -6934,10 +6943,10 @@ const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
   await log($, `change to ${gate.host}: made again, as allowed`)
 }
 
-const gateKind = (gate: Gate) => (gate.isUndone ? 'Undone' : gate.kind === 'release' ? 'Release' : gate.kind === 'file' ? 'Change to your files' : 'Admin command')
+const gateKind = (gate: Gate) => (gate.isUndone ? 'Change undone' : gate.kind === 'release' ? 'Release' : gate.kind === 'file' ? 'Change to your files' : 'Admin command')
 const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean, card = '') => (
   <ui.Box key={key} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
-    <ui.Text wrap="truncate-end" dimColor>{`${gateKind(gate)} · ${gateHeld.has(gate.id) && !isElsewhere ? (gate.isUndone ? 'yours to decide' : 'waits for your press') : isElsewhere ? 'asked in another chat' : 'no longer waits'}`}</ui.Text>
+    <ui.Text wrap="truncate-end" dimColor>{`${gateKind(gate)} · ${gateHeld.has(gate.id) && !isElsewhere ? 'waiting for you' : isElsewhere ? 'waiting in another chat' : 'no longer waiting'}`}</ui.Text>
     <ui.Text wrap="wrap" color={NEEDS} bold>{gateWhat(gate)}</ui.Text>
     {gate.kind === 'release' && gate.folder ? (
       <ui.Box flexDirection="column">
@@ -6949,18 +6958,18 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
         <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
       </ui.Box>
     ) : (
-      <ui.Text dimColor wrap="wrap">What it is is shown only on its own Mac.</ui.Text>
+      <ui.Text dimColor wrap="wrap">Its details show only on its own Mac.</ui.Text>
     )}
     <ui.Text wrap="wrap">
       {gate.kind === 'release'
-        ? 'Allow: this branch is merged into main, checked and pushed, with its version and tag. Deny: nothing is released, and Claudopus tells Claude.'
+        ? 'Allow once: Claudopus merges this branch into main, checks it and pushes it with its version and tag. Deny: nothing is released, and Claudopus tells Claude.'
         : gate.isUndone && gate.isOutside
-          ? 'It changed while no command of a task was running: by you in an editor, or by a program a command left running. Claude changes this file only with Edit or Write, which ask you first, so the change was undone. Allow: the change is made again, as shown (if you made it yourself, allow it). Deny: the file stays as it was. Either way what it held is saved beside it as a .put-back copy.'
+          ? 'Something outside Claudopus changed this file, maybe you in an editor or a program a command left running, so Claudopus undid it. Allow once: Claudopus makes the change again. If you made it, allow it. Deny: the file stays as it was. Either way Claudopus keeps the changed text beside it as a .put-back copy.'
           : gate.isUndone
-          ? 'Claude changes this file only with Edit or Write, which ask you first, so what a command wrote to it was undone. Allow: the change is made again, as it was written (if you made it yourself, allow it). Deny: the file stays as it was. Either way what it held is saved beside it as a .put-back copy.'
+          ? 'A command wrote to this file, so Claudopus undid it: Claude changes it only with Edit or Write, which ask you first. Allow once: Claudopus makes the change again. If you made it, allow it. Deny: the file stays as it was. Either way Claudopus keeps the changed text beside it as a .put-back copy.'
           : gate.kind === 'file'
-          ? 'Allow: the change is made to this file of yours. Deny: the file stays as it is, and Claudopus tells Claude.'
-          : `Allow: it runs with admin rights${gate.isWork ? ', and this task runs its next admin commands without asking' : ''}. Deny: it doesn't run, and Claudopus tells Claude.`}
+          ? 'Allow once: Claude makes this change to your file. Deny: the file stays as it is, and Claudopus tells Claude.'
+          : `${gate.isWork ? "Allow for this task: it runs as admin, and so do this task's next admin commands, without asking" : 'Allow once: it runs as admin'}. Deny: it doesn't run, and Claudopus tells Claude.`}
     </ui.Text>
     {gateHeld.has(gate.id) && !isElsewhere ? (
       <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
@@ -6969,7 +6978,8 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
         <ui.Button key={`${key}-deny-${loadMark}`} label="Deny" onPress={() => answerGate($, gate, 'deny', card)} />
       </ui.Box>
     ) : (
-      <ui.Text dimColor wrap="wrap">{isElsewhere ? 'Allow or deny it on its card in its own chat.' : 'It no longer waits.'}</ui.Text>
+      <ui.Text dimColor wrap="wrap">{isElsewhere ? 'Allow or deny it on its card in its own chat.' : "It's no longer waiting for you."}</ui.Text>
+
     )}
   </ui.Box>
 )
@@ -7022,41 +7032,41 @@ const promptOf = (tool: string, input: unknown, list: Todo[], isWork = false): A
   const allow = (text: string, yes: string, detail = '', no = isWork ? NO_TOLD : NO_SKIPS): Asks => ({ text, kind: 'allow', ...(detail ? { detail } : {}), yes: `Yes: ${yes}`, no })
   if (tool === 'Bash' || tool === 'PowerShell')
     return allow(`Run a command: ${cut(field('description'), 90) || cut(field('command'), 90) || 'no description'}`, 'the command runs on its Mac.', whole('command', 400))
-  if (tool === 'Write') return allow(`Write the file ${file(field('file_path')) || 'a file'}`, 'the file is saved, replacing any file of that name.', field('file_path'))
+  if (tool === 'Write') return allow(`Write the file ${file(field('file_path')) || 'a file'}`, 'Claude saves the file, replacing any file of that name.', field('file_path'))
   if (tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit')
-    return allow(`Change the file ${file(field('file_path') || field('notebook_path')) || 'a file'}`, 'the change is made to the file.', field('file_path') || field('notebook_path'))
-  if (tool === 'Read') return allow(`Read the file ${file(field('file_path')) || 'a file'}`, 'Claude reads the file; nothing is changed.', field('file_path'))
-  if (tool === 'Glob' || tool === 'Grep') return allow(`Search files for ${cut(field('pattern'), 80) || 'a pattern'}`, 'Claude searches; nothing is changed.', field('path'))
-  if (tool === 'WebFetch') return allow(`Open a web page on ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'the web'}`, 'Claude reads the page; nothing is sent but the address.', field('url'))
+    return allow(`Change the file ${file(field('file_path') || field('notebook_path')) || 'a file'}`, 'Claude changes the file.', field('file_path') || field('notebook_path'))
+  if (tool === 'Read') return allow(`Read the file ${file(field('file_path')) || 'a file'}`, 'Claude reads the file and changes nothing.', field('file_path'))
+  if (tool === 'Glob' || tool === 'Grep') return allow(`Search files for ${cut(field('pattern'), 80) || 'a pattern'}`, 'Claude searches and changes nothing.', field('path'))
+  if (tool === 'WebFetch') return allow(`Open a web page on ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'the web'}`, 'Claude reads the page and sends nothing but its address.', field('url'))
   if (tool === 'WebSearch') return allow(`Search the web for “${cut(field('query'), 80)}”`, 'Claude searches the web and reads the results.')
   if (tool === 'SendMessage') {
     const to = workNamed(field('to'))
     return {
       ...allow(
-        to === 'its chat' ? 'Pass a message back to its chat' : `Pass a message to ${to}`,
+        to === 'its chat' ? 'Send a message to its chat' : `Send a message to ${to}`,
         to === 'its chat' ? 'its chat gets the message.' : 'that task gets the message and acts on it.',
         whole('message', 400) || field('summary'),
         isWork ? "No: it isn't sent, and Claudopus tells Claude you said no." : "No: it isn't sent, and the chat waits for what you say next.",
       ),
-      done: 'it was sent',
+      done: 'Claude sent it',
     }
   }
   if (tool === 'Agent' || tool === 'Task')
-    return { ...allow(`Start a background task: ${cut(field('description'), 90) || 'with no title'}`, 'it starts in the background and gets a card here.', whole('prompt', 300), isWork ? NO_TOLD : "No: it isn't started, and the chat waits for what you say next."), done: 'it was started' }
+    return { ...allow(`Start a task: ${cut(field('description'), 90) || 'with no title'}`, 'the task starts in the background and gets a card here.', whole('prompt', 300), isWork ? NO_TOLD : "No: it doesn't start, and the chat waits for what you say next."), done: 'Claude started it' }
   if (tool === 'TaskStop')
-    return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that task is stopped where it is.', '', isWork ? 'No: that task keeps running, and Claudopus tells Claude you said no.' : 'No: that task keeps running, and the chat waits for what you say next.'), done: 'it was stopped' }
+    return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that task stops where it is.', '', isWork ? 'No: that task keeps running, and Claudopus tells Claude you said no.' : 'No: that task keeps running, and the chat waits for what you say next.'), done: 'Claude stopped it' }
   if (tool === 'Skill') return allow(`Use the skill “${field('skill') || field('name')}”`, 'Claude loads those instructions and follows them.')
   if (tool === 'AskUserQuestion') {
     const first = Array.isArray(given.questions) ? (given.questions[0] as { question?: unknown } | undefined)?.question : undefined
     return {
       text: typeof first === 'string' && first.trim() ? `Answer a question: ${cut(oneLine(first), 120)}` : 'Answer a question',
       kind: 'question',
-      yes: 'Pick an answer: it goes back and Claude continues with it.',
-      no: 'Skip it: no answer goes back, and Claude waits for what you say next.',
+      yes: 'Pick an answer: Claude gets it and carries on.',
+      no: 'Skip it: Claude gets no answer and waits for what you say next.',
     }
   }
   if (tool === 'ExitPlanMode')
-    return { text: 'Approve a plan', kind: 'plan', detail: whole('plan', 400), yes: 'Yes: Claude starts doing what the plan says.', no: 'No: Claude keeps planning; say what to change.' }
+    return { text: 'Approve a plan', kind: 'plan', detail: whole('plan', 400), yes: 'Yes: Claude starts doing what the plan says.', no: 'No: Claude keeps planning. Say what to change.' }
   const mcp = tool.match(/^mcp__(.+?)__(.+)$/)
   const words = field('description') || field('text') || field('query') || field('title') || field('name') || field('url')
   if (mcp) return allow(`Use “${(mcp[2] ?? '').replace(/_/g, ' ')}” from ${(mcp[1] ?? '').replace(/^plugin_[^_]+_/, '').replace(/[_-]/g, ' ')}`, 'that action runs.', cut(words, 300))
@@ -7094,7 +7104,7 @@ const tellWaiting = async ($: EngineInterface) => {
   waiting = waiting.map(one => ({ ...one, isTold: true }))
   const { title } = await read($, me)
   const chat = title.trim() || cwd.split('/').filter(Boolean).pop() || 'A chat'
-  for (const one of due) await aloud($, 'prompt', `${one.title ?? chat} needs your OK`, one.text, `prompt-${one.id}`).catch(err => log($, `prompt not told: ${String(err)}`))
+  for (const one of due) await aloud($, 'prompt', `${one.title ?? chat} has a question for you`, one.text, `prompt-${one.id}`).catch(err => log($, `prompt not told: ${String(err)}`))
 }
 type Outcome = 'running' | 'ran' | 'no' | 'stopped'
 let answeredPrompts: Waiting[] = []
@@ -7219,12 +7229,12 @@ const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
 
 const CARRY_ON = 'Carry on without it'
 const CC_REFUSALS: [string, string][] = [
-  ['Permission for this action was denied by the Claude Code auto mode classifier', "Claude Code's auto mode refused it"],
-  ['Permission for this command was denied by a built-in Claude Code safety check', 'a built-in Claude Code safety check refused it'],
-  ['Permission for this tool use was denied. It requires approval, and this session has no approval surface', 'it needs approval, and Claude Code cannot ask anyone in this run'],
-  ['Permission for this tool use was denied: it requires interactive approval', 'it needs approval, and Claude Code cannot ask anyone in this run'],
-  ['no approval surface in this session', 'it needs approval, and Claude Code cannot ask anyone in this run'],
-  ['nobody can be asked in this headless run', 'it needs approval, and Claude Code cannot ask anyone in this run'],
+  ['Permission for this action was denied by the Claude Code auto mode classifier', "Claude Code's auto mode blocked it"],
+  ['Permission for this command was denied by a built-in Claude Code safety check', 'a built-in Claude Code safety check blocked it'],
+  ['Permission for this tool use was denied. It requires approval, and this session has no approval surface', "it needs your OK, and Claude Code can't ask you in a background task"],
+  ['Permission for this tool use was denied: it requires interactive approval', "it needs your OK, and Claude Code can't ask you in a background task"],
+  ['no approval surface in this session', "it needs your OK, and Claude Code can't ask you in a background task"],
+  ['nobody can be asked in this headless run', "it needs your OK, and Claude Code can't ask you in a background task"],
 ]
 const NO_VERDICT = /gave no verdict|transient failure/i
 const refusalOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isError?: unknown } | undefined): { who: string; reason: string } | undefined => {
@@ -7247,11 +7257,12 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   if (!top || top.chat) return
   const what = promptOf(tool, call, list, true)
   const who = own?.parentId ? `a helper of this task ("${titleOf(own)}")` : 'this task'
-  const text = cut(`Claude Code refused ${who}: ${what.text}.`, ASK_TEXT)
+  const text = cut(`Claude Code blocked ${who}: ${what.text}.`, ASK_TEXT)
   const details = [
     what.detail ? `What it is: ${what.detail}` : '',
     `Why: ${refusal.who}${refusal.reason ? ` (${refusal.reason})` : ''}.`,
-    'The task carries on without it, and does not do it another way.',
+    "Claude carries on without it and won't try another way.",
+
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -7551,13 +7562,13 @@ const stepsAtEnd = async ($: EngineInterface) => {
     const id = card.id
     const isDone = !card.byYou && !(card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) && card.status === 'done'
     if (!isDone) await unsettleAsked($, id, held.ask.at).catch(err => log($, `result's question not opened again for ${id}: ${String(err)}`))
-    if (card.byYou) await stepLine($, id, `Nothing was done on your "${held.said}": you stopped it first`)
-    else if (card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) await stepLine($, id, `Nothing was done on your "${held.said}": Claude asked something else first`)
+    if (card.byYou) await stepLine($, id, `Claudopus didn't do “${held.said}” · you stopped the task first`)
+    else if (card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) await stepLine($, id, `Claudopus didn't do “${held.said}” · Claude asked something else first`)
     else if (card.status !== 'done') {
       answeredAsks.delete(`${id}:${held.ask.at}:${held.ask.text}`)
       if (answeredAt.get(id) === held.ask.at) answeredAt.delete(id)
       sentReplies.delete(id)
-      await stepLine($, id, `Nothing was done on your "${held.said}": Claude's turn ${card.status === 'stopped' ? 'was stopped' : 'failed'} first, so the question is back`)
+      await stepLine($, id, `Claudopus didn't do “${held.said}” · Claude ${card.status === 'stopped' ? 'was stopped' : 'failed'} first, so the question is back`)
       if (card.ask?.refused) await askGone($, card).catch(err => log($, `refusal notice not cleared in the chat: ${String(err)}`))
       await askInChat($, { ...card, ask: held.ask }).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
     } else await lastStep($, card, held.ask, held.said).catch(err => log($, `last step of ${id} not done: ${String(err)}`))
@@ -7576,7 +7587,7 @@ const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['as
   const prompt = named(
     `Do the last step of the task "${titleOf(one)}", which {name} just gave the go-ahead for by pressing "${said}" (to: ${ask.text}): ${step}\nWork in ${folder}${branch && branch !== 'HEAD' ? `, on its branch ${branch}` : ''}. It is this one step: do only that, then report in one or two lines what happened. If it fails in a way that needs what the task that built it knows (a merge conflict, a failing check, a question only it can answer), send that task, "${one.id}", a message with SendMessage saying what failed and the last lines of the output, and end; do not fix it yourself.`,
   )
-  await stepLine($, one.id, `On your "${said}", a small fresh task does the last step: ${cut(step, 160)}`)
+  await stepLine($, one.id, `You pressed “${said}” · Claudopus starts a new task for it: ${cut(step, 160)}`)
   const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: last step`, subagentType: 'claudopus:quick', model: clearModel(models, lean), cwd: folder } }
   wakes.push(wake)
   void $.clock.after(WAKE_WAIT, () => {
@@ -7592,20 +7603,20 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   const name = (/\/\.git$/.test(common) ? common.replace(/\/\.git$/, '') : repo).split('/').pop() || repo
   const id = `step-${one.id}-${at}`
   const gate: Gate = { id, call: id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at, from: one.id }
-  await stepLine($, one.id, `On your "${said}", Claudopus releases ${branch} itself once you allow it below`)
+  await stepLine($, one.id, `You pressed “${said}” · Claudopus releases ${branch} once you allow it below`)
   const allowed = await holdGate($, {}, gate, one.id)
-  if (allowed !== 'once') return stepLine($, one.id, `Nothing was released: the release was ${allowed === 'deny' ? 'denied' : 'not allowed'}`)
+  if (allowed !== 'once') return stepLine($, one.id, `Nothing was released · ${allowed === 'deny' ? 'you denied it' : "it wasn't allowed"}`)
   const logFile = `${dir}/releases/${id}.log`
   const isLogged = await $.fs.write(logFile, '').then(() => true).catch(() => false)
-  if (!isLogged) return stepLine($, one.id, 'Nothing was released: Claudopus could not start the release')
+  if (!isLogged) return stepLine($, one.id, "Nothing was released · Claudopus couldn't start the release")
   const grant = await issueGrant($, id, { host: 'release', command: `${repo}\n${branch}` }, 'release-grant')
-  if (!grant) return stepLine($, one.id, 'Nothing was released: the allow could not be secured')
+  if (!grant) return stepLine($, one.id, "Nothing was released · Claudopus couldn't use its keychain key")
   const run = await $.process
     .run(['/bin/sh', '-c', 'nohup /bin/sh -c \'"$1" > "$2" 2>&1; echo "claudopus-exit $?" >> "$2"\' sh "$1" "$2" > /dev/null 2>&1 &', 'sh', `${$.plugin.root}/bin/release`, logFile], { cwd: repo, env: { CLAUDECODE: '1' }, timeoutMs: 15_000 })
     .catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (run.exitCode !== 0) {
     await dropGrants($, [grant])
-    return stepLine($, one.id, 'Nothing was released: Claudopus could not start the release')
+    return stepLine($, one.id, "Nothing was released · Claudopus couldn't start the release")
   }
   await log($, `release of ${branch} in ${name} started by Claudopus for ${one.id}`)
   const timer = everyLoad($, STEP_LOOK, () => {
@@ -7618,11 +7629,12 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       timer.cancel()
       const tail = text.replace(/claudopus-exit \d+\s*$/, '').replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n')
       if (exit === '0') {
-        await stepLine($, one.id, `Released: ${cut(oneLine(tail.split('\n').at(-1) ?? ''), 160)}`)
-        await sayInChat($, named(`Claudopus released "${titleOf(one)}" on {name}'s go-ahead. Its last lines:\n${tail}`), `Released "${titleOf(one)}".`)
+        await stepLine($, one.id, `Released · ${cut(oneLine(tail.split('\n').at(-1) ?? ''), 160)}`)
+        await sayInChat($, named(`Claudopus released "${titleOf(one)}" on {name}'s go-ahead. Its last lines:\n${tail}`), `Claudopus released "${titleOf(one)}".`)
         return
       }
-      await stepLine($, one.id, `The release ${isLate ? 'has run 90 minutes' : `stopped (exit ${exit})`}: Claude is started again to look at it`)
+      await stepLine($, one.id, `The release ${isLate ? 'is still running after 1h 30m' : 'failed'} · Claudopus started Claude again to look at it`)
+
       await toEnded($, one, one.id, isLate ? `${wakeText}\nClaudopus started the release itself after the go-ahead, and it has run 90 minutes without ending. It may still be running: look at its log, ${logFile}, and at what is running, before anything else; do not start a second release while it runs. Its last lines:\n${tail}` : `${wakeText}\nClaudopus ran the release itself after the go-ahead, and it failed with exit ${exit}. Its log is ${logFile}; its last lines:\n${tail}\nSort out what it needs (exit 2: merge main and keep what both sides meant; exit 3: a build or check failed), then run the release as your rules say.`, { text: said, ask: ask.text, at, line: '', isCard: true, askAt: ask.at })
     })().catch(err => log($, `release of ${one.id} not followed: ${String(err)}`))
   })
@@ -7847,8 +7859,9 @@ const chatHooks = (on: On) => {
       },
       isDeferred: false,
     })
-    await $.command.register({ name: 'claudopus', description: 'Show the to-dos of this chat: what I asked for, what was done and decided, and each answer' })
-    await $.command.register({ name: 'servers', description: 'Show the servers running on this Mac, with a link to each and which chat started it' })
+    await $.command.register({ name: 'claudopus', description: "Open the Claudopus panel: this chat's tasks, questions and results" })
+    await $.command.register({ name: 'servers', description: 'Open the Servers panel: the servers running on this Mac, a link to each and the chat that started it' })
+
     void $.ui.close({ id: OLD_PANE }).catch(() => undefined)
 
     const isNew = !(await $.fs.exists(`${dir}/index.md`))
@@ -9541,10 +9554,10 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   redraw($)
   const cards = await read($, todos)
   const titled = (one: string) => `"${titleOf(cards.find(card => card.id === one) ?? started(one, '', '', '', cutAt))}"`
-  const where = isCopy ? 'on this Mac by itself' : 'again'
+  const where = isCopy ? ', in the background on this Mac' : ''
   const text = [
-    back.length ? `${back.length === 1 ? `${titled(back[0] ?? '')} was interrupted at ${hhmm(cutAt)} and has been running ${where}` : `${back.length} tasks were interrupted at ${hhmm(cutAt)} and have been running ${where}`} since ${hhmm(now)}.` : '',
-    lost.length ? `${lost.length === 1 ? titled(lost[0] ?? '') : `${lost.length} tasks`} interrupted at ${hhmm(cutAt)} couldn't be restarted.` : '',
+    back.length ? `Claudopus started ${back.length === 1 ? titled(back[0] ?? '') : `${back.length} tasks`} again at ${hhmm(now)}${where}, after the chat stopped at ${hhmm(cutAt)}.` : '',
+    lost.length ? `Claudopus couldn't start ${lost.length === 1 ? titled(lost[0] ?? '') : `${lost.length} tasks`} again after the chat stopped at ${hhmm(cutAt)}.` : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -9555,11 +9568,12 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
 const tellDevice = async ($: EngineInterface, text: string) => {
   const pushed = await $.tool.call({ tool: 'PushNotification', message: text.slice(0, 199) } as never).catch(err => ({ deny: String(err) }))
   await log($, `cut-off notice pushed: ${JSON.stringify(pushed).slice(0, 200)}`)
-  await alertPerson($, 'cut', 'Task interrupted and restarted', text, `cut-${Math.round((await $.clock.now()) / 60_000)}`)
+  await alertPerson($, 'cut', 'Task interrupted', text, `cut-${Math.round((await $.clock.now()) / 60_000)}`)
 }
 
 const cutLine = (one: Todo) =>
-  one.cutAt ? (one.backAt ? `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; running again since ${hhmm(one.backAt)}.` : `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; it couldn't be restarted.`) : ''
+  one.cutAt ? (one.backAt ? `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · running again since ${hhmm(one.backAt)}` : `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · Claudopus couldn't start it again`) : ''
+
 
 
 const BEAT_EVERY = 3000
@@ -10139,7 +10153,7 @@ const NO_PROGRESS_WAIT =
 const NO_PROGRESS_SCRIPT =
   'Not run: this long command would print nothing to show how far it has got. Make its script print, flushed right away, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
 const HANDBACK_PRESS = '[handback-send-enforce]'
-const LEFT_AT_WORK = 'My own work is still going; I am started again when it is done, and give my report then.'
+const LEFT_AT_WORK = "My command is still running. Claudopus starts me again when it's done, and I'll send my result then."
 const isPressedForReport = async ($: EngineInterface, id: string) => {
   const talk = await $.session.messages({ as: 'api', agentId: id }).catch(() => [])
   if (!Array.isArray(talk)) return false
@@ -10686,7 +10700,7 @@ const commandHooks = (on: On) => {
     const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS })
     if (opened.isPlaced) await choosePanel($, true)
 
-    return { text: opened.isPlaced ? 'Claudopus panel opened.' : nowhere('Claudopus') }
+    return { text: opened.isPlaced ? 'Claudopus opened its panel.' : nowhere('Claudopus') }
   })
 
   on('ui.focus', async ($, e, next) => {
@@ -10720,7 +10734,8 @@ const commandHooks = (on: On) => {
     await scanServers($).catch(err => log($, `servers not read: ${String(err)}`))
     const opened = await $.ui.open({ id: PANE, title: PANE_TITLE })
 
-    return { text: opened.isPlaced ? 'Servers panel opened.' : nowhere('Servers') }
+    return { text: opened.isPlaced ? 'Claudopus opened the Servers panel.'
+ : nowhere('Servers') }
   })
 
 }
@@ -12990,7 +13005,7 @@ const panelHooks = (on: On) => {
                     </Box>
                     {/* The Mac has a newer copy than this chat runs: said beside the version, with what to type to switch to it */}
                     {versions.version ? (
-                      <Text key="head-version" dimColor wrap={versions.isWaiting ? 'wrap' : 'truncate-end'}>{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} ready, type /reload-plugins` : ''}`}</Text>
+                      <Text key="head-version" dimColor wrap={versions.isWaiting ? 'wrap' : 'truncate-end'}>{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} is ready: type /reload-plugins to use it` : ''}`}</Text>
                     ) : null}
                   </Box>
                 )}
