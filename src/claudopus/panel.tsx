@@ -777,8 +777,10 @@ const panelHooks = (on: On) => {
       // A server or a watch leads with what it does, then the last thing it said
       const lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving · ') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching · ') : isSilent && hasSaid ? 'Last: ' : ''
       // (what one command left going, when it is several programs, says how many: its row names the command once)
+      // (a narrow row drops the "about" of a time left worked out from its percent)
+      const near = left.map(one => one.replace(/^about /, ''))
       const programs = leftCommandOf(job.id) && job.count && job.count > 1 ? [`${job.count} programs`] : []
-      const numbers = [[...full, ...pct, ...rate, ...left, ...programs, ...mem], [...full, ...pct, ...rate, ...left, ...programs], [...full, ...pct, ...left, ...programs], [...full, ...pct, ...left], [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...bare, ...left]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]
+      const numbers = [[...full, ...pct, ...rate, ...left, ...programs, ...mem], [...full, ...pct, ...rate, ...left, ...programs], [...full, ...pct, ...left, ...programs], [...full, ...pct, ...left], ...(near.length ? [[...full, ...near]] : []), [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...compact, ...near], [...bare, ...near]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]
       const tails = [[state, told], [state], [short, told], [short]].map(t => t.filter(Boolean))
       // How far it is comes first, then its sign of life, then whether Claude was told: the fullest counts with each tail, then any
       const tries = [...numbers.slice(0, 3).flatMap(nums => tails.map(tail => ({ nums, tail }))), ...tails.flatMap(tail => numbers.map(nums => ({ nums, tail })))]

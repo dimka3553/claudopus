@@ -8195,7 +8195,7 @@ const helperNow = (one: Todo, at: number, commands = 0) => {
   const call = lastCall.get(one.id)
   const note = [...one.entries].reverse().find(entry => entry.kind !== 'steer' && entry.text)
   if (note && (!call || (note.at ?? 0) >= call.at)) return !commands && at - (note.at ?? at) >= 3 * 60_000 ? `Last: ${note.text} · nothing new for ${took(at - (note.at ?? at))}` : note.text
-  if (!call) return one.status === 'working' ? 'Working' : ''
+  if (!call) return ''
   if (!call.endedAt) return at - call.at >= 60_000 ? `${call.what} · ${took(at - call.at)}` : call.what
   const idle = at - call.endedAt
   if (idle < 60_000) return 'Thinking'
@@ -12130,8 +12130,9 @@ const panelHooks = (on: On) => {
         : [`No progress shown · nothing new for ${ago(still)}`, `Nothing new for ${shortAgo(still)}`]
       const isWarn = job.isPaused || Boolean(job.target) || isSilent
       const lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving · ') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching · ') : isSilent && hasSaid ? 'Last: ' : ''
+      const near = left.map(one => one.replace(/^about /, ''))
       const programs = leftCommandOf(job.id) && job.count && job.count > 1 ? [`${job.count} programs`] : []
-      const numbers = [[...full, ...pct, ...rate, ...left, ...programs, ...mem], [...full, ...pct, ...rate, ...left, ...programs], [...full, ...pct, ...left, ...programs], [...full, ...pct, ...left], [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...bare, ...left]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]
+      const numbers = [[...full, ...pct, ...rate, ...left, ...programs, ...mem], [...full, ...pct, ...rate, ...left, ...programs], [...full, ...pct, ...left, ...programs], [...full, ...pct, ...left], ...(near.length ? [[...full, ...near]] : []), [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...compact, ...near], [...bare, ...near]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]
       const tails = [[state, told], [state], [short, told], [short]].map(t => t.filter(Boolean))
       const tries = [...numbers.slice(0, 3).flatMap(nums => tails.map(tail => ({ nums, tail }))), ...tails.flatMap(tail => numbers.map(nums => ({ nums, tail })))]
       for (const { nums, tail } of tries) {

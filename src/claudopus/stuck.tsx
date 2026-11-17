@@ -68,8 +68,7 @@ const helperNow = (one: Todo, at: number, commands = 0) => {
   const note = [...one.entries].reverse().find(entry => entry.kind !== 'steer' && entry.text)
   // (a note that has stood for minutes with nothing since, and no command of its own running, is the last thing it said)
   if (note && (!call || (note.at ?? 0) >= call.at)) return !commands && at - (note.at ?? at) >= 3 * 60_000 ? `Last: ${note.text} · nothing new for ${took(at - (note.at ?? at))}` : note.text
-  // (after a reload of the mod nothing of its actions is known yet: it is at work all the same)
-  if (!call) return one.status === 'working' ? 'Working' : ''
+  if (!call) return ''
   if (!call.endedAt) return at - call.at >= 60_000 ? `${call.what} · ${took(at - call.at)}` : call.what
   // Between actions it is thinking; long after its last one, with commands of its own running in the background, it waits for
   // them, as their rows under it show; long after with none, only that nothing new has come

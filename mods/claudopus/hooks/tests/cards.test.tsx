@@ -2244,8 +2244,8 @@ test("a run's second line starts under its name, with the tree's lines carried d
   // A narrow panel keeps how long is left before the percent
   const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 40 }, surface: 'terminal' } as never)
   const tight = (await narrow.findAll({ type: 'Text' })).map(one => one.text)
-  expect(tight).toContain('3/6 steps · about 2m left')
+  expect(tight).toContain('3/6 steps · 2m left')
   // and one under a helper, with less room, keeps its count beside it
-  expect(tight).toContain('10/40 · about 6m left')
+  expect(tight).toContain('10/40 · 6m left')
   await narrow.unmount()
 })
