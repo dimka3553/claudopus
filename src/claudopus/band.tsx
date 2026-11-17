@@ -99,6 +99,8 @@ const barCardsSign = (cards: Todo[]) => {
 }
 // Once a second while a bar holds a box (chat.tsx): the cards it shows moved, so it is drawn again, once for each change
 const lookBar = async ($: EngineInterface) => {
+  // A redraw put off while the box held the cursor is made once it no longer does (drawFresh)
+  if (isRedrawOwed && !isBoxHeld(await $.clock.now())) drawAgain($)
   if (!barHeld.size || !replyTo) return
   const sign = barCardsSign(await read($, todos))
   if (sign === barCardsDrawn) return
@@ -132,16 +134,16 @@ const bandHooks = (on: On) => {
     const key = `bar|${e.requestId ?? ''}|${e.surface}|${e.props.bodyColumns}|${e.props.isCollapsed ? 1 : 0}`
     const at = await $.clock.now()
     const recent = lastShown.get(key) as Awaited<ReturnType<typeof next>> | undefined
-    const isBoxHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
-    if (recent && !isBoxHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
-    if (recent && !isBoxHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
+    const isBarHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
+    if (recent && !isBarHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
+    if (recent && !isBarHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
     freshBegins(key)
     const madeFrom = Date.now()
     let made: { at: number; ms: number; fresh: number } | undefined
     try {
       const drawing = await drawBar()
       // A click begun while it was made: the bar on screen is given instead, and this one made again once the click is over
-      if (recent && !isBoxHeld && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent)
+      if (recent && !isBarHeld && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent)
       lastShown.set(key, drawing)
       made = { at, ms: Date.now() - madeFrom, fresh: freshness }
       return drawing

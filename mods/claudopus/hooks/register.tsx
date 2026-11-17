@@ -135,7 +135,7 @@ const lookHold = ($: EngineInterface) => {
   const late = holdAt && isTimed ? now - holdAt - HOLD_LOOK : 0
   holdAt = now
   if (late < LATE) {
-    if (behindLooks > 0 && (behindLooks -= 1) === 0) $.ui.invalidate('ui.render')
+    if (behindLooks > 0 && (behindLooks -= 1) === 0) drawAgain($)
     return
   }
   behindLooks = BEHIND_FOR / HOLD_LOOK
@@ -4747,11 +4747,16 @@ const freeTimes = ($: EngineInterface) => {
   isTyping = false
   if (wasHeld) drawAgain($)
 }
+let isRedrawOwed = false
+const isBoxHeld = (at: number) => isTyping || (Boolean(replyTo || boxOpen) && barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
 const drawFresh = async ($: EngineInterface, isThroughTyping = false) => {
-  if (isTyping && !isThroughTyping) return void recordEvent($, 'redraw-owed')
+  if (!isThroughTyping && isBoxHeld(await $.clock.now())) return void ((isRedrawOwed = true), recordEvent($, 'redraw-owed'))
+  isRedrawOwed = false
   recordEvent($, 'redraw-all')
   $.ui.invalidate('ui.render')
 }
+let urgentDrawn = ''
+const urgentSign = () => JSON.stringify([waiting.map(one => [one.agent, one.tool]), asked.length, looseGates.map(one => one.id), boxes.map(one => one.id)])
 const drawnPanes = new Map<string, { shape: string; content: string; at: number; side: string }>()
 const sideSign = () =>
   JSON.stringify([
@@ -4818,15 +4823,19 @@ let calmAt = 0
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
 const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   const now = await $.clock.now()
+  const urgent = urgentSign()
+  if (urgentDrawn && urgent !== urgentDrawn) drawAgain($, true)
+  urgentDrawn = urgent
   const list = drawnPanes.get(LIST) ?? { shape: '', content: '', at: 0, side: sideSign() }
   const side = sideSign()
-  let isNew = !isTyping && list.side !== side
-  for (const [path, text] of isTyping ? [] : drawnFiles) {
+  const isHeld = isBoxHeld(now)
+  let isNew = !isHeld && list.side !== side
+  for (const [path, text] of isHeld ? [] : drawnFiles) {
     const now = await readOr($, path)
     if (now !== text) (drawnFiles.set(path, now), (isNew = true))
   }
   if (isNew) return void ((list.side = side), (calmBumps += 1), drawAgain($), (list.side = sideSign()))
-  if (!(isMoving || outputMoved) || isTyping || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
+  if (!(isMoving || outputMoved) || isBoxHeld(now) || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
   calmAt = now
   outputMoved = false
   await writeHeldOthers($)
@@ -4924,6 +4933,7 @@ const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) =
   if (one?.ask) boxOpen = undefined
   replyMark = one?.ask ? askMark(one.ask) : ''
   barBoxAt = 0
+  isBarSettling = false
   presses += 1
   redraw($)
   const ask = one?.ask
@@ -6111,6 +6121,7 @@ const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surf
   barKeyTyped.clear()
   if (id) (boxHeldReply.delete(id), boxSaid.delete(id))
   barBoxAt = 0
+  isBarSettling = false
   boxPresses += 1
   drawAgain($)
   const bar = barIds.get(surface)
@@ -11174,10 +11185,17 @@ const barCardsSign = (cards: Todo[]) => {
   return target?.ask ? `${target.id}|${titleOf(target)}` : ''
 }
 const lookBar = async ($: EngineInterface) => {
+  if (isRedrawOwed && !isBoxHeld(await $.clock.now())) drawAgain($)
   if (!barHeld.size || !replyTo) return
   const sign = barCardsSign(await read($, todos))
   if (sign === barCardsDrawn) return
   barCardsDrawn = sign
+  drawAgain($, true)
+}
+let isBarSettling = false
+const settleBar = ($: EngineInterface) => {
+  if (isBarSettling) return void (isBarSettling = false)
+  isBarSettling = true
   drawAgain($, true)
 }
 let barFlipAt = 0
@@ -11190,15 +11208,15 @@ const bandHooks = (on: On) => {
     const key = `bar|${e.requestId ?? ''}|${e.surface}|${e.props.bodyColumns}|${e.props.isCollapsed ? 1 : 0}`
     const at = await $.clock.now()
     const recent = lastShown.get(key) as Awaited<ReturnType<typeof next>> | undefined
-    const isBoxHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
-    if (recent && !isBoxHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
-    if (recent && !isBoxHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
+    const isBarHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
+    if (recent && !isBarHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
+    if (recent && !isBarHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
     freshBegins(key)
     const madeFrom = Date.now()
     let made: { at: number; ms: number; fresh: number } | undefined
     try {
       const drawing = await drawBar()
-      if (recent && !isBoxHeld && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent)
+      if (recent && !isBarHeld && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent)
       lastShown.set(key, drawing)
       made = { at, ms: Date.now() - madeFrom, fresh: freshness }
       return drawing
@@ -11212,7 +11230,7 @@ const bandHooks = (on: On) => {
     const kept = barHeld.get(e.surface)
     if (kept && canBox && barBoxes.has(e.surface) && (replyTo || boxOpen) && kept.shape === barShape()) {
       const isHeldNow = isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)
-      if (isHeldNow || kept.mark === (await markerSign($, e.surface))) return kept.drawing as Awaited<ReturnType<typeof next>>
+      if (isHeldNow || kept.mark === (await markerSign($, e.surface))) return ((isBarSettling = false), kept.drawing as Awaited<ReturnType<typeof next>>)
     }
     const cards = await read($, todos)
     if (canBox !== barBoxes.has(e.surface)) {
@@ -11294,6 +11312,7 @@ const bandHooks = (on: On) => {
         row
       )
       barHeld.set(e.surface, { shape, mark: await markerSign($, e.surface), drawing })
+      settleBar($)
       return drawing
     }
     const target = canBox ? barTarget(cards) : undefined
@@ -11312,6 +11331,7 @@ const bandHooks = (on: On) => {
         reply
       )
       barHeld.set(e.surface, { shape, mark: await markerSign($, e.surface), drawing })
+      settleBar($)
       return drawing
     }
     barHeld.delete(e.surface)

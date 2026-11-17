@@ -1666,7 +1666,7 @@ test('a reply never waits behind a long command: one that may run for minutes is
   await settle()
 })
 test("where the bar above the prompt takes a box, a card's answers end with Reply in your own words, which opens the reply box in that bar and never in the panel or its Details, whose window the app drags to a box that holds the cursor (15 Nov); Close takes it away with what was typed kept; one box at a time", async ($, on) => {
-  const { appended, clock, files } = world(on, { panes: ['claudopus'] })
+  const { appended, clock, files, keep } = world(on, { panes: ['claudopus'] })
   await $.session.start(start)
   await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
@@ -1766,6 +1766,22 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   expect(await barDrawings()).toBe(drawnBefore)
   expect((await boxesIn(bar))[0]?.props.rows).toBe(4)
   expect((await boxesIn(bar))[0]?.key).toBe(growing?.key)
+  // and while the box keeps the cursor after the typing has stopped, past the half minute typing holds the panel
+  await clock.advance(31_000)
+  for (const n of [1, 2, 3]) {
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `s${n}`, agentId: 'a1', text: `Later step ${n}` } as never)
+    await clock.advance(5000)
+  }
+  expect(await barDrawings()).toBe(drawnBefore)
+  // What newly waits on the person still shows at once: a key box asked for meanwhile is in the panel within a second or two
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-k', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
+  const keyBox = '7c1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${keyBox}.json`, JSON.stringify({ id: keyBox, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
+  await clock.advance(2000)
+  expect(await until(async () => list.find({ type: 'Text', text: GITHUB_BOX }))).toBeDefined()
+  files.delete(`${MEMORY}/boxes/${keyBox}.json`)
+  await clock.advance(2000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: GITHUB_BOX })) ? undefined : true))).toBe(true)
   // Half typed: the same box through the bar's own drawings, drawn with the text it was last drawn with, never with letters
   // older than the box holds
   const [first] = await boxesIn(bar)

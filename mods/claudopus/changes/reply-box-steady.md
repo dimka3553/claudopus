@@ -1,2 +1,2 @@
-- The reply box above the chat no longer flashes blue or jumps while you type: it stays four lines tall and scrolls inside, and Claudopus waits to redraw anything until you stop typing, send or click elsewhere.
-- Send and Close sit a little below the box, so the Send button no longer covers the box's lower edge. The key box's response and the card's own reply box work the same way.
+- The reply box above the chat no longer flashes blue or jumps while you type: it stays four lines tall and scrolls inside, and while it has your cursor Claudopus redraws nothing else until you send, close it or click elsewhere. A question, key box or admin box that newly needs you still shows at once.
+- Send and Close sit a little below the box, so the Send button no longer covers the box's lower edge. The key box's response in the bar works the same way, and the card's own reply box (bar folded) is four lines with the same gap.

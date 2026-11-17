@@ -351,6 +351,7 @@ const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surf
   barKeyTyped.clear()
   if (id) (boxHeldReply.delete(id), boxSaid.delete(id))
   barBoxAt = 0
+  isBarSettling = false
   boxPresses += 1
   drawAgain($)
   const bar = barIds.get(surface)
@@ -428,7 +429,7 @@ const heldReplyButtons = ($: EngineInterface, ui: Ui, id: string, where: string)
   ) : null
 // The box in the bar above the prompt for the key box opened there: what goes where on a line of its own, the field under it as wide
 // as the bar, and Send, the big one, and Close, small, under that, as the reply box is (band.tsx, barReply). A key is one line; a
-// response grows with its text as the chat's own box does. No submitLabel: the app draws one as a second, small send button, and
+// response BOX_ROWS lines. No submitLabel: the app draws one as a second, small send button, and
 // with one a box of several lines sends only on Cmd+Enter
 const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
   const name = boxNameOf(one)

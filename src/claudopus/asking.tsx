@@ -154,17 +154,24 @@ const freeTimes = ($: EngineInterface) => {
   if (wasHeld) drawAgain($)
 }
 // Every pane of the mod's is drawn again, from the values as they are now
-// Not while the person types into a box (isTyping): the app asks again for every drawing of the mod's at each redraw, the bar
-// above the prompt too, and builds each one anew, the box with the cursor in it too, whose ring then fades in again; holding the
-// drawing does not spare that (17 Nov: the box flashed blue several times a second while tasks wrote their cards, each a redraw
-// the app answered with a box built anew; its own renderer, headless, measured). Asked for meanwhile, it is made as the typing
-// hold ends, which draws everything again anyway: a send, a press, the focus leaving the boxes, or TYPING after the last letter
-// A box whose card stopped asking goes at once, typed in or not (isThroughTyping)
+// Not while the person types into a box, nor while the bar's box holds the cursor (isBoxHeld): the app asks again for every
+// drawing of the mod's at each redraw, the bar above the prompt too, and builds each one anew, the box with the cursor in it too,
+// whose ring then fades in again; holding the drawing does not spare that (17 Nov: the box flashed blue several times a second
+// while tasks wrote their cards, each a redraw the app answered with a box built anew; its own renderer, headless, measured).
+// Asked for meanwhile, it is made once the hold ends (lookBar, each second). What must show at once goes through
+// (isThroughTyping): a box whose card stopped asking, and what newly waits on the person (urgentSign)
+let isRedrawOwed = false
+const isBoxHeld = (at: number) => isTyping || (Boolean(replyTo || boxOpen) && barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
 const drawFresh = async ($: EngineInterface, isThroughTyping = false) => {
-  if (isTyping && !isThroughTyping) return void recordEvent($, 'redraw-owed')
+  if (!isThroughTyping && isBoxHeld(await $.clock.now())) return void ((isRedrawOwed = true), recordEvent($, 'redraw-owed'))
+  isRedrawOwed = false
   recordEvent($, 'redraw-all')
   $.ui.invalidate('ui.render')
 }
+// What newly waits on the person and is drawn from the mod's own memory: the app's prompts, gates without a card, key and admin
+// boxes. A change in it is drawn within a second, through any hold
+let urgentDrawn = ''
+const urgentSign = () => JSON.stringify([waiting.map(one => [one.agent, one.tool]), asked.length, looseGates.map(one => one.id), boxes.map(one => one.id)])
 // What each pane showed when last drawn afresh: its shape, its content and when, so calmLook knows what has moved since
 const drawnPanes = new Map<string, { shape: string; content: string; at: number; side: string }>()
 // What the panel shows from the mod's own memory rather than its values: what the app's prompts, the admin and file gates, the boxes,
@@ -283,11 +290,15 @@ const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now
 // draw it again only every CALM while work moves, and not while the person uses it
 const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   const now = await $.clock.now()
+  const urgent = urgentSign()
+  if (urgentDrawn && urgent !== urgentDrawn) drawAgain($, true)
+  urgentDrawn = urgent
   const list = drawnPanes.get(LIST) ?? { shape: '', content: '', at: 0, side: sideSign() }
   // What the mod holds in memory, or a file the panel read, changed: drawn again at once, as anything new is
   const side = sideSign()
-  let isNew = !isTyping && list.side !== side
-  for (const [path, text] of isTyping ? [] : drawnFiles) {
+  const isHeld = isBoxHeld(now)
+  let isNew = !isHeld && list.side !== side
+  for (const [path, text] of isHeld ? [] : drawnFiles) {
     const now = await readOr($, path)
     if (now !== text) (drawnFiles.set(path, now), (isNew = true))
   }
@@ -295,7 +306,7 @@ const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   if (isNew) return void ((list.side = side), (calmBumps += 1), drawAgain($), (list.side = sideSign()))
   // Counted from the panel's last drawing afresh or the last of these, so a Details tab or the band drawn without the panel moves on
   // every CALM too, not each second
-  if (!(isMoving || outputMoved) || isTyping || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
+  if (!(isMoving || outputMoved) || isBoxHeld(now) || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
   calmAt = now
   outputMoved = false
   await writeHeldOthers($)
@@ -446,6 +457,7 @@ const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) =
   if (one?.ask) boxOpen = undefined
   replyMark = one?.ask ? askMark(one.ask) : ''
   barBoxAt = 0
+  isBarSettling = false
   presses += 1
   redraw($)
   const ask = one?.ask
