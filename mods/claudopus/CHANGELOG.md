@@ -2,6 +2,14 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.183 · 17 November 2026
+- What waits for you stays at the top of the panel in the order it came: the oldest first, and a new one goes under it, so nothing you're about to press moves down.
+- A key to paste or a permission that a task's own command asks for now sits inside that task's card. It no longer floats in a box above the cards.
+- Once you allow something, the line saying so stays inside that task's card, not loose between the cards.
+- After you answer, the card keeps its place while anything else still waits. Cards go back down once nothing waits.
+- The bar above the chat always shows one line while anything waits: how many, and what the first one asks. Show takes the panel back to the top.
+- On every question the main answer is the filled button, and Answer in words is the quiet one at the end.
+
 ## 0.2.182 · 17 November 2026
 - When Claude Code refuses a task's command, its card now shows the command whole, where it would run and for how long at most, and a Run it button. Your press, and only your press, has Claudopus run exactly that command once, as a command you type in your terminal would run (your shell and its start files, without Claude Code's own settings). The card shows it running with what it last printed and a Stop it button; a command is stopped after 10 minutes at most, or an hour for one Claude would have run in the background. The task is told where the output goes and gets its last lines when it ends; a task that had ended is started again with them at the chat's next step, or at once when you press Send it to Claude now. Nothing about the task's own permissions changes, and the task never runs it itself.
 

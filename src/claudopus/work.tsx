@@ -329,7 +329,7 @@ const workHooks = (on: On) => {
       }
       grants = [...grants, ...released.grants]
       // A command that runs a runner may ask for a password or key in a box: the box is drawn only while one runs
-      if ([String((e as { command?: unknown }).command ?? ''), ...(await scriptsRun($, String((e as { command?: unknown }).command ?? '')))].some(text => /\bbin\/(?:admin|secret)\b/.test(text))) runnerBegun(e.tool_use_id, String((e as { command?: unknown }).command ?? ''), await $.clock.now())
+      if ([String((e as { command?: unknown }).command ?? ''), ...(await scriptsRun($, String((e as { command?: unknown }).command ?? '')))].some(text => /\bbin\/(?:admin|secret)\b/.test(text))) runnerBegun(e.tool_use_id, String((e as { command?: unknown }).command ?? ''), await $.clock.now(), e.agentId)
     }
     if (!isRefusedHere) {
       const fileSaid = await gateOwnFile($, e, raw as never)
