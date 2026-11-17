@@ -115,6 +115,8 @@ export type Todo = {
   // The rules it was last handed after its brief, by their text's hash, and whether a compaction has taken them from its context
   rulesSent?: string
   rulesDue?: boolean
+  // Its own folder in the chat's scratchpad, by name, which its rules name
+  scratch?: string
   detached?: { id: string; what: string; at: number; cmd: string; log: string; pid?: string; isLeft?: boolean; from?: string }[]
   // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
   // so. It is still at work, and its card says what it waits for

@@ -1,0 +1,4 @@
+- Each task a chat starts gets a scratch folder of its own in the chat's scratchpad, so one task's script no longer replaces another's. A task that writes at the scratchpad's top is told to use its own folder instead.
+- A task that writes into another running task's scratch folder, or changes a file another running task changed in the last ten minutes, is stopped once and told whose it is; doing it again on purpose goes through.
+- A task that starts changing files in the same checkout as another running task is told so, and to make a worktree of its own.
+- When a task's build or page fails with an error naming a file another running task changed lately, Claudopus tells that other task to finish or put back its change, and tells the first task whose change it is, so nobody waits for someone to notice.

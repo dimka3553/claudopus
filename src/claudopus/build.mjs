@@ -20,7 +20,7 @@ const TESTS_OUT = join(hooks, 'tests')
 const PARTS = [
   'common.tsx', 'recorder.tsx', 'rules.tsx', 'settings.tsx', 'subjects.tsx', 'cards.tsx', 'talk.tsx', 'servers.tsx', 'reports.tsx', 'welcome.tsx',
   'results-tab.tsx', 'memory.tsx', 'stats-tab.tsx', 'about.tsx', 'art.tsx', 'term-art.tsx', 'pictures.tsx', 'workflows.tsx', 'notify.tsx',
-  'updating.tsx', 'changelog.tsx', 'asking.tsx', 'sharing.tsx', 'macs.tsx', 'afar.tsx', 'boxes.tsx', 'gate.tsx', 'prompts.tsx', 'lean.tsx', 'chat.tsx', 'stuck.tsx', 'jobs.tsx', 'steps.tsx', 'keep.tsx', 'keys.tsx', 'work.tsx', 'commands.tsx', 'tools.tsx', 'usage.tsx', 'band.tsx',
+  'updating.tsx', 'changelog.tsx', 'asking.tsx', 'sharing.tsx', 'macs.tsx', 'afar.tsx', 'boxes.tsx', 'gate.tsx', 'prompts.tsx', 'lean.tsx', 'chat.tsx', 'stuck.tsx', 'jobs.tsx', 'steps.tsx', 'keep.tsx', 'keys.tsx', 'crossing.tsx', 'work.tsx', 'commands.tsx', 'tools.tsx', 'usage.tsx', 'band.tsx',
   'panel.tsx', 'tabs.tsx', 'register.tsx',
 ]
 const TEST_PARTS = [

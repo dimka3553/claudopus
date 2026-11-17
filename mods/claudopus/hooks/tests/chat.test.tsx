@@ -1054,6 +1054,64 @@ test('work reaches main only through the release runner: its rules name it, and 
   }
 })
 
+test("tasks of one chat don't cross each other's files: each has its own scratch folder, the scratchpad's top is refused, another running task's folder or file is refused once, a shared checkout is named, and the task whose change breaks the build is told", async ($, on) => {
+  const { files, held, appended } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose and the chin', wait: false, origin: composer })
+  const first = prompts.length
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'NOSE' } as never)
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'CHIN', description: 'Fix the chin' } as never)
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'NOSE AGAIN' } as never)
+  // Each task is told a folder of its own in the scratchpad, two with the same few words two folders
+  expect(prompts[first]).toContain('Your own folder for scratch files is `fix-the-nose`')
+  expect(prompts[first + 1]).toContain('`fix-the-chin`')
+  expect(prompts[first + 2]).toContain('`fix-the-nose-2`')
+  const S = '/private/tmp/claude-501/-repo/sess-1/scratchpad'
+  const call = async (id: string, agentId: string, input: Record<string, unknown>) => (await $.tool.call({ tool_use_id: id, agentId, ...input } as never)) as { deny?: string; context?: string[] }
+
+  // 16 Nov: one task's shot.mjs at the scratchpad's top replaced another's; by Write, or by a command's redirect through a variable
+  expect((await call('w1', 'a1', { tool: 'Write', file_path: `${S}/shot.mjs`, content: 'x' })).deny).toContain("the scratchpad's top is shared by every task of this chat")
+  expect((await call('w1b', 'a1', { tool: 'Write', file_path: `${S}/shot.mjs`, content: 'x' })).deny).toContain('`fix-the-nose`')
+  expect((await call('w2', 'a2', { tool: 'Bash', command: `S=${S}; cat > $S/shot.mjs <<'EOF'\nconst on = a => a > 1\nEOF\nnode $S/shot.mjs` })).deny).toContain('`fix-the-chin`')
+  expect((await call('w3', 'a2', { tool: 'Bash', command: `cd ${S} && node render.mjs > page.png` })).deny).toContain("the scratchpad's top")
+  // Its own folder, and its helper's inside it, are its own; a command that only reads the top, or writes elsewhere, runs
+  expect((await call('w4', 'a1', { tool: 'Write', file_path: `${S}/fix-the-nose/shot.mjs`, content: 'x' })).deny).toBeUndefined()
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Shoot the nose', prompt: 'go', parentAgentId: 'a1' } as never)
+  expect((await call('w5', 'a4', { tool: 'Bash', command: `node ${S}/fix-the-nose/shot.mjs > ${S}/fix-the-nose/helper/out.png 2>&1` })).deny).toBeUndefined()
+  expect((await call('w6', 'a2', { tool: 'Bash', command: `ls ${S} && node shot.mjs 2>/dev/null > /tmp/x.png` })).deny).toBeUndefined()
+  // Another running task's folder is refused once, with whose it is; the same call again goes through
+  expect((await call('w7', 'a2', { tool: 'Write', file_path: `${S}/fix-the-nose/shot.mjs`, content: 'y' })).deny).toContain('the task "Fix the nose"\'s, which is still working')
+  expect((await call('w8', 'a2', { tool: 'Write', file_path: `${S}/fix-the-nose/shot.mjs`, content: 'y' })).deny).toBeUndefined()
+
+  // One checkout of an app two tasks change at once: the same file is refused once, a second file of it names the other task
+  files.set('/app/.git', '')
+  files.set('/app-chin/.git', 'gitdir: /app/.git/worktrees/app-chin')
+  expect((await call('e1', 'a1', { tool: 'Write', file_path: '/app/src/Button.tsx', content: "import './Button.module.css'" })).context ?? []).toEqual([])
+  expect((await call('e2', 'a2', { tool: 'Edit', file_path: '/app/src/Button.tsx', old_string: 'a', new_string: 'b' })).deny).toContain('the task "Fix the nose", still working, changed this file less than a minute ago')
+  const second = await call('e3', 'a2', { tool: 'Write', file_path: '/app/src/Card.tsx', content: 'x' })
+  expect(second.deny).toBeUndefined()
+  expect((second.context ?? []).join(' ')).toContain('the task "Fix the nose" is changing files in this same checkout (/app) right now')
+  expect((second.context ?? []).join(' ')).toContain('git worktree add')
+  // A worktree of its own crosses nothing
+  expect((await call('e4', 'a2', { tool: 'Write', file_path: '/app-chin/src/Button.tsx', content: 'x' })).deny).toBeUndefined()
+  expect((await call('e5', 'a2', { tool: 'Write', file_path: '/app-chin/src/Card.tsx', content: 'x' })).context ?? []).toEqual([])
+
+  // The build fails on the nose task's half-done file: the chin task that met it is told whose it is, and the nose task is told
+  const build = call('b1', 'a2', { tool: 'Bash', command: 'hold nextbuild' })
+  await until(async () => held.get('nextbuild'))
+  held.get('nextbuild')?.("Failed to compile\n./src/Button.tsx:1:1\nModule not found: Can't resolve './Button.module.css'")
+  expect(((await build).context ?? []).join(' ')).toContain('this error names src/Button.tsx, which the task "Fix the nose" changed less than a minute ago')
+  expect(await until(async () => appended.find(one => one.startsWith('a1: From Claudopus: the task "Fix the chin" just met an error naming src/Button.tsx')))).toBeDefined()
+  // Output that names the file with no error, or an error that names none of its files, tells nobody
+  for (const [i, text] of ['compiled ./src/Button.tsx in 2s', 'error in ./src/Other.tsx'].entries()) {
+    const quiet = call(`b${i + 2}`, 'a3', { tool: 'Bash', command: `hold ok${i}` })
+    await until(async () => held.get(`ok${i}`))
+    held.get(`ok${i}`)?.(text)
+    expect((await quiet).context ?? []).toEqual([])
+  }
+  expect(appended.filter(one => one.startsWith('a1: From Claudopus')).length).toBe(1)
+})
+
 test('a large paste is saved to a file and left out of the chat', async ($, on) => {
   const { files } = world(on)
   await $.session.start(start)

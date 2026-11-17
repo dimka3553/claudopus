@@ -162,7 +162,7 @@ const rulesAgain = async ($: EngineInterface, agent: string) => {
   if (!card.rulesDue && card.rulesSent === hashOf(rules)) return ''
   await changeTodos($, list => list.map(one => (one.id === agent ? { ...one, rulesSent: hashOf(rules), rulesDue: undefined } : one)))
   await log($, `work ${agent} handed its rules again${card.rulesDue ? ' after a compaction' : ' as they changed'}`)
-  return `${card.rulesDue ? 'Your context was compacted, and the rules you were handed at the start are no longer in it.' : 'The rules every task follows have changed since you started.'} These are the rules now; they replace any earlier copy.\n\n${rules}`
+  return `${card.rulesDue ? 'Your context was compacted, and the rules you were handed at the start are no longer in it.' : 'The rules every task follows have changed since you started.'} These are the rules now; they replace any earlier copy.\n\n${rules}${card.scratch ? `\n${SCRATCH_LINE(card.scratch)}` : ''}`
 }
 
 const workHooks = (on: On) => {
@@ -225,6 +225,12 @@ const workHooks = (on: On) => {
     if (ownFiles) {
       await log($, `refused ${e.tool} writing the memory folder's own files`)
       return { deny: ownFiles }
+    }
+    // A task's write that crosses the files of another task of this chat still at work (crossing.tsx)
+    const crossed = await crossingOf($, e).catch(async err => (await log($, `crossing not looked at: ${String(err)}`), {} as Awaited<ReturnType<typeof crossingOf>>))
+    if (crossed.deny) {
+      await log($, `refused work ${e.agentId}'s ${e.tool} that crosses another task's files`)
+      return { deny: crossed.deny }
     }
     // (only while it, or the work it helps, has a question of its own open to the person: a wait said for them then is that)
     if (dir && !isOff && e.agentId !== undefined && isPersonWait(e as never, who()) && asksNow(await read($, todos), e.agentId)) {
@@ -328,7 +334,11 @@ const workHooks = (on: On) => {
       if (from && e.agentId !== undefined && !r.deny) await keepSpan($, e.agentId, call as never, from, spanAt, r.result).catch(err => log($, `left runs not looked for: ${String(err)}`))
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
       const shown = await hideKept($, call, r)
-      return isMovedBack && !shown.deny && !shown.isError ? ({ ...shown, context: [...((shown as { context?: string[] }).context ?? []), MOVED_BACK(who())] } as typeof shown) : shown
+      // What it wrote is kept as it ends, and what crossed another task's is told then
+      const broke = r.deny || (r.isError && e.tool !== 'Bash') ? '' : await crossEnded($, e, crossed, r.result).catch(() => '')
+      const crossing = r.deny ? [] : [crossed.context ?? '', broke].filter(Boolean)
+      const told = crossing.length && !shown.deny ? ({ ...shown, context: [...((shown as { context?: string[] }).context ?? []), ...crossing] } as typeof shown) : shown
+      return isMovedBack && !told.deny && !told.isError ? ({ ...told, context: [...((told as { context?: string[] }).context ?? []), MOVED_BACK(who())] } as typeof told) : told
     }
     // Work the person stopped is not set going again, by the chat or by the work above a helper of it: no message to it, no resume,
     // no fresh agent for the same task, until their next message
@@ -648,8 +658,10 @@ const workHooks = (on: On) => {
     // and is handed, after its brief, the rules every piece of work follows and where the chat's words are, so the brief stays short
     // and where the runner is that does an admin command with a Mac's kept password
     const rules = isTold ? await workRules($) : ''
+    // and a scratch folder of its own in the chat's scratchpad, which every task of the chat shares
+    const scratch = isTold ? scratchName(await read($, todos), e.description ?? '') : ''
     const isBackground = isHelperSpawn(e)
-    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}` } : isBackground ? { ...e, background: true } : e)
+    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}\n${SCRATCH_LINE(scratch)}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
     if (r.model) seeModel(r.model)
     // A resumed agent keeps the model it first started on, or none: the model it resumes on may be one the app moved it to after a flag. A
@@ -669,7 +681,7 @@ const workHooks = (on: On) => {
       const old = list.find(one => one.id === id)
       // Its title is the few words the task was given; under it, the person's message as they wrote it
       const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}) }
-      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(rules ? { rulesSent: hashOf(rules) } : {}) }])
+      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(rules ? { rulesSent: hashOf(rules) } : {}), ...(old?.scratch || scratch ? { scratch: old?.scratch || scratch } : {}) }])
     })
     if (isOwn) await openList($)
     await sync($).catch(() => undefined)
