@@ -30,9 +30,9 @@ small=$(grep -o '^file [0-9a-f]*: small one.txt' "$tmp/log" | cut -d' ' -f2 | tr
 grep -q "^file $big: big.mp4, 3000000 bytes, 3 parts" "$tmp/log" && ok "it names each file with its size and parts" || no "it names each file with its size and parts"
 grep -q "const ids=\[\"$big\"\]" "$tmp/log" && grep -q "const ids=\[\"$small\"\]" "$tmp/log" && ok "it prints a PUT script for each file" || no "it prints a PUT script for each file"
 [ ${#big} = 32 ] && [ "$big" != "$(shasum -a 256 "$tmp/big.mp4" | cut -c1-32)" ] && ok "a file's id is random, not from its bytes" || no "a file's id is random, not from its bytes: $big"
-grep -q "input\[type=file\]')\].find(e=>shown(e.closest(" "$tmp/log" && grep -q "w<30&&!(inp=boxed())" "$tmp/log" && ok "the PUT script prefers the file input of the dialog that shows, and waits for it, where a page has one behind it too" || no "the PUT script prefers the file input of the dialog that shows"
+grep -q "input\[type=file\]')\].find(e=>shown(e.closest(" "$tmp/log" && grep -q "w<30&&!(inp=boxed())" "$tmp/log" && grep -q "the dialog has no file input yet" "$tmp/log" && ok "the PUT script uses the file input of the dialog that shows, waits for it, and never one behind it" || no "the PUT script prefers the file input of the dialog that shows"
 grep -q "h!==meta.sha" "$tmp/log" && ok "the PUT script refuses a file whose SHA-256 differs" || no "the PUT script refuses a file whose SHA-256 differs"
-grep -q "for(const k of gone)t.objectStore('parts').delete(k)" "$tmp/log" && ! grep -q "^(async.*deleteDatabase" "$tmp/log" && ok "the PUT script clears only its own files' parts from the site once set" || no "the PUT script clears only its own files' parts"
+grep -q "for(const k of gone)o.delete(k)" "$tmp/log" && grep -q "if(!left)indexedDB.deleteDatabase" "$tmp/log" && ok "the PUT script clears only its own files' parts from the site once set, and the store once empty" || no "the PUT script clears only its own files' parts"
 grep -q "location.replace('$base/go?id=" "$tmp/log" && ok "the CARRY script it prints comes back to this server" || no "the CARRY script it prints comes back to this server"
 
 # Each part's page, and what its address after the # holds (read with python3: a shell's patterns take minutes on 2 MB)
