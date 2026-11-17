@@ -235,6 +235,40 @@ test('while drawings of the panel are slow, as under seven tasks and their comma
   expect(await until(async () => list.find({ type: 'Text', text: 'Find more scans' }))).toBeDefined()
 })
 
+test('two asks for the panel or the bar that come together, as from two windows of a chat or the engine\'s push beside the mod\'s, ask for it again only for a drawing made afresh that the engine dropped, and that ask is given it as made: they never overtake each other without end, each drawing a new pane under the pointer whose hover goes out', async ($, on) => {
+  const { clock, files } = world(on)
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Fix the nose', prompt: 'fix' } as never)
+  files.set(`${MEMORY}/record-panel.on`, '')
+  files.set(`mtime:${MEMORY}/record-panel.on`, String(clock.now()))
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await clock.advance(2500)
+  type Line = { ev: string; component?: string; held?: boolean }
+  const recorded = async () => {
+    await clock.advance(2100)
+    const path = [...files.keys()].find(one => one.includes('/panel-record/'))
+    return (files.get(path ?? '') ?? '').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Line)
+  }
+  const redraws = (lines: Line[]) => lines.filter(one => one.ev === 'redraw-all').length
+  // Nothing new since the last drawing: both asks are given the panel as it was, and nothing asks for it again
+  await list.redraw()
+  const before = redraws(await recorded())
+  await Promise.all([list.redraw(), list.redraw()])
+  await new Promise<void>(done => setTimeout(() => done(), 300))
+  expect(redraws(await recorded())).toBe(before)
+  // The bar, made afresh at each ask: the one made while the other ask overtook it is asked for once, and given as made
+  const from = (await recorded()).length
+  await Promise.all([bar.redraw(), bar.redraw()])
+  await new Promise<void>(done => setTimeout(() => done(), 300))
+  const after = (await recorded()).slice(from)
+  // (a drawing's line is written once it is given, after the call for a drawing its end made)
+  const bars = after.filter(one => one.ev === 'render' && one.component === 'AbovePrompt')
+  expect(bars.filter(one => !one.held).length).toBe(1)
+  expect(bars.at(-1)?.held).toBe(true)
+  expect(redraws(after)).toBe(1)
+})
+
 test('the bar above the prompt on the desktop, drawn as often as the panel under load, is given again as it was for a second after each drawing made afresh, and a tab of the mod\'s through a click on its buttons, so a click names one still there; both are then drawn afresh by themselves', async ($, on) => {
   const { clock, files } = world(on)
   // Each drawing of the panel takes 300 ms, as on 16 Nov with seven tasks at work; the bar's own stay quick
