@@ -242,8 +242,8 @@ const chatCommandEnded = async ($: EngineInterface, text: string): Promise<strin
 // work"); and a task that ended its step to wait for its helpers or a wake_me, which Claude Code does not count as its own at work,
 // so says it "ended without delivering a report" while Claudopus knows it waits. Only a notice made of nothing but Claude Code's own
 // sentences for these is such a notice: a security warning, a refused report, an agent's own words, a note of a limit or of messages
-// that came late, a worktree, any line Claudopus does not know, keeps it. A prompt of only such notices is left out; beside anything
-// else, each task in it that waits goes with the word that it is still at work (waitsText)
+// that came late, a worktree, any line Claudopus does not know, keeps it. A prompt of only such notices costs the chat no turn of
+// the model's; beside anything else, each task in it that waits goes with the word that it is still at work (waitsText)
 const ENGINE_FILLER = [
   /This agent has not reported yet: it is waiting on its own background work and will deliver its report through \w+ when that finishes\./g,
   /This agent's report was delivered to you as a message from "[^"]*" \(its \w+ call\)\. Read it there; it is not repeated here\./g,
@@ -282,6 +282,18 @@ const quietNotices = (text: string, waiting: Set<string>): Quiet => {
   const waits = [...new Set(notices.filter(isEndedWaiting).map(idOf))]
   const isQuiet = notices.length > 0 && !rest && notices.every(body => isRepeat(body) || isWaitingOwn(body) || (isCompleted(body) && isEndedWaiting(body)))
   return { isQuiet, isRepeat: isQuiet && notices.every(isRepeat), waits }
+}
+// Such a prompt is let in and its turn answered with no model (workHooks' turn.step): Claude Code shows every prompt a hook drops
+// as a warning card, "Prompt dropped by a hook" (2.1.325), and asks the model again after an answer with no visible text ("Your
+// previous response had no visible output"). Its own line for a turn with nothing to say ends the turn; it counts that line as no
+// answer (the turn's result is empty)
+const NO_ANSWER = 'No response requested.'
+// The notices a prompt is made of, each whole: a turn is quiet when every notice in it was let in as quiet and it brings nothing
+// else (Claude Code may put its header before them, or join several in one turn)
+const noticesOf = (text: string) => [...text.matchAll(/<task-notification>[\s\S]*?<\/task-notification>/g)].map(m => m[0])
+const isQuietTurn = (text: string, quiet: ReadonlySet<string>) => {
+  const notices = noticesOf(text)
+  return notices.length > 0 && notices.every(one => quiet.has(one)) && !text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').replace(NOTICE_HEADER, '').trim()
 }
 
 // ---- The last step on a go-ahead ----
