@@ -202,7 +202,7 @@ const took = (ms: number) => {
   const [hrs, m, sec] = [Math.floor(all / 3600), Math.floor(all / 60) % 60, all % 60]
   const two = (n: number) => String(n).padStart(2, '0')
   if (isRunFromAfar) return hrs ? `${hrs}h ${two(m)}m` : m ? `${m}m` : '<1m'
-  return hrs ? `${hrs}h ${two(m)}m ${two(sec)}s` : m ? `${m}m ${two(sec)}s` : `${sec}s`
+  return hrs ? `${hrs}h ${two(m)}m` : m ? `${m}m ${two(sec)}s` : `${sec}s`
 }
 const thousands = (tokens: number) =>
   isRunFromAfar ? (tokens < 10_000 ? '<10k' : `${Math.round(tokens / 10_000) * 10}k`) : `${(tokens / 1000).toFixed(tokens < 100_000 ? 1 : 0)}k`
@@ -4048,7 +4048,7 @@ const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: bo
     }
     await new Promise<void>(done => void $.clock.after(3000, done))
   }
-  return { text: "Couldn't check: another chat's update did not finish. Try again later.", isError: true }
+  return { text: "Couldn't check: another chat's update didn't finish. Try again later.", isError: true }
 }
 const pageFor = async ($: EngineInterface, version: string) => {
   if (pageRead && !isNewer(version, pageRead.page.version)) return pageRead.page
@@ -7568,7 +7568,7 @@ const stepsAtEnd = async ($: EngineInterface) => {
       answeredAsks.delete(`${id}:${held.ask.at}:${held.ask.text}`)
       if (answeredAt.get(id) === held.ask.at) answeredAt.delete(id)
       sentReplies.delete(id)
-      await stepLine($, id, `Claudopus didn't do “${held.said}” · Claude ${card.status === 'stopped' ? 'was stopped' : 'failed'} first, so the question is back`)
+      await stepLine($, id, `Claudopus didn't do “${held.said}” · Claude ${card.status === 'stopped' ? 'stopped' : 'failed'} first, so the question is back`)
       if (card.ask?.refused) await askGone($, card).catch(err => log($, `refusal notice not cleared in the chat: ${String(err)}`))
       await askInChat($, { ...card, ask: held.ask }).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
     } else await lastStep($, card, held.ask, held.said).catch(err => log($, `last step of ${id} not done: ${String(err)}`))
@@ -7588,7 +7588,7 @@ const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['as
     `Do the last step of the task "${titleOf(one)}", which {name} just gave the go-ahead for by pressing "${said}" (to: ${ask.text}): ${step}\nWork in ${folder}${branch && branch !== 'HEAD' ? `, on its branch ${branch}` : ''}. It is this one step: do only that, then report in one or two lines what happened. If it fails in a way that needs what the task that built it knows (a merge conflict, a failing check, a question only it can answer), send that task, "${one.id}", a message with SendMessage saying what failed and the last lines of the output, and end; do not fix it yourself.`,
   )
   await stepLine($, one.id, `You pressed “${said}” · Claudopus starts a new task for it: ${cut(step, 160)}`)
-  const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: last step`, subagentType: 'claudopus:quick', model: clearModel(models, lean), cwd: folder } }
+  const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: finishing`, subagentType: 'claudopus:quick', model: clearModel(models, lean), cwd: folder } }
   wakes.push(wake)
   void $.clock.after(WAKE_WAIT, () => {
     const at = wakes.indexOf(wake)
@@ -8165,21 +8165,23 @@ const callWords = (tool: string, input?: { description?: unknown; command?: unkn
   if (tool === 'Agent' || tool === 'Task') return said ? `Starting a helper: ${said}` : 'Starting a helper'
   if (tool === 'SendMessage') return 'Sending a message'
   if (tool === 'TaskStop' || tool === 'KillShell') return 'Stopping a command'
+  if (tool === 'TaskOutput' || tool === 'BashOutput') return "Reading a command's output"
   if (tool === 'Skill') return 'Using a skill'
   if (/chrome|browser|playwright|puppeteer/i.test(tool)) return 'Using the browser'
   const server = /^mcp__([^_]+(?:_[^_]+)*)__/.exec(tool)?.[1]
-  return server ? `Using ${server.replace(/[-_]+/g, ' ')}` : `Using ${tool}`
+  const words = (server ?? '').replace(/^plugin_/, '').split(/[-_]+/).filter((word, n, all) => word && all.indexOf(word) === n)
+  return words.length ? `Using ${words.join(' ')}` : 'Using a tool'
 }
 const helperNow = (one: Todo, at: number, commands = 0) => {
   const call = lastCall.get(one.id)
   const note = [...one.entries].reverse().find(entry => entry.kind !== 'steer' && entry.text)
-  if (note && (!call || (note.at ?? 0) >= call.at)) return note.text
-  if (!call) return ''
+  if (note && (!call || (note.at ?? 0) >= call.at)) return !commands && at - (note.at ?? at) >= 3 * 60_000 ? `Last: ${note.text} · nothing new for ${took(at - (note.at ?? at))}` : note.text
+  if (!call) return one.status === 'working' ? 'Working' : ''
   if (!call.endedAt) return at - call.at >= 60_000 ? `${call.what} · ${took(at - call.at)}` : call.what
   const idle = at - call.endedAt
   if (idle < 60_000) return 'Thinking'
   if (commands) return `${commands === 1 ? 'Waiting for its command' : 'Waiting for its commands'} · ${took(idle)}`
-  return idle < 3 * 60_000 ? `Thinking · ${took(idle)}` : `Nothing new for ${took(idle)}`
+  return idle < 3 * 60_000 ? `Thinking · ${took(idle)}` : `Last: ${call.what} · nothing new for ${took(idle)}`
 }
 
 const runningWhat = (tool: string) =>
@@ -8379,7 +8381,6 @@ const stuckLine = (list: Todo[], one: Todo, at: number) => {
   return `Nothing new for ${mins}m.${tail}${nudge}`
 }
 
-const runningLine = (one: Todo, at: number) => (one.status === 'working' && one.running && at - one.running.at >= RUNNING_SHOWN ? `${one.running.what} · ${took(at - one.running.at)}` : '')
 
 
 const BG_KEPT = 20
@@ -8637,11 +8638,11 @@ const lookJobs = async ($: EngineInterface) => {
         ? jobProcs.filter(p => p.pid === wait.pid)
         : undefined
     if (runs && jobProcs.length) {
-      if (!runs.length) return wait.isStart ? '' : 'What it waits for has ended'
+      if (!runs.length) return wait.isStart ? '' : 'What it waits for ended'
       if (runs.some(p => treeOf(jobProcs, p.pid).some(isPausedProc))) return 'What it waits for is paused'
     }
     const at = wait.file ? changed.get(wait.file) : undefined
-    return at && now - at >= JOB_QUIET ? `What it waits for has not changed for ${shortAgo(now - at)}` : ''
+    return at && now - at >= JOB_QUIET ? `What it waits for hasn't changed for ${shortAgo(now - at)}` : ''
   }
   const parts = body.split(/\n@@JOB@@ ([^\n]*)\n/)
   let isChanged = false
@@ -11626,7 +11627,7 @@ const panelHooks = (on: On) => {
     const isFinishMoment = (one: Todo) => one.status === 'done' && !one.ask && lingers(one, at)
     const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
     const stood: Record<Todo['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
-    const offModel = (one: Todo) => (one.flagged ? `stopped by a safety check, so it doesn't continue on ${one.flagged}` : one.moved ? `the app moved it to ${one.moved}` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
+    const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `Claude Code moved it to ${one.moved}` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
     const glance = (one: Todo, count = '') =>
       [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     const { picking = '' } = await read($, view)
@@ -11789,7 +11790,7 @@ const panelHooks = (on: On) => {
             {/* Where the bar above the prompt holds the reply box, the last answer opens it there for this card, and closes it again */}
             {'Input' in table && repliesInBar(e.surface) ? (
               isReplyOpen(one) ? (
-                <Button key={`${key}-inbar-close-${presses}`} label="Close the reply box" onPress={press => openReply($, undefined, press.surface)} />
+                <Button key={`${key}-inbar-close-${presses}`} label="Close" onPress={press => openReply($, undefined, press.surface)} />
               ) : (
                 <Button key={`${key}-inbar-${presses}`} label="Answer in words" onPress={press => openReply($, one, press.surface)} />
               )
@@ -11936,7 +11937,7 @@ const panelHooks = (on: On) => {
                   </Text>
                 ) : (
                   <Box flexDirection="column" minWidth={0}>
-                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(now(one), room) || (one.status === 'working' ? 'Starting' : "Claude hasn't said what it's doing")}</Text>
+                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(now(one), room) || (one.status === 'working' ? helperNow(one, at, jobsOf(one, at).length) || 'Starting' : "Claude hasn't said what it's doing")}</Text>
                     {/* Held where it was after an answer, once a newer line of the work's took the answer's place: why it is still up there */}
                     {!one.ask && !sentLine(one, at) && heldAnswer(one, at) ? <Text key={`held-answer-${one.id}`} dimColor wrap="truncate-end">{`✓ You answered “${cut(heldAnswer(one, at)?.text ?? '', 60)}”`}</Text> : null}
                   </Box>
@@ -12097,16 +12098,16 @@ const panelHooks = (on: On) => {
       const told = isSilent && silentTold.has(job.id) ? 'Claude was told to check it' : ''
       const [state, short]: [string, string] =
         job.isPaused ? ['Paused', 'Paused']
-        : job.target ? [job.target, job.target.replace(/^what it waits (?:for|on) (?:is|has) /i, '').replace(/^not changed for /, 'still for ')]
+        : job.target ? [job.target, job.target.replace(/^What it waits for hasn't changed for /, 'No change for ')]
         : job.kind === 'server' || job.kind === 'watch' ? ['', '']
         : !isSilent ? ['', '']
-        : hasSaid ? [`nothing new for ${ago(still)}`, `nothing new ${ago(still)}`]
-        : !job.wroteAt || job.isEmpty ? [`No output yet · started ${shortAgo(ran)} ago`, 'No output yet']
-        : [`No progress shown · nothing new for ${ago(still)}`, `nothing new ${ago(still)}`]
+        : hasSaid ? [`nothing new for ${ago(still)}`, `nothing new for ${shortAgo(still)}`]
+        : !job.wroteAt || job.isEmpty ? [`No output yet · started ${shortAgo(ran)} ago`, `No output for ${shortAgo(ran)}`]
+        : [`No progress shown · nothing new for ${ago(still)}`, `Nothing new for ${shortAgo(still)}`]
       const isWarn = job.isPaused || Boolean(job.target) || isSilent
-      const lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching') : isSilent && hasSaid ? 'Last: ' : ''
+      const lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving · ') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching · ') : isSilent && hasSaid ? 'Last: ' : ''
       const programs = leftCommandOf(job.id) && job.count && job.count > 1 ? [`${job.count} programs`] : []
-      const numbers = [[...full, ...pct, ...rate, ...left, ...programs, ...mem], [...full, ...pct, ...left, ...programs, ...mem], [...full, ...pct, ...rate, ...left, ...mem], [...full, ...pct, ...rate, ...left], [...full, ...pct, ...left], [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...bare, ...left]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]
+      const numbers = [[...full, ...pct, ...rate, ...left, ...programs, ...mem], [...full, ...pct, ...rate, ...left, ...programs], [...full, ...pct, ...left, ...programs], [...full, ...pct, ...left], [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...bare, ...left]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]
       const tails = [[state, told], [state], [short, told], [short]].map(t => t.filter(Boolean))
       const tries = [...numbers.slice(0, 3).flatMap(nums => tails.map(tail => ({ nums, tail }))), ...tails.flatMap(tail => numbers.map(nums => ({ nums, tail })))]
       for (const { nums, tail } of tries) {
@@ -12116,7 +12117,7 @@ const panelHooks = (on: On) => {
         const room = width - lead.length - fixed.length - (fixed ? 3 : 0)
         const said = words && room >= 12 ? (words.length <= room ? words : `${words.slice(0, room - 1).replace(/\s+\S*$/, '')}…`) : ''
         const text = [...nums, said, ...tail].filter(Boolean).join(' · ')
-        return { text: text ? `${lead && (nums.length || said) ? lead : ''}${text}` : lead === 'Serving' || lead === 'Watching' ? lead : job.kind === 'wait' ? 'Waiting' : job.kind === 'download' ? 'Downloading' : 'Working', isWarn }
+        return { text: text ? `${lead && (nums.length || said) ? lead : ''}${text}` : lead === 'Serving · ' || lead === 'Watching · ' ? lead.slice(0, -3) : job.kind === 'wait' ? 'Waiting' : job.kind === 'download' ? 'Downloading' : 'Working', isWarn }
       }
       return { text: short, isWarn }
     }
@@ -12458,7 +12459,7 @@ const panelHooks = (on: On) => {
         'To-dos',
         kept ? `${done} of ${kept} done` : '',
         <Box flexDirection="column">
-          {done > DONE_FOLDED ? opener(OPEN_DONE, isFolded ? `${done} done` : 'Hide the done ones') : null}
+          {done > DONE_FOLDED ? opener(OPEN_DONE, isFolded ? `${done} done` : 'Hide done') : null}
           {one.items.map((item, i) => {
             if (item.state === 'done' && isFolded) return null
             if (item.state === 'doing') {
@@ -12711,7 +12712,7 @@ const panelHooks = (on: On) => {
             <Box key="part-gates" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
               <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-                <Text bold dimColor>Needs you now</Text>
+                <Text bold dimColor>Waiting for you</Text>
                 {adminBlock($, table, one, `gates-big-${one.id}`, at)}
               </Box>
             </Box>
@@ -12720,7 +12721,7 @@ const panelHooks = (on: On) => {
             <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE} />
               <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-                <Text bold dimColor>{needsPerson(one) ? 'Needs you now' : 'Claude is working on your reply'}</Text>
+                <Text bold dimColor>{needsPerson(one) ? 'Waiting for you' : 'Claude is working on your reply'}</Text>
                 {askBlock(one, `ask-big-${one.id}`, true)}
               </Box>
             </Box>
@@ -12789,7 +12790,7 @@ const panelHooks = (on: On) => {
       if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · Claude got no answer and is waiting for you' : p.kind === 'plan' ? 'You said no · Claude keeps planning' : p.title ? "You said no · it didn't run, and Claudopus told Claude" : "You said no · it didn't run, and Claude is waiting for what you say next"
       if (p.kind === 'question') return p.isRunning ? 'You answered · Claude has your answer' : 'You answered · Claude is continuing with your answer'
       if (p.kind === 'plan') return 'You approved the plan · Claude is carrying it out'
-      if (p.isCut) return 'You allowed it · it was stopped before it finished'
+      if (p.isCut) return 'You allowed it · it stopped before it finished'
       return p.isRunning ? 'You allowed it · it is running now' : `You allowed it · ${p.done ?? 'it ran and is done'}`
     }
     const answeredCard = (p: Prompt, key: string, c?: Shared) =>
@@ -12968,7 +12969,7 @@ const panelHooks = (on: On) => {
     }
 
     const alone = [...all, ...elsewhere, ...helpersThere].find(one => one.id === workId)
-    if (paneId !== LIST && !alone) return <Text dimColor>{paneId.startsWith(`${WORK_PANE}r-`) ? 'This task has finished, or its chat is closed. Open that chat to see it.' : 'This task is no longer available.'}</Text>
+    if (paneId !== LIST && !alone) return <Text dimColor>{paneId.startsWith(`${WORK_PANE}r-`) ? 'This task is done, or its chat is closed. Open that chat to see it.' : 'This task is no longer available.'}</Text>
     if (alone) void (alone.chat ? loadTheirs($, alone) : loadWork($, alone.id)).catch(() => undefined)
     const talked = alone ? talks.get(alone.id) : undefined
     const kept = await read($, reports)

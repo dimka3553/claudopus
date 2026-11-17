@@ -53,25 +53,30 @@ const callWords = (tool: string, input?: { description?: unknown; command?: unkn
   if (tool === 'Agent' || tool === 'Task') return said ? `Starting a helper: ${said}` : 'Starting a helper'
   if (tool === 'SendMessage') return 'Sending a message'
   if (tool === 'TaskStop' || tool === 'KillShell') return 'Stopping a command'
+  if (tool === 'TaskOutput' || tool === 'BashOutput') return "Reading a command's output"
   if (tool === 'Skill') return 'Using a skill'
   if (/chrome|browser|playwright|puppeteer/i.test(tool)) return 'Using the browser'
   const server = /^mcp__([^_]+(?:_[^_]+)*)__/.exec(tool)?.[1]
-  return server ? `Using ${server.replace(/[-_]+/g, ' ')}` : `Using ${tool}`
+  // (a plugin's server is named once: "mcp__plugin_easel_easel__draw" is easel)
+  const words = (server ?? '').replace(/^plugin_/, '').split(/[-_]+/).filter((word, n, all) => word && all.indexOf(word) === n)
+  return words.length ? `Using ${words.join(' ')}` : 'Using a tool'
 }
 // What a helper is doing now: its own latest note where that is newer than its latest action; else the action, with how long it
 // has run once that is a minute; between actions, thinking
 const helperNow = (one: Todo, at: number, commands = 0) => {
   const call = lastCall.get(one.id)
   const note = [...one.entries].reverse().find(entry => entry.kind !== 'steer' && entry.text)
-  if (note && (!call || (note.at ?? 0) >= call.at)) return note.text
-  if (!call) return ''
+  // (a note that has stood for minutes with nothing since, and no command of its own running, is the last thing it said)
+  if (note && (!call || (note.at ?? 0) >= call.at)) return !commands && at - (note.at ?? at) >= 3 * 60_000 ? `Last: ${note.text} · nothing new for ${took(at - (note.at ?? at))}` : note.text
+  // (after a reload of the mod nothing of its actions is known yet: it is at work all the same)
+  if (!call) return one.status === 'working' ? 'Working' : ''
   if (!call.endedAt) return at - call.at >= 60_000 ? `${call.what} · ${took(at - call.at)}` : call.what
   // Between actions it is thinking; long after its last one, with commands of its own running in the background, it waits for
   // them, as their rows under it show; long after with none, only that nothing new has come
   const idle = at - call.endedAt
   if (idle < 60_000) return 'Thinking'
   if (commands) return `${commands === 1 ? 'Waiting for its command' : 'Waiting for its commands'} · ${took(idle)}`
-  return idle < 3 * 60_000 ? `Thinking · ${took(idle)}` : `Nothing new for ${took(idle)}`
+  return idle < 3 * 60_000 ? `Thinking · ${took(idle)}` : `Last: ${call.what} · nothing new for ${took(idle)}`
 }
 
 // What a running call is, in a few words, for its row
@@ -325,8 +330,6 @@ const stuckLine = (list: Todo[], one: Todo, at: number) => {
   return `Nothing new for ${mins}m.${tail}${nudge}`
 }
 
-// A row's running call, with its time, once it has run RUNNING_SHOWN
-const runningLine = (one: Todo, at: number) => (one.status === 'working' && one.running && at - one.running.at >= RUNNING_SHOWN ? `${one.running.what} · ${took(at - one.running.at)}` : '')
 
 // ---- What work started in the background itself, which wakes it as it ends ----
 

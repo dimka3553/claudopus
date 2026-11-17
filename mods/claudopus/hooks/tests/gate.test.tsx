@@ -769,7 +769,7 @@ test('asked each time: the call is held, its card shows the exact command and th
   expect(logged.some(line => line.includes('"Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts') && line.includes('Nothing you type in the chat allows it'))).toBe(true)
   expect(notified).toContain('Fix the hosts file has a question for you | Run an admin command on this Mac: chmod 644 /etc/hosts')
   const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
-  expect(await details.find({ type: 'Text', text: 'Needs you now' })).toBeDefined()
+  expect(await details.find({ type: 'Text', text: 'Waiting for you' })).toBeDefined()
   await press('gate-b1-0-once')
   expect((await call).result).toBe('ran')
   // It ran with one grant, for this Mac and this exact command, sealed with the keychain's key; the grant goes with the call

@@ -134,7 +134,7 @@ const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: bo
     }
     await new Promise<void>(done => void $.clock.after(3000, done))
   }
-  return { text: "Couldn't check: another chat's update did not finish. Try again later.", isError: true }
+  return { text: "Couldn't check: another chat's update didn't finish. Try again later.", isError: true }
 }
 // A chat whose panel shows a newer version than any page it has read reads the page itself once, for that version's lines, at most
 // every PAGE_AGAIN; never while the look is set to only when asked, when only a press reads it

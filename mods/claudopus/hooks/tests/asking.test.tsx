@@ -733,10 +733,10 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   expect((await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === '✓ Copied')))).toBeDefined()
   // Its Details tab has it at the top, and clearing it takes it away
   const ears = await $.ui.mount({ ...LIST, requestId: 'work-a2', surface: 'desktop' } as never)
-  expect(await ears.find({ type: 'Text', text: 'Needs you now' })).toBeDefined()
+  expect(await ears.find({ type: 'Text', text: 'Waiting for you' })).toBeDefined()
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: '' } as never)
   expect(await list.find({ type: 'Text', text: 'ABCD-1234' })).toBeUndefined()
-  expect(await ears.find({ type: 'Text', text: 'Needs you now' })).toBeUndefined()
+  expect(await ears.find({ type: 'Text', text: 'Waiting for you' })).toBeUndefined()
 
   // An ask for a go-ahead carries buttons; the one pressed goes back to the work and the ask goes
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a2', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
@@ -759,7 +759,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   // At work on the reply, the ask is drawn in the work's purple, not as waiting on the person: its question with the reply under it,
   // and no buttons, box or send, on the small card and in Details
   expect((await list.find({ type: 'Text', text: 'Submit it to the plugin directory.' }))?.props.color).toBe('#8A63F0')
-  expect(await ears.find({ type: 'Text', text: 'Needs you now' })).toBeUndefined()
+  expect(await ears.find({ type: 'Text', text: 'Waiting for you' })).toBeUndefined()
   expect(await ears.find({ type: 'Text', text: 'Claude is working on your reply' })).toBeDefined()
   for (const pane of [list, ears]) {
     expect((await pane.findAll({ type: 'Button' })).some(b => b.props.label === 'Submitted' || b.props.label === 'Not now')).toBe(false)
@@ -1012,7 +1012,7 @@ test('the bar above the prompt on the desktop, drawn as often as the panel under
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   const says = async () => {
     await config.redraw()
-    return (await config.findAll({ type: 'Text' })).map(one => one.text ?? '').map(text => /Last looked (\d+ min)/.exec(text)?.[1]).find(Boolean)
+    return (await config.findAll({ type: 'Text' })).map(one => one.text ?? '').map(text => /Last checked (\d+ min)/.exec(text)?.[1]).find(Boolean)
   }
   expect(await says()).toBe('5 min')
   // From the focus on one of its buttons until the press, the drawing on screen stays, so the press names that button
@@ -1500,7 +1500,7 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
     deskEdges: await edges(desk),
     termEdges: await inTerminal(LIST, edges),
     buttons: [await desk.findAll({ type: 'Button' }), await inTerminal(LIST, pane => pane.findAll({ type: 'Button' })), await inTerminal(BAND, pane => pane.findAll({ type: 'Button' }))].map(all => all.map(b => b.props.label)),
-    heading: (await details.find({ type: 'Text', text: 'Needs you now' })) ? 'needs' : (await details.find({ type: 'Text', text: 'Claude is working on your reply' })) ? 'acting' : 'none',
+    heading: (await details.find({ type: 'Text', text: 'Waiting for you' })) ? 'needs' : (await details.find({ type: 'Text', text: 'Claude is working on your reply' })) ? 'acting' : 'none',
   })
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: ASK, choices: ['Release it', 'Not now'] } as never)
   await $.turn.complete({ answer: 'Release PR 54 to production? (Answers: Release it / Not now.)', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
@@ -1552,7 +1552,7 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
   })
   expect(after ?? (await look())).toMatchObject({ desk: AMBER, term: AMBER, band: AMBER, heading: 'needs' })
   for (const labels of (await look()).buttons) expect(labels).toEqual(expect.arrayContaining(['Release it', 'Not now']))
-  expect(await desk.find({ type: 'Text', text: '1 waiting for you' })).toBeDefined()
+  expect(await desk.find({ type: 'Text', text: '1 task waiting for you' })).toBeDefined()
   // Release it pressed goes back to the work and the ask goes; the card is at work on it, purple, until the work is done
   await desk.press({ key: (await desk.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it')?.key ?? '' })
   expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it"')))).toBeDefined()
@@ -2381,7 +2381,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   const says = async (site: Site, text: RegExp) => (await site.findAll({ type: 'Text' })).some(one => text.test(one.text ?? ''))
   const labelled = async (site: Site, label: string) => (await site.findAll({ type: 'Button' })).filter(b => b.props.label === label)
   const OPEN = 'Answer in words'
-  const CLOSE = 'Close the reply box'
+  const CLOSE = 'Close'
   // A surface whose bar was never drawn keeps the card's own box: a reply in words can always be typed somewhere
   expect((await boxesIn(list)).length).toBe(1)
   expect((await labelled(list, OPEN)).length).toBe(0)

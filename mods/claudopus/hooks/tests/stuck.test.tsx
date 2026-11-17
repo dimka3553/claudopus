@@ -718,7 +718,7 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
     await pane.unmount()
     return r
   }
-  const stuck = () => look(pane => pane.find({ type: 'Text', text: /^Nothing new for / }))
+  const stuck = () => look(pane => pane.find({ type: 'Text', text: /^Nothing new for \d+m\./ }))
 
   // The work waits on its helpers, and they each wait on a start signal only it could give: nothing comes back to any of them
   await bash('a1', 'git log', 'p1')
@@ -1014,7 +1014,7 @@ test('work sent a message after a long rest, and work only held by what it left 
   await clock.advance(25_000)
   const look = async () => {
     const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-    const r = await pane.find({ type: 'Text', text: /^Nothing new for / })
+    const r = await pane.find({ type: 'Text', text: /^Nothing new for \d+m\./ })
     await pane.unmount()
     return r
   }
@@ -1037,7 +1037,7 @@ test('work asking the person something waits on them and is never flagged', SLOW
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release it?', choices: ['Approve', 'Not now'] } as never)
   await clock.advance(30 * 60_000)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await pane.find({ type: 'Text', text: /^Nothing new for / })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Nothing new for \d+m\./ })).toBeUndefined()
   expect(logged.filter(line => line.includes('Nothing new from'))).toHaveLength(0)
   await pane.unmount()
 })

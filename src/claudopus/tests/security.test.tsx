@@ -592,7 +592,7 @@ test('F-020 · a lock on the update dated ahead of this clock holds nothing: Che
   await $.session.start(start)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   await pressed(config, 'config-check')
-  expect(await until(() => config.find({ type: 'Text', text: /^You're on the newest version/ }))).toBeDefined()
+  expect(await until(() => config.find({ type: 'Text', text: /^You have the newest version/ }))).toBeDefined()
   expect(fetches).toBe(1)
 })
 

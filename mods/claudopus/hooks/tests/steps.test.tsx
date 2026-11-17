@@ -937,7 +937,7 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
     await list.unmount()
     return texts
   }
-  expect(await until(async () => (await lines()).find(text => /^Claudopus starts Claude again when this is there: the deploy marker; at \d\d:\d\d if it never comes$/.test(text)))).toBeDefined()
+  expect(await until(async () => (await lines()).find(text => /^Waiting for the deploy marker · Claudopus starts Claude again when it comes, or at \d\d:\d\d$/.test(text)))).toBeDefined()
   // A helper that ended its step would have ended: it hands back what it waits for, and its task asks
   expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w2', agentId: 'a2', what: 'the build to finish', file: '/w/build.log', text: 'BUILD DONE' } as never)) as { result?: string }).result).toContain('hand back your result now')
   await clock.advance(40_000)
@@ -946,7 +946,7 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
   files.set('/w/deployed.flag', '')
   await clock.advance(40_000)
   expect(await until(async () => resumed.find(one => one === 'a1: From Claudopus: what you asked to be started again for is there: the deploy marker. Carry on from it.'))).toBeDefined()
-  expect(await until(async () => !(await lines()).some(text => text.startsWith('Claudopus starts Claude again')) || undefined)).toBe(true)
+  expect(await until(async () => !(await lines()).some(text => text.includes('Claudopus starts Claude again')) || undefined)).toBe(true)
   // A time only, and a file that never comes: started when the time comes, or told it never came
   agents.a1 = 'completed'
   expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w3l', agentId: 'a1', what: 'a look much later', minutes: 500 } as never)) as { result?: string }).result).toContain('in 60 min (at most 60 min).')

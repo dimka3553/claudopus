@@ -234,11 +234,11 @@ const lookJobs = async ($: EngineInterface) => {
         ? jobProcs.filter(p => p.pid === wait.pid)
         : undefined
     if (runs && jobProcs.length) {
-      if (!runs.length) return wait.isStart ? '' : 'What it waits for has ended'
+      if (!runs.length) return wait.isStart ? '' : 'What it waits for ended'
       if (runs.some(p => treeOf(jobProcs, p.pid).some(isPausedProc))) return 'What it waits for is paused'
     }
     const at = wait.file ? changed.get(wait.file) : undefined
-    return at && now - at >= JOB_QUIET ? `What it waits for has not changed for ${shortAgo(now - at)}` : ''
+    return at && now - at >= JOB_QUIET ? `What it waits for hasn't changed for ${shortAgo(now - at)}` : ''
   }
   const parts = body.split(/\n@@JOB@@ ([^\n]*)\n/)
   let isChanged = false

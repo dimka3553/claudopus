@@ -598,7 +598,7 @@ test('work a safety flag would move to an older model is ended with a report tha
   expect(stepped).toEqual(['claude-opus-5-5'])
   expect(flagged.find(c => c.kind === 'tool')?.name).toBe('SubagentHandback')
   expect(JSON.parse(flagged.find(c => c.kind === 'input')?.json ?? '{}').message).toContain('Start what is left again on the current model, leaving out what was flagged')
-  expect(await line()).toContain("stopped by a safety check, so it doesn't continue on Opus 4.8")
+  expect(await line()).toContain("a safety check stopped it, so it doesn't continue on Opus 4.8")
   // Where the handback does not end it, a step after is a plain last answer, and still nothing runs on the older model
   const again = await step(2, 'claude-opus-4-8')
   expect(stepped).toEqual(['claude-opus-5-5'])
