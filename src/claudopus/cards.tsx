@@ -204,7 +204,7 @@ const sync = async ($: EngineInterface) => {
           : undefined
         : // Work that ended its step to let its helpers work, or for what it asked Claudopus to look for, is still at work: the engine
           // lists it as completed, but a helper's result or the thing it waits for starts it again (16 Nov its card vanished meanwhile)
-          card.status === 'working' && one.status === 'completed' && !handedBack.has(card.id) && card.handedBackAt === undefined && (card.wakeWhen !== undefined || list.some(kid => kid.parentId === card.id && kid.status === 'working'))
+          card.status === 'working' && one.status === 'completed' && !handedBack.has(card.id) && card.handedBackAt === undefined && (card.wakeWhen !== undefined || isTurnWaited(list, card.id) || list.some(kid => kid.parentId === card.id && kid.status === 'working'))
           ? undefined
         : card.status === 'working' && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed')
           ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? stoppedAs(card) : 'done', now)
@@ -286,7 +286,7 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
       isMoved = false
       list = list.map(one => {
         const f = finished.get(one.id)
-        if (!f || one.status !== 'working' || one.wakeWhen || list.some(kid => kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id)))) return one
+        if (!f || one.status !== 'working' || one.wakeWhen || isTurnWaited(list, one.id) || list.some(kid => kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id)))) return one
         gone.add(one.id)
         isMoved = true
         // (its words count as a report only when it handed one back or wrote one as long, as at a heard end)

@@ -127,6 +127,8 @@ export type Todo = {
   // Its heavy commands (a browser it drives, a build, a render) that wait their turn while the Mac is busy: the call, its own words,
   // the command, since when, and its place in the line of every piece of work's held commands
   heldCalls?: { id: string; what: string; cmd: string; at: number; place: number }[]
+  // Its heavy command's turn came: until when its next heavy command runs at once
+  heavyPass?: number
   // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
   // so. It is still at work, and its card says what it waits for
   waitsSince?: number

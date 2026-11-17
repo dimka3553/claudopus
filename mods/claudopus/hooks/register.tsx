@@ -1192,7 +1192,7 @@ const sync = async ($: EngineInterface) => {
             started(one.id, one.parentId ?? (one.type === 'fork' || ownCalls.has(one.description) ? '' : HELPER), one.description, '', now, one.type === 'fork')
           : undefined
         : // Work that ended its step to let its helpers work, or for what it asked Claudopus to look for, is still at work: the engine
-          card.status === 'working' && one.status === 'completed' && !handedBack.has(card.id) && card.handedBackAt === undefined && (card.wakeWhen !== undefined || list.some(kid => kid.parentId === card.id && kid.status === 'working'))
+          card.status === 'working' && one.status === 'completed' && !handedBack.has(card.id) && card.handedBackAt === undefined && (card.wakeWhen !== undefined || isTurnWaited(list, card.id) || list.some(kid => kid.parentId === card.id && kid.status === 'working'))
           ? undefined
         : card.status === 'working' && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed')
           ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? stoppedAs(card) : 'done', now)
@@ -1263,7 +1263,7 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
       isMoved = false
       list = list.map(one => {
         const f = finished.get(one.id)
-        if (!f || one.status !== 'working' || one.wakeWhen || list.some(kid => kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id)))) return one
+        if (!f || one.status !== 'working' || one.wakeWhen || isTurnWaited(list, one.id) || list.some(kid => kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id)))) return one
         gone.add(one.id)
         isMoved = true
         const isTop = !one.parentId
@@ -8005,7 +8005,7 @@ const chatHooks = (on: On) => {
       if (isHandedBack) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now, wakeWhen: undefined } : one)))
       if (!isHeld) await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
       await changeTodos($, list => {
-        const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)))
+        const isWaiting = how === 'done' && !isHandedBack && (isHeld || isTurnWaited(list, id) || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)))
         const waitsSince = (one: Todo) => (isHeld && !isReport && one.bg?.some(b => !b.isWatch) ? (one.waitsSince ?? now) : undefined)
         return list.map(one =>
           one.id !== id
@@ -8860,14 +8860,15 @@ const HEAVY_RAMP = 20_000
 type HeldCall = { id: string; agent: string; what: string; cmd: string; at: number }
 let heavyQueue: HeldCall[] = []
 const HEAVY_PASS = 3 * 60_000
-const heavyPass = new Map<string, number>()
+const heavyTries = new Map<string, number>()
+const isTurnWaited = (list: Todo[], id: string) => list.some(one => (one.id === id || one.parentId === id) && one.heldCalls?.length)
 const heavyOpen = new Map<string, string>()
 const heavySeen = new Set<string>()
 let heavyLetAt = 0
 const keptCmd = (command: string) => oneLine(command).slice(0, 400)
 
 const heavyRunning = (list: Todo[], now: number) =>
-  heavyOpen.size + [...heavyPass.values()].filter(until => until > now).length + list.filter(one => !one.chat).reduce((n, one) => n + [...(one.bg ?? []), ...(one.detached ?? [])].filter(run => run.cmd && heavySeen.has(run.cmd)).length, 0)
+  heavyOpen.size + list.filter(one => !one.chat && (one.heavyPass ?? 0) > now).length + list.filter(one => !one.chat).reduce((n, one) => n + [...(one.bg ?? []), ...(one.detached ?? [])].filter(run => run.cmd && heavySeen.has(run.cmd)).length, 0)
 const isMacBusy = (f: UsageFigures | undefined, mode: HeavyMode) =>
   Boolean(f && ((f.load !== undefined && f.loadCores && f.load >= mode.load * f.loadCores) || (f.memTotal > 0 && f.memUsed / f.memTotal >= mode.memory)))
 const heavyRoom = (list: Todo[], f: UsageFigures | undefined, mode: HeavyMode, now: number) => {
@@ -8881,7 +8882,8 @@ const busyWords = (f: UsageFigures | undefined) =>
   !f ? 'busy' : [f.load !== undefined && f.loadCores ? `load ${Math.round(f.load)} on ${f.loadCores} cores` : '', f.memTotal ? `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB memory in use` : ''].filter(Boolean).join(', ')
 const placeWords = (n: number) => (n === 1 ? 'next in line' : `${n}${n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : n % 10 === 1 && n % 100 !== 11 ? 'st' : 'th'} in line`)
 const HEAVY_HELD = (what: string, place: number, f: UsageFigures | undefined, isHelper: boolean) =>
-  `Not run yet: the Mac is busy (${busyWords(f)}) and other heavy commands of Claudopus's tasks run, so this one ("${what}") waits its turn, ${placeWords(place)}. ${isHelper ? 'Do other work that does not need it meanwhile: Claudopus tells you when its turn comes, in 15 minutes at the latest.' : 'Do other work that does not need it, or end your step: Claudopus starts you again when its turn comes, in 15 minutes at the latest.'} Then send the same command again.`
+  `Not run yet: the Mac is busy (${busyWords(f)}) and other heavy commands of Claudopus's tasks run, so this one ("${what}") waits its turn, ${placeWords(place)}. Do other work that does not need it, or end your step${isHelper ? ' without handing back' : ''}: Claudopus starts you again when its turn comes, in 15 minutes at the latest. Then send the same command again.`
+const HEAVY_LOST = (title: string, what: string) => `The task "${title}" could not be told that its command "${what}" may run now. Send it a message to carry on.`
 const HEAVY_TURN = (what: string, isLate: boolean) =>
   isLate
     ? `Your command "${what}" has waited 15 minutes for room on the Mac: send it again now, and it runs whatever the load. If it fails or times out for lack of room, try it again later.`
@@ -8914,8 +8916,8 @@ const turnHeavy = async ($: EngineInterface, e: ToolCallInput): Promise<{ id?: s
   heavySeen.add(cmd)
   await lookUsage($).catch(() => undefined)
   const now = await $.clock.now()
-  const pass = heavyPass.get(agent)
-  heavyPass.delete(agent)
+  const pass = list.find(one => one.id === agent)?.heavyPass
+  if (pass) await changeTodos($, cards => cards.map(one => (one.id === agent ? { ...one, heavyPass: undefined } : one)))
   const waiting = heavyQueue.find(one => one.agent === agent && one.cmd === cmd)
   if ((pass && pass > now) || (!heavyQueue.length && heavyRoom(list, usageNow(now), mode, now))) {
     if (waiting) await leaveLine($, waiting.id)
@@ -8925,15 +8927,13 @@ const turnHeavy = async ($: EngineInterface, e: ToolCallInput): Promise<{ id?: s
   if (!waiting) {
     heavyQueue.push(call)
     await log($, `work ${agent}'s heavy command waits its turn (${heavyQueue.length} held, Mac ${busyWords(usageNow(now))})`)
-    await changeTodos($, cards => cards.map(one => (one.id === agent && !one.parentId && !one.wakeWhen ? { ...one, wakeWhen: { what: `its turn on the Mac for "${cut(call.what, 80)}"`, at: now, until: now + HEAVY_MOST + 2 * 60_000 } } : one)))
     await showHeld($)
   }
   return { deny: HEAVY_HELD(cut(call.what, 120), heavyQueue.indexOf(call) + 1, usageNow(now), Boolean(list.find(one => one.id === agent)?.parentId)) }
 }
 const leaveLine = async ($: EngineInterface, id: string) => {
-  const call = heavyQueue.find(one => one.id === id)
   heavyQueue = heavyQueue.filter(one => one.id !== id)
-  if (call && !heavyQueue.some(one => one.agent === call.agent)) await changeTodos($, cards => cards.map(one => (one.id === call.agent && one.wakeWhen?.what.startsWith('its turn on the Mac') ? { ...one, wakeWhen: undefined } : one)))
+  heavyTries.delete(id)
   await showHeld($)
 }
 const lookHeld = async ($: EngineInterface) => {
@@ -8941,25 +8941,31 @@ const lookHeld = async ($: EngineInterface) => {
   const list = await read($, todos)
   for (const call of heavyQueue) {
     const card = list.find(one => one.id === call.agent)
-    if (!card || card.status === 'stopped' || card.status === 'failed' || card.handedBackAt !== undefined || (card.parentId && card.status === 'done')) await leaveLine($, call.id)
+    if (!card || card.status !== 'working' || card.handedBackAt !== undefined) await leaveLine($, call.id)
   }
   const first = heavyQueue[0]
   if (!first) return
   await lookUsage($).catch(() => undefined)
   const now = await $.clock.now()
-  for (const [agent, until] of heavyPass) if (until <= now) heavyPass.delete(agent)
+  if (list.some(one => one.heavyPass !== undefined && one.heavyPass <= now)) await changeTodos($, cards => cards.map(one => (one.heavyPass !== undefined && one.heavyPass <= now ? { ...one, heavyPass: undefined } : one)))
   const isLate = now - first.at >= HEAVY_MOST && now - heavyLetAt >= HEAVY_RAMP
   if (!isLate && !heavyRoom(await read($, todos), usageNow(now), heavyModeOf(await readConfig($, dir)), now)) return
-  await leaveLine($, first.id)
-  heavyPass.set(first.agent, now + HEAVY_PASS)
-  heavyLetAt = now
   const text = HEAVY_TURN(cut(first.what, 120), isLate)
   const isAtStep = (await $.agent.list().catch(() => [])).find(agent => agent.id === first.agent)?.status === 'running'
   const r = isAtStep
     ? await tell($, first.agent, text).then(() => ({ isDelivered: true as const, reason: '' })).catch(err => ({ isDelivered: false as const, reason: String(err) }))
-    : await sendOwn($, { to: { agentId: first.agent }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    : (await isReplaced($))
+      ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
+      : await sendOwn($, { to: { agentId: first.agent }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  const tries = (heavyTries.get(first.id) ?? 0) + 1
+  if (!r.isDelivered && tries < 3) return void (heavyTries.set(first.id, tries), await log($, `work ${first.agent}'s heavy command's turn not told, tried again next look: ${r.reason}`))
+  await changeTodos($, cards => cards.map(one => (one.id === first.agent && r.isDelivered ? { ...one, heavyPass: now + HEAVY_PASS } : one)))
+  await leaveLine($, first.id)
+  heavyLetAt = now
   if (r.isDelivered && !isAtStep) await wakeCard($, first.agent)
-  await log($, `work ${first.agent}'s heavy command's turn came after ${shortAgo(now - first.at)}${isLate ? ', before the Mac had room' : ''}: ${r.isDelivered ? (isAtStep ? 'told' : 'started again') : `not reached (${r.reason})`}`)
+  const card = list.find(one => one.id === first.agent)
+  if (!r.isDelivered) await sayInChat($, HEAVY_LOST(card ? titleOf(card) : first.agent, cut(first.what, 120)))
+  await log($, `work ${first.agent}'s heavy command's turn came after ${shortAgo(now - first.at)}${isLate ? ', before the Mac had room' : ''}: ${r.isDelivered ? (isAtStep ? 'told' : 'started again') : `not reached (${r.reason}): the chat is told`}`)
   redraw($)
 }
 const clearHeld = async ($: EngineInterface) => {
@@ -9158,7 +9164,7 @@ const lookWakes = async ($: EngineInterface) => {
 }
 const wakeLine = (one: Todo) => {
   const w = one.wakeWhen
-  if (!w || (one.heldCalls?.length && w.what.startsWith('its turn on the Mac'))) return ''
+  if (!w) return ''
   return w.file || w.url ? `Claudopus starts Claude again when this is there: ${w.what}; at ${hhmm(w.until)} if it never comes` : `Claudopus starts Claude again at ${hhmm(w.until)}: ${w.what}`
 }
 
@@ -10467,7 +10473,7 @@ const workHooks = (on: On) => {
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
     const helpers = id !== undefined && card && !isOff && card.handedBackAt === undefined ? runningHelpers(await read($, todos), id).length : 0
-    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen || helpers) && (await isPressedForReport($, id))) {
+    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen || isTurnWaited(await read($, todos), id) || helpers) && (await isPressedForReport($, id))) {
       await log($, `work ${id} pressed by the engine for its report while ${card.detached?.length ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : 'it waits to be woken'}: let it end its step`)
       yield { kind: 'text', index: 0, text: LEFT_AT_WORK }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
