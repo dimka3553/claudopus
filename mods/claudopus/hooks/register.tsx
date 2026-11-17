@@ -552,7 +552,7 @@ const recorderHooks = (on: On) => {
 const BRIEF =
   'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
 const REFUSED =
-  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
+  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, sent with `run_in_background: true`; a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
   `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
 const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus\/keyring\b/
@@ -7399,8 +7399,8 @@ const isChatCurl = (args: string[]) => {
   return asked > 0
 }
 const CHAT_SHAPES: Record<string, string> = {
-  open: 'An `open` the chat runs itself shows a page of a local server (http://localhost:3000), a folder, or a file that is only looked at (a picture, a PDF, a page, a text, a video), optionally in a named browser or viewer (`-a Vivaldi`), or shows a file in the Finder with `-R`.',
-  curl: 'A `curl` the chat runs itself starts with -q (so it reads no curlrc) and is a plain GET or HEAD of a local address (localhost, 127.0.0.1, [::1]), its body printed or sent to /dev/null, never to a file: flags -s -S -f -I -i -k -v, -o /dev/null, -w with a format, -m; no -L, -X, -H, -d, -F, -T or -O.',
+  open: 'An `open` the chat runs itself shows a page of a local server (http://localhost:3000), a folder, or a file that is only looked at (a picture, a PDF, a page, a text, a video), optionally in a named browser or viewer (`-a Vivaldi`), or shows a file in the Finder with `-R`; sent with `run_in_background: true`.',
+  curl: 'A `curl` the chat runs itself starts with -q (so it reads no curlrc) and is a plain GET or HEAD of a local address (localhost, 127.0.0.1, [::1]), its body printed or sent to /dev/null, never to a file: flags -s -S -f -I -i -k -v, -o /dev/null, -w with a format, -m; no -L, -X, -H, -d, -F, -T or -O; sent with `run_in_background: true`.',
   preview_start: "The browser pane's `preview_start` runs in the chat only with a `url` of a local address (http://localhost:3000); one that starts a server by its name is a task's.",
 }
 const isPaneShow = (e: { tool: string }) => {
@@ -7434,7 +7434,7 @@ const isChatRunnable = (command: string, branch = '') => {
   return CHAT_LOOKS.includes(head)
 }
 const NOT_ONE_COMMAND =
-  'Not run: the chat runs only a single command with nothing joined to it (no `&&`, `;`, `|`, `>`, `$( )` or backticks), and only one that changes no file: a push, a fetch, a look with git or gh, an `open` of a file or page, or a `curl` status check of a local server. Start a task for anything else.'
+  'Not run: the chat runs only a single command with nothing joined to it (no `&&`, `;`, `|`, `>`, `$( )` or backticks), and only one that changes no file: a push, a fetch, a look with git or gh, an `open` of a file or page, or a `curl` status check of a local server, sent with `run_in_background: true`. Start a task for anything else.'
 const chatCommands = new Map<string, { at: number; command: string; description: string }>()
 const backgroundIdOf = (result: unknown): string => {
   const r = result as { backgroundTaskId?: unknown } | undefined
@@ -9974,12 +9974,17 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
   return false
 }
 const HELD_LONGEST = 2 * 60_000
-const isLongHeld = (call: { tool: string; command?: unknown; description?: unknown; timeout?: unknown; run_in_background?: unknown }) =>
-  call.tool === 'Bash' &&
-  !call.run_in_background &&
-  !/\bbin\/(?:helpers|admin|secret)\b|(?:^|[\s;&|(])\.\/(?:helpers|admin|secret)\b/.test(String(call.command ?? '')) &&
-  !/\b(?:nohup|setsid|disown)\b|(?<![&>|])&(?![&>])/.test(String(call.command ?? '')) &&
-  (Number(call.timeout ?? 0) > HELD_LONGEST || (/^\s*(?:wait|watch|poll)(?:ing)?\b/i.test(String(call.description ?? '')) && (describedOf(String(call.description ?? '')).expect ?? 0) >= HELD_LONGEST))
+const isLongHeld = (call: { tool: string; command?: unknown; description?: unknown; timeout?: unknown; run_in_background?: unknown }) => {
+  const command = String(call.command ?? '')
+  const description = String(call.description ?? '')
+  return (
+    call.tool === 'Bash' &&
+    !call.run_in_background &&
+    !/\bbin\/(?:helpers|admin|secret|release)\b|(?:^|[\s;&|(])\.\/(?:helpers|admin|secret|release)\b/.test(command) &&
+    !/\b(?:nohup|setsid|disown)\b|(?<![&>|])&(?![&>])/.test(command) &&
+    ((describedOf(description).expect ?? 0) >= HELD_LONGEST || (Number(call.timeout ?? 0) > HELD_LONGEST && (Boolean(heavyOf(command)) || jobKindOf(command, description) === 'download')))
+  )
+}
 const isPersonWait = (call: { tool: string; command?: unknown; description?: unknown }, name: string) => {
   const them = `you${name ? `|${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` : ''}`
   return (
@@ -10023,7 +10028,6 @@ const NO_FOLLOW =
 const SEND_BACKGROUND = (name: string) =>
   `Not run: this command may run for minutes, and held open it keeps ${name}'s replies from you until it ends. Send the same call again with \`run_in_background: true\` and nothing else changed: Claudopus tells you when it ends, and ${name}'s replies reach you while it runs. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
 const CHAT_SEND_BACKGROUND = 'Not run: the chat runs its own command only in the background. Send the same call again with `run_in_background: true` and nothing else changed.'
-const SEND_MODEL = (asked: string, better: string, alias: string) => `Not started: ${asked} is not used here. Send the same call again with \`model: "${alias}"\` (${better}) and nothing else changed.`
 
 const scriptsRun = async ($: EngineInterface, command: string) => {
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
@@ -10262,14 +10266,6 @@ const workHooks = (on: On) => {
         await log($, `refused ${e.tool} that would set going again ${held.id}, which the person stopped`)
         return { deny: named(STOPPED_REFUSED(titleOf(held))) }
       }
-    }
-    const kindModel = ['quick', 'reader', 'check'].includes(KIND_OF(String((e as { subagent_type?: unknown }).subagent_type ?? '')) ?? '')
-    const askedModel = !isOff && e.tool === 'Agent' && (e as { subagent_type?: unknown }).subagent_type !== 'fork' && !kindModel ? String((e as { model?: unknown }).model ?? '') : ''
-    const better = askedModel ? rightModel(askedModel) : undefined
-    if (better) {
-      const alias = (modelName(better).split(' ')[0] ?? '').toLowerCase()
-      await log($, `refused an Agent call on ${modelName(askedModel)}: told to name ${modelName(better)}`)
-      return { deny: SEND_MODEL(modelName(askedModel), modelName(better), alias) }
     }
     let steered = ''
     let from = ''

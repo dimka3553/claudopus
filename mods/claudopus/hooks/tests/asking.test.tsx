@@ -2270,16 +2270,21 @@ test('a reply never waits behind a long command: one that may run for minutes is
     expect(wait.deny).toContain('End your step now')
   }
   expect(held.has('record')).toBe(false)
-  // A script of minutes, by its time limit or by its words, is refused with the same call to send in the background, never changed
-  // on its way (auto mode refuses a call a hook changed after it reviewed it: 484 calls on 16-17 Nov); sent so, it runs
-  for (const [id, more] of [['s1', { timeout: 600000, description: 'Run the head check on the CQ500 scans' }], ['s2', { description: 'Waiting for the CQ500 results (about 5 min)' }], ['s4', { timeout: 600000, description: 'Run the tests', command: 'hold s4 &>test.log' }]] as const) {
-    const r = (await $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command: `hold ${id}`, ...more } as never)) as { deny?: string }
-    expect([...held.keys()].some(key => key.startsWith(id))).toBe(false)
-    expect(r.deny).toContain('Send the same call again with `run_in_background: true` and nothing else changed')
+  // A command known to run for minutes, by its words, or a build, render, browser run or download asking for a longer time limit, is
+  // refused with the same call to send in the background, never changed on its way (auto mode refuses a call a hook changed after it
+  // reviewed it: 484 calls on 16-17 Nov); sent so, it runs as written
+  for (const [id, more] of [['s1', { timeout: 600000, command: 'npm run build', description: 'Run the build' }], ['s2', { command: 'hold s2', description: 'Waiting for the CQ500 results (about 5 min)' }], ['s4', { timeout: 600000, description: 'Run the tests (about 6 min)', command: 'hold s4 &>test.log' }], ['s5', { timeout: 600000, command: 'curl -L -o scans.zip https://example.com/scans.zip', description: 'Get the scans' }]] as const) {
+    const r = (await $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', ...more } as never)) as { deny?: string }
+    expect([id, r.deny]).toEqual([id, expect.stringContaining('Send the same call again with `run_in_background: true` and nothing else changed')])
     expect(r.deny).toContain('replies reach you while it runs')
-    const sent = (await $.tool.call({ tool: 'Bash', tool_use_id: `${id}b`, agentId: 'a1', command: `hold ${id}`, ...more, run_in_background: true } as never)) as { deny?: string }
-    expect(sent.deny).toBeUndefined()
-    expect([...held.keys()].some(key => key.startsWith(id))).toBe(true)
+    expect([...held.keys()].some(key => key.startsWith(id))).toBe(false)
+    const sent = (await $.tool.call({ tool: 'Bash', tool_use_id: `${id}b`, agentId: 'a1', ...more, run_in_background: true } as never)) as { deny?: string; result?: { backgroundTaskId?: string } }
+    expect([id, sent.deny, sent.result?.backgroundTaskId]).toEqual([id, undefined, `bg-${id}b`])
+  }
+  // A long time limit alone says nothing: a push, a short test or a look runs as sent, held open and never refused
+  for (const [id, more] of [['q1', { timeout: 600000, command: 'git push', description: 'Push the branch' }], ['q2', { timeout: 300000, command: 'npm test', description: 'Run the tests' }], ['q3', { timeout: 600000, command: 'rg -n nose /repo', description: 'Look for the nose' }]] as const) {
+    const r = (await $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', ...more } as never)) as { deny?: string; result?: { backgroundTaskId?: string } }
+    expect([id, r.deny, r.result?.backgroundTaskId]).toEqual([id, undefined, undefined])
   }
   // A launcher that leaves its runs going is left as it is, as what it started is followed while it runs
   const launched = (await $.tool.call({ tool: 'Bash', tool_use_id: 's3', agentId: 'a1', command: 'nohup python run.py > run.log 2>&1 & echo $!', description: 'Wait for the head check to start on every set (about 20 min)', timeout: 600000 } as never)) as { context?: string[] }
