@@ -759,13 +759,13 @@ test('asked each time: the call is held, its card shows the exact command and th
   expect(done).toBe(false)
   expect(admins).toEqual([])
   expect(grants()).toEqual([])
-  expect((await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' }))?.props.color).toBe('#E5A50A')
+  expect((await list.find({ type: 'Text', text: 'Run an admin command on this Mac?' }))?.props.color).toBe('#E5A50A')
   expect((await list.find({ type: 'Text', text: 'chmod 644 /etc/hosts' }))?.props.mono).toBe(true)
-  expect(await list.find({ type: 'Text', text: "Allow: it runs with admin rights. Deny: it doesn't run, and Claudopus tells Claude." })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: "Allow once: it runs as admin. Deny: it doesn't run, and Claudopus tells Claude." })).toBeDefined()
   expect((await labels()).filter(one => ['Allow once', 'Always allow this command', 'Deny'].includes(one))).toEqual(['Allow once', 'Always allow this command', 'Deny'])
   // Said in the chat and as a notification; its Details tab has it at the top
-  expect(logged.some(line => line.includes('The task "Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts') && line.includes('Nothing typed in the chat allows it'))).toBe(true)
-  expect(notified).toContain('Fix the hosts file has a question for you | Wants to run an admin command on this Mac: chmod 644 /etc/hosts')
+  expect(logged.some(line => line.includes('"Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts') && line.includes('Nothing you type in the chat allows it'))).toBe(true)
+  expect(notified).toContain('Fix the hosts file has a question for you | Run an admin command on this Mac: chmod 644 /etc/hosts')
   const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   expect(await details.find({ type: 'Text', text: 'Needs you now' })).toBeDefined()
   await press('gate-b1-0-once')
@@ -777,9 +777,9 @@ test('asked each time: the call is held, its card shows the exact command and th
   expect({ host: grant?.host, command: grant?.command }).toEqual({ host: 'here', command: 'chmod 644 /etc/hosts' })
   expect(grant?.seal).toBe(fakeSeal(files.get('keychain:gate') ?? '', `grant\n${grant?.id}\n${grant?.at}\nhere\nchmod 644 /etc/hosts`))
   expect(grants()).toEqual([])
-  expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' })).toBeUndefined()
+  expect(await list.find({ type: 'Text', text: 'Run an admin command on this Mac?' })).toBeUndefined()
   // In its place for a minute: what the person pressed and what happens now
-  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it once · it runs now' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it. It runs now.' }))).toBeDefined()
   expect(files.has(ALLOWED)).toBe(false)
   // Once is once: the same command again is held again
   void bash('b2', `${ADMIN} here 'chmod 644 /etc/hosts'`)
@@ -791,14 +791,14 @@ test('Deny refuses the call with a line that says the person refused it, and not
   const { press, list, bash, held, grants, admins } = await gated($, on)
   const call = bash('b1', `${ADMIN} m4 'rm -rf /Library/Caches/x'`)
   expect(await held('b1')).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on m4' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Run an admin command on m4?' })).toBeDefined()
   await press('gate-b1-0-deny')
   const r = await call
   expect(r.deny).toBe("Refused by Sam: Sam pressed Deny on this admin command, so it didn't run. Don't try to run it another way. Continue without it, or say what it is needed for and ask again.")
   expect(admins).toEqual([])
   expect(grants()).toEqual([])
-  expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on m4' })).toBeUndefined()
-  expect(await until(async () => list.find({ type: 'Text', text: "You denied it · it didn't run, and Claudopus told Claude" }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Run an admin command on m4?' })).toBeUndefined()
+  expect(await until(async () => list.find({ type: 'Text', text: "You denied it. It didn't run, and Claudopus told Claude." }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Admin command on m4' })).toBeDefined()
 })
 
@@ -969,7 +969,7 @@ test('never asked, as Config sealed it: the call goes through as it was made, wi
   expect([...files.keys()].filter(path => !path.endsWith('log.md') && !path.includes('/live/')).sort()).toEqual(before.filter(path => !path.includes('/live/')))
   expect(logged.some(line => line.includes('admin command'))).toBe(false)
   expect(notified.some(line => line.includes('admin command'))).toBe(false)
-  expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' })).toBeUndefined()
+  expect(await list.find({ type: 'Text', text: 'Run an admin command on this Mac?' })).toBeUndefined()
   // Config's Reset puts the asking back, and makes a new key
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   await pressed(config, 'config-admin-mode-back')
@@ -1009,7 +1009,7 @@ test("the chat's own thread, doing its own work, is asked at the top of the pane
   for (const id of ['c1', 'c2']) {
     const call = $.tool.call({ tool: 'Bash', tool_use_id: id, command: `${ADMIN} here 'id -u'` } as never)
     expect(await until(async () => keyed(list, `gate-${id}-0-deny`))).toBeDefined()
-    expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' })).toBeDefined()
+    expect(await list.find({ type: 'Text', text: 'Run an admin command on this Mac?' })).toBeDefined()
     // No piece of work to allow it for: the chat's thread never ends, so it is asked each time
     expect((await list.findAll({ type: 'Button' })).map(one => one.props.label)).toContain('Allow once')
     expect((await list.findAll({ type: 'Button' })).map(one => one.props.label)).not.toContain('Allow for this task')
@@ -1028,7 +1028,7 @@ test("another chat's panel shows an admin command that waits, with no button: on
   await clock.advance(5000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'softwareupdate -i -a' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Run an admin command on this Mac?' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Allow or deny it on its card in its own chat.' })).toBeDefined()
   expect((await list.findAll({ type: 'Button' })).some(one => ['Allow once', 'Always allow this command', 'Deny'].includes(String(one.props.label)))).toBe(false)
 })
@@ -1058,15 +1058,15 @@ test('a press is answered by a line, not a card: an ask is an outlined box, what
   const boxes = async () => (await list.findAll({ type: 'Box' })) as { props: Record<string, unknown> }[]
   // The ask: an outlined box in the colour of what needs the person, the kind of ask at its top
   expect((await boxes()).some(one => one.props.borderStyle === 'round' && one.props.borderColor === '#E5A50A')).toBe(true)
-  expect(await list.find({ type: 'Text', text: 'Admin command · waits for your press' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Admin command · waiting for you' })).toBeDefined()
   await press('gate-b1-0-once')
   await call
-  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it once · it runs now' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it. It runs now.' }))).toBeDefined()
   const edges = async () => (await boxes()).filter(one => one.props.backgroundColor === '#8A63F0' || one.props.backgroundColor === '#80808024').length
   const withNote = await edges()
   // Its call has ended: once it could be read, it goes, well before a minute
   await clock.advance(16_000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'You allowed it once · it runs now' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'You allowed it. It runs now.' })) ? undefined : true))).toBe(true)
   // It had no fill or purple edge of its own, as a piece of work has
   expect(await edges()).toBe(withNote)
 })
@@ -1124,8 +1124,8 @@ test('a gate answered on its card says what was allowed in that same card, outli
   expect(green?.key).toBe('done-gate-b1-0')
   const texts = await textOrder(list)
   // In its card, under the work's title, not a line of its own at the top
-  expect(texts.indexOf('Fix the hosts file')).toBeLessThan(texts.indexOf('You allowed it once · it runs now'))
-  expect(texts.filter(one => one === 'You allowed it once · it runs now').length).toBe(1)
+  expect(texts.indexOf('Fix the hosts file')).toBeLessThan(texts.indexOf('You allowed it. It runs now.'))
+  expect(texts.filter(one => one === 'You allowed it. It runs now.').length).toBe(1)
   // Under anything that still waits: another work's gate comes in, and its card is drawn above the answered one
   await $.agent.spawn({ ...spawn, description: 'Tidy the logs', prompt: 'tidy the logs' } as never)
   const call2 = bash('b2', `${ADMIN} here 'id -u'`, 'a2')
@@ -1299,15 +1299,15 @@ const pressedFirst = async ($: Parameters<TestBody>[0], on: On, button: 'once' |
   await pressed(w.list, base)
   expect(await w.list.find({ type: 'Text', text: said })).toBeDefined()
   expect((await w.list.findAll({ type: 'Button' })).some(b => (b.key ?? '').startsWith('gate-p1-'))).toBe(false)
-  expect(await w.list.find({ type: 'Text', text: /· waits for your press$/ })).toBeUndefined()
+  expect(await w.list.find({ type: 'Text', text: /· waiting for you$/ })).toBeUndefined()
   w.wake()
   if (isRelease) (await until(async () => w.holding.get('xp1; /plug/claudopus/bin/release')))?.('released')
   await call
 }
-test("Allow once on a gate draws it answered in the press's own drawing, before the wait reads it: green, with no buttons left", ($, on) => pressedFirst($, on, 'once', 'You allowed it once · it runs now'))
-test("Always allow on a gate draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'always', 'You always allow this command · it runs now, and will not ask again'))
-test("Deny on a gate draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'deny', "You denied it · it didn't run, and Claudopus told Claude"))
-test("Allow once on a release draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'once', 'You allowed it once · it releases now', true))
+test("Allow once on a gate draws it answered in the press's own drawing, before the wait reads it: green, with no buttons left", ($, on) => pressedFirst($, on, 'once', 'You allowed it. It runs now.'))
+test("Always allow on a gate draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'always', "You always allow this command. It runs now, and Claudopus won't ask again."))
+test("Deny on a gate draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'deny', "You denied it. It didn't run, and Claudopus told Claude."))
+test("Allow once on a release draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'once', 'You allowed it. Claudopus is releasing it now.', true))
 
 test('two presses on a gate before its wait reads them send one answer: the first, as drawn', async ($, on) => {
   const { list, bash, held, wake } = await gated($, on)
@@ -1317,16 +1317,16 @@ test('two presses on a gate before its wait reads them send one answer: the firs
   const once = (await keyed(list, 'gate-d1-0-once'))?.key ?? ''
   const deny = (await keyed(list, 'gate-d1-0-deny'))?.key ?? ''
   await list.press({ key: once })
-  expect(await list.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'You allowed it. It runs now.' })).toBeDefined()
   await list.press({ key: deny }).catch(() => undefined)
   // The second press changed nothing: the card still says what the first one did
-  expect(await list.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'You allowed it. It runs now.' })).toBeDefined()
   await list.press({ key: once }).catch(() => undefined)
   wake()
   const r = (await call) as { deny?: string }
   expect(r.deny).toBeUndefined()
   expect((await list.findAll({ type: 'Text' })).filter(t => /^You (allowed|denied|always)/.test(String(t.text ?? ''))).length).toBe(1)
-  expect(await list.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'You allowed it. It runs now.' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: /^You denied it/ })).toBeUndefined()
 })
 
@@ -1340,9 +1340,9 @@ test('a gate allowed but not let through says so where its green box was, never 
   const r = (await call) as { deny?: string }
   expect(r.deny).toBeDefined()
   expect(w.grants()).toEqual([])
-  expect(await until(async () => w.list.find({ type: 'Text', text: "It could not be secured · it didn't run, and Claudopus told Claude" }))).toBeDefined()
-  expect(await w.list.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeUndefined()
-  expect(await w.list.find({ type: 'Text', text: /· allowed$/ })).toBeUndefined()
+  expect(await until(async () => w.list.find({ type: 'Text', text: "Claudopus couldn't use its keychain key. It didn't run, and Claudopus told Claude." }))).toBeDefined()
+  expect(await w.list.find({ type: 'Text', text: 'You allowed it. It runs now.' })).toBeUndefined()
+  expect(await w.list.find({ type: 'Text', text: /^You allowed it/ })).toBeUndefined()
 })
 
 // Found on a second look: one Bash call with two commands to allow, the first allowed and the second refused, ran nothing yet left
@@ -1362,7 +1362,7 @@ test('a call refused after one of its commands was allowed says in grey that not
     await w.press(second)
     expect(((await call) as { deny?: string }).deny).toBeDefined()
     expect(w.admins).toEqual([])
-    expect(await until(async () => w.list.find({ type: 'Text', text: 'It did not run: another part of the same command was refused, so nothing in it ran' }))).toBeDefined()
-    expect(await w.list.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeUndefined()
+    expect(await until(async () => w.list.find({ type: 'Text', text: "It didn't run: another part of the same command was denied, so none of it ran." }))).toBeDefined()
+    expect(await w.list.find({ type: 'Text', text: 'You allowed it. It runs now.' })).toBeUndefined()
   }
 })

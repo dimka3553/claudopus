@@ -103,7 +103,7 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   const before = stepped.length
   const said: string[] = []
   for await (const chunk of $.turn.step({ turnId: 'h1p', index: 1, model: 'm', messageCount: 2, agentId: 'a1' })) if (chunk.kind === 'text') said.push((chunk as { text: string }).text)
-  expect([stepped.length - before, said]).toEqual([0, ['My own work is still going; I am started again when it is done, and give my report then.']])
+  expect([stepped.length - before, said]).toEqual([0, ["My command is still running. Claudopus starts me again when it's done, and I'll send my result then."]])
   await $.turn.complete({ answer: 'Waiting for the drawing.', durationMs: 1, isAborted: false, turnId: 'h1', reason: 'answer', agentId: 'a1' } as never)
   // The engine then tells the chat it ended without its report. Claudopus adds no note of its own, which would ride into a later
   // turn of the chat's; at rest, the chat takes the notice as a prompt of its own, which is left out (16 Nov evening: 67 of 152 turns)

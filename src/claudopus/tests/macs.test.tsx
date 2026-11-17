@@ -431,15 +431,15 @@ test("a chat on the other Mac running without Claudopus, and this Mac's app havi
   await $.session.start(start)
   await clock.advance(40_000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Claudopus is off in some chats' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: /^New chats on m4 start without Claudopus\. .* at 2026-11-12 13:57 .*quit and opened again\.$/ })).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: "Claudopus isn't running in some chats" }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^New chats on m4 start without Claudopus\. At 2026-11-12 13:57 .*Quit the Claude app and open it again to end this\.$/ })).toBeDefined()
   expect(await list.find({ type: 'Text', text: /^“FaceIQ email plan” on m4 runs without Claudopus/ })).toBeDefined()
   expect(await list.find({ type: 'Text', text: /bad;id/ })).toBeUndefined()
   // The app is quit and opened again, and the chat there has gone: the warning goes
   files.set('sh:applog', '2026-11-13 09:00:00 [info] Starting app {\n')
   files.set('ssh:fetch', `${NOW / 1000}\n`)
   await clock.advance(40_000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: /^Claudopus is off/ })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: /^Claudopus isn't running/ })) ? undefined : true))).toBe(true)
   await list.unmount()
 })
 

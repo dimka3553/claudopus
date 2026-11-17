@@ -145,10 +145,10 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   redraw($)
   const cards = await read($, todos)
   const titled = (one: string) => `"${titleOf(cards.find(card => card.id === one) ?? started(one, '', '', '', cutAt))}"`
-  const where = isCopy ? 'on this Mac by itself' : 'again'
+  const where = isCopy ? ', in the background on this Mac' : ''
   const text = [
-    back.length ? `${back.length === 1 ? `${titled(back[0] ?? '')} was interrupted at ${hhmm(cutAt)} and has been running ${where}` : `${back.length} tasks were interrupted at ${hhmm(cutAt)} and have been running ${where}`} since ${hhmm(now)}.` : '',
-    lost.length ? `${lost.length === 1 ? titled(lost[0] ?? '') : `${lost.length} tasks`} interrupted at ${hhmm(cutAt)} couldn't be restarted.` : '',
+    back.length ? `Claudopus started ${back.length === 1 ? titled(back[0] ?? '') : `${back.length} tasks`} again at ${hhmm(now)}${where}, after the chat stopped at ${hhmm(cutAt)}.` : '',
+    lost.length ? `Claudopus couldn't start ${lost.length === 1 ? titled(lost[0] ?? '') : `${lost.length} tasks`} again after the chat stopped at ${hhmm(cutAt)}.` : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -161,12 +161,13 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
 const tellDevice = async ($: EngineInterface, text: string) => {
   const pushed = await $.tool.call({ tool: 'PushNotification', message: text.slice(0, 199) } as never).catch(err => ({ deny: String(err) }))
   await log($, `cut-off notice pushed: ${JSON.stringify(pushed).slice(0, 200)}`)
-  await alertPerson($, 'cut', 'Task interrupted and restarted', text, `cut-${Math.round((await $.clock.now()) / 60_000)}`)
+  await alertPerson($, 'cut', 'Task interrupted', text, `cut-${Math.round((await $.clock.now()) / 60_000)}`)
 }
 
 // The line on a card of cut-off work: when, and whether it goes on again
 const cutLine = (one: Todo) =>
-  one.cutAt ? (one.backAt ? `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; running again since ${hhmm(one.backAt)}.` : `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; it couldn't be restarted.`) : ''
+  one.cutAt ? (one.backAt ? `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · running again since ${hhmm(one.backAt)}` : `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · Claudopus couldn't start it again`) : ''
+
 
 // ---- Back by itself after Claude switches it off ----
 
