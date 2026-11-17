@@ -496,7 +496,7 @@ const chatHooks = (on: On) => {
       // A reply it never read goes to the chat; work that waits for its helpers reads it at its next step
       if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
       // A go-ahead pressed during this turn does its last step now, before the wakes go, so its small task starts from this hook
-      await stepAtEnd($, id, how).catch(err => log($, `last step of ${id} not done: ${String(err)}`))
+      await stepsAtEnd($).catch(err => log($, `last step not done: ${String(err)}`))
       if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
       // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
       // held on its own background work leaves it once it ends (keepStoppedReports)

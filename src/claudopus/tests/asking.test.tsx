@@ -517,10 +517,9 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   expect(await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('Release it after lunch')))).toBeDefined()
 
   // Release it pressed while the work is still in the turn that asked (writing its waits and report, as on 16 Nov 19:49 and 17 Nov
-  // 07:49): the work is told the step is Claudopus's, not left it, and the step is done as that turn ends, from its own hook,
-  // whatever the work left running: the release's allow box, a small fresh task for any other step. A turn that was stopped first
-  // does no step, and the question is back on the card
-  for (const description of ['Fix the jaw', 'Fix the cheek', 'Fix the lip']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
+  // 07:49): the work is told the step is Claudopus's, not left it, and the step is done once its card has ended: the release's allow
+  // box, a small fresh task for any other step. A turn that was stopped first does no step, and the question is back on the card
+  for (const description of ['Fix the jaw', 'Fix the cheek', 'Fix the lip', 'Fix the neck']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
   const working = async (id: string, last_step: string, folder: string) => {
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${id}`, agentId: id, text: `Release ${id}?`, choices: ['Release it', 'Not now'], last_step, folder } as never)
     await press(id, 'Release it')
@@ -531,8 +530,7 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   expect(await until(async () => list.find({ type: 'Text', text: 'On your "Release it", Claudopus does the last step once Claude ends this turn' }))).toBeDefined()
   await clock.advance(60_000)
   expect(await gate5()).toBeUndefined()
-  // (a helper of its own still at work holds its card at work, and the step is done all the same)
-  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Look at the jaw', prompt: 'look', parentAgentId: 'a5' } as never)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h-a5', agentId: 'a5', message: 'Claudopus releases it.' } as never)
   await $.turn.complete({ answer: 'Claudopus releases it.', durationMs: 1, isAborted: false, turnId: 'turn-a5', reason: 'answer', agentId: 'a5' } as never)
   expect(await until(gate5)).toBeDefined()
   expect(files.get(`${MEMORY}/log.md`)).toContain('last step of a5 on')
@@ -543,7 +541,13 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 'turn-a7', reason: 'answer', agentId: 'a7' } as never)
   expect(await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it' && String(b.key ?? '').startsWith('ask-a7-')))).toBeDefined()
   expect(files.get(`${MEMORY}/log.md`)).not.toContain('last step of a7 on')
-  expect(resumed.filter(line => /^a[567]: /.test(line))).toEqual([])
+  // nor when it asks something else before its turn ends
+  await working('a8', 'release', '/repo/wt')
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k-a8b', agentId: 'a8', text: 'A check failed: may I fix it first?', choices: ['Fix it', 'Not now'] } as never)
+  await $.turn.complete({ answer: 'May I fix it first?', durationMs: 1, isAborted: false, turnId: 'turn-a8', reason: 'answer', agentId: 'a8' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Nothing was done on your "Release it": Claude asked something else first' }))).toBeDefined()
+  expect(files.get(`${MEMORY}/log.md`)).not.toContain('last step of a8 on')
+  expect(resumed.filter(line => /^a[5678]: /.test(line))).toEqual([])
   await list.unmount()
 })
 

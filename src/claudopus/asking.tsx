@@ -501,6 +501,8 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       // Kept on the card, so a reload meanwhile keeps it too, and done from the end of that turn's own hook (stepAtEnd)
       await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, stepOnEnd: { ask, said } } : card)))
       await stepLine($, one.id, `On your "${said}", Claudopus does the last step once Claude ends this turn`)
+      // (a turn that ended while this was written has had its end's look already)
+      await stepsAtEnd($)
     }
     return void askGone($, one, said)
   }
