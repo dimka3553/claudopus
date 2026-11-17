@@ -3,9 +3,9 @@
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
 const BRIEF =
-  'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command, a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
+  'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
 const REFUSED =
-  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow, if any; it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
+  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
   `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
 // A command that would print a password or key the keychain keeps (on Linux, the files bin/keyring keeps). Work uses a kept key only through `bin/secret`, which reads it itself
@@ -184,6 +184,115 @@ const writesMemory = (text: string, names: readonly string[]): boolean => {
     .join('\n')
   return namesMemory(kept, names) || (names === MEMORY_PERSON && /\brelease\.local\b/.test(kept))
 }
+// A command that is only Python or Node handed code that reads (`python3 -c "print(json.load(open(p)))"`, `node -e`), at most with its
+// errors sent to /dev/null and its output piped into a reader (head, tail, wc, grep, jq, cut, tr): nothing else joined to it and
+// nothing sent into a file. Its code passes only when every name it calls or reaches into is one of a short list of plain reads
+// (open of one path, json, a text's own ways, printing, Path's read_text, fs.readFileSync), its modules are json, sys, os and pathlib
+// (fs, path and os in Node), and no call is reached by a computed name. Anything else is read as a write; a command that changes the
+// files anyway is undone as it ends
+const CODE_NAMES = new Set(
+  (
+    'print open len str int float bool list dict set tuple sorted reversed enumerate range zip map filter min max sum any all abs round repr type isinstance next iter ' +
+    'load loads dumps read read_text read_bytes readline readlines keys values items get Path home expanduser expandvars join exists isfile isdir basename dirname ' +
+    'abspath realpath getenv listdir is_file is_dir iterdir glob stat getsize getmtime splitlines split rsplit strip lstrip rstrip lower upper startswith endswith ' +
+    'replace format count find index decode encode path environ argv stdout stderr stdin st_size st_mtime name stem suffix parent parts ' +
+    'if elif else for while not and or in is return lambda typeof catch ' +
+    'console log error JSON parse stringify require readFileSync existsSync statSync readdirSync toString trim includes slice sort push entries length env process homedir resolve String Number Object Array'
+  ).split(' '),
+)
+const CODE_MODULES = ['json', 'sys', 'os', 'os.path', 'pathlib']
+const CODE_REQUIRES = /^(['"])(?:node:)?(?:fs|path|os)\1$/
+const CODE_RUNNERS: Record<string, { flags: RegExp; code: readonly string[] }> = {
+  python: { flags: /^-[IBSEusq]+$/, code: ['-c'] },
+  python3: { flags: /^-[IBSEusq]+$/, code: ['-c'] },
+  node: { flags: /^$/, code: ['-e', '-p', '-pe', '--eval', '--print'] },
+}
+const PIPE_READERS = ['head', 'tail', 'wc', 'grep', 'jq', 'cut', 'tr']
+// The command cut at each | outside quotes, with what lies outside quotes in each piece
+const pipedParts = (command: string) => {
+  const parts: { text: string; bare: string }[] = [{ text: '', bare: '' }]
+  let quote = ''
+  for (const c of command) {
+    const part = parts[parts.length - 1]!
+    if (quote) quote = c === quote ? '' : quote
+    else if (c === "'" || c === '"') quote = c
+    else if (c === '|') {
+      parts.push({ text: '', bare: '' })
+      continue
+    } else part.bare += c
+    part.text += c
+  }
+  return quote ? [] : parts
+}
+// The arguments of the call that starts at `open`, split at its own commas, or undefined when they cannot be read plainly
+const callArgs = (code: string, open: number): string[] | undefined => {
+  const args: string[] = []
+  let depth = 0
+  let quote = ''
+  let arg = ''
+  for (let i = open + 1; i < code.length; i++) {
+    const c = code[i]!
+    if (quote) {
+      if (c === '\\') arg += c + (code[++i] ?? '')
+      else (quote = c === quote ? '' : quote), (arg += c)
+      continue
+    }
+    if (c === "'" || c === '"') (quote = c), (arg += c)
+    else if ('([{'.includes(c)) depth++, (arg += c)
+    else if (')]}'.includes(c)) {
+      if (depth === 0) return arg.trim() ? [...args, arg.trim()] : args
+      depth--
+      arg += c
+    } else if (c === ',' && depth === 0) args.push(arg.trim()), (arg = '')
+    else arg += c
+  }
+  return undefined
+}
+const codeOnlyReads = (command: string): boolean => {
+  if (/\n|\$\(|`/.test(command)) return false
+  const parts = pipedParts(command.trim())
+  if (!parts.length || parts.some(one => !one.text.trim())) return false
+  // after the code, only the reader each pipe goes into, and no file sent into or read from but errors sent to /dev/null
+  for (const one of parts.slice(1)) {
+    const words = shellWords(one.text)
+    if (words.length !== 1 || !PIPE_READERS.includes(words[0]![0] ?? '') || /[;&<>]/.test(one.bare)) return false
+  }
+  if (/[;&<]/.test(parts[0]!.bare) || /[<>]/.test(parts[0]!.bare.replace(/(?:^|\s)2>\/dev\/null(?=\s|$)/g, ' '))) return false
+  const words = (shellWords(parts[0]!.text)[0] ?? []).filter(one => one !== '2>/dev/null')
+  const name = (words[0] ?? '').split('/').pop() ?? ''
+  const runner = CODE_RUNNERS[/^python3\.\d+$/.test(name) ? 'python3' : name]
+  if (!runner || !Object.hasOwn(CODE_RUNNERS, /^python3\.\d+$/.test(name) ? 'python3' : name)) return false
+  // the program's own flags (no module, no import hook) and then its code
+  let at = 1
+  while (at < words.length && runner.flags.test(words[at]!) && !runner.code.includes(words[at]!)) at++
+  if (!runner.code.includes(words[at] ?? '') || at + 1 >= words.length) return false
+  const code = words[at + 1]!
+  // a string that runs what it holds (Python's f-strings) is not plain
+  if (/(?:^|[^\w'"])[rRbBuU]?[fF][rRbB]?['"]/.test(code)) return false
+  // modules and what Node requires
+  for (const m of code.matchAll(/\bfrom\s+([\w.]+)\s+import\s+([\w\s,]+)/g)) if (!CODE_MODULES.includes(m[1]!) || m[2]!.split(',').some(one => !CODE_NAMES.has(one.trim().split(/\s+/)[0]!))) return false
+  for (const m of code.replace(/\bfrom\s+[\w.]+\s+import\s+[\w\s,]+/g, '').matchAll(/(?:^|[;\s])import\s+([\w.\s,]+)/g)) if (m[1]!.split(',').some(one => !CODE_MODULES.includes(one.trim().split(/\s+/)[0]!))) return false
+  if (/\bimport\b/.test(code.replace(/\bfrom\s+[\w.]+\s+import\b|(?:^|[;\s])import\s+[\w.]/g, ''))) return false
+  for (const m of code.matchAll(/\brequire\s*\(/g)) {
+    const args = callArgs(code, m.index! + m[0].length - 1)
+    if (args?.length !== 1 || !CODE_REQUIRES.test(args[0]!)) return false
+  }
+  // printing is not writing; then, with the texts in quotes left out, every name called or reached into is a plain read, and nothing
+  // is called that is not named (a call on what an index or a call gave back)
+  const bare = code.replace(/\bstd(?:out|err)\s*\.\s*write\s*\(/g, 'print(').replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''")
+  if (/[\])]\s*\(/.test(bare) || /['"]/.test(bare.replace(/''/g, ''))) return false
+  // (open itself never handed on, as to map(open, paths, modes), only called)
+  if (/\bopen\b(?!\s*\()/.test(bare)) return false
+  for (const m of bare.matchAll(/(\.\s*)?\b([A-Za-z_]\w*)\s*(\()?/g)) if ((m[1] || m[3]) && !CODE_NAMES.has(m[2]!)) return false
+  // a replace of text names what to replace and with what; one with a single argument is a path's move (pathlib's replace)
+  for (const m of code.matchAll(/\breplace\s*\(/g)) if ((callArgs(code, m.index! + m[0].length - 1)?.length ?? 0) < 2) return false
+  // every open: one argument, or a literal mode that reads, or a literal encoding beside it
+  for (const m of code.matchAll(/\bopen\s*\(/g)) {
+    const args = callArgs(code, m.index! + m[0].length - 1)
+    if (!args || !args.length || args.slice(1).some(one => !/^(?:mode\s*=\s*)?(['"])r[bt]?\1$|^(?:encoding|errors|newline)\s*=\s*(['"])[\w-]*\2$/.test(one))) return false
+  }
+  return true
+}
 const NO_MEMORY =
   "Only Claudopus writes the files chats share and answer one another through, and the update's own files: Claude never writes them with any tool."
 const NO_MEMORY_BASH = () =>
@@ -297,6 +406,18 @@ const drifted = (steps: number) =>
 // The chat is told once when nothing new has come back under a piece of work for a while
 const STUCK_IN_CHAT = (title: string, mins: number) =>
   `"${title}" hasn't made progress for ${mins} minutes: nothing new has come back to Claude or its helpers. It may be stuck waiting for something. Its card shows how far it has got.`
+// What the chat alone reads with it: it may ask the task what it waits on, as nothing of Claudopus's will
+const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to hand back what it has if nothing is coming.'
+// A task that ended its step to wait for its helpers, from which nothing new has come back: Claudopus starts it again with a nudge,
+// first to ask them, then to hand back what it has. What it is told, and what the chat is told
+const HELPERS_SILENT = (mins: number, helpers: string) =>
+  `From Claudopus: nothing new has come back from your helpers for ${mins} min while your step had ended: ${helpers}. Ask each with SendMessage what it is doing and when it will end, and tell one that is stuck or waits on nothing to hand back what it has now. Then carry on with what needs nothing from them, or end your step.`
+const HELPERS_STILL_SILENT = (mins: number, helpers: string) =>
+  `From Claudopus: nothing new has come back from your helpers for ${mins} min, nor since you were asked to check on them: ${helpers}. Unless one told you it is still making progress and when it ends, hand back your report now with what you have, saying what each was still doing: Claudopus lets you hand it back while they run, and stops those that sit silent as you do.`
+const GAVE_UP_IN_CHAT = (title: string, mins: number) =>
+  `"${title}" is stuck: nothing new has come back from its helpers for ${mins} minutes, and it has not handed back what it has though Claudopus asked it to.`
+const NUDGED_IN_CHAT = (title: string, mins: number, isLast: boolean) =>
+  `"${title}" hasn't made progress for ${mins} minutes: it waits for its helpers, and nothing new has come back from them. Claudopus started it again and asked it ${isLast ? 'to hand back what it has now' : 'to check on them'}.`
 // A task that had stopped partway through a step without a report, restarted by Claudopus: what Claude is told, and what the chat is told
 const RESTARTED_WORK = `From Claudopus, not {name}: you stopped partway through a step without a report (the app restarted, the Mac slept or a command was interrupted). First check what you already have, then continue from where you were; a command or helper you started may still be running, or may need starting again.`
 const RESTARTED_IN_CHAT = (title: string, mins: number) =>

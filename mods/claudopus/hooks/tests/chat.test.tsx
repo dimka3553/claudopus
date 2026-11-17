@@ -83,6 +83,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const submitted: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
+  // How many lines the mod had written into chats as each SubagentHandback reached the engine
+  const atHandback: number[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
   // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
@@ -510,6 +512,12 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // as the engine says it: an error result in words, the same for an approval cut short
     if (files.get('refuse') === e.tool) return { result: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", isError: true } as never
     if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
+    // A command marked to fail at its end (npm run build # fails) fails as the engine's does, with what the test lays in `fails`
+    if (e.tool === 'Bash' && command.endsWith(' # fails')) return { result: `Exit code 1\n${files.get('fails') ?? ''}`, isError: true } as never
+    // Claude Code's auto mode refuses this tool outright, as it does a background task's call, with no prompt to the person
+    if (files.get('auto-refuse') === e.tool) return { result: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access]. If you have other tasks that don't depend on this action, continue working on those.", isError: true } as never
+    // What the chat had been told when a hand-back reached the engine, which hands it on at once
+    if (e.tool === 'SubagentHandback') atHandback.push(appended.length)
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,
@@ -591,7 +599,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -1054,6 +1062,79 @@ test('work reaches main only through the release runner: its rules name it, and 
   }
 })
 
+test("tasks of one chat don't cross each other's files: each has its own scratch folder, the scratchpad's top is refused, another running task's folder or file is refused once, a shared checkout is named, and the task whose change may break the build is told", async ($, on) => {
+  const { files, appended } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose and the chin', wait: false, origin: composer })
+  const first = prompts.length
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'NOSE' } as never)
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'CHIN', description: 'Fix the chin' } as never)
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'NOSE AGAIN' } as never)
+  // Each task is told a folder of its own in the scratchpad: two with the same few words two folders, even started at once
+  expect(prompts[first]).toContain('Your own folder for scratch files is `fix-the-nose`')
+  expect(prompts[first + 1]).toContain('`fix-the-chin`')
+  expect(prompts[first + 2]).toContain('`fix-the-nose-2`')
+  await Promise.all([1, 2].map(() => $.agent.spawn({ ...spawn, model: 'opus', prompt: 'JAW', description: 'Fix the jaw' } as never)))
+  expect(prompts.slice(first + 3).map(p => /scratch files is `([^`]+)`/.exec(p)?.[1]).sort()).toEqual(['fix-the-jaw', 'fix-the-jaw-2'])
+  const S = '/private/tmp/claude-501/-repo/engine-id/scratchpad'
+  const call = async (id: string, agentId: string, input: Record<string, unknown>) => (await $.tool.call({ tool_use_id: id, agentId, ...input } as never)) as { deny?: string; context?: string[] }
+
+  // 16 Nov: one task's shot.mjs at the scratchpad's top replaced another's; by Write, or by a command's redirect through a variable
+  expect((await call('w1', 'a1', { tool: 'Write', file_path: `${S}/shot.mjs`, content: 'x' })).deny).toContain("the scratchpad's top is shared by every task of this chat")
+  expect((await call('w1b', 'a1', { tool: 'Write', file_path: `${S}/shot.mjs`, content: 'x' })).deny).toContain('`fix-the-nose`')
+  expect((await call('w2', 'a2', { tool: 'Bash', command: `S=${S}; cat > $S/shot.mjs <<'EOF'\nconst on = a => a > 1\nEOF\nnode $S/shot.mjs` })).deny).toContain('`fix-the-chin`')
+  expect((await call('w3', 'a2', { tool: 'Bash', command: `cd ${S} && node render.mjs > page.png` })).deny).toContain("the scratchpad's top")
+  // A > in quotes writes nothing, and a cd in a subshell leaves the folder unsure, so nothing is taken as written; another chat's
+  // scratchpad is not this chat's
+  for (const [i, command] of [`node -e "if (a > 1) print('${S}/shot.mjs')"`, `echo 'a > ${S}/shot.mjs'`, `(cd ${S} && node r.mjs > page.png)`, 'echo hi > /private/tmp/claude-501/-repo/other-chat/scratchpad/shot.mjs'].entries()) expect((await call(`q${i}`, 'a2', { tool: 'Bash', command })).deny).toBeUndefined()
+  // Its own folder, and its helper's inside it, are its own; a command that only reads the top, or writes elsewhere, runs
+  expect((await call('w4', 'a1', { tool: 'Write', file_path: `${S}/fix-the-nose/shot.mjs`, content: 'x' })).deny).toBeUndefined()
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Shoot the nose', prompt: 'go', parentAgentId: 'a1' } as never)
+  // (the sixth agent started in this test)
+  const helper = 'a6'
+  expect((await call('w5', helper, { tool: 'Bash', command: `node ${S}/fix-the-nose/shot.mjs > ${S}/fix-the-nose/helper/out.png 2>&1` })).deny).toBeUndefined()
+  expect((await call('w6', 'a2', { tool: 'Bash', command: `ls ${S} && node shot.mjs 2>/dev/null > /tmp/x.png` })).deny).toBeUndefined()
+  // A folder nobody was handed, such as one a brief names for its helpers, is anyone's: two tasks under one parent folder both write
+  expect((await call('w6b', 'a1', { tool: 'Write', file_path: `${S}/ten-faults/nose/a.md`, content: 'x' })).deny).toBeUndefined()
+  expect((await call('w6c', 'a2', { tool: 'Write', file_path: `${S}/ten-faults/chin/a.md`, content: 'x' })).deny).toBeUndefined()
+  // Another running task's own folder is refused once, with whose it is; its next write there goes through
+  const theirs = await call('w7', 'a2', { tool: 'Write', file_path: `${S}/fix-the-nose/shot.mjs`, content: 'y' })
+  expect(theirs.deny).toContain('the task "Fix the nose"\'s own, and that task is still working')
+  expect(theirs.deny).toContain('Claudopus refuses this once: your next write into that folder goes through')
+  expect((await call('w8', 'a2', { tool: 'Write', file_path: `${S}/fix-the-nose/other.mjs`, content: 'y' })).deny).toBeUndefined()
+
+  // One checkout of an app two tasks change at once: the same file is refused once, a second file of it names the other task
+  files.set('/app/.git', '')
+  files.set('/app-chin/.git', 'gitdir: /app/.git/worktrees/app-chin')
+  expect((await call('e1', 'a1', { tool: 'Write', file_path: '/app/src/Button.tsx', content: "import './Button.module.css'" })).context ?? []).toEqual([])
+  const same = await call('e2', 'a2', { tool: 'Edit', file_path: '/app/src/Button.tsx', old_string: 'a', new_string: 'b' })
+  expect(same.deny).toContain('the task "Fix the nose", still working, changed this file less than a minute ago')
+  expect(same.deny).toContain('Claudopus refuses this once: your next write to this same file goes through')
+  // The note on the shared checkout is given with the call that goes through, not used up by one refused after it
+  expect((await call('e3', 'a3', { tool: 'Bash', command: 'echo x > /app/src/Card.tsx; echo y > /app/src/Button.tsx' })).deny).toContain('changed this file')
+  const second = await call('e3b', 'a3', { tool: 'Write', file_path: '/app/src/Card.tsx', content: 'x' })
+  expect(second.deny).toBeUndefined()
+  expect((second.context ?? []).join(' ')).toContain('the task "Fix the nose" is changing files in this same checkout (/app) right now')
+  expect((second.context ?? []).join(' ')).toContain('git worktree add')
+  // A worktree of its own crosses nothing
+  expect((await call('e4', 'a2', { tool: 'Write', file_path: '/app-chin/src/Button.tsx', content: 'x' })).deny).toBeUndefined()
+  expect((await call('e5', 'a2', { tool: 'Write', file_path: '/app-chin/src/Card.tsx', content: 'x' })).context ?? []).toEqual([])
+
+  // An error in a task's own worktree on its own copy of the file tells nobody, nor does a search or a command that did not fail
+  files.set('fails', "Failed to compile\n./src/Button.tsx:1:1\nModule not found: Can't resolve './Button.module.css'")
+  expect((await call('b0', 'a2', { tool: 'Bash', command: 'cd /app-chin && npm run build # fails' })).context ?? []).toEqual([])
+  expect((await call('b0b', 'a2', { tool: 'Bash', command: 'cd /app && rg -n error src/Button.tsx # fails' })).context ?? []).toEqual([])
+  expect((await call('b0c', 'a2', { tool: 'Bash', command: 'cd /app && npm run build' })).context ?? []).toEqual([])
+  expect(appended.filter(one => one.startsWith('a1: From Claudopus'))).toEqual([])
+  // The build of the shared checkout fails on the nose task's half-done file: the chin task is told whose change it may be, and the
+  // nose task is told, with the error line
+  expect(((await call('b1', 'a2', { tool: 'Bash', command: 'cd /app && npm run build # fails' })).context ?? []).join(' ')).toContain('this error names src/Button.tsx, which the task "Fix the nose" changed less than a minute ago in this same checkout')
+  const told = await until(async () => appended.find(one => one.startsWith('a1: From Claudopus: a command of the task "Fix the chin" failed in the checkout you share')))
+  expect(told).toContain('./src/Button.tsx:1:1')
+  expect(told).toContain('Your change may have caused it')
+  expect(appended.filter(one => one.startsWith('a1: From Claudopus')).length).toBe(1)
+})
+
 test('a large paste is saved to a file and left out of the chat', async ($, on) => {
   const { files } = world(on)
   await $.session.start(start)
@@ -1140,8 +1221,90 @@ test("a chat's own thread may only read, run a single command in the background,
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1f${i}`, command } as never)).deny).toContain('Start a fresh agent')
   // and it names the quick task for a clearly stated job
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1f-q', command: 'git pull' } as never)).deny).toContain('"claudopus:quick" for a clearly stated job')
-  for (const [i, command] of ['git status', 'git log --oneline -5', 'gh pr checks 12', 'git branch -a', 'git remote -v'].entries())
-    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1g${i}`, command } as never)).deny).toBeUndefined()
+  // A look, an open of a file or page, and a status check of a local server run; braces and the like inside quotes are as written
+  for (const [i, command] of [
+    'git status',
+    'git log --oneline -5',
+    'gh pr checks 12',
+    'git branch -a',
+    'git remote -v',
+    'open -a Vivaldi "/repo/out/before after [1].png"',
+    'open /repo/out/shot.png',
+    'open http://localhost:3000/pricing',
+    'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/pricing',
+    'curl -sSI --max-time 5 http://127.0.0.1:8080/',
+    'curl -s -o /dev/null -w "%{http_code}\\n" http://localhost:3000',
+    'curl -so /dev/null -m5 localhost:3000/health',
+    'curl -sI http://[::1]:3000/',
+    'curl -s --url http://localhost:3000/ -o /dev/null',
+    'open https://github.com/o/r/blob/main/tools/run.py',
+    'open http://localhost:3000/main.js',
+    'open -R /repo/run.sh',
+    'open -e /repo/notes.txt',
+  ].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `t1g${i}`, command } as never)).deny]).toEqual([command, undefined])
+  // but nothing that runs what it opens, sends data, writes a file or asks another machine
+  for (const [i, command] of [
+    'open /repo/deploy.command',
+    'open -a Terminal /repo/run.sh',
+    'open /Applications/Calculator.app',
+    'open x-apple.systempreferences:com.apple.preference.security',
+    'open --stdout /repo/out.txt /repo/a.png',
+    'open -a Vivaldi "$HOME/x.png"',
+    'curl -s -o /repo/page.html http://localhost:3000/',
+    'curl -O http://localhost:3000/a.js',
+    'curl -X POST http://localhost:3000/api/reset',
+    'curl -d x=1 http://localhost:3000/api',
+    'curl -s -w "%output{/repo/x}%{http_code}" http://localhost:3000/',
+    'curl -K /repo/curlrc http://localhost:3000/',
+    'curl -s https://example.com/',
+    'curl -s http://localhost@example.com/',
+    'curl -sL http://localhost:3000/go',
+    'curl -s -w @/repo/fmt.txt http://localhost:3000/',
+    'curl -X GET http://localhost:3000/',
+    'curl -H "X-HTTP-Method-Override: DELETE" http://localhost:3000/',
+    'curl -T /repo/a http://localhost:3000/',
+    'curl -F a=@/repo/a http://localhost:3000/',
+    'open /repo/scripts/deploy',
+    'open /Applications/Calculator.app/Contents/MacOS/Calculator',
+    'open -a /repo/build/Release/Foo.app /repo/x.png',
+    'open -a "Python Launcher" /repo/x.txt',
+    'open /repo/dist/build.zip',
+    'open /repo/Xcode_16.xip',
+    'open "file:///repo/deploy%2Ecommand"',
+    'open /repo/link.fileloc',
+    'open /repo/dev.cer',
+  ].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `t1o${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('Start a fresh agent')])
+  // A refusal of one of these says the shape the chat can run it in
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1o-shape', command: 'curl -sL http://localhost:3000/go' } as never)).deny).toContain('A `curl` the chat runs itself is a plain GET or HEAD')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1o-shape2', command: 'open /repo/scripts/deploy' } as never)).deny).toContain('An `open` the chat runs itself shows a web page')
+  // A .curlrc in the home folder, which may send curl's output into a file, is kept out with -q first
+  files.set('/home/sam/.curlrc', 'output = /repo/x')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1rc', command: 'curl -s http://localhost:3000/' } as never)).deny).toContain('-q comes first')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1rc-q', command: 'curl -q -s http://localhost:3000/' } as never)).deny).toBeUndefined()
+  files.delete('/home/sam/.curlrc')
+  // The browser pane's preview of a local page, its list, its server's log and its tabs the chat calls itself; a preview that starts a
+  // server by name or shows another site, a stop, and the pane's clicks and scripts are a task's
+  for (const [i, call] of [
+    { tool: 'mcp__Claude_Browser__preview_start', url: 'http://localhost:3000' },
+    { tool: 'mcp__remote-devices__Claude_Browser__preview_start', url: 'http://127.0.0.1:5173/x' },
+    { tool: 'mcp__Claude_Browser__preview_list' },
+    { tool: 'mcp__Claude_Browser__preview_logs' },
+  ].entries())
+    expect([call.tool, (await $.tool.call({ ...call, tool_use_id: `t1p${i}` } as never)).deny]).toEqual([call.tool, undefined])
+  for (const [i, call] of [
+    { tool: 'mcp__Claude_Browser__preview_start', name: 'dev' },
+    { tool: 'mcp__Claude_Browser__preview_start' },
+    { tool: 'mcp__Claude_Browser__preview_start', name: 'dev', url: 'http://localhost:3000' },
+    { tool: 'mcp__Claude_Browser__preview_start', url: 'https://example.com' },
+    { tool: 'mcp__Claude_Browser__preview_stop', name: 'dev' },
+    { tool: 'mcp__Claude_Browser__computer' },
+    { tool: 'mcp__Claude_Browser__javascript_tool' },
+    { tool: 'mcp__Claude_Browser__form_input' },
+  ].entries())
+    expect([call, (await $.tool.call({ ...call, tool_use_id: `t1q${i}` } as never)).deny]).toEqual([call, expect.stringContaining('Start a fresh agent')])
+  expect((await $.tool.call({ tool: 'mcp__Claude_Browser__preview_start', tool_use_id: 't1q-shape', name: 'dev' } as never)).deny).toContain('only with a `url` of a local address')
   // A push only of the branch it is on, never from main and never to it by another spelling, nor anything git is set to run
   files.set('git:branch', 'fix-nose')
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1h', command: 'git push -u origin fix-nose' } as never)).deny).toBeUndefined()

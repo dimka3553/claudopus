@@ -97,15 +97,20 @@ const scriptsRun = async ($: EngineInterface, command: string) => {
 // A command, or a script it runs, that would print a kept key or password: read as written and with its quotes taken out
 const readsKept = async ($: EngineInterface, command: string) =>
   [command, unquoted(command)].some(one => KEYCHAIN_READ.test(one)) || (await scriptsRun($, command)).some(text => KEYCHAIN_READ.test(text) || KEYCHAIN_READ.test(unquoted(text)))
+// A .curlrc curl reads by itself, from the home folder or its config folder
+const curlrcIn = async ($: EngineInterface) => {
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  return Boolean(home) && (await Promise.all([`${home}/.curlrc`, `${home}/.config/.curlrc`].map(path => readOr($, path)))).some(Boolean)
+}
 // A tool call that writes a file of the memory folder only the mod writes (refused outright), or the person's own settings and texts
 // by a command (refused: work changes those with Edit or Write, which wait for the person's press)
 const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
   if (!dir) return ''
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
   if (e.tool === 'Bash') {
-    // The command as written and unquoted, and each script it runs
+    // The command as written and unquoted, and each script it runs; a program handed code that only reads names a file to read it
     const command = String(input.command ?? '')
-    const texts = [command, ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
+    const texts = [...(codeOnlyReads(command) ? [] : [command]), ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
     if (texts.some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
     if (texts.some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
     return ''
@@ -162,7 +167,7 @@ const rulesAgain = async ($: EngineInterface, agent: string) => {
   if (!card.rulesDue && card.rulesSent === hashOf(rules)) return ''
   await changeTodos($, list => list.map(one => (one.id === agent ? { ...one, rulesSent: hashOf(rules), rulesDue: undefined } : one)))
   await log($, `work ${agent} handed its rules again${card.rulesDue ? ' after a compaction' : ' as they changed'}`)
-  return `${card.rulesDue ? 'Your context was compacted, and the rules you were handed at the start are no longer in it.' : 'The rules every task follows have changed since you started.'} These are the rules now; they replace any earlier copy.\n\n${rules}`
+  return `${card.rulesDue ? 'Your context was compacted, and the rules you were handed at the start are no longer in it.' : 'The rules every task follows have changed since you started.'} These are the rules now; they replace any earlier copy.\n\n${rules}${card.scratch ? `\n${SCRATCH_LINE(card.scratch)}` : ''}`
 }
 
 const workHooks = (on: On) => {
@@ -199,6 +204,8 @@ const workHooks = (on: On) => {
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool, outcomeOf(r as never), e as never)
+        // A call Claude Code refused a task with no prompt is put to the person on its card
+        if (e.agentId !== undefined) void refusedByClaudeCode($, e.agentId, e.tool, e as never, r as never).catch(err => log($, `refusal not put to the person: ${String(err)}`))
         // A grant its admin command did not take goes with the call; one sent to the background takes its own in its own time
         if (grants.length && !(call as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
         runnerEnded(e.tool_use_id, Boolean((call as { run_in_background?: unknown }).run_in_background), await $.clock.now())
@@ -225,6 +232,12 @@ const workHooks = (on: On) => {
     if (ownFiles) {
       await log($, `refused ${e.tool} writing the memory folder's own files`)
       return { deny: ownFiles }
+    }
+    // A task's write that crosses the files of another task of this chat still at work (crossing.tsx)
+    const crossed = await crossingOf($, e).catch(async err => (await log($, `crossing not looked at: ${String(err)}`), {} as Awaited<ReturnType<typeof crossingOf>>))
+    if (crossed.deny) {
+      await log($, `refused work ${e.agentId}'s ${e.tool} that crosses another task's files`)
+      return { deny: crossed.deny }
     }
     // (only while it, or the work it helps, has a question of its own open to the person: a wait said for them then is that)
     if (dir && !isOff && e.agentId !== undefined && isPersonWait(e as never, who()) && asksNow(await read($, todos), e.agentId)) {
@@ -286,7 +299,9 @@ const workHooks = (on: On) => {
     // The branch a push would go from, which is never main
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool)
+      // a curl that would read a .curlrc of the home folder, which may send its output into a file, runs only with -q first
+      && !(/^\s*curl\s/.test(chatCommand) && shellWords(chatCommand)[0]?.[1] !== '-q' && (await curlrcIn($)))
+    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
       // A call refused after a press (another of its commands denied, a grant not sealed) ends here: its note goes with it
@@ -309,7 +324,19 @@ const workHooks = (on: On) => {
     }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
+    // A heavy command of a piece of work waits its turn while the Mac is busy, and is told how long it waited as it runs
     const next = async (asked: typeof e) => {
+      // (never one the person has just allowed as admin or as a release: what they allowed lasts two minutes)
+      const held = dir && !isOff && e.agentId !== undefined && asked.tool === 'Bash' && !grants.length ? await holdHeavy($, asked, raw as never) : {}
+      if (held.deny) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: held.deny } as Awaited<ReturnType<typeof raw>>)
+      try {
+        const r = await nextHere(asked)
+        return held.said && !r.deny ? ({ ...r, context: [...((r as { context?: string[] }).context ?? []), held.said] } as typeof r) : r
+      } finally {
+        if (held.id) heavyOpen.delete(held.id)
+      }
+    }
+    const nextHere = async (asked: typeof e) => {
       const isMovedBack = Boolean(dir) && !isOff && e.agentId !== undefined && isLongHeld(asked as never)
       const call = isMovedBack ? ({ ...asked, run_in_background: true } as typeof e) : asked
       if (isMovedBack) await log($, `work ${e.agentId}'s long command started in the background: ${oneLine(String((asked as { description?: unknown }).description ?? '')).slice(0, 80)}`)
@@ -328,7 +355,11 @@ const workHooks = (on: On) => {
       if (from && e.agentId !== undefined && !r.deny) await keepSpan($, e.agentId, call as never, from, spanAt, r.result).catch(err => log($, `left runs not looked for: ${String(err)}`))
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
       const shown = await hideKept($, call, r)
-      return isMovedBack && !shown.deny && !shown.isError ? ({ ...shown, context: [...((shown as { context?: string[] }).context ?? []), MOVED_BACK(who())] } as typeof shown) : shown
+      // What it wrote is kept as it ends, and what crossed another task's is told then
+      const broke = r.deny ? '' : await crossEnded($, e as never, crossed, r.result, Boolean(r.isError)).catch(() => '')
+      const crossing = r.deny ? [] : [r.isError && e.tool !== 'Bash' ? '' : (crossed.context ?? ''), broke].filter(Boolean)
+      const told = crossing.length && !shown.deny ? ({ ...shown, context: [...((shown as { context?: string[] }).context ?? []), ...crossing] } as typeof shown) : shown
+      return isMovedBack && !told.deny && !told.isError ? ({ ...told, context: [...((told as { context?: string[] }).context ?? []), MOVED_BACK(who())] } as typeof told) : told
     }
     // Work the person stopped is not set going again, by the chat or by the work above a helper of it: no message to it, no resume,
     // no fresh agent for the same task, until their next message
@@ -397,12 +428,17 @@ const workHooks = (on: On) => {
                   ? 'the task that started you'
                   : `the task${title(sender)}`
         }
+        // Words from the chat or the person, or a helper's own, are news: the nudges about its helpers start over, and leave to hand
+        // back while they run goes with them, unless the chat asks it to hand back what it has
+        const isNews = e.agentId === undefined || list.find(one => one.id === e.agentId)?.parentId === target.id
+        const isHandBackAsked = e.agentId === undefined && HAND_BACK_ASKED.test(message)
         await changeTodos($, list =>
           list.map(one =>
             one.id !== target.id
               ? one
               : {
                   ...one,
+                  ...(isNews ? { nudged: undefined, mayHandBack: isHandBackAsked ? now : undefined } : {}),
                   owes: isSteer ? 0 : one.owes,
                   entries: words && one.entries.at(-1)?.text !== words ? [...one.entries, { at: now, kind: 'steer' as const, text: words }].slice(-ENTRIES_KEPT) : one.entries,
                 },
@@ -454,8 +490,14 @@ const workHooks = (on: On) => {
     if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
       const hold = await holdAtHandback($, e.agentId).catch(() => '')
       if (hold) return { deny: hold }
+      // A helper whose work has ended its step hands its result to the chat: the chat is told first, so its turn starts knowing
+      await noteHandback($, e.agentId).catch(err => log($, `chat not told of a helper's hand-back: ${String(err)}`))
+      const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       const r = await next(e)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
+      else notedAtHandback.delete(e.agentId)
+      // The helpers it was let hand back over that sit silent end with its report; those at work go on, their results reaching the chat
+      if (!r.deny && !r.isError && isLetGoNow) await stopHelpers($, e.agentId, true).catch(err => log($, `helpers of ${e.agentId} not stopped: ${String(err)}`))
       return r
     }
     // No agent, the chat's or a work's helper, is started on an older model or on Haiku: one named so starts on its family's newest
@@ -492,7 +534,7 @@ const workHooks = (on: On) => {
       }
       return r
     }
-    if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return next(e)
+    if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) || isPaneShow(e)) return next(e)
     // The chat's single command always runs in the background, so no command holds the chat; Claudopus stops it at its limit
     if (isChatCommand) {
       const r = await next({ ...e, run_in_background: true } as typeof e)
@@ -506,8 +548,10 @@ const workHooks = (on: On) => {
     if (READS.includes(e.tool) && !isPaste) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
     if (grants.length) await dropGrants($, grants).catch(() => undefined)
-
-    return { deny: REFUSED }
+    // An open, a curl or a preview not in the shape the chat runs is told that shape, so it can be run that way or go to a task
+    const kind = e.tool === 'Bash' ? (shellWords(chatCommand)[0]?.[0] ?? '') : (/__(preview_start)$/.exec(e.tool)?.[1] ?? '')
+    const shape = Object.hasOwn(CHAT_SHAPES, kind) ? CHAT_SHAPES[kind] : ''
+    return { deny: shape ? `${REFUSED} ${shape}` : REFUSED }
   })
 
   // How full this chat's context is, as the app counts it, each time it moves
@@ -646,8 +690,10 @@ const workHooks = (on: On) => {
     // and is handed, after its brief, the rules every piece of work follows and where the chat's words are, so the brief stays short
     // and where the runner is that does an admin command with a Mac's kept password
     const rules = isTold ? await workRules($) : ''
+    // and a scratch folder of its own in the chat's scratchpad, which every task of the chat shares
+    const scratch = isTold ? scratchName(await read($, todos), e.description ?? '', await $.clock.now()) : ''
     const isBackground = isHelperSpawn(e)
-    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}` } : isBackground ? { ...e, background: true } : e)
+    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}\n${SCRATCH_LINE(scratch)}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
     if (r.model) seeModel(r.model)
     // A resumed agent keeps the model it first started on, or none: the model it resumes on may be one the app moved it to after a flag. A
@@ -667,7 +713,7 @@ const workHooks = (on: On) => {
       const old = list.find(one => one.id === id)
       // Its title is the few words the task was given; under it, the person's message as they wrote it
       const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}) }
-      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(rules ? { rulesSent: hashOf(rules) } : {}) }])
+      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(rules ? { rulesSent: hashOf(rules) } : {}), ...(old?.scratch || scratch ? { scratch: old?.scratch || scratch } : {}) }])
     })
     if (isOwn) await openList($)
     await sync($).catch(() => undefined)

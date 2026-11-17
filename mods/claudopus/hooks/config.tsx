@@ -29,7 +29,7 @@ export const MODEL_NAMES: Record<string, string> = { opus: 'Opus 5.5', sonnet: '
 // otherwise; `skipVersion` a version the person skipped, kept quiet with every older one. None of them installs anything: Download
 // and Install are presses in the panel, and nothing here can make them run by themselves
 // `adminPassword` is read no more: no admin password is kept
-export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; updateEvery?: number; skipVersion?: string; models?: Partial<Models>; lean?: Partial<Lean>; admin?: string; adminSealed?: string; adminPassword?: string }
+export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; updateEvery?: number; skipVersion?: string; models?: Partial<Models>; lean?: Partial<Lean>; heavy?: string; admin?: string; adminSealed?: string; adminPassword?: string }
 
 // When Fable runs and when a second agent checks, each a choice in Config's Tasks band, the shipped one first. `lean` in config.json
 // holds only the ones changed; a key of a choice that was taken out (small, quick, start, checker, readers) is read as nothing. How a job
@@ -55,6 +55,16 @@ export const ADMIN_MODES = [
   { value: 'never', label: 'Never ask' },
 ] as const
 export type AdminMode = (typeof ADMIN_MODES)[number]['value']
+// `heavy`: when a task's new heavy command (a browser it drives, a build, a render) waits its turn: past each mark the Mac counts as
+// busy, by its load average for each core and its memory in use; "never" runs every one at once, as before. A command is held only
+// while a heavy command of the chat's work runs, so it waits on something that ends
+export const HEAVY_MODES = [
+  { value: 'busy', label: 'When the Mac is busy', load: 1.5, memory: 0.9 },
+  { value: 'overloaded', label: 'Only when overloaded', load: 3, memory: 0.95 },
+  { value: 'never', label: 'Never', load: Infinity, memory: Infinity },
+] as const
+export type HeavyMode = (typeof HEAVY_MODES)[number]
+export const heavyModeOf = (config: Config): HeavyMode => HEAVY_MODES.find(one => one.value === config.heavy) ?? HEAVY_MODES[0]
 
 export const parse = (text: string): Config => {
   try {
@@ -109,7 +119,7 @@ export const modelsRule = (m: Models, lean: Lean = LEAN_SHIPPED) => {
 // every step
 export const lanesRule = (m: Models, lean: Lean = LEAN_SHIPPED) => {
   return [
-    '- A message that is one command that changes no file (a push, a fetch, or a look with git or gh, such as a status, a log, a pull request or a build\'s checks): run it yourself with Bash, as a single command with no `&&`, `;`, `|` or `>`. Claudopus starts it in the background with a 10-minute limit and gives you how it ended and its last lines; tell {name} from that. Anything else goes to a task, quick or full, as the next two lines say: a script, a deploy, a commit, a merge or a pull, anything that edits files, takes more than one step, needs its output read to decide the next step, or may ask for a password.',
+    '- A message that is one command that changes no file (a push, a fetch, or a look with git or gh, such as a status, a log, a pull request or a build\'s checks; `open` of a file or page; a `curl` status check of a local server): run it yourself with Bash, as a single command with no `&&`, `;`, `|` or `>`. Claudopus starts it in the background with a 10-minute limit and gives you how it ended and its last lines; tell {name} from that. Show a page or a local server in the browser pane yourself with its `preview_start`. Anything else goes to a task, quick or full, as the next two lines say: a script, a deploy, a commit, a merge or a pull, anything that edits files, takes more than one step, needs its output read to decide the next step, or may ask for a password.',
     `- A job you can state clearly in a few paragraphs, with no judgment left to make (a change you can describe exactly, a push and a look at the build, a merge, a look-up, a chain of commands): write one line saying what you are now doing about it, and in the same turn start a quick task, the Agent tool with \`subagent_type: "claudopus:quick"\` and \`model: "${clearModel(m, lean)}"\`, which Claudopus keeps whatever model is named; when {name} names a model for the job, start it as a full task on that model instead. Its instructions say what to do, where, what done looks like, and what it needs from this talk, written out; name files rather than copy them in. Then stop; do not wait for it.`,
     `- For every other message, write one line saying what you are now doing about it, and in the same turn start a fresh task: the Agent tool with \`subagent_type: "claudopus:task"\`, the task's instructions as the prompt, and \`model\` as the next rule says. A task that needs a connector, a skill or the browser is started with \`subagent_type: "general-purpose"\` instead. Then stop; do not wait for it.`,
     '- Never start a copy of this chat (`subagent_type: "fork"`): it rereads the whole chat at every step, so it costs several times a fresh task and runs no faster. Claudopus refuses one.',
@@ -315,6 +325,14 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
               lean[one.key] !== LEAN_SHIPPED[one.key],
               () => acts.set('lean', undefined, one.key),
             ),
+          )}
+          {item(
+            'config-heavy',
+            'Heavy commands wait their turn',
+            "A task's browser, build or render waits while the Mac is busy and another one runs, or while several have just started, and starts in order once there is room, at the latest after 15 minutes. Its card says it waits its turn. One with nothing else heavy running, and Claudopus's own release and tests, never wait.",
+            <Select key="config-heavy-pick" options={HEAVY_MODES.map(one => ({ value: one.value, label: one.label }))} value={heavyModeOf(config).value} onSelect={value => acts.set('heavy', value === HEAVY_MODES[0].value ? undefined : value)} />,
+            heavyModeOf(config).value !== HEAVY_MODES[0].value,
+            () => acts.set('heavy', undefined),
           )}
         </Box>,
       )}

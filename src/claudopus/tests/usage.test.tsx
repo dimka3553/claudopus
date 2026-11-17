@@ -323,3 +323,54 @@ test('the battery card says what the Mac draws, the processors and graphics each
   for (const text of ['Drawing', 'Safari', '45%', '15%']) expect(await desk.find({ type: 'Text', text })).toBeDefined()
   await desk.unmount()
 })
+
+test("a task's heavy command waits its turn on its card while the Mac is busy and another runs, and goes in order once there is room, told how long it waited; one with nothing else heavy running never waits, and the setting at Never lets go one already waiting (16 Nov: ten tasks drove headless browsers on one Mac at once)", SLOW, async ($, on) => {
+  let n = 0
+  let load = 60
+  const { clock, wake, files } = world(on, { usage: () => lookAt((n += 1), 1583261, `@@LOAD@@\n{ ${load}.00 50.00 40.00 }`) })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'shoot every page', wait: false, origin: composer })
+  for (const description of ['Shoot the pages', 'Shoot the cards', 'Shoot the menus']) await $.agent.spawn({ ...spawn, description, prompt: description } as never)
+  const shoot = (id: string, agentId: string, description: string, isBackground = false) =>
+    $.tool.call({ tool: 'Bash', tool_use_id: id, agentId, command: `cd /w && npx playwright screenshot http://localhost:3000/${id} ${id}.png`, description, ...(isBackground ? { run_in_background: true } : {}) } as never) as Promise<{ deny?: string; context?: string[] }>
+  // Load 60 on 10 cores: the first heavy command still starts at once, as nothing else heavy of the chat's runs
+  const first = await shoot('s1', 'a1', 'Take the page shots', true)
+  expect(first.deny).toBeUndefined()
+  // A second and a third wait, each on its own card, in the order they came
+  const done: string[] = []
+  const second = shoot('s2', 'a2', 'Take the card shots').then(r => (done.push('s2'), r))
+  const third = shoot('s3', 'a3', 'Take the menu shots').then(r => (done.push('s3'), r))
+  const texts = async () => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
+    const all = (await list.findAll({ type: 'Text' })).map(one => one.text)
+    await list.unmount()
+    return all
+  }
+  expect(await until(async () => ((await texts()).some(text => /^waits for room on the Mac · 2nd in line/.test(text)) || undefined))).toBe(true)
+  const held = await texts()
+  expect(held.some(text => /^Wait · its turn: Take the card shots/.test(text))).toBe(true)
+  expect(held.some(text => /^waits for room on the Mac · next in line/.test(text))).toBe(true)
+  expect(held.some(text => /^Wait · its turn: Take the menu shots/.test(text))).toBe(true)
+  // Still held while the load stays
+  await clock.advance(10_000)
+  wake()
+  await clock.advance(1000)
+  expect(done).toEqual([])
+  // The load falls: they go in the order they came, each told how long it waited, and their cards no longer say they wait
+  load = 3
+  expect(await until(async () => (await clock.advance(6000), wake(), done.length === 2 || undefined))).toBe(true)
+  expect(done).toEqual(['s2', 's3'])
+  const said = await second
+  expect(said.deny).toBeUndefined()
+  expect(said.context?.some(line => /^Claudopus held this command \("Take the card shots"\) \d+s, until the Mac had room for it, and ran it as soon as its turn came\.$/.test(line))).toBe(true)
+  expect((await third).deny).toBeUndefined()
+  expect(await until(async () => (!(await texts()).some(text => /its turn|room on the Mac/.test(text)) || undefined))).toBe(true)
+  // Busy again, one more waits; the setting put at Never lets it go at once
+  load = 60
+  await clock.advance(6000)
+  const footer = shoot('s4', 'a3', 'Take the footer shots').then(r => (done.push('s4'), r))
+  expect(await until(async () => ((await texts()).some(text => /^Wait · its turn: Take the footer shots/.test(text)) || undefined))).toBe(true)
+  ownSet(files, 'config.json', JSON.stringify({ heavy: 'never' }))
+  expect(await until(async () => (await clock.advance(1000), wake(), done.includes('s4') || undefined))).toBe(true)
+  expect((await footer).deny).toBeUndefined()
+})

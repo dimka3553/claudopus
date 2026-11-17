@@ -83,6 +83,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const submitted: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
+  // How many lines the mod had written into chats as each SubagentHandback reached the engine
+  const atHandback: number[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
   // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
@@ -510,6 +512,12 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // as the engine says it: an error result in words, the same for an approval cut short
     if (files.get('refuse') === e.tool) return { result: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", isError: true } as never
     if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
+    // A command marked to fail at its end (npm run build # fails) fails as the engine's does, with what the test lays in `fails`
+    if (e.tool === 'Bash' && command.endsWith(' # fails')) return { result: `Exit code 1\n${files.get('fails') ?? ''}`, isError: true } as never
+    // Claude Code's auto mode refuses this tool outright, as it does a background task's call, with no prompt to the person
+    if (files.get('auto-refuse') === e.tool) return { result: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access]. If you have other tasks that don't depend on this action, continue working on those.", isError: true } as never
+    // What the chat had been told when a hand-back reached the engine, which hands it on at once
+    if (e.tool === 'SubagentHandback') atHandback.push(appended.length)
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,
@@ -591,7 +599,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -1015,4 +1023,55 @@ test('the battery card says what the Mac draws, the processors and graphics each
   // The graphics card: what it draws, and who uses it most
   for (const text of ['Drawing', 'Safari', '45%', '15%']) expect(await desk.find({ type: 'Text', text })).toBeDefined()
   await desk.unmount()
+})
+
+test("a task's heavy command waits its turn on its card while the Mac is busy and another runs, and goes in order once there is room, told how long it waited; one with nothing else heavy running never waits, and the setting at Never lets go one already waiting (16 Nov: ten tasks drove headless browsers on one Mac at once)", SLOW, async ($, on) => {
+  let n = 0
+  let load = 60
+  const { clock, wake, files } = world(on, { usage: () => lookAt((n += 1), 1583261, `@@LOAD@@\n{ ${load}.00 50.00 40.00 }`) })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'shoot every page', wait: false, origin: composer })
+  for (const description of ['Shoot the pages', 'Shoot the cards', 'Shoot the menus']) await $.agent.spawn({ ...spawn, description, prompt: description } as never)
+  const shoot = (id: string, agentId: string, description: string, isBackground = false) =>
+    $.tool.call({ tool: 'Bash', tool_use_id: id, agentId, command: `cd /w && npx playwright screenshot http://localhost:3000/${id} ${id}.png`, description, ...(isBackground ? { run_in_background: true } : {}) } as never) as Promise<{ deny?: string; context?: string[] }>
+  // Load 60 on 10 cores: the first heavy command still starts at once, as nothing else heavy of the chat's runs
+  const first = await shoot('s1', 'a1', 'Take the page shots', true)
+  expect(first.deny).toBeUndefined()
+  // A second and a third wait, each on its own card, in the order they came
+  const done: string[] = []
+  const second = shoot('s2', 'a2', 'Take the card shots').then(r => (done.push('s2'), r))
+  const third = shoot('s3', 'a3', 'Take the menu shots').then(r => (done.push('s3'), r))
+  const texts = async () => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
+    const all = (await list.findAll({ type: 'Text' })).map(one => one.text)
+    await list.unmount()
+    return all
+  }
+  expect(await until(async () => ((await texts()).some(text => /^waits for room on the Mac · 2nd in line/.test(text)) || undefined))).toBe(true)
+  const held = await texts()
+  expect(held.some(text => /^Wait · its turn: Take the card shots/.test(text))).toBe(true)
+  expect(held.some(text => /^waits for room on the Mac · next in line/.test(text))).toBe(true)
+  expect(held.some(text => /^Wait · its turn: Take the menu shots/.test(text))).toBe(true)
+  // Still held while the load stays
+  await clock.advance(10_000)
+  wake()
+  await clock.advance(1000)
+  expect(done).toEqual([])
+  // The load falls: they go in the order they came, each told how long it waited, and their cards no longer say they wait
+  load = 3
+  expect(await until(async () => (await clock.advance(6000), wake(), done.length === 2 || undefined))).toBe(true)
+  expect(done).toEqual(['s2', 's3'])
+  const said = await second
+  expect(said.deny).toBeUndefined()
+  expect(said.context?.some(line => /^Claudopus held this command \("Take the card shots"\) \d+s, until the Mac had room for it, and ran it as soon as its turn came\.$/.test(line))).toBe(true)
+  expect((await third).deny).toBeUndefined()
+  expect(await until(async () => (!(await texts()).some(text => /its turn|room on the Mac/.test(text)) || undefined))).toBe(true)
+  // Busy again, one more waits; the setting put at Never lets it go at once
+  load = 60
+  await clock.advance(6000)
+  const footer = shoot('s4', 'a3', 'Take the footer shots').then(r => (done.push('s4'), r))
+  expect(await until(async () => ((await texts()).some(text => /^Wait · its turn: Take the footer shots/.test(text)) || undefined))).toBe(true)
+  ownSet(files, 'config.json', JSON.stringify({ heavy: 'never' }))
+  expect(await until(async () => (await clock.advance(1000), wake(), done.includes('s4') || undefined))).toBe(true)
+  expect((await footer).deny).toBeUndefined()
 })

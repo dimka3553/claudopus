@@ -85,13 +85,84 @@ const isOneCommand = (command: string) => {
 const CHAT_GIT = ['push', 'fetch', 'status', 'log', 'diff', 'show', 'branch', 'remote', 'rev-parse', 'ls-remote', 'describe', 'shortlog', 'blame']
 const CHAT_GH = ['view', 'list', 'status', 'checks', 'diff']
 const CHAT_LOOKS = ['ls', 'pwd', 'date', 'uptime', 'whoami', 'hostname', 'df', 'sw_vers', 'uname', 'which']
+// It shows a file or a page: macOS's open of a web page, or of a file of a kind that is only looked at (a picture, a PDF, a page, a
+// text, a video), in its own app or one named from a short list of browsers, viewers and editors; -R only shows a file in the Finder
+const OPEN_VIEWS = /\.(?:png|jpe?g|gif|webp|avif|heic|tiff?|bmp|svg|ico|pdf|html?|txt|md|markdown|csv|tsv|json|log|mp4|mov|m4v|webm|mp3|m4a|wav)$/i
+const OPEN_APPS = ['safari', 'google chrome', 'chrome', 'chromium', 'vivaldi', 'firefox', 'arc', 'brave browser', 'microsoft edge', 'opera', 'orion', 'preview', 'quicktime player', 'photos', 'textedit', 'visual studio code', 'cursor', 'zed', 'sublime text', 'iina', 'vlc']
+const isChatOpen = (args: string[]) => {
+  let shown = 0
+  const isReveal = args.some(one => /^-[gnR]*R[gnR]*$/.test(one))
+  for (let i = 0; i < args.length; i++) {
+    const one = args[i]!
+    if (one === '-a') {
+      if (!OPEN_APPS.includes((args[++i] ?? '').toLowerCase())) return false
+    } else if (/^-[gnRet]+$/.test(one)) continue
+    else if (one.startsWith('-')) return false
+    else if (/^https?:\/\/[^\s]+$/i.test(one)) shown++
+    // a path: never a link of another kind, and for anything but -R one of the kinds above
+    else if (/^[a-z][\w+.-]*:/i.test(one) || !(isReveal || OPEN_VIEWS.test(one))) return false
+    else shown++
+  }
+  return shown > 0
+}
+// It asks how a server on this Mac stands: curl's plain GET or HEAD of a local address, its body sent nowhere but /dev/null; none of
+// curl's ways to send data, change the method or headers, follow a redirect elsewhere, write a file or read settings from one
+const CURL_LOCAL = /^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|[\w-]+\.localhost)(?::\d+)?(?:[/?#]|$)/i
+const CURL_FLAGS = ['--silent', '--show-error', '--fail', '--fail-with-body', '--head', '--include', '--insecure', '--compressed', '--verbose', '-4', '-6']
+const isChatCurl = (args: string[]) => {
+  let asked = 0
+  for (let i = 0; i < args.length; i++) {
+    let flag = args[i]!
+    let joined: string | undefined
+    // --name=value, and a value joined to a short flag or to a run of them (-so /dev/null, -m5)
+    if (flag.startsWith('--') && flag.includes('=')) [flag, joined] = [flag.slice(0, flag.indexOf('=')), flag.slice(flag.indexOf('=') + 1)]
+    else if (/^-[sSfIikv]*[omw]/.test(flag)) {
+      const m = /^-[sSfIikv]*([omw])(.*)$/.exec(flag)!
+      ;[flag, joined] = [`-${m[1]}`, m[2] || undefined]
+    }
+    const value = () => joined ?? args[++i] ?? ''
+    // -q only first, where it keeps curl from reading a .curlrc
+    if (/^-[sSfIikv]+$/.test(flag) || CURL_FLAGS.includes(flag) || (flag === '-q' && i === 0)) continue
+    if (flag === '-o' || flag === '--output') {
+      if (value() !== '/dev/null') return false
+    } else if (flag === '-w' || flag === '--write-out') {
+      const format = value()
+      if (/output\{/i.test(format) || format.startsWith('@')) return false
+    } else if (['-m', '--max-time', '--connect-timeout'].includes(flag)) {
+      if (!/^\d+(?:\.\d+)?$/.test(value())) return false
+    } else if (flag === '--url') {
+      if (!CURL_LOCAL.test(value())) return false
+      asked++
+    } else if (flag.startsWith('-') || !CURL_LOCAL.test(flag)) return false
+    else asked++
+  }
+  return asked > 0
+}
+// The shape each of these passes in, told with a refusal of one that does not
+const CHAT_SHAPES: Record<string, string> = {
+  open: 'An `open` the chat runs itself shows a web page (http or https) or a file that is only looked at (a picture, a PDF, a page, a text, a video), optionally in a named browser or viewer (`-a Vivaldi`), or shows a file in the Finder with `-R`.',
+  curl: 'A `curl` the chat runs itself is a plain GET or HEAD of a local address (localhost, 127.0.0.1, [::1]) with its body sent only to /dev/null: flags -s -S -f -I -i -k -v, -o /dev/null, -w with a format, -m; no -L, -X, -H, -d, -F, -T or -O. Where a .curlrc is in the home folder, -q comes first.',
+  preview_start: "The browser pane's `preview_start` runs in the chat only with a `url` of a local address (http://localhost:3000); one that starts a server by its name is a task's.",
+}
+// The browser pane's preview of a page of a local server, its list, its server's log and its tabs: shown, never a server started
+const isPaneShow = (e: { tool: string }) => {
+  const m = /^mcp__(?:remote-devices__)?Claude_Browser__(\w+)$/.exec(e.tool)
+  if (!m) return false
+  if (['preview_list', 'preview_logs', 'tabs_context'].includes(m[1]!)) return true
+  const call = e as { url?: unknown; name?: unknown }
+  return m[1] === 'preview_start' && call.name === undefined && typeof call.url === 'string' && /^https?:\/\//i.test(call.url) && CURL_LOCAL.test(call.url)
+}
 const isChatRunnable = (command: string, branch = '') => {
   if (!isOneCommand(command) || RUNNER_NAMED.test(command) || /claudopus\/p\W?stes|\bpastes\b/.test(command)) return false
-  // nothing the shell fills in or spreads out: no variables, braces, globs, escapes, home or history
-  if (/[$\\{}*?[\]~!]/.test(command)) return false
+  // nothing the shell fills in or spreads out: no variables, braces, globs, escapes, home or history, outside quotes; inside double
+  // quotes no variable or escape (single quotes hold anything as written)
+  // (a backslash there that the shell keeps as written, as in "%{http_code}\n", is as written; the address [::1] is curl's own)
+  if (/[$\\{}*?[\]~!]/.test(command.replace(/'[^']*'|"(?:[^"$`\\]|\\[^$`"\\\n])*"/g, '""').replace(/\[::1\]/g, ''))) return false
   const words = shellWords(command)[0] ?? []
   const head = words[0] ?? ''
   const rest = words.slice(2)
+  if (head === 'open') return isChatOpen(words.slice(1))
+  if (head === 'curl') return isChatCurl(words.slice(1))
   if (head === 'git') {
     // the verb straight after git: no -c, -C or --config-env before it, which set what git runs
     const verb = words[1] ?? ''
@@ -110,7 +181,7 @@ const isChatRunnable = (command: string, branch = '') => {
   return CHAT_LOOKS.includes(head)
 }
 const NOT_ONE_COMMAND =
-  'Not run: the chat runs only a single command with nothing joined to it (no `&&`, `;`, `|`, `>`, `$( )` or backticks), and only one that changes no file: a push, a fetch, or a look with git or gh. Start a task for anything else.'
+  'Not run: the chat runs only a single command with nothing joined to it (no `&&`, `;`, `|`, `>`, `$( )` or backticks), and only one that changes no file: a push, a fetch, a look with git or gh, an `open` of a file or page, or a `curl` status check of a local server. Start a task for anything else.'
 // The chat's own commands under way, by their background id: when each started and what it was
 const chatCommands = new Map<string, { at: number; command: string; description: string }>()
 // The background id a command sent to the background answers with, as the engine writes it

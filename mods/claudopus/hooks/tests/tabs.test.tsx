@@ -83,6 +83,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const submitted: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
+  // How many lines the mod had written into chats as each SubagentHandback reached the engine
+  const atHandback: number[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
   // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
@@ -510,6 +512,12 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // as the engine says it: an error result in words, the same for an approval cut short
     if (files.get('refuse') === e.tool) return { result: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", isError: true } as never
     if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
+    // A command marked to fail at its end (npm run build # fails) fails as the engine's does, with what the test lays in `fails`
+    if (e.tool === 'Bash' && command.endsWith(' # fails')) return { result: `Exit code 1\n${files.get('fails') ?? ''}`, isError: true } as never
+    // Claude Code's auto mode refuses this tool outright, as it does a background task's call, with no prompt to the person
+    if (files.get('auto-refuse') === e.tool) return { result: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access]. If you have other tasks that don't depend on this action, continue working on those.", isError: true } as never
+    // What the chat had been told when a hand-back reached the engine, which hands it on at once
+    if (e.tool === 'SubagentHandback') atHandback.push(appended.length)
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,
@@ -591,7 +599,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -922,9 +930,9 @@ test('a tab opened but not asked for its drawing is drawn again within seconds, 
   expect(redraws).toBe(asked)
 })
 
-test('a tab left open as the mod loads, after an update or a reload, is drawn again if the app does not ask for it', async ($, on) => {
+test('a tab left open as the mod loads, after an update or a reload, is drawn again if the app does not ask for it, and the log names the chat', async ($, on) => {
   const live = [{ id: 'claudopus', isShown: false, isPlaced: false }, { id: 'stats', isShown: false, isPlaced: false }]
-  const { clock } = world(on, { live })
+  const { clock, files } = world(on, { live })
   let redraws = 0
   on('ui.invalidate', () => ((redraws += 1), { value: undefined }) as never)
   await $.session.start(start)
@@ -935,4 +943,6 @@ test('a tab left open as the mod loads, after an update or a reload, is drawn ag
   // Four times at most, while nothing asks for it: a tab behind the others is never asked for
   await clock.advance(60_000)
   expect(redraws - before).toBeLessThanOrEqual(4)
+  // The app asks only the chat it shows: the line names this one, so a chat in sight left unasked can be told from those out of sight
+  expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/tab [^\n]* not asked for in 40s after this code loaded in chat engine-id: drawn again/)?.[0])).toBeDefined()
 })

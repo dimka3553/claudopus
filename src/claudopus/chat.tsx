@@ -48,6 +48,7 @@ const afterReply = async ($: EngineInterface, text: string, answer: string) => {
 // listed as completed, and the look ends its card (sync) and passes on a reply it never read, as the turn's end would have
 const HELD_LOOK = 1500
 const heldLook = async ($: EngineInterface, id: string) => {
+  const wasWorking = (await read($, todos)).find(one => one.id === id)?.status === 'working'
   await sync($)
   // Listed as idle, or no longer listed, its run is over too: nothing holds it
   const listed = (await $.agent.list().catch(() => undefined))?.find(one => one.id === id)?.status
@@ -55,9 +56,12 @@ const heldLook = async ($: EngineInterface, id: string) => {
     const now = await $.clock.now()
     await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
   }
-  if ((await read($, todos)).find(one => one.id === id)?.status === 'working') return
+  const card = (await read($, todos)).find(one => one.id === id)
+  if (card?.status === 'working') return
   await replyUnread($, id)
   if (wakes.length) await sendWakes($)
+  // A helper the engine still listed as running as its turn ended, ended now: its result is passed on as at a heard end
+  if (wasWorking && card?.parentId && card.parentId !== HELPER) await passOnHelper($, id, card.answer ?? '', card.status)
 }
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
@@ -71,6 +75,12 @@ const chatHooks = (on: On) => {
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
+    // How late the mod's own timer comes: behind, it does less until it has caught up (lookHold). From the start of the load, so a
+    // long hold in the load's own reads is logged with them too
+    holdAt = 0
+    // (not in the test kit, whose clock a test moves by hours at once: there only a test that asks for it has it)
+    isTimed = (await $.env.get('CLAUDOPUS_TIMING')) !== 'test'
+    if (isTimed) everyLoad($, HOLD_LOOK, () => lookHold($))
     // The mod's own kinds of agent, each starting with only the tools its work takes
     void registerKinds($)
     termLive = /truecolor|24bit/i.test((await $.env.get('COLORTERM')) ?? '') ? LIVE : DEEP_LIVE
@@ -94,6 +104,7 @@ const chatHooks = (on: On) => {
     ;(freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0), (usedRows = 0))
     await loadSettings($)
     await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
+    await clearHeld($).catch(err => log($, `held commands not cleared: ${String(err)}`))
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
     await closeUndrawn($)
     $.clock.after(3000, () => closeUndrawn($))
@@ -102,6 +113,7 @@ const chatHooks = (on: On) => {
 
     // The engine's id names this chat's files, as its transcript is named
     const id = await $.session.id()
+    heldChat = id
     const title = await appTitle($)
     // The first load of a session sends the role text; a reload keeps what stands
     await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id ? m.needsContext : true }))
@@ -109,6 +121,7 @@ const chatHooks = (on: On) => {
     await noteCut($, id).catch(err => log($, `cut-off work not looked for: ${String(err)}`))
     // The other chats, on this Mac and the others, are read before the panel is drawn: a chat that starts, or comes back, showed
     // its panel without them until the rest of its start was done, and they seemed to drop out of it for a while
+    during('load: read the other chats')
     await readOthers($).catch(() => undefined)
     keysOnStart($)
 
@@ -188,7 +201,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'wake_me',
       description: named(
-        'For a file, a page or a time that nothing of yours makes (a file another program writes, a page that comes up, a moment to look again): Claudopus looks for it and starts you again the moment it is there, so you end your step instead of waiting with a command. Your own commands, in the background or detached, and your helpers wake you by themselves: never use this for them. Name a file, a line in it, a page, or only minutes. A new call replaces the last one.',
+        'For a file, a page or a time that nothing of yours makes (a file another program writes, a page that comes up, a moment to look again): Claudopus looks for it and starts you again the moment it is there, so you end your step instead of waiting with a command. Your own commands, in the background or detached, and your helpers wake you by themselves: never use this for them. Name a file, a line in it, a page, or only minutes; Claudopus looks for at most an hour unless you say why it takes longer. A new call replaces the last one.',
       ),
       inputSchema: {
         type: 'object',
@@ -197,7 +210,8 @@ const chatHooks = (on: On) => {
           file: { type: 'string', description: 'The full path of a file to appear (with `text`, a file to hold that text)' },
           text: { type: 'string', description: 'A line of text to appear in `file`' },
           url: { type: 'string', description: 'A page to answer without an error' },
-          minutes: { type: 'number', description: 'With nothing else: start you after this many minutes. With a file or page: the longest to look, after which you are started with word that it never came (60 when left out, at most 360)' },
+          why: { type: 'string', description: 'For more than 60 minutes: what takes that long' },
+          minutes: { type: 'number', description: 'With nothing else: start you after this many minutes. With a file or page: the longest to look, after which you are started with word that it never came (15 when left out, at most 60, or 360 with `why`). Should it never come, you are started again and hand back what you have' },
         },
         required: ['what'],
       },
@@ -206,11 +220,30 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'waits',
       description: named(
-        "For background tasks, before you finish: records what in your report waits on {name}, each as one short line {name} can answer yes or no. The panel shows each with Yes / No / Not now. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. It replaces what was recorded before; do not call it when nothing waits.",
+        "For background tasks, before you finish: records what in your report waits on {name}, each as one short question. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. The panel answers a yes-or-no question with Yes / No / Not now; one that is not yes or no (a choice between ways, or one only words answer) names its answers in `choices`, or [] when only words answer it. What you recorded before goes on waiting until you name it in `settled` (answered, or no longer needed), or call it with [] once nothing waits. In the chat: once {name}'s own words have answered what a result waits on, call it with that result's report.md path as `result` and the questions they answered, copied exactly, as `items`.",
       ),
       inputSchema: {
         type: 'object',
-        properties: { items: { type: 'array', items: { type: 'string' }, description: 'Each a question of at most 140 characters, in plain words, speaking to them as "you"' } },
+        properties: {
+          items: {
+            type: 'array',
+            items: {
+              anyOf: [
+                { type: 'string', description: 'A yes-or-no question of at most 140 characters, in plain words, speaking to them as "you"' },
+                {
+                  type: 'object',
+                  properties: {
+                    text: { type: 'string', description: 'The question, at most 140 characters, in plain words, speaking to them as "you"' },
+                    choices: { type: 'array', items: { type: 'string' }, description: 'Its answers when it is not yes or no, a few words each (at most 4; Not now is added); [] when only words answer it' },
+                  },
+                  required: ['text'],
+                },
+              ],
+            },
+          },
+          settled: { type: 'array', items: { type: 'string' }, description: 'Questions you recorded before that no longer wait, as you recorded them' },
+          result: { type: 'string', description: named("Only in the chat: the report.md path of the result whose questions {name}'s words answered") },
+        },
         required: ['items'],
       },
       isDeferred: false,
@@ -224,9 +257,12 @@ const chatHooks = (on: On) => {
     if (isNew) await $.fs.write(`${dir}/index.md`, INDEX_HEAD)
     await settleWelcome($, isNew, id).catch(err => log($, `welcome not settled: ${String(err)}`))
     await measure($).catch(() => undefined)
+    during('load: read finished work')
     await loadFinished($).catch(err => log($, `finished work not read: ${String(err)}`))
     void recoverEnded($).catch(err => log($, `ended work not read back: ${String(err)}`))
+    during('load: sync the memory')
     await sync($).catch(() => undefined)
+    during('load: read the results')
     await loadReports($).catch(() => undefined)
     // What the person had typed into a reply box before a reload of the mod is in its box again
     await readDrafts($).catch(() => undefined)
@@ -257,11 +293,6 @@ const chatHooks = (on: On) => {
       for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)])
         if (one.status !== 'working' && one.endedAt > last && one.endedAt <= now && now - one.endedAt < RELOAD_GRACE) lateFrom.set(`${one.id}:${one.endedAt}`, Infinity)
     }
-    // How late the mod's own timer comes: behind, it does less until it has caught up (lookHold)
-    holdAt = 0
-    // (not in the test kit, whose clock a test moves by hours at once: there only a test that asks for it has it)
-    isTimed = (await $.env.get('CLAUDOPUS_TIMING')) !== 'test'
-    if (isTimed) everyLoad($, HOLD_LOOK, () => lookHold($))
     let seconds = 0
     everyLoad($, 1000, async () => {
       if (drawnNow > (await read($, lastDrawn))) await update($, lastDrawn, () => drawnNow)
@@ -320,6 +351,7 @@ const chatHooks = (on: On) => {
     await readOthers($).catch(() => undefined)
     // The workflows kept, read back, and followed while they run
     await knowSession($)
+    during('load: read back workflows')
     await loadFlows($).catch(err => log($, `workflows not read back: ${String(err)}`))
     everyLoad($, FLOW_EVERY, () => followFlows($).catch(err => log($, `workflows not followed: ${String(err)}`)))
     // Every hour one chat looks at the version page, and only looks: an update is installed, and a chat reloaded to it, only by a press
@@ -427,6 +459,8 @@ const chatHooks = (on: On) => {
     heard = [...heard, text]
     // A message that names a report starts work from it: that work's own report is kept linked to it
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
+    // One that names a result and quotes what in it waits answers that, as "Answer in words" on the result starts it
+    await answeredInMessage($, text).catch(err => log($, `results answered in words not marked: ${String(err)}`))
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
     await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
 

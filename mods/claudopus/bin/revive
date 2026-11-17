@@ -6,11 +6,17 @@
 # Claude's engine runs every add-on's hooks on one shared helper. When the helper gives no answer for five seconds while one of an
 # add-on's hooks is answering, the engine switches that add-on off, and it stays off in that chat until the person types
 # /reload-plugins. The engine loads an add-on again by itself when one of its own settings changes. So each chat's Claudopus writes
-# <memory>/keep/<chat>.beat every few seconds: the chat's process, the key its copy of Claudopus has in the settings, and the
-# settings file it reads, a tab apart. One of these runs on the Mac at a time, the newest copy's. When a beat goes quiet while its
-# chat's process still runs, it changes that copy's own "revived" setting in that file, and the engine loads Claudopus again: in
-# every chat that copy runs in, as an update does. A chat that does not come back after a few tries is left as it is until its
-# beat moves again. What it did is in <memory>/keep/revive.log.
+# <memory>/keep/<chat>.beat every few seconds: the chat's process, the key its copy of Claudopus has in the settings, the
+# settings file it reads, a tab apart, and on a line of its own the load that wrote it. One of these runs on the Mac at a time, the
+# newest copy's. When a beat goes quiet while its chat's process still runs, it changes that copy's own "revived" setting in that
+# file, and the engine loads Claudopus again: in every chat that copy runs in, as an update does. A chat that does not come back
+# after a few tries is left as it is until its beat moves again. What it did is in <memory>/keep/revive.log.
+#
+# A beat names the load of Claudopus that wrote it. One that moves again from the same load after a change was never switched off:
+# its chat's process was only slow (16 Nov, from 20:26 UTC: one chat's process hardly ran for over an hour, and eleven changes
+# reloaded the three other chats while that chat's own copy, never off, went on as it was). Such a load is left alone until a newer
+# load beats, or it beats steadily for SLOW_CLEAR (then it is treated as any other again), or its beat stays quiet for SLOW_QUIET
+# (a switched-off copy never beats again, so it reaches that), and then gets one try per quiet spell, not TRIES
 set -u
 mem=${1:?memory folder}
 dir="$mem/keep"
@@ -22,26 +28,32 @@ QUIET=${CLAUDOPUS_REVIVE_QUIET:-10}
 WOKE_QUIET=${CLAUDOPUS_REVIVE_WOKE_QUIET:-60}
 GAP=${CLAUDOPUS_REVIVE_GAP:-60}
 TRIES=${CLAUDOPUS_REVIVE_TRIES:-3}
+SLOW_QUIET=${CLAUDOPUS_REVIVE_SLOW_QUIET:-300}
+SLOW_CLEAR=${CLAUDOPUS_REVIVE_SLOW_CLEAR:-180}
 # With no chat beating for this long, it ends
 IDLE=${CLAUDOPUS_REVIVE_IDLE:-600}
-log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$dir/revive.log"; }
+# (in UTC, as Claudopus's own log.md, so the two are read side by side)
+log() { printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" >> "$dir/revive.log"; }
 now() { date +%s; }
 # (GNU stat first: its -f reads the file system and succeeds, so the BSD form would give nonsense on Linux)
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
 me="$0"
 
-# One at a time, the newest copy's: one already running from this same file is left to run; one from another copy (an older
-# version) is ended, and this one takes over
-was=$(cat "$dir/revive.pid" 2>/dev/null)
+# One at a time, the newest copy's: one already running from this same file, unchanged since it started, is left to run; one from
+# another copy (an older version), or from this file before an update rewrote it (a copy loaded from a folder keeps one path for
+# every version), is ended, and this one takes over. revive.pid holds the watcher's process and its file's time
+was=$(head -n 1 "$dir/revive.pid" 2>/dev/null)
+wasfile=$(sed -n 2p "$dir/revive.pid" 2>/dev/null)
+file=$(mtime "$me")
 if [ -n "$was" ] && [ "$was" != "$$" ] && kill -0 "$was" 2>/dev/null; then
   args=$(ps -o args= -p "$was" 2>/dev/null)
   case "$args" in
-    *"$me $mem"*) exit 0 ;;
+    *"$me $mem"*) [ -n "$file" ] && [ "$wasfile" = "$file" ] && exit 0; kill "$was" 2>/dev/null ;;
     *bin/revive*) kill "$was" 2>/dev/null ;;
   esac
 fi
-printf '%s\n' "$$" > "$dir/revive.pid"
-mine() { [ "$(cat "$dir/revive.pid" 2>/dev/null)" = "$$" ]; }
+printf '%s\n%s\n' "$$" "$file" > "$dir/revive.pid"
+mine() { [ "$(head -n 1 "$dir/revive.pid" 2>/dev/null)" = "$$" ]; }
 
 # One key's "revived" option set in one settings file with the system's own JSON (JavaScript on macOS, Python on Linux), every other
 # key as it was. A key of an installed copy is changed only while enabledPlugins turns it on; one loaded from a folder
@@ -92,7 +104,9 @@ PY
 }
 
 log "watching the chats' beats (pid $$)"
-last=$(now) idle=$(now) changed=0 woke=0
+# The last change, kept on disk: a watcher that takes over keeps to GAP after its predecessor's change
+changed=$(cat "$dir/revive.lastchange" 2>/dev/null); case "$changed" in ''|*[!0-9]*) changed=0 ;; esac
+last=$(now) idle=$(now) woke=0
 while mine; do
   sleep "$STEP"
   t=$(now)
@@ -103,14 +117,40 @@ while mine; do
   for beat in "$dir"/*.beat; do
     [ -f "$beat" ] || continue
     sid=$(basename "$beat" .beat)
-    IFS=$'\t' read -r pid key settings < "$beat" 2>/dev/null
+    # (the load on a line of its own: a watcher of an older version, still running, reads the first line as before). A beat with
+    # no load line (half written, or from an older version) says nothing of its load, and the slow mark is left as it is
+    load=''
+    { IFS=$'\t' read -r pid key settings; read -r load; } < "$beat" 2>/dev/null
     # A chat whose process has ended has no Claudopus to bring back
-    if ! kill -0 "${pid:-0}" 2>/dev/null; then rm -f "$beat" "$dir/$sid.revived" "$dir/$sid.gaveup"; continue; fi
+    if ! kill -0 "${pid:-0}" 2>/dev/null; then rm -f "$beat" "$dir/$sid.revived" "$dir/$sid.gaveup" "$dir/$sid.changed" "$dir/$sid.slow"; continue; fi
     any=1
     m=$(mtime "$beat") || continue
     quiet=$((t - m))
-    # Beating: a chat that came back starts its tries afresh
-    if [ "$quiet" -lt "$QUIET" ]; then rm -f "$dir/$sid.revived" "$dir/$sid.gaveup"; continue; fi
+    # The slow mark: the load, and since when it has beaten steadily
+    slow='' steady=''
+    [ -f "$dir/$sid.slow" ] && { read -r slow; read -r steady; } < "$dir/$sid.slow" 2>/dev/null
+    # A newer load: the slow one is gone
+    [ -n "$slow" ] && [ -n "$load" ] && [ "$slow" != "$load" ] && { rm -f "$dir/$sid.slow"; slow=''; }
+    if [ "$quiet" -lt "$QUIET" ]; then
+      was=$(cat "$dir/$sid.changed" 2>/dev/null)
+      if [ -n "$load" ] && [ "$was" = "$load" ]; then
+        # Beating again from the load that beat before the change: it was never off, and the change only reloaded the other chats
+        log "chat $sid: beats again from the same load, so Claudopus was not off: its process was slow; it is left alone until it loads anew, beats steadily $SLOW_CLEAR s or stays quiet $SLOW_QUIET s"
+        printf '%s\n%s\n' "$load" "$t" > "$dir/$sid.slow"
+      elif [ -n "$slow" ]; then
+        if [ -z "$steady" ]; then printf '%s\n%s\n' "$slow" "$t" > "$dir/$sid.slow"
+        elif [ $((t - steady)) -ge "$SLOW_CLEAR" ]; then rm -f "$dir/$sid.slow"; log "chat $sid: beats steadily again; treated as any other"
+        fi
+      fi
+      # Beating: a chat that came back starts its tries afresh
+      rm -f "$dir/$sid.revived" "$dir/$sid.gaveup" "$dir/$sid.changed"
+      continue
+    fi
+    if [ -n "$slow" ]; then
+      # Quiet again: its steady beating starts afresh, and it waits SLOW_QUIET
+      [ -n "$steady" ] && printf '%s\n' "$slow" > "$dir/$sid.slow"
+      [ "$quiet" -lt "$SLOW_QUIET" ] && continue
+    fi
     [ $((t - woke)) -lt "$WOKE_QUIET" ] && continue
     [ $((t - changed)) -lt "$GAP" ] && continue
     # Left after its tries, until its beat moves again
@@ -118,15 +158,19 @@ while mine; do
     case "${key:-}" in claudopus@*) ;; *) continue ;; esac
     [ -f "${settings:-}" ] || continue
     tries=0; [ -f "$dir/$sid.revived" ] && tries=$(wc -l < "$dir/$sid.revived" | tr -d ' ')
-    if [ "${tries:-0}" -ge "$TRIES" ]; then
+    most=$TRIES; [ -n "$slow" ] && most=1
+    if [ "${tries:-0}" -ge "$most" ]; then
       log "chat $sid: Claudopus did not come back after $tries tries; left as it is until it beats again"
       : > "$dir/$sid.gaveup"
       continue
     fi
     changed=$t
+    printf '%s\n' "$t" > "$dir/revive.lastchange"
     printf '%s %s\n' "$t" "$quiet" >> "$dir/$sid.revived"
     said=$(change "$settings" "$key" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')") || { log "chat $sid: quiet $quiet s, but its settings file could not be changed (not plain JSON, or a number too long to keep); left as it is"; : > "$dir/$sid.gaveup"; continue; }
     if [ "$said" = off ]; then log "chat $sid: quiet $quiet s, and $key is turned off in the settings: nothing done"; : > "$dir/$sid.gaveup"; continue; fi
+    # (only a change made: the load it was made for, whose beating again proves that chat was never off)
+    [ -n "$load" ] && printf '%s\n' "$load" > "$dir/$sid.changed"
     log "chat $sid: quiet $quiet s while its process $pid runs: the setting of $key changed, so Claude loads it again"
   done
   [ "$any" = 1 ] && idle=$t

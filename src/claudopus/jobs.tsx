@@ -47,6 +47,7 @@ const jobsOf = (one: Todo, at: number): Job[] =>
     ...(one.status === 'working' && one.running?.cmd && at - one.running.at >= ROW_SHOWN
       ? [jobOf(`call-${one.id}`, one.running.label ?? '', one.running.cmd, one.running.at)]
       : []),
+    ...heldJobs(one),
   ])
 
 // A job's name on its row: what kind, a server's port, and its own words
@@ -391,7 +392,7 @@ const isLike = (command: string, pattern: string) => {
 // detached or left going has its process and all it started ended, a command held open has its shell's processes ended (the work's
 // call then comes back with it ended). The work is told in its own chat that the person stopped it as stuck, and what to do next.
 // On this Mac only, as the processes are this Mac's
-const canStopJob = (job: Job) => !isRunFromAfar && !job.id.startsWith('more-')
+const canStopJob = (job: Job) => !isRunFromAfar && !job.id.startsWith('more-') && !job.id.startsWith('held-')
 const stoppingJobs = new Set<string>()
 const RUN_STOPPED = (what: string, silent: string) =>
   silent

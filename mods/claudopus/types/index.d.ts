@@ -66,8 +66,12 @@ export type Todo = {
   subject?: string
   // The report it was started from, by id, when the person's message named one
   from?: string
-  // What it recorded with the `waits` tool as waiting on the person; its next report takes them
-  waits?: string[]
+  // What it recorded with the `waits` tool as waiting on the person, each with its answers when it is not yes or no (a plain line
+  // was kept before answers were); its next report takes them
+  waits?: (Wait | string)[]
+  // What it said with the `waits` tool, this round, of what it recorded before no longer waits ('*' for all of it): applied to its
+  // results only once the round is done
+  settles?: string[]
   // What it needs the person's own hands for now, said with the `ask` tool: what to do, and the exact text to copy for it. Its card
   // stands out with the ask in view until the work clears it or ends
   // `replied`: the person's reply in their own words that did not settle it; the ask stays while the work acts on it, with nothing to press or type, until the work clears it or asks again, or ends with it open, when every answer is back. `isWaking`: the work had ended and is being started again with the reply
@@ -115,13 +119,27 @@ export type Todo = {
   // The rules it was last handed after its brief, by their text's hash, and whether a compaction has taken them from its context
   rulesSent?: string
   rulesDue?: boolean
+  // Its own folder in the chat's scratchpad, by name, which its rules name
+  scratch?: string
   detached?: { id: string; what: string; at: number; cmd: string; log: string; pid?: string; isLeft?: boolean; from?: string }[]
+  // Its heavy commands (a browser it drives, a build, a render) that wait their turn while the Mac is busy: the call, its own words,
+  // the command, since when, and its place in the line of every piece of work's held commands
+  heldCalls?: { id: string; what: string; cmd: string; at: number; place: number }[]
   // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
   // so. It is still at work, and its card says what it waits for
   waitsSince?: number
   // What it asked Claudopus to start it again for (wake_me), in place of a command that only waits: in its own words, a file to
   // appear, a line in that file, a page that answers, or only a time; when it asked, and the latest it is looked for
   wakeWhen?: { what: string; file?: string; text?: string; url?: string; at: number; until: number }
+  // What it was last woken for when that look ran out, and how many looks for it ran out in a row: after two, a look for the same
+  // thing is refused and it hands back what it has
+  wakeMisses?: { what: string; count: number }
+  // Claudopus started it again, its step ended, because nothing new came back from its helpers for a while: how many times (once to
+  // check on them, once to hand back what it has) and when last; `isGivenUp` once the chat was told it is stuck. Gone once a helper
+  // brings something new, someone writes to it, or no helper of its runs
+  nudged?: { count: number; at: number; isGivenUp?: boolean }
+  // Claudopus, or the chat, told it to hand back what it has: since when. Its report goes through while helpers run; gone with `nudged`
+  mayHandBack?: number
   // Work cut off as the chat's process ended, not stopped by anyone: when, and when it went on again; `backAt` is absent while it
   // could not be started again
   cutAt?: number
@@ -217,8 +235,11 @@ export type Report = {
   broughtBack?: number
 }
 
-// One thing a report leaves for the person to decide or do; open until `answer` is "Yes", "No", or "Not now" for one set aside
-export type Wait = { text: string; answer?: string }
+// One thing a report leaves for the person to decide or do; open until it has an `answer`: what they pressed ("Yes", "No", one of
+// its `choices`, "Not now" for one set aside), the answer to the work's ask that put the same question (`byAsk`: when that ask was
+// made, so the answer taken back opens it again), "In your words" for one their message answered, or "Settled" once the work said
+// it no longer waits. `choices`: its answers when it is not yes or no; none but words answer one whose `choices` is empty
+export type Wait = { text: string; answer?: string; choices?: string[]; byAsk?: number }
 
 // A process on this Mac that listens on a port, started from one of the person's folders
 export type Server = {
