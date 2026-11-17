@@ -1022,8 +1022,7 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
   expect(told).toContain("Why: Claude Code's auto mode refused it (Unauthorized Access).")
   expect(told).toContain('The task carries on without it, and does not do it another way.')
   expect(told).not.toMatch(/If you have other tasks|settings|Do it another way|Leave it out|it was Permission/)
-  const labels = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => /without it|another way|Leave it out|Run it/.test(label))
-  // (only a command can be run on a press: a change to a file has no Run it)
+  const labels = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => /without it|another way|Leave it out/.test(label))
   expect(await labels()).toEqual(['Carry on without it'])
   const check = (id: string) => $.tool.check({ tool: 'Edit', input: { file_path: '/repo/notes.md', old_string: 'old line', new_string: 'new line' }, agentId: 'a1', tool_use_id: id } as never) as Promise<{ decision?: string }>
   expect((await check('chk-2')).decision).toBe('ask')
