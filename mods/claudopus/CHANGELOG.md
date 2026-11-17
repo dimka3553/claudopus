@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.170 · 17 November 2026
+- When you answer a question in your own words in the box above the chat, only the big Send button shows now; the second, small send beside the box is gone, and Enter still sends.
+
 ## 0.2.169 · 17 November 2026
 - Check now in Config shows a newer version right under the press, with its Update button (Download, then Install, on an installed copy) and how far it has got, then says to type /reload-plugins: you no longer go to the panel to update.
 - Check now also brings back a version you had put off with Not now.
