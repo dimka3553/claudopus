@@ -7532,8 +7532,11 @@ const quietNotices = (text: string, waiting: Set<string>): Quiet => {
   return { isQuiet, isRepeat: isQuiet && notices.every(isRepeat), waits }
 }
 const NO_ANSWER = 'No response requested.'
-const noticesOf = (text: string) => [...text.matchAll(/<task-notification>[\s\S]*?<\/task-notification>/g)].map(m => m[0]).join('\n')
-const isQuietTurn = (text: string, quiet: string) => Boolean(quiet) && noticesOf(text) === quiet && !text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').replace(NOTICE_HEADER, '').trim()
+const noticesOf = (text: string) => [...text.matchAll(/<task-notification>[\s\S]*?<\/task-notification>/g)].map(m => m[0])
+const isQuietTurn = (text: string, quiet: ReadonlySet<string>) => {
+  const notices = noticesOf(text)
+  return notices.length > 0 && notices.every(one => quiet.has(one)) && !text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').replace(NOTICE_HEADER, '').trim()
+}
 
 
 const RELEASE_STEP = /^\s*(?:release|run (?:the )?release(?: runner)?|(?:cd \S+ && )?\S*bin\/release)\s*\.?\s*$/i
@@ -7685,7 +7688,7 @@ const heldLook = async ($: EngineInterface, id: string) => {
   if (wakes.length) await sendWakes($)
   if (wasWorking && card?.parentId && card.parentId !== HELPER) await passOnHelper($, id, card.answer ?? '', card.status)
 }
-let quietNext: string | undefined
+const quietHeld = new Set<string>()
 const quietTurns = new Set<string>()
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
@@ -7974,8 +7977,8 @@ const chatHooks = (on: On) => {
       const ended = await chatCommandEnded($, e.text).catch(() => [] as string[])
       if (ended.length) return next({ ...e, context: [...(e.context ?? []), ...ended, ...waits] })
       if (quiet.isQuiet) {
-        if (e.turnId === undefined) quietNext = noticesOf(e.text)
-        await log($, `${quiet.isRepeat ? 'let in the notice that repeats a report already given' : 'let in notices with nothing new: tasks still at work'}, ${e.turnId === undefined ? 'its turn answered with no model' : 'into the turn at work'}`)
+        for (const one of noticesOf(e.text)) quietHeld.add(one)
+        await log($, quiet.isRepeat ? 'let in the notice that repeats a report already given, with no turn of the model\'s' : 'let in notices with nothing new, with no turn of the model\'s: tasks still at work')
         return next(waits.length ? { ...e, context: [...(e.context ?? []), ...waits] } : e)
       }
       if (waits.length) return next({ ...e, context: [...(e.context ?? []), ...waits] })
@@ -8029,9 +8032,9 @@ const chatHooks = (on: On) => {
 
   on('turn.start', async ($, e, next) => {
     const started = await next(e)
-    if (e.agentId === undefined && quietNext !== undefined) {
-      if (isQuietTurn(e.text, quietNext)) quietTurns.add(e.turnId)
-      quietNext = undefined
+    if (e.agentId === undefined && quietHeld.size) {
+      if (isQuietTurn(e.text, quietHeld)) quietTurns.add(e.turnId)
+      quietHeld.clear()
     }
     return started
   })
@@ -8090,6 +8093,7 @@ const chatHooks = (on: On) => {
       }
       return done
     }
+    if (quietTurns.delete(e.turnId)) return done
     const text = said
     said = ''
     heard = []
@@ -10523,7 +10527,7 @@ const workHooks = (on: On) => {
   })
 
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId === undefined && e.index === 0 && quietTurns.delete(e.turnId)) {
+    if (e.agentId === undefined && e.index === 0 && quietTurns.has(e.turnId)) {
       yield { kind: 'text', index: 0, text: NO_ANSWER }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
       return { turnId: e.turnId, index: e.index, answer: NO_ANSWER, toolUses: [], stopReason: 'end_turn', usage: null }

@@ -283,15 +283,18 @@ const quietNotices = (text: string, waiting: Set<string>): Quiet => {
   const isQuiet = notices.length > 0 && !rest && notices.every(body => isRepeat(body) || isWaitingOwn(body) || (isCompleted(body) && isEndedWaiting(body)))
   return { isQuiet, isRepeat: isQuiet && notices.every(isRepeat), waits }
 }
-// Such a prompt is let in and its turn answered with no model (workHooks' turn.step): Claude Code shows every prompt a hook drops as a warning
-// card, "Prompt dropped by a hook" (2.1.325), and asks the model again after an answer with no visible text ("Your previous response
-// had no visible output"). Its own line for a turn with nothing to say, which it counts as no answer (the turn's result is empty)
-// and draws as none, ends the turn
+// Such a prompt is let in and its turn answered with no model (workHooks' turn.step): Claude Code shows every prompt a hook drops
+// as a warning card, "Prompt dropped by a hook" (2.1.325), and asks the model again after an answer with no visible text ("Your
+// previous response had no visible output"). Its own line for a turn with nothing to say ends the turn; it counts that line as no
+// answer (the turn's result is empty)
 const NO_ANSWER = 'No response requested.'
-// The notices a prompt is made of, by what they say: the turn a quiet prompt starts is known by them (Claude Code may put its
-// header before them), and a turn that brings anything more is the model's
-const noticesOf = (text: string) => [...text.matchAll(/<task-notification>[\s\S]*?<\/task-notification>/g)].map(m => m[0]).join('\n')
-const isQuietTurn = (text: string, quiet: string) => Boolean(quiet) && noticesOf(text) === quiet && !text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').replace(NOTICE_HEADER, '').trim()
+// The notices a prompt is made of, each whole: a turn is quiet when every notice in it was let in as quiet and it brings nothing
+// else (Claude Code may put its header before them, or join several in one turn)
+const noticesOf = (text: string) => [...text.matchAll(/<task-notification>[\s\S]*?<\/task-notification>/g)].map(m => m[0])
+const isQuietTurn = (text: string, quiet: ReadonlySet<string>) => {
+  const notices = noticesOf(text)
+  return notices.length > 0 && notices.every(one => quiet.has(one)) && !text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').replace(NOTICE_HEADER, '').trim()
+}
 
 // ---- The last step on a go-ahead ----
 

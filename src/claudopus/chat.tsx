@@ -65,8 +65,8 @@ const heldLook = async ($: EngineInterface, id: string) => {
   // (passOnHelper)
   if (wasWorking && card?.parentId && card.parentId !== HELPER) await passOnHelper($, id, card.answer ?? '', card.status)
 }
-// The notices of a quiet prompt let in while the chat is idle, until the turn it starts; the turns to answer with no model
-let quietNext: string | undefined
+// The notices with nothing new let in since the chat's last turn started, each whole; the turns to answer with no model
+const quietHeld = new Set<string>()
 const quietTurns = new Set<string>()
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
@@ -413,13 +413,13 @@ const chatHooks = (on: On) => {
       // The chat's own command ended: how it ended and its last lines go with the notice
       const ended = await chatCommandEnded($, e.text).catch(() => [] as string[])
       if (ended.length) return next({ ...e, context: [...(e.context ?? []), ...ended, ...waits] })
-      // Notices with nothing new (a report already given, a task still at work) cost the chat no turn of the model's: one that comes
-      // while the chat is at work goes into that turn, and one that would start a turn has that turn answered with no model
-      // (workHooks' turn.step). Neither is dropped, which Claude Code shows as a warning card. The word that a task still waits goes with it, so
-      // the chat, reading it later, does not take the task for ended
+      // Notices with nothing new (a report already given, a task still at work) cost the chat no turn of the model's: a turn made of
+      // nothing else is answered with no model (turn.start below, workHooks' turn.step), and one that comes while the chat is at
+      // work goes into that turn, or makes such a turn should that turn end first. None is dropped, which Claude Code shows as a
+      // warning card. The word that a task still waits goes with it, so the chat, reading it later, does not take the task for ended
       if (quiet.isQuiet) {
-        if (e.turnId === undefined) quietNext = noticesOf(e.text)
-        await log($, `${quiet.isRepeat ? 'let in the notice that repeats a report already given' : 'let in notices with nothing new: tasks still at work'}, ${e.turnId === undefined ? 'its turn answered with no model' : 'into the turn at work'}`)
+        for (const one of noticesOf(e.text)) quietHeld.add(one)
+        await log($, quiet.isRepeat ? 'let in the notice that repeats a report already given, with no turn of the model\'s' : 'let in notices with nothing new, with no turn of the model\'s: tasks still at work')
         return next(waits.length ? { ...e, context: [...(e.context ?? []), ...waits] } : e)
       }
       if (waits.length) return next({ ...e, context: [...(e.context ?? []), ...waits] })
@@ -478,13 +478,14 @@ const chatHooks = (on: On) => {
     return next(context.length ? { ...e, text, context } : { ...e, text })
   })
 
-  // The turn a quiet notice starts (above) is known as it starts; its first step is answered with Claude Code's own line for a turn
-  // with nothing to say (workHooks' turn.step, the module's one), so no model is asked and nothing is shown
+  // A turn of the chat's made only of quiet notices (above) is known as it starts; its first step is answered with Claude Code's own
+  // line for a turn with nothing to say (workHooks' turn.step, the module's one), so no model is asked. A turn that brings anything
+  // more, the person's words or a notice with news, is the model's
   on('turn.start', async ($, e, next) => {
     const started = await next(e)
-    if (e.agentId === undefined && quietNext !== undefined) {
-      if (isQuietTurn(e.text, quietNext)) quietTurns.add(e.turnId)
-      quietNext = undefined
+    if (e.agentId === undefined && quietHeld.size) {
+      if (isQuietTurn(e.text, quietHeld)) quietTurns.add(e.turnId)
+      quietHeld.clear()
     }
     return started
   })
@@ -571,6 +572,8 @@ const chatHooks = (on: On) => {
       }
       return done
     }
+    // A turn answered with no model is no reply: nothing is saved or logged for it
+    if (quietTurns.delete(e.turnId)) return done
     const text = said
     said = ''
     heard = []

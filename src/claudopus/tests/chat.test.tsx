@@ -482,7 +482,7 @@ test('a large paste is saved to a file and left out of the chat', async ($, on) 
 })
 
 test("a chat's own thread may only read, run a single command in the background, start agents and talk to them; an agent may do the work", async ($, on) => {
-  const { files, stepped } = world(on)
+  const { files, stepped, clock } = world(on)
   await $.session.start(start)
   const told = await $.prompt.submit({ text: 'what does this function do', wait: false, origin: composer })
   expect(told.context?.join('\n')).toContain('Answer a question that a few reads settle here')
@@ -515,30 +515,48 @@ test("a chat's own thread may only read, run a single command in the background,
   // The engine's notice that a task whose report already came has stopped is left out; one that also says something else is not
   const withResultEarly = (id: string, summary: string) => notice(id, 'completed', summary).replace('</summary>', '</summary>\n<result>This agent has not reported yet: it is waiting on its own background work and will deliver its report through SubagentHandback when that finishes.\n</result>')
   const REPEAT = 'Agent "Fix the nose" completed. Its report was already delivered to you as a message, so it is not repeated here.'
-  // Left out means let in with no turn of the model's, never dropped, which Claude Code shows as a warning card: one that would start a
-  // turn has that turn answered with Claude Code's own line for a turn with nothing to say, and the model is not asked
+  // Left out means let in with no turn of the model's, never dropped, which Claude Code shows as a warning card: a turn made only of
+  // such notices is answered with Claude Code's own line for a turn with nothing to say, and the model is not asked
   let turns = 0
-  const quietly = async (text: string, turnId?: string) => {
-    const left = (await $.prompt.submit({ text, wait: false, origin: { kind: 'task-notification' }, ...(turnId ? { turnId } : {}) } as never)) as { drop?: string; text?: string }
-    const turn = `quiet-${++turns}`
-    if (!turnId) await $.turn.start({ text: left.text ?? '', turnId: turn })
+  const noticeIn = async (text: string, turnId?: string) => (await $.prompt.submit({ text, wait: false, origin: { kind: 'task-notification' }, ...(turnId ? { turnId } : {}) } as never)) as { drop?: string; text?: string }
+  const turnOf = async (text: string) => {
+    const turnId = `turn-${++turns}`
+    await $.turn.start({ text, turnId })
     const asked = stepped.length
     const chunks: { kind: string; text?: string }[] = []
-    for await (const c of $.turn.step({ turnId: turnId ?? turn, index: 0, model: 'claude-opus-5-5', messageCount: 2 })) chunks.push(c as never)
-    return { drop: left.drop, text: left.text, isAsked: stepped.length > asked, said: chunks.map(c => c.text ?? '').join('') }
+    for await (const c of $.turn.step({ turnId, index: 0, model: 'claude-opus-5-5', messageCount: 2 })) chunks.push(c as never)
+    const said = chunks.map(c => c.text ?? '').join('')
+    await $.turn.complete({ answer: said, durationMs: 1, isAborted: false, turnId, reason: 'answer' } as never)
+    return { isAsked: stepped.length > asked, said }
+  }
+  const quietly = async (text: string) => {
+    const left = await noticeIn(text)
+    return { drop: left.drop, text: left.text, ...(await turnOf(left.text ?? '')) }
   }
   const repeat = await quietly(notice('a9', 'completed', REPEAT))
   expect(repeat).toEqual({ drop: undefined, text: notice('a9', 'completed', REPEAT), isAsked: false, said: 'No response requested.' })
   const two = await quietly(`${notice('a9', 'completed', REPEAT)}\n${notice('a8', 'completed', REPEAT)}`)
   expect([two.drop, two.isAsked, two.said]).toEqual([undefined, false, 'No response requested.'])
-  // One that comes while the chat is at work goes into that turn, which the model goes on with
-  const into = await quietly(notice('a9', 'completed', REPEAT), 'turn-at-work')
-  expect([into.drop, into.isAsked]).toEqual([undefined, true])
-  // The next turn, the person's, is the model's
-  await $.turn.start({ text: 'what changed', turnId: 'person-1' })
-  const before = stepped.length
-  for await (const _ of $.turn.step({ turnId: 'person-1', index: 0, model: 'claude-opus-5-5', messageCount: 4 })) void _
-  expect(stepped.length).toBe(before + 1)
+  // Two that come one by one and are joined in one turn are still such a turn
+  await noticeIn(notice('a9', 'completed', REPEAT))
+  await noticeIn(notice('a8', 'completed', REPEAT))
+  expect(await turnOf(`${notice('a9', 'completed', REPEAT)}\n\n${notice('a8', 'completed', REPEAT)}`)).toEqual({ isAsked: false, said: 'No response requested.' })
+  // A turn that brings anything beside them, the person's words or a notice not let in as such, is the model's
+  await noticeIn(notice('a9', 'completed', REPEAT))
+  expect((await turnOf(`${notice('a9', 'completed', REPEAT)}\nwhat changed?`)).isAsked).toBe(true)
+  await noticeIn(notice('a9', 'completed', REPEAT))
+  expect((await turnOf(`${notice('a9', 'completed', REPEAT)}\n${notice('a8', 'completed', REPEAT)}`)).isAsked).toBe(true)
+  // One that comes while the chat is at work goes into that turn: the person's turn after it is the model's, and a turn the notice
+  // makes of its own, should that turn end first, is answered with no model
+  expect((await noticeIn(notice('a9', 'completed', REPEAT), 'turn-at-work')).drop).toBeUndefined()
+  expect((await turnOf('what changed')).isAsked).toBe(true)
+  await noticeIn(notice('a9', 'completed', REPEAT), 'turn-at-work')
+  expect(await turnOf(notice('a9', 'completed', REPEAT))).toEqual({ isAsked: false, said: 'No response requested.' })
+  // Each is held for the next turn only: once the person's turn has started, the same words later are the model's
+  expect((await turnOf(notice('a9', 'completed', REPEAT))).isAsked).toBe(true)
+  // A turn answered with no model is no reply: nothing of it is saved with the chat's words
+  await clock.advance(1_000)
+  expect(files.get(`${MEMORY}/words/engine-id.md`) ?? '').not.toContain('No response requested')
   // A summary that is not the engine's plain one (a stop at a turn limit) is news, kept even with the plain words below it
   const limited = await quietly(withResultEarly('a7', 'Agent "Fix the jaw" stopped at its 40-turn limit'))
   expect([limited.drop, limited.isAsked]).toEqual([undefined, true])

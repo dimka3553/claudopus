@@ -570,7 +570,7 @@ const workHooks = (on: On) => {
   on('turn.step', async function* ($, e, next) {
     // The chat's turn that only a notice with nothing new started ends with Claude Code's own line for a turn with nothing to say
     // (chatHooks' prompt.submit and turn.start), with no model asked
-    if (e.agentId === undefined && e.index === 0 && quietTurns.delete(e.turnId)) {
+    if (e.agentId === undefined && e.index === 0 && quietTurns.has(e.turnId)) {
       yield { kind: 'text', index: 0, text: NO_ANSWER }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
       return { turnId: e.turnId, index: e.index, answer: NO_ANSWER, toolUses: [], stopReason: 'end_turn', usage: null }

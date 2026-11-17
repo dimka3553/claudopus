@@ -838,9 +838,10 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   expect([mixed.drop, toldOfWait(mixed.context), warned.drop, toldOfWait(warned.context)]).toEqual([undefined, 1, undefined, 1])
   expect(await answeredQuietly(endedNotice('a1'))).toBe(false)
   // Joining a turn of the chat's under way, the notice still comes through here (seen on Claude Code 2.1.325: a notice that came
-  // mid-turn was handed to this hook with that turn's id): it goes into that turn with the same word, and no turn is answered for it
+  // mid-turn was handed to this hook with that turn's id): it goes into that turn with the same word, or makes a turn of its own
+  // answered with no model should that turn end first
   const midTurn = (await $.prompt.submit({ text: endedNotice('a1'), wait: false, turnId: 'chat1', origin: { kind: 'task-notification' } } as never)) as { drop?: string; context?: string[] }
-  expect([midTurn.drop, toldOfWait(midTurn.context), await answeredQuietly(endedNotice('a1'))]).toEqual([undefined, 1, false])
+  expect([midTurn.drop, toldOfWait(midTurn.context), await answeredQuietly(endedNotice('a1'))]).toEqual([undefined, 1, true])
   // A helper the engine no longer lists at work, its card left behind, is no wait: the notice reaches the chat as it is
   agents.a3 = 'completed'
   const gone = await asNotice(endedNotice('a1'))
