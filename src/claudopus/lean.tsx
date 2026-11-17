@@ -183,16 +183,24 @@ const stepLine = async ($: EngineInterface, id: string, text: string) => {
   await changeTodos($, list => list.map(card => (card.id === id ? { ...card, entries: [...card.entries, { at, kind: 'note' as const, text }].slice(-ENTRIES_KEPT) } : card)))
   redraw($)
 }
-// A go-ahead pressed while its work is still in the turn that asked waits for that turn's end (the card no longer working, or gone)
-const TURN_LOOK = 2_000
-const afterTurn = ($: EngineInterface, id: string) =>
-  new Promise<void>(resolve => {
-    const timer = everyLoad($, TURN_LOOK, () => {
-      void read($, todos)
-        .then(list => list.find(card => card.id === id)?.status === 'working' || (timer.cancel(), resolve()))
-        .catch(() => undefined)
-    })
-  })
+// A go-ahead pressed while its work was still in the turn that asked (stepOnEnd) is done as that turn ends, from its own hook, so a
+// small fresh task is started in a hook and a release takes the branch as the task left it, whatever the work left running. A turn
+// that was stopped or failed does no step: the question goes back on the card, to be pressed again
+const stepAtEnd = async ($: EngineInterface, id: string, how: Todo['status']) => {
+  const card = (await read($, todos)).find(one => one.id === id)
+  const held = card?.stepOnEnd
+  if (!card || !held) return
+  const isDone = how === 'done'
+  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, stepOnEnd: undefined, ...(!isDone && !one.ask ? { ask: held.ask } : {}) } : one)))
+  if (!isDone) {
+    // pressed again as a fresh answer, as when an answer could not be sent (answerNow)
+    answeredAsks.delete(`${id}:${held.ask.at}:${held.ask.text}`)
+    if (answeredAt.get(id) === held.ask.at) answeredAt.delete(id)
+    sentReplies.delete(id)
+    return stepLine($, id, `Nothing was done on your "${held.said}": Claude's turn ${how === 'stopped' ? 'was stopped' : 'failed'} first, so the question is back`)
+  }
+  await lastStep($, card, held.ask, held.said).catch(err => log($, `last step of ${id} not done: ${String(err)}`))
+}
 const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string) => {
   const folder = ask.folder ?? ''
   const step = ask.lastStep ?? ''

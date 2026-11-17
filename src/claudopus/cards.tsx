@@ -303,6 +303,8 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
   for (const one of endedNow) {
     const card = (await read($, todos)).find(todo => todo.id === one)
     if (card?.parentId && card.parentId !== HELPER) await passOnHelper($, one, card.answer, 'done', true).catch(err => log($, `helper ${one}'s result not passed on: ${String(err)}`))
+    // and a go-ahead pressed during the turn the mod did not see end does its last step now
+    await stepAtEnd($, one, 'done').catch(err => log($, `last step of ${one} not done: ${String(err)}`))
   }
   redraw($)
 }

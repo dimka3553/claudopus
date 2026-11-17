@@ -495,12 +495,12 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   if (!isReply && ask.lastStep && ask.folder && ask.choices?.[0] === said) {
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line, isCard: true, askAt: ask.at })
     redraw($)
-    const done = (err: unknown) => log($, `last step of ${one.id} not done: ${String(err)}`)
-    if (!working) await lastStep($, one, ask, said).catch(done)
+    if (!working) await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
     else {
       await tell($, one.id, `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\nClaudopus does that step (${cut(ask.lastStep, 160)}) once you end this turn: do not do it or start it yourself. Commit anything left on the branch now, change nothing on it after that, and end with your report.`)
+      // Kept on the card, so a reload meanwhile keeps it too, and done from the end of that turn's own hook (stepAtEnd)
+      await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, stepOnEnd: { ask, said } } : card)))
       await stepLine($, one.id, `On your "${said}", Claudopus does the last step once Claude ends this turn`)
-      void afterTurn($, one.id).then(() => lastStep($, one, ask, said)).catch(done)
     }
     return void askGone($, one, said)
   }

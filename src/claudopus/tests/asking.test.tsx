@@ -517,18 +517,33 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   expect(await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('Release it after lunch')))).toBeDefined()
 
   // Release it pressed while the work is still in the turn that asked (writing its waits and report, as on 16 Nov 19:49 and 17 Nov
-  // 07:49): the work is told the step is Claudopus's, not left it, and the release waits for that turn's end, then for the allow box
-  await $.agent.spawn({ ...spawn, model: 'opus', description: 'Fix the jaw', prompt: 'Fix the jaw' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k-a5', agentId: 'a5', text: 'Release a5?', choices: ['Release it', 'Not now'], last_step: 'release', folder: '/repo/wt' } as never)
-  await press('a5', 'Release it')
-  expect(await until(async () => appended.find(line => line.startsWith('a5: ') && line.includes('pressed "Release it"')))).toContain('do not do it or start it yourself')
+  // 07:49): the work is told the step is Claudopus's, not left it, and the step is done as that turn ends, from its own hook,
+  // whatever the work left running: the release's allow box, a small fresh task for any other step. A turn that was stopped first
+  // does no step, and the question is back on the card
+  for (const description of ['Fix the jaw', 'Fix the cheek', 'Fix the lip']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
+  const working = async (id: string, last_step: string, folder: string) => {
+    await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${id}`, agentId: id, text: `Release ${id}?`, choices: ['Release it', 'Not now'], last_step, folder } as never)
+    await press(id, 'Release it')
+    expect(await until(async () => appended.find(line => line.startsWith(`${id}: `) && line.includes('pressed "Release it"')))).toContain('do not do it or start it yourself')
+  }
   const gate5 = async () => (await list.findAll({ type: 'Button' })).find(b => /^gate-step-a5-.*once/.test(String(b.key ?? '')))
-  await clock.advance(10_000)
+  await working('a5', 'release', '/repo/wt')
+  expect(await until(async () => list.find({ type: 'Text', text: 'On your "Release it", Claudopus does the last step once Claude ends this turn' }))).toBeDefined()
+  await clock.advance(60_000)
   expect(await gate5()).toBeUndefined()
+  // (a helper of its own still at work holds its card at work, and the step is done all the same)
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Look at the jaw', prompt: 'look', parentAgentId: 'a5' } as never)
   await $.turn.complete({ answer: 'Claudopus releases it.', durationMs: 1, isAborted: false, turnId: 'turn-a5', reason: 'answer', agentId: 'a5' } as never)
-  expect(await until(async () => (await clock.advance(2_000), await gate5()))).toBeDefined()
+  expect(await until(gate5)).toBeDefined()
   expect(files.get(`${MEMORY}/log.md`)).toContain('last step of a5 on')
-  expect(resumed.filter(line => line.startsWith('a5: '))).toEqual([])
+  await working('a6', 'Merge the PR and look at the build', '/repo/plain')
+  await $.turn.complete({ answer: 'Claudopus merges it.', durationMs: 1, isAborted: false, turnId: 'turn-a6', reason: 'answer', agentId: 'a6' } as never)
+  expect(await until(async () => prompts.find(one => one.startsWith('Do the last step of the task "Fix the cheek"')))).toContain('Merge the PR and look at the build')
+  await working('a7', 'release', '/repo/wt')
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 'turn-a7', reason: 'answer', agentId: 'a7' } as never)
+  expect(await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it' && String(b.key ?? '').startsWith('ask-a7-')))).toBeDefined()
+  expect(files.get(`${MEMORY}/log.md`)).not.toContain('last step of a7 on')
+  expect(resumed.filter(line => /^a[567]: /.test(line))).toEqual([])
   await list.unmount()
 })
 

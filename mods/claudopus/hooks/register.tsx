@@ -1664,6 +1664,8 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
   for (const one of endedNow) {
     const card = (await read($, todos)).find(todo => todo.id === one)
     if (card?.parentId && card.parentId !== HELPER) await passOnHelper($, one, card.answer, 'done', true).catch(err => log($, `helper ${one}'s result not passed on: ${String(err)}`))
+    // and a go-ahead pressed during the turn the mod did not see end does its last step now
+    await stepAtEnd($, one, 'done').catch(err => log($, `last step of ${one} not done: ${String(err)}`))
   }
   redraw($)
 }
@@ -6013,12 +6015,12 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   if (!isReply && ask.lastStep && ask.folder && ask.choices?.[0] === said) {
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line, isCard: true, askAt: ask.at })
     redraw($)
-    const done = (err: unknown) => log($, `last step of ${one.id} not done: ${String(err)}`)
-    if (!working) await lastStep($, one, ask, said).catch(done)
+    if (!working) await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
     else {
       await tell($, one.id, `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\nClaudopus does that step (${cut(ask.lastStep, 160)}) once you end this turn: do not do it or start it yourself. Commit anything left on the branch now, change nothing on it after that, and end with your report.`)
+      // Kept on the card, so a reload meanwhile keeps it too, and done from the end of that turn's own hook (stepAtEnd)
+      await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, stepOnEnd: { ask, said } } : card)))
       await stepLine($, one.id, `On your "${said}", Claudopus does the last step once Claude ends this turn`)
-      void afterTurn($, one.id).then(() => lastStep($, one, ask, said)).catch(done)
     }
     return void askGone($, one, said)
   }
@@ -8946,16 +8948,24 @@ const stepLine = async ($: EngineInterface, id: string, text: string) => {
   await changeTodos($, list => list.map(card => (card.id === id ? { ...card, entries: [...card.entries, { at, kind: 'note' as const, text }].slice(-ENTRIES_KEPT) } : card)))
   redraw($)
 }
-// A go-ahead pressed while its work is still in the turn that asked waits for that turn's end (the card no longer working, or gone)
-const TURN_LOOK = 2_000
-const afterTurn = ($: EngineInterface, id: string) =>
-  new Promise<void>(resolve => {
-    const timer = everyLoad($, TURN_LOOK, () => {
-      void read($, todos)
-        .then(list => list.find(card => card.id === id)?.status === 'working' || (timer.cancel(), resolve()))
-        .catch(() => undefined)
-    })
-  })
+// A go-ahead pressed while its work was still in the turn that asked (stepOnEnd) is done as that turn ends, from its own hook, so a
+// small fresh task is started in a hook and a release takes the branch as the task left it, whatever the work left running. A turn
+// that was stopped or failed does no step: the question goes back on the card, to be pressed again
+const stepAtEnd = async ($: EngineInterface, id: string, how: Todo['status']) => {
+  const card = (await read($, todos)).find(one => one.id === id)
+  const held = card?.stepOnEnd
+  if (!card || !held) return
+  const isDone = how === 'done'
+  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, stepOnEnd: undefined, ...(!isDone && !one.ask ? { ask: held.ask } : {}) } : one)))
+  if (!isDone) {
+    // pressed again as a fresh answer, as when an answer could not be sent (answerNow)
+    answeredAsks.delete(`${id}:${held.ask.at}:${held.ask.text}`)
+    if (answeredAt.get(id) === held.ask.at) answeredAt.delete(id)
+    sentReplies.delete(id)
+    return stepLine($, id, `Nothing was done on your "${held.said}": Claude's turn ${how === 'stopped' ? 'was stopped' : 'failed'} first, so the question is back`)
+  }
+  await lastStep($, card, held.ask, held.said).catch(err => log($, `last step of ${id} not done: ${String(err)}`))
+}
 const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string) => {
   const folder = ask.folder ?? ''
   const step = ask.lastStep ?? ''
@@ -9522,6 +9532,8 @@ const chatHooks = (on: On) => {
       if (how === 'done' && !isHandedBack && listed !== 'waiting') await tellWaitsOn($, id).catch(err => log($, `chat not told work ${id} waits: ${String(err)}`))
       // A reply it never read goes to the chat; work that waits for its helpers reads it at its next step
       if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
+      // A go-ahead pressed during this turn does its last step now, before the wakes go, so its small task starts from this hook
+      await stepAtEnd($, id, how).catch(err => log($, `last step of ${id} not done: ${String(err)}`))
       if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
       // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
       // held on its own background work leaves it once it ends (keepStoppedReports)
