@@ -97,20 +97,15 @@ const scriptsRun = async ($: EngineInterface, command: string) => {
 // A command, or a script it runs, that would print a kept key or password: read as written and with its quotes taken out
 const readsKept = async ($: EngineInterface, command: string) =>
   [command, unquoted(command)].some(one => KEYCHAIN_READ.test(one)) || (await scriptsRun($, command)).some(text => KEYCHAIN_READ.test(text) || KEYCHAIN_READ.test(unquoted(text)))
-// A .curlrc curl reads by itself, from the home folder or its config folder
-const curlrcIn = async ($: EngineInterface) => {
-  const home = dir.replace(/\/\.claude\/claudopus$/, '')
-  return Boolean(home) && (await Promise.all([`${home}/.curlrc`, `${home}/.config/.curlrc`].map(path => readOr($, path)))).some(Boolean)
-}
 // A tool call that writes a file of the memory folder only the mod writes (refused outright), or the person's own settings and texts
 // by a command (refused: work changes those with Edit or Write, which wait for the person's press)
 const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
   if (!dir) return ''
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
   if (e.tool === 'Bash') {
-    // The command as written and unquoted, and each script it runs; a program handed code that only reads names a file to read it
+    // The command as written and unquoted, and each script it runs
     const command = String(input.command ?? '')
-    const texts = [...(codeOnlyReads(command) ? [] : [command]), ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
+    const texts = [command, ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
     if (texts.some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
     if (texts.some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
     return ''
@@ -299,8 +294,6 @@ const workHooks = (on: On) => {
     // The branch a push would go from, which is never main
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-      // a curl that would read a .curlrc of the home folder, which may send its output into a file, runs only with -q first
-      && !(/^\s*curl\s/.test(chatCommand) && shellWords(chatCommand)[0]?.[1] !== '-q' && (await curlrcIn($)))
     const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
@@ -588,8 +581,6 @@ const workHooks = (on: On) => {
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
       return { turnId: e.turnId, index: e.index, answer: LEFT_AT_WORK, toolUses: [], stopReason: 'end_turn', usage: null }
     }
-    // A step of its own: the chat is told again the next time it ends its step to wait
-    if (id !== undefined) toldWaitsOn.delete(id)
     const own = id !== undefined ? (startedOn.get(id) ?? card?.startedOn) : undefined
     const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && !card?.flagged && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
     const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnOlder
