@@ -903,7 +903,7 @@ test("helpers are not taken for silent while their own record shows calls return
   // The engine keeps the helper's record: each minute a call of its returns, which Claudopus never saw
   const record = `${HOME}/.claude/projects/-repo/engine-id/subagents/agent-a2.jsonl`
   const rows: string[] = ['{"type":"system"}']
-  const write = (row: object) => (rows.push(JSON.stringify({ ...row, timestamp: new Date(clock.now()).toISOString() })), files.set(record, rows.join('\n')), files.set(`mtime:${record}`, String(clock.now())))
+  const write = (row: object) => (rows.push(JSON.stringify({ ...row, timestamp: new (Date as unknown as new (ms: number) => { toISOString: () => string })(clock.now()).toISOString() })), files.set(record, rows.join('\n')), files.set(`mtime:${record}`, String(clock.now())))
   const returned = (text: string) => write({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: text }] } })
   const called = (id: string, name: string, text: string) => (write({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input: {} }] } }), write({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] } }))
   // It parks on a command in the background that follows its run, and the command prints each minute for 20 minutes: no check-in
