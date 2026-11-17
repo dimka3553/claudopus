@@ -1025,7 +1025,7 @@ test('the battery card says what the Mac draws, the processors and graphics each
   await desk.unmount()
 })
 
-test("a task's heavy command waits its turn while the Mac is busy and another runs: refused at once with its place in the line, its card says so, and its work is started again in order once there is room or after 15 minutes; one with nothing else heavy running, or with the setting at Never, runs at once; nothing waits in a hook (16 Nov: ten tasks drove headless browsers on one Mac at once)", SLOW, async ($, on) => {
+test("a task's heavy command waits its turn while the Mac is busy and another runs: refused at once with its place in the line, its card says so and stays at work through its step's end and any wake_me of its own, and its work (a helper too) is started again in order once there is room or after 15 minutes; one with nothing else heavy running, or with the setting at Never, runs at once; nothing waits in a hook (16 Nov: ten tasks drove headless browsers on one Mac at once)", SLOW, async ($, on) => {
   let n = 0
   let load = 60
   const { clock, files, appended, resumed } = world(on, { usage: () => lookAt((n += 1), 1583261, `@@LOAD@@\n{ ${load}.00 50.00 40.00 }`) })
@@ -1054,6 +1054,16 @@ test("a task's heavy command waits its turn while the Mac is busy and another ru
   expect(held.some(text => /starts Claude again/.test(text))).toBe(false)
   // The same command sent again before its turn keeps its place
   expect((await shoot('s2b', 'a2', 'Take the card shots')).deny).toMatch(/waits its turn, next in line\./)
+  // A helper waits its turn as a task does, told to end its step without handing back
+  await $.agent.spawn({ ...spawn, description: 'Shoot the footer', prompt: 'footer', parentAgentId: 'a1' } as never)
+  expect((await shoot('s9', 'a4', 'Take the footer shots')).deny).toMatch(/waits its turn, 3rd in line\. Do other work that does not need it, or end your step without handing back: Claudopus starts you again/)
+  // Their steps end: still at work, whatever a wake_me of their own does meanwhile (one set and gone off leaves the wait standing)
+  expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w1', agentId: 'a2', what: 'a short pause', minutes: 1 } as never)) as { result?: string }).result).toBeDefined()
+  for (const agentId of ['a2', 'a4']) await $.turn.complete({ answer: 'Waiting my turn.', durationMs: 1, isAborted: false, turnId: `t-${agentId}`, reason: 'answer', agentId } as never)
+  await clock.advance(90_000)
+  const waited = await texts()
+  expect(waited.filter(text => /^Wait · its turn: Take the (card|footer) shots/.test(text))).toHaveLength(2)
+  expect(waited.some(text => /^Shoot the cards$/.test(text))).toBe(true)
   // Nobody is woken while the load stays
   const woken = () => [...appended, ...resumed].filter(line => /your command's turn|has waited 15 minutes/.test(line))
   await clock.advance(20_000)
@@ -1065,6 +1075,9 @@ test("a task's heavy command waits its turn while the Mac is busy and another ru
   expect((await shoot('s2c', 'a2', 'Take the card shots')).deny).toBeUndefined()
   expect(await until(async () => (await clock.advance(6000), woken().some(line => line.startsWith('a3: ')) || undefined))).toBe(true)
   expect((await shoot('s3b', 'a3', 'Take the menu shots')).deny).toBeUndefined()
+  // and the helper whose step had ended is started again with its turn, its command then run
+  expect(await until(async () => (await clock.advance(6000), woken().some(line => line === 'a4: It is your command\'s turn: the Mac has room for "Take the footer shots" now. Send it again now, and it runs at once.') || undefined))).toBe(true)
+  expect((await shoot('s9b', 'a4', 'Take the footer shots')).deny).toBeUndefined()
   expect(await until(async () => (!(await texts()).some(text => /its turn|room on the Mac/.test(text)) || undefined))).toBe(true)
   // Busy again, one more waits; after 15 minutes its work is started again however busy the Mac is
   load = 60
