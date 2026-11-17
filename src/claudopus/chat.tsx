@@ -206,11 +206,29 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'waits',
       description: named(
-        "For background tasks, before you finish: records what in your report waits on {name}, each as one short line {name} can answer yes or no. The panel shows each with Yes / No / Not now. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. It replaces what was recorded before; do not call it when nothing waits.",
+        "For background tasks, before you finish: records what in your report waits on {name}, each as one short question. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. The panel answers a yes-or-no question with Yes / No / Not now; one that is not yes or no (a choice between ways, or one only words answer) names its answers in `choices`, or [] when only words answer it. It replaces what was recorded before: call it again whenever that changes, with [] once nothing waits. In the chat: once {name}'s own words have answered what a result waits on, call it with that result's report.md path as `result` and what of it still waits as `items`.",
       ),
       inputSchema: {
         type: 'object',
-        properties: { items: { type: 'array', items: { type: 'string' }, description: 'Each a question of at most 140 characters, in plain words, speaking to them as "you"' } },
+        properties: {
+          items: {
+            type: 'array',
+            items: {
+              anyOf: [
+                { type: 'string', description: 'A yes-or-no question of at most 140 characters, in plain words, speaking to them as "you"' },
+                {
+                  type: 'object',
+                  properties: {
+                    text: { type: 'string', description: 'The question, at most 140 characters, in plain words, speaking to them as "you"' },
+                    choices: { type: 'array', items: { type: 'string' }, description: 'Its answers when it is not yes or no, a few words each (at most 4; Not now is added); [] when only words answer it' },
+                  },
+                  required: ['text'],
+                },
+              ],
+            },
+          },
+          result: { type: 'string', description: named("Only in the chat: the report.md path of the result whose items {name}'s words answered") },
+        },
         required: ['items'],
       },
       isDeferred: false,
@@ -421,6 +439,8 @@ const chatHooks = (on: On) => {
     heard = [...heard, text]
     // A message that names a report starts work from it: that work's own report is kept linked to it
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
+    // One that names a result and quotes what in it waits answers that, as "Answer in words" on the result starts it
+    await answeredInMessage($, text).catch(err => log($, `results answered in words not marked: ${String(err)}`))
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
     await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
 

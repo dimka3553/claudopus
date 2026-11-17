@@ -8,13 +8,15 @@ const carryOn = async ($: EngineInterface, r: Report, now: number) => {
   const filled = await $.prompt.fill(typed.trim() ? { text: `\n${text}`, mode: 'append' } : { text, mode: 'replace' }).catch(() => ({ isFilled: false }))
   if (!filled.isFilled) await log($, 'the chat box was not filled from a report')
 }
-// The person's answer to one thing a report waits on them for: Yes and No go to the chat as their message; Not now sets it aside.
-// It clears that one alone
+// The person's answer to one thing a report waits on them for: Yes, No or one of its own answers goes to the chat as their message;
+// Not now sets it aside. It clears that one alone. One only words answer puts a line naming it in the chat's box, for them to finish:
+// their message, sent, answers it (answeredInMessage)
 const answering = new Set<string>()
-const answerWait = async ($: EngineInterface, r: Report, index: number, said: 'Yes' | 'No' | 'Not now', now: number) => {
+const answerWait = async ($: EngineInterface, r: Report, index: number, said: string, now: number) => {
   const wait = waitsOf(r)[index]
   // A second press before the answer is kept sends nothing more
   if (!wait || wait.answer || answering.has(`${r.id}:${index}`)) return
+  if (said === ANSWER_IN_WORDS) return answerInWords($, r, wait, now)
   answering.add(`${r.id}:${index}`)
   if (said !== 'Not now') await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "${said}" to answer the question in the result "${r.title}" (${dated(r.at, now)}): ${wait.text}\nThe result: ${reportPath(r)}/report.md`)
   // Not now kept nowhere can be pressed again; a Yes or No already sent is not sent twice
@@ -22,6 +24,12 @@ const answerWait = async ($: EngineInterface, r: Report, index: number, said: 'Y
     if (said === 'Not now') answering.delete(`${r.id}:${index}`)
     throw err
   })
+}
+const answerInWords = async ($: EngineInterface, r: Report, wait: Wait, now: number) => {
+  const text = `About "${wait.text}" in the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: `
+  const typed = (await $.prompt.read().catch(() => ({ text: '' }))).text
+  const filled = await $.prompt.fill(typed.trim() ? { text: `\n${text}`, mode: 'append' } : { text, mode: 'replace' }).catch(() => ({ isFilled: false }))
+  if (!filled.isFilled) await log($, 'the chat box was not filled to answer a result in words')
 }
 // ---- Reports in panes of their own: the list as "Reports", and each report opened as a pane titled with its name ----
 
@@ -387,7 +395,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
                   <Box key={`report-wait-${index}`} flexDirection="column" gap={1}>
                     <Text wrap="wrap">{wait.text}</Text>
                     <Box flexDirection="row" flexWrap="wrap" gap={1}>
-                      {(['Yes', 'No', 'Not now'] as const).map(said => (
+                      {answersOf(wait).map(said => (
                         <Button key={`report-say-${index}-${said}-${gen}`} label={said} onPress={() => void ((presses += 1), answerWait($, r, index, said, now).catch(err => log($, `answer not kept: ${String(err)}`)))} />
                       ))}
                     </Box>

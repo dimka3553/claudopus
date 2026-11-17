@@ -1,0 +1,4 @@
+- A result's question that a task also asked on its card now stops waiting once you answer that card, whether you press its button, reply in your own words, or answer in the chat. Before, pressing Release it left the same question "waiting on you" in the results list, and the chat kept bringing it up.
+- When a task records what still waits after acting on your answer, what it leaves out stops waiting on its result too. An empty list now clears it.
+- When you answer a result's question in the chat, the chat marks it answered, so it no longer shows as waiting.
+- A result's question that is not a yes-or-no question now shows its own answers, such as "By hand" and "Leave them", instead of Yes and No. A question only words can answer shows "Answer in words", which puts a line about it in the chat box for you to finish. Sending that line answers the question.
