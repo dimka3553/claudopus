@@ -67,7 +67,8 @@ test('three single lookups in a row are told to go together or to a helper; two 
 test("work never waits for its helpers: it is told it may end its step, it is let go when it does, and a helper's result that the engine hands the chat is passed on to it, which starts it again; a report handed back while helpers run is still held", async ($, on) => {
   const agents: Record<string, string> = {}
   const talk: unknown[] = []
-  const { stopped, resumed, appended, clock, stepped } = world(on, { agents, talk })
+  const unresumable = new Set<string>()
+  const { stopped, resumed, appended, clock, stepped, atHandback } = world(on, { agents, talk, unresumable })
   on('classic.SubagentStop', () => ({}) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -134,11 +135,32 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a3', message: 'The nose is drawn at every size.' } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h3', reason: 'answer', agentId: 'a3' } as never)
   expect(await until(async () => resumed.find(one => one.startsWith('a1: From Claudopus: your helper "Draw the nose" has finished') && one.endsWith('The nose is drawn at every size.')))).toBeDefined()
-  expect(await until(async () => appended.find(one => /^undefined: From Claudopus: the result of the helper "Draw the nose" reached this chat because the task ".*" had ended its step/.test(one)))).toBeDefined()
+  // and the chat is told so before the hand-back reaches it, as its turn starts with the hand-back (16 Nov: its turn began before a
+  // note written as the helper's turn ended, and it sent the result on by hand), once
+  const passed = (helper: string) => (one: string) => new RegExp(`^undefined: From Claudopus: the result of the helper "${helper}" reached this chat because the task ".*" had ended its step`).test(one)
+  expect(appended.slice(0, atHandback.at(-1)).filter(passed('Draw the nose'))).toHaveLength(1)
+  expect(appended.filter(passed('Draw the nose'))).toHaveLength(1)
+  // A helper the engine still lists as running as its turn ends has its result passed on once the engine lists it as ended
+  await $.agent.spawn({ ...spawn, description: 'Draw the chin', prompt: 'draw', parentAgentId: 'a1' } as never)
+  agents.a4 = 'running'
+  await $.turn.complete({ answer: 'The chin is drawn.', durationMs: 1, isAborted: false, turnId: 'h4', reason: 'answer', agentId: 'a4' } as never)
+  agents.a4 = 'completed'
+  await clock.advance(2_000)
+  expect(await until(async () => resumed.find(one => one.startsWith('a1: From Claudopus: your helper "Draw the chin" has finished') && one.endsWith('The chin is drawn.')))).toBeDefined()
+  expect(appended.filter(passed('Draw the chin'))).toHaveLength(1)
+  // One that cannot be passed on leaves the chat told to send it on itself
+  agents.a1 = 'completed'
+  unresumable.add('a1')
+  await $.agent.spawn({ ...spawn, description: 'Draw the brow', prompt: 'draw', parentAgentId: 'a1' } as never)
+  agents.a5 = 'completed'
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb5', agentId: 'a5', message: 'The brow is drawn.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h5', reason: 'answer', agentId: 'a5' } as never)
+  expect(await until(async () => appended.find(one => /^undefined: From Claudopus: the result of the helper "Draw the brow" reached this chat .*could not pass it on to that task \(no such agent\)\. Send it on to that task yourself with SendMessage\./.test(one)))).toBeDefined()
+  unresumable.delete('a1')
   // Stopped from its card or by the chat, the work's running helpers are stopped with it
   await $.agent.spawn({ ...spawn, description: 'Draw the ear', prompt: 'draw', parentAgentId: 'a1' } as never)
   await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' } as never)
-  expect(stopped).toEqual(expect.arrayContaining(['a1', 'a4']))
+  expect(stopped).toEqual(expect.arrayContaining(['a1', 'a6']))
 })
 
 test("what nothing of the work's own makes, a file, a line in it, a page or a time, Claudopus looks for when asked and starts the work again once it is there, or once the longest look (15 min unless given, at most an hour) runs out, though the engine lists it as ended; two looks in a row that run out have it hand back what it has; work never reached is told to the chat; the card says so, with by when, in place of a command that would wait; a helper hands back instead", SLOW, async ($, on) => {

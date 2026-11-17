@@ -48,6 +48,7 @@ const afterReply = async ($: EngineInterface, text: string, answer: string) => {
 // listed as completed, and the look ends its card (sync) and passes on a reply it never read, as the turn's end would have
 const HELD_LOOK = 1500
 const heldLook = async ($: EngineInterface, id: string) => {
+  const wasWorking = (await read($, todos)).find(one => one.id === id)?.status === 'working'
   await sync($)
   // Listed as idle, or no longer listed, its run is over too: nothing holds it
   const listed = (await $.agent.list().catch(() => undefined))?.find(one => one.id === id)?.status
@@ -55,9 +56,12 @@ const heldLook = async ($: EngineInterface, id: string) => {
     const now = await $.clock.now()
     await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
   }
-  if ((await read($, todos)).find(one => one.id === id)?.status === 'working') return
+  const card = (await read($, todos)).find(one => one.id === id)
+  if (card?.status === 'working') return
   await replyUnread($, id)
   if (wakes.length) await sendWakes($)
+  // A helper the engine still listed as running as its turn ended, ended now: its result is passed on as at a heard end
+  if (wasWorking && card?.parentId && card.parentId !== HELPER) await passOnHelper($, id, card.answer ?? '', card.status)
 }
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {

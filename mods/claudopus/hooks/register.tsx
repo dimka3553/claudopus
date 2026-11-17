@@ -7174,6 +7174,42 @@ const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
   if (toolUseId && waiting.some(one => one.id === toolUseId)) settle($, toolUseId, undefined, undefined, 'running')
 }
 
+const OTHER_WAY = 'Do it another way'
+const LEAVE_OUT = 'Leave it out'
+const CC_REFUSED = /denied by the Claude Code auto mode classifier|denied by a built-in Claude Code safety check|no approval surface in this session|nobody can be asked in this headless run/i
+const NO_VERDICT = /gave no verdict|transient failure/i
+const refusalOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isError?: unknown } | undefined) => {
+  if (!r || (!r.deny && !r.isError)) return ''
+  const words = [r.deny, r.text, r.result].map(one => (typeof one === 'string' ? one : '')).join('\n')
+  return CC_REFUSED.test(words) && !NO_VERDICT.test(words) ? words : ''
+}
+const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: string, call: Record<string, unknown>, r: Parameters<typeof refusalOf>[0]) => {
+  const words = refusalOf(r)
+  if (!words || !dir || isOff) return
+  const list = await read($, todos)
+  const top = list.find(one => one.id === topOf(list, agent))
+  const own = list.find(one => one.id === agent)
+  if (!top || top.chat) return
+  if (top.ask) return void (await log($, `refusal of ${tool} for ${agent} not asked: its card asks something already`))
+  const what = promptOf(tool, call, list, true)
+  const who = own?.parentId ? `a helper of this task ("${titleOf(own)}")` : 'this task'
+  const text = cut(`Claude Code refused ${who}: ${what.text}.`, ASK_TEXT)
+  const reason = cut(oneLine(words.replace(/^Permission for this (?:action|command) was /i, '')), 600)
+  const details = [
+    what.detail ? `What it is: ${what.detail}` : '',
+    `Why: it was ${reason}`,
+    `${OTHER_WAY}: Claude looks for another way to get there. ${LEAVE_OUT}: Claude carries on without it and says so in its report. To let it run, allow it in Claude Code's own settings and tell the task in your own words.`,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  const at = await $.clock.now()
+  await change($, agent, one => ({ ...one, ask: { text, details, choices: [OTHER_WAY, LEAVE_OUT], from: agent, at } }))
+  await log($, `refusal of ${tool} for ${agent} put to the person on its card`)
+  const card = (await read($, todos)).find(one => one.id === top.id)
+  if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
+  if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
+}
+
 const OWN_CALLS = ['SendMessage', 'TaskStop']
 const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
 
@@ -7504,15 +7540,18 @@ const afterReply = async ($: EngineInterface, text: string, answer: string) => {
 
 const HELD_LOOK = 1500
 const heldLook = async ($: EngineInterface, id: string) => {
+  const wasWorking = (await read($, todos)).find(one => one.id === id)?.status === 'working'
   await sync($)
   const listed = (await $.agent.list().catch(() => undefined))?.find(one => one.id === id)?.status
   if (listed === 'idle' || listed === undefined) {
     const now = await $.clock.now()
     await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
   }
-  if ((await read($, todos)).find(one => one.id === id)?.status === 'working') return
+  const card = (await read($, todos)).find(one => one.id === id)
+  if (card?.status === 'working') return
   await replyUnread($, id)
   if (wakes.length) await sendWakes($)
+  if (wasWorking && card?.parentId && card.parentId !== HELPER) await passOnHelper($, id, card.answer ?? '', card.status)
 }
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
@@ -8955,7 +8994,9 @@ const HELPERS_STARTED = 'Your helpers run in the background: each call came back
 const HELPER_ENDED = (title: string, how: Todo['status'], report: string) =>
   `From Claudopus: your helper "${title}" ${how === 'failed' ? 'failed' : how === 'stopped' ? 'was stopped' : 'has finished'} while your step had ended, so Claudopus passes its result on to you here (if you already have it, carry on).${report ? ` Its result:\n\n${report}` : ' It gave no result.'}`
 const HELPER_PASSED = (helper: string, work: string) =>
-  `From Claudopus: the result of the helper "${helper}" reached this chat because the task "${work}" had ended its step to let it work. Claudopus has passed it on to that task and started it again: there is nothing for you to do with it, and nothing to tell {name}.`
+  `From Claudopus: the result of the helper "${helper}" reached this chat because the task "${work}" had ended its step to let it work. Claudopus passes it on to that task and starts it again: there is nothing for you to do with it, and nothing to tell {name}.`
+const HELPER_NOT_PASSED = (helper: string, work: string, reason: string) =>
+  `From Claudopus: the result of the helper "${helper}" reached this chat because the task "${work}" had ended its step, and Claudopus could not pass it on to that task (${cut(oneLine(reason), 120)}). Send it on to that task yourself with SendMessage.`
 
 const toldWaitsOn = new Set<string>()
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`)
@@ -8975,22 +9016,44 @@ const tellWaitsOn = async ($: EngineInterface, id: string) => {
   await log($, `chat told work ${id} waits on ${helpers ? plural(helpers, 'a helper', 'helpers') : 'being woken'}`)
 }
 
-const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status'], isUnheard = false) => {
-  if (!dir || isOff) return
-  const list = await read($, todos)
+const passedTo = (list: Todo[], helperId: string) => {
   const helper = list.find(one => one.id === helperId)
   const parent = helper?.parentId ? list.find(one => one.id === helper.parentId) : undefined
-  if (!helper || !parent || isHeld(parent) || pressed.has(parent.id) || stoppedHere.has(parent.id) || parent.status === 'stopped' || parent.status === 'failed' || parent.handedBackAt !== undefined || endedByHandback.has(parent.id)) return
+  if (!helper || !parent || isHeld(parent) || pressed.has(parent.id) || stoppedHere.has(parent.id) || parent.status === 'stopped' || parent.status === 'failed' || parent.handedBackAt !== undefined || endedByHandback.has(parent.id)) return undefined
+  return { helper, parent }
+}
+const toChat = async ($: EngineInterface, text: string) =>
+  $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(text) }] } }).catch(err => log($, `chat not told of a helper's result: ${String(err)}`))
+const notedAtHandback = new Set<string>()
+const noteHandback = async ($: EngineInterface, helperId: string) => {
+  if (!dir || isOff) return
+  const to = passedTo(await read($, todos), helperId)
+  if (!to) return
+  const listed = (await $.agent.list().catch(() => [])).find(one => one.id === to.parent.id)?.status
+  if (listed === 'running' || listed === 'waiting') return
+  notedAtHandback.add(helperId)
+  await toChat($, HELPER_PASSED(titleOf(to.helper), titleOf(to.parent)))
+}
+const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status'], isUnheard = false) => {
+  if (!dir || isOff) return
+  const isNoted = notedAtHandback.delete(helperId)
+  const to = passedTo(await read($, todos), helperId)
+  if (!to) return
+  const { helper, parent } = to
   const listed = (await $.agent.list().catch(() => [])).find(one => one.id === parent.id)?.status
-  if (listed === 'running' && isUnheard) return void (await tell($, parent.id, HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS))))
+  if (listed === 'running' && (isUnheard || isNoted)) return void (await tell($, parent.id, HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS))))
   if (listed === 'running') return
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
     : await sendOwn($, { to: { agentId: parent.id }, text: HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
-  if (!r.isDelivered) return void (await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${r.reason}`))
+  if (!r.isDelivered) {
+    await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${r.reason}`)
+    if (listed !== 'waiting' || isNoted) await toChat($, HELPER_NOT_PASSED(titleOf(helper), titleOf(parent), r.reason))
+    return
+  }
   await wakeCard($, parent.id)
   await log($, `helper ${helperId}'s result passed on to ${parent.id}, which had ended its step`)
-  if (listed !== 'waiting') await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(HELPER_PASSED(titleOf(helper), titleOf(parent))) }] } }).catch(err => log($, `chat not told of a helper's result passed on: ${String(err)}`))
+  if (listed !== 'waiting' && !isNoted) await toChat($, HELPER_PASSED(titleOf(helper), titleOf(parent)))
 }
 
 const isHelperSpawn = (e: { parentAgentId?: string; workflow?: unknown; resume?: unknown; fork: boolean; isTeammate?: true; background: boolean }) =>
@@ -9845,6 +9908,7 @@ const workHooks = (on: On) => {
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool, outcomeOf(r as never), e as never)
+        if (e.agentId !== undefined) void refusedByClaudeCode($, e.agentId, e.tool, e as never, r as never).catch(err => log($, `refusal not put to the person: ${String(err)}`))
         if (grants.length && !(call as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
         runnerEnded(e.tool_use_id, Boolean((call as { run_in_background?: unknown }).run_in_background), await $.clock.now())
         await noteCallEnded($, e.tool_use_id).catch(() => undefined)
@@ -10074,9 +10138,11 @@ const workHooks = (on: On) => {
     if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
       const hold = await holdAtHandback($, e.agentId).catch(() => '')
       if (hold) return { deny: hold }
+      await noteHandback($, e.agentId).catch(err => log($, `chat not told of a helper's hand-back: ${String(err)}`))
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       const r = await next(e)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
+      else notedAtHandback.delete(e.agentId)
       if (!r.deny && !r.isError && isLetGoNow) await stopHelpers($, e.agentId).catch(err => log($, `helpers of ${e.agentId} not stopped: ${String(err)}`))
       return r
     }

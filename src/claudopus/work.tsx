@@ -199,6 +199,8 @@ const workHooks = (on: On) => {
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool, outcomeOf(r as never), e as never)
+        // A call Claude Code refused a task with no prompt is put to the person on its card
+        if (e.agentId !== undefined) void refusedByClaudeCode($, e.agentId, e.tool, e as never, r as never).catch(err => log($, `refusal not put to the person: ${String(err)}`))
         // A grant its admin command did not take goes with the call; one sent to the background takes its own in its own time
         if (grants.length && !(call as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
         runnerEnded(e.tool_use_id, Boolean((call as { run_in_background?: unknown }).run_in_background), await $.clock.now())
@@ -476,9 +478,12 @@ const workHooks = (on: On) => {
     if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
       const hold = await holdAtHandback($, e.agentId).catch(() => '')
       if (hold) return { deny: hold }
+      // A helper whose work has ended its step hands its result to the chat: the chat is told first, so its turn starts knowing
+      await noteHandback($, e.agentId).catch(err => log($, `chat not told of a helper's hand-back: ${String(err)}`))
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       const r = await next(e)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
+      else notedAtHandback.delete(e.agentId)
       // Its silent helpers, which it was let hand back over, end with its report
       if (!r.deny && !r.isError && isLetGoNow) await stopHelpers($, e.agentId).catch(err => log($, `helpers of ${e.agentId} not stopped: ${String(err)}`))
       return r
