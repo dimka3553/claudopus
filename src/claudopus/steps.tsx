@@ -232,8 +232,7 @@ const lookWakes = async ($: EngineInterface) => {
 // and by when at the latest, when Claude is started again all the same
 const wakeLine = (one: Todo) => {
   const w = one.wakeWhen
-  // (a wait for a heavy command's turn is said on that command's own row, with its place in the line)
-  if (!w || (one.heldCalls?.length && w.what.startsWith('its turn on the Mac'))) return ''
+  if (!w) return ''
   return w.file || w.url ? `Claudopus starts Claude again when this is there: ${w.what}; at ${hhmm(w.until)} if it never comes` : `Claudopus starts Claude again at ${hhmm(w.until)}: ${w.what}`
 }
 
@@ -364,7 +363,8 @@ const noteHandback = async ($: EngineInterface, helperId: string) => {
 }
 // The result each helper's end was last passed on with: its turn's end, the look shortly after it and the look for work that ended
 // unheard may each come to the same end, and it is passed on once. A helper started again ends again with a result of its own
-// By the helper and its report alone: the same report ended again as failed or stopped is not passed on twice
+// By the helper and its report alone: the same report ended again as failed or stopped is not passed on twice; a step of the helper's
+// clears it (work.tsx)
 const passedOn = new Map<string, string>()
 const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status'], isUnheard = false) => {
   if (!dir || isOff) return

@@ -13,9 +13,14 @@ const HEAVY_RAMP = 20_000
 type HeldCall = { id: string; agent: string; what: string; cmd: string; at: number }
 // The held calls in the order they came, and the heavy calls let through whose call has not ended, by tool_use_id
 let heavyQueue: HeldCall[] = []
-// Work whose turn came, until when its next heavy command runs at once: a turn not taken by then goes to the next in line
+// Work whose turn came runs its next heavy command at once until then (heavyPass on its card, so a reload keeps it): a turn not
+// taken by then goes to the next in line
 const HEAVY_PASS = 3 * 60_000
-const heavyPass = new Map<string, number>()
+// How many times the first in line was told its turn in vain; after three the chat is told, and the line goes on
+const heavyTries = new Map<string, number>()
+// Whether a piece of work waits for a heavy command's turn, its own or a helper's under it: its step's end is no finish then, and
+// only its turn starts it again
+const isTurnWaited = (list: Todo[], id: string) => list.some(one => (one.id === id || one.parentId === id) && one.heldCalls?.length)
 const heavyOpen = new Map<string, string>()
 // The commands judged heavy, as cards keep a background or detached run's command, so one that goes on past its call still counts
 const heavySeen = new Set<string>()
@@ -25,7 +30,7 @@ const keptCmd = (command: string) => oneLine(command).slice(0, 400)
 // How many heavy commands of this chat's work run now: calls held open, and runs in the background or detached that go on (never
 // another chat's card, which this chat's memory of what is heavy does not cover)
 const heavyRunning = (list: Todo[], now: number) =>
-  heavyOpen.size + [...heavyPass.values()].filter(until => until > now).length + list.filter(one => !one.chat).reduce((n, one) => n + [...(one.bg ?? []), ...(one.detached ?? [])].filter(run => run.cmd && heavySeen.has(run.cmd)).length, 0)
+  heavyOpen.size + list.filter(one => !one.chat && (one.heavyPass ?? 0) > now).length + list.filter(one => !one.chat).reduce((n, one) => n + [...(one.bg ?? []), ...(one.detached ?? [])].filter(run => run.cmd && heavySeen.has(run.cmd)).length, 0)
 // Whether the Mac is past the setting's marks: its load average for each core, or its memory in use
 const isMacBusy = (f: UsageFigures | undefined, mode: HeavyMode) =>
   Boolean(f && ((f.load !== undefined && f.loadCores && f.load >= mode.load * f.loadCores) || (f.memTotal > 0 && f.memUsed / f.memTotal >= mode.memory)))
@@ -43,7 +48,8 @@ const busyWords = (f: UsageFigures | undefined) =>
   !f ? 'busy' : [f.load !== undefined && f.loadCores ? `load ${Math.round(f.load)} on ${f.loadCores} cores` : '', f.memTotal ? `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB memory in use` : ''].filter(Boolean).join(', ')
 const placeWords = (n: number) => (n === 1 ? 'next in line' : `${n}${n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : n % 10 === 1 && n % 100 !== 11 ? 'st' : 'th'} in line`)
 const HEAVY_HELD = (what: string, place: number, f: UsageFigures | undefined, isHelper: boolean) =>
-  `Not run yet: the Mac is busy (${busyWords(f)}) and other heavy commands of Claudopus's tasks run, so this one ("${what}") waits its turn, ${placeWords(place)}. ${isHelper ? 'Do other work that does not need it meanwhile: Claudopus tells you when its turn comes, in 15 minutes at the latest.' : 'Do other work that does not need it, or end your step: Claudopus starts you again when its turn comes, in 15 minutes at the latest.'} Then send the same command again.`
+  `Not run yet: the Mac is busy (${busyWords(f)}) and other heavy commands of Claudopus's tasks run, so this one ("${what}") waits its turn, ${placeWords(place)}. Do other work that does not need it, or end your step${isHelper ? ' without handing back' : ''}: Claudopus starts you again when its turn comes, in 15 minutes at the latest. Then send the same command again.`
+const HEAVY_LOST = (title: string, what: string) => `The task "${title}" could not be told that its command "${what}" may run now. Send it a message to carry on.`
 const HEAVY_TURN = (what: string, isLate: boolean) =>
   isLate
     ? `Your command "${what}" has waited 15 minutes for room on the Mac: send it again now, and it runs whatever the load. If it fails or times out for lack of room, try it again later.`
@@ -82,8 +88,8 @@ const turnHeavy = async ($: EngineInterface, e: ToolCallInput): Promise<{ id?: s
   await lookUsage($).catch(() => undefined)
   const now = await $.clock.now()
   // Work whose turn came runs its next heavy command at once, its place given up
-  const pass = heavyPass.get(agent)
-  heavyPass.delete(agent)
+  const pass = list.find(one => one.id === agent)?.heavyPass
+  if (pass) await changeTodos($, cards => cards.map(one => (one.id === agent ? { ...one, heavyPass: undefined } : one)))
   const waiting = heavyQueue.find(one => one.agent === agent && one.cmd === cmd)
   if ((pass && pass > now) || (!heavyQueue.length && heavyRoom(list, usageNow(now), mode, now))) {
     if (waiting) await leaveLine($, waiting.id)
@@ -94,17 +100,14 @@ const turnHeavy = async ($: EngineInterface, e: ToolCallInput): Promise<{ id?: s
   if (!waiting) {
     heavyQueue.push(call)
     await log($, `work ${agent}'s heavy command waits its turn (${heavyQueue.length} held, Mac ${busyWords(usageNow(now))})`)
-    // Its card waits to be started again, as for a wake_me of its own (one it set already stands), and says so
-    await changeTodos($, cards => cards.map(one => (one.id === agent && !one.parentId && !one.wakeWhen ? { ...one, wakeWhen: { what: `its turn on the Mac for "${cut(call.what, 80)}"`, at: now, until: now + HEAVY_MOST + 2 * 60_000 } } : one)))
     await showHeld($)
   }
   return { deny: HEAVY_HELD(cut(call.what, 120), heavyQueue.indexOf(call) + 1, usageNow(now), Boolean(list.find(one => one.id === agent)?.parentId)) }
 }
-// A held call taken out of the line, and its card's wait for it with it
+// A held call taken out of the line
 const leaveLine = async ($: EngineInterface, id: string) => {
-  const call = heavyQueue.find(one => one.id === id)
   heavyQueue = heavyQueue.filter(one => one.id !== id)
-  if (call && !heavyQueue.some(one => one.agent === call.agent)) await changeTodos($, cards => cards.map(one => (one.id === call.agent && one.wakeWhen?.what.startsWith('its turn on the Mac') ? { ...one, wakeWhen: undefined } : one)))
+  heavyTries.delete(id)
   await showHeld($)
 }
 // As the list is followed: work that stopped or reported leaves the line, and the first in line whose turn has come (room on the
@@ -114,27 +117,33 @@ const lookHeld = async ($: EngineInterface) => {
   const list = await read($, todos)
   for (const call of heavyQueue) {
     const card = list.find(one => one.id === call.agent)
-    // (a helper that ended its step has handed back: it is not started again)
-    if (!card || card.status === 'stopped' || card.status === 'failed' || card.handedBackAt !== undefined || (card.parentId && card.status === 'done')) await leaveLine($, call.id)
+    if (!card || card.status !== 'working' || card.handedBackAt !== undefined) await leaveLine($, call.id)
   }
   const first = heavyQueue[0]
   if (!first) return
   await lookUsage($).catch(() => undefined)
   const now = await $.clock.now()
-  for (const [agent, until] of heavyPass) if (until <= now) heavyPass.delete(agent)
+  if (list.some(one => one.heavyPass !== undefined && one.heavyPass <= now)) await changeTodos($, cards => cards.map(one => (one.heavyPass !== undefined && one.heavyPass <= now ? { ...one, heavyPass: undefined } : one)))
   // (those waited past 15 minutes go one at a time too, spaced as a burst is, never all at once)
   const isLate = now - first.at >= HEAVY_MOST && now - heavyLetAt >= HEAVY_RAMP
   if (!isLate && !heavyRoom(await read($, todos), usageNow(now), heavyModeOf(await readConfig($, dir)), now)) return
-  await leaveLine($, first.id)
-  heavyPass.set(first.agent, now + HEAVY_PASS)
-  heavyLetAt = now
   const text = HEAVY_TURN(cut(first.what, 120), isLate)
   const isAtStep = (await $.agent.list().catch(() => [])).find(agent => agent.id === first.agent)?.status === 'running'
   const r = isAtStep
     ? await tell($, first.agent, text).then(() => ({ isDelivered: true as const, reason: '' })).catch(err => ({ isDelivered: false as const, reason: String(err) }))
-    : await sendOwn($, { to: { agentId: first.agent }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    : (await isReplaced($))
+      ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
+      : await sendOwn($, { to: { agentId: first.agent }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  // Not reached: it stays first in line and is told again at the next look, three times at most, before the chat is told
+  const tries = (heavyTries.get(first.id) ?? 0) + 1
+  if (!r.isDelivered && tries < 3) return void (heavyTries.set(first.id, tries), await log($, `work ${first.agent}'s heavy command's turn not told, tried again next look: ${r.reason}`))
+  await changeTodos($, cards => cards.map(one => (one.id === first.agent && r.isDelivered ? { ...one, heavyPass: now + HEAVY_PASS } : one)))
+  await leaveLine($, first.id)
+  heavyLetAt = now
   if (r.isDelivered && !isAtStep) await wakeCard($, first.agent)
-  await log($, `work ${first.agent}'s heavy command's turn came after ${shortAgo(now - first.at)}${isLate ? ', before the Mac had room' : ''}: ${r.isDelivered ? (isAtStep ? 'told' : 'started again') : `not reached (${r.reason})`}`)
+  const card = list.find(one => one.id === first.agent)
+  if (!r.isDelivered) await sayInChat($, HEAVY_LOST(card ? titleOf(card) : first.agent, cut(first.what, 120)))
+  await log($, `work ${first.agent}'s heavy command's turn came after ${shortAgo(now - first.at)}${isLate ? ', before the Mac had room' : ''}: ${r.isDelivered ? (isAtStep ? 'told' : 'started again') : `not reached (${r.reason}): the chat is told`}`)
   redraw($)
 }
 // The line as the cards keep it, taken up by a new copy of the mod (a reload), in the order it had; a card's own wait stands

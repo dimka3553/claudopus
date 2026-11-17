@@ -570,6 +570,8 @@ const workHooks = (on: On) => {
   on('turn.step', async function* ($, e, next) {
     const id = e.agentId
     if (id !== undefined) replyRead($, id)
+    // A helper started again ends again with a result of its own, passed on even if its words are the same, or none
+    if (id !== undefined) passedOn.delete(id)
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
@@ -586,7 +588,7 @@ const workHooks = (on: On) => {
     // look were each pressed and refused at their report). That press is answered here with no model, so the work ends its step and
     // is started again when that is done
     const helpers = id !== undefined && card && !isOff && card.handedBackAt === undefined ? runningHelpers(await read($, todos), id).length : 0
-    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen || helpers) && (await isPressedForReport($, id))) {
+    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen || isTurnWaited(await read($, todos), id) || helpers) && (await isPressedForReport($, id))) {
       await log($, `work ${id} pressed by the engine for its report while ${card.detached?.length ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : 'it waits to be woken'}: let it end its step`)
       yield { kind: 'text', index: 0, text: LEFT_AT_WORK }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }

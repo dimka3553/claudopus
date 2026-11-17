@@ -509,7 +509,7 @@ const chatHooks = (on: On) => {
       if (!isHeld) await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
       await changeTodos($, list => {
         // (or for what it asked Claudopus to start it again for)
-        const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)))
+        const isWaiting = how === 'done' && !isHandedBack && (isHeld || isTurnWaited(list, id) || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)))
         // What it waits on of its own, since when: the card says so, and a long wait for it is not taken for being stuck
         // Work that gave its report waits on nothing it means to finish
         const waitsSince = (one: Todo) => (isHeld && !isReport && one.bg?.some(b => !b.isWatch) ? (one.waitsSince ?? now) : undefined)

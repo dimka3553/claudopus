@@ -925,6 +925,46 @@ test("a helper's command in the background is work only while it prints, for at 
   expect(waits[0]).not.toContain('do not message it')
 })
 
+test('the word that the chat was told a task is stuck lasts only until it or its helpers move again: a task held off the stuck flag by a command of its own, told of at the end of the schedule, moves, and the word that it waits says again not to message it', SLOW, async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = { a1: 'general-purpose', a2: 'general-purpose' }
+  const { keep, clock, held, appended } = world(on, { agents, kinds, parents: { a2: 'a1' } })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Upload the lids', prompt: 'upload' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Render the lids', prompt: 'render', parentAgentId: 'a1' } as never)
+  Object.assign(agents, { a1: 'running', a2: 'running' })
+  for (const id of ['a1', 'a2']) await $.tool.call({ tool: 'Bash', tool_use_id: `s-${id}`, agentId: id, command: 'git status' } as never)
+  // Its own upload runs in the background, so it is never flagged stuck; its helper sits silent
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u-a1', agentId: 'a1', command: 'hold upload', description: 'Upload the lids', run_in_background: true } as never)
+  // (the engine holds it for its upload as its step ends, and lists it as completed after)
+  const ends = async (turnId: string) => {
+    agents.a1 = 'running'
+    await $.turn.complete({ answer: 'Waiting for my helper.', durationMs: 1, isAborted: false, turnId, reason: 'answer', agentId: 'a1' } as never)
+    agents.a1 = 'completed'
+  }
+  await ends('e1')
+  for (let at = 0; at < 38; at += 1) await clock.advance(60_000)
+  expect(appended.filter(line => line.includes('"Upload the lids" is stuck'))).toHaveLength(1)
+  expect(appended.filter(line => line.includes('"Upload the lids" hasn\'t made progress') && line.includes('nothing new has come back to Claude'))).toEqual([])
+  const waitsWord = async () => {
+    const notice = `<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n<summary>Agent "Upload the lids" finished</summary>\n<result>The subagent ended without delivering a report through SubagentHandback.\n</result>\n</task-notification>\n<task-notification>\n<task-id>bx1</task-id>\n<status>completed</status>\n<summary>Background command "Build" completed (exit code 0)</summary>\n</task-notification>`
+    const r = (await $.prompt.submit({ text: notice, wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[] }
+    return (r.context ?? []).filter(text => text.includes('"Upload the lids" ended its step without its report'))
+  }
+  expect((await waitsWord())[0]).toContain('Claudopus told you it is stuck, so you may message it (SendMessage to a1)')
+  // It moves by itself: something new comes back to it, and it ends its step again
+  agents.a1 = 'running'
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'l-a1', agentId: 'a1', command: 'hold look' } as never))
+  const letLook = await until(async () => held.get('look'))
+  letLook?.('the upload is at 80 percent')
+  await ends('e2')
+  await clock.advance(60_000)
+  const after = await waitsWord()
+  expect(after).toHaveLength(1)
+  expect(after[0]).toContain('do not message it for one')
+  expect(after[0]).not.toContain('Claudopus told you it is stuck')
+})
+
 test('a step that runs for minutes says so on its row, with its time, and the flag names what keeps waiting', SLOW, async ($, on) => {
   const { keep, settle, clock, held } = world(on)
   await $.session.start(start)
