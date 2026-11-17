@@ -426,38 +426,40 @@ const heldReplyButtons = ($: EngineInterface, ui: Ui, id: string, where: string)
       <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send it as a response" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)} />
     </ui.Box>
   ) : null
-// The row in the bar above the prompt for the key box opened there: what goes where, the field, Send, the big one, and Close, small
-const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
+// The box in the bar above the prompt for the key box opened there: what goes where on a line of its own, the field under it as wide
+// as the bar, and Send, the big one, and Close, small, under that, as the reply box is (band.tsx, barReply). A key is one line; a
+// response grows with its text as the chat's own box does. No submitLabel: the app draws one as a second, small send button, and
+// with one a box of several lines sends only on Cmd+Enter
+const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode, columns: number) => {
   const name = boxNameOf(one)
   const head = mode === 'reply' ? `↳ Instead of ${name ?? (isNameBox(one) ? 'the name' : 'the key')}` : name ? `↳ ${name}` : `↳ The key's name`
+  const key = barKeyBoxKey(one.id, mode)
+  const rows = barKeyRows(one.id, mode, columns)
   return (
-    <ui.Box key="band-key" flexDirection="column" flexShrink={0}>
-      <ui.Box flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
-        <ui.Box flexShrink={1} minWidth={0}>
-          <ui.Text color={NEEDS} bold wrap="truncate-end">{head}</ui.Text>
-        </ui.Box>
-        {'Input' in ui ? (
-          <ui.Box flexShrink={0}>
-            <ui.Input
-              key={barKeyBoxKey(one.id, mode)}
-              placeholder={mode === 'reply' ? 'Type your response' : isNameBox(one) ? 'Type the name' : 'Paste the key'}
-              submitLabel="send"
-              autoFocus
-              onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
-              onSubmit={value => submitBox($, one.id, mode, value)}
-            />
-          </ui.Box>
-        ) : null}
-        <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-          <ui.Button key={`band-key-send-${boxPresses}`} label="Send" variant="primary" onPress={() => void (barKeyTyped.get(one.id) && submitBox($, one.id, mode, barKeyTyped.get(one.id) ?? ''))} />
-          <ui.Button key={`band-key-close-${boxPresses}`} label="Close" plain dimColor onPress={press => openBox($, undefined, mode, press.surface)} />
-        </ui.Box>
+    <ui.Box key="band-key" flexDirection="column" flexShrink={0} width="100%">
+      <ui.Box flexDirection="row" height={1} overflow="hidden">
+        <ui.Text color={NEEDS} bold wrap="truncate-end">{head}</ui.Text>
       </ui.Box>
+      {'Input' in ui ? (
+        <ui.Box flexDirection="column" width="100%" flexShrink={0}>
+          <ui.Input
+            key={key}
+            placeholder={mode === 'reply' ? 'Type your response' : isNameBox(one) ? 'Type the name' : 'Paste the key'}
+            rows={rows}
+            autoFocus
+            onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)), mode === 'reply' ? growBox($, key, rows ?? 1, boxLines(value, columns)) : undefined)}
+            onSubmit={value => submitBox($, one.id, mode, value)}
+          />
+        </ui.Box>
+      ) : null}
       {boxSaid.get(one.id) ? <ui.Text key="band-key-said" color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
       {heldReplyButtons($, ui, one.id, 'band-key')}
+      {barFoot($, ui, 'band-key', boxPresses, () => void (barKeyTyped.get(one.id) && submitBox($, one.id, mode, barKeyTyped.get(one.id) ?? '')), press => openBox($, undefined, mode, press.surface), mode === 'reply')}
     </ui.Box>
   )
 }
+// How many lines the bar's key box is drawn: a key or a name one, a response as many as its text needs
+const barKeyRows = (id: string, mode: BoxMode, columns: number) => (mode === 'reply' ? boxLines(barKeyTyped.get(id) ?? '', columns) : undefined)
 // The key box open in the bar on a surface that takes one, none once it is answered, cancelled or gone
 const barKeyTarget = () => (boxOpen ? boxes.find(one => one.id === boxOpen?.id && !one.key) : undefined)
 

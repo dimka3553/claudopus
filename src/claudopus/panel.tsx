@@ -342,6 +342,11 @@ const panelHooks = (on: On) => {
     const askBlock = (one: Todo, key: string, isWhole = false) => {
       const ask = one.ask
       if (!ask) return null
+      // The card's own box: the columns it wraps at, how many lines tall it is drawn for what is typed in it, and its send
+      const columns = e.props.bodyColumns - 9
+      const rows = boxLines(drafts.get(draftOf(one.id, ask)) ?? '', columns)
+      const sendCard = (value: string) =>
+        void (value.trim() && (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`))))
       const answers = ask.choices?.length ? ask.choices : DEFAULT_ANSWERS
       const lost = sentLine(one, at)
       // Answered in the person's own words and acted on: its question, with their reply under it, and nothing to press or type
@@ -404,16 +409,28 @@ const panelHooks = (on: On) => {
               <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Type it in the box above the chat</Text>
             ) : null
           ) : 'Input' in table && !one.chat ? (
+            // The card's own box, where the bar takes none (the terminal, a folded bar, a survey): as wide as the card and as tall as
+            // its text, as the chat's own box is (boxLines); on the desktop with Send under it and no submitLabel, which the app draws
+            // as a small send button and with which a box of several lines sends only on Cmd+Enter
             <Box width="100%" flexDirection="column">
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
                 autoFocus={e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
                 placeholder="Or reply in your own words"
                 value={draftShown(one.id, ask)}
-                submitLabel="send"
-                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($))}
-                onSubmit={value => void (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
+                rows={rows}
+                submitLabel={e.surface === 'terminal' ? 'send' : undefined}
+                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($), growBox($, `${key}-reply`, rows, boxLines(value, columns)))}
+                onSubmit={value => sendCard(value)}
               />
+              {e.surface === 'terminal' ? null : (
+                <Box flexDirection="row" alignItems="center" gap={2}>
+                  <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                    <Text dimColor wrap="truncate-end">{BOX_KEYS}</Text>
+                  </Box>
+                  <Button key={`${key}-send-${presses}`} label="Send" variant="primary" onPress={() => sendCard(drafts.get(draftOf(one.id, ask)) ?? '')} />
+                </Box>
+              )}
             </Box>
           ) : null}
           {/* An answer that could not be left for another Mac says so, under the ask that is back */}

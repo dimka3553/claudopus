@@ -1077,6 +1077,11 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
   await ask(said)
   await press(list, 'Give a response instead')
   const words = await until(async () => (await fieldsIn(bar, said))[0])
+  // A key is one line; a response a box of lines that grows as it is typed, as the reply box does, and neither has the small send
+  // button the app draws for a submitLabel
+  expect(pasted?.props.rows).toBeUndefined()
+  expect(words?.props.rows).toBe(2)
+  expect([pasted, words].some(one => 'submitLabel' in (one?.props ?? {}))).toBe(false)
   const kept = keychain.length
   // Sent with the row's Send, the big button first, Close the small one after it
   expect((await bar.findAll({ type: 'Button' })).filter(b => ['Send', 'Close'].includes(String(b.props.label))).map(b => [b.props.label, b.props.variant ?? null, b.props.plain ?? null])).toEqual([['Send', 'primary', null], ['Close', null, true]])
@@ -1667,6 +1672,30 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   // and Send is the only send: a submitLabel on the box is drawn by the desktop app as a second, small send button beside it
   // (17 Nov, the person: "there are two send buttons. Can you remove the small send button and just keep the big one?")
   expect('submitLabel' in ((await boxesIn(bar))[0]?.props ?? {})).toBe(false)
+  // As tall as what is typed in it, as the chat's own box is: two lines while empty (17 Nov, the person: "the text box is usually
+  // very small")
+  expect((await boxesIn(bar))[0]?.props.rows).toBe(2)
+  // and steady from the moment it opens: the work writing its card meanwhile draws no new box. Each new box is the app's to give
+  // the cursor again, its ring fading in again, and the bar was drawn anew each time any work wrote its card (17 Nov: "it's also
+  // blinking"). The same element keeps the number the engine gave it
+  const boxNumber = async () => {
+    let found: number | undefined
+    const walk = (node: unknown) => {
+      if (Array.isArray(node)) return void node.forEach(walk)
+      if (!node || typeof node !== 'object') return
+      const one = node as { type?: string; props?: { key?: string }; press?: { handle?: number }; children?: unknown }
+      if (one.type === 'Input' && /-reply-/.test(one.props?.key ?? '')) found = one.press?.handle
+      walk(one.children)
+    }
+    walk(await bar.drawn())
+    return found
+  }
+  const numbered = await boxNumber()
+  expect(numbered).toBeDefined()
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'Looking at the left ear now' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 'n2', agentId: 'a1', item: 'Look at the left ear', state: 'doing' } as never)
+  await clock.advance(1500)
+  expect(await boxNumber()).toBe(numbered)
   expect((await boxesIn(list)).length + (await boxesIn(details)).length).toBe(0)
   expect(await says(list, /^✎ Type it in the box above the chat$/)).toBe(true)
   expect((await labelled(list, CLOSE)).length).toBe(1)
@@ -1678,6 +1707,14 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   expect(await until(async () => bar.find({ type: 'Text', text: MARK }))).toBeDefined()
   await scrolled(0)
   expect(await until(async () => ((await bar.find({ type: 'Text', text: MARK })) ? undefined : true))).toBe(true)
+  // It grows a line for each line typed, Shift+Enter's or wrapped, up to eight, and keeps the same box, the text typed in it its own
+  const [growing] = await boxesIn(bar)
+  await bar.input({ key: growing?.key ?? '', text: 'The left.\nThen the right.\nThen both, side by side.', kind: 'change' } as never)
+  expect(await until(async () => ((await boxesIn(bar))[0]?.props.rows === 3 ? true : undefined))).toBe(true)
+  expect((await boxesIn(bar))[0]?.key).toBe(growing?.key)
+  expect((await boxesIn(bar))[0]?.props.value ?? '').toBe('')
+  await bar.input({ key: growing?.key ?? '', text: `${'a long line that wraps '.repeat(30)}\n`.repeat(4), kind: 'change' } as never)
+  expect(await until(async () => ((await boxesIn(bar))[0]?.props.rows === 8 ? true : undefined))).toBe(true)
   // Half typed: the same box through the bar's own drawings, drawn with the text it was last drawn with, never with letters
   // older than the box holds
   const [first] = await boxesIn(bar)
@@ -1737,6 +1774,10 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   await clock.advance(2000)
   const folded = await $.ui.mount({ ...BAND, props: { ...BAND.props, isCollapsed: true }, surface: 'desktop' } as never)
   expect(await until(async () => ((await boxesIn(list))[0]?.props.value === 'Nov' ? true : undefined))).toBe(true)
+  // The card's own box is a box of lines too, with Send under it and no small send button beside it
+  expect((await boxesIn(list))[0]?.props.rows).toBe(2)
+  expect('submitLabel' in ((await boxesIn(list))[0]?.props ?? {})).toBe(false)
+  expect((await labelled(list, 'Send')).length).toBe(1)
   expect((await boxesIn(folded)).length + (await labelled(list, OPEN)).length + (await labelled(list, CLOSE)).length).toBe(0)
   // Unfolded: the box does not open by itself; the card offers it again
   await folded.unmount()
