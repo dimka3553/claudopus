@@ -1,0 +1,1 @@
+- The banner at the top of the README shows the octopus in 3D, built from cubes and holding task cards, as on claudopus.ai's home page.
