@@ -1849,7 +1849,7 @@ const panelHooks = (on: On) => {
                     </Box>
                     {/* The Mac has a newer copy than this chat runs: said beside the version, with what to type to switch to it */}
                     {versions.version ? (
-                      <Text key="head-version" dimColor wrap={versions.isWaiting ? 'wrap' : 'truncate-end'}>{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} ready, type /reload-plugins` : ''}`}</Text>
+                      <Text key="head-version" dimColor wrap={versions.isWaiting ? 'wrap' : 'truncate-end'}>{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} is ready: type /reload-plugins to use it` : ''}`}</Text>
                     ) : null}
                   </Box>
                 )}

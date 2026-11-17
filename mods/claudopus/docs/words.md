@@ -30,7 +30,7 @@ Every word Claudopus shows you (panel, cards, the bar, questions, notices, resul
 - **Time running** `29m 40s`, over an hour `1h 05m`. **Expected** `of about 5m`. **Past it** `5m over` (amber). **Ago** `2m ago`. **Left** `1m left`. **Dates** `11 Nov, 14:20`.
 - **Counts** `<n> of <total> <what>`: `2 of 6 stills`, `2 of 5 to-dos`.
 - **Buttons** are a verb of one to three words, the same word for the same act: Stop, Details, Result, Release it, Not now, Send, Open chat, Answer in words, Allow once, Deny.
-- **Headings** are a noun: To-dos, Helpers and commands, Ended, Result.
+- **Headings** are a noun: To-dos, Helpers and commands, Commands ended, Finished, Result.
 
 ## Every running thing has a progress line
 A running command or helper is two lines:

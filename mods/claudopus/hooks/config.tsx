@@ -346,7 +346,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
         <Box flexDirection="column" gap={1}>
           {item(
             'config-admin-mode',
-            'Permission',
+            'Admin commands',
             `Claude runs a command as administrator only after you allow it on the task's card. Each one still asks for the admin password, which Claudopus never saves.${shown.gate.unsealed ? ` Your settings file says "${shown.gate.unsealed}", but you didn't choose it here, so every command asks.` : ''}`,
             <Select key="config-admin-mode-pick" options={ADMIN_MODES.map(one => ({ value: one.value, label: one.label }))} value={shown.gate.mode} onSelect={value => acts.gateMode(value as AdminMode)} />,
             shown.gate.mode !== 'each' || Boolean(shown.gate.unsealed),

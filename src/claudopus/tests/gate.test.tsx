@@ -210,7 +210,7 @@ test('asked once per piece of work: one Allow covers that work and its helpers u
   await pressed(list, 'config-open')
   expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBeDefined()
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
-  expect(await config.find({ type: 'Text', text: 'Permission' })).toBeDefined()
+  expect(await config.find({ type: 'Text', text: 'Admin commands' })).toBeDefined()
   await config.select({ key: 'config-admin-mode-pick', value: 'work' })
   const sealedAs = await until(async () => (JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}') as { admin?: string; adminSealed?: string }).adminSealed)
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', admin: 'work', adminSealed: fakeSeal(files.get('keychain:gate') ?? '', 'mode\nwork') })
