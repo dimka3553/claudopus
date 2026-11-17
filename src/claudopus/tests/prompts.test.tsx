@@ -363,10 +363,12 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
   await list.unmount()
 })
 
-test("a command Claude Code refuses a task is shown whole on its card with where it runs and a Run it button; nothing runs but on that press (not words, not a task's own ask, not waiting), and the press changes no permission; the press runs exactly that command once, as the person's, shows it running with what it last printed, and sends the task its output, an ended task started again only from a hook or the person's press, never a timer; a long one is stopped at its limit, and Stop stops it", async ($, on) => {
+test("a command Claude Code refuses a task is shown whole on its card with where it runs and a Run it button; nothing runs but on that press (not words, not a task's own ask, not waiting), and the press changes no permission; the press runs exactly that command once, as the person's, shows only one quiet line while it runs, never the command again nor a drawing of the whole panel at each look at it (17 Nov, the box that flashed), and sends the task its output, an ended task started again only from a hook or the person's press, never a timer; a long one is stopped at its limit, and Stop stops it", async ($, on) => {
   const agents: Record<string, string> = { a1: 'running' }
   const { files, clock, resumed, appended, pressRuns } = world(on, { agents })
   on('tool.check', (_, e, next) => (String((e as { tool_use_id?: unknown }).tool_use_id).startsWith('chk') ? ({ decision: 'ask' } as never) : next(e)))
+  const redraws = { count: 0 }
+  on('ui.invalidate', (_, e, next) => ((redraws.count += 1), next(e)))
   await $.session.start(start)
   await $.prompt.submit({ text: 'find the name servers', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Find the name servers', prompt: 'find the name servers' } as never)
@@ -380,7 +382,7 @@ test("a command Claude Code refuses a task is shown whole on its card with where
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const button = async (label: string) => until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === label))
   const pressed = async (label: string) => list.press({ key: (await button(label))?.key ?? '' })
-  const buttons = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => /without it|Run it|Stop it|Open in Terminal|Send it to Claude/.test(label))
+  const buttons = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => /without it|Run it|Stop it|Open in Terminal|^Send now$/.test(label))
   const stops = () => pressRuns.filter(argv => argv[1] === 'stop').length
   // Carry on without it runs nothing, and says nothing of words
   await refuse('b00', { command: 'dig +short NS example.net', description: 'Look up the name servers' })
@@ -420,21 +422,40 @@ test("a command Claude Code refuses a task is shown whole on its card with where
   // The task, still at work, is told it runs, where its output goes, and that its end comes as a message
   expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('Claudopus is running it for them now') && one.includes(`What it prints goes to ${out}`)))).toBeDefined()
   expect((await check('chk-2')).decision).toBe('ask')
-  // Running: the card shows it with what it last printed, and a Stop
+  // Running: one quiet line with how long it has run, and Stop it; the command is not shown again
   files.set(String(out), 'ns1.example.net.\n')
   await clock.advance(5000)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Last printed: ns1.example.net.' }))).toBeDefined()
+  const runTime = async () => (await list.findAll({ type: 'Text' })).find(t => /^ · \d+[hms]/.test(t.text))?.text
+  expect(await until(async () => list.find({ type: 'Text', text: 'Running your command' }))).toBeDefined()
+  expect(await runTime()).toBeDefined()
+  // and nothing else about it: not the command, nor the answer said again on the card's line
+  expect(await list.find({ type: 'Text', text: command })).toBeUndefined()
+  expect((await list.findAll({ type: 'Text' })).filter(t => /Run it”|Claudopus is running it/.test(t.text)).map(t => t.text)).toEqual([])
   expect(await buttons()).toEqual(['Stop it'])
+  // While it prints, each look at it every 5 s draws nothing: the whole panel is drawn again only as calmly as for any running
+  // work, every ten seconds at most
+  redraws.count = 0
+  for (let i = 0; i < 12; i++) (files.set(String(out), `ns1.example.net.\nline ${i}\n`), await clock.advance(5000))
+  expect(redraws.count).toBeLessThanOrEqual(8)
   // The task ends meanwhile. The command's end starts it again with what it printed and where the whole is, from no timer: its card
   // says the output waits, and the person's press sends it
   agents.a1 = 'completed'
   await $.turn.complete({ answer: 'Waiting on the name servers.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  // Its running time still moves, calmly, with the task ended
+  await clock.advance(15_000)
+  const ranThen = await runTime()
+  expect(ranThen).toBeDefined()
+  await clock.advance(15_000)
+  expect(await until(async () => ((await runTime()) !== ranThen ? true : undefined))).toBe(true)
   files.set(String(out), 'ns1.example.net.\nns2.example.net.\nclaudopus-exit 0\n')
   await clock.advance(5000)
   await clock.advance(30_000)
-  expect(await until(async () => ((await buttons()).includes('Send it to Claude now') ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await buttons()).includes('Send now') ? true : undefined))).toBe(true)
+  // with that one quiet line alone: the answer is not said again on the card
+  expect(await list.find({ type: 'Text', text: 'Its output waits for Claude' })).toBeDefined()
+  expect((await list.findAll({ type: 'Text' })).filter(t => /Run it”/.test(t.text)).map(t => t.text)).toEqual([])
   expect(resumed.filter(one => one.startsWith('a1: '))).toEqual([])
-  await pressed('Send it to Claude now')
+  await pressed('Send now')
   const woke = await until(async () => resumed.find(one => one.startsWith('a1: ') && one.includes('ns2.example.net.')))
   expect(woke).toContain(`ran it for them, exactly as shown, once, in /repo:\n${command}\nIt ended well after`)
   expect(woke).toContain(`Its whole output is in ${out}`)

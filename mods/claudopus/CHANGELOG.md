@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.189 · 18 November 2026
+- After you press Run it, the task's card shows one quiet line, "Running your command" with how long it has run and Stop it, instead of the whole command in a box.
+- The card no longer flashes while that command runs.
+
 ## 0.2.188 · 17 November 2026
 - A task that stops partway, with no result, no question for you and nothing of its own that would start it again, is no longer shown as finished: Claudopus starts it again a moment later with a note to carry on, and its card says so. If it keeps stopping that way with little done in between, Claudopus stops after three tries and its card says so in one line.
 - When a command a task left running ends while the task waits on its helpers, Claudopus now starts the task again. Before, the word that the command had ended was lost and the task sat still.

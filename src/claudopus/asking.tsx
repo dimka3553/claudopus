@@ -340,7 +340,7 @@ const readDrafts = async ($: EngineInterface) => {
 // The last answer given to each work's ask, shown on its card for a while after: sent to the work (which reads a message only at
 // its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
 // A button's answer keeps the ask it answered and the work it went to (asked, target), so it can be taken back (takeBack)
-type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'other' | 'ran' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
+type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'other' | 'ran' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; isRun?: boolean; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
 // The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
 const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
 // How long the card says what was answered, unless the work writes a newer line first
@@ -887,12 +887,14 @@ const sentLine = (one: Todo, now: number) => {
   const newer = lineOf(one) !== sent.line
   const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text))
   if ((one.ask && !isHeld) || (!isHeld && (newer || now - sent.at > ANSWER_SHOWN))) return ''
+  // Run it pressed, and the output of that command carried to its ended task: the card's one quiet line says it (runBlock), nothing more
+  if (sent.to === 'ran' || sent.isRun) return ''
   const how = {
     sending: 'Sending to Claude…',
     work: waitsBehind(one, sent.at, now) || 'Claude reads it next',
     read: 'Claude has read it',
     chat: 'sent to the chat, which carries on the task',
-    ran: 'Claudopus is running it; Claude gets what it prints',
+    ran: '',
     other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", which passes it on`,
   }[sent.to]
   if (isHeld) return `✓ You answered “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : ' · the question is still open'}`
