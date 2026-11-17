@@ -156,8 +156,8 @@ const lookInDue = async ($: EngineInterface) => {
 // ---- What a piece of work or a helper waits for that nothing of its own makes: Claudopus looks, and starts it again ----
 
 // How long Claudopus looks for what was asked when no time is given, and at most; and how often it looks
-const WAKE_LONGEST = 60
-const WAKE_MOST = 360
+const WAKE_LONGEST = 15
+const WAKE_MOST = 60
 const WAKE_LOOK = 15_000
 let wakesLookedAt = 0
 const wakeTries = new Map<string, number>()
@@ -166,7 +166,15 @@ const pageAnswers = async ($: EngineInterface, url: string) =>
   /^2\d\d$/.test(((await $.process.run(['curl', '-s', '-L', '-o', '/dev/null', '-m', '5', '-w', '%{http_code}', url], { timeoutMs: 8000 }).catch(() => undefined))?.stdout ?? '').trim())
 const WAKE_FOUND = (what: string) => `From Claudopus: what you asked to be started again for is there: ${what}. Carry on from it.`
 const WAKE_TIME = (what: string) => `From Claudopus: the time you asked for has come: ${what}. Carry on.`
-const WAKE_MISSED = (what: string, minutes: number) => `From Claudopus: ${what} was still not there after ${minutes} min of looking. Find out why before you look again.`
+const WAKE_MISSED = (what: string, minutes: number, isAgain: boolean) =>
+  isAgain
+    ? `From Claudopus: ${what} was still not there after ${minutes} min of looking, the second look in a row that ran out. Hand back your report now with what you have, saying what never came and why.`
+    : `From Claudopus: ${what} was still not there after ${minutes} min of looking. Find out why. Unless you can see it is about to come, hand back your report now with what you have, saying what never came; to look once more, call wake_me again.`
+// Looks in a row that ran out before wake_me is refused, and the work told to hand back what it has
+const WAKE_MISSES_MOST = 2
+// What the chat is told of work Claudopus could not start again for what it waited on, which would otherwise wait for good
+const WAKE_LOST_IN_CHAT = (title: string, what: string) => `Claudopus could not start "${title}" again for what it waited on: ${what}.`
+const WAKE_LOST_ASK = 'Send it a message to carry on, or to hand back what it has.'
 // Looked at as the list is followed: each file, line or page asked for, at most every WAKE_LOOK; the work is started again (or told,
 // while at a step of its own) the moment it is there, when its time comes, or when the longest look has run out
 const lookWakes = async ($: EngineInterface) => {
@@ -194,7 +202,8 @@ const lookWakes = async ($: EngineInterface) => {
           : await pageAnswers($, w.url ?? '')
     const isMissed = !found && now >= w.until
     if (!found && !isMissed) continue
-    const text = isMissed ? WAKE_MISSED(w.what, Math.round((w.until - w.at) / 60_000)) : isTimeOnly ? WAKE_TIME(w.what) : WAKE_FOUND(w.what)
+    const misses = isMissed ? (one.wakeMisses ?? 0) + 1 : 0
+    const text = isMissed ? WAKE_MISSED(w.what, Math.round((w.until - w.at) / 60_000), misses >= WAKE_MISSES_MOST) : isTimeOnly ? WAKE_TIME(w.what) : WAKE_FOUND(w.what)
     // At a step of its own it reads the line at its next step; with its step ended it is started again by the message
     const isAtStep = (await $.agent.list().catch(() => [])).find(agent => agent.id === one.id)?.status === 'running'
     const r = isAtStep
@@ -207,15 +216,22 @@ const lookWakes = async ($: EngineInterface) => {
     if (!r.isDelivered && tries < 3) (wakeTries.set(one.id, tries), await log($, `work ${one.id} not started again for ${w.what}, tried again next look: ${r.reason}`))
     if (!r.isDelivered && tries < 3) continue
     wakeTries.delete(one.id)
-    await changeTodos($, list => list.map(card => (card.id === one.id && card.wakeWhen?.at === w.at ? { ...card, wakeWhen: undefined } : card)))
+    await changeTodos($, list => list.map(card => (card.id === one.id && card.wakeWhen?.at === w.at ? { ...card, wakeWhen: undefined, wakeMisses: misses || undefined } : card)))
     isChanged = true
     if (r.isDelivered && !isAtStep) await wakeCard($, one.id)
+    // Not reached at all, it would wait for good: the chat is told, and may send it a message
+    if (!r.isDelivered) await sayInChat($, `${WAKE_LOST_IN_CHAT(titleOf(one), w.what)} ${WAKE_LOST_ASK}`, WAKE_LOST_IN_CHAT(titleOf(one), w.what))
     await log($, `work ${one.id} ${r.isDelivered ? 'started again' : 'not started again'}: ${isMissed ? 'not there' : 'there'}: ${w.what}`)
   }
   if (isChanged) redraw($)
 }
 // What a card that asked to be started again says under its line, in place of a command that would wait
-const wakeLine = (one: Todo) => (one.wakeWhen ? `Claudopus starts Claude again when this is there: ${one.wakeWhen.what}` : '')
+// and by when at the latest, when Claude is started again all the same
+const wakeLine = (one: Todo) => {
+  const w = one.wakeWhen
+  if (!w) return ''
+  return w.file || w.url ? `Claudopus starts Claude again when this is there: ${w.what}; at ${hhmm(w.until)} if it never comes` : `Claudopus starts Claude again at ${hhmm(w.until)}: ${w.what}`
+}
 
 // What a card with helpers running says under its line: only how many have gone quiet, as those at work are rows on its tree
 const lookedInLine = (one: Todo, at: number) => {
@@ -314,11 +330,17 @@ const isHelperSpawn = (e: { parentAgentId?: string; workflow?: unknown; resume?:
 // only ends its step is let go, as Claudopus passes each result on and starts it again (passOnHelper)
 const holdAtHandback = async ($: EngineInterface, agent: string): Promise<string> => {
   if (!dir || isOff || flowAgents.has(agent)) return ''
-  const running = runningHelpers(await read($, todos), agent).length
+  const list = await read($, todos)
+  const running = runningHelpers(list, agent).length
   if (!running) return ''
+  // Work told to hand back what it has, as its helpers brought nothing new however long it waited, may: they are stopped as it does
+  if (isLetGo(list, agent)) return (await log($, `work ${agent} hands back while ${running} helpers run, as they brought nothing new`), '')
   await log($, `work ${agent} held at its report: ${running} helpers run`)
   return HELD_AT_END(running)
 }
+
+// Work Claudopus told, for a second time, that its helpers bring nothing new: it may hand back its report while they run
+const isLetGo = (list: Todo[], id: string) => (list.find(one => one.id === id)?.nudged?.count ?? 0) >= 2
 
 // Work that is stopped takes the helpers it has running with it: they run in the background, and would go on spending, their
 // results reaching the chat

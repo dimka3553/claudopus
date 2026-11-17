@@ -68,6 +68,9 @@ const toolHooks = (on: On) => {
     if (file && !file.startsWith('/') && !file.startsWith('~/')) return { result: 'Name the file by its full path.' }
     const minutes = Math.min(WAKE_MOST, Math.max(0.25, Number(input.minutes) > 0 ? Number(input.minutes) : file || url ? WAKE_LONGEST : 0))
     if (!file && !url && !(Number(input.minutes) > 0)) return { result: 'Name a file, a page, or the minutes after which to start you again.' }
+    // Two looks in a row that ran out: what it waits on is not coming, and it hands back what it has
+    if (((await read($, todos)).find(one => one.id === e.agentId)?.wakeMisses ?? 0) >= WAKE_MISSES_MOST)
+      return { result: 'Refused by Claudopus: the last two looks ran out with what you waited on never there. Hand back your report now with what you have, saying what never came and why.' }
     const at = await $.clock.now()
     // (its own card: a helper's is its own, not its work's)
     const agent = e.agentId
