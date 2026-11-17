@@ -6514,7 +6514,7 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   await (card ? askAloud($, card, text) : aloud($, 'ask', 'This chat has a question for you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
   const act = gateAct(gate)
   $.ui.log(
-    `${card ? `"${titleOf(card)}"` : 'This chat'} wants to ${act.charAt(0).toLowerCase()}${act.slice(1)}: ${cut(oneLine(gate.command), 120)}. Allow it ${card ? 'on its card' : 'at the top of the Claudopus panel'}; typing here doesn't.`,
+    `${card ? `"${titleOf(card)}"` : 'This chat'} wants to ${act.charAt(0).toLowerCase()}${act.slice(1)}: ${cut(oneLine(gate.command), 120)}. Allow it ${card ? 'on its card in' : 'at the top of'} the Claudopus panel (/claudopus opens it). Typing here doesn't allow it.`,
   )
   let said: GateSaid | 'gone' | 'late' | undefined
   try {
@@ -10913,7 +10913,8 @@ const workHooks = (on: On) => {
       handingBack.add(e.agentId)
       await wakeForHandback($, e.agentId).catch(err => log($, `task not started for its helper's hand-back: ${String(err)}`))
       const r = await next(e)
-      if ((r.deny || r.isError) && wokenFor.delete(e.agentId)) await handbackRefused($, e.agentId).catch(err => log($, `task not told its helper's hand-back was refused: ${String(err)}`))
+      const isNotSent = Boolean(r.deny || r.isError) || (r.result as { success?: unknown } | undefined)?.success === false
+      if (isNotSent && wokenFor.delete(e.agentId)) await handbackRefused($, e.agentId).catch(err => log($, `task not told its helper's hand-back was refused: ${String(err)}`))
       if (r.deny || r.isError) handingBack.delete(e.agentId)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       if (!r.deny && !r.isError) await noteHandback($, e.agentId).catch(err => log($, `chat not told of a helper's hand-back: ${String(err)}`))
@@ -11750,8 +11751,8 @@ const bandHooks = (on: On) => {
               <Text key="band-ask-replied" dimColor wrap="truncate-end">{`    ${sentLine(first, await $.clock.now()) || `✓ You replied “${cut(ask.replied?.text ?? '', 60)}”`}`}</Text>
             ) : (
               <Box flexDirection="column">
-                {/* The chat's notice with what it is about went only to the chat that started the work */}
-                {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{cards.includes(first) ? '    The details are in the chat above and on its card' : '    The details are on its card'}</Text> : null}
+                {/* The chat's notice is the question alone: what it is about is on its card */}
+                {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{'    The details are on its card'}</Text> : null}
                 {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
                 <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
                   {answers.map((choice, n) => (

@@ -69,7 +69,7 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   const talk: unknown[] = []
   const unresumable = new Set<string>()
   const ended = new Set<string>()
-  const { stopped, resumed, appended, submitted, clock, stepped, atHandback, files } = world(on, { agents, talk, unresumable, ended })
+  const { stopped, resumed, appended, submitted, clock, stepped, atHandback, resumedAtHandback, files } = world(on, { agents, talk, unresumable, ended })
   on('classic.SubagentStop', () => ({}) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -166,7 +166,8 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   const passed = (helper: string) => (one: string) => new RegExp(`^undefined: From Claudopus: the result of the helper "${helper}" reached this chat because the task ".*" had ended its step`).test(one)
   const beforeNose = resumed.length
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a3', message: 'The nose is drawn at every size.' } as never)
-  expect(resumed.slice(beforeNose, atHandback.at(-1) === undefined ? undefined : resumed.length).filter(coming('Draw the nose'))).toHaveLength(1)
+  // (before the hand-back reaches Claude Code, which hands the report to the task only while it is at work)
+  expect(resumed.slice(beforeNose, resumedAtHandback.at(-1)).filter(coming('Draw the nose'))).toHaveLength(1)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h3', reason: 'answer', agentId: 'a3' } as never)
   await clock.advance(2_000)
   expect(resumed.filter(one => one.startsWith('a1: From Claudopus: your helper "Draw the nose" has finished'))).toEqual([])
@@ -227,10 +228,15 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   // and the task started for it is told nothing comes
   expect(resumed.filter(coming('Draw the lip'))).toHaveLength(1)
   expect(resumed.at(-1)).toMatch(/^a1: From Claudopus: the report of your helper "Draw the lip" did not come after all: Claude Code refused it\./)
+  // and so is it when Claude Code refuses it with a plain result, and the result is passed on as the helper's turn ends
+  files.set('handback-not-sent', '1')
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb6n', agentId: 'a6', message: 'The lip is drawn.' } as never)
+  files.delete('handback-not-sent')
+  expect(resumed.filter(one => one.includes('the report of your helper "Draw the lip" did not come after all'))).toHaveLength(2)
   // Should the chat get a hand-back all the same, its task started for it, Claudopus passes it on: here the task cannot be written
   // to, so the chat is told to send it on, with the task's id
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb6b', agentId: 'a6', message: 'The lip is drawn.' } as never)
-  expect(resumed.filter(coming('Draw the lip'))).toHaveLength(2)
+  expect(resumed.filter(coming('Draw the lip'))).toHaveLength(3)
   const lip = handbackOf('a6', 'The lip is drawn.')
   expect([(await asPeer(lip)).drop, await answeredQuietly(lip)]).toEqual([undefined, true])
   agents.a1 = 'running'

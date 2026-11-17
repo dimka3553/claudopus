@@ -86,6 +86,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const pressRuns: string[][] = []
   // How many lines the mod had written into chats as each SubagentHandback reached the engine
   const atHandback: number[] = []
+  const resumedAtHandback: number[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
   // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
@@ -525,7 +526,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // Claude Code's auto mode refuses this tool outright, as it does a background task's call, with no prompt to the person
     if (files.get('auto-refuse') === e.tool) return { result: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access]. If you have other tasks that don't depend on this action, continue working on those.", isError: true } as never
     // What the chat had been told when a hand-back reached the engine, which hands it on at once
-    if (String(e.tool) === 'SubagentHandback') atHandback.push(appended.length)
+    if (String(e.tool) === 'SubagentHandback') (atHandback.push(appended.length), resumedAtHandback.push(resumed.length))
+    // Claude Code refuses a hand-back with a plain result too, as for a second report
+    if (String(e.tool) === 'SubagentHandback' && files.get('handback-not-sent')) return { result: { success: false, message: 'Nothing was sent: an earlier report of yours was already delivered.' } } as never
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,
@@ -608,7 +611,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, pressRuns, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, pressRuns, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -779,7 +782,7 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   const talk: unknown[] = []
   const unresumable = new Set<string>()
   const ended = new Set<string>()
-  const { stopped, resumed, appended, submitted, clock, stepped, atHandback, files } = world(on, { agents, talk, unresumable, ended })
+  const { stopped, resumed, appended, submitted, clock, stepped, atHandback, resumedAtHandback, files } = world(on, { agents, talk, unresumable, ended })
   on('classic.SubagentStop', () => ({}) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -876,7 +879,8 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   const passed = (helper: string) => (one: string) => new RegExp(`^undefined: From Claudopus: the result of the helper "${helper}" reached this chat because the task ".*" had ended its step`).test(one)
   const beforeNose = resumed.length
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a3', message: 'The nose is drawn at every size.' } as never)
-  expect(resumed.slice(beforeNose, atHandback.at(-1) === undefined ? undefined : resumed.length).filter(coming('Draw the nose'))).toHaveLength(1)
+  // (before the hand-back reaches Claude Code, which hands the report to the task only while it is at work)
+  expect(resumed.slice(beforeNose, resumedAtHandback.at(-1)).filter(coming('Draw the nose'))).toHaveLength(1)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h3', reason: 'answer', agentId: 'a3' } as never)
   await clock.advance(2_000)
   expect(resumed.filter(one => one.startsWith('a1: From Claudopus: your helper "Draw the nose" has finished'))).toEqual([])
@@ -937,10 +941,15 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   // and the task started for it is told nothing comes
   expect(resumed.filter(coming('Draw the lip'))).toHaveLength(1)
   expect(resumed.at(-1)).toMatch(/^a1: From Claudopus: the report of your helper "Draw the lip" did not come after all: Claude Code refused it\./)
+  // and so is it when Claude Code refuses it with a plain result, and the result is passed on as the helper's turn ends
+  files.set('handback-not-sent', '1')
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb6n', agentId: 'a6', message: 'The lip is drawn.' } as never)
+  files.delete('handback-not-sent')
+  expect(resumed.filter(one => one.includes('the report of your helper "Draw the lip" did not come after all'))).toHaveLength(2)
   // Should the chat get a hand-back all the same, its task started for it, Claudopus passes it on: here the task cannot be written
   // to, so the chat is told to send it on, with the task's id
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb6b', agentId: 'a6', message: 'The lip is drawn.' } as never)
-  expect(resumed.filter(coming('Draw the lip'))).toHaveLength(2)
+  expect(resumed.filter(coming('Draw the lip'))).toHaveLength(3)
   const lip = handbackOf('a6', 'The lip is drawn.')
   expect([(await asPeer(lip)).drop, await answeredQuietly(lip)]).toEqual([undefined, true])
   agents.a1 = 'running'

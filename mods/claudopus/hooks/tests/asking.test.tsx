@@ -86,6 +86,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const pressRuns: string[][] = []
   // How many lines the mod had written into chats as each SubagentHandback reached the engine
   const atHandback: number[] = []
+  const resumedAtHandback: number[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
   // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
@@ -525,7 +526,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // Claude Code's auto mode refuses this tool outright, as it does a background task's call, with no prompt to the person
     if (files.get('auto-refuse') === e.tool) return { result: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access]. If you have other tasks that don't depend on this action, continue working on those.", isError: true } as never
     // What the chat had been told when a hand-back reached the engine, which hands it on at once
-    if (String(e.tool) === 'SubagentHandback') atHandback.push(appended.length)
+    if (String(e.tool) === 'SubagentHandback') (atHandback.push(appended.length), resumedAtHandback.push(resumed.length))
+    // Claude Code refuses a hand-back with a plain result too, as for a second report
+    if (String(e.tool) === 'SubagentHandback' && files.get('handback-not-sent')) return { result: { success: false, message: 'Nothing was sent: an earlier report of yours was already delivered.' } } as never
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,
@@ -608,7 +611,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, pressRuns, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, pressRuns, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -1674,7 +1677,7 @@ test('an ask carries what it is about, whole, on the small card, in Details and 
   expect(await big.find({ type: 'Markdown', text: differences })).toBeDefined()
   // Above the prompt in the terminal, where its numbers answer it, it says there is more
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
-  expect(await band.find({ type: 'Text', text: /The details are in the chat above and on its card/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: '    The details are on its card' })).toBeDefined()
   await band.unmount()
   // The chat's notice is the question alone, as the card carries the rest; the row the chat's model reads carries it whole
   await clock.advance(10)

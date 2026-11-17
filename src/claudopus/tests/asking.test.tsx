@@ -964,7 +964,7 @@ test('an ask carries what it is about, whole, on the small card, in Details and 
   expect(await big.find({ type: 'Markdown', text: differences })).toBeDefined()
   // Above the prompt in the terminal, where its numbers answer it, it says there is more
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
-  expect(await band.find({ type: 'Text', text: /The details are in the chat above and on its card/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: '    The details are on its card' })).toBeDefined()
   await band.unmount()
   // The chat's notice is the question alone, as the card carries the rest; the row the chat's model reads carries it whole
   await clock.advance(10)
