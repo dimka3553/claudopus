@@ -28,6 +28,8 @@ export type Job = {
   isUntold?: boolean
   // The memory it and all it started hold, in words
   mem?: string
+  // the same in KB, where it is known
+  memKb?: number
   isNamed?: boolean
   expect?: number
   expectText?: string
@@ -786,8 +788,13 @@ export const isWaiterTree = (procs: Proc[], top: string) => waiterLeavesOf(procs
 
 // Jobs alike (the same kind, words and command, or the same wait) are one row that says how many they are, from the first one's
 // start; the newest one's output stands for them
+// Memory in KB added up, said as memOf says it
+const memAdded = (kb: number) => (kb ? { memKb: kb, mem: kb >= 1024 * 1024 ? `${(kb / 1024 / 1024).toFixed(1)} GB` : `${Math.max(1, Math.round(kb / 1024))} MB` } : {})
+// The command a run left going came from, by its id (`left-<process>-<command>`); '' for any other run
+export const leftCommandOf = (id: string) => id.match(/^left-\d+-(.+)$/)?.[1] ?? ''
 export const foldJobs = (jobs: Job[]): Job[] => {
-  const keyOf = (job: Job) => (job.kind === 'wait' ? `wait|${job.label}|${job.waitsFor ?? ''}|${job.waitFile ?? ''}` : `${job.kind}|${job.label}|${job.cmd}`)
+  // (what one command left going is one row, whatever programs it is: a browser and its helpers are one test, not 12 rows)
+  const keyOf = (job: Job) => (job.kind === 'wait' ? `wait|${job.label}|${job.waitsFor ?? ''}|${job.waitFile ?? ''}` : leftCommandOf(job.id) ? `left|${job.label}|${leftCommandOf(job.id)}` : `${job.kind}|${job.label}|${job.cmd}`)
   const groups = new Map<string, Job[]>()
   for (const job of jobs) groups.set(keyOf(job), [...(groups.get(keyOf(job)) ?? []), job])
   return [...groups.values()].map(group => {
@@ -798,6 +805,7 @@ export const foldJobs = (jobs: Job[]): Job[] => {
       ...newest,
       at: Math.min(...group.map(job => job.at)),
       count: group.length,
+      ...(leftCommandOf(newest.id) && group.some(job => job.memKb) ? memAdded(group.reduce((sum, job) => sum + (job.memKb ?? 0), 0)) : {}),
       isPaused: group.every(job => job.isPaused),
       ...(wrote.length ? { wroteAt: Math.max(...wrote) } : {}),
     }
@@ -889,7 +897,10 @@ export type OpenCall = { from: number; at: number }
 const PID_MOST = 99_999
 const inSpan = (pid: number, span: Pick<Span, 'from' | 'to'>) => (span.to >= span.from ? pid > span.from && pid < span.to : pid > span.from || (pid < span.to && pid <= PID_MOST))
 // The system's own programs, which launchd starts in sessions of their own whenever it likes, are never a command's
-const SYSTEM_PROG = /^(\/System\/|\/usr\/libexec\/|\/usr\/sbin\/|\/sbin\/|\/Library\/Apple\/|\/Applications\/|\/Library\/Application Support\/)/
+// (and an app's own updaters and helpers in a Library folder, the person's own as well: GoogleUpdater, 17 Nov)
+const SYSTEM_PROG = /^(\/System\/|\/usr\/libexec\/|\/usr\/sbin\/|\/sbin\/|\/Library\/Apple\/|\/Applications\/|(\/Users\/[^/]+|\/home\/[^/]+|~)?\/Library\/Application Support\/)/
+// An app's own helper, updater or crash reporter: inside its bundle's frameworks or helpers, or in a Library folder of its own
+const APP_HELPER = /\.app\/Contents\/(Frameworks|Helpers|Library)\/|\/Library\/Application Support\/|crashpad_handler/
 export type Left = { span: string; top: Proc; tree: Proc[] }
 // What each command left running: the topmost of each group whose shell has gone (or a session it started of its own), with all it
 // started under it; never one already followed (`known`), nor what runs under one
@@ -915,7 +926,14 @@ export const leftoversOf = (procs: Proc[], spans: Span[], known: Set<string> = n
   // The command a number was handed out under; where two ran at once, the one that names the process (its script or its
   // arguments), else the one whose first number is nearest below
   const spanOf = (pid: number, p: Proc, isOwnSession: boolean) => {
-    const fits = spans.filter(s => inSpan(pid, s) && isTimely(p, s))
+    // A command sent to the background that still runs goes on being handed numbers after the one it had as it went there: every
+    // number since its first is in its range, so what another task's running command starts is never given to a short command
+    // beside it by its number alone (17 Nov: another task's screenshot script, sent to the background, started headless Chrome
+    // while a git push ran, and the push's card took its crash reporters)
+    // (as long as it runs, however far the numbers have gone: process numbers go round in minutes on a busy Mac. So a short command's
+    // own leftover that it does not name, started while another task's background command runs, goes to neither: a card shows
+    // nothing rather than another task's programs)
+    const fits = spans.filter(s => (inSpan(pid, s) || (s.until === undefined && after(pid, s.from) > 0)) && isTimely(p, s))
     if (fits.length <= 1) return fits[0]
     // The process's own words, past its program: a command that holds them started it. A session of its own also goes by the
     // command's words it holds
@@ -934,7 +952,9 @@ export const leftoversOf = (procs: Proc[], spans: Span[], known: Set<string> = n
     const isOwnSession = p.pgid === p.pid
     // (nor one ps can only name in brackets, as it does a process that is ending or not this person's: on 16 Nov the system's
     // own indexer, "(mdworker_shared)", was taken for runs of four tasks)
-    if (/^\(/.test(p.command.trim()) || (isOwnSession ? SYSTEM_PROG.test(p.command) : pids.has(p.pgid))) continue
+    // (nor an app's own helper in a group whose leader has gone: an app's crash reporter forks away from the app that started it, as
+    // Chrome's did on 17 Nov; an app's own program a script drives, such as Blender, still counts)
+    if (/^\(/.test(p.command.trim()) || (isOwnSession ? SYSTEM_PROG.test(p.command) : pids.has(p.pgid) || (SYSTEM_PROG.test(p.command) && APP_HELPER.test(p.command)))) continue
     const n = Number(isOwnSession ? p.pid : p.pgid)
     if (isOpenOnes(n, p)) continue
     const span = spanOf(n, p, isOwnSession)
@@ -942,16 +962,16 @@ export const leftoversOf = (procs: Proc[], spans: Span[], known: Set<string> = n
   }
   return out
 }
+// Whether a command names a process: its program, or a word of its own past its program (a script, a file it works on)
+export const isNamedBy = (command: string, cmd: string) => {
+  const words = command.trim().split(/\s+/)
+  const program = (words[0] ?? '').split('/').filter(Boolean).at(-1) ?? ''
+  const own = words.slice(1).filter(word => word.length >= 6 && !word.startsWith('-') && /^[\w./:=,@%+-]+$/.test(word)).map(word => word.split('/').filter(Boolean).at(-1) ?? word)
+  return [program, ...own].some(word => word.length >= 2 && new RegExp(`(^|[\\s/'"=])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[\\s'";|&)<>])`).test(cmd))
+}
 // The memory a process and all it started hold, in words (`7.1 GB`); undefined where ps gave none
 export const memOf = (tree: Proc[]) => {
   const kb = tree.reduce((sum, p) => sum + (p.rss ?? 0), 0)
   if (!kb) return undefined
   return kb >= 1024 * 1024 ? `${(kb / 1024 / 1024).toFixed(1)} GB` : `${Math.max(1, Math.round(kb / 1024))} MB`
-}
-// A left run's name when one command left several: its program, its script and the words after it, as `Run python fig4.py page 3`
-export const leftName = (command: string) => {
-  const words = command.trim().split(/\s+/)
-  const at = words.findIndex(word => /\.(py|sh|js|mjs|ts|rb|pl|R|jl)$/.test(word))
-  const name = (at >= 0 ? [commandName(command), ...words.slice(at + 1, at + 7)] : [commandName(command)]).join(' ').trim()
-  return `Run ${name.replace(/^Python\b/, 'python')}`.slice(0, 120)
 }
