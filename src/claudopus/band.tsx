@@ -29,7 +29,7 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
         <ui.Box flexShrink={0}>
           <ui.Button
             key={`band-waits-${presses}`}
-            label="↑ Show"
+            label="Show"
             plain
             onPress={() => ((presses += 1), void (recordEvent($, 'scroll-call', { to: 'start' }), $.ui.scroll({ in: LIST, to: 'start', block: 'start' })).catch(() => undefined))}
           />
@@ -209,7 +209,7 @@ const bandHooks = (on: On) => {
     // A message may begin with a digit too, so one press only picks the answer and says so; the same digit again sends it
     if (e.surface === 'terminal') {
       // What waits on the person comes before an ask whose work is acting on their reply, which is drawn in the work's purple
-      const asking = [...cards.filter(one => !one.parentId && one.ask)].sort((a, b) => Number(needsPerson(b)) - Number(needsPerson(a)) || (a.ask?.at ?? 0) - (b.ask?.at ?? 0))
+      const asking = [...cards.filter(one => !one.parentId && one.ask)].sort((a, b) => Number(needsPerson(b)) - Number(needsPerson(a)) || (topPlaces.get(`//${a.id}`) ?? a.ask?.at ?? 0) - (topPlaces.get(`//${b.id}`) ?? b.ask?.at ?? 0))
       const [first] = asking
       const ask = first?.ask
       if (first && ask) {

@@ -922,7 +922,8 @@ test("Yes on a prompt's card allows the call as Claude Code's own box would, and
   const texts = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
   expect(texts.indexOf('Show scan numbers')).toBeGreaterThan(-1)
   expect(texts.indexOf('Show scan numbers')).toBeLessThan(texts.indexOf(String(said?.text)))
-  expect(texts).not.toContain('This chat itself')
+  // Only its own words under what came of it: no "This chat itself" naming it as the chat's
+  expect(texts[texts.indexOf(String(said?.text)) + 1]).toBe('Start a background task: Show scan numbers')
   await list.unmount()
 })
 

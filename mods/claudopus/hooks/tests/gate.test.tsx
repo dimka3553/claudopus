@@ -1154,7 +1154,7 @@ test('on the desktop the line above the prompt says how many wait and what the f
   await clock.advance(5000)
   // The first is the card whose gate came first: w5's
   const MARK = /^● 2 waiting for you · first: /
-  const show = async (band: { findAll: (q: { type: string }) => Promise<{ props: Record<string, unknown> }[]> }) => (await band.findAll({ type: 'Button' })).some(one => one.props.label === '↑ Show')
+  const show = async (band: { findAll: (q: { type: string }) => Promise<{ props: Record<string, unknown> }[]> }) => (await band.findAll({ type: 'Button' })).some(one => one.props.label === 'Show')
   for (const surface of ['desktop', 'terminal']) {
     const down = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 40, bodyRows: 20 } }, surface } as never)
     expect(await until(async () => down.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
@@ -1288,19 +1288,35 @@ const answeredStays = async ($: Parameters<TestBody>[0], on: On, how: 'press' | 
 }
 test('Done on an ask leaves the card at the top saying the answer for a minute, then in its own place', async ($, on) => answeredStays($, on, 'press'))
 test('an answer sent from an ask\'s box leaves the card at the top saying the answer for a minute, then in its own place', async ($, on) => answeredStays($, on, 'reply'))
-test('answering one of two asks at the top leaves both cards where they were, so nothing still waiting slides into the spot just pressed', async ($, on) => {
+test('answering one of two asks at the top leaves both cards where they were, the oldest first, for as long as the other still waits; once nothing waits they go back to their places', async ($, on) => {
   const { list, order, clock } = await askingFourth($, on)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Release piece two?', choices: ['Release it', 'Not now'] } as never)
   await clock.advance(5000)
-  expect(await until(async () => ((await order())[0] === 'Piece 2' ? true : undefined))).toBe(true)
-  expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
-  // The older ask, second at the top, is answered: it stays second, the newer ask above it, and it still says the answer under the line its work then writes
+  // The newer ask goes under the older one, never above it
+  expect(await until(async () => ((await order())[1] === 'Piece 2' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 4', 'Piece 2', 'Piece 1', 'Piece 3', 'Piece 5'])
+  // The older ask, first at the top, is answered: it stays first, and it still says the answer under the line its work then writes
   await pressed(list, ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Done')?.key ?? '')
   expect(await until(async () => list.find({ type: 'Text', text: /You answered “Done”/ } as never))).toBeDefined()
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n4', agentId: 'a4', text: 'Now doing the next part' } as never)
   await clock.advance(5000)
-  expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
+  expect(await order()).toEqual(['Piece 4', 'Piece 2', 'Piece 1', 'Piece 3', 'Piece 5'])
   expect(await list.find({ type: 'Text', text: /You answered “Done”/ } as never)).toBeDefined()
+  // Past its minute, with the other ask still waiting, it keeps its place: nothing moves by itself
+  await clock.advance(65_000)
+  expect(await order()).toEqual(['Piece 4', 'Piece 2', 'Piece 1', 'Piece 3', 'Piece 5'])
+  // It asks again: new, it goes under what already waits
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4b', agentId: 'a4', text: 'And the next part?', choices: ['Yes', 'No'] } as never)
+  await clock.advance(1000)
+  expect(await until(async () => ((await order())[0] === 'Piece 2' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
+  // Both are answered: a minute on, both go back to where they began
+  const labelled = async (label: string) => ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === label)?.key ?? ''
+  await pressed(list, await labelled('Not now'))
+  await pressed(list, await labelled('Yes'))
+  await clock.advance(65_000)
+  expect(await until(async () => ((await order())[0] === 'Piece 1' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5'])
 })
 
 // 15 Nov: Allow once was pressed and the amber box with its buttons stayed up to a second, until the gate's wait (a one-second

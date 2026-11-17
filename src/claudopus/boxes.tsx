@@ -26,6 +26,18 @@ const runnerEnded = (id: string, isBackground: boolean, at: number) => {
 }
 // The command that asked: the one of this chat's running runners begun last before the request
 const runnerOf = (at: number, now: number) => [...runnerCalls].map(([call, one]) => ({ ...one, call })).filter(one => one.until >= now && one.at <= at + BOX_SKEW).sort((a, b) => b.at - a.at)[0]
+// The runner that made a request, for the card its box goes on: of those that could have, the ones whose command names the same
+// runner (and, for a key, the same key); only when exactly one does is its task known, else the box is no card's (17 Nov, second
+// look: the latest runner was taken, and a box went on another task's card)
+const runnerFor = (one: Record<string, unknown>, at: number, now: number): { call: string; command: string; agent?: string } | undefined => {
+  const runner = runnerOf(at, now)
+  if (!runner) return undefined
+  const live = [...runnerCalls].map(([call, other]) => ({ ...other, call })).filter(other => other.until >= now && other.at <= at + BOX_SKEW)
+  const same = live.filter(other => (one.kind === 'admin' ? /\bbin\/admin\b/.test(other.command) : /\bbin\/secret\b/.test(other.command) && (typeof one.name !== 'string' || other.command.includes(one.name))))
+  const [only] = same
+  if (same.length === 1 && only) return only
+  return { call: runner.call, command: runner.command }
+}
 const BOX_SKEW = 60_000
 // What the runners take as a Mac (an ssh host or alias, perhaps with a user) and as a key's name
 const BOX_HOST = /^(?:here|[A-Za-z0-9_][A-Za-z0-9._:@-]{0,199})$/
@@ -163,7 +175,7 @@ const boxesDir = () => `${dir}/boxes`
 // Another chat's request is left to it this long, so its own chat tells it, when that chat is open
 const BOX_GRACE = 5000
 // In the chat only the name of what is asked, once per box, in the chat that asked or else whichever chat sees it first
-const BOX_TOLD = (text: string) => `${text} Answer it in the box at the top of the Claudopus panel, never in this chat's prompt (/claudopus opens the panel): what is typed there for it goes only into ${keptWhere()}${text.includes('admin password') ? '' : ", or give a response instead, such as where it already is"}.`
+const BOX_TOLD = (text: string) => `${text} Answer it in its box in the Claudopus panel, never in this chat's prompt (/claudopus opens the panel): what is typed there for it goes only into ${keptWhere()}${text.includes('admin password') ? '' : ", or give a response instead, such as where it already is"}.`
 // This chat's own id, as the runner reads it from CLAUDE_CODE_SESSION_ID, read at each look (a /clear can change it)
 let boxChat = ''
 // Requests this chat has told or seen told
@@ -190,7 +202,7 @@ const lookBoxes = async ($: EngineInterface) => {
       const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Record<string, unknown>
       const text = one && typeof one === 'object' ? boxWording(one) : undefined
       // Only this chat's own request, dated no later than now, while a runner of this chat's that could have made it runs
-      const runner = typeof one.at === 'number' ? runnerOf(one.at, now) : undefined
+      const runner = typeof one.at === 'number' ? runnerFor(one, one.at, now) : undefined
       const key = typeof one.key === 'string' ? one.key : undefined
       if (key && !boxKeys.has(id)) boxKeys.set(id, key)
       const isKeySame = !key || boxKeys.get(id) === key
@@ -467,7 +479,7 @@ const barKeyTarget = () => (boxOpen ? boxes.find(one => one.id === boxOpen?.id &
 
 // Each box with when it was asked and the box itself: the panel draws a box of a task's command on that task's card, and any other
 // among what waits on the person, in the order they came (only: the boxes wanted)
-const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '', only: (one: Asked) => boolean = () => true) => {
+const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '', only: (one: Asked) => boolean = () => true, isOnCard = false) => {
   if (!boxes.length || !('Input' in ui)) return []
   // This chat's own first request holds the keys, so a value typed for the notice it told goes to its own box, wherever it is drawn
   const shown = [...boxes.filter(one => one.chat === boxChat), ...boxes.filter(one => one.chat !== boxChat)]
@@ -484,7 +496,7 @@ const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '', o
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
       <ui.Text dimColor wrap="truncate-end">{isKey ? 'Key · waits for you' : 'Admin password · waits for you to type it'}</ui.Text>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
-      {one.command ? <ui.Text dimColor wrap="wrap">{`Asked by this chat's command: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
+      {one.command ? <ui.Text dimColor wrap="wrap">{`${isOnCard ? 'Asked by its command' : "Asked by this chat's command"}: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
       <ui.Text dimColor wrap="wrap">{
         !isKey ? 'What you type here shows as you type it. It goes only to the command that asked, locked to that command, never into a chat, and is not saved.'
         : inBar ? `Paste ${what} in the box above the chat: it goes only into ${keptWhere()}, never into a chat. Or give a response instead, such as where ${name ?? 'the key'} already is, and the command that asked gets your words.`
@@ -509,11 +521,11 @@ const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '', o
       <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
         {inBar && isOpen ? <ui.Button key={`box-${one.id}-close-${boxPresses}`} label="Close the box" onPress={press => openBox($, undefined, 'key', press.surface)} /> : null}
         {inBar && !isOpen ? <ui.Button key={`box-${one.id}-paste-${boxPresses}`} label={isNameBox(one) ? 'Type the name' : 'Paste the key'} variant="primary" onPress={press => openBox($, one.id, 'key', press.surface)} /> : null}
-        {inBar && !isOpen ? <ui.Button key={`box-${one.id}-respond-${boxPresses}`} label="Give a response instead" onPress={press => openBox($, one.id, 'reply', press.surface)} /> : null}
+        {inBar && !isOpen ? <ui.Button key={`box-${one.id}-respond-${boxPresses}`} label="Give a response instead" plain onPress={press => openBox($, one.id, 'reply', press.surface)} /> : null}
         {isKey && !inBar ? (
           <ui.Button key={`box-${one.id}-mode-${boxPresses}`} label={mode === 'reply' ? `Type ${what} instead` : 'Give a response instead'} onPress={() => void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($))} />
         ) : null}
-        <ui.Button key={`box-${one.id}-cancel-${boxPresses}`} label="Cancel" plain onPress={() => void cancelBox($, one.id)} />
+        <ui.Button key={`box-${one.id}-cancel-${boxPresses}`} label="Cancel" plain dimColor onPress={() => void cancelBox($, one.id)} />
       </ui.Box>
     </ui.Box>
   ) }]

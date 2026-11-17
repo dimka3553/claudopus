@@ -23,6 +23,12 @@ let firstAtTop = ''
 // Where each card that waits stands at the top of the list: the moment it first came up there, kept while it stays, so what comes
 // later goes under it and nothing moves by itself (by chat and card: placeKey)
 const topPlaces = new Map<string, number>()
+// When each placed card stopped waiting (answered): kept in its place while something else here still waits, for KEPT_MOST at most;
+// one that asks again after that goes to the end, as anything new does
+const topClosed = new Map<string, number>()
+const KEPT_MOST = 10 * 60_000
+// When each card's admin commands first came, kept once they are answered, so its answered note stays where the box was
+const gatePartAt = new Map<string, number>()
 // The last drawing made of each pane on each surface, what a press under way keeps on screen (isPressHeld)
 const lastShown = new Map<string, unknown>()
 // Each pane's drawings made afresh are numbered as they are asked for: one that finishes after a newer one (the engine dropped its
@@ -200,6 +206,8 @@ const panelHooks = (on: On) => {
     // the cards (17 Nov, the person's screenshot: "You allowed it · it was started / This chat itself" loose under a card)
     let doneOnCards = new Map<string, { at: number; key: string; node: JSX.Element }[]>()
     let promptsLoose = promptsAnswered
+    // The cards kept among what waits at the top, as last put together
+    let keptUpNow = new Set<string>()
     // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of a chat does.
     // On another model it is not known, and the card gives the tokens alone. The time comes last, so its ticking moves nothing else
     const ours = modelName(await $.session.model().catch(() => ''))
@@ -482,17 +490,25 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
+    // When a card's admin commands came: the earliest still open, else as first seen
+    const gatesAt = (one: Todo) => {
+      const open = Math.min(...(one.admins ?? []).map(gate => gate.at), Infinity)
+      if (Number.isFinite(open) && !gatePartAt.has(one.id)) gatePartAt.set(one.id, open)
+      if (!one.admins?.length && !cardNotesOf(one.id, at).length) gatePartAt.delete(one.id)
+      return gatePartAt.get(one.id) ?? open
+    }
     const small = (one: Todo) => {
       // In the terminal, while the letters are keys, the first nine cards are numbered and the number opens the card's Details
       // A card in its moment at the top is not numbered, so the others keep their numbers through it
-      if (!isFinishMoment(one)) cardNo += 1
-      const digit = keyed && cardNo <= 9 && !isFinishMoment(one) ? String(cardNo) : undefined
+      const isMomentNow = isFinishMoment(one) && !keptUpNow.has(one.id)
+      if (!isMomentNow) cardNo += 1
+      const digit = keyed && cardNo <= 9 && !isMomentNow ? String(cardNo) : undefined
       const kept = one.items.filter(item => item.state !== 'dropped')
       const done = kept.filter(item => item.state === 'done').length
       const tree = treeUnder(one)
       const scope = `card-${one.id}`
       // Just finished, in its moment at the top: outlined in the green of what is done, as an allowed notice is
-      const isMoment = isFinishMoment(one) && !isAbovePrompt
+      const isMoment = isMomentNow && !isAbovePrompt
       return (
         <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isMoment ? { borderStyle: 'round' as const, borderColor: DONE } : {})}>
           {edge(one, kept.length, done, kept.some(item => item.state === 'doing'))}
@@ -524,7 +540,7 @@ const panelHooks = (on: On) => {
                   {askBlock(one, `ask-${one.id}`)}
                 </Box>
               ) }] : []),
-              ...(one.admins?.length || cardNotesOf(one.id, at).length ? [{ at: Math.min(...(one.admins ?? []).map(gate => gate.at), Infinity), node: (
+              ...(one.admins?.length || cardNotesOf(one.id, at).length ? [{ at: gatesAt(one), node: (
                 <Box key={`gate-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
                   {adminBlock($, table, one, `gates-${one.id}`, at)}
                 </Box>
@@ -1751,9 +1767,14 @@ const panelHooks = (on: On) => {
     const keysHeld = e.surface === 'terminal' && Boolean(keysAsk && hasDraft(keysAsk))
     onCards = new Map()
     const putOnCard = (card: string, row: { at: number; key: string; what: string; node: JSX.Element }) => void onCards.set(card, [...(onCards.get(card) ?? []), row])
-    for (const row of boxRows($, ui, keysHeld, e.surface, one => Boolean(cardOfAgent(one.agent)))) putOnCard(cardOfAgent(row.one.agent), { at: row.at, key: `box-${row.one.id}`, what: boxHead(row.one.text), node: row.node })
+    for (const row of boxRows($, ui, keysHeld, e.surface, one => Boolean(cardOfAgent(one.agent)), true)) putOnCard(cardOfAgent(row.one.agent), { at: row.at, key: `box-${row.one.id}`, what: boxHead(row.one.text), node: row.node })
     // The chat's own prompt to start a task belongs, once answered, to the card that task started: the one its words name
-    const startedCard = (p: Waiting) => (p.agent ? '' : p.tool === 'Agent' || p.tool === 'Task' ? (shownWork.find(one => !one.chat && titleOf(one) === (p.input?.description ?? '').trim())?.id ?? '') : '')
+    const startedCard = (p: Waiting) => {
+      if (p.agent || (p.tool !== 'Agent' && p.tool !== 'Task') || p.answered === 'no' || p.answered === 'stopped') return ''
+      const words = oneLine(p.input?.description ?? '')
+      const begun = shownWork.filter(one => !one.chat && oneLine(titleOf(one)) === words && one.startedAt >= p.at - 5000).sort((a, b) => a.startedAt - b.startedAt)
+      return begun[0]?.id ?? ''
+    }
     doneOnCards = new Map()
     for (const p of promptsAnswered) {
       const card = cardOfAgent(p.agent) || startedCard(p)
@@ -1789,11 +1810,13 @@ const panelHooks = (on: On) => {
     const placeKey = (one: Todo) => `${one.chat?.host ?? ''}/${one.chat?.id ?? ''}/${one.id}`
     // While anything still waits, a card that waited keeps its place at the top, answered or not: only once nothing waits do the
     // answered ones go back among the rest, so working down the list never moves what is still to answer
+    // (for KEPT_MOST at most after a card's own answer, so a request nobody here can answer, another chat's, never pins it for long)
     const isAnyOpen = notices.length > 0 || shownWork.some(isOpen) || listedChats.some(c => shownOf(c).some(isOpen))
-    const isWaits = (one: Todo) => isOpen(one) || answeredSince(one) > 0 || (isAnyOpen && topPlaces.has(placeKey(one)))
+    const isKeptPlace = (one: Todo) => topPlaces.has(placeKey(one)) && at - (topClosed.get(placeKey(one)) ?? at) < KEPT_MOST
+    const isWaits = (one: Todo) => isOpen(one) || answeredSince(one) > 0 || (isAnyOpen && isKeptPlace(one))
     // A card that waited and now only says what was done (a gate answered) keeps its place too while it says so: what comes later
     // goes under it, never above
-    const isKeptUp = (one: Todo) => isWaits(one) || (!one.chat && cardNotesOf(one.id, at).length > 0 && topPlaces.has(placeKey(one)))
+    const isKeptUp = (one: Todo) => isWaits(one) || (!one.chat && cardNotesOf(one.id, at).length > 0 && isKeptPlace(one))
     // Where a card stands among what waits: where it first came, kept for as long as it stays up there
     const cameAt = (one: Todo) => Math.min(isAsking(one) ? (one.ask?.at ?? Infinity) : Infinity, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : (onCards.get(one.id) ?? []).map(row => row.at)))
     const placeOf = (one: Todo) => topPlaces.get(placeKey(one)) ?? (Number.isFinite(cameAt(one)) ? cameAt(one) : answeredPlace(one) || at)
@@ -1810,8 +1833,15 @@ const panelHooks = (on: On) => {
     // The places kept: set as a card comes up among what waits, dropped as it leaves
     if (paneId === LIST) {
       const waitingNow = new Set(askCards.filter(isKeptUp).map(placeKey))
+      for (const one of askCards) {
+        const key = placeKey(one)
+        if (!topPlaces.has(key)) continue
+        if (!isOpen(one)) {
+          if (!topClosed.has(key)) topClosed.set(key, at)
+        } else if (topClosed.has(key)) ((topClosed.get(key) ?? 0) <= cameAt(one) ? topPlaces.set(key, cameAt(one)) : undefined, topClosed.delete(key))
+      }
       for (const one of askCards.filter(isWaits)) if (!topPlaces.has(placeKey(one))) topPlaces.set(placeKey(one), placeOf(one))
-      for (const key of [...topPlaces.keys()]) if (!waitingNow.has(key)) topPlaces.delete(key)
+      for (const key of [...topPlaces.keys()]) if (!waitingNow.has(key)) (topPlaces.delete(key), topClosed.delete(key))
     }
     const restHere = shownWork.filter(one => !isUp(one))
     const restFlows = shownFlows.filter(f => !isFlowMoment(f))
@@ -1827,6 +1857,7 @@ const panelHooks = (on: On) => {
       ...finishingFlows.map(f => ({ rank: 1, at: -pauseFrom(f), what: '', draw: () => flowSmall(f) })),
     ].sort((a, b) => a.rank - b.rank || a.at - b.at)
     const waitsCount = notices.length + askCards.reduce((n, one) => n + waitsOn(one), 0)
+    keptUpNow = new Set(askCards.filter(isKeptUp).map(one => one.id))
     // The terminal's keys stay with the ask they were on while it waits
     if (keysAsk && !askingHere.some(one => one.id === keysAsk && isAsking(one))) keysAsk = ''
     // The header says what every card under it says, every chat's: what needs the person, what runs here and in other chats, and

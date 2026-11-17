@@ -451,7 +451,7 @@ test('on the desktop the line above the prompt says how many wait and what the f
   await clock.advance(5000)
   // The first is the card whose gate came first: w5's
   const MARK = /^● 2 waiting for you · first: /
-  const show = async (band: { findAll: (q: { type: string }) => Promise<{ props: Record<string, unknown> }[]> }) => (await band.findAll({ type: 'Button' })).some(one => one.props.label === '↑ Show')
+  const show = async (band: { findAll: (q: { type: string }) => Promise<{ props: Record<string, unknown> }[]> }) => (await band.findAll({ type: 'Button' })).some(one => one.props.label === 'Show')
   for (const surface of ['desktop', 'terminal']) {
     const down = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 40, bodyRows: 20 } }, surface } as never)
     expect(await until(async () => down.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
@@ -602,8 +602,15 @@ test('answering one of two asks at the top leaves both cards where they were, th
   // Past its minute, with the other ask still waiting, it keeps its place: nothing moves by itself
   await clock.advance(65_000)
   expect(await order()).toEqual(['Piece 4', 'Piece 2', 'Piece 1', 'Piece 3', 'Piece 5'])
-  // The other is answered too: a minute on, both go back to where they began
-  await pressed(list, ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Not now')?.key ?? '')
+  // It asks again: new, it goes under what already waits
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4b', agentId: 'a4', text: 'And the next part?', choices: ['Yes', 'No'] } as never)
+  await clock.advance(1000)
+  expect(await until(async () => ((await order())[0] === 'Piece 2' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
+  // Both are answered: a minute on, both go back to where they began
+  const labelled = async (label: string) => ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === label)?.key ?? ''
+  await pressed(list, await labelled('Not now'))
+  await pressed(list, await labelled('Yes'))
   await clock.advance(65_000)
   expect(await until(async () => ((await order())[0] === 'Piece 1' ? true : undefined))).toBe(true)
   expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5'])
