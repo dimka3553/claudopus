@@ -482,7 +482,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
 const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, isReply: boolean, target: string, at: number, line: string) => {
   answeredAt.set(one.id, ask.at)
   // What the work recorded as waiting for the same question is answered with it
-  await settleAsked($, one.id, ask, isReply ? IN_WORDS : said, said).catch(err => log($, `result's question not answered with the ask of ${one.id}: ${String(err)}`))
+  await settleAsked($, one.id, ask, isReply ? IN_WORDS : said).catch(err => log($, `result's question not answered with the ask of ${one.id}: ${String(err)}`))
   dropDrafts($, one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   const back = isReply ? {} : { asked: ask, target }
@@ -734,7 +734,7 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   const isHeld = !settles(a.ask, a.words, true)
   // Either way the ask is done with in the chat: the work asking again is sent to it afresh
   if (isHeld) answeredAsks.delete(a.key)
-  else await settleAsked($, a.card.id, a.ask, IN_WORDS, a.words).catch(err => log($, `result's question not answered with the ask of ${a.card.id}: ${String(err)}`))
+  else await settleAsked($, a.card.id, a.ask, IN_WORDS).catch(err => log($, `result's question not answered with the ask of ${a.card.id}: ${String(err)}`))
   inChat.delete(a.card.id)
   await changeTodos($, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   dropDrafts($, a.card.id)
