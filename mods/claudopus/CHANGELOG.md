@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.180 · 17 November 2026
+- The reply box above the chat no longer flashes blue or jumps while you type: it stays four lines tall and scrolls inside, and while you type in it, and for half a minute after your last letter, Claudopus redraws nothing else. A question, key box or admin box that newly needs you still shows at once.
+- Send and Close sit a little below the box, so the Send button no longer covers the box's lower edge. The key box's response in the bar works the same way, and the card's own reply box (bar folded) is four lines with the same gap.
+
 ## 0.2.179 · 17 November 2026
 - A release goes out within a minute of your press: it no longer waits up to 45 minutes for GitHub's tests, which now run after it and never hold it up. Each task runs every test once before it asks you to release.
 

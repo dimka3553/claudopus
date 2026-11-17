@@ -193,7 +193,7 @@ const lookHold = ($: EngineInterface) => {
   holdAt = now
   if (late < LATE) {
     // Caught up: drawn again, with what was left out meanwhile
-    if (behindLooks > 0 && (behindLooks -= 1) === 0) $.ui.invalidate('ui.render')
+    if (behindLooks > 0 && (behindLooks -= 1) === 0) drawAgain($)
     return
   }
   behindLooks = BEHIND_FOR / HOLD_LOOK

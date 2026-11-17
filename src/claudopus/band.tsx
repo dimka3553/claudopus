@@ -29,16 +29,15 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
     </ui.Box>
   ) : null
 // The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: the work the reply goes to on a
-// line of its own, the box under it as wide as the bar and as tall as its text, as the chat's own box is (boxLines), and under it
+// line of its own, the box under it as wide as the bar and BOX_ROWS lines tall whatever it holds, and under it, a gap below it
 // what Enter does beside Send, the big one, and Close, small, which takes the box away again with what was typed kept for its card
 // (17 Nov, the person: the box was "very small" and "doesn't extend taller"; one row of a field drawn as narrow as the app makes
 // one, beside the title and buttons). The box names no submitLabel: the desktop app draws one as a second, small send button
 // beside it, and with one a box of several lines sends only on Cmd+Enter; without it Enter sends and Shift+Enter makes a new line.
 // Nothing in it follows the panel's scrolling. The box is the card's own: the same answer, and the same box through a new question
 // of its work, until the person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
-const barReply = ($: EngineInterface, ui: Ui, one: Todo, columns: number) => {
+const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
   const draft = barDraft(one.id)
-  const rows = boxLines(drafts.get(draft) ?? '', columns)
   const send = (value: string) => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
   return (
     <ui.Box key="band-reply" flexDirection="column" flexShrink={0} width="100%">
@@ -51,9 +50,9 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo, columns: number) => {
             key={barBoxKey(one.id)}
             placeholder="Type your reply"
             value={draftDrawn(draft)}
-            rows={rows}
+            rows={BOX_ROWS}
             autoFocus
-            onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)), growBox($, barBoxKey(one.id), rows, boxLines(value, columns)))}
+            onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
             onSubmit={send}
           />
         </ui.Box>
@@ -65,7 +64,7 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo, columns: number) => {
 // Under a box in the bar: what Enter does, and Send, the big one, then Close, small
 const BOX_KEYS = 'Enter sends · Shift+Enter for a new line'
 const barFoot = ($: EngineInterface, ui: Ui, where: string, mark: number, onSend: () => void, onClose: (press: { surface: string }) => void, isLines = true) => (
-  <ui.Box key={`${where}-foot`} flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
+  <ui.Box key={`${where}-foot`} flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
     <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
       <ui.Text dimColor wrap="truncate-end">{isLines ? BOX_KEYS : 'Enter sends'}</ui.Text>
     </ui.Box>
@@ -75,20 +74,6 @@ const barFoot = ($: EngineInterface, ui: Ui, where: string, mark: number, onSend
     </ui.Box>
   </ui.Box>
 )
-// A box whose text now needs another number of lines is drawn again at that height, once for each height asked: a box of `rows`
-// stays that tall whatever it holds. Drawn with the text it was last drawn with, the box keeps what is typed in it (draftDrawn)
-// A box drawn anew (sent, closed and opened, a new question) is drawn at its own height, so an ask is skipped only when it is the same
-// as the last one from the same drawn height. growths counts the asks: the panel, held while its card's box is typed in, is drawn
-// again for one (paneShape)
-let lastGrow = ''
-let growths = 0
-const growBox = ($: EngineInterface, key: string, drawn: number, wanted: number) => {
-  const ask = `${key}|${drawn}|${wanted}`
-  if (wanted === drawn || ask === lastGrow) return
-  lastGrow = ask
-  growths += 1
-  drawAgain($)
-}
 // The bar as last drawn on each surface while a reply box was in it: while the person types, and for as long as the box holds the
 // cursor (barBoxAt), it is drawn as it was, whole, but for a change in what it holds, as a pane is (heldDrawings): each drawing is
 // a new box under the cursor, its ring drawn again and a selection or a half-composed letter lost
@@ -99,14 +84,11 @@ const growBox = ($: EngineInterface, key: string, drawn: number, wanted: number)
 // what the marker says (markerSign), reading none of the cards: a drawing that reads nothing is not drawn again as they are
 // written. The cards are looked at once a second instead (lookBar), and the bar is drawn again when what it shows of them moved
 const barHeld = new Map<string, { shape: string; mark: string; drawing: unknown }>()
-// The width the bar was last drawn at on each surface, in columns: what a box in it wraps at (boxLines)
-const barColumns = new Map<string, number>()
-// What a bar with a box open is drawn for, from the mod's own memory alone: which box, and how many lines tall
-const barShape = (surface: string) => {
-  const columns = barColumns.get(surface) ?? 80
+// What a bar with a box open is drawn for, from the mod's own memory alone: which box, and what is said beside it
+const barShape = () => {
   const keyBox = barKeyTarget()
-  if (boxOpen && keyBox) return `key|${barKeyBoxKey(keyBox.id, boxOpen.mode)}|${boxSaid.get(keyBox.id) ?? ''}|${boxHeldReply.has(keyBox.id)}|${barKeyRows(keyBox.id, boxOpen.mode, columns) ?? 1}`
-  return replyTo ? `reply|${barBoxKey(replyTo)}|${boxLines(drafts.get(barDraft(replyTo)) ?? '', columns)}|${barCardsDrawn}` : ''
+  if (boxOpen && keyBox) return `key|${barKeyBoxKey(keyBox.id, boxOpen.mode)}|${boxSaid.get(keyBox.id) ?? ''}|${boxHeldReply.has(keyBox.id)}`
+  return replyTo ? `reply|${barBoxKey(replyTo)}|${barCardsDrawn}` : ''
 }
 // What the cards say of the box open in the bar as last looked at: its card, still asking, under its title. Part of the held shape,
 // so a card that stops asking (answered elsewhere, its question withdrawn, the work stopped) takes its box away within a second
@@ -117,11 +99,24 @@ const barCardsSign = (cards: Todo[]) => {
 }
 // Once a second while a bar holds a box (chat.tsx): the cards it shows moved, so it is drawn again, once for each change
 const lookBar = async ($: EngineInterface) => {
+  // A redraw put off while the box held the cursor is made once it no longer does (drawFresh)
+  if (isRedrawOwed && !isBoxHeld(await $.clock.now())) drawAgain($)
   if (!barHeld.size || !replyTo) return
   const sign = barCardsSign(await read($, todos))
   if (sign === barCardsDrawn) return
   barCardsDrawn = sign
-  drawAgain($)
+  drawAgain($, true)
+}
+// A bar drawn afresh with a box in it read the cards to draw it, and the engine draws a drawing again at the first write of what
+// it read: the app then built the box anew under the cursor, its ring fading in again, at the first card any work wrote after the
+// box opened or the marker moved. So it is asked for once more at once, and given then as held, reading nothing; once only, so a
+// bar drawn afresh again in reply asks for nothing more
+let isBarSettling = false
+const settleBar = ($: EngineInterface) => {
+  if (isBarSettling) return void (isBarSettling = false)
+  isBarSettling = true
+  // (the panes' own drawings are still good: they are given again as they were)
+  void drawFresh($, true)
 }
 // When this surface's bar last asked for the cards to be drawn again as its box came or went: at most once a second, so two
 // windows of one chat that differ never ask in turn without end
@@ -140,16 +135,16 @@ const bandHooks = (on: On) => {
     const key = `bar|${e.requestId ?? ''}|${e.surface}|${e.props.bodyColumns}|${e.props.isCollapsed ? 1 : 0}`
     const at = await $.clock.now()
     const recent = lastShown.get(key) as Awaited<ReturnType<typeof next>> | undefined
-    const isBoxHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
-    if (recent && !isBoxHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
-    if (recent && !isBoxHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
+    const isBarHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
+    if (recent && !isBarHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
+    if (recent && !isBarHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
     freshBegins(key)
     const madeFrom = Date.now()
     let made: { at: number; ms: number; fresh: number } | undefined
     try {
       const drawing = await drawBar()
       // A click begun while it was made: the bar on screen is given instead, and this one made again once the click is over
-      if (recent && !isBoxHeld && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent)
+      if (recent && !isBarHeld && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent)
       lastShown.set(key, drawing)
       made = { at, ms: Date.now() - madeFrom, fresh: freshness }
       return drawing
@@ -164,12 +159,11 @@ const bandHooks = (on: On) => {
     const canBox = e.surface === 'desktop' && 'Input' in uiOf($, e) && !e.props.hasSurvey && !e.props.isCollapsed
     if (e.requestId) barIds.set(e.surface, e.requestId)
     const flipAt = await $.clock.now()
-    if (canBox) barColumns.set(e.surface, e.props.bodyColumns)
     // A box open and drawn as it is: given again as it was, reading no cards (barHeld)
     const kept = barHeld.get(e.surface)
-    if (kept && canBox && barBoxes.has(e.surface) && (replyTo || boxOpen) && kept.shape === barShape(e.surface)) {
+    if (kept && canBox && barBoxes.has(e.surface) && (replyTo || boxOpen) && kept.shape === barShape()) {
       const isHeldNow = isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)
-      if (isHeldNow || kept.mark === (await markerSign($, e.surface))) return kept.drawing as Awaited<ReturnType<typeof next>>
+      if (isHeldNow || kept.mark === (await markerSign($, e.surface))) return ((isBarSettling = false), kept.drawing as Awaited<ReturnType<typeof next>>)
     }
     const cards = await read($, todos)
     if (canBox !== barBoxes.has(e.surface)) {
@@ -253,9 +247,9 @@ const bandHooks = (on: On) => {
     const keyBox = canBox ? barKeyTarget() : undefined
     if (boxOpen && canBox && !keyBox) boxOpen = undefined
     if (keyBox && boxOpen) {
-      const shape = barShape(e.surface)
+      const shape = barShape()
       const marker = await waitMarker($, ui, e.surface)
-      const row = barKeyRow($, ui, keyBox, boxOpen.mode, e.props.bodyColumns)
+      const row = barKeyRow($, ui, keyBox, boxOpen.mode)
       const drawing = marker ? (
         <Box flexDirection="column">
           {marker}
@@ -265,6 +259,7 @@ const bandHooks = (on: On) => {
         row
       )
       barHeld.set(e.surface, { shape, mark: await markerSign($, e.surface), drawing })
+      settleBar($)
       return drawing
     }
     // The reply box the person opened from a card, while that card still asks; its ask answered or gone, the box goes with it
@@ -275,10 +270,10 @@ const bandHooks = (on: On) => {
       // scrolled under the cursor nor work starting or ending puts a new box under it. The row takes the place of the figures
       // while it is open: figures drawn under a held box would stand still, and a row that came and went would move the box
       barCardsDrawn = barCardsSign(cards)
-      const shape = barShape(e.surface)
+      const shape = barShape()
       // What waits at the top of a panel scrolled away is still pointed at, as the bar is drawn; not while the box is held
       const marker = await waitMarker($, ui, e.surface)
-      const reply = barReply($, ui, target, e.props.bodyColumns)
+      const reply = barReply($, ui, target)
       const drawing = marker ? (
         <Box flexDirection="column">
           {marker}
@@ -288,6 +283,7 @@ const bandHooks = (on: On) => {
         reply
       )
       barHeld.set(e.surface, { shape, mark: await markerSign($, e.surface), drawing })
+      settleBar($)
       return drawing
     }
     barHeld.delete(e.surface)
