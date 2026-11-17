@@ -15,8 +15,9 @@
 # A beat names the load of Claudopus that wrote it. One that moves again from the same load after a change was never switched off:
 # its chat's process was only slow (16 Nov, from 20:26 UTC: one chat's process hardly ran for over an hour, and eleven changes
 # reloaded the three other chats while that chat's own copy, never off, went on as it was). Such a load is left alone until a newer
-# load beats, or it beats steadily for SLOW_CLEAR (then it is treated as any other again), or its beat stays quiet for SLOW_QUIET
-# (a switched-off copy never beats again, so it reaches that), and then gets one try per quiet spell, not TRIES
+# load beats, or it has gone SLOW_KEEP without a stall (then it is treated as any other again), or its beat stays quiet for
+# SLOW_QUIET (a switched-off copy never beats again, so it reaches that), and then has its tries as any other: a slow process is
+# just when the engine switches an add-on off. So one chat that stalls on and off costs a reload only per stall of SLOW_QUIET
 set -u
 mem=${1:?memory folder}
 dir="$mem/keep"
@@ -29,7 +30,7 @@ WOKE_QUIET=${CLAUDOPUS_REVIVE_WOKE_QUIET:-60}
 GAP=${CLAUDOPUS_REVIVE_GAP:-60}
 TRIES=${CLAUDOPUS_REVIVE_TRIES:-3}
 SLOW_QUIET=${CLAUDOPUS_REVIVE_SLOW_QUIET:-300}
-SLOW_CLEAR=${CLAUDOPUS_REVIVE_SLOW_CLEAR:-180}
+SLOW_KEEP=${CLAUDOPUS_REVIVE_SLOW_KEEP:-1800}
 # With no chat beating for this long, it ends
 IDLE=${CLAUDOPUS_REVIVE_IDLE:-600}
 # (in UTC, as Claudopus's own log.md, so the two are read side by side)
@@ -126,29 +127,28 @@ while mine; do
     any=1
     m=$(mtime "$beat") || continue
     quiet=$((t - m))
-    # The slow mark: the load, and since when it has beaten steadily
-    slow='' steady=''
-    [ -f "$dir/$sid.slow" ] && { read -r slow; read -r steady; } < "$dir/$sid.slow" 2>/dev/null
+    # The slow mark: the load, and when it was last seen stalled
+    slow='' stalled=''
+    [ -f "$dir/$sid.slow" ] && { read -r slow; read -r stalled; } < "$dir/$sid.slow" 2>/dev/null
+    case "$stalled" in ''|*[!0-9]*) stalled=$t ;; esac
     # A newer load: the slow one is gone
     [ -n "$slow" ] && [ -n "$load" ] && [ "$slow" != "$load" ] && { rm -f "$dir/$sid.slow"; slow=''; }
     if [ "$quiet" -lt "$QUIET" ]; then
       was=$(cat "$dir/$sid.changed" 2>/dev/null)
       if [ -n "$load" ] && [ "$was" = "$load" ]; then
         # Beating again from the load that beat before the change: it was never off, and the change only reloaded the other chats
-        log "chat $sid: beats again from the same load, so Claudopus was not off: its process was slow; it is left alone until it loads anew, beats steadily $SLOW_CLEAR s or stays quiet $SLOW_QUIET s"
+        log "chat $sid: beats again from the same load, so Claudopus was not off: its process was slow; it is left alone until it loads anew, goes $SLOW_KEEP s without a stall or stays quiet $SLOW_QUIET s"
         printf '%s\n%s\n' "$load" "$t" > "$dir/$sid.slow"
-      elif [ -n "$slow" ]; then
-        if [ -z "$steady" ]; then printf '%s\n%s\n' "$slow" "$t" > "$dir/$sid.slow"
-        elif [ $((t - steady)) -ge "$SLOW_CLEAR" ]; then rm -f "$dir/$sid.slow"; log "chat $sid: beats steadily again; treated as any other"
-        fi
+      elif [ -n "$slow" ] && [ $((t - stalled)) -ge "$SLOW_KEEP" ]; then
+        rm -f "$dir/$sid.slow"; log "chat $sid: no stall for $SLOW_KEEP s; treated as any other"
       fi
       # Beating: a chat that came back starts its tries afresh
       rm -f "$dir/$sid.revived" "$dir/$sid.gaveup" "$dir/$sid.changed"
       continue
     fi
     if [ -n "$slow" ]; then
-      # Quiet again: its steady beating starts afresh, and it waits SLOW_QUIET
-      [ -n "$steady" ] && printf '%s\n' "$slow" > "$dir/$sid.slow"
+      # Stalled again: the mark is kept from now, and it waits SLOW_QUIET
+      printf '%s\n%s\n' "$slow" "$t" > "$dir/$sid.slow"
       [ "$quiet" -lt "$SLOW_QUIET" ] && continue
     fi
     [ $((t - woke)) -lt "$WOKE_QUIET" ] && continue
@@ -158,8 +158,7 @@ while mine; do
     case "${key:-}" in claudopus@*) ;; *) continue ;; esac
     [ -f "${settings:-}" ] || continue
     tries=0; [ -f "$dir/$sid.revived" ] && tries=$(wc -l < "$dir/$sid.revived" | tr -d ' ')
-    most=$TRIES; [ -n "$slow" ] && most=1
-    if [ "${tries:-0}" -ge "$most" ]; then
+    if [ "${tries:-0}" -ge "$TRIES" ]; then
       log "chat $sid: Claudopus did not come back after $tries tries; left as it is until it beats again"
       : > "$dir/$sid.gaveup"
       continue
