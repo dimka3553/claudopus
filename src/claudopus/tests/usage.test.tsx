@@ -313,7 +313,7 @@ test('the battery card says what the Mac draws, the processors and graphics each
   await clock.advance(1000)
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await until(async () => ((await desk.find({ type: 'Text', text: 'Power use, whole Mac' })) ? true : undefined))
-  for (const text of ['Power use, whole Mac', '80 W', 'Power use, processors', 'Claude and what it started', 'Power use, graphics', /^about [\d.]+ W$/])
+  for (const text of ['Power use, whole Mac', '80 W', 'Power use, processors', 'Claude, processors', 'Power use, graphics', 'Claude, graphics', /^about [\d.]+ W$/])
     expect(await desk.find({ type: 'Text', text })).toBeDefined()
   expect(await desk.find({ type: 'Text', text: "Claude's processors draw" })).toBeUndefined()
   // The cards are their rows alone: no paragraph under them on what the figures cover, and no line on what busy means

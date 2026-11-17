@@ -15,7 +15,7 @@ Every word Claudopus shows you (panel, cards, the bar, questions, notices, resul
 | to-do | a line on a task's list | step |
 | result | what a finished task leaves you | report, finding |
 | topic | a line in Memory with its notes | subject, stream |
-| full | how much of its memory a chat or task has used | context, tokens, k |
+| full | how much of its memory a chat or task has used | context, tokens, k (Stats alone counts tokens, and says what they are) |
 
 - Never: brief, steer, turn, hand back, printed, killed, exit code, flag, shipped, mod, legwork.
 
@@ -27,7 +27,7 @@ Every word Claudopus shows you (panel, cards, the bar, questions, notices, resul
 
 ## Standard forms
 - **States**, one word each, one colour each: Starting, Working (purple), Waiting for you (amber), Done (green), Failed (amber), Stopped, Stopped by you (grey).
-- **Time running** `29m 40s`, over an hour `1h 05m`. **Expected** `of about 5m`. **Past it** `5m over` (amber). **Ago** `2m ago`. **Left** `1m left`. **Dates** `11 Nov, 14:20`.
+- **Time running** `29m 40s`, over an hour `1h 05m`. **Expected** `of about 5m`. **Past it** `29m 40s · 24m over` (amber). **Ago** `2m ago`. **Left** `1m left`. **Dates** `11 Nov, 14:20`.
 - **Counts** `<n> of <total> <what>`: `2 of 6 stills`, `2 of 5 to-dos`.
 - **Buttons** are a verb of one to three words, the same word for the same act: Stop, Details, Result, Release it, Not now, Send, Open chat, Answer in words, Allow once, Deny.
 - **Headings** are a noun: To-dos, Helpers and commands, Commands ended, Finished, Result.
@@ -35,15 +35,15 @@ Every word Claudopus shows you (panel, cards, the bar, questions, notices, resul
 ## Every running thing has a progress line
 A running command or helper is two lines:
 1. **What it does**, in Claude's words, with its time: `Render the song stills · 4m 10s of about 5m`
-2. **Now**: what it is doing now · how far · how fast · time left: `Rendering still 3 · 2 of 6 · 33% · 2m left`
+2. **Now**: how far · how fast · time left · what it is doing now: `2 of 6 · 33% · 2m left · rendering still 3`
 
-- After a minute with nothing new, line 2 keeps the last thing it said and adds how long: `Last: 2 of 6 stills rendered · nothing new for 29m`. With nothing ever said: `No output yet · started 29m ago`. Never "nothing new" alone.
+- After three minutes with nothing new, line 2 keeps the last thing it said and adds how long: `Last: 2 of 6 stills rendered · nothing new for 29m`. With nothing ever said: `No output yet · started 29m ago`. Never "nothing new" alone.
 - Once Claudopus has told Claude about the quiet, the line says so: `· Claude was told to check it`.
-- A server: `Serving on port 3000`. A watch: `Watching · last: series arrived, 1m ago`.
-- A helper's line 2 is what it is doing now, in plain words: `Reading the code`, `Running: Render the song stills`, `Searching the web`, or its own last note.
-- Ended: `Done in 2m 05s`, `Failed after 2m 05s`, `Stopped by you after 1m`.
+- A server: `Serving`. A watch: `Watching · last: series arrived`.
+- A helper's line 2 is what it is doing now, in plain words: `Reading files`, `Rendering the song stills · 4m`, `Searching the web`, `Waiting for its commands`, or its own last note.
+- Ended: `Done in 2m 05s`, `Failed after 2m 05s`, `Stopped after 1m`.
 
 ## Questions, notices, errors
 - **A question**: the question first, ending in "?"; then what happens, in short lines; then buttons that answer it, and Answer in words.
-- **A notice**: who did what, then what happens next. `You allowed the release. Claudopus is releasing it now.`
+- **A notice**: who did what, then what happens next. `You allowed it. Claude is releasing it now.`
 - **An error**: what failed, then what happens next or what you can do. `Couldn't save the setting. Your old value stays.`

@@ -379,7 +379,7 @@ const asPressed = (one: Todo): Todo => {
 // once the moves were refused). A pane has no part that stays still, so on a surface whose bar above the prompt takes a box
 // (barBoxes: the bar was drawn there with an Input in its table) an ask's reply box is drawn in that bar, a site of its own that the
 // pane's scrolling does not reach, and never in the pane. It is there only once the person asks for it: the card's answers end
-// with "Reply in your own words", which opens the box in the bar for that card, and Close takes it away again (16 Nov: a box
+// with "Answer in words", which opens the box in the bar for that card, and Close takes it away again (16 Nov: a box
 // always in the bar looked bad, and the person asked for it as one of the options)
 // A bar the person folded shows nothing of the mod's, and one of the app's surveys takes its place: neither takes the box, and the
 // card has its own again, so a reply in words can always be typed somewhere
@@ -391,7 +391,7 @@ const repliesInBar = (surface: string) => barBoxes.has(surface)
 let barBoxAt = 0
 const BAR_BOX_HELD = 300_000
 const isBarBox = (element: string | undefined) => /^band-.*-reply-/.test(element ?? '')
-// The card whose reply box is open in the bar, none when it is closed: opened by the card's "Reply in your own words", closed by
+// The card whose reply box is open in the bar, none when it is closed: opened by the card's "Answer in words", closed by
 // Close (on the card or in the bar), by the reply sent, by the card answered, or by the bar folding. One box at a time: opened on
 // another card it is that card's, and what was half typed is kept for the card it was typed for. Nothing but the person closes or
 // moves it while the card asks: when the work puts a new question in place of the one it was opened on (replyMark), the box stays

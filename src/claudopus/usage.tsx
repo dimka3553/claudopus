@@ -120,9 +120,9 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
       rows: [
         ...(f.watts !== undefined ? [['Power use, whole Mac', `${wattText(f.watts)} W`] as [string, string]] : []),
         ...(f.wattsCpu !== undefined ? [['Power use, processors', `${wattText(f.wattsCpu)} W`] as [string, string]] : []),
-        ...(f.wattsClaude !== undefined ? [[CLAUDE_ALL, `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
+        ...(f.wattsClaude !== undefined ? [['Claude, processors', `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
         ...(f.wattsGpu !== undefined ? [['Power use, graphics', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
-        ...(f.wattsGpuClaude !== undefined ? [[CLAUDE_ALL, `about ${wattText(f.wattsGpuClaude)} W`] as [string, string]] : []),
+        ...(f.wattsGpuClaude !== undefined ? [['Claude, graphics', `about ${wattText(f.wattsGpuClaude)} W`] as [string, string]] : []),
       ],
     },
     disk: f.disk === undefined ? undefined : {

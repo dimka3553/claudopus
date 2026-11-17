@@ -452,7 +452,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
       {band(
         ui,
         'report-text',
-        'Result',
+        'In full',
         '',
         // A link it names never leaves the app: one of its pictures is shown above, anything else stays as text
         <Markdown

@@ -148,7 +148,7 @@ test("a Mac handed another Mac's chats lists them by name and Mac with its own, 
   expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeUndefined()
   expect((await list.findAll({ type: 'Text' })).filter(one => one.text === 'Robot arm')).toHaveLength(1)
   // Its running time is told on this Mac's clock
-  expect(await list.find({ type: 'Text', text: /^Opus 5\.5 · (\d+ of \d+ done · )?(\d+s|1m \d\ds)$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Opus 5\.5 · (\d+ of \d+ to-dos done · )?(\d+s|1m \d\ds)$/ })).toBeDefined()
   // Its ask has nothing to press here, and nothing waits in the outbox for that Mac
   expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Send')).toBe(false)
   expect([...files.keys()].filter(path => path.startsWith(`${MEMORY}/live/outbox/sams-m5/`) && path.endsWith('.json'))).toEqual([])

@@ -1142,7 +1142,7 @@ test('scrolled down a long list, the line above the prompt says how many wait at
   const at = 1_700_000_000_000
   files.set(`${MEMORY}/live/chat-b.json`, longList(at, { w5: at - 2000, w6: at - 1000 }))
   await clock.advance(5000)
-  const MARK = '↑ 2 cards are waiting for you at the top of the panel'
+  const MARK = '↑ 2 waiting for you at the top of the panel'
   for (const surface of ['desktop', 'terminal']) {
     const down = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 40, bodyRows: 20 } }, surface } as never)
     expect(await until(async () => down.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
@@ -1307,7 +1307,7 @@ const pressedFirst = async ($: Parameters<TestBody>[0], on: On, button: 'once' |
 test("Allow once on a gate draws it answered in the press's own drawing, before the wait reads it: green, with no buttons left", ($, on) => pressedFirst($, on, 'once', 'You allowed it. It runs now.'))
 test("Always allow on a gate draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'always', "You always allow this command. It runs now, and Claudopus won't ask again."))
 test("Deny on a gate draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'deny', "You denied it. It didn't run, and Claudopus told Claude."))
-test("Allow once on a release draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'once', 'You allowed it. Claudopus is releasing it now.', true))
+test("Allow once on a release draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'once', 'You allowed it. Claude is releasing it now.', true))
 
 test('two presses on a gate before its wait reads them send one answer: the first, as drawn', async ($, on) => {
   const { list, bash, held, wake } = await gated($, on)

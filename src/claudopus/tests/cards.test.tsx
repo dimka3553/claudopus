@@ -69,7 +69,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: /^To-do / }))?.text).toBe('To-do 1 of 2 ·')
   expect((await pane.find({ type: 'Text', text: /^Fit the/ }))?.props.dimColor).toBe(false)
   expect(await pane.find({ type: 'Text', text: /^Try the/ })).toBeUndefined()
-  expect((await pane.find({ type: 'Text', text: /of \d+ done/ }))?.text).toMatch(/(^| · )0 of 2 done · \d+s$/)
+  expect((await pane.find({ type: 'Text', text: /of \d+ to-dos done/ }))?.text).toMatch(/(^| · )0 of 2 to-dos done · \d+s$/)
   // Its edge is its to-dos, one part each: the one being done lighter than a done one, the rest a dim tint; a terminal's edge is whole
   const edgeOf = async (of: typeof pane) => (await of.findAll({ type: 'Box' })).map(b => String(b.props.backgroundColor)).filter(colour => colour.startsWith('#8A63F0'))
   expect(await edgeOf(pane)).toEqual(['#8A63F0AD', '#8A63F05C'])
@@ -98,10 +98,10 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   // The newer line replaced the older; a dropped to-do is not counted
   expect(await pane.find({ type: 'Text', text: /^I am fitting/ })).toBeUndefined()
   expect((await pane.find({ type: 'Text', text: /^The nostril is closed/ }))?.text).toBe('The nostril is closed; I am comparing the head with your scan.')
-  expect((await pane.find({ type: 'Text', text: /of \d+ done/ }))?.text).toContain('1 of 2 done')
+  expect((await pane.find({ type: 'Text', text: /of \d+ to-dos done/ }))?.text).toContain('1 of 2 to-dos done')
   // The done to-do's part of the edge is bright, and with none being done the other is dim, named dim as the next
   expect(await edgeOf(pane)).toEqual(['#8A63F0', '#8A63F05C'])
-  expect((await pane.find({ type: 'Text', text: /^Next, step / }))?.text).toBe('Next, step 2 of 2 ·')
+  expect((await pane.find({ type: 'Text', text: /^Next to-do / }))?.text).toBe('Next to-do 2 of 2 ·')
   expect((await pane.find({ type: 'Text', text: /^Compare the head/ }))?.props.dimColor).toBe(true)
   expect(await pane.findAll({ type: 'Svg' })).toHaveLength(1)
   expect(await pane.find({ type: 'Text', text: /^To do/ })).toBeUndefined()
@@ -127,7 +127,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await tab.find({ type: 'Text', text: /^Fit the/ }))?.props.dimColor).toBe(true)
   expect((await tab.find({ type: 'Text', text: /^Try the/ }))?.props.strikethrough).toBe(true)
   // The list behind it is as it was
-  expect((await pane.find({ type: 'Text', text: /of \d+ done/ }))?.text).toContain('1 of 7 done')
+  expect((await pane.find({ type: 'Text', text: /of \d+ to-dos done/ }))?.text).toContain('1 of 7 to-dos done')
 
   // A helper this work starts writes into the same card, and is no card of its own, even where the engine does not name its parent
   await $.tool.call({ tool: 'Agent', tool_use_id: 'h1', agentId: 'a1', prompt: 'search', description: 'Search the docs' } as never)
@@ -217,7 +217,7 @@ test('past the parts the edge has, it is one bar in three shades, and the step b
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const edge = (await pane.findAll({ type: 'Box' })).filter(b => String(b.props.backgroundColor).startsWith('#8A63F0'))
   expect(edge.map(b => [b.props.backgroundColor, b.props.flexGrow])).toEqual([['#8A63F0', 12], ['#8A63F0AD', 1], ['#8A63F05C', 3]])
-  expect((await pane.find({ type: 'Text', text: /of \d+ done/ }))?.text).toContain('12 of 16 done')
+  expect((await pane.find({ type: 'Text', text: /of \d+ to-dos done/ }))?.text).toContain('12 of 16 to-dos done')
   expect((await pane.find({ type: 'Text', text: /^To-do / }))?.text).toBe('To-do 13 of 16 ·')
   expect(await pane.find({ type: 'Text', text: /^Round step 13$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^Round step 14$/ })).toBeUndefined()
@@ -225,7 +225,7 @@ test('past the parts the edge has, it is one bar in three shades, and the step b
   await call('todo', { item: 'Round step 13', state: 'done' })
   const after = (await pane.findAll({ type: 'Box' })).filter(b => String(b.props.backgroundColor).startsWith('#8A63F0'))
   expect(after.map(b => [b.props.backgroundColor, b.props.flexGrow])).toEqual([['#8A63F0', 13], ['#8A63F05C', 3]])
-  expect((await pane.find({ type: 'Text', text: /^Next, step / }))?.text).toBe('Next, step 14 of 16 ·')
+  expect((await pane.find({ type: 'Text', text: /^Next to-do / }))?.text).toBe('Next to-do 14 of 16 ·')
   // Every step ticked while it still runs: the row stays and says so
   for (let n = 14; n <= 16; n += 1) await call('todo', { item: `Round step ${n}`, state: 'done' })
   expect((await pane.find({ type: 'Text', text: /^All \d+ to-dos done$/ }))?.text).toBe('All 16 to-dos done')
@@ -504,10 +504,10 @@ test('the panel shows how full the context of this chat and of each piece of wor
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect((await pane.find({ type: 'Text', text: /This chat/ }))?.text).toBe('This chat is 22% full')
   expect((await keyed(pane, 'model-a1'))?.props.label).toBe('Opus 5.5')
-  expect((await pane.find({ type: 'Text', text: /full/ }))?.text).toBe(' · 61% full · 0s')
+  expect((await pane.find({ type: 'Text', text: /^ · \d+% full/ }))?.text).toBe(' · 61% full · 0s')
   // Work with no to-dos has a whole purple edge
   expect((await pane.findAll({ type: 'Box' })).filter(b => String(b.props.backgroundColor).startsWith('#8A63F0')).map(b => b.props.backgroundColor)).toEqual(['#8A63F0'])
-  // A helper's row says its model, how much context it holds and its time, in that order
+  // A helper's row says its model and its time, in that order, never a count of tokens
   await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Measure the nose', prompt: 'go', parentAgentId: 'a1' } as never)
   for await (const chunk of $.turn.step({ turnId: 'turn-3', index: 0, model: 'm', messageCount: 2, agentId: 'a2' })) kinds.push(chunk.kind)
   // More to-dos than the edge has parts for are one edge, filled as far as they are done
@@ -515,9 +515,9 @@ test('the panel shows how full the context of this chat and of each piece of wor
   expect((await pane.findAll({ type: 'Box' })).filter(b => String(b.props.backgroundColor).startsWith('#8A63F0')).map(b => [b.props.backgroundColor, b.props.flexGrow])).toEqual([['#8A63F0', 3], ['#8A63F05C', 13]])
   await pane.unmount()
   const wide = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
-  expect((await wide.find({ type: 'Text', text: /^Opus 5\.5 · / }))?.text).toBe('Opus 5.5 · 305k · 0s')
+  expect((await wide.find({ type: 'Text', text: /^Opus 5\.5 · / }))?.text).toBe('Opus 5.5 · 0s')
   await wide.unmount()
-  // A narrower panel drops the context, and the narrowest the model too, so the helper's name keeps its room
+  // The narrowest panel drops the model too, so the helper's name keeps its room
   const narrow = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect((await narrow.find({ type: 'Text', text: /^Opus 5\.5 · / }))?.text).toBe('Opus 5.5 · 0s')
   await narrow.unmount()
@@ -598,7 +598,7 @@ test('work a safety flag would move to an older model is ended with a report tha
   expect(stepped).toEqual(['claude-opus-5-5'])
   expect(flagged.find(c => c.kind === 'tool')?.name).toBe('SubagentHandback')
   expect(JSON.parse(flagged.find(c => c.kind === 'input')?.json ?? '{}').message).toContain('Start what is left again on the current model, leaving out what was flagged')
-  expect(await line()).toContain("ended after a safety flag, so it doesn't continue on Opus 4.8")
+  expect(await line()).toContain("stopped by a safety check, so it doesn't continue on Opus 4.8")
   // Where the handback does not end it, a step after is a plain last answer, and still nothing runs on the older model
   const again = await step(2, 'claude-opus-4-8')
   expect(stepped).toEqual(['claude-opus-5-5'])
@@ -1053,7 +1053,7 @@ test('what a piece of work and its helpers have running is in its Details too, e
   // The helper's own Details, with no helpers of its own, shows what it has running
   const helperTab = await $.ui.mount({ ...LIST, requestId: 'work-a2', props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
   const its = await texts(helperTab)
-  expect((await helperTab.find({ type: 'Text', text: /^Running$/ }))?.props.bold).toBe(true)
+  expect((await helperTab.find({ type: 'Text', text: /^Commands$/ }))?.props.bold).toBe(true)
   expect(its).toContain('5 commands running')
   expect(its.filter(text => /Download weights/.test(text))).toHaveLength(5)
   expect(its.some(text => /Serve the site/.test(text))).toBe(false)
@@ -1157,7 +1157,7 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   expect(await until(async () => appended.find(line => /^a1: .*stopped your command "Fetch the CT scans" from the panel because it looked stuck: it had printed nothing for 3m/.test(line)))).toBeDefined()
   await advance(5_000)
   // (its row goes; the card's own line says it was stopped until the work writes again)
-  expect(await until(async () => ((await texts()).every(text => !/^Fetch the CT scans/.test(text) || text === 'Fetch the CT scans was stopped') || undefined))).toBe(true)
+  expect(await until(async () => ((await texts()).every(text => !/^Fetch the CT scans/.test(text) || text === 'Fetch the CT scans: stopped') || undefined))).toBe(true)
 })
 
 test('a percent moves up on its row within seconds of being printed, and a quiet of under three minutes says nothing (16 Nov: "nothing printed for 5 seconds, 10 seconds", while the percent sat still)', async ($, on) => {
@@ -1210,7 +1210,7 @@ test('a run whose output cannot be found says so after three minutes, so a blank
   const shown = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
   // Its name, its kind already said in the work's own words
   expect(shown.some(text => /^Fetch the CT scans/.test(text))).toBe(true)
-  expect(shown.some(text => /^No output yet( · Claude was told to check it)?$/.test(text))).toBe(true)
+  expect(shown.some(text => /^No output yet · started \d+m ago( · Claude was told to check it)?$/.test(text))).toBe(true)
   await list.unmount()
 })
 
@@ -1251,7 +1251,7 @@ test('a run of a work\'s own wakes it the moment it ends: any command that only 
   isAlive = false
   await clock.advance(20_000)
   expect(await until(async () => appended.find(one => one === 'a1: Your command "Upload both zips to the folder" has ended. Look at how it ended in its log, /w/upload.log, and carry on with the next step now.'))).toBeDefined()
-  expect(await until(async () => ((await line()).some(text => text === 'Upload both zips to the folder has ended') || undefined))).toBe(true)
+  expect(await until(async () => ((await line()).some(text => text === 'Upload both zips to the folder: ended') || undefined))).toBe(true)
   expect((await line()).some(text => /about 40% done/.test(text))).toBe(false)
   // The sifter outlived what it watched: stopped a minute on, and the work told why
   await clock.advance(60_000)
@@ -1342,7 +1342,7 @@ test('every run under a card says how it stands: a command held open shows its p
     const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
     const all = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
     await list.unmount()
-    return all.includes('Download the CT scans') && all.some(text => /^460 MB of 1 GB|^working$/.test(text)) ? all : undefined
+    return all.includes('Download the CT scans') && all.some(text => /^460 MB of 1 GB|^Working$/.test(text)) ? all : undefined
   })
   expect(early).toBeDefined()
   // Five minutes, well past the 1.5 times its minute where it turns amber, in steps of 5 s: the stand-in ps ages the shell from
@@ -1370,11 +1370,11 @@ test('every run under a card says how it stands: a command held open shows its p
   expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
-  expect(shown.some(text => /^No output yet( · Claude was told to check it)?$/.test(text))).toBe(true)
+  expect(shown.some(text => /^No output yet · started \d+m ago( · Claude was told to check it)?$/.test(text))).toBe(true)
   expect(shown.some(text => /updated/.test(text))).toBe(false)
   // The watch, its last event and when it came
   expect(shown.some(text => /^Watch · Azure jobs finishing/.test(text))).toBe(true)
-  expect(shown).toContain('Watching')
+  expect(shown.some(text => /^Watching( · last: |$)/.test(text))).toBe(true)
   // its event's file name is never shown
   expect(shown.some(text => /vsd-02/.test(text))).toBe(false)
   // A press on a run's name shows its output whole in a Terminal window, as it goes on
@@ -1448,8 +1448,8 @@ test('only runs really running are listed: a watch the engine killed at its time
   expect(shown).toContain('49m 00s of about 55m')
   // Past its time: a fresh expectation from the time left it prints; or else plainly past it, never the old figure as if it held
   expect(shown).toContain('49m 00s of about 53m')
-  expect(shown).toContain('49m 00s of about 20m')
-  expect(shown.some(text => /of about 20m 00s|of about 4m/.test(text))).toBe(false)
+  expect(shown).toContain('49m 00s · 29m over')
+  expect(shown.some(text => /of about 20m/.test(text))).toBe(false)
   // Details names each ended run with how it ended
   const pane = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
   const details = (await pane.findAll({ type: 'Text' })).map(one => one.text)
@@ -1461,7 +1461,7 @@ test('only runs really running are listed: a watch the engine killed at its time
   expect(details.some(text => /^finished after \dm \d\ds · /.test(text))).toBe(true)
   // Later the wait passes its time too, with nothing printed: it says so
   for (let n = 0; n < 8; n++) await advance(MIN)
-  expect((await texts()).some(text => /^57m 00s of about 55m$/.test(text))).toBe(true)
+  expect((await texts()).some(text => /^57m 00s · 2m over$/.test(text))).toBe(true)
 })
 
 test("a run's second line starts under its name, with the tree's lines carried down beside it: not the last, the last, a run under a helper, a narrow panel, on a desktop and in a terminal; 15 Nov the app dropped the lines and the line started left of the tree", SLOW, async ($, on) => {
@@ -1535,13 +1535,13 @@ test("a run's second line starts under its name, with the tree's lines carried d
   const shown = (await pane.findAll({ type: 'Text' })).map(one => one.text).join('\n')
   await pane.unmount()
   expect(shown).toContain('4m left')
-  expect(shown).toMatch(/~2m left/)
+  expect(shown).toMatch(/about 2m left/)
   expect(shown).not.toMatch(/printed/)
   // A narrow panel keeps how long is left before the percent
   const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 40 }, surface: 'terminal' } as never)
   const tight = (await narrow.findAll({ type: 'Text' })).map(one => one.text)
-  expect(tight).toContain('3/6 steps · ~2m left')
+  expect(tight).toContain('3/6 steps · about 2m left')
   // and one under a helper, with less room, keeps its count beside it
-  expect(tight).toContain('10/40 · ~6m left')
+  expect(tight).toContain('10/40 · about 6m left')
   await narrow.unmount()
 })

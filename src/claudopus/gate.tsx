@@ -343,7 +343,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') =
         said === 'deny'
           ? `You denied it. ${gate.kind === 'release' ? 'Nothing was released' : gate.kind === 'file' ? 'Nothing changed' : "It didn't run"}, and Claudopus told Claude.`
           : gate.kind
-            ? `You allowed it. ${gate.kind === 'release' ? 'Claudopus is releasing it now.' : 'Claude is making the change now.'}`
+            ? `You allowed it. ${gate.kind === 'release' ? 'Claude is releasing it now.' : 'Claude is making the change now.'}`
             : said === 'always'
             ? "You always allow this command. It runs now, and Claudopus won't ask again."
             : gate.isWork
@@ -824,7 +824,7 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
     )}
     <ui.Text wrap="wrap">
       {gate.kind === 'release'
-        ? 'Allow once: Claudopus merges this branch into main, checks it and pushes it with its version and tag. Deny: nothing is released, and Claudopus tells Claude.'
+        ? 'Allow once: Claude merges this branch into main, checks it and pushes it with its version and tag. Deny: nothing is released, and Claudopus tells Claude.'
         : gate.isUndone && gate.isOutside
           ? 'Something outside Claudopus changed this file, maybe you in an editor or a program a command left running, so Claudopus undid it. Allow once: Claudopus makes the change again. If you made it, allow it. Deny: the file stays as it was. Either way Claudopus keeps the changed text beside it as a .put-back copy.'
           : gate.isUndone

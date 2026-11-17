@@ -493,7 +493,7 @@ const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '') =
         <ui.Input
           key={`box-${one.id}-field-${mode === 'reply' ? 'reply-' : ''}${boxTries.get(one.id) ?? 0}`}
           placeholder={mode === 'reply' ? 'Type your answer' : 'Type or paste it here'}
-          submitLabel="send"
+          submitLabel="Send"
           autoFocus={n === 0 && !isKeysHeld ? true : undefined}
           onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($))}
           onSubmit={value => submitBox($, one.id, mode, value)}

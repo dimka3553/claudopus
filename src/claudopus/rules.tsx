@@ -301,7 +301,7 @@ const minutesSaid = (mins: number) => (mins >= 60 ? `${Math.floor(mins / 60)}h $
 const STUCK_IN_CHAT = (title: string, mins: number, isHelpersAtWork = false) =>
   `Nothing new from "${title}" for ${minutesSaid(mins)}${isHelpersAtWork ? ', though its helpers are still running something' : ''}. Claude may be stuck waiting for something. Its card shows how far it got.`
 // What the chat alone reads with it: it may ask the task what it waits on, as nothing of Claudopus's will
-const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to hand back what it has if nothing is coming.'
+const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to finish with what it has if nothing is coming.'
 // A task that ended its step to wait for its helpers, from which nothing new has come back: Claudopus starts it again with a nudge,
 // first to ask them, then to hand back what it has. What it is told, and what the chat is told
 const HELPERS_SILENT = (mins: number, helpers: string) =>

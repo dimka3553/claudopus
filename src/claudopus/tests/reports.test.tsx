@@ -71,7 +71,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   await until(async () => opened.includes(id) || undefined)
   const one = await $.ui.mount({ ...LIST, requestId: id, props: { ...LIST.props, title: 'Weekly revenue', bodyColumns: 80 }, surface: 'desktop' } as never)
   const heads = (await one.findAll({ type: 'Text' })).filter(text => text.props.bold).map(text => text.text)
-  expect(heads).toEqual(['Weekly revenue', 'Waiting for you', 'Summary', 'Pictures', 'Result', 'Follow-up'])
+  expect(heads).toEqual(['Weekly revenue', 'Waiting for you', 'Summary', 'Pictures', 'In full', 'Follow-up'])
   expect((await one.find({ type: 'Markdown', text: /Revenue rose 12%/ }))?.props.text).toBe(`${report}\n`)
   // Its picture is shown in the pane, never handed to another app: where it cannot be drawn, its path is given as text
   expect(await keyed(one, 'report-page')).toBeUndefined()

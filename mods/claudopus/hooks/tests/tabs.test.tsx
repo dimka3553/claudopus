@@ -791,7 +791,7 @@ test('the bar keeps its buttons whole on a row of their own under the header, wr
   expect((await term.findAll({ type: 'Box' })).find(one => one.key === 'head-buttons')?.props.rowGap).toBe(0)
   expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About'])
   // The chat's size is no longer squeezed beside the buttons
-  expect(await pane.find({ type: 'Text', text: /^This chat:/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^This chat /})).toBeDefined()
 })
 
 test('the header names the version this chat loaded beside Claudopus, and a newer one the Mac has installed, on the same line', async ($, on) => {
@@ -806,7 +806,7 @@ test('the header names the version this chat loaded beside Claudopus, and a newe
   expect(shown?.text).toBe('v0.1.0')
   expect(shown?.props.dimColor).toBe(true)
   // The header keeps its three lines: the name, what runs, this chat's size
-  expect(await pane.find({ type: 'Text', text: /^This chat:/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^This chat /})).toBeDefined()
   // The installed version is Claude Code's own record, not the last look's: a copy run from a folder of its code has none, so a
   // newer version in update.json names nothing (an installed copy's is read from installed_plugins.json, tested in update.test)
   await pane.unmount()

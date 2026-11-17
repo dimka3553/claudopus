@@ -221,7 +221,7 @@ test('a background command whose shell ends leaving its scripts running hands th
   expect(await until(async () => ((await leftTexts($)).some(text => /3 commands ended/.test(text)) || undefined))).toBe(true)
   const shown = await leftTexts($)
   expect(shown.some(text => /^Run python render\.py [01]/.test(text))).toBe(true)
-  expect(shown).toContain('Run a build of the scene has ended and Run a check of the scene has ended')
+  expect(shown).toContain('Run a build of the scene: ended · Run a check of the scene: ended')
   expect(shown.some(text => /commands have ended|Run the renders (has|have) /.test(text))).toBe(false)
 })
 

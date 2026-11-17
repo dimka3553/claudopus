@@ -30,7 +30,7 @@ const seenLines = new Map<string, Set<string>>()
 // its card, so a call does not write the cards and redraw every panel
 const lastCall = new Map<string, { id: string; what: string; at: number; endedAt?: number }>()
 // A command's own words turned into what it is doing: "Render the song stills" is "Rendering the song stills"
-const DOUBLED = new Set(['run', 'stop', 'get', 'set', 'put', 'cut', 'plan', 'drop', 'ship', 'scan', 'grab', 'trim', 'zip', 'pin', 'tag', 'map', 'log', 'shut', 'chat', 'swap', 'skip', 'step', 'wrap', 'snap', 'clip', 'dig', 'begin'])
+const DOUBLED = new Set(['commit', 'rerun', 'plot', 'crop', 'fit', 'refit', 'format', 'submit', 'omit', 'permit', 'chop', 'prep', 'spin', 'run', 'stop', 'get', 'set', 'put', 'cut', 'plan', 'drop', 'ship', 'scan', 'grab', 'trim', 'zip', 'pin', 'tag', 'map', 'log', 'shut', 'chat', 'swap', 'skip', 'step', 'wrap', 'snap', 'clip', 'dig', 'begin'])
 const VERBS = new Set(['run', 'download', 'upload', 'watch', 'serve', 'wait', 'check', 'render', 'build', 'test', 'install', 'fetch', 'copy', 'move', 'make', 'find', 'read', 'write', 'draw', 'train', 'fit', 'compute', 'count', 'convert', 'compress', 'push', 'pull', 'clone', 'deploy', 'start', 'stop', 'open', 'save', 'sync', 'update', 'fix', 'look', 'search', 'list', 'measure', 'compare', 'merge', 'release', 'export', 'import', 'generate', 'create', 'delete', 'remove', 'clean', 'tidy', 'record', 'capture', 'take', 'shoot', 'encode', 'decode', 'transcribe', 'play', 'send', 'load', 'prepare', 'set', 'get', 'sort', 'scan', 'crop', 'resize', 'split', 'join', 'bake', 'solve', 'analyse', 'analyze', 'plot', 'extract', 'unpack', 'pack', 'zip', 'grade', 'score', 'rank', 'evaluate', 'label', 'align', 'compile', 'lint', 'format', 'verify', 'validate', 'probe', 'query', 'print', 'show', 'restart', 'stage', 'commit', 'rebuild', 'retry', 'redo', 'rerun', 'resize', 'collect', 'gather', 'process', 'index', 'upscale', 'mesh', 'paint', 'cut', 'trim', 'publish', 'post', 'preview', 'shrink', 'combine', 'reset', 'apply', 'mark', 'tag', 'map', 'kill', 'begin', 'close', 'add', 'try'])
 const doingOf = (said: string) => {
   const [first = '', ...rest] = said.trim().split(/\s+/)
@@ -66,9 +66,12 @@ const helperNow = (one: Todo, at: number, commands = 0) => {
   if (note && (!call || (note.at ?? 0) >= call.at)) return note.text
   if (!call) return ''
   if (!call.endedAt) return at - call.at >= 60_000 ? `${call.what} · ${took(at - call.at)}` : call.what
-  // (a helper whose commands run in the background waits for them, as their rows under it show)
-  if (commands) return commands === 1 ? 'Waiting for its command' : 'Waiting for its commands'
-  return at - call.endedAt >= 60_000 ? `Thinking · ${took(at - call.endedAt)}` : 'Thinking'
+  // Between actions it is thinking; long after its last one, with commands of its own running in the background, it waits for
+  // them, as their rows under it show; long after with none, only that nothing new has come
+  const idle = at - call.endedAt
+  if (idle < 60_000) return 'Thinking'
+  if (commands) return `${commands === 1 ? 'Waiting for its command' : 'Waiting for its commands'} · ${took(idle)}`
+  return idle < 3 * 60_000 ? `Thinking · ${took(idle)}` : `Nothing new for ${took(idle)}`
 }
 
 // What a running call is, in a few words, for its row

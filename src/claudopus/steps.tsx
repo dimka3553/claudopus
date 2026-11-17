@@ -241,7 +241,7 @@ const lookedInLine = (one: Todo, at: number) => {
   const l = one.lookedIn
   // Helpers at work are rows on its tree already; only one gone quiet is said, as the work was told of it
   if (!l || one.status !== 'working' || !l.running || !l.quiet) return ''
-  return `${l.quiet === 1 ? '1 helper has' : `${l.quiet} helpers have`} shown nothing new for ${HELPER_QUIET / 60_000}m · Claude was told to check`
+  return `${l.quiet === 1 ? '1 helper has' : `${l.quiet} helpers have`} shown nothing new for over ${HELPER_QUIET / 60_000}m · Claude was told to check it`
 }
 
 const stepHooks = (on: On) => {

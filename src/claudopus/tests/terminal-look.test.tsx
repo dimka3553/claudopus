@@ -31,7 +31,7 @@ test('in the terminal each header button has a key, and a line says how to reach
 
   const idle = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
   expect(await keysOf(idle as never)).toMatchObject({ Stats: 's', Memory: 'm', Config: 'c', About: 'a' })
-  expect(await textOf(idle as never)).toContain('ctrl+x Tab')
+  expect(await textOf(idle as never)).toContain('ctrl+x then Tab')
   await idle.unmount()
 
   const held = await $.ui.mount({ ...LIST, props: { ...LIST.props, isFocused: true }, surface: 'terminal' } as never)
@@ -40,7 +40,7 @@ test('in the terminal each header button has a key, and a line says how to reach
 
   // The app has its own pointer and keys: no such line there
   const app = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await textOf(app as never)).not.toContain('ctrl+x Tab')
+  expect(await textOf(app as never)).not.toContain('ctrl+x then Tab')
   await app.unmount()
 })
 

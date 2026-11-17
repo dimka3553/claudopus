@@ -1000,7 +1000,7 @@ test('a helper quiet for five minutes is named to its work once, and the card sa
   expect(await pane.find({ type: 'Text', text: /looked in on|helper running/ })).toBeUndefined()
   await clock.advance(5 * 60_000)
   expect(appended.filter(line => line.startsWith('a1: Your helper "Read the nose code" (a2) has shown nothing new'))).toHaveLength(1)
-  expect((await pane.find({ type: 'Text', text: /^1 helper has shown nothing new for 5m · Claude was told to check$/ }))?.text).toBeDefined()
+  expect((await pane.find({ type: 'Text', text: /^1 helper has shown nothing new for over 5m · Claude was told to check it$/ }))?.text).toBeDefined()
   await clock.advance(3 * 60_000)
   expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1)
 })

@@ -791,7 +791,7 @@ test("with another Mac named in config.json, its chats' work shows here under it
   expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'billing · on m4' })).toBeDefined()
   // Its running time is told on this Mac's clock: a minute and some, not an hour
-  expect(await list.find({ type: 'Text', text: /^Opus 5\.5 · (\d+ of \d+ done · )?1m \d\ds$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Opus 5\.5 · (\d+ of \d+ to-dos done · )?1m \d\ds$/ })).toBeDefined()
   // Its ask is answered only in its own chat, on the M4: nothing to press here, and nothing goes there
   expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Send')).toBe(false)
   expect(await list.find({ type: 'Text', text: /^Answer it in its own chat, “.*”, on / })).toBeDefined()

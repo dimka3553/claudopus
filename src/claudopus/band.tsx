@@ -21,7 +21,7 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
         onPress={() => ((presses += 1), void (recordEvent($, 'scroll-call', { to: 'start' }), $.ui.scroll({ in: LIST, to: 'start', block: 'start' })).catch(() => undefined))}
       >
         {waitsAtTop > 0 ? (
-          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 card is' : `${waitsAtTop} cards are`} waiting for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} done` : ''}`}</ui.Text>
+          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop} waiting for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} done` : ''}`}</ui.Text>
         ) : (
           <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} is done` : `${finishedAtTop.length} tasks are done`}, at the top of the panel`}</ui.Text>
         )}
@@ -43,7 +43,7 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo, columns: number) => {
   return (
     <ui.Box key="band-reply" flexDirection="column" flexShrink={0} width="100%">
       <ui.Box flexDirection="row" height={1} overflow="hidden">
-        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↳ Your reply to “${cut(titleOf(one), 60)}”`}</ui.Text>
+        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↳ Your answer to “${cut(titleOf(one), 60)}”`}</ui.Text>
       </ui.Box>
       {'Input' in ui ? (
         <ui.Box flexDirection="column" width="100%" flexShrink={0}>

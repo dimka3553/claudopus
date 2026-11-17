@@ -80,7 +80,7 @@ const panelHooks = (on: On) => {
         <Box key="tab-back-row" flexDirection="row" gap={2} height={1} flexShrink={0} paddingX={2}>
           <Button key="tab-back" label="Close" plain hotkey="x" onPress={() => void backToPanel($, id).catch(err => log($, `not back to the panel: ${String(err)}`))} />
           {id.startsWith('report-') ? <Button key="tab-results" label="Results" plain hotkey="r" onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
-          <Text dimColor wrap="truncate-end">{e.props.isFocused ? 'Esc: back to the chat' : 'ctrl+x Tab for keys'}</Text>
+          <Text dimColor wrap="truncate-end">{e.props.isFocused ? 'Esc: back to the chat' : 'ctrl+x then Tab to use the keys'}</Text>
         </Box>
         {body}
       </Box>
@@ -263,7 +263,8 @@ const panelHooks = (on: On) => {
     const now = (one: Todo) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
       const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim() && !one.detached?.some(d => d.from === r.id)) : []
-      const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))}: ${endedWord(r)}`)
+      const said: Record<string, string> = { finished: 'done', failed: 'failed', killed: 'stopped', stopped: 'stopped', ended: 'ended' }
+      const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))}: ${said[r.how] ?? 'ended'}`)
       return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} · ${second}` : `${first} · ${second} · ${runs.length - 2} more ended`
     }
 
@@ -303,7 +304,7 @@ const panelHooks = (on: On) => {
       const canDraw = e.surface !== 'terminal' && 'Svg' in drawing
       // The terminal draws no picture: a row each that opens it, with no small copy made
       const made = canDraw ? askPicturesOf($, one) : paths.map(path => ({ name: fileName(path), path, thumb: null }) as Pic)
-      if (!made) return <Text key={`${key}-pics`} dimColor>Making its pictures small…</Text>
+      if (!made) return <Text key={`${key}-pics`} dimColor>Shrinking its pictures…</Text>
       if (!made.length) return null
       // In Details the chat's own small pictures are drawn too: all of them together stay near what that tab keeps for pictures
       const chatChars = isWhole ? [...(shots.get(one.id)?.shots.values() ?? [])].flat().reduce((sum, pic) => sum + (pic.thumb?.source.length ?? 0), 0) : 0
@@ -381,7 +382,7 @@ const panelHooks = (on: On) => {
           {/* A command to type: Terminal opens with it typed, not run, only on this press */}
           {canOpenTerminal(one) ? (
             <Box flexDirection="row">
-              <Button key={`${key}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Opened in Terminal, typed, not run' : 'Open in Terminal'} onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} />
+              <Button key={`${key}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Typed into Terminal, not run yet' : 'Open in Terminal'} onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} />
             </Box>
           ) : null}
           {/* Another chat's ask is answered only in its own chat: no file carries an answer there */}
@@ -398,7 +399,7 @@ const panelHooks = (on: On) => {
               isReplyOpen(one) ? (
                 <Button key={`${key}-inbar-close-${presses}`} label="Close the reply box" onPress={press => openReply($, undefined, press.surface)} />
               ) : (
-                <Button key={`${key}-inbar-${presses}`} label="Reply in your own words" onPress={press => openReply($, one, press.surface)} />
+                <Button key={`${key}-inbar-${presses}`} label="Answer in words" onPress={press => openReply($, one, press.surface)} />
               )
             ) : null}
           </Box>
@@ -417,7 +418,7 @@ const panelHooks = (on: On) => {
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
                 autoFocus={e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
-                placeholder="Or reply in your own words"
+                placeholder="Or answer in words"
                 value={draftShown(one.id, ask)}
                 rows={rows}
                 submitLabel={e.surface === 'terminal' ? 'send' : undefined}
@@ -726,7 +727,7 @@ const panelHooks = (on: On) => {
       const printedAt = Math.min(ran, Math.max(0, (job.wroteAt ?? 0) - job.at))
       const left = isFresh ? leftSeconds(job.left ?? guessLeft(job, printedAt)) : undefined
       const fresh = left ? timeLeftText(Math.max(ran / 1000, printedAt / 1000 + left))?.replace(/ left$/, '') : undefined
-      return fresh ? { time: `${took(ran)} of about ${fresh}`, isPast: false } : { time: `${took(ran)} of about ${job.expectText}`, isPast: true }
+      return fresh ? { time: `${took(ran)} of about ${fresh}`, isPast: false } : { time: `${took(ran)} · ${shortAgo(ran - job.expect)} over`, isPast: true }
     }
     // Every run's second line has the one shape plainOf describes: how far, a few plain words, and its sign of life, which changes
     // as time goes so the line never stands still while the run goes on. Nothing raw is shown: a line that is not plain words is
@@ -765,15 +766,15 @@ const panelHooks = (on: On) => {
       const told = isSilent && silentTold.has(job.id) ? 'Claude was told to check it' : ''
       const [state, short]: [string, string] =
         job.isPaused ? ['Paused', 'Paused']
-        : job.target ? [job.target, job.target.replace(/^what it waits (?:for|on) (?:is|has) /, '').replace(/^not changed for /, 'still for ')]
-        : job.kind === 'server' ? ['Serving', 'Serving']
-        : job.kind === 'watch' ? ['Watching', 'Watching']
+        : job.target ? [job.target, job.target.replace(/^what it waits (?:for|on) (?:is|has) /i, '').replace(/^not changed for /, 'still for ')]
+        : job.kind === 'server' || job.kind === 'watch' ? ['', '']
         : !isSilent ? ['', '']
         : hasSaid ? [`nothing new for ${ago(still)}`, `nothing new ${ago(still)}`]
-        : !job.wroteAt || job.isEmpty ? ['No output yet', 'No output yet']
+        : !job.wroteAt || job.isEmpty ? [`No output yet · started ${shortAgo(ran)} ago`, 'No output yet']
         : [`No progress shown · nothing new for ${ago(still)}`, `nothing new ${ago(still)}`]
       const isWarn = job.isPaused || Boolean(job.target) || isSilent
-      const lead = isSilent && hasSaid ? 'Last: ' : ''
+      // A server or a watch leads with what it does, then the last thing it said
+      const lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching') : isSilent && hasSaid ? 'Last: ' : ''
       const numbers = [[...full, ...pct, ...rate, ...left, ...mem], [...full, ...pct, ...rate, ...left], [...full, ...pct, ...left], [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...bare, ...left]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]
       const tails = [[state, told], [state], [short, told], [short]].map(t => t.filter(Boolean))
       // How far it is comes first, then its sign of life, then whether Claude was told: the fullest counts with each tail, then any
@@ -788,7 +789,7 @@ const panelHooks = (on: On) => {
         const said = words && room >= 12 ? (words.length <= room ? words : `${words.slice(0, room - 1).replace(/\s+\S*$/, '')}…`) : ''
         const text = [...nums, said, ...tail].filter(Boolean).join(' · ')
         // A run that gives word but says nothing plain of how far it is or what it does: that it is at work, and its kind's word
-        return { text: text ? `${lead && (nums.length || said) ? lead : ''}${text}` : job.kind === 'wait' ? 'Waiting' : job.kind === 'download' ? 'Downloading' : 'Working', isWarn }
+        return { text: text ? `${lead && (nums.length || said) ? lead : ''}${text}` : lead === 'Serving' || lead === 'Watching' ? lead : job.kind === 'wait' ? 'Waiting' : job.kind === 'download' ? 'Downloading' : 'Working', isWarn }
       }
       return { text: short, isWarn }
     }
@@ -1259,7 +1260,7 @@ const panelHooks = (on: On) => {
       return part(
         'part-ended-runs',
         'Commands ended',
-        `${runs.length} ${runs.length === 1 ? 'command' : 'commands'}${bad ? ` · ${bad} did not finish` : ''}`,
+        endedSummary(0, runs),
         <Box flexDirection="column">
           {runs.map(run => (
             <Box key={`ended-${run.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
@@ -1500,7 +1501,7 @@ const panelHooks = (on: On) => {
     const promptCard = (p: Prompt, key: string, where: string, c?: Shared) => (
       <Box key={`prompt-${key}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
         <Box flexDirection="column">
-          <Text dimColor wrap="truncate-end">{`${p.kind === 'question' ? 'Question' : p.kind === 'plan' ? 'Plan' : 'Permission'} · ${isHeldHere(p, c) || !c ? 'waits for your answer' : 'asked in another chat'}`}</Text>
+          <Text dimColor wrap="truncate-end">{`${p.kind === 'question' ? 'Question' : p.kind === 'plan' ? 'Plan' : 'Permission'} · ${isHeldHere(p, c) || !c ? 'waiting for you' : 'waiting in another chat'}`}</Text>
           <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
           {/* At the top, away from its chat's name: which chat it is */}
           {c ? <Text key={`prompt-${key}-chat`} dimColor wrap="truncate-end">{`In the chat “${chatName(c)}”${c.host ? ` on ${macName(c.host)}` : ''}`}</Text> : null}
@@ -1533,7 +1534,7 @@ const panelHooks = (on: On) => {
     const saidOf = (p: Prompt) => {
       if (p.answered === 'stopped') return 'It ended before you answered · nothing happened'
       if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · Claude got no answer and is waiting for you' : p.kind === 'plan' ? 'You said no · Claude keeps planning' : p.title ? "You said no · it didn't run, and Claudopus told Claude" : "You said no · it didn't run, and Claude is waiting for what you say next"
-      if (p.kind === 'question') return p.isRunning ? 'You answered · Claude is taking your answer' : 'You answered · Claude is continuing with your answer'
+      if (p.kind === 'question') return p.isRunning ? 'You answered · Claude has your answer' : 'You answered · Claude is continuing with your answer'
       if (p.kind === 'plan') return 'You approved the plan · Claude is carrying it out'
       if (p.isCut) return 'You allowed it · it was stopped before it finished'
       return p.isRunning ? 'You allowed it · it is running now' : `You allowed it · ${p.done ?? 'it ran and is done'}`
@@ -1865,13 +1866,13 @@ const panelHooks = (on: On) => {
               {memoryButton($, ui, isKeyed)}
               {configButton($, ui, isKeyed)}
               {aboutButton($, ui, isKeyed)}
-              {isInline && !e.props.isFocused ? <Text key="head-keys-short" dimColor>ctrl+x Tab for keys</Text> : null}
+              {isInline && !e.props.isFocused ? <Text key="head-keys-short" dimColor>ctrl+x then Tab to use the keys</Text> : null}
             </Box>
             {/* The terminal reaches a pane from the keys only after ctrl+x Tab, which nothing else tells; once it holds them each
                 button above answers its first letter */}
             {e.surface === 'terminal' && (e.props.isFocused || !isInline) ? (
               <Text key="head-keys" dimColor wrap="wrap">
-                {!e.props.isFocused ? 'ctrl+x Tab for keys' : [...own, ...elsewhere].some(one => one.ask) ? 'What you type goes in the reply box · Tab leaves it for the keys shown · Esc: back to the chat' : 'Esc: back to the chat'}
+                {!e.props.isFocused ? 'ctrl+x then Tab to use the keys' : [...own, ...elsewhere].some(one => one.ask) ? 'What you type goes in the reply box · Tab leaves it for the keys shown · Esc: back to the chat' : 'Esc: back to the chat'}
               </Text>
             ) : null}
           </Box>

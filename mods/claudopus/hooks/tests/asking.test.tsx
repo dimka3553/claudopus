@@ -749,7 +749,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Reply…')).toBe(false)
   expect((await ears.findAll({ type: 'Input' } as never)).some(one => /-reply-/.test(one.key ?? ''))).toBe(true)
   const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
-  expect(box?.props.placeholder).toBe('Or reply in your own words')
+  expect(box?.props.placeholder).toBe('Or answer in words')
   await list.input({ key: box?.key ?? '', text: 'Where do I do that?' })
   const toWork = (await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('Where do I do that?')))) ?? ''
   expect(toWork).toContain('Submit it to the plugin directory.')
@@ -2299,7 +2299,7 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
   const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   const barBox = async () => (await bar.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   await clock.advance(3000)
-  const open = await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Reply in your own words'))
+  const open = await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Answer in words'))
   await list.press({ key: open?.key ?? '' })
   expect(await until(async () => barBox())).toBeDefined()
   await box()
@@ -2378,7 +2378,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   const boxesIn = async (site: Site) => (await site.findAll({ type: 'Input' } as never)).filter(one => /-reply-/.test(one.key ?? ''))
   const says = async (site: Site, text: RegExp) => (await site.findAll({ type: 'Text' })).some(one => text.test(one.text ?? ''))
   const labelled = async (site: Site, label: string) => (await site.findAll({ type: 'Button' })).filter(b => b.props.label === label)
-  const OPEN = 'Reply in your own words'
+  const OPEN = 'Answer in words'
   const CLOSE = 'Close the reply box'
   // A surface whose bar was never drawn keeps the card's own box: a reply in words can always be typed somewhere
   expect((await boxesIn(list)).length).toBe(1)
@@ -2398,7 +2398,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   // Pressed: one box, in the bar, beside the name of the work it goes to and a Close; the card says where it is and offers to close it
   await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
   expect(await until(async () => ((await boxesIn(bar)).length === 1 ? true : undefined))).toBe(true)
-  expect(await says(bar, /^↳ Your reply to “Check the ears”$/)).toBe(true)
+  expect(await says(bar, /^↳ Your answer to “Check the ears”$/)).toBe(true)
   // Send is the big button, first, and Close the small one after it (16 Nov, the person: "the send button is big but the cancel
   // button is small")
   const shape = async () => (await bar.findAll({ type: 'Button' })).filter(b => ['Send', 'Close'].includes(String(b.props.label))).map(b => [b.props.label, b.props.variant ?? null, b.props.plain ?? null])
@@ -2435,7 +2435,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   expect((await labelled(list, CLOSE)).length).toBe(1)
   expect((await labelled(list, OPEN)).length).toBe(0)
   // The panel scrolled away from its top with the box open: the bar still points at what waits there
-  const MARK = '↑ 1 card is waiting for you at the top of the panel'
+  const MARK = '↑ 1 waiting for you at the top of the panel'
   const scrolled = async (offset: number) => (await list.unmount(), (list = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset, bodyRows: 20 } }, surface: 'desktop' } as never)))
   await scrolled(40)
   expect(await until(async () => bar.find({ type: 'Text', text: MARK }))).toBeDefined()
@@ -2483,14 +2483,14 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   await $.agent.spawn({ ...spawn, description: 'Sort the invoices', prompt: 'sort the invoices' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Which month?', choices: ['October', 'November'] } as never)
   expect(await until(async () => ((await labelled(list, OPEN)).length === 1 && (await labelled(list, CLOSE)).length === 1 ? true : undefined))).toBe(true)
-  expect(await says(bar, /^↳ Your reply to “Check the ears”$/)).toBe(true)
+  expect(await says(bar, /^↳ Your answer to “Check the ears”$/)).toBe(true)
   // Opened on the newer card it is that card's, empty; opened on the first again, its half-typed reply is back
   await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
-  expect(await until(async () => ((await says(bar, /^↳ Your reply to “Sort the invoices”$/)) ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await says(bar, /^↳ Your answer to “Sort the invoices”$/)) ? true : undefined))).toBe(true)
   expect((await boxesIn(bar)).length).toBe(1)
   expect((await boxesIn(bar))[0]?.props.value ?? '').toBe('')
   await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
-  expect(await until(async () => ((await says(bar, /^↳ Your reply to “Check the ears”$/)) ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await says(bar, /^↳ Your answer to “Check the ears”$/)) ? true : undefined))).toBe(true)
   expect((await boxesIn(bar))[0]?.props.value).toBe('The left, but ke')
   // Sent from the bar with its Send button: it reaches the work in the person's own words, and the box goes with the ask, on to no
   // other card
