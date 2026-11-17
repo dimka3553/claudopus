@@ -1,0 +1,1 @@
+- The panel and the bar above the prompt no longer redraw themselves several times a second with nothing new: two requests for a drawing that came together kept asking for another one without end, and every redraw made the hover under your pointer blink.

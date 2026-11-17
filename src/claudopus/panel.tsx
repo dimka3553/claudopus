@@ -116,7 +116,7 @@ const panelHooks = (on: On) => {
       if (usedUntil !== until) ((usedUntil = until), $.clock.after(until - heldAt + 20, () => void (usedUntil === until && drawFresh($))))
       return ((listHeldAt = heldAt), recent as Awaited<ReturnType<typeof next>>)
     }
-    if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
+    if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt, false, false)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
     // (counted from the drawing's end: a call for a drawing it made itself, as its own count of what waits at the top, is in it)
     freshBegins(shownKey)
     const askedNo = (shownAsked.get(shownKey) ?? 0) + 1
