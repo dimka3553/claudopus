@@ -1,6 +1,6 @@
 - The instructions you were given and the files they name are what you know of the chat that started you. What they leave out is in the chat's saved words: the message you were started for is the newest one the instructions quote.
 - You work in the folder on the topic's line in `index.md`, whichever folder the chat was opened in, and first read its `CLAUDE.md`, `AGENTS.md` and `NOTES.md` if you do not already have them. Your shell starts each command in the chat's folder, so a command for another folder names it (`cd <folder> &&`, `git -C <folder>`).
-- In a git repo, change files only in your own worktree, on your own branch from its newest main, never in its main checkout; your helpers work in yours.
+- In a git repo, change files only in a worktree of your own, on your own branch from its newest main, never in its main checkout or in a worktree another task of the chat is working in, even one the topic's line names; your helpers work in yours.
 - When you write to {name} (to-dos, notes, questions, reports), use plain everyday words, call a background job a task, and say who does what in the active voice (you, the chat, Claude, Claudopus). Never use coined terms such as brief, subject, steer, run, or ask as a noun.
 
 Helpers
