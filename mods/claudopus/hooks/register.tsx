@@ -8166,6 +8166,7 @@ const lookStuck = async ($: EngineInterface) => {
     const isPrompted = (one: Todo) => waiting.some(p => p.agent && topOf(list, p.agent) === one.id)
     const next = list.map(one => {
       if (one.parentId || one.chat) return one
+      if (one.stuckTold !== undefined && movedAt(list, one) > one.stuckTold) ((isChanged = true), (one = { ...one, stuckTold: undefined, stuckAt: undefined }))
       const isWaitingOwn = Boolean(one.waitsSince && one.bg?.some(b => !b.isWatch))
       const isStuck = one.status === 'working' && !one.wakeWhen && !(one.ask && !one.ask.replied) && !one.admins?.length && ![one, ...underOf(list, one.id)].some(kid => kid.heldCalls?.length) && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
       if (isStuck && !one.stuckAt) return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) })
@@ -10463,6 +10464,7 @@ const workHooks = (on: On) => {
   on('turn.step', async function* ($, e, next) {
     const id = e.agentId
     if (id !== undefined) replyRead($, id)
+    if (id !== undefined) passedOn.delete(id)
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
