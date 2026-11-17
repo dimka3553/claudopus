@@ -128,11 +128,15 @@ export type Todo = {
   // What it asked Claudopus to start it again for (wake_me), in place of a command that only waits: in its own words, a file to
   // appear, a line in that file, a page that answers, or only a time; when it asked, and the latest it is looked for
   wakeWhen?: { what: string; file?: string; text?: string; url?: string; at: number; until: number }
-  // How many looks in a row ran out with what it asked to be woken for never there: after two it is told to hand back what it has
-  wakeMisses?: number
-  // How many times Claudopus started it again, its step ended, because nothing new came back from its helpers for a while, and when
-  // last; from the second it may hand back its report while they run, and they are stopped as it does. Gone once no helper of its runs
-  nudged?: { count: number; at: number }
+  // What it was last woken for when that look ran out, and how many looks for it ran out in a row: after two, a look for the same
+  // thing is refused and it hands back what it has
+  wakeMisses?: { what: string; count: number }
+  // Claudopus started it again, its step ended, because nothing new came back from its helpers for a while: how many times (once to
+  // check on them, once to hand back what it has) and when last; `isGivenUp` once the chat was told it is stuck. Gone once a helper
+  // brings something new, someone writes to it, or no helper of its runs
+  nudged?: { count: number; at: number; isGivenUp?: boolean }
+  // Claudopus, or the chat, told it to hand back what it has: since when. Its report goes through while helpers run; gone with `nudged`
+  mayHandBack?: number
   // Work cut off as the chat's process ended, not stopped by anyone: when, and when it went on again; `backAt` is absent while it
   // could not be started again
   cutAt?: number

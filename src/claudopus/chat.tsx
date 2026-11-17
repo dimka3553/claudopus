@@ -189,7 +189,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'wake_me',
       description: named(
-        'For a file, a page or a time that nothing of yours makes (a file another program writes, a page that comes up, a moment to look again): Claudopus looks for it and starts you again the moment it is there, so you end your step instead of waiting with a command. Your own commands, in the background or detached, and your helpers wake you by themselves: never use this for them. Name a file, a line in it, a page, or only minutes; Claudopus looks for at most an hour. A new call replaces the last one.',
+        'For a file, a page or a time that nothing of yours makes (a file another program writes, a page that comes up, a moment to look again): Claudopus looks for it and starts you again the moment it is there, so you end your step instead of waiting with a command. Your own commands, in the background or detached, and your helpers wake you by themselves: never use this for them. Name a file, a line in it, a page, or only minutes; Claudopus looks for at most an hour unless you say why it takes longer. A new call replaces the last one.',
       ),
       inputSchema: {
         type: 'object',
@@ -198,7 +198,8 @@ const chatHooks = (on: On) => {
           file: { type: 'string', description: 'The full path of a file to appear (with `text`, a file to hold that text)' },
           text: { type: 'string', description: 'A line of text to appear in `file`' },
           url: { type: 'string', description: 'A page to answer without an error' },
-          minutes: { type: 'number', description: 'With nothing else: start you after this many minutes. With a file or page: the longest to look, after which you are started with word that it never came (15 when left out, at most 60). Should it never come, you are started again and hand back what you have' },
+          why: { type: 'string', description: 'For more than 60 minutes: what takes that long' },
+          minutes: { type: 'number', description: 'With nothing else: start you after this many minutes. With a file or page: the longest to look, after which you are started with word that it never came (15 when left out, at most 60, or 360 with `why`). Should it never come, you are started again and hand back what you have' },
         },
         required: ['what'],
       },

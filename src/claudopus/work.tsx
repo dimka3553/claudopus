@@ -419,12 +419,17 @@ const workHooks = (on: On) => {
                   ? 'the task that started you'
                   : `the task${title(sender)}`
         }
+        // Words from the chat or the person, or a helper's own, are news: the nudges about its helpers start over, and leave to hand
+        // back while they run goes with them, unless the chat asks it to hand back what it has
+        const isNews = e.agentId === undefined || list.find(one => one.id === e.agentId)?.parentId === target.id
+        const isHandBackAsked = e.agentId === undefined && HAND_BACK_ASKED.test(message)
         await changeTodos($, list =>
           list.map(one =>
             one.id !== target.id
               ? one
               : {
                   ...one,
+                  ...(isNews ? { nudged: undefined, mayHandBack: isHandBackAsked ? now : undefined } : {}),
                   owes: isSteer ? 0 : one.owes,
                   entries: words && one.entries.at(-1)?.text !== words ? [...one.entries, { at: now, kind: 'steer' as const, text: words }].slice(-ENTRIES_KEPT) : one.entries,
                 },
@@ -479,8 +484,8 @@ const workHooks = (on: On) => {
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       const r = await next(e)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
-      // Its silent helpers, which it was let hand back over, end with its report
-      if (!r.deny && !r.isError && isLetGoNow) await stopHelpers($, e.agentId).catch(err => log($, `helpers of ${e.agentId} not stopped: ${String(err)}`))
+      // The helpers it was let hand back over that sit silent end with its report; those at work go on, their results reaching the chat
+      if (!r.deny && !r.isError && isLetGoNow) await stopHelpers($, e.agentId, true).catch(err => log($, `helpers of ${e.agentId} not stopped: ${String(err)}`))
       return r
     }
     // No agent, the chat's or a work's helper, is started on an older model or on Haiku: one named so starts on its family's newest
