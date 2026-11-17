@@ -10721,7 +10721,7 @@ const commandHooks = (on: On) => {
 
   on('ui.focus', async ($, e, next) => {
     const isInBarBox = e.plugin === 'claudopus' && isBarBox(e.element)
-    if (isInBarBox) barBoxAt = await $.clock.now()
+    if (isInBarBox && (e.origin.kind === 'person' || barBoxAt === 0)) barBoxAt = await $.clock.now()
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
       if (e.plugin === 'claudopus') await engage($)
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)

@@ -403,8 +403,8 @@ const asPressed = (one: Todo): Todo => {
 const barBoxes = new Set<string>()
 const repliesInBar = (surface: string) => barBoxes.has(surface)
 // When the bar's box last took the cursor or a letter, 0 once the cursor is known to have left it or its reply was sent: the bar
-// holds its drawing that long (band.tsx, barHeld). The app may say nothing when the cursor leaves for the chat's own box, so the
-// hold ends by itself BAR_BOX_HELD after the last sign of it
+// gives its own drawing again for BAR_BOX_HELD after it (band.tsx, barHeld), and the mod puts off its other redraws for TYPING
+// after it (isBoxHeld). The app may say nothing when the cursor leaves for the chat's own box, so both end by themselves
 let barBoxAt = 0
 const BAR_BOX_HELD = 300_000
 const isBarBox = (element: string | undefined) => /^band-.*-reply-/.test(element ?? '')
