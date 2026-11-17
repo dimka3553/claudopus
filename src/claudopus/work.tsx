@@ -311,8 +311,9 @@ const workHooks = (on: On) => {
     let woken = ''
     // A heavy command of a piece of work waits its turn while the Mac is busy, and is told how long it waited as it runs
     const next = async (asked: typeof e) => {
-      const held = dir && !isOff && e.agentId !== undefined && asked.tool === 'Bash' ? await holdHeavy($, asked, raw as never) : {}
-      if (held.deny) return { deny: held.deny } as Awaited<ReturnType<typeof raw>>
+      // (never one the person has just allowed as admin or as a release: what they allowed lasts two minutes)
+      const held = dir && !isOff && e.agentId !== undefined && asked.tool === 'Bash' && !grants.length ? await holdHeavy($, asked, raw as never) : {}
+      if (held.deny) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: held.deny } as Awaited<ReturnType<typeof raw>>)
       try {
         const r = await nextHere(asked)
         return held.said && !r.deny ? ({ ...r, context: [...((r as { context?: string[] }).context ?? []), held.said] } as typeof r) : r

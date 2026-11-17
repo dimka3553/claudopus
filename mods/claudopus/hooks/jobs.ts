@@ -121,20 +121,29 @@ const stepsOf = (cmd: string) =>
 // either: they are never held. On 16 Nov ten tasks each drove headless browsers for screenshots on one Mac at once, and on 15 Nov
 // its load average reached 204 on 18 cores
 export type HeavyKind = 'browser' | 'build' | 'render'
-const BROWSER_STEP = /^(?:(?:npx|pnpm(?: exec| dlx)?|yarn|bunx|uvx)\s+)?(?:playwright\b(?!\s+install\b)|puppeteer\b|shot-scraper\b|capture-website\b|pageres\b|wkhtmltoimage\b|chrome-headless-shell\b|(?:chromium(?:-browser)?|google-chrome(?:-stable)?|Google Chrome(?: for Testing| Canary)?|Chromium|Microsoft Edge|Brave Browser)\s.*--(?:headless|screenshot|print-to-pdf|dump-dom)\b)/
+const BROWSER_STEP = /^(?:(?:npx|pnpm(?: exec| dlx)?|yarn|bunx|uvx)\s+(?:-\S+\s+)*)?(?:playwright\b(?!\s+install\b)|puppeteer\b|shot-scraper\b|capture-website\b|pageres\b|wkhtmltoimage\b|chrome-headless-shell\b|(?:chromium(?:-browser)?|google-chrome(?:-stable)?|Google Chrome(?: for Testing| Canary)?|Chromium|Microsoft Edge|Brave Browser)\s.*--(?:headless|screenshot|print-to-pdf|dump-dom)\b)/
 const BROWSER_SCRIPT = /\bfrom\s+['"](?:playwright|@playwright\/test|puppeteer(?:-core)?)['"]|\brequire\(\s*['"](?:playwright|puppeteer(?:-core)?)['"]\s*\)|\bimport\s*\{[^}]*\b(?:chromium|firefox|webkit)\b[^}]*\}\s*from\s*['"][^'"]*playwright[^'"]*['"]|\bfrom\s+playwright\.(?:sync|async)_api\s+import\b|\b(?:chromium|puppeteer)\.launch\(|\bpyppeteer\b|\bselenium\.webdriver\b/
 const BUILD_STEP = /^(?:(?:npx|bunx)\s+)?(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?build\b|next\s+build\b|vite\s+build\b|astro\s+build\b|nuxt\s+build\b|remix\s+build\b|webpack\b|rollup\b|turbo\s+(?:run\s+)?build\b|cargo\s+build\b|xcodebuild\b|swift\s+build\b|go\s+build\b|docker\s+(?:buildx\s+)?build\b|gradlew?\s|mvn\s|make\b(?=.*\s-j)|cmake\s+--build\b|bazel\s+build\b|expo\s+export\b)/
-const RENDER_STEP = /^(?:(?:npx|pnpm(?: exec| dlx)?|bunx)\s+)?(?:ffmpeg\b|remotion\s+render\b|hyperframes\s+render\b|blender\b.*\s(?:-b|--background)\b|manim\b|povray\b)/
+const RENDER_STEP = /^(?:(?:npx|pnpm(?: exec| dlx)?|bunx)\s+(?:-\S+\s+)*)?(?:ffmpeg\b|remotion\s+render\b|hyperframes\s+render\b|blender\b.*\s(?:-b|--background)\b|manim\b|povray\b)/
 // A script a step runs with an interpreter, for the browser it may drive
-const INTERPRETED = /^(?:node|bun|deno(?:\s+run)?|tsx|ts-node|python3?|uv\s+run(?:\s+python3?)?)\b/
+// A script a step runs with an interpreter, for the browser it may drive: a file it names, or code given on its own line
+const INTERPRETED = /^(?:(?:npx|pnpm\s+(?:exec|dlx)|bunx)\s+(?:-\S+\s+)*)?(?:node|bun|deno(?:\s+run)?|tsx|ts-node|python3?|uv\s+run(?:\s+python3?)?)\b/
+// What never ends to make room is no heavy command, as a server is not: a build or test that watches, a report or test window it
+// serves, a recorder of clicks
+const ENDLESS = /(?:\s--watch\b|\s-w\b|\s--ui\b|\bserve\b|\bshow-report\b|\bshow-trace\b|\bcodegen\b|\bdev\b)/
+// A look that is over in a moment: a program's version or help, one frame taken out of a video
+const MOMENT = /\s(?:-version|-h|-help|--help|-codecs|-formats|-encoders|-decoders|-filters|-frames:v\s+1|-vframes\s+1)\b/
 const MOD_OWN = /(?:^|\/)bin\/release\b|\bguard\.mjs\b|\bplugin\s+(?:test|validate)\b|\bsrc\/claudopus\/build\.mjs\b/
 export const heavyOf = (cmd: string, scripts: string[] = []): HeavyKind | '' => {
-  // Each step by its own program's name, its folder taken off, quoted or not: "/Applications/Google Chrome.app/.../Google Chrome" --headless
-  const steps = stepsOf(cmd).map(step => step.replace(/^"[^"]*\/([^"/]+)"/, '$1').replace(/^'[^']*\/([^'/]+)'/, '$1').replace(/^[^\s"']*\//, ''))
-  if (steps.some(step => MOD_OWN.test(step))) return ''
-  if (steps.some(step => SERVER_CMD.test(step) && !BUILD_STEP.test(step)) && !steps.some(step => BROWSER_STEP.test(step) || RENDER_STEP.test(step))) return ''
-  if (steps.some(step => BROWSER_STEP.test(step))) return 'browser'
-  if (steps.some(step => INTERPRETED.test(step)) && scripts.some(text => BROWSER_SCRIPT.test(text))) return 'browser'
+  // The mod's own runners anywhere in it, by their paths as written: the release runs builds and tests of its own and is never held
+  if (MOD_OWN.test(cmd)) return ''
+  // Each step by its own program's name, its folder taken off, quoted, escaped or not: "/Applications/Google Chrome.app/.../Google Chrome" --headless
+  const steps = stepsOf(cmd.replace(/\\ /g, '\u0000'))
+    .map(step => step.replace(/^"[^"]*\/([^"/]+)"/, '$1').replace(/^'[^']*\/([^'/]+)'/, '$1').replace(/^[^\s"']*\//, '').replace(/\u0000/g, ' '))
+    .filter(step => !ENDLESS.test(step) && !MOMENT.test(step))
+  const isBrowserScript = steps.some(step => INTERPRETED.test(step)) && [cmd, ...scripts].some(text => BROWSER_SCRIPT.test(text))
+  if (steps.some(step => BROWSER_STEP.test(step)) || isBrowserScript) return 'browser'
+  if (steps.some(step => SERVER_CMD.test(step))) return steps.some(step => RENDER_STEP.test(step)) ? 'render' : steps.some(step => BUILD_STEP.test(step) && !SERVER_CMD.test(step)) ? 'build' : ''
   if (steps.some(step => RENDER_STEP.test(step))) return 'render'
   if (steps.some(step => BUILD_STEP.test(step))) return 'build'
   return ''

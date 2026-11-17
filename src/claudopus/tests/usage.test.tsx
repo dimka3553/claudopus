@@ -324,7 +324,7 @@ test('the battery card says what the Mac draws, the processors and graphics each
   await desk.unmount()
 })
 
-test("a task's heavy command waits its turn on its card while the Mac is busy and another runs, and goes in order once there is room, told how long it waited; one with nothing else heavy running and the setting at Never never wait (16 Nov: ten tasks drove headless browsers on one Mac at once)", SLOW, async ($, on) => {
+test("a task's heavy command waits its turn on its card while the Mac is busy and another runs, and goes in order once there is room, told how long it waited; one with nothing else heavy running never waits, and the setting at Never lets go one already waiting (16 Nov: ten tasks drove headless browsers on one Mac at once)", SLOW, async ($, on) => {
   let n = 0
   let load = 60
   const { clock, wake, files } = world(on, { usage: () => lookAt((n += 1), 1583261, `@@LOAD@@\n{ ${load}.00 50.00 40.00 }`) })
@@ -346,10 +346,10 @@ test("a task's heavy command waits its turn on its card while the Mac is busy an
     await list.unmount()
     return all
   }
-  expect(await until(async () => ((await texts()).some(text => /^the Mac is busy · 2nd in line/.test(text)) || undefined))).toBe(true)
+  expect(await until(async () => ((await texts()).some(text => /^waits for room on the Mac · 2nd in line/.test(text)) || undefined))).toBe(true)
   const held = await texts()
   expect(held.some(text => /^Wait · its turn: Take the card shots/.test(text))).toBe(true)
-  expect(held.some(text => /^the Mac is busy · next in line/.test(text))).toBe(true)
+  expect(held.some(text => /^waits for room on the Mac · next in line/.test(text))).toBe(true)
   expect(held.some(text => /^Wait · its turn: Take the menu shots/.test(text))).toBe(true)
   // Still held while the load stays
   await clock.advance(10_000)
@@ -364,11 +364,13 @@ test("a task's heavy command waits its turn on its card while the Mac is busy an
   expect(said.deny).toBeUndefined()
   expect(said.context?.some(line => /^Claudopus held this command \("Take the card shots"\) \d+s, until the Mac had room for it, and ran it as soon as its turn came\.$/.test(line))).toBe(true)
   expect((await third).deny).toBeUndefined()
-  expect(await until(async () => (!(await texts()).some(text => /its turn|the Mac is busy/.test(text)) || undefined))).toBe(true)
-  // With the setting at Never, a heavy command runs at once however busy the Mac is
+  expect(await until(async () => (!(await texts()).some(text => /its turn|room on the Mac/.test(text)) || undefined))).toBe(true)
+  // Busy again, one more waits; the setting put at Never lets it go at once
   load = 60
   await clock.advance(6000)
+  const footer = shoot('s4', 'a3', 'Take the footer shots').then(r => (done.push('s4'), r))
+  expect(await until(async () => ((await texts()).some(text => /^Wait · its turn: Take the footer shots/.test(text)) || undefined))).toBe(true)
   ownSet(files, 'config.json', JSON.stringify({ heavy: 'never' }))
-  const never = shoot('s4', 'a3', 'Take the footer shots').then(() => true)
-  expect(await until(async () => Promise.race([never, new Promise<undefined>(done => setTimeout(() => done(undefined), 50))]))).toBe(true)
+  expect(await until(async () => (await clock.advance(1000), wake(), done.includes('s4') || undefined))).toBe(true)
+  expect((await footer).deny).toBeUndefined()
 })

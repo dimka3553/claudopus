@@ -535,6 +535,22 @@ test("a heavy command is one whose own program drives a browser, builds or rende
     ['next dev -p 3517', [], ''],
     ['/Users/x/.claude/plugins/cache/claudopus/claudopus/0.2.1/bin/release', [], ''],
     ['"$ENGINE" plugin test mods/claudopus && npm run build', [], ''],
+    ['cd wt && npm run build && mods/claudopus/bin/release', [], ''],
+    // what never ends to make room, and a look over in a moment
+    ['npx webpack serve', [], ''],
+    ['vite build --watch', [], ''],
+    ['npm run build -- --watch', [], ''],
+    ['npx playwright show-report', [], ''],
+    ['npx playwright test --ui', [], ''],
+    ['ffmpeg -version', [], ''],
+    ['ffmpeg -ss 3 -i a.mp4 -frames:v 1 a.png', [], ''],
+    // code given on the command's own line, a server started beside a shot, a runner before the interpreter, an escaped path
+    ['node -e "const { chromium } = require(\'playwright\'); chromium.launch()"', [], 'browser'],
+    ["python3 -c 'from playwright.sync_api import sync_playwright'", [], 'browser'],
+    ['npm run dev & sleep 5 && node shoot.mjs', ["import { chromium } from 'playwright'"], 'browser'],
+    ['npx tsx shoot.ts', ["import { chromium } from 'playwright'"], 'browser'],
+    ['npx -y playwright screenshot http://localhost:3000 a.png', [], 'browser'],
+    ['/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --headless --screenshot=a.png http://localhost:3000', [], 'browser'],
   ]
   for (const [cmd, scripts, kind] of cases) expect([cmd, heavyOf(cmd, scripts)]).toEqual([cmd, kind])
 })
