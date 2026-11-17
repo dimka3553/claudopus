@@ -768,7 +768,8 @@ test('a launcher that starts 8 drawings and exits leaves 8 runs under its card, 
     procs.logs[String(5060 + k)] = `/s/figlog/page-${k}.log`
     procs.outputs[`/s/figlog/page-${k}.log`] = `progress: ${k}/16 eyes drawn (PMC closed ${k})\n`
   }
-  await $.tool.call({ tool: 'Bash', tool_use_id: 'l1', agentId: 'a1', command: 'cd /w && ~/.venvs/ct/bin/python launch.py 8', description: 'Run the drawing of all 25 pages, eight at a time (about 20 min)' } as never)
+  // (held open, so its words give it no time: one said to take minutes is refused, to be sent in the background)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'l1', agentId: 'a1', command: 'cd /w && ~/.venvs/ct/bin/python launch.py 8', description: 'Run the drawing of all 25 pages, eight at a time' } as never)
   await advance(20_000)
   const shown = await until(async () => {
     const all = await leftTexts($)

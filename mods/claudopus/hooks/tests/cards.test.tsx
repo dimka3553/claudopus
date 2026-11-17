@@ -2032,7 +2032,8 @@ test('every run under a card says how it stands: a command held open shows its p
   await $.tool.call({ tool: 'Bash', tool_use_id: 'r1', agentId: 'a1', command: 'bash /s/round3b_figs.sh', description: 'Redraw all pictures', run_in_background: true } as never)
   await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'tail -n0 -F sheet.log', description: 'Azure jobs finishing' } as never)
   heldAt = now
-  const call = $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a1', command: 'curl -L -o scans.zip https://example.com/scans.zip # hold dl', description: 'Download the CT scans (about 3 min)' } as never)
+  // (said to take a minute: one its words give two minutes or more is refused, to be sent in the background)
+  const call = $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a1', command: 'curl -L -o scans.zip https://example.com/scans.zip # hold dl', description: 'Download the CT scans (about 1 min)' } as never)
   // The mod takes as the command held open only a shell started within 20 s of when the call began, as its hook saw it: the clock
   // moves only once the call is running, else on a slow machine (GitHub's) the hook ran a few steps late and no shell matched
   expect(await until(async () => held.has('dl') || undefined)).toBe(true)
@@ -2045,7 +2046,7 @@ test('every run under a card says how it stands: a command held open shows its p
     return all.includes('Download the CT scans') && all.some(text => /^460 MB of 1 GB|^working$/.test(text)) ? all : undefined
   })
   expect(early).toBeDefined()
-  // Five minutes, past the 1.5 times its three minutes where it turns amber, in steps of 5 s: the stand-in ps ages the shell from
+  // Five minutes, well past the 1.5 times its minute where it turns amber, in steps of 5 s: the stand-in ps ages the shell from
   // `now`, which runs a step ahead of the clock while a step's timers fire. No longer: each second the clock moves runs the
   // panel's every-second look, and on GitHub's Mac nine minutes took past the time the kit lets a held call run, which ended it
   // (57 steps here, as three were taken above for its row at ten seconds)
@@ -2066,7 +2067,7 @@ test('every run under a card says how it stands: a command held open shows its p
   expect(shown).toContain('Download the CT scans')
   // past it, the run's own time left makes a fresh expectation, never the old figure as if it held
   expect(shown).toContain('5m 00s of ~5m 53s')
-  expect(shown.some(text => /of ~3m/.test(text))).toBe(false)
+  expect(shown.some(text => /of ~1m/.test(text))).toBe(false)
   expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
