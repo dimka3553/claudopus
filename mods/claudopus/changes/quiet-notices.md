@@ -1,0 +1,1 @@
+- The chat no longer shows a red "A hook blocked your prompt" card each time Claude Code tells it that a task is still at work or that a report already came. Such a notice now goes into the chat quietly and ends its own turn at once, with no answer from Claude and no cost; one that comes while the chat is busy joins the turn already running.

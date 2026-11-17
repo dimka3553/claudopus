@@ -65,6 +65,9 @@ const heldLook = async ($: EngineInterface, id: string) => {
   // (passOnHelper)
   if (wasWorking && card?.parentId && card.parentId !== HELPER) await passOnHelper($, id, card.answer ?? '', card.status)
 }
+// The notices of a quiet prompt let in while the chat is idle, until the turn it starts; the turns to answer with no model
+let quietNext: string | undefined
+const quietTurns = new Set<string>()
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
     await knowSystem($).catch(() => undefined)
@@ -410,10 +413,14 @@ const chatHooks = (on: On) => {
       // The chat's own command ended: how it ended and its last lines go with the notice
       const ended = await chatCommandEnded($, e.text).catch(() => [] as string[])
       if (ended.length) return next({ ...e, context: [...(e.context ?? []), ...ended, ...waits] })
-      // Notices with nothing new (a report already given, a task still at work) are left out, so the chat takes no turn for them
+      // Notices with nothing new (a report already given, a task still at work) cost the chat no turn of the model's: one that comes
+      // while the chat is at work goes into that turn, and one that would start a turn has that turn answered with no model
+      // (workHooks' turn.step). Neither is dropped, which Claude Code shows as a warning card. The word that a task still waits goes with it, so
+      // the chat, reading it later, does not take the task for ended
       if (quiet.isQuiet) {
-        await log($, quiet.isRepeat ? 'left out the notice that repeats a report already given' : 'left out notices with nothing new: tasks still at work')
-        return { drop: quiet.isRepeat ? "Left out a repeat notice: that task's report already came." : 'Left out a notice with nothing new: the task is still at work.' }
+        if (e.turnId === undefined) quietNext = noticesOf(e.text)
+        await log($, `${quiet.isRepeat ? 'let in the notice that repeats a report already given' : 'let in notices with nothing new: tasks still at work'}, ${e.turnId === undefined ? 'its turn answered with no model' : 'into the turn at work'}`)
+        return next(waits.length ? { ...e, context: [...(e.context ?? []), ...waits] } : e)
       }
       if (waits.length) return next({ ...e, context: [...(e.context ?? []), ...waits] })
     }
@@ -469,6 +476,17 @@ const chatHooks = (on: On) => {
     await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
 
     return next(context.length ? { ...e, text, context } : { ...e, text })
+  })
+
+  // The turn a quiet notice starts (above) is known as it starts; its first step is answered with Claude Code's own line for a turn
+  // with nothing to say (workHooks' turn.step, the module's one), so no model is asked and nothing is shown
+  on('turn.start', async ($, e, next) => {
+    const started = await next(e)
+    if (e.agentId === undefined && quietNext !== undefined) {
+      if (isQuietTurn(e.text, quietNext)) quietTurns.add(e.turnId)
+      quietNext = undefined
+    }
+    return started
   })
 
   on('turn.complete', async ($, e, next) => {
