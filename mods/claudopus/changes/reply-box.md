@@ -1,0 +1,3 @@
+- The reply box above the chat is as wide as the bar and grows taller as you type, up to eight lines, like the chat's own box: Enter sends, Shift+Enter starts a new line, and Send and Close sit under it.
+- The reply box no longer blinks while you type: it used to be drawn anew each time any task wrote its progress, which put the cursor back into a fresh box and replayed its outline.
+- A key box's response and a card's own reply box are boxes of lines that grow the same way; a key is still pasted in one line.
