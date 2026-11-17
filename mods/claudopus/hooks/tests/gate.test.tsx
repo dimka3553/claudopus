@@ -1142,7 +1142,7 @@ test('scrolled down a long list, the line above the prompt says how many wait at
   const at = 1_700_000_000_000
   files.set(`${MEMORY}/live/chat-b.json`, longList(at, { w5: at - 2000, w6: at - 1000 }))
   await clock.advance(5000)
-  const MARK = '↑ 2 things are waiting for you at the top of the panel'
+  const MARK = '↑ 2 cards are waiting for you at the top of the panel'
   for (const surface of ['desktop', 'terminal']) {
     const down = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 40, bodyRows: 20 } }, surface } as never)
     expect(await until(async () => down.find({ type: 'Text', text: 'run step six' }))).toBeDefined()

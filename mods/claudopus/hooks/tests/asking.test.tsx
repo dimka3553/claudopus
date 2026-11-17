@@ -2435,7 +2435,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   expect((await labelled(list, CLOSE)).length).toBe(1)
   expect((await labelled(list, OPEN)).length).toBe(0)
   // The panel scrolled away from its top with the box open: the bar still points at what waits there
-  const MARK = '↑ 1 thing is waiting for you at the top of the panel'
+  const MARK = '↑ 1 card is waiting for you at the top of the panel'
   const scrolled = async (offset: number) => (await list.unmount(), (list = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset, bodyRows: 20 } }, surface: 'desktop' } as never)))
   await scrolled(40)
   expect(await until(async () => bar.find({ type: 'Text', text: MARK }))).toBeDefined()

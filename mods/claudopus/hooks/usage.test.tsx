@@ -185,8 +185,9 @@ test('the battery is taken as the system says it: the Mac own battery only, a ti
   // A desktop: no battery, and a UPS it is plugged into is not its own
   expect(batteryOfMac("Now drawing from 'AC Power'\n")).toBeUndefined()
   expect(batteryOfMac("Now drawing from 'AC Power'\n -CP1500PFCLCDa (id=1)\t100%; charged; 0:00 remaining present: true\n")).toBeUndefined()
-  expect(leftText(252)).toBe('4:12')
-  expect(leftText(5)).toBe('0:05')
+  expect(leftText(252)).toBe('4h 12m')
+  expect(leftText(65)).toBe('1h 05m')
+  expect(leftText(5)).toBe('5m')
   const sys = (rows: Record<string, Record<string, string>>) => Object.entries(rows).flatMap(([name, f]) => Object.entries(f).map(([k, v]) => `/sys/class/power_supply/${name}/${k}:${v}`)).join('\n')
   expect(batteryOfLinux(sys({ AC: { type: 'Mains' }, BAT0: { type: 'Battery', capacity: '57', status: 'Discharging' } }))).toEqual({ pct: 57, state: 'battery' })
   expect(batteryOfLinux(sys({ BAT1: { type: 'Battery', capacity: '40', status: 'Charging' } }))).toEqual({ pct: 40, state: 'charging' })

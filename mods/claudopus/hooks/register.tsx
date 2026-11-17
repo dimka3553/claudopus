@@ -1794,15 +1794,15 @@ const serversTabHooks = (on: On) => {
 
     return (
       <Box flexDirection="column" gap={1}>
-        {found.length === 0 && <Text dimColor>Nothing is listening from your folders.</Text>}
+        {found.length === 0 && <Text dimColor>No servers are running from your folders.</Text>}
         {found.map(one => (
           <Box key={`server-${one.pid}`} flexDirection="row" alignItems="flex-start" gap={1}>
             <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-              <Text wrap="wrap">{one.url ? <Link href={one.url} label={`localhost:${one.port}`} /> : `Port ${one.port}`}</Text>
+              <Text wrap="wrap">{one.url ? <Link href={one.url} label={`localhost:${one.port}`} /> : `Serving on port ${one.port}`}</Text>
               <Text dimColor wrap="wrap">{one.about}</Text>
             </Box>
             <Box flexShrink={0}>
-              <Button key={`kill-${one.pid}`} label="■" onPress={() => void stopServer($, one.pid)} />
+              <Button key={`kill-${one.pid}`} label="Stop" onPress={() => void stopServer($, one.pid)} />
             </Box>
           </Box>
         ))}
@@ -8924,7 +8924,7 @@ const busyWords = (f: UsageFigures | undefined) =>
 const placeWords = (n: number) => (n === 1 ? 'next in line' : `${n}${n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : n % 10 === 1 && n % 100 !== 11 ? 'st' : 'th'} in line`)
 const HEAVY_HELD = (what: string, place: number, f: UsageFigures | undefined, isHelper: boolean) =>
   `Not run yet: the Mac is busy (${busyWords(f)}) and other heavy commands of Claudopus's tasks run, so this one ("${what}") waits its turn, ${placeWords(place)}. Do other work that does not need it, or end your step${isHelper ? ' without handing back' : ''}: Claudopus starts you again when its turn comes, in 15 minutes at the latest. Then send the same command again.`
-const HEAVY_LOST = (title: string, what: string) => `The task "${title}" could not be told that its command "${what}" may run now. Send it a message to carry on.`
+const HEAVY_LOST = (title: string, what: string) => `Claudopus couldn't tell the task "${title}" that its command "${what}" can run now. Send the task a message so it carries on.`
 const HEAVY_TURN = (what: string, isLate: boolean) =>
   isLate
     ? `Your command "${what}" has waited 15 minutes for room on the Mac: send it again now, and it runs whatever the load. If it fails or times out for lack of room, try it again later.`
@@ -8941,7 +8941,7 @@ const showHeld = ($: EngineInterface) =>
     }),
   ).then(() => redraw($))
 const heldJobs = (one: Todo): Job[] =>
-  (one.heldCalls ?? []).map(call => ({ ...jobOf(`held-${call.id}`, call.what, call.cmd, call.at), kind: 'wait' as const, waitsFor: `its turn: ${labelOf(call.what, call.cmd)}`, target: `waits for room on the Mac · ${placeWords(call.place)}` }))
+  (one.heldCalls ?? []).map(call => ({ ...jobOf(`held-${call.id}`, call.what, call.cmd, call.at), kind: 'wait' as const, waitsFor: `its turn to run ${labelOf(call.what, call.cmd)}`, target: `Waiting until the Mac is less busy · ${placeWords(call.place)}` }))
 
 const turnHeavy = async ($: EngineInterface, e: ToolCallInput): Promise<{ id?: string; deny?: string }> => {
   const input = e as { command?: unknown; description?: unknown; tool_use_id?: unknown }
@@ -10910,44 +10910,45 @@ const keepUsage = async ($: EngineInterface, kept: UsageKept) => {
 }
 const usageNow = (now: number) => (usageKept && now - usageKept.at < USAGE_EVERY * 6 ? usageKept.figures : undefined)
 
+const CLAUDE_ALL = 'Claude and what it started'
 const usageWords = (f: UsageFigures) => ({
-  memory: `Memory: ${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB in use, Claude ${gbText(f.memClaude)} GB`,
-  cpu: f.cpu === undefined ? '' : `Processor: ${pctText(f.cpu)}% busy, Claude ${pctText(f.cpuClaude ?? 0)}% of the whole`,
+  memory: `Memory: ${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB in use, ${gbText(f.memClaude)} GB by ${CLAUDE_ALL}`,
+  cpu: f.cpu === undefined ? '' : `Processor: ${pctText(f.cpu)}% busy, ${pctText(f.cpuClaude ?? 0)}% by ${CLAUDE_ALL}`,
   disk: f.disk === undefined ? '' : `Disk: ${rateText(f.disk).join(' ')} read and written`,
-  net: f.net === undefined ? '' : `Network: ${rateText(f.net).join(' ')} in and out`,
-  gpu: f.gpu === undefined ? '' : `Graphics processor: ${pctText(f.gpu)}% busy${f.gpuClaude !== undefined ? `, Claude ${pctText(f.gpuClaude)}% of the whole` : ''}`,
+  net: f.net === undefined ? '' : `Network: ${rateText(f.net).join(' ')} downloaded and uploaded`,
+  gpu: f.gpu === undefined ? '' : `Graphics processor: ${pctText(f.gpu)}% busy${f.gpuClaude !== undefined ? `, ${pctText(f.gpuClaude)}% by ${CLAUDE_ALL}` : ''}`,
   battery: f.battery ? `Battery: ${f.battery.pct}%, ${batteryWords(f.battery)}` : '',
 })
 const batteryWords = (read: UsageBattery, b = batteryShown(read)) =>
-  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : b.finishing ? 'finishing charge' : 'charging') : b.state === 'plugged' ? 'on power' : 'its state not said'
+  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : b.finishing ? 'finishing the charge' : 'charging') : b.state === 'plugged' ? 'on power' : "the system doesn't say if it's charging"
 const batteryAfter = (read: UsageBattery, b = batteryShown(read)) =>
   b.state === 'plugged' || b.state === 'unknown' ? '' : b.left ? ` ${leftText(b.left)}${b.state === 'charging' ? ' to full' : ' left'}` : b.state === 'charging' && b.finishing && b.pct >= 100 ? ' finishing' : ''
 
 const batteryNote = (read: UsageBattery, b = batteryShown(read)) =>
   b.state === 'battery'
-    ? b.left ? `on battery, ${leftText(b.left)} left as the system estimates it` : read.left ? 'on battery, at 0% as the system gives it' : 'on battery, the system is still estimating the time left'
+    ? b.left ? `on battery · about ${leftText(b.left)} left` : read.left ? 'on battery · the system calls it empty' : 'on battery · the system is still working out the time left'
     : b.state === 'charging'
-      ? b.left ? `charging, ${leftText(b.left)} to full` : b.pct >= 100 ? (b.finishing ? 'finishing the charge: the system calls it full and still tops it up' : 'charging: the system calls it full') : 'charging, the time to full still being estimated'
-      : b.state === 'unknown' ? 'the system does not say whether it charges' : b.pct >= 100 ? 'fully charged, on power' : 'on power, not charging'
+      ? b.left ? `charging · about ${leftText(b.left)} to full` : b.pct >= 100 ? (b.finishing ? 'finishing the charge · the system calls it full and still tops it up' : 'charging · the system calls it full') : 'charging · the system is still working out the time to full'
+      : b.state === 'unknown' ? "the system doesn't say if it's charging" : b.pct >= 100 ? 'full · on power' : 'on power · not charging'
 
 type UsageCard = { title: string; value: string; note?: string; rows: [string, string][]; most?: [string, string][] }
 const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
   const most = (top: UsageTop | undefined, text: (n: number) => string) => (top?.length ? top.map(([name, n]): [string, string] => [name, text(n)]) : undefined)
   const b = f.battery
   return {
-    memory: { title: 'Memory', value: `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB`, rows: [['Claude and what it started', `${gbText(f.memClaude)} GB`]], most: most(f.memTop, n => `${gbText(n)} GB`) },
+    memory: { title: 'Memory', value: `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB`, rows: [[CLAUDE_ALL, `${gbText(f.memClaude)} GB`]], most: most(f.memTop, n => `${gbText(n)} GB`) },
     cpu: f.cpu === undefined ? undefined : {
       title: 'Processor',
       value: `${pctText(f.cpu)}% busy`,
-      rows: [...(f.ncpu && f.ncpu > 1 ? [['Cores', `${f.ncpu}`] as [string, string]] : []), ['Claude and what it started', `${pctText(f.cpuClaude ?? 0)}%`]],
+      rows: [...(f.ncpu && f.ncpu > 1 ? [['Cores', `${f.ncpu}`] as [string, string]] : []), [CLAUDE_ALL, `${pctText(f.cpuClaude ?? 0)}%`]],
       most: most(f.cpuTop, n => `${pctText(n)}%`),
     },
     gpu: f.gpu === undefined ? undefined : {
       title: 'Graphics processor',
       value: `${pctText(f.gpu)}% busy`,
       rows: [
-        ...(f.gpuClaude !== undefined ? [['Claude and what it started', `${pctText(f.gpuClaude)}%`] as [string, string]] : []),
-        ...(f.wattsGpu !== undefined ? [['Drawing', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
+        ...(f.gpuClaude !== undefined ? [[CLAUDE_ALL, `${pctText(f.gpuClaude)}%`] as [string, string]] : []),
+        ...(f.wattsGpu !== undefined ? [['Power use', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
         ...(f.gpuMem !== undefined ? [['Graphics memory in use', f.gpuMemTotal ? `${gbText(f.gpuMem)} of ${gbText(f.gpuMemTotal)} GB` : `${gbText(f.gpuMem)} GB`] as [string, string]] : []),
       ],
       most: most(f.gpuTop?.map(([name, n]): [string, number] => [name === 'WindowServer' ? 'macOS drawing the screen' : name, n]), n => `${pctText(n)}%`),
@@ -10957,24 +10958,24 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
       value: `${batteryShown(b).pct}%`,
       note: upperFirst(batteryNote(b)),
       rows: [
-        ...(f.watts !== undefined ? [['The whole Mac draws', `${wattText(f.watts)} W`] as [string, string]] : []),
-        ...(f.wattsCpu !== undefined ? [['Processors, every program', `${wattText(f.wattsCpu)} W`] as [string, string]] : []),
-        ...(f.wattsClaude !== undefined ? [["Claude's own processes", `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
-        ...(f.wattsGpu !== undefined ? [['Graphics, every program', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
-        ...(f.wattsGpuClaude !== undefined ? [['Claude of that, estimated', `${wattText(f.wattsGpuClaude)} W`] as [string, string]] : []),
+        ...(f.watts !== undefined ? [['Power use, whole Mac', `${wattText(f.watts)} W`] as [string, string]] : []),
+        ...(f.wattsCpu !== undefined ? [['Power use, processors', `${wattText(f.wattsCpu)} W`] as [string, string]] : []),
+        ...(f.wattsClaude !== undefined ? [[CLAUDE_ALL, `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
+        ...(f.wattsGpu !== undefined ? [['Power use, graphics', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
+        ...(f.wattsGpuClaude !== undefined ? [[CLAUDE_ALL, `about ${wattText(f.wattsGpuClaude)} W`] as [string, string]] : []),
       ],
     },
     disk: f.disk === undefined ? undefined : {
-      title: 'Disk, read and write',
+      title: 'Disk, read and written',
       value: rateText(f.disk).join(' '),
-      rows: f.diskClaude !== undefined ? [['Claude and what it runs', rateFine(Math.min(f.diskClaude, f.disk))]] : [],
+      rows: f.diskClaude !== undefined ? [[CLAUDE_ALL, rateFine(Math.min(f.diskClaude, f.disk))]] : [],
     },
     net: f.net === undefined ? undefined : {
       title: 'Network',
       value: rateText(f.net).join(' '),
       rows: [
         ...(f.netIn !== undefined && f.netOut !== undefined ? [['Download', rateFine(f.netIn)], ['Upload', rateFine(f.netOut)]] as [string, string][] : []),
-        ...(f.netInClaude !== undefined && f.netOutClaude !== undefined ? [['Claude downloading', rateFine(f.netIn !== undefined ? Math.min(f.netInClaude, f.netIn) : f.netInClaude)], ['Claude uploading', rateFine(f.netOut !== undefined ? Math.min(f.netOutClaude, f.netOut) : f.netOutClaude)]] as [string, string][] : []),
+        ...(f.netInClaude !== undefined && f.netOutClaude !== undefined ? [[CLAUDE_ALL, `${rateFine(f.netIn !== undefined ? Math.min(f.netInClaude, f.netIn) : f.netInClaude)} down · ${rateFine(f.netOut !== undefined ? Math.min(f.netOutClaude, f.netOut) : f.netOutClaude)} up`]] as [string, string][] : []),
       ],
     },
   }
@@ -11101,7 +11102,7 @@ const batteryText = (ui: Ui, b: UsageBattery) => {
   ]
 }
 const batteryAfterText = (read: UsageBattery, b = batteryShown(read)) =>
-  b.state === 'plugged' ? ' ac' : b.state === 'charging' ? (!b.left && b.finishing && b.pct >= 100 ? ' finishing' : ` ↑${b.left ? leftText(b.left) : ''}`) : b.left ? ` ${leftText(b.left)}` : ''
+  b.state === 'plugged' ? ' on power' : b.state === 'charging' ? (!b.left && b.finishing && b.pct >= 100 ? ' finishing' : ` ↑${b.left ? leftText(b.left).replace(' ', '') : ''}`) : b.left ? ` ${leftText(b.left).replace(' ', '')}` : ''
 const hashOf = (text: string) => {
   let h = 0
   for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0
@@ -11124,9 +11125,9 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
         onPress={() => ((presses += 1), void (recordEvent($, 'scroll-call', { to: 'start' }), $.ui.scroll({ in: LIST, to: 'start', block: 'start' })).catch(() => undefined))}
       >
         {waitsAtTop > 0 ? (
-          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 thing is' : `${waitsAtTop} things are`} waiting for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} just finished` : ''}`}</ui.Text>
+          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 card is' : `${waitsAtTop} cards are`} waiting for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} done` : ''}`}</ui.Text>
         ) : (
-          <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} finished` : `${finishedAtTop.length} just finished`}, at the top of the panel`}</ui.Text>
+          <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} is done` : `${finishedAtTop.length} tasks are done`}, at the top of the panel`}</ui.Text>
         )}
       </ui.Button>
     </ui.Box>
@@ -11268,7 +11269,7 @@ const bandHooks = (on: On) => {
           <Box flexDirection="column">
             {await waitMarker($, ui, e.surface)}
             <Box flexDirection="row" gap={1}>
-              {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, something needs you' : 'Claudopus is working on your reply', $, { surface: e.surface, requestId: e.requestId })}
+              {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, waiting for you' : 'Claudopus, Claude is working on your reply', $, { surface: e.surface, requestId: e.requestId })}
               <Box flexShrink={1} minWidth={0}>
                 <Text wrap="wrap">
                   <Text dimColor>{`${titleOf(first)}: `}</Text>
@@ -11289,7 +11290,7 @@ const bandHooks = (on: On) => {
                     <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => press(n, choice)} />
                   ))}
                   <Text dimColor={picked < 0} color={picked < 0 ? undefined : needsPerson(first) ? NEEDS : LIVE}>
-                    {picked >= 0 ? `Press ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `press its number twice in the empty prompt${asking.filter(needsPerson).length > Number(needsPerson(first)) ? ` · ${asking.filter(needsPerson).length - Number(needsPerson(first))} more waiting` : ''} · /claudopus to reply in words`}
+                    {picked >= 0 ? `Type ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `Type its number twice in an empty box${asking.filter(needsPerson).length > Number(needsPerson(first)) ? ` · ${asking.filter(needsPerson).length - Number(needsPerson(first))} more waiting` : ''} · /claudopus to answer in words`}
                   </Text>
                 </Box>
               </Box>
@@ -11346,7 +11347,7 @@ const bandHooks = (on: On) => {
     const drawing = (spacers: JSX.Element | null) => {
       const row = (
         <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
-          {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, task finished' : 'Claudopus, working', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
+          {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, a task is done' : 'Claudopus, Claude is working', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
           {spacers}
           {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
           {/* The figures fill a phone's terminal: the hint shows until they come */}
