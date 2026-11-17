@@ -267,16 +267,29 @@ const WAITS_ON = (work: string, helpers: number, wake: string) =>
   `From Claudopus: the task "${work}" ended its step without its report because it waits ${helpers ? `for ${plural(helpers, 'a helper', 'helpers')} it started` : `to be started again once this is there: ${wake}`}. Claude Code may say it ended without delivering a report, but it is still at work: ${
     helpers ? `${helpers === 1 ? "the helper's result starts" : "each helper's result starts"} it again` : 'Claudopus starts it again then'
   }, and its report comes after that. Do not send it a message asking for its report, which it cannot give while it waits, and do not tell {name} it stopped.`
-const tellWaitsOn = async ($: EngineInterface, id: string) => {
-  if (!dir || isOff || toldWaitsOn.has(id)) return
-  const list = await read($, todos)
+// What top work at work, its report not given, waits on that the engine does not see: its helpers at work, or a wake_me
+const waitsOn = (list: Todo[], id: string) => {
   const card = list.find(one => one.id === id)
-  if (!card || card.parentId || card.status !== 'working' || card.handedBackAt !== undefined) return
+  if (!card || card.parentId || card.status !== 'working' || card.handedBackAt !== undefined) return undefined
   const helpers = runningHelpers(list, id).length
-  if (!helpers && !card.wakeWhen) return
+  return helpers || card.wakeWhen ? { title: titleOf(card), helpers, wake: card.wakeWhen?.what ?? '' } : undefined
+}
+const waitsText = (list: Todo[], id: string) => {
+  const on = waitsOn(list, id)
+  return on ? named(WAITS_ON(on.title, on.helpers, on.wake)) : ''
+}
+// Whether the chat is at a turn of its own. Idle, it gets the engine's notice as a prompt of its own, which Claudopus leaves out
+// (quietNotices) or, beside anything else, explains in that prompt: a note added to the chat as well would ride into its next turn
+// with nothing to explain. At a turn, the notice joins that turn unseen by Claudopus, so the note goes in beside it
+let isChatInTurn = false
+const tellWaitsOn = async ($: EngineInterface, id: string) => {
+  if (!dir || isOff || toldWaitsOn.has(id) || !isChatInTurn) return
+  const list = await read($, todos)
+  const on = waitsOn(list, id)
+  if (!on) return
   toldWaitsOn.add(id)
-  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(WAITS_ON(titleOf(card), helpers, card.wakeWhen?.what ?? '')) }] } })
-  await log($, `chat told work ${id} waits on ${helpers ? plural(helpers, 'a helper', 'helpers') : 'being woken'}`)
+  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: waitsText(list, id) }] } })
+  await log($, `chat told work ${id} waits on ${on.helpers ? plural(on.helpers, 'a helper', 'helpers') : 'being woken'}`)
 }
 
 // A helper that ends while the work that started it has ended its step: the engine hands its result to the chat (seen live on 16

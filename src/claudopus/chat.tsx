@@ -369,11 +369,17 @@ const chatHooks = (on: On) => {
       // The chat's own command ended: how it ended and its last lines go with the notice
       const ended = await chatCommandEnded($, e.text).catch(() => [] as string[])
       if (ended.length) return next({ ...e, context: [...(e.context ?? []), ...ended] })
-      // A notice that a task whose report already came has stopped says nothing new: it is left out, so the chat takes no turn for it
-      if (isRepeatOnly(e.text)) {
-        await log($, 'left out the notice that repeats a report already given')
-        return { drop: "Left out a repeat notice: that task's report already came." }
+      // Notices with nothing new (a report already given, a task still at work) are left out, so the chat takes no turn for them;
+      // beside anything else, each that says a task waiting on its helpers ended goes with the word that it is still at work
+      const list = await read($, todos)
+      const quiet = quietNotices(e.text, list)
+      if (quiet.isQuiet) {
+        await log($, quiet.isRepeat ? 'left out the notice that repeats a report already given' : 'left out notices with nothing new: tasks still at work')
+        return { drop: quiet.isRepeat ? "Left out a repeat notice: that task's report already came." : 'Left out a notice with nothing new: the task is still at work.' }
       }
+      const told = quiet.waits.filter(id => !toldWaitsOn.has(id) && waitsText(list, id))
+      for (const id of told) toldWaitsOn.add(id)
+      if (told.length) return next({ ...e, context: [...(e.context ?? []), ...told.map(id => waitsText(list, id))] })
     }
     if (e.isMeta || e.command || !dir) return next(e)
     // A message the mod sent from a press or reply in the panel starts work as a message of the person's does
@@ -427,7 +433,14 @@ const chatHooks = (on: On) => {
     return next(context.length ? { ...e, text, context } : { ...e, text })
   })
 
+  // Whether the chat is at a turn of its own, for what it is told of work that waits (tellWaitsOn)
+  on('turn.start', ($, e, next) => {
+    if (e.agentId === undefined) isChatInTurn = true
+    return next(e)
+  })
+
   on('turn.complete', async ($, e, next) => {
+    if (e.agentId === undefined) isChatInTurn = false
     const done = await next(e)
     // An answer waiting to start ended work again goes from inside this hook, at the end of any turn, the chat's own too (sendWakes)
     if (wakes.length && e.agentId === undefined) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))

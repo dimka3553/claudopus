@@ -103,25 +103,36 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   for await (const chunk of $.turn.step({ turnId: 'h1p', index: 1, model: 'm', messageCount: 2, agentId: 'a1' })) if (chunk.kind === 'text') said.push((chunk as { text: string }).text)
   expect([stepped.length - before, said]).toEqual([0, ['My own work is still going; I am started again when it is done, and give my report then.']])
   await $.turn.complete({ answer: 'Waiting for the drawing.', durationMs: 1, isAborted: false, turnId: 'h1', reason: 'answer', agentId: 'a1' } as never)
-  // and the chat, which the engine tells it ended without its report, is told once it waits for its helper and is not to be asked
+  // The engine then tells the chat it ended without its report. The chat at rest takes that notice as a turn of its own, which is
+  // left out: no turn, and no note of Claudopus's left to ride into its next turn (16 Nov evening: 67 of 152 turns were such notices)
   const waits = /^undefined: From Claudopus: the task ".*" ended its step without its report because it waits for a helper it started\..*Do not send it a message asking for its report/
-  expect(await until(async () => appended.find(one => waits.test(one)))).toBeDefined()
-  await $.turn.complete({ answer: 'Still waiting.', durationMs: 1, isAborted: false, turnId: 'h1b', reason: 'answer', agentId: 'a1' } as never)
-  expect(appended.filter(one => waits.test(one))).toHaveLength(1)
-  // A step of its own, and it ends its step to wait again: told again. Held by the engine on a command it sees, it is not: the
-  // engine tells the chat it waits
+  const endedNotice = (id: string) =>
+    `<task-notification>\n<task-id>${id}</task-id>\n<status>completed</status>\n<summary>Agent "Fix the nose" finished</summary>\n<result>The subagent ended without delivering a report through SubagentHandback, so no report was delivered. Its unsent text is not shown. Send the agent a message (SendMessage) to ask it to deliver its report.\n</result>\n</task-notification>`
+  const asNotice = (text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'task-notification' } } as never) as Promise<{ drop?: string; context?: string[] }>
+  await clock.advance(1_000)
+  expect(appended.filter(one => waits.test(one))).toHaveLength(0)
+  expect((await asNotice(`[SYSTEM NOTIFICATION - NOT USER INPUT]\n\n${endedNotice('a1')}`)).drop).toContain('nothing new')
+  // Beside a notice that says something, it goes on, with the word that the task is still at work in the same prompt
+  const mixed = await asNotice(`${endedNotice('a1')}\n<task-notification>\n<task-id>bx1</task-id>\n<status>completed</status>\n<summary>Background command "Build" completed (exit code 0)</summary>\n</task-notification>`)
+  expect(mixed.drop).toBeUndefined()
+  expect(mixed.context?.filter(one => waits.test(`undefined: ${one}`))).toHaveLength(1)
+  // A step of its own, and it ends its step to wait again while the chat is at a turn: that turn takes the engine's notice unseen,
+  // so the chat is told beside it, once. Held by the engine on a command it sees, it is not: the engine tells the chat it waits
   const step = async (turnId: string) => {
     talk.splice(0, talk.length, { role: 'user', content: 'Carry on.' })
     for await (const _ of $.turn.step({ turnId, index: 1, model: 'm', messageCount: 1, agentId: 'a1' })) void _
   }
   await step('h1c')
+  await $.turn.start({ turnId: 'chat1' } as never)
   await $.turn.complete({ answer: 'Waiting again.', durationMs: 1, isAborted: false, turnId: 'h1c', reason: 'answer', agentId: 'a1' } as never)
-  expect(await until(async () => (appended.filter(one => waits.test(one)).length === 2) || undefined)).toBe(true)
+  expect(await until(async () => (appended.filter(one => waits.test(one)).length === 1) || undefined)).toBe(true)
+  await $.turn.complete({ answer: 'Still waiting.', durationMs: 1, isAborted: false, turnId: 'h1b', reason: 'answer', agentId: 'a1' } as never)
+  expect(appended.filter(one => waits.test(one))).toHaveLength(1)
   await step('h1d')
   agents.a1 = 'waiting'
   await $.turn.complete({ answer: 'Waiting on the build too.', durationMs: 1, isAborted: false, turnId: 'h1d', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(1_000)
-  expect(appended.filter(one => waits.test(one))).toHaveLength(2)
+  expect(appended.filter(one => waits.test(one))).toHaveLength(1)
   agents.a1 = 'completed'
   // and its card stays at work with its helper under it, though the engine lists it as completed (16 Nov it vanished meanwhile)
   await clock.advance(25_000)

@@ -569,6 +569,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (e.origin.kind !== 'composer') submitted.push(e.text)
     return { text: e.text, context: e.context }
   })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_, e) => ({ text: e.answer }))
   // The sounds played and the notifications raised, each as "title | text"
   on('audio.play', (_, e) => {
