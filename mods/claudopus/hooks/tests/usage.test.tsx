@@ -1025,22 +1025,20 @@ test('the battery card says what the Mac draws, the processors and graphics each
   await desk.unmount()
 })
 
-test("a task's heavy command waits its turn on its card while the Mac is busy and another runs, and goes in order once there is room, told how long it waited; one with nothing else heavy running never waits, and the setting at Never lets go one already waiting (16 Nov: ten tasks drove headless browsers on one Mac at once)", SLOW, async ($, on) => {
+test("a task's heavy command waits its turn while the Mac is busy and another runs: refused at once with its place in the line, its card says so, and its work is started again in order once there is room or after 15 minutes; one with nothing else heavy running, or with the setting at Never, runs at once; nothing waits in a hook (16 Nov: ten tasks drove headless browsers on one Mac at once)", SLOW, async ($, on) => {
   let n = 0
   let load = 60
-  const { clock, wake, files } = world(on, { usage: () => lookAt((n += 1), 1583261, `@@LOAD@@\n{ ${load}.00 50.00 40.00 }`) })
+  const { clock, files, appended, resumed } = world(on, { usage: () => lookAt((n += 1), 1583261, `@@LOAD@@\n{ ${load}.00 50.00 40.00 }`) })
   await $.session.start(start)
   await $.prompt.submit({ text: 'shoot every page', wait: false, origin: composer })
   for (const description of ['Shoot the pages', 'Shoot the cards', 'Shoot the menus']) await $.agent.spawn({ ...spawn, description, prompt: description } as never)
   const shoot = (id: string, agentId: string, description: string, isBackground = false) =>
-    $.tool.call({ tool: 'Bash', tool_use_id: id, agentId, command: `cd /w && npx playwright screenshot http://localhost:3000/${id} ${id}.png`, description, ...(isBackground ? { run_in_background: true } : {}) } as never) as Promise<{ deny?: string; context?: string[] }>
+    $.tool.call({ tool: 'Bash', tool_use_id: id, agentId, command: `cd /w && npx playwright screenshot http://localhost:3000/${agentId} ${agentId}.png`, description, ...(isBackground ? { run_in_background: true } : {}) } as never) as Promise<{ deny?: string }>
   // Load 60 on 10 cores: the first heavy command still starts at once, as nothing else heavy of the chat's runs
-  const first = await shoot('s1', 'a1', 'Take the page shots', true)
-  expect(first.deny).toBeUndefined()
-  // A second and a third wait, each on its own card, in the order they came
-  const done: string[] = []
-  const second = shoot('s2', 'a2', 'Take the card shots').then(r => (done.push('s2'), r))
-  const third = shoot('s3', 'a3', 'Take the menu shots').then(r => (done.push('s3'), r))
+  expect((await shoot('s1', 'a1', 'Take the page shots', true)).deny).toBeUndefined()
+  // A second and a third are refused at once, each with its place, and their cards say they wait
+  expect((await shoot('s2', 'a2', 'Take the card shots')).deny).toMatch(/^Not run yet: the Mac is busy \(load 60 on 10 cores, .*\) and other heavy commands of Claudopus's tasks run, so this one \("Take the card shots"\) waits its turn, next in line\. Do other work that does not need it, or end your step: Claudopus starts you again when its turn comes, in 15 minutes at the latest\. Then send the same command again\.$/)
+  expect((await shoot('s3', 'a3', 'Take the menu shots')).deny).toMatch(/waits its turn, 2nd in line\./)
   const texts = async () => {
     const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
     const all = (await list.findAll({ type: 'Text' })).map(one => one.text)
@@ -1052,26 +1050,27 @@ test("a task's heavy command waits its turn on its card while the Mac is busy an
   expect(held.some(text => /^Wait · its turn: Take the card shots/.test(text))).toBe(true)
   expect(held.some(text => /^waits for room on the Mac · next in line/.test(text))).toBe(true)
   expect(held.some(text => /^Wait · its turn: Take the menu shots/.test(text))).toBe(true)
-  // Still held while the load stays
-  await clock.advance(10_000)
-  wake()
-  await clock.advance(1000)
-  expect(done).toEqual([])
-  // The load falls: they go in the order they came, each told how long it waited, and their cards no longer say they wait
+  // The same command sent again before its turn keeps its place
+  expect((await shoot('s2b', 'a2', 'Take the card shots')).deny).toMatch(/waits its turn, next in line\./)
+  // Nobody is woken while the load stays
+  const woken = () => [...appended, ...resumed].filter(line => /your command's turn|has waited 15 minutes/.test(line))
+  await clock.advance(20_000)
+  expect(woken()).toEqual([])
+  // The load falls: the first in line is started again first, and its command, sent again, runs
   load = 3
-  expect(await until(async () => (await clock.advance(6000), wake(), done.length === 2 || undefined))).toBe(true)
-  expect(done).toEqual(['s2', 's3'])
-  const said = await second
-  expect(said.deny).toBeUndefined()
-  expect(said.context?.some(line => /^Claudopus held this command \("Take the card shots"\) \d+s, until the Mac had room for it, and ran it as soon as its turn came\.$/.test(line))).toBe(true)
-  expect((await third).deny).toBeUndefined()
+  expect(await until(async () => (await clock.advance(6000), woken().length > 0 || undefined))).toBe(true)
+  expect(woken()[0]).toBe('a2: It is your command\'s turn: the Mac has room for "Take the card shots" now. Send it again now, and it runs at once.')
+  expect((await shoot('s2c', 'a2', 'Take the card shots')).deny).toBeUndefined()
+  expect(await until(async () => (await clock.advance(6000), woken().some(line => line.startsWith('a3: ')) || undefined))).toBe(true)
+  expect((await shoot('s3b', 'a3', 'Take the menu shots')).deny).toBeUndefined()
   expect(await until(async () => (!(await texts()).some(text => /its turn|room on the Mac/.test(text)) || undefined))).toBe(true)
-  // Busy again, one more waits; the setting put at Never lets it go at once
+  // Busy again, one more waits; after 15 minutes its work is started again however busy the Mac is
   load = 60
   await clock.advance(6000)
-  const footer = shoot('s4', 'a3', 'Take the footer shots').then(r => (done.push('s4'), r))
-  expect(await until(async () => ((await texts()).some(text => /^Wait · its turn: Take the footer shots/.test(text)) || undefined))).toBe(true)
+  expect((await shoot('s4', 'a2', 'Take the footer shots')).deny).toMatch(/waits its turn, next in line\./)
+  for (let k = 0; k < 15; k++) await clock.advance(60_000)
+  expect(await until(async () => (await clock.advance(6000), woken().some(line => line === 'a2: Your command "Take the footer shots" has waited 15 minutes for room on the Mac: send it again now, and it runs whatever the load. If it fails or times out for lack of room, try it again later.') || undefined))).toBe(true)
+  // With the setting at Never, a heavy command runs at once however busy the Mac is
   ownSet(files, 'config.json', JSON.stringify({ heavy: 'never' }))
-  expect(await until(async () => (await clock.advance(1000), wake(), done.includes('s4') || undefined))).toBe(true)
-  expect((await footer).deny).toBeUndefined()
+  expect((await shoot('s5', 'a3', 'Take the header shots')).deny).toBeUndefined()
 })

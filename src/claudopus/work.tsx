@@ -333,14 +333,14 @@ const workHooks = (on: On) => {
     }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
-    // A heavy command of a piece of work waits its turn while the Mac is busy, and is told how long it waited as it runs
+    // A heavy command of a piece of work waits its turn while the Mac is busy: refused at once with its place in the line, and its
+    // work started again when its turn comes
     const next = async (asked: typeof e) => {
       // (never one the person has just allowed as admin or as a release: what they allowed lasts two minutes)
-      const held = dir && !isOff && e.agentId !== undefined && asked.tool === 'Bash' && !grants.length ? await holdHeavy($, asked, raw as never) : {}
+      const held = dir && !isOff && e.agentId !== undefined && asked.tool === 'Bash' && !grants.length ? await turnHeavy($, asked) : {}
       if (held.deny) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: held.deny } as Awaited<ReturnType<typeof raw>>)
       try {
-        const r = await nextHere(asked)
-        return held.said && !r.deny ? ({ ...r, context: [...((r as { context?: string[] }).context ?? []), held.said] } as typeof r) : r
+        return await nextHere(asked)
       } finally {
         if (held.id) heavyOpen.delete(held.id)
       }

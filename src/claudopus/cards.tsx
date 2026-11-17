@@ -553,6 +553,7 @@ const follow = async ($: EngineInterface) => {
   await lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))
   await lookStuck($).catch(err => log($, `stuck work not looked for: ${String(err)}`))
   await lookInDue($).catch(err => log($, `helpers not looked in on: ${String(err)}`))
+  await lookHeld($).catch(err => log($, `held commands not looked at: ${String(err)}`))
   await lookWakes($).catch(err => log($, `wakes not looked at: ${String(err)}`))
   await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
   const isShown = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)

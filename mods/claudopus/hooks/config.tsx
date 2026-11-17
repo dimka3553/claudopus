@@ -331,7 +331,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
           {item(
             'config-heavy',
             'Heavy commands wait their turn',
-            "A task's browser, build or render waits while the Mac is busy and another one runs, or while several have just started, and starts in order once there is room, at the latest after 15 minutes. Its card says it waits its turn. One with nothing else heavy running, and Claudopus's own release and tests, never wait.",
+            "A task's browser, build or render waits its turn while the Mac is busy and another one runs, or while several have just started: the task is told at once, its card says so, and Claudopus starts it again in order once there is room, at the latest after 15 minutes. One with nothing else heavy running, and Claudopus's own release and tests, never wait.",
             <Select key="config-heavy-pick" options={HEAVY_MODES.map(one => ({ value: one.value, label: one.label }))} value={heavyModeOf(config).value} onSelect={value => acts.set('heavy', value === HEAVY_MODES[0].value ? undefined : value)} />,
             heavyModeOf(config).value !== HEAVY_MODES[0].value,
             () => acts.set('heavy', undefined),
