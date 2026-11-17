@@ -78,12 +78,13 @@ const isPressedForReport = async ($: EngineInterface, id: string, isAnyWords = f
   const said = [...talk].reverse().find(m => (m as { role?: unknown }).role === 'assistant')
   return isAnyWords || textOf(said).trim().length < REPORT_LEAST
 }
-// What starts a piece of work again by itself once its step has ended: a command of its own it started detached or in the
-// background, or a watch; what it asked Claudopus to wake it for; a command Claudopus holds for its turn; or a helper of its own
-// that has not handed back, whatever it said as it ended a step of its own (its end, or its result, starts the work)
+// What starts a piece of work again by itself once its step has ended, that the engine does not see: a command of its own it
+// started detached; what it asked Claudopus to wake it for; a command Claudopus holds for its turn; or a helper of its own still at
+// work (its end, or its result, starts the work). A command it sent to the background the engine sees, and presses nothing while
+// it runs
 const waitsOnOwn = (list: Todo[], card: Todo) => {
   const helpers = runningHelpers(list, card.id).length
-  const what = card.detached?.length ? 'its own detached command runs' : card.bg?.length ? 'its own command or watch runs in the background' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : card.wakeWhen || isTurnWaited(list, card.id) ? 'it waits to be woken' : ''
+  const what = card.detached?.length ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : card.wakeWhen || isTurnWaited(list, card.id) ? 'it waits to be woken' : ''
   return { what, helpers }
 }
 // What a command that only waits is told instead, by what it waits for

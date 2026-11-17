@@ -1264,6 +1264,7 @@ const lastWordsOf = async ($: EngineInterface, folder: string, agent: string, no
     const blocks = o.message.content as { type?: string; name?: string; text?: string; input?: { message?: unknown } }[]
     isHandback = blocks.some(b => b.type === 'tool_use' && b.name === 'SubagentHandback')
     answer = blocks.map(b => (b.type === 'tool_use' && b.name === 'SubagentHandback' && typeof b.input?.message === 'string' ? b.input.message : b.type === 'text' ? (b.text ?? '') : '')).join('').trim()
+    if (answer === PRESS_ANSWER) answer = ''
     if (answer) break
   }
   return { at, answer: answer.slice(0, ANSWER_CHARS), isReport: isHandback || answer.length >= REPORT_LEAST, isPressed }
@@ -8079,7 +8080,7 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   await stepsAtEnd($).catch(err => log($, `last step not done: ${String(err)}`))
   if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
   const card = (await read($, todos)).find(one => one.id === id)
-  const report = (e.answer ?? '').trim() || answer
+  const report = (said === PRESS_ANSWER ? '' : said) || answer
   if (card?.parentId && card.status !== 'working') await passOnHelper($, id, report, card.status).catch(err => log($, `helper's result not passed on: ${String(err)}`))
   else if (card?.parentId && notedAtHandback.has(id)) await passOnHelper($, id, report, 'done').catch(err => log($, `helper's result not passed on: ${String(err)}`))
   if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
@@ -8719,11 +8720,11 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
     const one = list.find(card => card.id === id)
     if (!one || isHeld(one) || stoppedHere.has(id) || pressed.has(id) || (await isReplaced($))) continue
     if (step < 3 && WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))) continue
-    const wrote = step < 3 ? await helpersWroteAt($, list, id) : 0
     const from = list.find(card => card.id === id)?.helperWait?.from ?? now
-    if (wrote > from) {
-      await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { from: wrote, done: 0 } } : card)))
-      await log($, `work ${id} waits on helpers Claudopus saw nothing new from, but one wrote to its transcript ${took(now - wrote)} ago: not started again`)
+    const changed = await helpersChangedAt($, list, id, from)
+    if (changed > from) {
+      await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { from: changed, done: 0 } } : card)))
+      await log($, `work ${id} waits on helpers, one of which had a call return something new ${took(now - changed)} ago that Claudopus had not seen: not started again`)
       continue
     }
     await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { ...card.helperWait, done: step, at: now }, ...(step === 2 ? { mayHandBack: card.mayHandBack ?? now } : {}), ...(step === 3 ? { stuckTold: card.stuckTold ?? now } : {}) } : card)))
@@ -8740,14 +8741,28 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
   }
 }
 
-const helpersWroteAt = async ($: EngineInterface, list: Todo[], id: string) => {
+const helpersChangedAt = async ($: EngineInterface, list: Todo[], id: string, since: number) => {
   const { id: session } = await read($, me)
-  const home = (await $.env.get('HOME')) ?? ''
-  if (!session || !home || !cwd) return 0
-  const folder = `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${session}/subagents`
-  const kids = underOf(list, id).filter(kid => kid.status === 'working')
-  const times = await Promise.all(kids.map(kid => $.fs.stat(`${folder}/agent-${kid.id}.jsonl`).then(found => found.mtimeMs, () => 0)))
-  return Math.max(0, ...times)
+  if (!session || !cwd) return 0
+  const folder = await agentsFolder($, session)
+  let latest = 0
+  for (const kid of underOf(list, id).filter(one => one.status === 'working')) {
+    const path = `${folder}/agent-${kid.id}.jsonl`
+    if (((await $.fs.stat(path).catch(() => undefined))?.mtimeMs ?? 0) <= since) continue
+    const tail = (await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? ''
+    let before: string | undefined
+    for (const row of tail.split('\n').slice(1)) {
+      const o = parsedOr<{ type?: string; timestamp?: string; message?: { content?: unknown } }>(row, {})
+      const content = o.type === 'user' && Array.isArray(o.message?.content) ? (o.message.content as { type?: string; content?: unknown }[]) : []
+      for (const part of content.filter(one => one.type === 'tool_result')) {
+        const said = resultLines(part.content).join('\n')
+        const at = Date.parse(o.timestamp ?? '') || 0
+        if (before !== undefined && said !== before && at > latest) latest = at
+        before = said
+      }
+    }
+  }
+  return latest
 }
 const silentHelpers = (list: Todo[], id: string, at: number) =>
   list
@@ -8778,9 +8793,9 @@ const stuckLine = (list: Todo[], one: Todo, at: number) => {
 const BG_KEPT = 20
 const keepBackground = async ($: EngineInterface, agent: string, call: { tool: string; description?: unknown; command?: unknown; task_id?: unknown; shell_id?: unknown; timeout_ms?: unknown; persistent?: unknown }, result: unknown) => {
   if (call.tool === 'TaskStop' || call.tool === 'KillShell') return dropBackground($, [String(call.task_id ?? call.shell_id ?? '')], 'stopped')
-  const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown }
+  const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown; backgroundEndsWithFinalResponse?: unknown }
   const id = call.tool === 'Bash' ? r.backgroundTaskId : call.tool === 'Monitor' ? r.taskId : undefined
-  if (typeof id !== 'string' || !id) return
+  if (typeof id !== 'string' || !id || r.backgroundEndsWithFinalResponse) return
   const what = oneLine(String(call.description ?? '') || String(call.command ?? '').split('\n')[0] || '').slice(0, 160)
   const cmd = oneLine(String(call.command ?? '')).slice(0, 400)
   const now = await $.clock.now()
@@ -9840,7 +9855,13 @@ const stepHooks = (on: On) => {
 }
 
 
-const runningHelpers = (list: Todo[], id: string) => list.filter(one => one.parentId === id && one.status === 'working' && one.handedBackAt === undefined)
+const runningHelpers = (list: Todo[], id: string) =>
+  list.filter(one => {
+    if (one.parentId !== id || one.status !== 'working' || one.handedBackAt !== undefined) return false
+    if (!one.answeredAt) return true
+    const isServer = (cmd: string | undefined, what: string) => SERVER_CMD.test(cmd ?? '') || describedOf(what).kind === 'server'
+    return Boolean(one.bg?.some(b => !b.isWatch && !isServer(b.cmd, b.what)) || one.detached?.some(d => !isServer(d.cmd, d.what)) || one.wakeWhen || list.some(kid => kid.parentId === one.id && kid.status === 'working'))
+  })
 const HELD_AT_END = (n: number) =>
   `You have ${n === 1 ? 'a helper' : `${n} helpers`} still running in the background. Don't hand back your report yet: ${n === 1 ? 'its result' : 'their results'} would reach the chat instead of you. Carry on with what needs nothing from ${n === 1 ? 'it' : 'them'}, or end your step without a report: each result starts you again, and Claudopus tells the chat you wait for ${n === 1 ? 'it' : 'them'}. One you no longer need: tell it with SendMessage to hand back what it has now, as Claude Code does not let you stop it yourself.`
 const HELPERS_STARTED = 'Your helpers run in the background: each call came back at once, and each result comes to you as a message when it ends, even after you end your step. Continue now with your own part, and when nothing else is left, end your step: never wait for them with a command.'
@@ -10811,7 +10832,7 @@ const isPressedForReport = async ($: EngineInterface, id: string, isAnyWords = f
 }
 const waitsOnOwn = (list: Todo[], card: Todo) => {
   const helpers = runningHelpers(list, card.id).length
-  const what = card.detached?.length ? 'its own detached command runs' : card.bg?.length ? 'its own command or watch runs in the background' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : card.wakeWhen || isTurnWaited(list, card.id) ? 'it waits to be woken' : ''
+  const what = card.detached?.length ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : card.wakeWhen || isTurnWaited(list, card.id) ? 'it waits to be woken' : ''
   return { what, helpers }
 }
 const NO_WAIT = (kind: WaitKind, isHelper = false) =>

@@ -145,7 +145,7 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
   // held on its own background work leaves it once it ends (keepStoppedReports)
   const card = (await read($, todos)).find(one => one.id === id)
-  const report = (e.answer ?? '').trim() || answer
+  const report = (said === PRESS_ANSWER ? '' : said) || answer
   // A helper that has ended while its work had ended its step: its result is passed on to that work, which starts again with it
   if (card?.parentId && card.status !== 'working') await passOnHelper($, id, report, card.status).catch(err => log($, `helper's result not passed on: ${String(err)}`))
   // One that handed back while a command or helper of its own still runs stays at work on its card, but its hand-back reached the

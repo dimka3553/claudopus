@@ -546,8 +546,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (e.tool === 'Bash' && / # hold (\S+)$/.test(command)) return { result: { stdout: await new Promise<string>(done => held.set(command.match(/ # hold (\S+)$/)?.[1] ?? '', done)), stderr: '', interrupted: false } } as never
     // One sent to the background comes back at once, as the engine's does, and ends with the test
     if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background && command.startsWith('hold ')) {
-      void new Promise<string>(done => held.set(command.slice(5).replace(/ # with its step$/, ''), done))
-      return { result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: `bg-${e.tool_use_id}`, ...(command.endsWith('# with its step') ? { backgroundEndsWithFinalResponse: true } : {}) } } as never
+      void new Promise<string>(done => held.set(command.slice(5), done))
+      return { result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
     }
     if (e.tool === 'Bash' && command.startsWith('hold ')) return { result: { stdout: await new Promise<string>(done => held.set(command.slice(5), done)), stderr: '', interrupted: false } } as never
     if (e.tool === 'Bash' && command.includes('admin')) admins.push({ command, grants: [...files].filter(([path]) => path.startsWith(`${MEMORY}/admin-grants/`)).map(([, text]) => JSON.parse(text)) })
@@ -559,8 +559,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (e.tool === 'Read' && String((e as { file_path?: string }).file_path).endsWith('/.env')) return { result: { type: 'text', file: { content: `API_KEY=${files.get('keychain:API_KEY') ?? 'none'}` } } } as never
     // A workflow runs in the background: the tool answers with its run, its task and where its transcripts go
     // A command sent to the background answers at once with its task, as a real one did on 13 Nov; a watch the same
-    // (one marked `# with its step` is one the engine says it ends with its agent's final response, as it says of a helper's)
-    if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}`, ...(command.endsWith('# with its step') ? { backgroundEndsWithFinalResponse: true } : {}) } } as never
+    if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
     // SBOS's list of names, as the test lays it
     if (e.tool === 'mcp__sbos__secrets') return { result: { content: [{ type: 'text', text: files.get('sbos:secrets') ?? '[]' }] } } as never
     if (e.tool === 'Monitor') {
@@ -889,36 +888,30 @@ test('the schedule for silent helpers keeps its time: each step comes though the
   await settle()
 })
 
-test('helpers are not taken for silent while the engine writes to one\'s transcript, nor while one waits on a command the engine says ends with its step that lives on and prints; once all sit silent, the task is started again to check on them (17 Nov: a task was told its helpers sat silent while two were mid-step and one followed its Azure run)', SLOW, async ($, on) => {
+test("helpers are not taken for silent while their own record shows calls returning something new that Claudopus did not see; a record of calls that say the same again, or of messages to the helper, is no news, and the check-ins and the word to the chat still come (17 Nov: a task was started again three times to check on helpers that were mid-step)", SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
-  const kinds: Record<string, string> = { a1: 'general-purpose', a2: 'general-purpose', a3: 'general-purpose' }
-  const printed: Record<string, number> = {}
-  const { clock, resumed, files } = world(on, { agents, kinds, parents: { a2: 'a1', a3: 'a1' }, jobs: { output: () => 'progress: 3/40 heads fitting\n', wroteAt: file => printed[(file.split('/').pop() ?? '').replace(/\.output$/, '')] ?? 0 } })
+  const kinds: Record<string, string> = { a1: 'general-purpose', a2: 'general-purpose' }
+  const { clock, resumed, appended, files } = world(on, { agents, kinds, parents: { a2: 'a1' } })
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Rebuild the head model', prompt: 'rebuild' } as never)
   await $.agent.spawn({ ...spawn, description: 'Fit the CT scans', prompt: 'ct', parentAgentId: 'a1' } as never)
-  await $.agent.spawn({ ...spawn, description: 'Fit the surface scans', prompt: 'scans', parentAgentId: 'a1' } as never)
-  Object.assign(agents, { a1: 'running', a2: 'running', a3: 'running' })
-  for (const id of ['a1', 'a2', 'a3']) await $.tool.call({ tool: 'Bash', tool_use_id: `s-${id}`, agentId: id, command: 'git status' } as never)
-  // a2 follows its run on Azure in the background, a command the engine says ends with a2's step, and ends its step held on it
-  await $.tool.call({ tool: 'Bash', tool_use_id: 'f-a2', agentId: 'a2', command: 'hold follow # with its step', description: 'Follow the face run until it ends', run_in_background: true } as never)
-  agents.a2 = 'waiting'
-  await $.turn.complete({ answer: 'Waiting for the face run on Azure.', durationMs: 1, isAborted: false, turnId: 'e-a2', reason: 'answer', agentId: 'a2' } as never)
+  Object.assign(agents, { a1: 'running', a2: 'running' })
+  for (const id of ['a1', 'a2']) await $.tool.call({ tool: 'Bash', tool_use_id: `s-${id}`, agentId: id, command: 'git status' } as never)
   agents.a1 = 'completed'
-  await $.turn.complete({ answer: 'Two helpers are fitting; I continue when they report.', durationMs: 1, isAborted: false, turnId: 'e-a1', reason: 'answer', agentId: 'a1' } as never)
+  await $.turn.complete({ answer: 'A helper is fitting; I continue when it reports.', durationMs: 1, isAborted: false, turnId: 'e-a1', reason: 'answer', agentId: 'a1' } as never)
   const nudges = () => resumed.filter(line => line.startsWith('a1: From Claudopus: nothing new has come back from your helpers'))
-  // 13 minutes on, a2's run prints each minute: no check-in
-  const a3 = `${HOME}/.claude/projects/-repo/engine-id/subagents/agent-a3.jsonl`
-  files.set(a3, '{}')
-  for (let m = 1; m <= 13; m++) ((printed['bg-f-a2'] = clock.now()), await clock.advance(60_000))
+  // The engine keeps the helper's record: each minute a call of its returns, which Claudopus never saw
+  const record = `${HOME}/.claude/projects/-repo/engine-id/subagents/agent-a2.jsonl`
+  const rows: string[] = ['{"type":"system"}']
+  const write = (row: object) => (rows.push(JSON.stringify({ ...row, timestamp: new Date(clock.now()).toISOString() })), files.set(record, rows.join('\n')), files.set(`mtime:${record}`, String(clock.now())))
+  const returned = (text: string) => write({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: text }] } })
+  // For 30 minutes each returns something new: no check-in
+  for (let m = 1; m <= 30; m++) (returned(`fitted head ${['one', 'two', 'three', 'four', 'five', 'six'][m % 6]} of the batch, file ${m}.npz`), await clock.advance(60_000))
   expect(nudges()).toEqual([])
-  // a2's run then prints nothing more; for 40 minutes the engine writes a3's steps to its transcript, though Claudopus saw none of
-  // its calls: no check-in
-  for (let m = 1; m <= 40; m++) (files.set(`mtime:${a3}`, String(clock.now())), await clock.advance(60_000))
-  expect(nudges()).toEqual([])
-  // Both then sit silent: the task is started again to check on them
-  await clock.advance(13 * 60_000)
-  expect(await until(async () => nudges().length > 0 || undefined)).toBe(true)
+  // Then each says what the last said, and Claudopus's own messages to it land there too: the check-ins come, and the chat is told
+  for (let m = 1; m <= 40; m++) (returned('Running'), write({ type: 'user', message: { role: 'user', content: 'From Claudopus: a note' } }), await clock.advance(60_000))
+  expect(await until(async () => nudges().length >= 2 || undefined)).toBe(true)
+  expect(await until(async () => appended.some(line => line.includes('"Rebuild the head model" is stuck')) || undefined)).toBe(true)
 })
 
 test("a helper's command in the background is work only while it prints, for at most 30 minutes after its last line, and a task waiting on its own wake_me beside its helpers is not nudged; work flagged stuck is told to the chat once by 36 minutes whatever its helpers look like, and the word that it waits then says the chat may write to it", SLOW, async ($, on) => {
