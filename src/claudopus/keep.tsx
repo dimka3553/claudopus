@@ -97,9 +97,13 @@ const readCut = async ($: EngineInterface, id: string) => {
   // with work at work (the app quit, restarted or dropped the chat: 17 Nov 16:00, three tasks and their helpers lost). It ended
   // about when its beat last came, or else when the file was last written
   const wasPid = typeof was.pid === 'string' ? was.pid : ''
-  const isOtherProcess = !kept && /^\d+$/.test(wasPid) && /^\d+$/.test(enginePid) && wasPid !== enginePid
+  // (a cut the keeper saw that was already taken up is no reason to miss a later one it did not see)
+  const keptNew = kept && !(handled.at === kept && handled.isDone) ? kept : 0
+  const isOtherProcess = !keptNew && /^\d+$/.test(wasPid) && /^\d+$/.test(enginePid) && wasPid !== enginePid
   const beat = isOtherProcess && (await readOr($, beatFile(id))).startsWith(`${wasPid}\t`) ? (await $.fs.stat(beatFile(id)).catch(() => undefined))?.mtimeMs : undefined
-  const cutAt = kept || (isOtherProcess ? beat || (typeof was.at === 'number' ? was.at : 0) : 0)
+  const [endedPid = '', endedAt = ''] = isOtherProcess ? (await readOr($, `${dir}/keep/${id}.ended`)).trim().split('\t') : []
+  const ended = endedPid === wasPid && Number(endedAt) > 0 ? Number(endedAt) : undefined
+  const cutAt = keptNew || (isOtherProcess ? beat || ended || (typeof was.at === 'number' ? was.at : 0) : 0)
   const titles = Object.fromEntries(Object.entries(was.titles && typeof was.titles === 'object' ? (was.titles as Record<string, unknown>) : {}).filter((pair): pair is [string, string] => isId(pair[0]) && typeof pair[1] === 'string'))
   return { ids, helpers, titles, cutAt, state, handled }
 }
@@ -107,8 +111,8 @@ const readCut = async ($: EngineInterface, id: string) => {
 const cutPending = new Set<string>()
 const markCut = ($: EngineInterface, id: string, handled: CutHandled) => $.fs.write(keepFile(id, 'cut'), JSON.stringify(handled)).catch(err => log($, `cut-off work not noted: ${String(err)}`))
 // The words the work is started again with
-const CUT_TELL = (cutAt: number, here: boolean) =>
-  `From Claudopus, not {name}: this chat's process was ended at ${hhmm(cutAt)} while you were working, not by {name}, and the chat has started again${here ? ' on this Mac by itself, under its own sign-in' : ''}. Continue from where you were: first check what you already have and whether a command you started is still running (a detached one keeps running), then continue with your to-dos.`
+const CUT_TELL = (cutAt: number, here: boolean, hasHelpers = false) =>
+  `From Claudopus, not {name}: this chat's process was ended at ${hhmm(cutAt)} while you were working, not by {name}, and the chat has started again${here ? ' on this Mac by itself, under its own sign-in' : ''}. Continue from where you were: first check what you already have and whether a command you started is still running (a detached one keeps running), then continue with your to-dos.${hasHelpers ? ' Claudopus also started your helpers that were cut off again: do not start them a second time; their results come to you as before.' : ''}`
 const CUT_BACK_IN_CHAT = (titles: string[], at: string, helpers: number) =>
   `From Claudopus: the chat stopped at ${at} while tasks were at work, and Claudopus has started ${titles.join(', ')} again${helpers ? `, with ${helpers === 1 ? 'the helper' : `${helpers} helpers`} cut off under them` : ''}. Do not start ${titles.length === 1 ? 'it' : 'them'} again or message ${titles.length === 1 ? 'it' : 'them'} about the stop yourself; nothing needs telling {name}.`
 const hhmm = (at: number) => new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
@@ -137,15 +141,24 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   const handled = parsedOr<CutHandled>(await readOr($, keepFile(id, 'cut')), {})
   if (handled.at === cutAt && handled.isDone) return
   await markCut($, id, { at: cutAt, pid: enginePid, isDone: true })
+  // The task a helper was started under, through the helpers between
+  const rootOf = (kid: string) => {
+    let at = kid
+    for (let hops = 0; hops < 10 && helpers[at]; hops += 1) at = helpers[at] ?? at
+    return at
+  }
   for (const one of [...ids, ...Object.keys(helpers)]) cutPending.delete(one)
   await sync($).catch(() => undefined)
   const live = await $.agent.list().catch(() => [])
   const back: string[] = []
   const lost: string[] = []
   const heldNow = await read($, todos)
-  for (const one of ids.filter(one => !stoppedHere.has(one) && !isHeld(heldNow.find(card => card.id === one)))) {
+  // (nor one that had finished: handed back or gave its result before the end, as a keep file can be a moment behind)
+  const isFinished = (one: string) => Boolean(heldNow.find(card => card.id === one && (card.handedBackAt !== undefined || (card.status !== 'working' && card.answeredAt !== undefined))))
+  for (const one of ids.filter(one => !stoppedHere.has(one) && !isHeld(heldNow.find(card => card.id === one)) && !isFinished(one))) {
     const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
-    const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    const hasHelpers = Object.keys(helpers).some(kid => rootOf(kid) === one)
+    const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy, hasHelpers)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     ;(r.isDelivered ? back : lost).push(one)
     if (!r.isDelivered) await log($, `cut-off work ${one} not started again: ${r.reason}`)
   }
@@ -153,8 +166,10 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   const helpersBack: string[] = []
   const helpersLost: string[] = []
   for (const [one, parent] of Object.entries(helpers)) {
-    const top = topOf(heldNow, parent) || parent
-    if (stoppedHere.has(one) || stoppedHere.has(top) || isHeld(heldNow.find(card => card.id === top)) || isHeld(heldNow.find(card => card.id === one))) continue
+    // (only under a task started again, every helper between them kept too)
+    let isKept = back.includes(rootOf(one))
+    for (let at = parent, hops = 0; isKept && at !== rootOf(one) && hops < 10; at = helpers[at] ?? rootOf(one), hops += 1) isKept = at in helpers && !stoppedHere.has(at) && !isHeld(heldNow.find(card => card.id === at))
+    if (!isKept || stoppedHere.has(one) || isHeld(heldNow.find(card => card.id === one))) continue
     const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
     const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     ;(r.isDelivered ? helpersBack : helpersLost).push(one)
@@ -281,6 +296,8 @@ const startReviver = async ($: EngineInterface, id: string) => {
 // A chat that ends leaves no beat behind
 const endBeat = async ($: EngineInterface, id: string) => {
   beatLine = ''
+  // (the moment it ended, so a restart that follows says when, though the beat is gone)
+  if (dir && SAFE_CHAT.test(id) && enginePid) await $.fs.write(`${dir}/keep/${id}.ended`, `${enginePid}\t${Math.round(await $.clock.now())}\n`).catch(() => undefined)
   if (dir && SAFE_CHAT.test(id)) await $.process.run(['rm', '-f', beatFile(id)]).catch(() => undefined)
 }
 const SAFE_CHAT = /^[A-Za-z0-9-]{1,80}$/

@@ -309,6 +309,8 @@ const CARRIED_IN_CHAT = (title: string) =>
   `From Claudopus: the task "${title}" stopped partway without its report, and Claudopus started it again to carry on. Claude Code may say it ended without delivering a report: there is nothing for you to do, and nothing to tell {name}.`
 const CARRY_GAVE_UP_IN_CHAT = (title: string, id: string) =>
   `From Claudopus: the task "${title}" (${id}) keeps stopping partway without its report, so Claudopus stopped starting it again, and its card says so. Tell {name} in one line only if {name} asks about it; send it a message (SendMessage to ${id}) only when {name} asks you to.`
+const CARRY_LOST_IN_CHAT = (title: string, id: string) =>
+  `From Claudopus: the task "${title}" (${id}) stopped partway without its report, and Claudopus could not start it again; its card says so. Tell {name} in one line only if {name} asks about it; send it a message (SendMessage to ${id}) only when {name} asks you to.`
 const RESTARTED_IN_CHAT = (title: string, mins: number) =>
   `"${title}" stopped partway ${minutesSaid(mins)} ago without a result, so Claudopus started it again. Its card shows how far it got.`
 

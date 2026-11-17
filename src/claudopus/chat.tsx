@@ -56,7 +56,7 @@ const heldLook = async ($: EngineInterface, id: string) => {
     const now = await $.clock.now()
     // (a task left stopped partway is started again to carry on, not ended)
     const one = (await read($, todos)).find(card => card.id === id)
-    const isShort = one?.status === 'working' && isStoppedShort(one, '') && ownsNothing(await read($, todos), id) && !one.wakeWhen && (await pressedAtEnd($, id))
+    const isShort = one?.status === 'working' && isStoppedShort(one, '') && ownsNothing(await read($, todos), id) && !one.wakeWhen && !isTurnWaited(await read($, todos), id) && (await pressedAtEnd($, id))
     if (isShort) await goOn($, id, 'its step ended', true)
     else await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
   }
@@ -152,6 +152,8 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
     $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
   }
+  // What is at work is kept for a restart at once: a task that just finished is never brought back by a quit seconds later
+  await saveKeep($).catch(err => log($, `work at work not kept for the keeper: ${String(err)}`))
   return done
 }
 // The tasks and helpers whose turn's end is being taken up now: the list's look leaves them to it

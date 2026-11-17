@@ -399,4 +399,11 @@ test('a task Claude Code pressed for its report that ended its step with none, a
   await ends('a1', 'Waiting for the build.', 5)
   await clock.advance(6000)
   expect(carried('a1')).toHaveLength(3)
+  // Sent a message, as its card says, it works again and gives its result: the amber line goes, and it ends under Finished
+  agents.a1 = 'running'
+  await $.tool.call({ tool: 'Bash', tool_use_id: 's9', agentId: 'a1', command: 'git status' } as never)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h9', agentId: 'a1', message: `Painted. ${'Every patch is gone. '.repeat(30)}` } as never)
+  await ends('a1', `Painted. ${'Every patch is gone. '.repeat(30)}`, 6)
+  await clock.advance(6000)
+  expect(await lines()).toEqual([])
 })

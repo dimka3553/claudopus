@@ -786,6 +786,8 @@ const CARRIED_IN_CHAT = (title: string) =>
   `From Claudopus: the task "${title}" stopped partway without its report, and Claudopus started it again to carry on. Claude Code may say it ended without delivering a report: there is nothing for you to do, and nothing to tell {name}.`
 const CARRY_GAVE_UP_IN_CHAT = (title: string, id: string) =>
   `From Claudopus: the task "${title}" (${id}) keeps stopping partway without its report, so Claudopus stopped starting it again, and its card says so. Tell {name} in one line only if {name} asks about it; send it a message (SendMessage to ${id}) only when {name} asks you to.`
+const CARRY_LOST_IN_CHAT = (title: string, id: string) =>
+  `From Claudopus: the task "${title}" (${id}) stopped partway without its report, and Claudopus could not start it again; its card says so. Tell {name} in one line only if {name} asks about it; send it a message (SendMessage to ${id}) only when {name} asks you to.`
 const RESTARTED_IN_CHAT = (title: string, mins: number) =>
   `"${title}" stopped partway ${minutesSaid(mins)} ago without a result, so Claudopus started it again. Its card shows how far it got.`
 
@@ -1054,7 +1056,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
   status: 'working',
 })
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
-const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, newAt: at })
 const goesOn = (list: Todo[], id: string) => {
   const one = list.find(card => card.id === id)
   const isRunning = Boolean(one?.bg?.some(b => !b.isWatch)) || list.some(kid => kid.parentId === id && kid.status === 'working')
@@ -1199,7 +1201,7 @@ const sync = async ($: EngineInterface) => {
           card.status === 'working' && card.carryOn && !card.carryOn.gaveUp && card.endedStepAt === card.carryOn.at && (one.status === 'completed' || one.status === 'failed' || one.status === 'idle')
           ? undefined
         : // A task whose end the mod did not hear may have stopped partway: its last words are read first (below)
-          card.status === 'working' && one.status !== 'killed' && (one.status === 'completed' || one.status === 'failed') && !turnEnding.has(card.id) && isStoppedShort(card, '') && !carryTaken.has(carryKey(card)) && ownsNothing(list, card.id)
+          card.status === 'working' && one.status !== 'killed' && (one.status === 'completed' || one.status === 'failed') && !turnEnding.has(card.id) && card.wakeWhen === undefined && !isTurnWaited(list, card.id) && isStoppedShort(card, '') && !carryTaken.has(carryKey(card)) && ownsNothing(list, card.id)
           ? ((unheardEnds.add(card.id)), undefined)
         : card.status === 'working' && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed')
           ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? stoppedAs(card) : 'done', now)
@@ -1220,6 +1222,7 @@ const sync = async ($: EngineInterface) => {
     for (const card of cards.values()) if (listed && card.leftSince && !live.some(one => one.id === card.id)) ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined }))
     return isChanged ? capped([...cards.values()]) : list
   })
+  await carryDue($, now).catch(err => log($, `carry-on notes not looked at: ${String(err)}`))
   if (unheardEnds.size) await endedUnheardShort($, unheardEnds, live, now).catch(err => log($, `ends not heard not looked at: ${String(err)}`))
   if (listed) await endUnheard($, live, now).catch(err => log($, `work that ended unheard not looked for: ${String(err)}`))
   await stepsAtEnd($).catch(err => log($, `last step not done: ${String(err)}`))
@@ -1360,6 +1363,7 @@ const stop = async ($: EngineInterface, id: string) => {
   if (isYours && card && !card.parentId) stopLeft.set(id, left)
   await keepStoppedReports($, now)
   await lookEnds($)
+  await saveKeep($).catch(err => log($, `work at work not kept for the keeper: ${String(err)}`))
 }
 
 const startAgain = async ($: EngineInterface, id: string) => {
@@ -8012,7 +8016,7 @@ const heldLook = async ($: EngineInterface, id: string) => {
   if (listed === 'idle' || listed === undefined) {
     const now = await $.clock.now()
     const one = (await read($, todos)).find(card => card.id === id)
-    const isShort = one?.status === 'working' && isStoppedShort(one, '') && ownsNothing(await read($, todos), id) && !one.wakeWhen && (await pressedAtEnd($, id))
+    const isShort = one?.status === 'working' && isStoppedShort(one, '') && ownsNothing(await read($, todos), id) && !one.wakeWhen && !isTurnWaited(await read($, todos), id) && (await pressedAtEnd($, id))
     if (isShort) await goOn($, id, 'its step ended', true)
     else await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
   }
@@ -8077,6 +8081,7 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
     $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
   }
+  await saveKeep($).catch(err => log($, `work at work not kept for the keeper: ${String(err)}`))
   return done
 }
 const turnEnding = new Set<string>()
@@ -8835,6 +8840,11 @@ const CARRY_PROGRESS = 5
 const CARRY_AFTER = 5000
 const CARRY_SHOWN = 10 * 60_000
 const carryTaken = new Set<string>()
+const carrySent = new Set<string>()
+const carryDue = async ($: EngineInterface, now: number) => {
+  for (const one of (await read($, todos)).filter(card => card.status === 'working' && card.carryOn && !card.carryOn.gaveUp && card.endedStepAt === card.carryOn.at && now - card.carryOn.at >= CARRY_AFTER * 4))
+    if (!carrySent.has(`${one.id}:${one.carryOn?.at}`) && !carrying.has(one.id)) await carryNow($, one.id, one.carryOn?.at ?? 0)
+}
 const carryKey = (one: Todo) => `${one.id}:${one.steps ?? 0}`
 
 const isStoppedShort = (one: Todo | undefined, answer: string) =>
@@ -8853,7 +8863,7 @@ const isStoppedShort = (one: Todo | undefined, answer: string) =>
       !pressed.has(one.id) &&
       !one.flagged &&
       !one.carryOn?.gaveUp &&
-      !(one.detached ?? []).some(d => !SERVER_CMD.test(d.cmd) && describedOf(d.what).kind !== 'server'),
+      !one.detached?.length,
   )
 const isPressedAtEnd = (rows: unknown) => {
   if (!Array.isArray(rows)) return false
@@ -8910,13 +8920,16 @@ const carryNow = async ($: EngineInterface, id: string, at: number) => {
   if (!one || one.status !== 'working' || one.carryOn?.at !== at || !isStoppedShort(one, '') || (await isReplaced($))) return
   const status = (await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status
   if (WORKING.includes(String(status))) return void (await log($, `work ${id} was at work again before Claudopus started it: no note sent`))
+  if (status === 'killed') return void (await log($, `work ${id} was stopped before Claudopus started it: no note sent`))
+  if (carrySent.has(`${id}:${at}`)) return
+  carrySent.add(`${id}:${at}`)
   const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (r.isDelivered) return void (await log($, `work ${id} started again to carry on`))
   const now = await $.clock.now()
   await changeTodos($, list => list.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'stopped', now), carryOn: { ...(card.carryOn ?? nextCarry(card, now)), gaveUp: now, isLost: true } } : card)))
   redraw($)
   await log($, `work ${id} could not be started again to carry on: ${r.reason}`)
-  await tellChat($, named(CARRY_GAVE_UP_IN_CHAT(titleOf(one), id)))
+  await tellChat($, named(CARRY_LOST_IN_CHAT(titleOf(one), id)))
 }
 const isLeftStopped = (one: Todo, at: number) => Boolean(one.carryOn?.gaveUp && one.status !== 'working' && at - one.carryOn.gaveUp < CUT_OLD)
 const carryLine = (one: Todo, at: number) => {
@@ -10070,16 +10083,19 @@ const readCut = async ($: EngineInterface, id: string) => {
   const helpers = Object.fromEntries(Object.entries(was.helpers && typeof was.helpers === 'object' ? (was.helpers as Record<string, unknown>) : {}).filter((pair): pair is [string, string] => isId(pair[0]) && isId(pair[1])))
   const kept = typeof state.backAt === 'number' ? state.backAt : typeof state.cutAt === 'number' ? state.cutAt : 0
   const wasPid = typeof was.pid === 'string' ? was.pid : ''
-  const isOtherProcess = !kept && /^\d+$/.test(wasPid) && /^\d+$/.test(enginePid) && wasPid !== enginePid
+  const keptNew = kept && !(handled.at === kept && handled.isDone) ? kept : 0
+  const isOtherProcess = !keptNew && /^\d+$/.test(wasPid) && /^\d+$/.test(enginePid) && wasPid !== enginePid
   const beat = isOtherProcess && (await readOr($, beatFile(id))).startsWith(`${wasPid}\t`) ? (await $.fs.stat(beatFile(id)).catch(() => undefined))?.mtimeMs : undefined
-  const cutAt = kept || (isOtherProcess ? beat || (typeof was.at === 'number' ? was.at : 0) : 0)
+  const [endedPid = '', endedAt = ''] = isOtherProcess ? (await readOr($, `${dir}/keep/${id}.ended`)).trim().split('\t') : []
+  const ended = endedPid === wasPid && Number(endedAt) > 0 ? Number(endedAt) : undefined
+  const cutAt = keptNew || (isOtherProcess ? beat || ended || (typeof was.at === 'number' ? was.at : 0) : 0)
   const titles = Object.fromEntries(Object.entries(was.titles && typeof was.titles === 'object' ? (was.titles as Record<string, unknown>) : {}).filter((pair): pair is [string, string] => isId(pair[0]) && typeof pair[1] === 'string'))
   return { ids, helpers, titles, cutAt, state, handled }
 }
 const cutPending = new Set<string>()
 const markCut = ($: EngineInterface, id: string, handled: CutHandled) => $.fs.write(keepFile(id, 'cut'), JSON.stringify(handled)).catch(err => log($, `cut-off work not noted: ${String(err)}`))
-const CUT_TELL = (cutAt: number, here: boolean) =>
-  `From Claudopus, not {name}: this chat's process was ended at ${hhmm(cutAt)} while you were working, not by {name}, and the chat has started again${here ? ' on this Mac by itself, under its own sign-in' : ''}. Continue from where you were: first check what you already have and whether a command you started is still running (a detached one keeps running), then continue with your to-dos.`
+const CUT_TELL = (cutAt: number, here: boolean, hasHelpers = false) =>
+  `From Claudopus, not {name}: this chat's process was ended at ${hhmm(cutAt)} while you were working, not by {name}, and the chat has started again${here ? ' on this Mac by itself, under its own sign-in' : ''}. Continue from where you were: first check what you already have and whether a command you started is still running (a detached one keeps running), then continue with your to-dos.${hasHelpers ? ' Claudopus also started your helpers that were cut off again: do not start them a second time; their results come to you as before.' : ''}`
 const CUT_BACK_IN_CHAT = (titles: string[], at: string, helpers: number) =>
   `From Claudopus: the chat stopped at ${at} while tasks were at work, and Claudopus has started ${titles.join(', ')} again${helpers ? `, with ${helpers === 1 ? 'the helper' : `${helpers} helpers`} cut off under them` : ''}. Do not start ${titles.length === 1 ? 'it' : 'them'} again or message ${titles.length === 1 ? 'it' : 'them'} about the stop yourself; nothing needs telling {name}.`
 const hhmm = (at: number) => new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
@@ -10104,23 +10120,31 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   const handled = parsedOr<CutHandled>(await readOr($, keepFile(id, 'cut')), {})
   if (handled.at === cutAt && handled.isDone) return
   await markCut($, id, { at: cutAt, pid: enginePid, isDone: true })
+  const rootOf = (kid: string) => {
+    let at = kid
+    for (let hops = 0; hops < 10 && helpers[at]; hops += 1) at = helpers[at] ?? at
+    return at
+  }
   for (const one of [...ids, ...Object.keys(helpers)]) cutPending.delete(one)
   await sync($).catch(() => undefined)
   const live = await $.agent.list().catch(() => [])
   const back: string[] = []
   const lost: string[] = []
   const heldNow = await read($, todos)
-  for (const one of ids.filter(one => !stoppedHere.has(one) && !isHeld(heldNow.find(card => card.id === one)))) {
+  const isFinished = (one: string) => Boolean(heldNow.find(card => card.id === one && (card.handedBackAt !== undefined || (card.status !== 'working' && card.answeredAt !== undefined))))
+  for (const one of ids.filter(one => !stoppedHere.has(one) && !isHeld(heldNow.find(card => card.id === one)) && !isFinished(one))) {
     const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
-    const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    const hasHelpers = Object.keys(helpers).some(kid => rootOf(kid) === one)
+    const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy, hasHelpers)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     ;(r.isDelivered ? back : lost).push(one)
     if (!r.isDelivered) await log($, `cut-off work ${one} not started again: ${r.reason}`)
   }
   const helpersBack: string[] = []
   const helpersLost: string[] = []
   for (const [one, parent] of Object.entries(helpers)) {
-    const top = topOf(heldNow, parent) || parent
-    if (stoppedHere.has(one) || stoppedHere.has(top) || isHeld(heldNow.find(card => card.id === top)) || isHeld(heldNow.find(card => card.id === one))) continue
+    let isKept = back.includes(rootOf(one))
+    for (let at = parent, hops = 0; isKept && at !== rootOf(one) && hops < 10; at = helpers[at] ?? rootOf(one), hops += 1) isKept = at in helpers && !stoppedHere.has(at) && !isHeld(heldNow.find(card => card.id === at))
+    if (!isKept || stoppedHere.has(one) || isHeld(heldNow.find(card => card.id === one))) continue
     const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
     const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     ;(r.isDelivered ? helpersBack : helpersLost).push(one)
@@ -10224,6 +10248,7 @@ const startReviver = async ($: EngineInterface, id: string) => {
 }
 const endBeat = async ($: EngineInterface, id: string) => {
   beatLine = ''
+  if (dir && SAFE_CHAT.test(id) && enginePid) await $.fs.write(`${dir}/keep/${id}.ended`, `${enginePid}\t${Math.round(await $.clock.now())}\n`).catch(() => undefined)
   if (dir && SAFE_CHAT.test(id)) await $.process.run(['rm', '-f', beatFile(id)]).catch(() => undefined)
 }
 const SAFE_CHAT = /^[A-Za-z0-9-]{1,80}$/
@@ -11087,7 +11112,7 @@ const workHooks = (on: On) => {
         await changeTodos($, list =>
           list.map(one => {
             if (one.id !== id) return one
-            const base = { ...(one.status === 'working' ? one : resumed(one, now)), steps: (one.steps ?? 0) + 1, answeredAt: undefined, waitsSince: undefined, endedStepAt: undefined }
+            const base = { ...(one.status === 'working' ? one : resumed(one, now)), ...(one.carryOn?.gaveUp ? { carryOn: undefined } : {}), steps: (one.steps ?? 0) + 1, answeredAt: undefined, waitsSince: undefined, endedStepAt: undefined }
             if (isKeeping) return { ...base, quiet: 0, owes: isTool(e.tool, 'note') ? undefined : one.owes }
             const owes = one.owes === undefined ? undefined : one.owes + 1
             const quiet = (one.quiet ?? 0) + 1

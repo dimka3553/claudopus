@@ -144,27 +144,32 @@ test('each chat beats for the watcher that brings Claudopus back, naming its pro
 })
 
 test('a chat this Mac runs whose process ended with tasks at work, as when the app quits or drops it, has them and their helpers started again, each helper under its own task, and the chat is told not to start them itself; a task you stopped is left, and a reload in the same process starts nothing', SLOW, async ($, on) => {
-  const { files, clock, resumed, appended } = world(on)
-  // The last process wrote the file and beat until the moment it ended; no keeper saw it end
-  files.set(`${KEEP_AT}.json`, JSON.stringify({ count: 3, ids: ['a7', 'a8', 'a6'], helpers: { a9: 'a7', a5: 'a6' }, titles: { a9: 'Lay out the frames' }, title: 'Contest', pid: '3131', at: KEEP_NOW - 600_000 }))
+  const { files, clock, resumed, appended } = world(on, { unresumable: new Set(['a4']) })
+  // The last process wrote the file and beat until the moment it ended; no keeper saw it end. a3 had handed back its result a moment
+  // before; a4 cannot be started again, so its helper a2 is left too; a1 is a helper of a9's
+  files.set(`${KEEP_AT}.json`, JSON.stringify({ count: 5, ids: ['a7', 'a8', 'a6', 'a3', 'a4'], helpers: { a9: 'a7', a1: 'a9', a5: 'a6', a2: 'a4' }, titles: { a9: 'Lay out the frames' }, title: 'Contest', pid: '3131', at: KEEP_NOW - 600_000 }))
   files.set(`${KEEP_AT}.beat`, '3131\tclaudopus@x\t/s/settings.json\n')
   files.set(`mtime:${KEEP_AT}.beat`, String(KEEP_NOW - 60_000))
   const card = (id: string, title: string, more = {}) => ({ id, parentId: '', isFork: false, tokens: 0, title, words: '', items: [], entries: [], answer: '', startedAt: KEEP_NOW - 900_000, endedAt: KEEP_NOW - 60_000, status: 'stopped', ...more })
-  files.set(`${MEMORY}/finished/engine-id.json`, JSON.stringify([card('a7', 'Solve the cameras'), card('a8', 'Train the splats'), card('a6', 'Sort the frames', { byYou: { at: KEEP_NOW - 60_000 } })]))
+  files.set(`${MEMORY}/finished/engine-id.json`, JSON.stringify([card('a7', 'Solve the cameras'), card('a8', 'Train the splats'), card('a6', 'Sort the frames', { byYou: { at: KEEP_NOW - 60_000 } }), card('a3', 'Write it up', { status: 'done', handedBackAt: KEEP_NOW - 70_000 }), card('a4', 'Fit the lens')]))
   await $.session.start(start)
   expect(resumed).toEqual([])
   await clock.advance(31_000)
-  expect(resumed.map(one => one.split(':')[0]).sort()).toEqual(['a7', 'a8', 'a9'])
+  expect(resumed.map(one => one.split(':')[0]).sort()).toEqual(['a1', 'a7', 'a8', 'a9'])
   expect(resumed.every(one => one.includes("this chat's process was ended at") && one.includes('Continue from where you were'))).toBe(true)
+  // The task whose helper is started again is told not to start it a second time
+  expect(resumed.find(one => one.startsWith('a7: '))).toContain('do not start them a second time')
+  expect(resumed.find(one => one.startsWith('a8: '))).not.toContain('helpers')
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const cut = (await pane.findAll({ type: 'Text', text: /^Interrupted at / })).map(one => one.text?.replace(/\d\d:\d\d/g, 'hh:mm'))
   // The helper, which this process had no card for, is back under its task by the title the last process kept
   expect((await pane.findAll({ type: 'Button' })).map(one => one.props.label)).toContain('Lay out the frames')
   await pane.unmount()
-  expect(cut).toEqual(['Interrupted at hh:mm when the chat stopped · running again since hh:mm', 'Interrupted at hh:mm when the chat stopped · running again since hh:mm'])
-  expect(appended.filter(line => line.includes('Claudopus has started "Solve the cameras", "Train the splats" again, with the helper cut off under them') && line.includes('Do not start them again'))).toHaveLength(1)
+  expect(cut.filter(line => line?.endsWith('running again since hh:mm'))).toHaveLength(2)
+  expect(cut.filter(line => line?.endsWith("Claudopus couldn't start it again"))).toHaveLength(1)
+  expect(appended.filter(line => line.includes('Claudopus has started "Solve the cameras", "Train the splats" again, with 2 helpers cut off under them') && line.includes('Do not start them again'))).toHaveLength(1)
   // Loaded again in this process: nothing more
   await $.session.start(start)
   await clock.advance(31_000)
-  expect(resumed).toHaveLength(3)
+  expect(resumed).toHaveLength(4)
 })

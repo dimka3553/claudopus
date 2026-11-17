@@ -23,7 +23,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // A reply its ask was held with has been acted on once the run it started ends: the ask waits on the person again, every answer back
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, newAt: at })
 // Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
 // a to-do of its is still being done. It is still at work; an answer it handed back on the way is no report. A watch it set is no
 // such command: it may run until stopped
@@ -219,7 +219,7 @@ const sync = async ($: EngineInterface) => {
           card.status === 'working' && card.carryOn && !card.carryOn.gaveUp && card.endedStepAt === card.carryOn.at && (one.status === 'completed' || one.status === 'failed' || one.status === 'idle')
           ? undefined
         : // A task whose end the mod did not hear may have stopped partway: its last words are read first (below)
-          card.status === 'working' && one.status !== 'killed' && (one.status === 'completed' || one.status === 'failed') && !turnEnding.has(card.id) && isStoppedShort(card, '') && !carryTaken.has(carryKey(card)) && ownsNothing(list, card.id)
+          card.status === 'working' && one.status !== 'killed' && (one.status === 'completed' || one.status === 'failed') && !turnEnding.has(card.id) && card.wakeWhen === undefined && !isTurnWaited(list, card.id) && isStoppedShort(card, '') && !carryTaken.has(carryKey(card)) && ownsNothing(list, card.id)
           ? ((unheardEnds.add(card.id)), undefined)
         : card.status === 'working' && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed')
           ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? stoppedAs(card) : 'done', now)
@@ -242,6 +242,7 @@ const sync = async ($: EngineInterface) => {
     for (const card of cards.values()) if (listed && card.leftSince && !live.some(one => one.id === card.id)) ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined }))
     return isChanged ? capped([...cards.values()]) : list
   })
+  await carryDue($, now).catch(err => log($, `carry-on notes not looked at: ${String(err)}`))
   if (unheardEnds.size) await endedUnheardShort($, unheardEnds, live, now).catch(err => log($, `ends not heard not looked at: ${String(err)}`))
   if (listed) await endUnheard($, live, now).catch(err => log($, `work that ended unheard not looked for: ${String(err)}`))
   // A go-ahead pressed during a turn whose end only the engine's list showed does its last step now
@@ -407,6 +408,7 @@ const stop = async ($: EngineInterface, id: string) => {
   if (isYours && card && !card.parentId) stopLeft.set(id, left)
   await keepStoppedReports($, now)
   await lookEnds($)
+  await saveKeep($).catch(err => log($, `work at work not kept for the keeper: ${String(err)}`))
 }
 
 // Work the person stopped, started again by their press on its card: a message from the panel in their name, which lifts the hold

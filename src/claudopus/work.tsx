@@ -471,7 +471,7 @@ const workHooks = (on: On) => {
         await changeTodos($, list =>
           list.map(one => {
             if (one.id !== id) return one
-            const base = { ...(one.status === 'working' ? one : resumed(one, now)), steps: (one.steps ?? 0) + 1, answeredAt: undefined, waitsSince: undefined, endedStepAt: undefined }
+            const base = { ...(one.status === 'working' ? one : resumed(one, now)), ...(one.carryOn?.gaveUp ? { carryOn: undefined } : {}), steps: (one.steps ?? 0) + 1, answeredAt: undefined, waitsSince: undefined, endedStepAt: undefined }
             if (isKeeping) return { ...base, quiet: 0, owes: isTool(e.tool, 'note') ? undefined : one.owes }
             const owes = one.owes === undefined ? undefined : one.owes + 1
             const quiet = (one.quiet ?? 0) + 1
