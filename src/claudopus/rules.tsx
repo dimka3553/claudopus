@@ -295,8 +295,9 @@ const OWED =
 const drifted = (steps: number) =>
   `You have taken ${steps} steps since you last touched your to-dos or said how far you have got. In your next step, send the to-do calls that bring the list up to date (tick what is done, mark the one you are on as doing, add what you took on) and a \`note\` saying how far you have got, together with your next working call in that same step, never in a step of their own. If all of it is already up to date, continue.`
 // The chat is told once when nothing new has come back under a piece of work for a while
-const STUCK_IN_CHAT = (title: string, mins: number) =>
-  `"${title}" hasn't made progress for ${mins} minutes: nothing new has come back to Claude or its helpers. It may be stuck waiting for something. Its card shows how far it has got.`
+// (`isHelpersAtWork`: a helper of its still runs something, which brought nothing back meanwhile)
+const STUCK_IN_CHAT = (title: string, mins: number, isHelpersAtWork = false) =>
+  `"${title}" hasn't made progress for ${mins} minutes: nothing new has come back to Claude${isHelpersAtWork ? ', though its helpers still run something' : ' or its helpers'}. It may be stuck waiting for something. Its card shows how far it has got.`
 // What the chat alone reads with it: it may ask the task what it waits on, as nothing of Claudopus's will
 const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to hand back what it has if nothing is coming.'
 // A task that ended its step to wait for its helpers, from which nothing new has come back: Claudopus starts it again with a nudge,

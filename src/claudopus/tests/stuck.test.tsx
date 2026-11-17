@@ -56,7 +56,8 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   const all = { a1: 'idle', a2: 'running', a3: 'running', a4: 'running', a5: 'running', a6: 'running', a7: 'running' }
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = Object.fromEntries(Object.keys(all).map(id => [id, 'general-purpose']))
-  const { keep, settle, clock, held, logged, resumed, stopped, appended } = world(on, { agents, kinds, parents: { a3: 'a2', a5: 'a4', a7: 'a6' } })
+  // (a5's render prints a line every minute)
+  const { keep, settle, clock, held, logged, resumed, stopped, appended, submitted } = world(on, { agents, kinds, parents: { a3: 'a2', a5: 'a4', a7: 'a6' }, jobs: { output: () => 'rendering frames\n', wroteAt: file => (file.endsWith('/bg-r-a5.output') ? clock.now() - 60_000 : 0) } })
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Fit the video', prompt: 'fit' } as never)
   await $.agent.spawn({ ...spawn, description: 'Draw the lids', prompt: 'lids' } as never)
@@ -117,15 +118,19 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   const texts = (await pane.findAll({ type: 'Text' })).map(one => (one as { text?: string }).text ?? '')
   await pane.unmount()
   expect(texts.filter(text => text.startsWith('No progress for') && text.endsWith('and told the chat it is stuck.'))).toHaveLength(1)
-  // Helpers at work are never taken for silent: their tasks are not started again; one rendering in the background is not told to
-  // the chat as maybe stuck, and its card says it waits on its helpers' work
+  // Helpers at work are never taken for silent: their tasks are not started again, and its card says it waits on its helpers' work;
+  // with nothing new coming back, the chat is told once that its helpers still run something
   expect([nudges('a4'), nudges('a6')]).toEqual([[], []])
-  expect(logged.filter(line => line.startsWith('"Film the town"'))).toEqual([])
+  expect(logged.filter(line => line.startsWith('"Film the town"'))).toEqual([expect.stringMatching(/^"Film the town" hasn't made progress for 3\d minutes: nothing new has come back to Claude, though its helpers still run something\./)])
   expect(texts.filter(text => text === "Waits on its helpers' work.").length).toBeGreaterThanOrEqual(1)
   // Its report goes through while its helpers run: the silent one is stopped with it, those at work never are
   expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-late', agentId: 'a2', message: 'Lids drawn; rendering never ended.' } as never)) as { deny?: string }).deny).toBeUndefined()
   expect(stopped).toContain('a3')
   expect(stopped.filter(id => id === 'a5' || id === 'a7')).toEqual([])
+  // The helper Claudopus stopped tells the chat nothing as it ends, though it ends with words
+  await $.turn.complete({ answer: 'Half the lids rendered.', durationMs: 1, isAborted: false, turnId: 'e-a3', reason: 'answer', agentId: 'a3' } as never)
+  await clock.advance(2_000)
+  expect([...appended, ...submitted].filter(line => line.includes('came after the task'))).toEqual([])
   held.get('render')?.('done')
   await settle()
 })
@@ -164,6 +169,59 @@ test('the schedule for silent helpers keeps its time: each step comes though the
   expect(said()[2]).toContain('asked it to check on them')
   expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: 'Lids drawn.' } as never)) as { deny?: string }).deny).toBeUndefined()
   await settle()
+})
+
+test("a helper's command in the background is work only while it prints, for at most 30 minutes after its last line, and a task waiting on its own wake_me beside its helpers is not nudged; work flagged stuck is told to the chat once by 36 minutes whatever its helpers look like, and the word that it waits then says the chat may write to it", SLOW, async ($, on) => {
+  const all = { a1: 'running', a2: 'running', a3: 'running', a4: 'running', a5: 'running', a6: 'running' }
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = Object.fromEntries(Object.keys(all).map(id => [id, 'general-purpose']))
+  // When each command in the background last printed, by its task id
+  const printed: Record<string, number> = {}
+  const { clock, resumed, appended } = world(on, { agents, kinds, parents: { a2: 'a1', a4: 'a3', a6: 'a5' }, jobs: { output: () => 'listening on :3000\n', wroteAt: file => printed[(file.split('/').pop() ?? '').replace(/\.output$/, '')] ?? 0 } })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Serve the site', prompt: 'serve' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Start the server', prompt: 'start', parentAgentId: 'a1' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the app', prompt: 'check' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Read the app log', prompt: 'read', parentAgentId: 'a3' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Run the dev site', prompt: 'run' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Watch the dev site', prompt: 'watch', parentAgentId: 'a5' } as never)
+  Object.assign(agents, all)
+  for (const id of Object.keys(all)) await $.tool.call({ tool: 'Bash', tool_use_id: `s-${id}`, agentId: id, command: 'git status' } as never)
+  // a2 starts a server that prints once and then hangs silent; a6 one that prints all the time
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'v-a2', agentId: 'a2', command: 'hold serve', description: 'Start the server', run_in_background: true } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'v-a6', agentId: 'a6', command: 'hold watch', description: 'Serve the dev site', run_in_background: true } as never)
+  printed['bg-v-a2'] = clock.now()
+  // a3 asks to be started again in an hour, beside its helper
+  expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w-a3', agentId: 'a3', what: 'the app to come up', minutes: 60 } as never)) as { result?: string }).result).toContain('in 60 min')
+  for (const id of ['a1', 'a3', 'a5']) {
+    agents[id] = 'completed'
+    await $.turn.complete({ answer: 'Waiting for my helper.', durationMs: 1, isAborted: false, turnId: `e-${id}`, reason: 'answer', agentId: id } as never)
+  }
+  const nudges = (id: string) => resumed.filter(line => line.startsWith(`${id}: From Claudopus:`) && line.includes('helpers'))
+  const told = () => appended.filter(line => line.includes('"Run the dev site" hasn\'t made progress') && line.includes('you may send it a message'))
+  const minutes = async (n: number) => {
+    for (let at = 0; at < n; at += 1) ((printed['bg-v-a6'] = clock.now()), await clock.advance(60_000))
+  }
+  // 25 minutes on: the server that last printed 25 minutes ago is still work, and the task waiting on its own wake_me is not nudged
+  await minutes(25)
+  expect([nudges('a1'), nudges('a3'), nudges('a5'), told()]).toEqual([[], [], [], []])
+  // 30 minutes after its last line it is silent: its task is checked on, and ordered to hand back only 12 minutes after that
+  await minutes(7)
+  expect(nudges('a1')).toHaveLength(1)
+  await minutes(6)
+  expect(nudges('a1')).toHaveLength(1)
+  // The task whose helper prints all along, with nothing new coming back, is told to the chat once by 36 minutes
+  expect(told()).toHaveLength(1)
+  await minutes(8)
+  expect(nudges('a1')).toHaveLength(2)
+  expect([told().length, nudges('a3'), nudges('a5')]).toEqual([1, [], []])
+  // Its notice that it ended now says the chat may write to it
+  const notice = `<task-notification>\n<task-id>a5</task-id>\n<status>completed</status>\n<summary>Agent "Run the dev site" finished</summary>\n<result>The subagent ended without delivering a report through SubagentHandback.\n</result>\n</task-notification>\n<task-notification>\n<task-id>bx1</task-id>\n<status>completed</status>\n<summary>Background command "Build" completed (exit code 0)</summary>\n</task-notification>`
+  const r = (await $.prompt.submit({ text: notice, wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[] }
+  const waits = (r.context ?? []).filter(text => text.includes('"Run the dev site" ended its step without its report'))
+  expect(waits).toHaveLength(1)
+  expect(waits[0]).toContain('Claudopus told you it is stuck, so you may message it (SendMessage to a5)')
+  expect(waits[0]).not.toContain('do not message it')
 })
 
 test('a step that runs for minutes says so on its row, with its time, and the flag names what keeps waiting', SLOW, async ($, on) => {

@@ -100,6 +100,9 @@ export type Todo = {
   newAt?: number
   // Set while nothing new has come back to it or any helper under it for a while: when something last did
   stuckAt?: number
+  // The chat was told it is stuck (Claudopus's word that it made no progress, or that it did not hand back what it has): when.
+  // Once per time it is flagged stuck
+  stuckTold?: number
   // Finished work that its own background work still holds: since when the mod has seen it so. Absent once nothing holds it
   leftSince?: number
   // What it started in the background itself that wakes it when it ends (a command, a watch): the engine's task id, what it is
@@ -138,8 +141,8 @@ export type Todo = {
   endedStepAt?: number
   // Its step ended while all its helpers sit silent: since when, and how many of the steps Claudopus takes on a fixed schedule are
   // done (1 a check-in at 12 minutes, 2 the order to hand back at 24, 3 the chat told it is stuck at 36). Starts over only when a
-  // helper hands back a result or prints something new
-  helperWait?: { from: number; done: number }
+  // helper hands back a result or prints something new. `at`: when the last step was taken; steps come at least 12 minutes apart
+  helperWait?: { from: number; done: number; at?: number }
   // Claudopus told it to hand back what it has (its wait ran out, or its helpers sat silent): since when. Its report goes through
   // while helpers run, until it hands back
   mayHandBack?: number
