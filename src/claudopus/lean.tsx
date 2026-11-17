@@ -86,12 +86,12 @@ const CHAT_GIT = ['push', 'fetch', 'status', 'log', 'diff', 'show', 'branch', 'r
 const CHAT_GH = ['view', 'list', 'status', 'checks', 'diff']
 const CHAT_LOOKS = ['ls', 'pwd', 'date', 'uptime', 'whoami', 'hostname', 'df', 'sw_vers', 'uname', 'which']
 // It shows a file or a page: macOS's open of a page of a local server, a folder, or a file of a kind that is only looked at (a picture,
-// a PDF, a page, a text, a video), in its own app or one named from a short list of browsers, viewers and editors; -R only shows a
+// a PDF, a page, a text, a video), in its own app or one named from a short list of browsers and viewers (never a code editor, which may run a folder's own tasks as it opens); -R only shows a
 // file in the Finder. A path may start at the home folder (~ or $HOME)
 const OPEN_VIEWS = /\.(?:png|jpe?g|gif|webp|avif|heic|tiff?|bmp|svg|ico|pdf|html?|txt|md|markdown|csv|tsv|json|log|mp4|mov|m4v|webm)$/i
 // a folder: the current one, the home folder, or a path ending in / whose last name has no dot (Foo.app/ is an app)
 const OPEN_FOLDER = /^(?:\.|~|\$HOME|(?:.*\/)?[^/.]+\/)$/
-const OPEN_APPS = ['safari', 'google chrome', 'chrome', 'chromium', 'vivaldi', 'firefox', 'arc', 'brave browser', 'microsoft edge', 'opera', 'orion', 'preview', 'quicktime player', 'photos', 'textedit', 'visual studio code', 'cursor', 'zed', 'sublime text', 'iina', 'vlc']
+const OPEN_APPS = ['safari', 'google chrome', 'chrome', 'chromium', 'vivaldi', 'firefox', 'arc', 'brave browser', 'microsoft edge', 'opera', 'orion', 'preview', 'quicktime player', 'photos', 'textedit', 'iina', 'vlc']
 const isChatOpen = (args: string[]) => {
   let shown = 0
   const isReveal = args.some(one => /^-[gnR]*R[gnR]*$/.test(one))
