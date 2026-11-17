@@ -12921,7 +12921,7 @@ const watchTabs = async ($: EngineInterface, ids: string[], why: string, since =
       const empty = ids.filter(id => open.has(id) && (tabAsked.get(id) ?? 0) < from)
       if (!empty.length) return
       drawAgain($)
-      if (wait === TAB_CHECKS.at(-1)) await log($, `tab ${empty.join(', ')} not asked for in ${wait / 1000}s after ${why}: drawn again`)
+      if (wait === TAB_CHECKS.at(-1)) await log($, `tab ${empty.join(', ')} not asked for in ${wait / 1000}s after ${why}${heldChat ? ` in chat ${heldChat}` : ''}: drawn again`)
     })
 }
 const watchLoaded = async ($: EngineInterface) => {
