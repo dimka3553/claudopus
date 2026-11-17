@@ -1,0 +1,1 @@
+- claudopus.ai asks before it counts visits: a small cookie banner offers Accept and Decline, and only Accept loads Microsoft Clarity. The footer's Cookies link changes the choice, and a new Privacy page says what Clarity records.

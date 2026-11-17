@@ -82,7 +82,7 @@ section h2{font-size:var(--t-title)}
 section .note{margin:var(--s1) 0 var(--s3)}
 section li{position:relative;padding-left:var(--s6);margin-top:var(--s2)}
 section li::before{content:"";position:absolute;left:0;top:.6em;width:var(--s2);height:var(--s2);background:var(--purple)}
-.foot{padding:var(--s12) 0 var(--s16);color:var(--soft);font-size:var(--t-small)}
+.foot{display:flex;flex-wrap:wrap;gap:var(--s3) var(--s6);padding:var(--s12) 0 var(--s16);color:var(--soft);font-size:var(--t-small)}
 </style>
 </head>
 <body>
@@ -283,7 +283,8 @@ section li::before{content:"";position:absolute;left:0;top:.6em;width:var(--s2);
 <section id="v0.2.0"><h2>v0.2.0</h2><p class="note">12 November 2026</p><ul><li>Adds the Stats, Memory, About and Config tabs to the panel.</li><li>Adds a card that shows when a task needs you, a way to store keys and passwords, and a short clip of the panel.</li><li>Adds a website and the details Anthropic's plugin directory asks for.</li></ul></section>
 <section id="v0.1.0"><h2>v0.1.0</h2><p class="note">11 November 2026</p><ul><li>First public version: every chat does its tasks in the background and says how they are going.</li><li>Saves your words and Claude's answers, keeps topics, and keeps chats small.</li></ul></section>
 </main>
-<footer class="foot"><a href="https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/CHANGELOG.md">The same changelog on GitHub</a></footer>
+<footer class="foot"><a href="https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/CHANGELOG.md">The same changelog on GitHub</a> <a href="privacy.html">Privacy</a> <a href="#cookies" data-cookies>Cookies</a></footer>
+<script src="consent.js"></script>
 </div>
 </body>
 </html>
