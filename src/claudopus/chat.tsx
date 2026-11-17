@@ -75,8 +75,10 @@ const quietTurns = new Set<string>()
 // A turn of a task or helper ends: its card follows what it ended with (chatHooks' turn.complete)
 const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAborted: boolean; reason: string }, id: string, done: T): Promise<T> => {
   const now = await $.clock.now()
-  // A turn that handed back its report with SubagentHandback and says nothing after has that report as its answer
-  const answer = ((e.answer ?? '').trim() || handedBack.get(id) || '').slice(0, ANSWER_CHARS)
+  // A turn that handed back its report with SubagentHandback and says nothing after has that report as its answer; the line
+  // Claudopus answered Claude Code's press with is no answer of its own (its card keeps what it said before)
+  const said = (e.answer ?? '').trim()
+  const answer = ((said === PRESS_ANSWER ? '' : said) || handedBack.get(id) || '').slice(0, ANSWER_CHARS)
   // Held: the engine keeps it for what it left running, and lists it as waiting. As a turn ends the engine may still list it as
   // running for a moment, held or not: taken as held then, and looked at again shortly (heldLook)
   const listed = (await $.agent.list().catch(() => [])).find(one => one.id === id)?.status

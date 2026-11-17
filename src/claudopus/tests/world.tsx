@@ -552,7 +552,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (e.tool === 'Read' && String((e as { file_path?: string }).file_path).endsWith('/.env')) return { result: { type: 'text', file: { content: `API_KEY=${files.get('keychain:API_KEY') ?? 'none'}` } } } as never
     // A workflow runs in the background: the tool answers with its run, its task and where its transcripts go
     // A command sent to the background answers at once with its task, as a real one did on 13 Nov; a watch the same
-    if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
+    // (one marked `# with its step` is one the engine says it ends with its agent's final response, as it says of a helper's)
+    if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}`, ...(command.endsWith('# with its step') ? { backgroundEndsWithFinalResponse: true } : {}) } } as never
     // SBOS's list of names, as the test lays it
     if (e.tool === 'mcp__sbos__secrets') return { result: { content: [{ type: 'text', text: files.get('sbos:secrets') ?? '[]' }] } } as never
     if (e.tool === 'Monitor') {

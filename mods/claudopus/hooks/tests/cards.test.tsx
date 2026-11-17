@@ -559,7 +559,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (e.tool === 'Read' && String((e as { file_path?: string }).file_path).endsWith('/.env')) return { result: { type: 'text', file: { content: `API_KEY=${files.get('keychain:API_KEY') ?? 'none'}` } } } as never
     // A workflow runs in the background: the tool answers with its run, its task and where its transcripts go
     // A command sent to the background answers at once with its task, as a real one did on 13 Nov; a watch the same
-    if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
+    // (one marked `# with its step` is one the engine says it ends with its agent's final response, as it says of a helper's)
+    if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}`, ...(command.endsWith('# with its step') ? { backgroundEndsWithFinalResponse: true } : {}) } } as never
     // SBOS's list of names, as the test lays it
     if (e.tool === 'mcp__sbos__secrets') return { result: { content: [{ type: 'text', text: files.get('sbos:secrets') ?? '[]' }] } } as never
     if (e.tool === 'Monitor') {
@@ -2014,7 +2015,7 @@ test('a run of a work\'s own wakes it the moment it ends: any command that only 
     for await (const chunk of $.turn.step({ turnId: 't1', index: 1, model: 'm', messageCount: 2, agentId: 'a1' })) if (chunk.kind === 'text') texts.push((chunk as { text: string }).text)
     return [stepped.length - before, texts]
   }
-  expect(await press('The rest uploads; I am woken when it ends.')).toEqual([0, ["My command is still running. Claudopus starts me again when it's done, and I'll send my result then."]])
+  expect(await press('The rest uploads; I am woken when it ends.')).toEqual([0, ['<system-reminder>Waiting on my own work, which starts me again.</system-reminder>']])
   expect(await press(`Both uploads are done. ${'Every file arrived whole. '.repeat(30)}`)).toEqual([1, ['Looking at the nose.']])
   // It also waits on something else, so its card stays at work with its step ended: the run's end still starts it again, as there is
   // no run of it to read a line in (17 Nov: the word was refused there and lost, and the task sat still for half an hour)

@@ -292,6 +292,15 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
     if (!one || isHeld(one) || stoppedHere.has(id) || pressed.has(id) || (await isReplaced($))) continue
     // (read right before: work at a step of its own again is not sent one, and the step waits for its step to end)
     if (step < 3 && WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))) continue
+    // A helper whose own transcript the engine wrote to since the wait began was at work, whatever Claudopus saw of its calls (17 Nov:
+    // a task was told its helpers sat silent while two of them were mid-step): the schedule starts over from then
+    const wrote = step < 3 ? await helpersWroteAt($, list, id) : 0
+    const from = list.find(card => card.id === id)?.helperWait?.from ?? now
+    if (wrote > from) {
+      await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { from: wrote, done: 0 } } : card)))
+      await log($, `work ${id} waits on helpers Claudopus saw nothing new from, but one wrote to its transcript ${took(now - wrote)} ago: not started again`)
+      continue
+    }
     await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { ...card.helperWait, done: step, at: now }, ...(step === 2 ? { mayHandBack: card.mayHandBack ?? now } : {}), ...(step === 3 ? { stuckTold: card.stuckTold ?? now } : {}) } : card)))
     if (step === 3) {
       // The chat already told it is stuck is not told again
@@ -307,6 +316,17 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
   }
 }
 
+// When the engine last wrote to the transcript of a helper at work under a piece of work: what it says and does, and each message
+// and notice that reaches it, go there as they happen. 0 when none can be read
+const helpersWroteAt = async ($: EngineInterface, list: Todo[], id: string) => {
+  const { id: session } = await read($, me)
+  const home = (await $.env.get('HOME')) ?? ''
+  if (!session || !home || !cwd) return 0
+  const folder = `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${session}/subagents`
+  const kids = underOf(list, id).filter(kid => kid.status === 'working')
+  const times = await Promise.all(kids.map(kid => $.fs.stat(`${folder}/agent-${kid.id}.jsonl`).then(found => found.mtimeMs, () => 0)))
+  return Math.max(0, ...times)
+}
 // The helpers a piece of work waits on, each by its title and id with what it runs and for how long, for its nudge
 const silentHelpers = (list: Todo[], id: string, at: number) =>
   list
@@ -340,14 +360,14 @@ const stuckLine = (list: Todo[], one: Todo, at: number) => {
 
 const BG_KEPT = 20
 // A command it sent to the background, or a watch it set, is kept by its card with its task id and its own words for it; one it
-// stops goes. A command the engine ends with its final response wakes nothing and is not kept
+// stops goes. One the engine says it ends with the work's final response is kept too: a helper's often lives on past it, and wakes
+// it as it ends (17 Nov: three helpers' Azure followers ran on unseen for an hour, and their task was told they sat silent); one the
+// engine did end goes as its output ends, or with the step that holds nothing (agentTurnEnded)
 const keepBackground = async ($: EngineInterface, agent: string, call: { tool: string; description?: unknown; command?: unknown; task_id?: unknown; shell_id?: unknown; timeout_ms?: unknown; persistent?: unknown }, result: unknown) => {
   if (call.tool === 'TaskStop' || call.tool === 'KillShell') return dropBackground($, [String(call.task_id ?? call.shell_id ?? '')], 'stopped')
-  const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown; backgroundEndsWithFinalResponse?: unknown }
-  // A command the engine ends with the work's final response wakes nothing and is not kept (the engine does not always say that
-  // one it keeps wakes its owner, so its silence is no sign)
+  const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown }
   const id = call.tool === 'Bash' ? r.backgroundTaskId : call.tool === 'Monitor' ? r.taskId : undefined
-  if (typeof id !== 'string' || !id || r.backgroundEndsWithFinalResponse) return
+  if (typeof id !== 'string' || !id) return
   const what = oneLine(String(call.description ?? '') || String(call.command ?? '').split('\n')[0] || '').slice(0, 160)
   const cmd = oneLine(String(call.command ?? '')).slice(0, 400)
   const now = await $.clock.now()

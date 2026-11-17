@@ -1301,7 +1301,7 @@ test('a run of a work\'s own wakes it the moment it ends: any command that only 
     for await (const chunk of $.turn.step({ turnId: 't1', index: 1, model: 'm', messageCount: 2, agentId: 'a1' })) if (chunk.kind === 'text') texts.push((chunk as { text: string }).text)
     return [stepped.length - before, texts]
   }
-  expect(await press('The rest uploads; I am woken when it ends.')).toEqual([0, ["My command is still running. Claudopus starts me again when it's done, and I'll send my result then."]])
+  expect(await press('The rest uploads; I am woken when it ends.')).toEqual([0, ['<system-reminder>Waiting on my own work, which starts me again.</system-reminder>']])
   expect(await press(`Both uploads are done. ${'Every file arrived whole. '.repeat(30)}`)).toEqual([1, ['Looking at the nose.']])
   // It also waits on something else, so its card stays at work with its step ended: the run's end still starts it again, as there is
   // no run of it to read a line in (17 Nov: the word was refused there and lost, and the task sat still for half an hour)

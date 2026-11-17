@@ -559,7 +559,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (e.tool === 'Read' && String((e as { file_path?: string }).file_path).endsWith('/.env')) return { result: { type: 'text', file: { content: `API_KEY=${files.get('keychain:API_KEY') ?? 'none'}` } } } as never
     // A workflow runs in the background: the tool answers with its run, its task and where its transcripts go
     // A command sent to the background answers at once with its task, as a real one did on 13 Nov; a watch the same
-    if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
+    // (one marked `# with its step` is one the engine says it ends with its agent's final response, as it says of a helper's)
+    if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}`, ...(command.endsWith('# with its step') ? { backgroundEndsWithFinalResponse: true } : {}) } } as never
     // SBOS's list of names, as the test lays it
     if (e.tool === 'mcp__sbos__secrets') return { result: { content: [{ type: 'text', text: files.get('sbos:secrets') ?? '[]' }] } } as never
     if (e.tool === 'Monitor') {
@@ -888,6 +889,34 @@ test('the schedule for silent helpers keeps its time: each step comes though the
   await settle()
 })
 
+test('helpers are not taken for silent while the engine writes to one\'s transcript, nor while one waits on a command the engine says ends with its step that lives on and prints; once all sit silent, the task is started again to check on them (17 Nov: a task was told its helpers sat silent while two were mid-step and one followed its Azure run)', SLOW, async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = { a1: 'general-purpose', a2: 'general-purpose', a3: 'general-purpose' }
+  const printed: Record<string, number> = {}
+  const { clock, resumed, files } = world(on, { agents, kinds, parents: { a2: 'a1', a3: 'a1' }, jobs: { output: () => 'progress: 3/40 heads fitting\n', wroteAt: file => printed[(file.split('/').pop() ?? '').replace(/\.output$/, '')] ?? 0 } })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Rebuild the head model', prompt: 'rebuild' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Fit the CT scans', prompt: 'ct', parentAgentId: 'a1' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Fit the surface scans', prompt: 'scans', parentAgentId: 'a1' } as never)
+  Object.assign(agents, { a1: 'running', a2: 'running', a3: 'running' })
+  for (const id of ['a1', 'a2', 'a3']) await $.tool.call({ tool: 'Bash', tool_use_id: `s-${id}`, agentId: id, command: 'git status' } as never)
+  // a2 follows its run on Azure in the background, a command the engine says ends with a2's step, and ends its step held on it
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'f-a2', agentId: 'a2', command: 'hold follow # with its step', description: 'Follow the face run until it ends', run_in_background: true } as never)
+  agents.a2 = 'waiting'
+  await $.turn.complete({ answer: 'Waiting for the face run on Azure.', durationMs: 1, isAborted: false, turnId: 'e-a2', reason: 'answer', agentId: 'a2' } as never)
+  agents.a1 = 'completed'
+  await $.turn.complete({ answer: 'Two helpers are fitting; I continue when they report.', durationMs: 1, isAborted: false, turnId: 'e-a1', reason: 'answer', agentId: 'a1' } as never)
+  const nudges = () => resumed.filter(line => line.startsWith('a1: From Claudopus: nothing new has come back from your helpers'))
+  // 13 minutes on, the engine writes a3's steps to its transcript, though Claudopus saw none of its calls; a2's run prints
+  const a3 = `${HOME}/.claude/projects/-repo/engine-id/subagents/agent-a3.jsonl`
+  files.set(a3, '{}')
+  for (let m = 1; m <= 13; m++) ((printed['bg-f-a2'] = clock.now()), files.set(`mtime:${a3}`, String(clock.now())), await clock.advance(60_000))
+  expect(nudges()).toEqual([])
+  // Both then sit silent: a3's transcript stays as it is, and a2's run prints nothing more for over half an hour
+  await clock.advance(31 * 60_000)
+  expect(await until(async () => nudges().length > 0 || undefined)).toBe(true)
+})
+
 test("a helper's command in the background is work only while it prints, for at most 30 minutes after its last line, and a task waiting on its own wake_me beside its helpers is not nudged; work flagged stuck is told to the chat once by 36 minutes whatever its helpers look like, and the word that it waits then says the chat may write to it", SLOW, async ($, on) => {
   const all = { a1: 'running', a2: 'running', a3: 'running', a4: 'running', a5: 'running', a6: 'running' }
   const agents: Record<string, string> = {}
@@ -1067,7 +1096,7 @@ test('the log is added to, never rewritten whole, and the empty bytes earlier ve
 test('a task Claude Code pressed for its report that ended its step with none, asking nothing and with nothing that starts it again, is started again to carry on and its card stays at work saying so; stopped so again and again with little done between, it is left stopped with one line on its card; a task asking you something, one stopped, one with a result, and one never pressed for a report end as before', SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const PRESS = { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' }
-  const pressed = [{ role: 'assistant', content: [{ type: 'text', text: 'Waiting for the build.' }] }, PRESS, { role: 'assistant', content: [{ type: 'text', text: "My command is still running. Claudopus starts me again when it's done, and I'll send my result then." }] }]
+  const pressed = [{ role: 'assistant', content: [{ type: 'text', text: 'Waiting for the build.' }] }, PRESS, { role: 'assistant', content: [{ type: 'text', text: '<system-reminder>Waiting on my own work, which starts me again.</system-reminder>' }] }]
   const talk: unknown[] = [...pressed]
   const { clock, resumed, appended } = world(on, { agents, talk })
   await $.session.start(start)

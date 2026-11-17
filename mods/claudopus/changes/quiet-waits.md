@@ -1,0 +1,2 @@
+- A task waiting on its helpers or its own commands no longer writes "My command is still running…" three times in its chat each time it pauses. Claude Code still asks it for its report then, and Claudopus answers that for it with a line the app doesn't show, and without starting the model.
+- A task is no longer started again to check on its helpers while they are still working. Claudopus now counts a helper's background command, and any helper that Claude Code is still writing to, as work. Helpers that really go silent still get checked on.

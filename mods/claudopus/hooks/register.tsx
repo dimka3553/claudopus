@@ -8033,7 +8033,8 @@ const quietHeld = new Set<string>()
 const quietTurns = new Set<string>()
 const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAborted: boolean; reason: string }, id: string, done: T): Promise<T> => {
   const now = await $.clock.now()
-  const answer = ((e.answer ?? '').trim() || handedBack.get(id) || '').slice(0, ANSWER_CHARS)
+  const said = (e.answer ?? '').trim()
+  const answer = ((said === PRESS_ANSWER ? '' : said) || handedBack.get(id) || '').slice(0, ANSWER_CHARS)
   const listed = (await $.agent.list().catch(() => [])).find(one => one.id === id)?.status
   const isHeld = listed === 'waiting' || listed === 'running'
   if (listed === 'running') $.clock.after(HELD_LOOK, () => void heldLook($, id).catch(err => log($, `work ${id} not looked at again: ${String(err)}`)))
@@ -8718,6 +8719,13 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
     const one = list.find(card => card.id === id)
     if (!one || isHeld(one) || stoppedHere.has(id) || pressed.has(id) || (await isReplaced($))) continue
     if (step < 3 && WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))) continue
+    const wrote = step < 3 ? await helpersWroteAt($, list, id) : 0
+    const from = list.find(card => card.id === id)?.helperWait?.from ?? now
+    if (wrote > from) {
+      await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { from: wrote, done: 0 } } : card)))
+      await log($, `work ${id} waits on helpers Claudopus saw nothing new from, but one wrote to its transcript ${took(now - wrote)} ago: not started again`)
+      continue
+    }
     await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { ...card.helperWait, done: step, at: now }, ...(step === 2 ? { mayHandBack: card.mayHandBack ?? now } : {}), ...(step === 3 ? { stuckTold: card.stuckTold ?? now } : {}) } : card)))
     if (step === 3) {
       if (one.stuckTold !== undefined) continue
@@ -8732,6 +8740,15 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
   }
 }
 
+const helpersWroteAt = async ($: EngineInterface, list: Todo[], id: string) => {
+  const { id: session } = await read($, me)
+  const home = (await $.env.get('HOME')) ?? ''
+  if (!session || !home || !cwd) return 0
+  const folder = `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${session}/subagents`
+  const kids = underOf(list, id).filter(kid => kid.status === 'working')
+  const times = await Promise.all(kids.map(kid => $.fs.stat(`${folder}/agent-${kid.id}.jsonl`).then(found => found.mtimeMs, () => 0)))
+  return Math.max(0, ...times)
+}
 const silentHelpers = (list: Todo[], id: string, at: number) =>
   list
     .filter(kid => kid.parentId === id && kid.status === 'working')
@@ -8761,9 +8778,9 @@ const stuckLine = (list: Todo[], one: Todo, at: number) => {
 const BG_KEPT = 20
 const keepBackground = async ($: EngineInterface, agent: string, call: { tool: string; description?: unknown; command?: unknown; task_id?: unknown; shell_id?: unknown; timeout_ms?: unknown; persistent?: unknown }, result: unknown) => {
   if (call.tool === 'TaskStop' || call.tool === 'KillShell') return dropBackground($, [String(call.task_id ?? call.shell_id ?? '')], 'stopped')
-  const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown; backgroundEndsWithFinalResponse?: unknown }
+  const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown }
   const id = call.tool === 'Bash' ? r.backgroundTaskId : call.tool === 'Monitor' ? r.taskId : undefined
-  if (typeof id !== 'string' || !id || r.backgroundEndsWithFinalResponse) return
+  if (typeof id !== 'string' || !id) return
   const what = oneLine(String(call.description ?? '') || String(call.command ?? '').split('\n')[0] || '').slice(0, 160)
   const cmd = oneLine(String(call.command ?? '')).slice(0, 400)
   const now = await $.clock.now()
@@ -9823,7 +9840,7 @@ const stepHooks = (on: On) => {
 }
 
 
-const runningHelpers = (list: Todo[], id: string) => list.filter(one => one.parentId === id && one.status === 'working' && !one.answeredAt)
+const runningHelpers = (list: Todo[], id: string) => list.filter(one => one.parentId === id && one.status === 'working' && one.handedBackAt === undefined)
 const HELD_AT_END = (n: number) =>
   `You have ${n === 1 ? 'a helper' : `${n} helpers`} still running in the background. Don't hand back your report yet: ${n === 1 ? 'its result' : 'their results'} would reach the chat instead of you. Carry on with what needs nothing from ${n === 1 ? 'it' : 'them'}, or end your step without a report: each result starts you again, and Claudopus tells the chat you wait for ${n === 1 ? 'it' : 'them'}. One you no longer need: tell it with SendMessage to hand back what it has now, as Claude Code does not let you stop it yourself.`
 const HELPERS_STARTED = 'Your helpers run in the background: each call came back at once, and each result comes to you as a message when it ends, even after you end your step. Continue now with your own part, and when nothing else is left, end your step: never wait for them with a command.'
@@ -10779,8 +10796,8 @@ const NO_PROGRESS_WAIT =
 const NO_PROGRESS_SCRIPT =
   'Not run: this long command would print nothing to show how far it has got. Make its script print, flushed right away, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
 const HANDBACK_PRESS = '[handback-send-enforce]'
-const LEFT_AT_WORK = "My command is still running. Claudopus starts me again when it's done, and I'll send my result then."
-const isPressedForReport = async ($: EngineInterface, id: string) => {
+const PRESS_ANSWER = '<system-reminder>Waiting on my own work, which starts me again.</system-reminder>'
+const isPressedForReport = async ($: EngineInterface, id: string, isAnyWords = false) => {
   const talk = await $.session.messages({ as: 'api', agentId: id }).catch(() => [])
   if (!Array.isArray(talk)) return false
   const textOf = (m: unknown) => {
@@ -10790,7 +10807,12 @@ const isPressedForReport = async ($: EngineInterface, id: string) => {
   const last = talk.at(-1) as { role?: unknown } | undefined
   if (last?.role !== 'user' || !textOf(last).includes(HANDBACK_PRESS)) return false
   const said = [...talk].reverse().find(m => (m as { role?: unknown }).role === 'assistant')
-  return textOf(said).trim().length < REPORT_LEAST
+  return isAnyWords || textOf(said).trim().length < REPORT_LEAST
+}
+const waitsOnOwn = (list: Todo[], card: Todo) => {
+  const helpers = runningHelpers(list, card.id).length
+  const what = card.detached?.length ? 'its own detached command runs' : card.bg?.length ? 'its own command or watch runs in the background' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : card.wakeWhen || isTurnWaited(list, card.id) ? 'it waits to be woken' : ''
+  return { what, helpers }
 }
 const NO_WAIT = (kind: WaitKind, isHelper = false) =>
   `Not run: this command only waits${kind === 'helpers' ? ' for your helpers' : kind === 'time' ? ' for time to pass' : ''}, and nothing you start may only wait. ${
@@ -11209,12 +11231,12 @@ const workHooks = (on: On) => {
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
-    const helpers = id !== undefined && card && !isOff && card.handedBackAt === undefined ? runningHelpers(await read($, todos), id).length : 0
-    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen || isTurnWaited(await read($, todos), id) || helpers) && (await isPressedForReport($, id))) {
-      await log($, `work ${id} pressed by the engine for its report while ${card.detached?.length ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : 'it waits to be woken'}: let it end its step`)
-      yield { kind: 'text', index: 0, text: LEFT_AT_WORK }
+    const waits = id !== undefined && card && !isOff && card.handedBackAt === undefined ? waitsOnOwn(await read($, todos), card) : undefined
+    if (id !== undefined && waits?.what && (await isPressedForReport($, id, waits.helpers > 0 && card?.mayHandBack === undefined))) {
+      await log($, `work ${id} pressed by the engine for its report while ${waits.what}: let it end its step, saying nothing`)
+      yield { kind: 'text', index: 0, text: PRESS_ANSWER }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
-      return { turnId: e.turnId, index: e.index, answer: LEFT_AT_WORK, toolUses: [], stopReason: 'end_turn', usage: null }
+      return { turnId: e.turnId, index: e.index, answer: PRESS_ANSWER, toolUses: [], stopReason: 'end_turn', usage: null }
     }
     const own = id !== undefined ? (startedOn.get(id) ?? card?.startedOn) : undefined
     const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && !card?.flagged && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)

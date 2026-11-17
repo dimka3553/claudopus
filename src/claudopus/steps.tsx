@@ -264,8 +264,10 @@ const stepHooks = (on: On) => {
 
 // ---- Helpers run in the background, and their work never waits for them ----
 
-// The helpers an agent started that are still at work
-const runningHelpers = (list: Todo[], id: string) => list.filter(one => one.parentId === id && one.status === 'working' && !one.answeredAt)
+// The helpers an agent started that are still at work: one that said a long word as it ended a step, held on its own work, has
+// not handed back, and its end or result still comes to the agent (17 Nov: such helpers were counted as done, and their task was
+// pressed for its report, told to the chat as ended and let hand back past them)
+const runningHelpers = (list: Todo[], id: string) => list.filter(one => one.parentId === id && one.status === 'working' && one.handedBackAt === undefined)
 const HELD_AT_END = (n: number) =>
   `You have ${n === 1 ? 'a helper' : `${n} helpers`} still running in the background. Don't hand back your report yet: ${n === 1 ? 'its result' : 'their results'} would reach the chat instead of you. Carry on with what needs nothing from ${n === 1 ? 'it' : 'them'}, or end your step without a report: each result starts you again, and Claudopus tells the chat you wait for ${n === 1 ? 'it' : 'them'}. One you no longer need: tell it with SendMessage to hand back what it has now, as Claude Code does not let you stop it yourself.`
 const HELPERS_STARTED = 'Your helpers run in the background: each call came back at once, and each result comes to you as a message when it ends, even after you end your step. Continue now with your own part, and when nothing else is left, end your step: never wait for them with a command.'

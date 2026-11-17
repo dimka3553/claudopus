@@ -59,11 +59,14 @@ const NO_PROGRESS_WAIT =
   'Not run: this wait would print nothing to show how it is going. Make it print a plain line at each try and at least every 10 seconds, such as `n=$((n+1)); echo "progress: $n/40 tries waiting for the deploy"` inside its loop, then start it again.'
 const NO_PROGRESS_SCRIPT =
   'Not run: this long command would print nothing to show how far it has got. Make its script print, flushed right away, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
-// The note the engine adds when work ends its step without its report, and what such a step says instead while the work's own
-// detached command runs or it waits to be woken: what it said before was no report (a report goes on to the engine's press)
+// The note the engine adds when work ends its step without its report. While something of the work's own will start it again,
+// the press is answered with a line the app draws as nothing in a task's chat (it takes system reminders out of an agent's text,
+// and leaves out a block left empty; the main chat's "No response requested." it shows there): the line it gave before, said three
+// times at every step's end, filled the task's chat (17 Nov: 36 presses in one task's evening, 794 in a day's 63 tasks)
 const HANDBACK_PRESS = '[handback-send-enforce]'
-const LEFT_AT_WORK = "My command is still running. Claudopus starts me again when it's done, and I'll send my result then."
-const isPressedForReport = async ($: EngineInterface, id: string) => {
+const PRESS_ANSWER = '<system-reminder>Waiting on my own work, which starts me again.</system-reminder>'
+// (`isAnyWords`: whatever it said before; else only words shorter than a report, as a report in words goes on to the press)
+const isPressedForReport = async ($: EngineInterface, id: string, isAnyWords = false) => {
   const talk = await $.session.messages({ as: 'api', agentId: id }).catch(() => [])
   if (!Array.isArray(talk)) return false
   const textOf = (m: unknown) => {
@@ -73,7 +76,15 @@ const isPressedForReport = async ($: EngineInterface, id: string) => {
   const last = talk.at(-1) as { role?: unknown } | undefined
   if (last?.role !== 'user' || !textOf(last).includes(HANDBACK_PRESS)) return false
   const said = [...talk].reverse().find(m => (m as { role?: unknown }).role === 'assistant')
-  return textOf(said).trim().length < REPORT_LEAST
+  return isAnyWords || textOf(said).trim().length < REPORT_LEAST
+}
+// What starts a piece of work again by itself once its step has ended: a command of its own it started detached or in the
+// background, or a watch; what it asked Claudopus to wake it for; a command Claudopus holds for its turn; or a helper of its own
+// that has not handed back, whatever it said as it ended a step of its own (its end, or its result, starts the work)
+const waitsOnOwn = (list: Todo[], card: Todo) => {
+  const helpers = runningHelpers(list, card.id).length
+  const what = card.detached?.length ? 'its own detached command runs' : card.bg?.length ? 'its own command or watch runs in the background' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : card.wakeWhen || isTurnWaited(list, card.id) ? 'it waits to be woken' : ''
+  return { what, helpers }
 }
 // What a command that only waits is told instead, by what it waits for
 const NO_WAIT = (kind: WaitKind, isHelper = false) =>
@@ -604,12 +615,14 @@ const workHooks = (on: On) => {
     // results start it again, it does not see (16 Nov: 30 presses in 25 minutes ended a task early; five tasks waiting on a second
     // look were each pressed and refused at their report). That press is answered here with no model, so the work ends its step and
     // is started again when that is done
-    const helpers = id !== undefined && card && !isOff && card.handedBackAt === undefined ? runningHelpers(await read($, todos), id).length : 0
-    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen || isTurnWaited(await read($, todos), id) || helpers) && (await isPressedForReport($, id))) {
-      await log($, `work ${id} pressed by the engine for its report while ${card.detached?.length ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : 'it waits to be woken'}: let it end its step`)
-      yield { kind: 'text', index: 0, text: LEFT_AT_WORK }
+    // With helpers of its own at work its report would be refused, unless it was told it may hand back, so whatever it said is no
+    // report and the press is answered whatever its length (17 Nov: a long status line sent each first press to the model)
+    const waits = id !== undefined && card && !isOff && card.handedBackAt === undefined ? waitsOnOwn(await read($, todos), card) : undefined
+    if (id !== undefined && waits?.what && (await isPressedForReport($, id, waits.helpers > 0 && card?.mayHandBack === undefined))) {
+      await log($, `work ${id} pressed by the engine for its report while ${waits.what}: let it end its step, saying nothing`)
+      yield { kind: 'text', index: 0, text: PRESS_ANSWER }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
-      return { turnId: e.turnId, index: e.index, answer: LEFT_AT_WORK, toolUses: [], stopReason: 'end_turn', usage: null }
+      return { turnId: e.turnId, index: e.index, answer: PRESS_ANSWER, toolUses: [], stopReason: 'end_turn', usage: null }
     }
     const own = id !== undefined ? (startedOn.get(id) ?? card?.startedOn) : undefined
     const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && !card?.flagged && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)

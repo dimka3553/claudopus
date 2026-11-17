@@ -97,13 +97,25 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   expect(resumed.filter(one => one.startsWith('a1:'))).toEqual([])
   // Its step ended, the engine lists it as done; the second helper's result is passed on and starts it again, and the chat is told
   agents.a1 = 'completed'
+  // The helper still drawing ends a step of its own with a long word of how it stands, held on its render in the background: it has
+  // not handed back
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'r3', agentId: 'a3', command: 'hold render', description: 'Render the nose', run_in_background: true } as never)
+  agents.a3 = 'waiting'
+  await $.turn.complete({ answer: `Drawing the nose. ${'The render runs on and wakes me when it ends. '.repeat(15)}`, durationMs: 1, isAborted: false, turnId: 'h3', reason: 'answer', agentId: 'a3' } as never)
   // The engine, which does not count its helpers as its own at work, presses it for its report as it ends its step: answered with no
-  // model, it ends its step again (16 Nov: five tasks, pressed and refused at their report, were told to the chat as ended)
-  talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text: 'Waiting for the drawing.' }] }, { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' })
-  const before = stepped.length
-  const said: string[] = []
-  for await (const chunk of $.turn.step({ turnId: 'h1p', index: 1, model: 'm', messageCount: 2, agentId: 'a1' })) if (chunk.kind === 'text') said.push((chunk as { text: string }).text)
-  expect([stepped.length - before, said]).toEqual([0, ["My command is still running. Claudopus starts me again when it's done, and I'll send my result then."]])
+  // model and a line the app draws as nothing in a task's chat, it ends its step again (16 Nov: five tasks, pressed and refused at
+  // their report, were told to the chat as ended; 17 Nov: the old line, said three times at each step's end, filled the task's chat).
+  // Nor does a long word of how things stand send it to the model while a helper runs, nor a helper that said a long word itself
+  const press = async (text: string) => {
+    talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text }] }, { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' })
+    const before = stepped.length
+    const said: string[] = []
+    for await (const chunk of $.turn.step({ turnId: 'h1p', index: 1, model: 'm', messageCount: 2, agentId: 'a1' })) if (chunk.kind === 'text') said.push((chunk as { text: string }).text)
+    return [stepped.length - before, said]
+  }
+  const QUIET = '<system-reminder>Waiting on my own work, which starts me again.</system-reminder>'
+  expect(await press('Waiting for the drawing.')).toEqual([0, [QUIET]])
+  expect(await press(`The nose code is read. ${'The drawing helper still runs its render. '.repeat(15)}`)).toEqual([0, [QUIET]])
   await $.turn.complete({ answer: 'Waiting for the drawing.', durationMs: 1, isAborted: false, turnId: 'h1', reason: 'answer', agentId: 'a1' } as never)
   // The engine then tells the chat it ended without its report. Claudopus adds no note of its own, which would ride into a later
   // turn of the chat's; at rest, the chat takes the notice as a prompt of its own, which is left out (16 Nov evening: 67 of 152 turns)
