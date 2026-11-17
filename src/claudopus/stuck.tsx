@@ -438,3 +438,139 @@ const waitLine = (one: Todo, at: number, isShort = false) => {
 
 // What finished work left running says on its card
 const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'working' ? `A command Claude started is still running · ${took(at - one.leftSince)}` : '')
+
+
+// ---- Work that stops partway: started again until it gives its result or asks the person ----
+
+// A task whose step ends with no result, no question for the person and nothing of its own that starts it again is left stopped
+// partway: Claude Code ends it, says to the chat that it "ended without delivering a report", and nothing wakes it (17 Nov: tasks
+// sat for half an hour and more until the chat or the person noticed). Claudopus starts it again with a note to carry on, a moment
+// after its step ends, for as long as its runs get something done. One that stops so this many times in a row with little done
+// between, or this many times in all, is left stopped, and its card says so in one line
+const CARRY_TRIES = 3
+const CARRY_MOST = 8
+// Steps of a run that count as getting something done: the tries count again from one after it
+const CARRY_PROGRESS = 5
+// How long after its step ends it is started again: the engine closes the run first, and a result or a message that comes for it
+// meanwhile starts it by itself
+const CARRY_AFTER = 5000
+// The card's line that Claudopus started it again shows this long after
+const CARRY_SHOWN = 10 * 60_000
+// A task whose stop was taken up already, by its id and its step count then: the turn's end, the list's look and the look for work
+// that ended unheard may each come to the same stop
+const carryTaken = new Set<string>()
+// The stops a note was sent for, by the task and when it stopped: one note each, whichever load sends it
+const carrySent = new Set<string>()
+// A note due that no load sent (the mod reloaded during the wait): sent by the list's look once the wait is well over
+const carryDue = async ($: EngineInterface, now: number) => {
+  for (const one of (await read($, todos)).filter(card => card.status === 'working' && card.carryOn && !card.carryOn.gaveUp && card.endedStepAt === card.carryOn.at && now - card.carryOn.at >= CARRY_AFTER * 4))
+    if (!carrySent.has(`${one.id}:${one.carryOn?.at}`) && !carrying.has(one.id)) await carryNow($, one.id, one.carryOn?.at ?? 0)
+}
+const carryKey = (one: Todo) => `${one.id}:${one.steps ?? 0}`
+
+// Whether a task whose step just ended was left stopped partway: one of this chat's tasks, whose words are no result, that has not
+// handed back or given a result, is not asking the person something or waiting for their Allow, was not stopped or held by them, did
+// not end after a safety flag, and was not given up on
+const isStoppedShort = (one: Todo | undefined, answer: string) =>
+  Boolean(
+    one &&
+      !one.parentId &&
+      !one.chat &&
+      answer.trim().length < REPORT_LEAST &&
+      one.handedBackAt === undefined &&
+      !one.answeredAt &&
+      !endedByHandback.has(one.id) &&
+      !(one.ask && !one.ask.replied) &&
+      !one.admins?.length &&
+      !isHeld(one) &&
+      !stoppedHere.has(one.id) &&
+      !pressed.has(one.id) &&
+      !one.flagged &&
+      !one.carryOn?.gaveUp &&
+      // (a command it left detached starts it again as it ends, and Claude Code's press is answered for it with no model)
+      !one.detached?.length,
+  )
+// Whether Claude Code pressed it for its report as its run ended, after its last call: the sign that its words reached no one (the
+// chat is told only that it "ended without delivering a report"). A run where the engine asks for no report, as headless ones, ends
+// with its words as its result, and is not started again
+const isPressedAtEnd = (rows: unknown) => {
+  if (!Array.isArray(rows)) return false
+  for (const row of [...rows].reverse()) {
+    const m = (row && typeof row === 'object' && 'message' in row ? (row as { message?: unknown }).message : row) as { role?: unknown; content?: unknown } | undefined
+    const blocks: unknown[] = Array.isArray(m?.content) ? m.content : [m?.content]
+    const texts = blocks.map(b => (typeof b === 'string' ? b : b && typeof b === 'object' ? String((b as { text?: unknown }).text ?? '') + (typeof (b as { content?: unknown }).content === 'string' ? String((b as { content?: unknown }).content) : '') : ''))
+    if (m?.role === 'assistant' && blocks.some(b => b && typeof b === 'object' && (b as { type?: unknown }).type === 'tool_use')) return false
+    if (m?.role === 'user' && texts.some(text => text.includes(HANDBACK_PRESS))) return true
+  }
+  return false
+}
+const pressedAtEnd = async ($: EngineInterface, id: string) => isPressedAtEnd(await $.session.messages({ as: 'api', agentId: id }).catch(() => []))
+// The next start's count, or the word that it is given up: a run that got something done since the last start counts from one again
+const nextCarry = (one: Todo, now: number): NonNullable<Todo['carryOn']> => {
+  const was = one.carryOn
+  const tries = was && (one.steps ?? 0) - was.steps < CARRY_PROGRESS ? was.tries + 1 : 1
+  const total = (was?.total ?? 0) + 1
+  return { tries, total, at: now, steps: one.steps ?? 0, ...(tries > CARRY_TRIES || total > CARRY_MOST ? { gaveUp: now } : {}) }
+}
+// Its step ended so: its card stays at work, and a moment later Claudopus starts it again, unless something else did first. Given
+// up, its card ends stopped with its line, and the chat's model is told
+const carrying = new Set<string>()
+// `isHeard`: its turn's end was heard, a stop of its own however few steps it took; a stop only the list's looks found is taken up once
+const goOn = async ($: EngineInterface, id: string, how: string, isHeard = false) => {
+  if (!dir || isOff || carrying.has(id)) return
+  carrying.add(id)
+  try {
+    await goOnNow($, id, how, isHeard)
+  } finally {
+    carrying.delete(id)
+  }
+}
+const goOnNow = async ($: EngineInterface, id: string, how: string, isHeard: boolean) => {
+  const now = await $.clock.now()
+  const got: { next?: NonNullable<Todo['carryOn']>; title?: string } = {}
+  await changeTodos($, list =>
+    list.map(one => {
+      if (one.id !== id || (!isHeard && carryTaken.has(carryKey(one)))) return one
+      const next = nextCarry(one, now)
+      ;(got.next = next), (got.title = titleOf(one))
+      return next.gaveUp ? { ...ended(one, 'stopped', now), carryOn: next } : { ...(one.status === 'working' ? one : resumed(one, now)), carryOn: next, endedStepAt: now }
+    }),
+  )
+  const { next, title = '' } = got
+  if (!next) return
+  carryTaken.add(`${id}:${next.steps}`)
+  redraw($)
+  if (next.gaveUp) {
+    await log($, `work ${id} stopped partway without a result ${next.tries > CARRY_TRIES ? `${next.tries} times in a row` : `${next.total} times`} (${how}): not started again`)
+    return void (await tellChat($, named(CARRY_GAVE_UP_IN_CHAT(title, id))))
+  }
+  await log($, `work ${id} stopped partway without a result (${how}): started again in a moment, ${next.tries} of ${CARRY_TRIES}`)
+  $.clock.after(CARRY_AFTER, () => void carryNow($, id, next.at).catch(err => log($, `work ${id} not started again: ${String(err)}`)))
+}
+const carryNow = async ($: EngineInterface, id: string, at: number) => {
+  const one = (await read($, todos)).find(card => card.id === id)
+  // (moved on meanwhile: its result, a message, a helper's result or the person's stop came first)
+  if (!one || one.status !== 'working' || one.carryOn?.at !== at || !isStoppedShort(one, '') || (await isReplaced($))) return
+  const status = (await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status
+  if (WORKING.includes(String(status))) return void (await log($, `work ${id} was at work again before Claudopus started it: no note sent`))
+  // (one ended from outside Claudopus meanwhile, as the app's own stop, is left as it was ended)
+  if (status === 'killed') return void (await log($, `work ${id} was stopped before Claudopus started it: no note sent`))
+  if (carrySent.has(`${id}:${at}`)) return
+  carrySent.add(`${id}:${at}`)
+  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  if (r.isDelivered) return void (await log($, `work ${id} started again to carry on`))
+  const now = await $.clock.now()
+  await changeTodos($, list => list.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'stopped', now), carryOn: { ...(card.carryOn ?? nextCarry(card, now)), gaveUp: now, isLost: true } } : card)))
+  redraw($)
+  await log($, `work ${id} could not be started again to carry on: ${r.reason}`)
+  await tellChat($, named(CARRY_LOST_IN_CHAT(titleOf(one), id)))
+}
+// A task Claudopus stopped starting again stays in its place, its line in sight, as a task cut off that could not be started again does
+const isLeftStopped = (one: Todo, at: number) => Boolean(one.carryOn?.gaveUp && one.status !== 'working' && at - one.carryOn.gaveUp < CUT_OLD)
+// The line on its card: dim while Claudopus has just started it again, amber once it was left stopped
+const carryLine = (one: Todo, at: number) => {
+  const c = one.carryOn
+  if (!c) return ''
+  if (c.gaveUp && one.status !== 'working') return c.isLost ? `Stopped partway at ${hhmm(c.gaveUp)} · Claudopus couldn't start it again · send it a message to carry on` : `Stopped partway ${c.tries > CARRY_TRIES ? c.tries : c.total} times without a result · Claudopus stopped starting it again · send it a message to carry on`
+  return one.status === 'working' && !c.gaveUp && at - c.at < CARRY_SHOWN ? `Stopped partway at ${hhmm(c.at)} without a result · Claudopus started it again` : ''
+}

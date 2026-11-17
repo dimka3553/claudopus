@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.188 · 17 November 2026
+- A task that stops partway, with no result, no question for you and nothing of its own that would start it again, is no longer shown as finished: Claudopus starts it again a moment later with a note to carry on, and its card says so. If it keeps stopping that way with little done in between, Claudopus stops after three tries and its card says so in one line.
+- When a command a task left running ends while the task waits on its helpers, Claudopus now starts the task again. Before, the word that the command had ended was lost and the task sat still.
+- When the app quits, restarts or drops a chat while tasks are at work, Claudopus starts those tasks and their helpers again when the chat comes back, as it already did for chats run from another Mac. Tasks you stopped stay stopped.
+
 ## 0.2.187 · 17 November 2026
 - Claude can now put a file from your Mac into a page's upload box in the Claude app's browser, such as a video on TikTok, Instagram, YouTube or X, without you picking it in a file window.
 

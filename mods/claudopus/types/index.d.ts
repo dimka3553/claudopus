@@ -152,6 +152,10 @@ export type Todo = {
   // could not be started again
   cutAt?: number
   backAt?: number
+  // Work that stopped partway, with no report, no question for the person and nothing of its own that starts it again, that
+  // Claudopus started again with a note to carry on: how many times in a row with little done between, how many in all, when
+  // last, and its step count then; `gaveUp` when it stopped so too often, or could not be started again, and was left stopped
+  carryOn?: { tries: number; total: number; at: number; steps: number; gaveUp?: number; isLost?: boolean }
   // Work with helpers running: when the mod last looked in on them, how many ran and how many had shown nothing new for a while
   lookedIn?: { at: number; running: number; quiet: number }
   // A helper whose work was told it has shown nothing new: when it last had, so it is told once each quiet stretch

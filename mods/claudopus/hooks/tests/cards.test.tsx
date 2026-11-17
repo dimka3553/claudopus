@@ -1954,7 +1954,9 @@ test('a run whose output cannot be found says so after three minutes, so a blank
 test('a run of a work\'s own wakes it the moment it ends: any command that only waits, the work\'s or its helper\'s, is refused in one sentence, the work is told it ended, and its card no longer says how far it was (16 Nov an upload read 100% beside "about 40% done"; a helper polled for a file its own script wrote)', SLOW, async ($, on) => {
   let isAlive = true
   const talk: unknown[] = []
-  const { clock, appended, resumed, stopped, stepped } = world(on, { talk, jobs: { output: () => 'progress: 8/8 GB uploading\n', wroteAt: () => 1_700_000_000_000, alive: () => isAlive } })
+  // (at a step of its own, as the engine lists it, until it ends its step below)
+  const agents: Record<string, string> = { a1: 'running' }
+  const { clock, appended, resumed, stopped, stepped } = world(on, { talk, agents, jobs: { output: () => 'progress: 8/8 GB uploading\n', wroteAt: () => 1_700_000_000_000, alive: () => isAlive } })
   on('session.cwd', () => ({ value: '/repo' }) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'upload the zips', wait: false, origin: composer })
@@ -2014,6 +2016,10 @@ test('a run of a work\'s own wakes it the moment it ends: any command that only 
   }
   expect(await press('The rest uploads; I am woken when it ends.')).toEqual([0, ["My command is still running. Claudopus starts me again when it's done, and I'll send my result then."]])
   expect(await press(`Both uploads are done. ${'Every file arrived whole. '.repeat(30)}`)).toEqual([1, ['Looking at the nose.']])
+  // It also waits on something else, so its card stays at work with its step ended: the run's end still starts it again, as there is
+  // no run of it to read a line in (17 Nov: the word was refused there and lost, and the task sat still for half an hour)
+  await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'wk1', agentId: 'a1', what: 'the files to land', minutes: 60 } as never)
+  agents.a1 = 'completed'
   await $.turn.complete({ answer: 'The rest uploads; I am woken when it ends.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(20_000)
   expect(resumed.some(one => one.startsWith('a1: '))).toBe(false)
