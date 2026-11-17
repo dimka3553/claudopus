@@ -340,7 +340,7 @@ const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = fals
 // or one that begins with the words of one of its buttons. Any other reply, such as a request first, leaves the ask open while the work acts on it
 const plainWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) =>
-  !isReply || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))
+  !isReply || Boolean(ask.refused) || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))
 // The asks a press answered, by card, as `${at}:${text}`: the panel draws the card answered from the press itself, its buttons and box
 // gone in the press's own drawing, before the answer is written; the mark goes once the card's file no longer carries the ask
 const askPressed = new Map<string, string>()
@@ -496,6 +496,16 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line, isCard: true, askAt: ask.at })
     redraw($)
     await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
+    return void askGone($, one, said)
+  }
+  // A notice of a call Claude Code refused: the work it is for, still at work, is told to carry on without it, and work that has
+  // ended is not started again for it, neither now nor as it ends without having read it (no answer waits for it)
+  if (ask.refused) {
+    const isWorking = (await read($, todos)).find(card => card.id === target)?.status === 'working'
+    const told = isWorking ? await tell($, target, REFUSAL_ANSWERED(ask.text, said, isReply)) : undefined
+    if (!told || told.deny) await log($, `answer to the refusal on ${one.id} not sent: ${target} is not at work, or could not be written to`)
+    sentReplies.set(one.id, { text: said, ask: ask.text, to: told && !told.deny ? 'work' : 'other', at, line, isCard: true, askAt: ask.at })
+    redraw($)
     return void askGone($, one, said)
   }
   const to = isReply ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}`

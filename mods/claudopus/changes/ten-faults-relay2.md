@@ -1,0 +1,6 @@
+- When a helper's result reached the chat and Claudopus then could not pass it on to its task (the task was stopped, held, finished or could not be written to), the chat is now told so, with the task's id, instead of being left thinking it was passed on.
+- The chat is told a helper's result is passed on only once its hand-back went through; a refused hand-back no longer leaves that note.
+- A helper's result is passed on to its task once, never twice when two looks find the same end.
+- A call Claude Code refused a background task shows on its card only for Claude Code's own refusal, not for a failing command whose output holds the same words, and gives Claude Code's reason alone.
+- That card now says what was refused, why, and that the task carries on without it, with one button, "Carry on without it", and room for your own words; the task is told not to reach the refused action by other means, and a task that has ended is not started again by it.
+- The card never replaces a question put up on the same card meanwhile.

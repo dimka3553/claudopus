@@ -490,12 +490,12 @@ const workHooks = (on: On) => {
     if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
       const hold = await holdAtHandback($, e.agentId).catch(() => '')
       if (hold) return { deny: hold }
-      // A helper whose work has ended its step hands its result to the chat: the chat is told first, so its turn starts knowing
-      await noteHandback($, e.agentId).catch(err => log($, `chat not told of a helper's hand-back: ${String(err)}`))
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       const r = await next(e)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
-      else notedAtHandback.delete(e.agentId)
+      // A helper whose work has ended its step hands its result to the chat: the chat is told once the hand-back went through, before
+      // the helper's turn ends, so its turn starts knowing; a refused hand-back leaves no note
+      if (!r.deny && !r.isError) await noteHandback($, e.agentId).catch(err => log($, `chat not told of a helper's hand-back: ${String(err)}`))
       // The helpers it was let hand back over that sit silent end with its report; those at work go on, their results reaching the chat
       if (!r.deny && !r.isError && isLetGoNow) await stopHelpers($, e.agentId, true).catch(err => log($, `helpers of ${e.agentId} not stopped: ${String(err)}`))
       return r

@@ -284,9 +284,12 @@ const HELPER_ENDED = (title: string, how: Todo['status'], report: string) =>
 // What the chat is told, so a helper's result that reached it, or a notice that the task ended without its report, needs nothing
 const HELPER_PASSED = (helper: string, work: string) =>
   `From Claudopus: the result of the helper "${helper}" reached this chat because the task "${work}" had ended its step to let it work. Claudopus passes it on to that task and starts it again: there is nothing for you to do with it, and nothing to tell {name}.`
-// What the chat is told when that could not be done: the result is in the chat alone, so the chat sends it on
-const HELPER_NOT_PASSED = (helper: string, work: string, reason: string) =>
-  `From Claudopus: the result of the helper "${helper}" reached this chat because the task "${work}" had ended its step, and Claudopus could not pass it on to that task (${cut(oneLine(reason), 120)}). Send it on to that task yourself with SendMessage.`
+// What the chat is told when that could not be done: the result is in the chat alone, so the chat sends it on, or tells the person
+// what it adds when the person stopped or holds that task, as sending it would start that task again
+const HELPER_NOT_PASSED = (helper: string, work: string, id: string, reason: string, isPersons = false) =>
+  `From Claudopus: the result of the helper "${helper}" reached this chat, and Claudopus did not pass it on to the task "${work}" (id ${id}): ${cut(oneLine(reason), 120)}. ${
+    isPersons ? 'Do not start that task again for it: tell {name} what the result adds.' : `Send the result on to that task yourself: SendMessage to ${id}, with the result as it reached you.`
+  }`
 
 // What the chat is told of work that ended its step to wait for its helpers, or to be started again: the engine sees neither, so it
 // tells the chat that work ended without its report and to ask it for one, which the work cannot give while its helpers run (16 Nov:
@@ -317,9 +320,20 @@ const tellWaitsOn = async ($: EngineInterface, id: string) => {
 const passedTo = (list: Todo[], helperId: string) => {
   const helper = list.find(one => one.id === helperId)
   const parent = helper?.parentId ? list.find(one => one.id === helper.parentId) : undefined
-  if (!helper || !parent || isHeld(parent) || pressed.has(parent.id) || stoppedHere.has(parent.id) || parent.status === 'stopped' || parent.status === 'failed' || parent.handedBackAt !== undefined || endedByHandback.has(parent.id)) return undefined
+  if (!helper || !parent || notPassedWhy(parent)) return undefined
   return { helper, parent }
 }
+// Why a helper's result is not passed on to its work, and whether that was the person's doing; nothing when it is
+const notPassedWhy = (parent: Todo): { reason: string; isPersons: boolean } | undefined =>
+  isHeld(parent)
+    ? { reason: '{name} holds that task', isPersons: true }
+    : pressed.has(parent.id) || stoppedHere.has(parent.id) || parent.status === 'stopped'
+      ? { reason: 'that task was stopped', isPersons: true }
+      : parent.status === 'failed'
+        ? { reason: 'that task failed', isPersons: false }
+        : parent.handedBackAt !== undefined || endedByHandback.has(parent.id)
+          ? { reason: 'that task had handed back its report', isPersons: false }
+          : undefined
 const toChat = async ($: EngineInterface, text: string) =>
   $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(text) }] } }).catch(err => log($, `chat not told of a helper's result: ${String(err)}`))
 // The helpers whose hand-back the chat was told of before it went: the engine hands it to the chat at once, and the chat's turn
@@ -327,6 +341,7 @@ const toChat = async ($: EngineInterface, text: string) =>
 // written as the helper's turn ended, and the chat sent 31 of those results on by hand). So the chat is told as the hand-back is
 // given, and its result is passed on to the work as the helper's turn ends
 const notedAtHandback = new Set<string>()
+// Written once the hand-back went through, before its hook returns: a refused hand-back leaves no note
 const noteHandback = async ($: EngineInterface, helperId: string) => {
   if (!dir || isOff) return
   const to = passedTo(await read($, todos), helperId)
@@ -337,15 +352,32 @@ const noteHandback = async ($: EngineInterface, helperId: string) => {
   notedAtHandback.add(helperId)
   await toChat($, HELPER_PASSED(titleOf(to.helper), titleOf(to.parent)))
 }
+// The result each helper's end was last passed on with: its turn's end, the look shortly after it and the look for work that ended
+// unheard may each come to the same end, and it is passed on once. A helper started again ends again with a result of its own
+const passedOn = new Map<string, string>()
 const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status'], isUnheard = false) => {
   if (!dir || isOff) return
+  const key = `${how}:${report.trim().slice(0, ANSWER_CHARS)}`
+  if (passedOn.get(helperId) === key) return
+  passedOn.set(helperId, key)
   const isNoted = notedAtHandback.delete(helperId)
   // A result that comes after the work handed back what it had, as it was told to, reaches the chat: it is told what it is
   const all = await read($, todos)
   const late = all.find(one => one.id === all.find(kid => kid.id === helperId)?.parentId)
   if (late && late.handedBackAt !== undefined && late.mayHandBack !== undefined && report) return void (await toChat($, HELPER_LATE(titleOf(all.find(one => one.id === helperId) ?? late), titleOf(late))))
+  // The chat was told it is passed on: when it is not, the chat is told so, so the result is never left unsent
+  const notPassed = async (helper: Todo | undefined, parent: Todo, reason: string, isPersons = false) => {
+    await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${reason}`)
+    await toChat($, HELPER_NOT_PASSED(titleOf(helper ?? parent), titleOf(parent), parent.id, reason, isPersons))
+  }
   const to = passedTo(all, helperId)
-  if (!to) return
+  if (!to) {
+    const helper = all.find(one => one.id === helperId)
+    const parent = all.find(one => one.id === helper?.parentId)
+    const why = parent ? notPassedWhy(parent) : undefined
+    if (isNoted && parent) await notPassed(helper, parent, why?.reason ?? 'that task is gone', why?.isPersons)
+    return
+  }
   const { helper, parent } = to
   // A work at a step of its own has the result from the engine itself. One the engine still holds for a command of its own may have
   // it too: it is passed on all the same, as a result lost costs more than one read twice, but the chat had none of it to be told of
@@ -353,15 +385,19 @@ const passOnHelper = async ($: EngineInterface, helperId: string, report: string
   // A helper whose end was never heard (it ended while the mod was out) had its result reach no step of the work's, nor did one the
   // engine handed the chat because the work had ended its step as it handed back: one now at a step, woken by something else since,
   // reads it at its next step
-  if (listed === 'running' && (isUnheard || isNoted)) return void (await tell($, parent.id, HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS))))
+  if (listed === 'running' && (isUnheard || isNoted)) {
+    const told = await tell($, parent.id, HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS)))
+    if ((!told || told.deny) && isNoted) await notPassed(helper, parent, told?.deny ?? 'it could not be written to')
+    return
+  }
   if (listed === 'running') return
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
     : await sendOwn($, { to: { agentId: parent.id }, text: HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   // Not passed on, the result is in the chat alone: the chat is told to send it on, so nothing is lost unsaid
   if (!r.isDelivered) {
-    await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${r.reason}`)
-    if (listed !== 'waiting' || isNoted) await toChat($, HELPER_NOT_PASSED(titleOf(helper), titleOf(parent), r.reason))
+    if (listed !== 'waiting' || isNoted) await notPassed(helper, parent, r.reason)
+    else await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${r.reason}`)
     return
   }
   await wakeCard($, parent.id)
