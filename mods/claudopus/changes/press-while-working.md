@@ -1,0 +1,1 @@
+- When you press Release it seconds after a task asks, while it is still finishing, Claudopus now releases it after your allow box once the task has ended, as it does when you press later. Before, such a press reached only the task, which left the release to Claudopus, so nothing went out.

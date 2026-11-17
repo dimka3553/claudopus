@@ -489,14 +489,20 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
-  // A go-ahead to finish does its last step without starting the work again. Work still in its last turn when the press lands is
-  // told Claudopus does it, not left to do it: a task asks, then writes its waits and report, and a press seconds later (16 Nov 19:49,
-  // 17 Nov 07:49) reached it as a plain answer, which it took, as its rules say, for Claudopus's to do, so nobody released
+  // A go-ahead to finish does its last step without starting the work again. Work still in the turn that asked is told the step is
+  // Claudopus's, and the step waits for that turn's end, so a release takes the branch as the task left it: a task asks, then writes
+  // its waits and report, and a press seconds later (16 Nov 19:49, 17 Nov 07:49) reached it as a plain answer, which it took, as its
+  // rules say, for Claudopus's to do, so nobody released
   if (!isReply && ask.lastStep && ask.folder && ask.choices?.[0] === said) {
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line, isCard: true, askAt: ask.at })
     redraw($)
-    if (working) await tell($, target, `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\nClaudopus does the last step itself (${cut(ask.lastStep, 160)}): do not do it yourself. End as you were, saying Claudopus does it.`)
-    await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
+    const done = (err: unknown) => log($, `last step of ${one.id} not done: ${String(err)}`)
+    if (!working) await lastStep($, one, ask, said).catch(done)
+    else {
+      await tell($, one.id, `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\nClaudopus does that step (${cut(ask.lastStep, 160)}) once you end this turn: do not do it or start it yourself. Commit anything left on the branch now, change nothing on it after that, and end with your report.`)
+      await stepLine($, one.id, `On your "${said}", Claudopus does the last step once Claude ends this turn`)
+      void afterTurn($, one.id).then(() => lastStep($, one, ask, said)).catch(done)
+    }
     return void askGone($, one, said)
   }
   const to = isReply ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}`

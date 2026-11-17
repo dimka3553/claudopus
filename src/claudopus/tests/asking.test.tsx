@@ -517,13 +517,18 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   expect(await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('Release it after lunch')))).toBeDefined()
 
   // Release it pressed while the work is still in the turn that asked (writing its waits and report, as on 16 Nov 19:49 and 17 Nov
-  // 07:49): Claudopus still releases it, after the allow box, and the work is told so instead of being left the step
+  // 07:49): the work is told the step is Claudopus's, not left it, and the release waits for that turn's end, then for the allow box
   await $.agent.spawn({ ...spawn, model: 'opus', description: 'Fix the jaw', prompt: 'Fix the jaw' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k-a5', agentId: 'a5', text: 'Release a5?', choices: ['Release it', 'Not now'], last_step: 'release', folder: '/repo/wt' } as never)
   await press('a5', 'Release it')
-  expect(await until(async () => (await list.findAll({ type: 'Button' })).find(b => /^gate-step-a5-.*once/.test(String(b.key ?? ''))))).toBeDefined()
+  expect(await until(async () => appended.find(line => line.startsWith('a5: ') && line.includes('pressed "Release it"')))).toContain('do not do it or start it yourself')
+  const gate5 = async () => (await list.findAll({ type: 'Button' })).find(b => /^gate-step-a5-.*once/.test(String(b.key ?? '')))
+  await clock.advance(10_000)
+  expect(await gate5()).toBeUndefined()
+  await $.turn.complete({ answer: 'Claudopus releases it.', durationMs: 1, isAborted: false, turnId: 'turn-a5', reason: 'answer', agentId: 'a5' } as never)
+  expect(await until(async () => (await clock.advance(2_000), await gate5()))).toBeDefined()
   expect(files.get(`${MEMORY}/log.md`)).toContain('last step of a5 on')
-  expect(await until(async () => appended.find(line => line.startsWith('a5: ') && line.includes('Claudopus does the last step itself')))).toContain('do not do it yourself')
+  expect(resumed.filter(line => line.startsWith('a5: '))).toEqual([])
   await list.unmount()
 })
 

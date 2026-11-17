@@ -183,6 +183,16 @@ const stepLine = async ($: EngineInterface, id: string, text: string) => {
   await changeTodos($, list => list.map(card => (card.id === id ? { ...card, entries: [...card.entries, { at, kind: 'note' as const, text }].slice(-ENTRIES_KEPT) } : card)))
   redraw($)
 }
+// A go-ahead pressed while its work is still in the turn that asked waits for that turn's end (the card no longer working, or gone)
+const TURN_LOOK = 2_000
+const afterTurn = ($: EngineInterface, id: string) =>
+  new Promise<void>(resolve => {
+    const timer = everyLoad($, TURN_LOOK, () => {
+      void read($, todos)
+        .then(list => list.find(card => card.id === id)?.status === 'working' || (timer.cancel(), resolve()))
+        .catch(() => undefined)
+    })
+  })
 const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string) => {
   const folder = ask.folder ?? ''
   const step = ask.lastStep ?? ''
