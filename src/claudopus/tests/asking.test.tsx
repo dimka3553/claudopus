@@ -1416,7 +1416,7 @@ test('one card and a folded Finished list are drawn at their own height, even af
   const { clock } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'five pieces of work', wait: false, origin: composer })
-  for (const [n, what] of ['ears', 'nose', 'chin', 'eyes', 'mouth'].entries()) await $.agent.spawn({ ...spawn, agentId: `a${n + 1}`, description: `Check the ${what}`, prompt: what } as never)
+  for (const what of ['ears', 'nose', 'chin', 'eyes', 'mouth']) await $.agent.spawn({ ...spawn, description: `Check the ${what}`, prompt: what } as never)
   for (const n of [2, 3, 4, 5]) await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: `t${n}`, reason: 'answer', agentId: `a${n}` } as never)
   await clock.advance(2_100)
   // The person opened Finished, the list ran to 300 rows as the app said, and they scrolled down to its fold, 200 rows in
