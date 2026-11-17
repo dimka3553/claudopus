@@ -315,7 +315,19 @@ const workHooks = (on: On) => {
     }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
+    // A heavy command of a piece of work waits its turn while the Mac is busy, and is told how long it waited as it runs
     const next = async (asked: typeof e) => {
+      // (never one the person has just allowed as admin or as a release: what they allowed lasts two minutes)
+      const held = dir && !isOff && e.agentId !== undefined && asked.tool === 'Bash' && !grants.length ? await holdHeavy($, asked, raw as never) : {}
+      if (held.deny) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: held.deny } as Awaited<ReturnType<typeof raw>>)
+      try {
+        const r = await nextHere(asked)
+        return held.said && !r.deny ? ({ ...r, context: [...((r as { context?: string[] }).context ?? []), held.said] } as typeof r) : r
+      } finally {
+        if (held.id) heavyOpen.delete(held.id)
+      }
+    }
+    const nextHere = async (asked: typeof e) => {
       const isMovedBack = Boolean(dir) && !isOff && e.agentId !== undefined && isLongHeld(asked as never)
       const call = isMovedBack ? ({ ...asked, run_in_background: true } as typeof e) : asked
       if (isMovedBack) await log($, `work ${e.agentId}'s long command started in the background: ${oneLine(String((asked as { description?: unknown }).description ?? '')).slice(0, 80)}`)

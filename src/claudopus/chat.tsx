@@ -94,6 +94,7 @@ const chatHooks = (on: On) => {
     ;(freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0), (usedRows = 0))
     await loadSettings($)
     await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
+    await clearHeld($).catch(err => log($, `held commands not cleared: ${String(err)}`))
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
     await closeUndrawn($)
     $.clock.after(3000, () => closeUndrawn($))

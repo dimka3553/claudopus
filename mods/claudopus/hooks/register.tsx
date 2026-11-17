@@ -9,8 +9,8 @@ import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
 import { broughtBackBy, isResultId, marksOf, merged, markThere, parsedMeta, PLACE, PULL, pullThere, PUSH, PUSH_THERE, rehome, RESULTS_A_TRIP, RESULTS_EVERY, RESULTS_LOOK, resultsOf } from './results'
 import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, helpersOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, shareableHelpers, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
 import type { Answer, Off } from './shared'
-import { clearModel, configView, editing, fillModels, leanOf, modelsIn, modelsOf, modelsShort, parse, TEXTS } from './config'
-import type { Config, ConfigShown, Lean, LeanKey, Models, Role } from './config'
+import { clearModel, configView, editing, fillModels, heavyModeOf, leanOf, modelsIn, modelsOf, modelsShort, parse, TEXTS } from './config'
+import type { Config, ConfigShown, HeavyMode, Lean, LeanKey, Models, Role } from './config'
 import type { Fail, LookIo, Notice, Published, Source, Steps } from './update'
 import { copyOf, download, FAILS, folderMarketplace, folderReady, install, installedFrom, isNewer, isUpdateDue, isVersion, lookEveryOf, LOOK_EVERY_HOURS, missedOn, noticeOf, publishedOf, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, sizeText, stampOf, stepsOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
@@ -18,8 +18,8 @@ import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
 import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isKindSaid, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
 import { leftoversOf, memOf, leftName, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
-import { isWaiterTree, waiterLeavesOf, waitingOf, watcherOf } from './jobs'
-import type { OpenCall, Proc, Span, WaitKind } from './jobs'
+import { heavyOf, isWaiterTree, waiterLeavesOf, waitingOf, watcherOf } from './jobs'
+import type { HeavyKind, OpenCall, Proc, Span, WaitKind } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
 import { batteryShown, batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
@@ -9192,6 +9192,7 @@ const chatHooks = (on: On) => {
     ;(freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0), (usedRows = 0))
     await loadSettings($)
     await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
+    await clearHeld($).catch(err => log($, `held commands not cleared: ${String(err)}`))
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
     await closeUndrawn($)
     $.clock.after(3000, () => closeUndrawn($))
@@ -9774,7 +9775,7 @@ const lookStuck = async ($: EngineInterface) => {
       // Nor work that waits for a command of its own it started in the background: a long copy is not stuck
       const isWaitingOwn = Boolean(one.waitsSince && one.bg?.some(b => !b.isWatch))
       // Nor work that asked Claudopus to start it again: that look has its own end, which starts it (lookWakes)
-      const isStuck = one.status === 'working' && !one.wakeWhen && !(one.ask && !one.ask.replied) && !one.admins?.length && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
+      const isStuck = one.status === 'working' && !one.wakeWhen && !(one.ask && !one.ask.replied) && !one.admins?.length && !one.heldCalls?.length && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
       // The nudges a wait on helpers had are let go once none of its helpers runs
       const nudged = one.nudged && list.some(kid => kid.parentId === one.id && kid.status === 'working') ? one.nudged : undefined
       if (nudged !== one.nudged) ((isChanged = true), (one = { ...one, nudged }))
@@ -9990,6 +9991,7 @@ const jobsOf = (one: Todo, at: number): Job[] =>
     ...(one.status === 'working' && one.running?.cmd && at - one.running.at >= ROW_SHOWN
       ? [jobOf(`call-${one.id}`, one.running.label ?? '', one.running.cmd, one.running.at)]
       : []),
+    ...heldJobs(one),
   ])
 
 // A job's name on its row: what kind, a server's port, and its own words
@@ -10334,7 +10336,7 @@ const isLike = (command: string, pattern: string) => {
 // detached or left going has its process and all it started ended, a command held open has its shell's processes ended (the work's
 // call then comes back with it ended). The work is told in its own chat that the person stopped it as stuck, and what to do next.
 // On this Mac only, as the processes are this Mac's
-const canStopJob = (job: Job) => !isRunFromAfar && !job.id.startsWith('more-')
+const canStopJob = (job: Job) => !isRunFromAfar && !job.id.startsWith('more-') && !job.id.startsWith('held-')
 const stoppingJobs = new Set<string>()
 const RUN_STOPPED = (what: string, silent: string) =>
   silent
@@ -10552,6 +10554,122 @@ const openJobOutput = async ($: EngineInterface, job: Job) => {
   const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
   if (r.exitCode !== 0) void log($, `output not opened: ${r.stderr.trim().slice(0, 160)}`)
+}
+
+// Heavy commands wait their turn: a task's browser, build or render that would start while the Mac is busy and another of the
+// chat's heavy commands runs is held before it starts, shown on its card as waiting its turn, and let go in the order they came
+// once there is room. On 16 Nov ten tasks each drove headless browsers for screenshots on one Mac at once: captures timed out and
+// a dev server took 13 s a request; on 15 Nov this Mac's load average reached 204 on 18 cores. What counts as heavy is heavyOf in
+// hooks/jobs.ts; the marks are the person's setting (`heavy` in config.json, HEAVY_MODES in hooks/config.tsx)
+//
+// Nothing here makes the work wait with a sleep of its own: its command is held in this hook, as the admin gate holds one, and runs
+// the moment its turn comes, with a line telling the work how long it waited and why. A command held this long runs anyway, so
+// nothing waits for good on load the chat's work does not make
+const HEAVY_MOST = 15 * 60_000
+// After one is let go, the next waits this long unless few run, so the load of the last shows before another starts
+const HEAVY_RAMP = 20_000
+type HeldCall = { id: string; agent: string; what: string; cmd: string; kind: HeavyKind; at: number }
+// The held calls in the order they came, and the heavy calls let through whose call has not ended, by tool_use_id
+let heavyQueue: HeldCall[] = []
+const heavyOpen = new Map<string, string>()
+// The commands judged heavy, as cards keep a background or detached run's command, so one that goes on past its call still counts
+const heavySeen = new Set<string>()
+let heavyLetAt = 0
+const keptCmd = (command: string) => oneLine(command).slice(0, 400)
+
+// How many heavy commands of this chat's work run now: calls held open, and runs in the background or detached that go on (never
+// another chat's card, which this chat's memory of what is heavy does not cover)
+const heavyRunning = (list: Todo[]) =>
+  heavyOpen.size + list.filter(one => !one.chat).reduce((n, one) => n + [...(one.bg ?? []), ...(one.detached ?? [])].filter(run => run.cmd && heavySeen.has(run.cmd)).length, 0)
+// Whether the Mac is past the setting's marks: its load average for each core, or its memory in use
+const isMacBusy = (f: UsageFigures | undefined, mode: HeavyMode) =>
+  Boolean(f && ((f.load !== undefined && f.loadCores && f.load >= mode.load * f.loadCores) || (f.memTotal > 0 && f.memUsed / f.memTotal >= mode.memory)))
+// Whether a heavy command may start now: always when none of the chat's runs, so it never waits on load the work does not make;
+// never while the Mac is busy; else when few run, or none was let go just now, so the load of the last shows before the next
+const heavyRoom = (list: Todo[], f: UsageFigures | undefined, mode: HeavyMode, now: number) => {
+  if (mode.value === 'never') return true
+  const running = heavyRunning(list)
+  if (!running) return true
+  if (isMacBusy(f, mode)) return false
+  return running < Math.max(2, Math.round((f?.loadCores ?? 8) / 4)) || now - heavyLetAt >= HEAVY_RAMP
+}
+// How busy the Mac is, in words
+const busyWords = (f: UsageFigures | undefined) =>
+  !f ? 'busy' : [f.load !== undefined && f.loadCores ? `load ${Math.round(f.load)} on ${f.loadCores} cores` : '', f.memTotal ? `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB memory in use` : ''].filter(Boolean).join(', ')
+const placeWords = (n: number) => (n === 1 ? 'next in line' : `${n}${n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : n % 10 === 1 && n % 100 !== 11 ? 'st' : 'th'} in line`)
+const HEAVY_WAITED = (what: string, waited: string, f: UsageFigures | undefined, isLate: boolean) =>
+  isLate
+    ? `Claudopus held this command ("${what}") ${waited} while the Mac was busy (${busyWords(f)}), then ran it anyway. If it failed or timed out for lack of room, run it again later.`
+    : `Claudopus held this command ("${what}") ${waited}, until the Mac had room for it, and ran it as soon as its turn came.`
+const HEAVY_GONE = 'Not run: your task was stopped while this command waited its turn for the Mac to have room.'
+
+// Every card's held calls, with their places in the line; none outlives the copy of the mod that holds it, so a chat that starts
+// clears what a copy before it left on the cards
+const showHeld = ($: EngineInterface) =>
+  changeTodos($, list =>
+    list.map(one => {
+      if (one.chat) return one
+      const mine = heavyQueue.flatMap((call, n) => (call.agent === one.id ? [{ id: call.id, what: call.what, cmd: call.cmd, at: call.at, place: n + 1 }] : []))
+      if (!mine.length && !one.heldCalls) return one
+      if (JSON.stringify(mine) === JSON.stringify(one.heldCalls ?? [])) return one
+      return { ...one, heldCalls: mine.length ? mine : undefined }
+    }),
+  ).then(() => redraw($))
+// A held row as the card's tree draws it: a wait for its turn, with how it stands
+const heldJobs = (one: Todo): Job[] =>
+  (one.heldCalls ?? []).map(call => ({ ...jobOf(`held-${call.id}`, call.what, call.cmd, call.at), kind: 'wait' as const, waitsFor: `its turn: ${labelOf(call.what, call.cmd)}`, target: `waits for room on the Mac · ${placeWords(call.place)}` }))
+
+// Holds a heavy command of a piece of work until its turn, and says what the work is told as it runs; a deny when its work was
+// stopped while it waited. The id is the call's, to take out of heavyOpen as the call ends. A call that would outlast the hook's
+// time, or that a newer copy of the mod takes over from, runs at once
+const holdHeavy = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ id?: string; said?: string; deny?: string }> => {
+  const input = e as { command?: unknown; description?: unknown; tool_use_id?: unknown }
+  const command = String(input.command ?? '')
+  const kind = heavyOf(command, await scriptsRun($, command))
+  if (!kind) return {}
+  const agent = e.agentId ?? ''
+  // Only work with a card of its own here, where the wait can be seen
+  if (!(await read($, todos)).some(one => one.id === agent && !one.chat)) return {}
+  const modeNow = async () => heavyModeOf(await readConfig($, dir))
+  if ((await modeNow()).value === 'never') return {}
+  const id = String(input.tool_use_id ?? '')
+  heavySeen.add(keptCmd(command))
+  await lookUsage($).catch(() => undefined)
+  const at = await $.clock.now()
+  const list = await read($, todos)
+  const mode = await modeNow()
+  // (the line looked at only after every wait, so a call that came meanwhile is not passed)
+  if (!heavyQueue.length && heavyRoom(list, usageNow(at), mode, at)) return (heavyOpen.set(id, agent), (heavyLetAt = at), { id })
+  const call: HeldCall = { id, agent, what: oneLine(String(input.description ?? '')) || labelOf('', command), cmd: keptCmd(command), kind, at }
+  let isLate = false
+  let now = at
+  try {
+    heavyQueue.push(call)
+    await log($, `work ${agent}'s ${kind} command waits its turn (${heavyQueue.length} held, Mac ${busyWords(usageNow(at))})`)
+    await showHeld($)
+    for (;;) {
+      const card = (await read($, todos)).find(one => one.id === agent)
+      if (next.signal?.aborted || !card || card.status !== 'working') return { deny: HEAVY_GONE }
+      now = await $.clock.now()
+      isLate = now - at >= HEAVY_MOST || (next.budget?.remainingMs ?? Infinity) < 3000 || (await isReplaced($))
+      if (isLate) break
+      await lookUsage($).catch(() => undefined)
+      if (heavyQueue[0]?.id === id && heavyRoom(await read($, todos), usageNow(now), await modeNow(), now)) break
+      await $.process.run(['/bin/sleep', '2'], { timeoutMs: 10_000 }).catch(() => undefined)
+    }
+  } finally {
+    heavyQueue = heavyQueue.filter(one => one.id !== id)
+    await showHeld($).catch(() => undefined)
+  }
+  heavyOpen.set(id, agent)
+  heavyLetAt = now
+  const waited = shortAgo(now - at)
+  await log($, `work ${agent}'s ${kind} command let go after ${waited}${isLate ? ', before the Mac had room' : ''}`)
+  return { id, said: HEAVY_WAITED(cut(call.what, 120), waited, usageNow(now), isLate) }
+}
+// Held calls a copy of the mod before this one left on the cards: none is held any more
+const clearHeld = async ($: EngineInterface) => {
+  if ((await read($, todos)).some(one => !one.chat && one.heldCalls?.some(call => !heavyQueue.some(held => held.id === call.id)))) await showHeld($)
 }
 
 // Steps that could have gone out together: after each step of work, a line in its next request when the step shows a pattern that
@@ -11945,7 +12063,19 @@ const workHooks = (on: On) => {
     }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
+    // A heavy command of a piece of work waits its turn while the Mac is busy, and is told how long it waited as it runs
     const next = async (asked: typeof e) => {
+      // (never one the person has just allowed as admin or as a release: what they allowed lasts two minutes)
+      const held = dir && !isOff && e.agentId !== undefined && asked.tool === 'Bash' && !grants.length ? await holdHeavy($, asked, raw as never) : {}
+      if (held.deny) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: held.deny } as Awaited<ReturnType<typeof raw>>)
+      try {
+        const r = await nextHere(asked)
+        return held.said && !r.deny ? ({ ...r, context: [...((r as { context?: string[] }).context ?? []), held.said] } as typeof r) : r
+      } finally {
+        if (held.id) heavyOpen.delete(held.id)
+      }
+    }
+    const nextHere = async (asked: typeof e) => {
       const isMovedBack = Boolean(dir) && !isOff && e.agentId !== undefined && isLongHeld(asked as never)
       const call = isMovedBack ? ({ ...asked, run_in_background: true } as typeof e) : asked
       if (isMovedBack) await log($, `work ${e.agentId}'s long command started in the background: ${oneLine(String((asked as { description?: unknown }).description ?? '')).slice(0, 80)}`)

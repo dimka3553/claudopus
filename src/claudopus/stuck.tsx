@@ -98,7 +98,7 @@ const lookStuck = async ($: EngineInterface) => {
       // Nor work that waits for a command of its own it started in the background: a long copy is not stuck
       const isWaitingOwn = Boolean(one.waitsSince && one.bg?.some(b => !b.isWatch))
       // Nor work that asked Claudopus to start it again: that look has its own end, which starts it (lookWakes)
-      const isStuck = one.status === 'working' && !one.wakeWhen && !(one.ask && !one.ask.replied) && !one.admins?.length && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
+      const isStuck = one.status === 'working' && !one.wakeWhen && !(one.ask && !one.ask.replied) && !one.admins?.length && !one.heldCalls?.length && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
       // The nudges a wait on helpers had are let go once none of its helpers runs
       const nudged = one.nudged && list.some(kid => kid.parentId === one.id && kid.status === 'working') ? one.nudged : undefined
       if (nudged !== one.nudged) ((isChanged = true), (one = { ...one, nudged }))

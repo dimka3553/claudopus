@@ -149,6 +149,7 @@ declare global {
   export import configView = M6.configView
   export import editing = M6.editing
   export import fillModels = M6.fillModels
+  export import heavyModeOf = M6.heavyModeOf
   export import leanOf = M6.leanOf
   export import modelsIn = M6.modelsIn
   export import modelsOf = M6.modelsOf
@@ -157,6 +158,7 @@ declare global {
   export import TEXTS = M6.TEXTS
   export import Config = M6.Config
   export import ConfigShown = M6.ConfigShown
+  export import HeavyMode = M6.HeavyMode
   export import Lean = M6.Lean
   export import LeanKey = M6.LeanKey
   export import Models = M6.Models
@@ -252,10 +254,12 @@ declare global {
   export import reportsOf = M10.reportsOf
   export import SILENT_AFTER = M10.SILENT_AFTER
   export import SILENT_WARN = M10.SILENT_WARN
+  export import heavyOf = M10.heavyOf
   export import isWaiterTree = M10.isWaiterTree
   export import waiterLeavesOf = M10.waiterLeavesOf
   export import waitingOf = M10.waitingOf
   export import watcherOf = M10.watcherOf
+  export import HeavyKind = M10.HeavyKind
   export import OpenCall = M10.OpenCall
   export import Proc = M10.Proc
   export import Span = M10.Span
