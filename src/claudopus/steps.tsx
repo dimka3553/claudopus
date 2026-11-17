@@ -259,38 +259,31 @@ const HELPER_PASSED = (helper: string, work: string) =>
 
 // What the chat is told of work that ended its step to wait for its helpers, or to be started again: the engine sees neither, so it
 // tells the chat that work ended without its report and to ask it for one, which the work cannot give while its helpers run (16 Nov:
-// five tasks asked again and again, each refused at its report). Told once, until the work takes a step again. Work that waits only
-// on a command it started detached is not: its card ends as the engine ends it, and the command starts it again
-const toldWaitsOn = new Set<string>()
+// five tasks asked again and again, each refused at its report). Told in the same message as that notice, never on its own: added on
+// its own it reached the chat beside the notice, or rode into a later turn after the notice was left out (16 Nov evening: 27 turns).
+// Work that waits only on a command it started detached is not: its card ends as the engine ends it, and the command starts it again
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`)
 const WAITS_ON = (work: string, helpers: number, wake: string) =>
   `From Claudopus: the task "${work}" ended its step without its report because it waits ${helpers ? `for ${plural(helpers, 'a helper', 'helpers')} it started` : `to be started again once this is there: ${wake}`}. Claude Code may say it ended without delivering a report, but it is still at work: ${
     helpers ? `${helpers === 1 ? "the helper's result starts" : "each helper's result starts"} it again` : 'Claudopus starts it again then'
   }, and its report comes after that. Do not send it a message asking for its report, which it cannot give while it waits, and do not tell {name} it stopped.`
-// What top work at work, its report not given, waits on that the engine does not see: its helpers at work, or a wake_me
-const waitsOn = (list: Todo[], id: string) => {
-  const card = list.find(one => one.id === id)
-  if (!card || card.parentId || card.status !== 'working' || card.handedBackAt !== undefined) return undefined
-  const helpers = runningHelpers(list, id).length
-  return helpers || card.wakeWhen ? { title: titleOf(card), helpers, wake: card.wakeWhen?.what ?? '' } : undefined
-}
-const waitsText = (list: Todo[], id: string) => {
-  const on = waitsOn(list, id)
-  return on ? named(WAITS_ON(on.title, on.helpers, on.wake)) : ''
-}
-// Whether the chat is at a turn of its own. Idle, it gets the engine's notice as a prompt of its own, which Claudopus leaves out
-// (quietNotices) or, beside anything else, explains in that prompt: a note added to the chat as well would ride into its next turn
-// with nothing to explain. At a turn, the notice joins that turn unseen by Claudopus, so the note goes in beside it
-let isChatInTurn = false
-const tellWaitsOn = async ($: EngineInterface, id: string) => {
-  if (!dir || isOff || toldWaitsOn.has(id) || !isChatInTurn) return
+// The top work at work, its report not given, that waits on what the engine does not count as its own: a helper the engine still
+// lists at work, or a wake_me still due. A helper's card left at work after the helper is gone, or a wake long past, is not waiting:
+// the engine's word that the work ended then reaches the chat as it is
+const waitingNow = async ($: EngineInterface) => {
   const list = await read($, todos)
-  const on = waitsOn(list, id)
-  if (!on) return
-  toldWaitsOn.add(id)
-  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: waitsText(list, id) }] } })
-  await log($, `chat told work ${id} waits on ${on.helpers ? plural(on.helpers, 'a helper', 'helpers') : 'being woken'}`)
+  const listed = new Map((await $.agent.list().catch(() => [])).map(one => [one.id, one.status] as const))
+  const now = await $.clock.now()
+  const waiting = new Map<string, { title: string; helpers: number; wake: string }>()
+  for (const card of list) {
+    if (card.parentId || card.status !== 'working' || card.handedBackAt !== undefined) continue
+    const helpers = runningHelpers(list, card.id).filter(one => listed.get(one.id) === 'running' || listed.get(one.id) === 'waiting').length
+    const wake = card.wakeWhen && card.wakeWhen.until > now ? card.wakeWhen.what : ''
+    if (helpers || wake) waiting.set(card.id, { title: titleOf(card), helpers, wake })
+  }
+  return waiting
 }
+const waitsText = (work: { title: string; helpers: number; wake: string }) => named(WAITS_ON(work.title, work.helpers, work.wake))
 
 // A helper that ends while the work that started it has ended its step: the engine hands its result to the chat (seen live on 16
 // Nov), so Claudopus passes it on to that work and starts it again with it. The work never holds itself open to wait for helpers

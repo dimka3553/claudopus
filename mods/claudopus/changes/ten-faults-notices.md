@@ -1,3 +1,4 @@
 - The chat is no longer woken for Claude Code's notices that bring nothing new: a task still waiting on its own command with no report yet, or a task that ended its step to wait for its helpers or for something Claudopus starts it again for. On 16 Nov these were 67 of one chat's 152 turns in an evening, each answered "still in progress"
-- A task waiting on its helpers is no longer shown to the chat as ended without a report on one side and still at work on the other: when such a notice does reach the chat beside something real, Claudopus's word that the task is still at work comes in the same message, and Claudopus no longer adds that word on its own when nothing came with it
-- When a notice with nothing new does reach the chat, it ends its turn at once without a word
+- A notice that says anything more still reaches the chat: a security warning, a report Claude Code refused, a limit a task stopped at, an agent's own words
+- A task waiting on its helpers no longer reads as ended without a report in one message and still at work in another: when Claude Code's notice reaches the chat, Claudopus's word that the task is still at work is in the same message, and Claudopus no longer sends that word on its own
+- A task whose helpers have really gone, or whose wait has run out, is no longer taken for waiting: Claude Code's word that it ended reaches the chat

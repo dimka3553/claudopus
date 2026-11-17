@@ -547,8 +547,6 @@ const workHooks = (on: On) => {
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
       return { turnId: e.turnId, index: e.index, answer: LEFT_AT_WORK, toolUses: [], stopReason: 'end_turn', usage: null }
     }
-    // A step of its own: the chat is told again the next time it ends its step to wait
-    if (id !== undefined) toldWaitsOn.delete(id)
     const own = id !== undefined ? (startedOn.get(id) ?? card?.startedOn) : undefined
     const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && !card?.flagged && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
     const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnOlder
