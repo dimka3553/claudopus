@@ -310,7 +310,7 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   const details = [
     what.detail && !runnable ? `What it is: ${what.detail}` : '',
     `Why: ${refusal.who}${refusal.reason ? ` (${refusal.reason})` : ''}.`,
-    runnable ? runDetails(runnable) : 'The task carries on without it, and does not do it another way.',
+    runnable ? runDetails() : 'The task carries on without it, and does not do it another way.',
   ]
     .filter(Boolean)
     .join('\n\n')

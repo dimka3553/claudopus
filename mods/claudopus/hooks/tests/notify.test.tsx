@@ -232,11 +232,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The chat's own process, as the shell the mod starts names its parent
     if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
-    // A command Claude Code refused, run on the person's press: started detached, it prints its process group's number; still
-    // running until the test lays run:gone; stopped, it is gone
-    if (tool === '/bin/sh' && String(rest[1]).startsWith('# claudopus run-it\n')) return (pressRuns.push([...e.argv]), ok('51234\n'))
-    if (tool === '/bin/sh' && String(rest[1]).startsWith('# claudopus run-it alive')) return ok('', files.has('run:gone') ? 1 : 0)
-    if (tool === '/bin/sh' && String(rest[1]).startsWith('# claudopus run-it stop')) return (pressRuns.push([...e.argv]), files.set('run:gone', ''), ok())
+    // bin/run-it, as a command Claude Code refused is run on the person's press: started detached, it prints its process group's
+    // number; it runs until the test lays run:gone; stopped, it is gone and its output says so
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'start') return (pressRuns.push([...e.argv]), ok('51234\n'))
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'alive') return ok('', files.has('run:gone') ? 1 : 0)
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'stop') return (pressRuns.push([...e.argv]), files.set('run:gone', ''), files.set(String(rest[2]), `${files.get(String(rest[2])) ?? ''}claudopus-exit 143 stopped\n`), ok())
     // Every admin password an earlier version kept, taken out of the keychain as the mod loads
     if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
     // What a password box sends, sealed by openssl to the key of the runner that asked: the test's own stand-in for it

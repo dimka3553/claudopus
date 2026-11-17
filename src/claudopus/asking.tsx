@@ -548,6 +548,8 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       await startRun($, one, run).catch(err => log($, `refused command not run: ${String(err)}`))
       return void askGone($, one, said)
     }
+    // Words, even "Run it", never run the command: the card says so where it offered it
+    if (runList.some(r => isSameRun(r, { card: one.id, askAt: ask.at }) && !r.startedAt)) await stepLine($, one.id, `Your answer didn't run the command: only its ${RUN_IT} button runs it`).catch(() => undefined)
     const isWorking = (await read($, todos)).find(card => card.id === target)?.status === 'working'
     const told = isWorking ? await tell($, target, REFUSAL_ANSWERED(ask.text, said, isReply)) : undefined
     if (!told || told.deny) await log($, `answer to the refusal on ${one.id} not sent: ${target} is not at work, or could not be written to`)
@@ -674,7 +676,9 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
 const WAKE_WAIT = 4000
 // Each wake carries every answer joined into it, so each card's line and the chat's notice are settled for every one
 const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Sent, 'to'> }[]; spawn?: { prompt: string; description: string; subagentType: string; model: string; cwd: string } }[] = []
-const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>) => {
+// `isHookOnly`: never from the timer, for what no press of this chat's started (a command run on a press ending, runit.tsx): it
+// waits for the next hook, and its card offers a press meanwhile
+const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>, isHookOnly = false) => {
   // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
   pending.set(target, one.id)
   // A reply that holds its ask is acted on from now: no answers on the card while its work is started again with it
@@ -686,6 +690,7 @@ const toEnded = async ($: EngineInterface, one: Todo, target: string, text: stri
   if (same) return void ((same.text = `${same.text}\n\n${text}`), same.answers.push({ one, sent }))
   const wake = { target, text, answers: [{ one, sent }] }
   wakes.push(wake)
+  if (isHookOnly) return
   void $.clock.after(WAKE_WAIT, () => {
     const at = wakes.indexOf(wake)
     if (at < 0) return

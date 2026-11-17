@@ -5009,6 +5009,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       await startRun($, one, run).catch(err => log($, `refused command not run: ${String(err)}`))
       return void askGone($, one, said)
     }
+    if (runList.some(r => isSameRun(r, { card: one.id, askAt: ask.at }) && !r.startedAt)) await stepLine($, one.id, `Your answer didn't run the command: only its ${RUN_IT} button runs it`).catch(() => undefined)
     const isWorking = (await read($, todos)).find(card => card.id === target)?.status === 'working'
     const told = isWorking ? await tell($, target, REFUSAL_ANSWERED(ask.text, said, isReply)) : undefined
     if (!told || told.deny) await log($, `answer to the refusal on ${one.id} not sent: ${target} is not at work, or could not be written to`)
@@ -5097,7 +5098,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
 }
 const WAKE_WAIT = 4000
 const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Sent, 'to'> }[]; spawn?: { prompt: string; description: string; subagentType: string; model: string; cwd: string } }[] = []
-const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>) => {
+const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>, isHookOnly = false) => {
   pending.set(target, one.id)
   await changeTodos($, list => list.map(card => (card.id === one.id && card.ask?.replied?.text === sent.text && !card.ask.replied.isWaking && card.status !== 'working' ? { ...card, ask: { ...card.ask, replied: { ...card.ask.replied, isWaking: true } } } : card)))
   sentReplies.set(one.id, { ...sent, to: 'work' })
@@ -5106,6 +5107,7 @@ const toEnded = async ($: EngineInterface, one: Todo, target: string, text: stri
   if (same) return void ((same.text = `${same.text}\n\n${text}`), same.answers.push({ one, sent }))
   const wake = { target, text, answers: [{ one, sent }] }
   wakes.push(wake)
+  if (isHookOnly) return
   void $.clock.after(WAKE_WAIT, () => {
     const at = wakes.indexOf(wake)
     if (at < 0) return
@@ -7260,7 +7262,7 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   const details = [
     what.detail && !runnable ? `What it is: ${what.detail}` : '',
     `Why: ${refusal.who}${refusal.reason ? ` (${refusal.reason})` : ''}.`,
-    runnable ? runDetails(runnable) : 'The task carries on without it, and does not do it another way.',
+    runnable ? runDetails() : 'The task carries on without it, and does not do it another way.',
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -7319,31 +7321,26 @@ const promptHooks = (on: On) => {
 
 const RUN_IT = 'Run it'
 const RUN_TEXT_MOST = 4000
+const RUN_UNSEEN = new RegExp('[\\u0000-\\u0008\\u000B-\\u001F\\u007F-\\u009F\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2069\\uFEFF]')
 const RUN_LIMIT = 10 * 60_000
 const RUN_LIMIT_BACKGROUND = 60 * 60_000
 const RUN_LOOK = 5_000
 const RUN_TAIL_LINES = 30
 const RUN_TAIL_CHARS = 4000
 const RUN_KEPT = 24 * 60 * 60_000
-const RUN_SCRIPT = [
-  '# claudopus run-it',
-  'set -m',
-  '(',
-  '  trap "" HUP',
-  '  unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SSE_PORT',
-  '  S="${SHELL:-/bin/sh}"; [ -x "$S" ] || S=/bin/sh',
-  '  if cd "$3" 2>> "$2"; then "$S" -l -c "$1" < /dev/null >> "$2" 2>&1; echo "claudopus-exit $?" >> "$2"; else echo "claudopus-exit 1" >> "$2"; fi',
-  ') > /dev/null 2>&1 &',
-  'echo $!',
-].join('\n')
-const RUN_ALIVE = '# claudopus run-it alive\nps -o args= -p "$1" 2>/dev/null | grep -qF -- "$2"'
-const RUN_STOP = '# claudopus run-it stop\nps -o args= -p "$1" 2>/dev/null | grep -qF -- "$2" || exit 0\nkill -TERM -- "-$1" 2>/dev/null || kill -TERM "$1"\nsleep 3\nkill -KILL -- "-$1" 2>/dev/null\nexit 0'
+const RUNS_KEPT = 40
+const RUN_END = /claudopus-exit (\d+)( stopped)?\s*$/
 
 const runs = atom({ plugin: 'claudopus', key: 'runs' } as const, [], { shape: 'runs-1' })
 let runList: PressRun[] = []
 const saveRuns = async ($: EngineInterface, fn: (list: PressRun[]) => PressRun[]) => {
   const now = await $.clock.now()
-  runList = await update($, runs, list => fn(list).filter(one => now - (one.endedAt ?? one.startedAt ?? one.askAt) < RUN_KEPT).slice(-40))
+  runList = await update($, runs, list => {
+    const next = fn(list)
+    const live = (one: PressRun) => Boolean(one.startedAt && !one.endedAt)
+    const kept = next.filter(one => !live(one) && now - (one.endedAt ?? one.startedAt ?? one.askAt) < RUN_KEPT).slice(-RUNS_KEPT)
+    return next.filter(one => live(one) || kept.includes(one))
+  })
   redraw($)
   return runList
 }
@@ -7353,26 +7350,35 @@ const offeredRun = (one: Todo) => {
   if (!ask?.refused || one.chat || !ask.copy) return undefined
   return runList.find(run => isSameRun(run, { card: one.id, askAt: ask.at }) && run.command === ask.copy && !run.startedAt)
 }
-const runningOn = (card: string) => runList.filter(run => run.card === card && run.startedAt && !run.endedAt)
+const runningOn = (card: string) => runList.filter(run => run.card === card && run.startedAt && (!run.endedAt || isRunWaking(run)))
 const runLast = new Map<string, string>()
 const runStopped = new Set<string>()
 const runKey = (run: Pick<PressRun, 'card' | 'askAt'>) => `${run.card}:${run.askAt}`
 const runPressed = new Set<string>()
 const runAsked = new Map<string, PressRun>()
+const runWaking = new Map<string, string>()
+const isRunWaking = (run: PressRun) => {
+  const target = runWaking.get(runKey(run))
+  if (target === undefined) return false
+  if (wakes.some(w => w.target === target)) return true
+  runWaking.delete(runKey(run))
+  return false
+}
 const limitText = (ms: number) => (ms >= 60 * 60_000 ? `${Math.round(ms / 3_600_000)} hour${ms >= 2 * 3_600_000 ? 's' : ''}` : `${Math.max(1, Math.round(ms / 60_000))} min`)
 
 const runnableOf = (tool: string, call: Record<string, unknown>) => {
   const command = typeof call.command === 'string' ? call.command.trim() : ''
-  if (tool !== 'Bash' || !command || command.length > RUN_TEXT_MOST) return undefined
+  if (tool !== 'Bash' || !command || command.length > RUN_TEXT_MOST || RUN_UNSEEN.test(command)) return undefined
   const asked = typeof call.timeout === 'number' && call.timeout > 0 ? Math.min(call.timeout, RUN_LIMIT) : RUN_LIMIT
   const limitMs = call.run_in_background === true ? RUN_LIMIT_BACKGROUND : asked
   return { command, cwd: cwd || dir.replace(/\/\.claude\/claudopus$/, ''), limitMs, description: typeof call.description === 'string' ? oneLine(call.description) : '' }
 }
 const offerRun = async ($: EngineInterface, card: string, from: string, askAt: number, runnable: NonNullable<ReturnType<typeof runnableOf>>) => {
   await saveRuns($, list => [...list.filter(one => !isSameRun(one, { card, askAt })), { card, from, askAt, ...runnable }])
+  if (dir) void $.process.run(['find', `${dir}/runs`, '-type', 'f', '-name', '*.log', '-mtime', '+1', '-delete'], { timeoutMs: 15_000 }).catch(() => undefined)
 }
-const runDetails = (runnable: NonNullable<ReturnType<typeof runnableOf>>) =>
-  `${RUN_IT}: Claudopus runs exactly the command shown, once, as a command you type in your terminal would run, in ${shortPath(runnable.cwd, 80)}, for at most ${limitText(runnable.limitMs)}, and sends the task what it printed. Nothing else changes: Claude Code still decides each of the task's own calls. ${CARRY_ON}: it doesn't run, and the task goes on without it.`
+const runDetails = () =>
+  `${RUN_IT}: Claudopus runs exactly the command below, once, as yours, and sends the task what it printed. Nothing else changes: Claude Code still decides each of the task's own calls. ${CARRY_ON}: it doesn't run, and the task goes on without it.`
 
 const runIt = async ($: EngineInterface, one: Todo) => {
   presses += 1
@@ -7384,27 +7390,31 @@ const runIt = async ($: EngineInterface, one: Todo) => {
     await answerAsk($, one, RUN_IT)
   } finally {
     runAsked.delete(one.id)
+    if (!runList.find(other => isSameRun(other, run))?.startedAt) runPressed.delete(runKey(run))
   }
 }
 const startRun = async ($: EngineInterface, one: Todo, run: PressRun) => {
   const at = await $.clock.now()
   const logFile = `${dir}/runs/${slug(one.id) || 'work'}-${at}.log`
+  const target = run.from || one.id
   const isLogged = await $.fs.write(logFile, '').then(() => true).catch(() => false)
   const r = isLogged
-    ? await $.process.run(['/bin/sh', '-c', RUN_SCRIPT, 'sh', run.command, logFile, run.cwd], { cwd: run.cwd, timeoutMs: 15_000 }).catch(err => ({ exitCode: 1, stdout: '', stderr: String(err) }))
+    ? await $.process.run([`${$.plugin.root}/bin/run-it`, 'start', run.command, logFile, run.cwd], { cwd: run.cwd, timeoutMs: 15_000 }).catch(err => ({ exitCode: 1, stdout: '', stderr: String(err) }))
     : { exitCode: 1, stdout: '', stderr: 'its output file could not be made' }
   const pid = r.exitCode === 0 ? /^(\d+)\s*$/.exec(r.stdout.trim())?.[1] : undefined
   if (!pid) {
-    await log($, `run of the refused command for ${one.id} not started: ${cut(oneLine(r.stderr), 160)}`)
+    const why = cut(oneLine(r.stderr), 100) || 'no reason given'
+    await log($, `run of the refused command for ${one.id} not started: ${why}`)
     await saveRuns($, list => list.map(other => (isSameRun(other, run) ? { ...other, startedAt: at, endedAt: at, end: 'lost' as const } : other)))
-    await stepLine($, one.id, `Your command didn't start: Claudopus could not start it (${cut(oneLine(r.stderr), 100) || 'no reason given'})`)
+    await stepLine($, one.id, `Your command didn't start: Claudopus could not start it (${why})`)
+    await deliverRun($, one.id, target, run, named(`{Name} pressed "${RUN_IT}" on your card for the command Claude Code refused, but Claudopus could not start it (${why}), so it did not run. What Claude Code refused stays refused: do not do it yourself. Carry on without it, and say in your report what was left out.`), at)
     return
   }
   await saveRuns($, list => list.map(other => (isSameRun(other, run) ? { ...other, startedAt: at, log: logFile, pid } : other)))
   await log($, `refused command for ${one.id} run on ${who()}'s press, in ${run.cwd}`)
-  const target = run.from || one.id
   const card = (await read($, todos)).find(other => other.id === target)
-  if (card?.status === 'working') await tell($, target, named(`{Name} pressed "${RUN_IT}" on your card for the command Claude Code refused, and Claudopus is running it for them now, exactly as shown, in ${run.cwd}, for at most ${limitText(run.limitMs)}. What it prints comes to you as a message when it ends. Do not run it yourself; carry on with what does not need it, or end your step.`))
+  const stops = run.limitMs >= RUN_LIMIT_BACKGROUND ? `It is stopped after ${limitText(run.limitMs)} if it is still running then.` : `It is stopped after ${limitText(run.limitMs)} at most.`
+  if (card?.status === 'working') await tell($, target, named(`{Name} pressed "${RUN_IT}" on your card for the command Claude Code refused, and Claudopus is running it for them now, exactly as shown, in ${run.cwd}. What it prints goes to ${logFile}, which you can read as it runs; when it ends, its last lines come to you as a message. ${stops} Do not run it yourself; carry on with what does not need it, or end your step.`))
   followRun($, { ...run, startedAt: at, log: logFile, pid })
 }
 
@@ -7427,38 +7437,51 @@ const followRun = ($: EngineInterface, run: PressRun) => {
       .finally(() => (isLooking = false))
   })
 }
+const runOutputOf = (text: string) => {
+  const end = RUN_END.exec(text)
+  const lines = text.replace(RUN_END, '').replace(/\s+$/, '').split('\n')
+  return { exit: end ? Number(end[1]) : undefined, isStopped: Boolean(end?.[2]), lines }
+}
 const lookRun = async ($: EngineInterface, run: PressRun) => {
-  const now = (runList.find(one => isSameRun(one, run)) ?? run)
+  const now = runList.find(one => isSameRun(one, run)) ?? run
   if (now.endedAt || !run.log || !run.pid || !run.startedAt) return true
   during('look at a command run on a press')
-  const text = await fileEnd($, run.log, 64_000)
-  const exit = /claudopus-exit (\d+)\s*$/.exec(text)?.[1]
-  const lines = text.replace(/claudopus-exit \d+\s*$/, '').replace(/\s+$/, '').split('\n')
-  const last = oneLine(lines.filter(line => line.trim()).at(-1) ?? '')
-  if (runLast.get(runKey(run)) !== last) (runLast.set(runKey(run), last), redraw($))
+  const out = runOutputOf(await fileEnd($, run.log, 64_000))
+  const last = oneLine(out.lines.filter(line => line.trim()).at(-1) ?? '')
+  runLast.set(runKey(run), last)
+  redraw($)
   const at = await $.clock.now()
-  if (exit !== undefined) return void (await endRun($, run, runStopped.has(runKey(run)) ? 'stopped' : 'exited', Number(exit), lines)), true
+  const stopped = (isStopped: boolean) => (isStopped || runStopped.has(runKey(run)) ? 'stopped' : 'exited')
+  if (out.exit !== undefined) return void (await endRun($, run, stopped(out.isStopped), out.exit, out.lines)), true
   if (at - run.startedAt > run.limitMs) {
     await stopProcess($, run)
-    return void (await endRun($, run, 'limit', undefined, lines)), true
+    return void (await endRun($, run, 'limit', undefined, runOutputOf(await fileEnd($, run.log, 64_000)).lines)), true
   }
-  const alive = await $.process.run(['/bin/sh', '-c', RUN_ALIVE, 'sh', run.pid, run.log], { timeoutMs: 10_000 }).catch(() => undefined)
+  const alive = await $.process.run([`${$.plugin.root}/bin/run-it`, 'alive', run.pid, run.log], { timeoutMs: 10_000 }).catch(() => undefined)
   if (alive && alive.exitCode !== 0) {
-    const again = await fileEnd($, run.log, 64_000)
-    const late = /claudopus-exit (\d+)\s*$/.exec(again)?.[1]
-    const rest = again.replace(/claudopus-exit \d+\s*$/, '').replace(/\s+$/, '').split('\n')
-    return void (await endRun($, run, late !== undefined ? (runStopped.has(runKey(run)) ? 'stopped' : 'exited') : runStopped.has(runKey(run)) ? 'stopped' : 'lost', late === undefined ? undefined : Number(late), rest)), true
+    const late = runOutputOf(await fileEnd($, run.log, 64_000))
+    return void (await endRun($, run, late.exit !== undefined ? stopped(late.isStopped) : runStopped.has(runKey(run)) ? 'stopped' : 'lost', late.exit, late.lines)), true
   }
   return false
 }
 const stopProcess = ($: EngineInterface, run: PressRun) =>
-  run.pid && run.log ? $.process.run(['/bin/sh', '-c', RUN_STOP, 'sh', run.pid, run.log], { timeoutMs: 15_000 }).catch(err => log($, `run of ${run.card} not stopped: ${String(err)}`)) : Promise.resolve()
+  run.pid && run.log ? $.process.run([`${$.plugin.root}/bin/run-it`, 'stop', run.pid, run.log], { timeoutMs: 15_000 }).catch(err => log($, `run of ${run.card} not stopped: ${String(err)}`)) : Promise.resolve()
 const stopRun = async ($: EngineInterface, run: PressRun) => {
   presses += 1
   if (runStopped.has(runKey(run))) return
   runStopped.add(runKey(run))
   redraw($)
   await stopProcess($, run)
+}
+const deliverRun = async ($: EngineInterface, cardId: string, target: string, run: PressRun, text: string, at: number) => {
+  const card = (await read($, todos)).find(one => one.id === cardId)
+  if (!card) return false
+  const isWorking = (await read($, todos)).find(one => one.id === target)?.status === 'working'
+  const told = isWorking ? await tell($, target, text) : undefined
+  if (told && !told.deny) return true
+  runWaking.set(runKey(run), target)
+  await toEnded($, card, target, `${text}\n${RESUMED_BY_ANSWER}`, { text: RUN_IT, ask: `the command Claude Code refused (${cut(run.description || run.command, 60)})`, at, line: lineOf(card), isCard: true, askAt: run.askAt }, true)
+  return false
 }
 const endRun = async ($: EngineInterface, run: PressRun, end: NonNullable<PressRun['end']>, exit: number | undefined, lines: string[]) => {
   const at = await $.clock.now()
@@ -7476,17 +7499,11 @@ const endRun = async ($: EngineInterface, run: PressRun, end: NonNullable<PressR
   }[end]
   const tail = cut(lines.slice(-RUN_TAIL_LINES).join('\n'), RUN_TAIL_CHARS)
   await log($, `refused command for ${run.card} run on ${who()}'s press ${named(how)}`)
-  await stepLine($, run.card, named(`The command you ran ${how.replace(/\{name\}/g, 'you')}; Claude was sent what it printed`))
-  const card = (await read($, todos)).find(one => one.id === run.card)
-  if (!card) return
-  const target = run.from || run.card
   const text = named(
     `{Name} pressed "${RUN_IT}" on your card for the command Claude Code refused, and Claudopus ran it for them, exactly as shown, once, in ${run.cwd}:\n${run.command}\nIt ${how}. Its whole output is in ${run.log}; ${tail ? `its last lines:\n${tail}` : 'it printed nothing.'}\nThat ran on {name}'s own press, as theirs: it is no permission. Claude Code still decides each call of yours, so do not run it, or another way to the same end, yourself. Use what it printed; if you need it run again, ask {name} with the command.`,
   )
-  const isWorking = (await read($, todos)).find(one => one.id === target)?.status === 'working'
-  const told = isWorking ? await tell($, target, text) : undefined
-  if (told && !told.deny) return
-  await toEnded($, card, target, `${text}\n${RESUMED_BY_ANSWER}`, { text: RUN_IT, ask: `the command Claude Code refused (${cut(run.description || run.command, 60)})`, at, line: lineOf(card), isCard: true, askAt: run.askAt })
+  const isSent = await deliverRun($, run.card, run.from || run.card, run, text, at)
+  await stepLine($, run.card, `The command you ran ${how.replace(/\{name\}/g, 'you')}; ${isSent ? 'Claude was sent what it printed' : 'Claude gets what it printed as it starts again'}`)
 }
 
 const runWhere = (ui: Ui, one: Todo, key: string) => {
@@ -7503,15 +7520,25 @@ const runBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number
       {list.map(run => {
         const last = runLast.get(runKey(run)) ?? ''
         const isStopping = runStopped.has(runKey(run))
+        const isEnded = Boolean(run.endedAt)
+        const state = isEnded ? 'ended · its output waits for Claude' : isStopping ? 'stopping' : `running ${took(at - (run.startedAt ?? at))} · at most ${limitText(run.limitMs)}`
         return (
           <ui.Box key={`${key}-${run.askAt}`} flexDirection="column" gap={1} borderStyle="round" borderColor={LIVE} paddingX={1} flexShrink={0}>
-            <ui.Text wrap="truncate-end" dimColor>{`Your command · ${isStopping ? 'stopping' : `running ${took(at - (run.startedAt ?? at))}`} · at most ${limitText(run.limitMs)}`}</ui.Text>
+            <ui.Text wrap="truncate-end" dimColor>{`Your command · ${state}`}</ui.Text>
             <ui.Box backgroundColor={FILL} paddingLeft={2}>
               <ui.Text mono wrap="wrap">{isWhole ? run.command : cut(run.command, 600)}</ui.Text>
             </ui.Box>
             <ui.Text dimColor wrap="truncate-start">{`in ${shortPath(run.cwd, 60)}`}</ui.Text>
-            <ui.Text wrap="truncate-end">{last ? `Last printed: ${cut(last, 200)}` : 'Nothing printed yet'}</ui.Text>
-            {isStopping ? null : (
+            {isEnded ? (
+              <ui.Text wrap="wrap">Claude gets what it printed at the next step in this chat.</ui.Text>
+            ) : (
+              <ui.Text wrap="truncate-end">{last ? `Last printed: ${cut(last, 200)}` : 'Nothing printed yet'}</ui.Text>
+            )}
+            {isEnded ? (
+              <ui.Box flexDirection="row">
+                <ui.Button key={`${key}-${run.askAt}-send-${loadMark}`} label="Send it to Claude now" onPress={() => ((presses += 1), redraw($))} />
+              </ui.Box>
+            ) : isStopping ? null : (
               <ui.Box flexDirection="row">
                 <ui.Button key={`${key}-${run.askAt}-stop-${loadMark}`} label="Stop it" onPress={() => void stopRun($, run).catch(err => log($, `run not stopped: ${String(err)}`))} />
               </ui.Box>
@@ -11727,7 +11754,7 @@ const panelHooks = (on: On) => {
     const answeredOf = (list: Prompt[] | undefined) => (list ?? []).filter(p => !p.endedAt || at - p.endedAt < PROMPT_SHOWN)
     const promptsAnswered = answeredShown(at)
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
-    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD))
+    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD))
     const ours = modelName(await $.session.model().catch(() => ''))
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
     const isAbovePrompt = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
@@ -13091,8 +13118,8 @@ const panelHooks = (on: On) => {
     const isFinishing = (one: Todo) => !isWaits(one) && isFinishMoment(one)
     const finishFrom = (one: Todo) => (one.chat ? (endSeen.get(`${one.id}:${one.endedAt}`) ?? one.endedAt) : pauseFrom(one))
     const isLeftUp = (one: Todo) => !one.chat && one.status !== 'working' && Boolean(one.leftSince) && !isWaits(one) && !isFinishing(one)
-    const isUp = (one: Todo) => isWaits(one) || isFinishing(one) || isLeftUp(one) || (!one.chat && cardNotesOf(one.id, at).length > 0)
-    const upSince = (one: Todo) => Math.max(isAsking(one) ? (one.ask?.at ?? 0) : 0, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)), answeredPlace(one))
+    const isUp = (one: Todo) => isWaits(one) || isFinishing(one) || isLeftUp(one) || (!one.chat && (cardNotesOf(one.id, at).length > 0 || runningOn(one.id).length > 0))
+    const upSince = (one: Todo) => Math.max(isAsking(one) ? (one.ask?.at ?? 0) : 0, ...(one.chat ? [] : runningOn(one.id).map(run => run.startedAt ?? 0)), ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)), answeredPlace(one))
     const askingHere = shownWork.filter(isUp)
     const askingThere = listedChats.flatMap(c => shownOf(c).filter(isUp))
     const askCards = [...askingHere, ...askingThere].sort((a, b) => upSince(b) - upSince(a))
