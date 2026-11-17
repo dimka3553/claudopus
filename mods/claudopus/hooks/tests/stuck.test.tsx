@@ -824,7 +824,7 @@ test('nudges about silent helpers start over when a helper brings something new 
   expect(nudges()).toHaveLength(1)
   // The helper brings something new: the next stretch with nothing is a check-in again, not an order to hand back
   await $.tool.call({ tool: 'Bash', tool_use_id: 'n-a2', agentId: 'a2', command: 'ls' } as never)
-  await clock.advance(26 * 60_000)
+  await clock.advance(13 * 60_000)
   expect(await until(async () => nudges().length === 2 || undefined)).toBe(true)
   expect(nudges()[1]).toContain('Ask each with SendMessage')
   // The chat writes to it: the count starts over too, and its words asking it to hand back let the report through at once

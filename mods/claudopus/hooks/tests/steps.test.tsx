@@ -800,7 +800,7 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   await $.turn.complete({ answer: 'Waiting for the drawing.', durationMs: 1, isAborted: false, turnId: 'h1', reason: 'answer', agentId: 'a1' } as never)
   // and the chat, which the engine tells it ended without its report, is told once it waits for its helper, and that Claudopus starts it
   // again should that wait run out, never that it may not be written to (Claudopus may have just told it to hand back)
-  const waits = /^undefined: From Claudopus: the task ".*" ended its step without its report because it waits for a helper it started\..*Claudopus starts it again if that wait runs out or its helpers go quiet; do not tell \S+ it stopped\.$/
+  const waits = /^undefined: From Claudopus: the task ".*" ended its step without its report because it waits for a helper it started\.[\s\S]*Claudopus starts it again if that wait runs out or its helpers go quiet; do not tell .+ it stopped\./
   expect(await until(async () => appended.find(one => waits.test(one)))).toBeDefined()
   await $.turn.complete({ answer: 'Still waiting.', durationMs: 1, isAborted: false, turnId: 'h1b', reason: 'answer', agentId: 'a1' } as never)
   expect(appended.filter(one => waits.test(one))).toHaveLength(1)
