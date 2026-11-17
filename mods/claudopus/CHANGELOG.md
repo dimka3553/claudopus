@@ -2,6 +2,17 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.179 · 17 November 2026
+- A release goes out within a minute of your press: it no longer waits up to 45 minutes for GitHub's tests, which now run after it and never hold it up. Each task runs every test once before it asks you to release.
+
+## 0.2.178 · 17 November 2026
+- The chat no longer shows a red "A hook blocked your prompt" card each time Claude Code tells it that a task is still at work or that a report already came. Such a notice now goes into the chat and ends its own turn at once with Claude Code's own "No response requested." line, without asking Claude and at no cost; one that comes while the chat is busy joins the turn already running.
+
+## 0.2.177 · 17 November 2026
+- A program a task's command left running is named on its card by what that command does, in the words Claude gave it, never by the program's own name: no more rows of "Run Google Chrome" for a test's hidden browser
+- Everything one command left running is one row, with how many programs it is and their memory added up; Stop on it ends them all, and only once the last of them ends does the card say the command has ended, as one line under Commands ended, with its task told once
+- A card no longer shows programs that started elsewhere at the moment its command ran: another chat's or another app's (such as a browser's crash reporter or Google's updater appearing during a git push), or what another task's background command in the same chat started
+
 ## 0.2.176 · 17 November 2026
 - A task whose step ended while all its helpers sit silent (nothing new from them for 12 minutes, and no command of theirs that printed in the last 30 minutes) now follows a fixed schedule: at 12 minutes Claudopus starts it again to check on them, at 24 it asks it to hand back what it has, and at 36 the chat is told plainly that it is stuck and may send it a message. The schedule starts over only when a helper hands back a result or prints something new, and its steps come at least 12 minutes apart. A task waiting on something it asked Claudopus to look for is not nudged while that look runs.
 - Once told to hand back, the task's report goes through even while its helpers run: silent helpers are stopped with it, and a helper still at work goes on, its later result reaching the chat with a note that it came late. A helper Claudopus stopped tells the chat nothing.
