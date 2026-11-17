@@ -288,13 +288,19 @@ test("a No pressed after Claude Code's box said yes does not stand: the card say
 })
 
 
-test("a call Claude Code refuses a background task with no prompt, as auto mode does, is put to the person on the task's card, the answer goes to the task, and Claudopus never lets the call through itself", async ($, on) => {
-  const { files, clock, resumed } = world(on, { agents: { a1: 'running' } })
-  // Beneath the mod the engine would put each of the checks below to its mode, which settles the ask
-  on('tool.check', () => ({ decision: 'ask' }) as never)
+test("a call Claude Code refuses a background task with no prompt, as auto mode does, is shown on the task's card with Claude Code's own reason alone, and its answer tells the task to carry on without it and never to reach it by other means; a failing call whose output only holds those words shows nothing; an ask put up meanwhile is never replaced; pressed once the task has ended it is not started again; and Claudopus never lets the call through itself", async ($, on) => {
+  const agents: Record<string, string> = { a1: 'running' }
+  const { files, clock, resumed, appended, logged } = world(on, { agents })
+  // Beneath the mod the engine would put each of the checks below to its mode, which settles the ask; the refused calls are Claude
+  // Code's own to refuse, with no prompt
+  on('tool.check', (_, e, next) => (String((e as { tool_use_id?: unknown }).tool_use_id).startsWith('chk') ? ({ decision: 'ask' } as never) : next(e)))
   await $.session.start(start)
   await $.prompt.submit({ text: 'write the notes', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Write the notes', prompt: 'write the notes' } as never)
+  const put = () => (files.get(`${MEMORY}/log.md`) ?? '').split('\n').filter(line => line.includes('put to the person on its card'))
+  // A search that fails, whose output holds Claude Code's words, is no refusal
+  files.set('fails', "notes.md: Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access].")
+  await $.tool.call({ tool: 'Bash', agentId: 'a1', command: 'grep -r denied notes.md # fails', tool_use_id: 'g1' } as never)
   const call = { tool: 'Edit', agentId: 'a1', file_path: '/repo/notes.md', old_string: 'old line', new_string: 'new line' }
   files.set('auto-refuse', 'Edit')
   await $.tool.call({ ...call, tool_use_id: 'e1' } as never)
@@ -303,13 +309,37 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const asks = 'Claude Code refused this task: Change the file notes.md.'
   expect(await until(async () => list.find({ type: 'Text', text: asks }))).toBeDefined()
+  expect(put()).toHaveLength(1)
+  // What was refused, Claude Code's reason alone (none of its words for the model), and that the task carries on without it
+  const told = await until(async () => [...logged, ...appended].find(one => one.includes('Why: ')))
+  expect(told).toContain("Why: Claude Code's auto mode refused it (Unauthorized Access).")
+  expect(told).toContain('The task carries on without it, and does not do it another way.')
+  expect(told).not.toMatch(/If you have other tasks|settings|Do it another way|Leave it out|it was Permission/)
+  const labels = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => /without it|another way|Leave it out/.test(label))
+  expect(await labels()).toEqual(['Carry on without it'])
   const check = (id: string) => $.tool.check({ tool: 'Edit', input: { file_path: '/repo/notes.md', old_string: 'old line', new_string: 'new line' }, agentId: 'a1', tool_use_id: id } as never) as Promise<{ decision?: string }>
   expect((await check('chk-2')).decision).toBe('ask')
-  const other = await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Do it another way'))
-  await list.press({ key: other?.key ?? '' })
-  expect(await until(async () => resumed.find(one => one.startsWith('a1: ') && one.includes('Do it another way')) ?? (await list.find({ type: 'Text', text: asks }) ? undefined : 'cleared'))).toBeDefined()
+  // Pressed, the task is told to carry on without it, never to get there another way, and its call is still the mode's to settle
+  const press = async () => list.press({ key: (await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Carry on without it')))?.key ?? '' })
+  await press()
+  expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('do not do it, nor reach its result by other means')))).toBeDefined()
   await clock.advance(1000)
-  // The press is the task's answer, never a permission: the same call is still the mode's to settle
   expect((await check('chk-3')).decision).toBe('ask')
+  // Two refused at once: the first on the card stays, the second never replaces it
+  files.set('auto-refuse', 'Edit')
+  await Promise.all([$.tool.call({ ...call, file_path: '/repo/a.md', tool_use_id: 'e2' } as never), $.tool.call({ ...call, file_path: '/repo/b.md', tool_use_id: 'e3' } as never)])
+  files.delete('auto-refuse')
+  await clock.advance(1000)
+  expect(await until(async () => ((files.get(`${MEMORY}/log.md`) ?? '').includes('not put on its card: its card asks something already') ? true : undefined))).toBe(true)
+  expect(put()).toHaveLength(2)
+  // Pressed once the task has ended, nothing starts it again
+  agents.a1 = 'completed'
+  await $.turn.complete({ answer: 'The notes are written, without the files Claude Code refused.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(1000)
+  const before = appended.filter(one => one.startsWith('a1: ')).length
+  await press()
+  await clock.advance(5000)
+  expect(await until(async () => ((await labels()).length ? undefined : true))).toBe(true)
+  expect([resumed.filter(one => one.startsWith('a1: ')), appended.filter(one => one.startsWith('a1: ')).length]).toEqual([[], before])
   await list.unmount()
 })

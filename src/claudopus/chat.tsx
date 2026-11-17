@@ -60,7 +60,9 @@ const heldLook = async ($: EngineInterface, id: string) => {
   if (card?.status === 'working') return
   await replyUnread($, id)
   if (wakes.length) await sendWakes($)
-  // A helper the engine still listed as running as its turn ended, ended now: its result is passed on as at a heard end
+  // A helper the engine still listed as running as its turn ended, ended now: its result is passed on as at a heard end. Read as at
+  // work before the look, as the look itself ends it; one the look for work that ended unheard passed on is not passed on again
+  // (passOnHelper)
   if (wasWorking && card?.parentId && card.parentId !== HELPER) await passOnHelper($, id, card.answer ?? '', card.status)
 }
 const chatHooks = (on: On) => {
@@ -539,6 +541,9 @@ const chatHooks = (on: On) => {
       const report = (e.answer ?? '').trim() || answer
       // A helper that has ended while its work had ended its step: its result is passed on to that work, which starts again with it
       if (card?.parentId && card.status !== 'working') await passOnHelper($, id, report, card.status).catch(err => log($, `helper's result not passed on: ${String(err)}`))
+      // One that handed back while a command or helper of its own still runs stays at work on its card, but its hand-back reached the
+      // chat, which was told it is passed on: it is passed on now
+      else if (card?.parentId && notedAtHandback.has(id)) await passOnHelper($, id, report, 'done').catch(err => log($, `helper's result not passed on: ${String(err)}`))
       if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
         $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
       }
