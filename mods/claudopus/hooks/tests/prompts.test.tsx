@@ -1095,7 +1095,7 @@ test("a command Claude Code refuses a task is shown whole on its card with where
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const button = async (label: string) => until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === label))
   const pressed = async (label: string) => list.press({ key: (await button(label))?.key ?? '' })
-  const buttons = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => /without it|Run it|Stop it|Open in Terminal|Send it now/.test(label))
+  const buttons = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => /without it|Run it|Stop it|Open in Terminal|^Send now$/.test(label))
   const stops = () => pressRuns.filter(argv => argv[1] === 'stop').length
   // Carry on without it runs nothing, and says nothing of words
   await refuse('b00', { command: 'dig +short NS example.net', description: 'Look up the name servers' })
@@ -1163,9 +1163,12 @@ test("a command Claude Code refuses a task is shown whole on its card with where
   files.set(String(out), 'ns1.example.net.\nns2.example.net.\nclaudopus-exit 0\n')
   await clock.advance(5000)
   await clock.advance(30_000)
-  expect(await until(async () => ((await buttons()).includes('Send it now') ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await buttons()).includes('Send now') ? true : undefined))).toBe(true)
+  // with that one quiet line alone: the answer is not said again on the card
+  expect(await list.find({ type: 'Text', text: 'Its output waits for Claude' })).toBeDefined()
+  expect((await list.findAll({ type: 'Text' })).filter(t => /Run it”/.test(t.text)).map(t => t.text)).toEqual([])
   expect(resumed.filter(one => one.startsWith('a1: '))).toEqual([])
-  await pressed('Send it now')
+  await pressed('Send now')
   const woke = await until(async () => resumed.find(one => one.startsWith('a1: ') && one.includes('ns2.example.net.')))
   expect(woke).toContain(`ran it for them, exactly as shown, once, in /repo:\n${command}\nIt ended well after`)
   expect(woke).toContain(`Its whole output is in ${out}`)

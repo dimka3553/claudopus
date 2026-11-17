@@ -4900,7 +4900,7 @@ const readDrafts = async ($: EngineInterface) => {
   for (const [key, value] of live) if (!drafts.has(key)) drafts.set(key, value)
   if (live.length !== Object.keys(kept).length) await update($, draftsKept, () => Object.fromEntries(live))
 }
-type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'other' | 'ran' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
+type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'other' | 'ran' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; isRun?: boolean; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
 const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
 const ANSWER_SHOWN = 60_000
 const DEFAULT_ANSWERS = ['Done', 'Not now']
@@ -5290,7 +5290,7 @@ const sentLine = (one: Todo, now: number) => {
   const newer = lineOf(one) !== sent.line
   const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text))
   if ((one.ask && !isHeld) || (!isHeld && (newer || now - sent.at > ANSWER_SHOWN))) return ''
-  if (sent.to === 'ran') return ''
+  if (sent.to === 'ran' || sent.isRun) return ''
   const how = {
     sending: 'Sending to Claude…',
     work: waitsBehind(one, sent.at, now) || 'Claude reads it next',
@@ -7433,12 +7433,12 @@ const queueWaiting = async ($: EngineInterface) => {
     const card = (await read($, todos)).find(one => one.id === run.card)
     if (!card || isHeld(card)) {
       await saveRuns($, list => list.map(one => (isSameRun(one, run) ? { ...one, waiting: undefined } : one)))
-      if (card) await stepLine($, run.card, `Claude didn't get your command's output, as you stopped the task. It's in ${run.log ?? 'its output file'}`)
+      if (card) await stepLine($, run.card, `Claude didn't get your command's output as you stopped the task · it's in ${run.log ?? 'its output file'}`)
       continue
     }
     runWaking.add(key)
     const target = run.waiting.target
-    await toEnded($, card, target, `${run.waiting.text}\n${RESUMED_BY_ANSWER}`, { text: RUN_IT, ask: `the command Claude Code refused (${cut(run.description || run.command, 60)})`, at: run.endedAt ?? 0, line: lineOf(card), isCard: true, askAt: run.askAt }, true)
+    await toEnded($, card, target, `${run.waiting.text}\n${RESUMED_BY_ANSWER}`, { text: RUN_IT, ask: `the command Claude Code refused (${cut(run.description || run.command, 60)})`, at: run.endedAt ?? 0, line: lineOf(card), isCard: true, isRun: true, askAt: run.askAt }, true)
     const wake = wakes.find(w => w.target === target && w.isHookOnly)
     if (wake) wake.runs = [...(wake.runs ?? []), key]
   }
@@ -7450,8 +7450,9 @@ const runsSent = async ($: EngineInterface, wake: { runs?: string[] }, how: 'sen
   await saveRuns($, list => list.map(one => (keys.includes(runKey(one)) ? { ...one, waiting: undefined } : one)))
   for (const run of done) {
     runWaking.delete(runKey(run))
-    if (how === 'held') await stepLine($, run.card, `Claude didn't get your command's output, as you stopped the task. It's in ${run.log ?? 'its output file'}`)
-    if (how === 'failed') await stepLine($, run.card, `Your command's output couldn't start Claude again, so it went to the chat. It's in ${run.log ?? 'its output file'}`)
+    if (how === 'sent') await stepLine($, run.card, "Claude got your command's output")
+    if (how === 'held') await stepLine($, run.card, `Claude didn't get your command's output as you stopped the task · it's in ${run.log ?? 'its output file'}`)
+    if (how === 'failed') await stepLine($, run.card, `Your command's output couldn't start Claude again, so it went to the chat · it's in ${run.log ?? 'its output file'}`)
   }
 }
 const limitText = (ms: number) => (ms >= 60 * 60_000 ? `${Math.round(ms / 3_600_000)} hour${ms >= 2 * 3_600_000 ? 's' : ''}` : `${Math.max(1, Math.round(ms / 60_000))} min`)
@@ -7612,7 +7613,7 @@ const runBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number
         const isStopping = runStopped.has(runKey(run))
         const isEnded = Boolean(run.endedAt)
         const what = list.length > 1 && run.description ? `“${cut(run.description, 60)}”` : 'your command'
-        const said = isEnded ? `${what === 'your command' ? 'Your command' : what} ended · its output waits for Claude` : isStopping ? `Stopping ${what}` : `Running ${what}`
+        const said = isEnded ? (what === 'your command' ? 'Its output waits for Claude' : `${what} · its output waits for Claude`) : isStopping ? `Stopping ${what}` : `Running ${what}`
         return (
           <ui.Box key={`${key}-${run.askAt}`} flexDirection="row" gap={1} height={1} overflow="hidden">
             <ui.Box flexDirection="row" flexShrink={1} minWidth={0} height={1} overflow="hidden">
@@ -7627,7 +7628,7 @@ const runBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number
             </ui.Box>
             {isEnded ? (
               <ui.Box flexShrink={0}>
-                <ui.Button key={`${key}-${run.askAt}-send-${loadMark}`} label="Send it now" plain hover={{ scope: `${key}-${run.askAt}-send`, underline: true }} onPress={() => ((presses += 1), redraw($))} />
+                <ui.Button key={`${key}-${run.askAt}-send-${loadMark}`} label="Send now" plain hover={{ scope: `${key}-${run.askAt}-send`, underline: true }} onPress={() => ((presses += 1), redraw($))} />
               </ui.Box>
             ) : isStopping ? null : (
               <ui.Box flexShrink={0}>
@@ -12569,7 +12570,7 @@ const panelHooks = (on: On) => {
                   <Box flexDirection="column" minWidth={0}>
                     <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || (one.status === 'working' && !one.ask && !endedNow(one) && !isFreshNote(one) ? helperNow(one, at, jobsOf(one, at).length, room) : '') || cut(now(one), room) || (one.status === 'working' ? (one.ask ? 'Waiting for you' : 'Starting') : "Claude hasn't said what it's doing")}</Text>
                     {/* Held where it was after an answer, once a newer line of the work's took the answer's place: why it is still up there */}
-                    {!one.ask && !sentLine(one, at) && heldAnswer(one, at) && heldAnswer(one, at)?.to !== 'ran' ? <Text key={`held-answer-${one.id}`} dimColor wrap="truncate-end">{`✓ You answered “${cut(heldAnswer(one, at)?.text ?? '', 60)}”`}</Text> : null}
+                    {!one.ask && !sentLine(one, at) && heldAnswer(one, at) && heldAnswer(one, at)?.to !== 'ran' && !heldAnswer(one, at)?.isRun ? <Text key={`held-answer-${one.id}`} dimColor wrap="truncate-end">{`✓ You answered “${cut(heldAnswer(one, at)?.text ?? '', 60)}”`}</Text> : null}
                   </Box>
                 )}
               </Box>

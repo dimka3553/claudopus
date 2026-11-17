@@ -68,12 +68,12 @@ const queueWaiting = async ($: EngineInterface) => {
     const card = (await read($, todos)).find(one => one.id === run.card)
     if (!card || isHeld(card)) {
       await saveRuns($, list => list.map(one => (isSameRun(one, run) ? { ...one, waiting: undefined } : one)))
-      if (card) await stepLine($, run.card, `Claude didn't get your command's output, as you stopped the task. It's in ${run.log ?? 'its output file'}`)
+      if (card) await stepLine($, run.card, `Claude didn't get your command's output as you stopped the task · it's in ${run.log ?? 'its output file'}`)
       continue
     }
     runWaking.add(key)
     const target = run.waiting.target
-    await toEnded($, card, target, `${run.waiting.text}\n${RESUMED_BY_ANSWER}`, { text: RUN_IT, ask: `the command Claude Code refused (${cut(run.description || run.command, 60)})`, at: run.endedAt ?? 0, line: lineOf(card), isCard: true, askAt: run.askAt }, true)
+    await toEnded($, card, target, `${run.waiting.text}\n${RESUMED_BY_ANSWER}`, { text: RUN_IT, ask: `the command Claude Code refused (${cut(run.description || run.command, 60)})`, at: run.endedAt ?? 0, line: lineOf(card), isCard: true, isRun: true, askAt: run.askAt }, true)
     const wake = wakes.find(w => w.target === target && w.isHookOnly)
     if (wake) wake.runs = [...(wake.runs ?? []), key]
   }
@@ -87,8 +87,9 @@ const runsSent = async ($: EngineInterface, wake: { runs?: string[] }, how: 'sen
   await saveRuns($, list => list.map(one => (keys.includes(runKey(one)) ? { ...one, waiting: undefined } : one)))
   for (const run of done) {
     runWaking.delete(runKey(run))
-    if (how === 'held') await stepLine($, run.card, `Claude didn't get your command's output, as you stopped the task. It's in ${run.log ?? 'its output file'}`)
-    if (how === 'failed') await stepLine($, run.card, `Your command's output couldn't start Claude again, so it went to the chat. It's in ${run.log ?? 'its output file'}`)
+    if (how === 'sent') await stepLine($, run.card, "Claude got your command's output")
+    if (how === 'held') await stepLine($, run.card, `Claude didn't get your command's output as you stopped the task · it's in ${run.log ?? 'its output file'}`)
+    if (how === 'failed') await stepLine($, run.card, `Your command's output couldn't start Claude again, so it went to the chat · it's in ${run.log ?? 'its output file'}`)
   }
 }
 const limitText = (ms: number) => (ms >= 60 * 60_000 ? `${Math.round(ms / 3_600_000)} hour${ms >= 2 * 3_600_000 ? 's' : ''}` : `${Math.max(1, Math.round(ms / 60_000))} min`)
@@ -275,7 +276,7 @@ const runBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number
         const isStopping = runStopped.has(runKey(run))
         const isEnded = Boolean(run.endedAt)
         const what = list.length > 1 && run.description ? `“${cut(run.description, 60)}”` : 'your command'
-        const said = isEnded ? `${what === 'your command' ? 'Your command' : what} ended · its output waits for Claude` : isStopping ? `Stopping ${what}` : `Running ${what}`
+        const said = isEnded ? (what === 'your command' ? 'Its output waits for Claude' : `${what} · its output waits for Claude`) : isStopping ? `Stopping ${what}` : `Running ${what}`
         return (
           <ui.Box key={`${key}-${run.askAt}`} flexDirection="row" gap={1} height={1} overflow="hidden">
             <ui.Box flexDirection="row" flexShrink={1} minWidth={0} height={1} overflow="hidden">
@@ -290,7 +291,7 @@ const runBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number
             </ui.Box>
             {isEnded ? (
               <ui.Box flexShrink={0}>
-                <ui.Button key={`${key}-${run.askAt}-send-${loadMark}`} label="Send it now" plain hover={{ scope: `${key}-${run.askAt}-send`, underline: true }} onPress={() => ((presses += 1), redraw($))} />
+                <ui.Button key={`${key}-${run.askAt}-send-${loadMark}`} label="Send now" plain hover={{ scope: `${key}-${run.askAt}-send`, underline: true }} onPress={() => ((presses += 1), redraw($))} />
               </ui.Box>
             ) : isStopping ? null : (
               <ui.Box flexShrink={0}>
