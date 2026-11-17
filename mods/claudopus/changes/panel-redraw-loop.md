@@ -1,1 +1,1 @@
-- The panel and the bar above the prompt no longer redraw themselves several times a second with nothing new: two requests for a drawing that came together kept asking for another one without end, and every redraw made the hover under your pointer blink.
+- The panel and the bar above the prompt redraw themselves far less often with nothing new: when two requests for a drawing came together, each kept asking for another, in chains of up to 27 redraws, and every redraw made the hover under your pointer blink.
