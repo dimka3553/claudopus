@@ -292,6 +292,18 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
     if (!one || isHeld(one) || stoppedHere.has(id) || pressed.has(id) || (await isReplaced($))) continue
     // (read right before: work at a step of its own again is not sent one, and the step waits for its step to end)
     if (step < 3 && WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))) continue
+    // A helper whose own record shows a call that returned something new since the wait began was at work: the schedule starts over
+    // from then, as it does for news Claudopus saw itself
+    const from = list.find(card => card.id === id)?.helperWait?.from ?? now
+    const { changed, printed } = await helpersRecord($, list, id)
+    // One whose record shows a command in the background still going that printed within LIVE_CALL_MOST is at work, as isBusy has
+    // it: the step waits
+    if (printed && now - printed < LIVE_CALL_MOST) continue
+    if (changed > from) {
+      await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { from: changed, done: 0 } } : card)))
+      await log($, `work ${id} waits on helpers, one of which had a call return something new ${took(now - changed)} ago that Claudopus had not seen: not started again`)
+      continue
+    }
     await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { ...card.helperWait, done: step, at: now }, ...(step === 2 ? { mayHandBack: card.mayHandBack ?? now } : {}), ...(step === 3 ? { stuckTold: card.stuckTold ?? now } : {}) } : card)))
     if (step === 3) {
       // The chat already told it is stuck is not told again
@@ -307,6 +319,51 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
   }
 }
 
+// What the engine's own record of each helper at work under a piece of work shows, for when its calls passed Claudopus by (17 Nov:
+// a task was started again three times to check on helpers that were mid-step or following their runs, Claudopus having seen
+// nothing of them): when a call last returned something different from the call before it, by the same rule as for the calls
+// Claudopus sees (callEnded: its own tools and refused calls bring no news, nor do messages to the helper or notices), and when a
+// command it sent to the background that has not ended last printed. 0 for each when nothing can be read
+const helpersRecord = async ($: EngineInterface, list: Todo[], id: string) => {
+  const { id: session } = await read($, me)
+  const seen = { changed: 0, printed: 0 }
+  if (!session || !cwd) return seen
+  const folder = await agentsFolder($, session)
+  for (const kid of underOf(list, id).filter(one => one.status === 'working')) {
+    const path = `${folder}/agent-${kid.id}.jsonl`
+    // (read only as a step comes due, as a record a helper parked on its run gets nothing new while the run prints)
+    const tail = (await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? ''
+    const tools = new Map<string, string>()
+    const runs = new Map<string, { output: string; at: number }>()
+    let before: string | undefined
+    for (const row of tail.split('\n')) {
+      const o = parsedOr<{ type?: string; timestamp?: string; message?: { content?: unknown } }>(row, {})
+      const at = Date.parse(o.timestamp ?? '') || 0
+      const content = o.message?.content
+      const text = typeof content === 'string' ? content : ''
+      // A notice that a command in the background ended: it no longer runs
+      for (const ended of text.matchAll(/<task-id>(\w+)<\/task-id>/g)) runs.delete(ended[1] ?? '')
+      if (!Array.isArray(content)) continue
+      for (const part of content as { type?: string; id?: string; name?: string; tool_use_id?: string; content?: unknown; is_error?: boolean }[]) {
+        if (o.type === 'assistant' && part.type === 'tool_use') tools.set(part.id ?? '', part.name ?? '')
+        if (o.type !== 'user' || part.type !== 'tool_result') continue
+        for (const ended of JSON.stringify(part.content ?? '').matchAll(/<task-id>(\w+)<\/task-id>/g)) runs.delete(ended[1] ?? '')
+        const tool = tools.get(part.tool_use_id ?? '') ?? ''
+        if (part.is_error || tool.startsWith(TOOLS) || tool.startsWith(OLD_TOOLS)) continue
+        const said = resultLines(part.content).join('\n')
+        const started = /Command running in background with ID: (\w+)\. Output is being written to: (\S+?\.output)/.exec(JSON.stringify(part.content ?? ''))
+        if (started) runs.set(started[1] ?? '', { output: started[2] ?? '', at })
+        if (before !== undefined && said !== before && at > seen.changed) seen.changed = at
+        before = said
+      }
+    }
+    for (const run of runs.values()) {
+      const wrote = (await $.fs.stat(run.output).catch(() => undefined))?.mtimeMs ?? 0
+      seen.printed = Math.max(seen.printed, wrote || run.at)
+    }
+  }
+  return seen
+}
 // The helpers a piece of work waits on, each by its title and id with what it runs and for how long, for its nudge
 const silentHelpers = (list: Todo[], id: string, at: number) =>
   list

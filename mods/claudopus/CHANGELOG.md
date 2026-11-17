@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.190 · 18 November 2026
+- A task that's waiting on its helpers no longer writes "My command is still running…" three times in its chat every time it pauses. Claude Code still asks it for its result at each pause, and Claudopus now answers for it with a line the app doesn't show, without starting Claude.
+- A task is no longer started again to check on its helpers while they are still working. Claudopus now also reads each helper's own record to see whether its commands bring back anything new. Helpers that really go quiet are still checked on, and the chat is still told.
+
 ## 0.2.189 · 18 November 2026
 - After you press Run it, the task's card shows one quiet line, "Running your command" with how long it has run and Stop it, instead of the whole command in a box.
 - The card no longer flashes while that command runs.

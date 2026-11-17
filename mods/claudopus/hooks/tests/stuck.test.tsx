@@ -888,6 +888,48 @@ test('the schedule for silent helpers keeps its time: each step comes though the
   await settle()
 })
 
+test("helpers are not taken for silent while their own record shows calls returning something new that Claudopus did not see, or a command in the background still printing; a record of calls that say the same again, of Claudopus's own tools, of refused calls or of messages to the helper is no news, and the check-ins and the word to the chat still come (17 Nov: a task was started again three times to check on helpers that were mid-step)", SLOW, async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = { a1: 'general-purpose', a2: 'general-purpose' }
+  const { clock, resumed, appended, files } = world(on, { agents, kinds, parents: { a2: 'a1' } })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Rebuild the head model', prompt: 'rebuild' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Fit the CT scans', prompt: 'ct', parentAgentId: 'a1' } as never)
+  Object.assign(agents, { a1: 'running', a2: 'running' })
+  for (const id of ['a1', 'a2']) await $.tool.call({ tool: 'Bash', tool_use_id: `s-${id}`, agentId: id, command: 'git status' } as never)
+  agents.a1 = 'completed'
+  await $.turn.complete({ answer: 'A helper is fitting; I continue when it reports.', durationMs: 1, isAborted: false, turnId: 'e-a1', reason: 'answer', agentId: 'a1' } as never)
+  const nudges = () => resumed.filter(line => line.startsWith('a1: From Claudopus: nothing new has come back from your helpers'))
+  // The engine keeps the helper's record: each minute a call of its returns, which Claudopus never saw
+  const record = `${HOME}/.claude/projects/-repo/engine-id/subagents/agent-a2.jsonl`
+  const rows: string[] = ['{"type":"system"}']
+  const write = (row: object) => (rows.push(JSON.stringify({ ...row, timestamp: new (Date as unknown as new (ms: number) => { toISOString: () => string })(clock.now()).toISOString() })), files.set(record, rows.join('\n')), files.set(`mtime:${record}`, String(clock.now())))
+  const returned = (text: string) => write({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: text }] } })
+  const called = (id: string, name: string, text: string) => (write({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input: {} }] } }), write({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] } }))
+  // It parks on a command in the background that follows its run, and the command prints each minute for 20 minutes: no check-in
+  const output = '/tmp/claude-1/x/tasks/bfollow.output'
+  returned('Command running in background with ID: bfollow. Output is being written to: /tmp/claude-1/x/tasks/bfollow.output. You will be notified when it completes.')
+  files.set(output, 'progress: 1/40 heads fitting')
+  for (let m = 1; m <= 20; m++) (files.set(`mtime:${output}`, String(clock.now())), await clock.advance(60_000))
+  expect(nudges()).toEqual([])
+  write({ type: 'user', message: { role: 'user', content: '<task-notification>\n<task-id>bfollow</task-id>\n<status>completed</status>\n</task-notification>' } })
+  // For 30 minutes each call returns something new: no check-in
+  for (let m = 1; m <= 30; m++) (returned(`fitted head ${['one', 'two', 'three', 'four', 'five', 'six'][m % 6]} of the batch, file ${m}.npz`), await clock.advance(60_000))
+  expect(nudges()).toEqual([])
+  // Then each says what the last said, and Claudopus's own messages to it land there too, beside its notes with new words and
+  // refused calls: the check-ins come, and the chat is told
+  for (let m = 1; m <= 40; m++) {
+    const word = ['still', 'fitting', 'waiting', 'looking'][m % 4]
+    returned('Running')
+    write({ type: 'user', message: { role: 'user', content: 'From Claudopus: a note' } })
+    called(`n${m}`, 'mcp__claudopus__note', `Noted: ${word}`)
+    write({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `x${m}`, content: `Not run: ${word}`, is_error: true }] } })
+    await clock.advance(60_000)
+  }
+  expect(await until(async () => nudges().length >= 2 || undefined)).toBe(true)
+  expect(await until(async () => appended.some(line => line.includes('"Rebuild the head model" is stuck')) || undefined)).toBe(true)
+})
+
 test("a helper's command in the background is work only while it prints, for at most 30 minutes after its last line, and a task waiting on its own wake_me beside its helpers is not nudged; work flagged stuck is told to the chat once by 36 minutes whatever its helpers look like, and the word that it waits then says the chat may write to it", SLOW, async ($, on) => {
   const all = { a1: 'running', a2: 'running', a3: 'running', a4: 'running', a5: 'running', a6: 'running' }
   const agents: Record<string, string> = {}
@@ -1067,7 +1109,7 @@ test('the log is added to, never rewritten whole, and the empty bytes earlier ve
 test('a task Claude Code pressed for its report that ended its step with none, asking nothing and with nothing that starts it again, is started again to carry on and its card stays at work saying so; stopped so again and again with little done between, it is left stopped with one line on its card; a task asking you something, one stopped, one with a result, and one never pressed for a report end as before', SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const PRESS = { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' }
-  const pressed = [{ role: 'assistant', content: [{ type: 'text', text: 'Waiting for the build.' }] }, PRESS, { role: 'assistant', content: [{ type: 'text', text: "My command is still running. Claudopus starts me again when it's done, and I'll send my result then." }] }]
+  const pressed = [{ role: 'assistant', content: [{ type: 'text', text: 'Waiting for the build.' }] }, PRESS, { role: 'assistant', content: [{ type: 'text', text: '<system-reminder>Waiting on my own work, which starts me again.</system-reminder>' }] }]
   const talk: unknown[] = [...pressed]
   const { clock, resumed, appended } = world(on, { agents, talk })
   await $.session.start(start)

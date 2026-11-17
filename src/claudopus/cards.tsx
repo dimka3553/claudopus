@@ -296,6 +296,8 @@ const lastWordsOf = async ($: EngineInterface, folder: string, agent: string, no
     const blocks = o.message.content as { type?: string; name?: string; text?: string; input?: { message?: unknown } }[]
     isHandback = blocks.some(b => b.type === 'tool_use' && b.name === 'SubagentHandback')
     answer = blocks.map(b => (b.type === 'tool_use' && b.name === 'SubagentHandback' && typeof b.input?.message === 'string' ? b.input.message : b.type === 'text' ? (b.text ?? '') : '')).join('').trim()
+    // (the line Claudopus answered Claude Code's press with is no words of its own)
+    if (answer === PRESS_ANSWER) answer = ''
     if (answer) break
   }
   return { at, answer: answer.slice(0, ANSWER_CHARS), isReport: isHandback || answer.length >= REPORT_LEAST, isPressed }

@@ -264,8 +264,17 @@ const stepHooks = (on: On) => {
 
 // ---- Helpers run in the background, and their work never waits for them ----
 
-// The helpers an agent started that are still at work
-const runningHelpers = (list: Todo[], id: string) => list.filter(one => one.parentId === id && one.status === 'working' && !one.answeredAt)
+// The helpers an agent started that are still at work. One that ended a step with words as long as a result, held on its own work,
+// has not handed back while that work is something that ends and starts it again: a run, what it asked to be woken for, or helpers
+// of its own (17 Nov: helpers following their runs on Azure were counted as done, and their task was pressed for its report each
+// time it paused). One that gave its result and only left a server or a watch going for the person is done
+const runningHelpers = (list: Todo[], id: string) =>
+  list.filter(one => {
+    if (one.parentId !== id || one.status !== 'working' || one.handedBackAt !== undefined) return false
+    if (!one.answeredAt) return true
+    const isServer = (cmd: string | undefined, what: string) => SERVER_CMD.test(cmd ?? '') || describedOf(what).kind === 'server'
+    return Boolean(one.bg?.some(b => !b.isWatch && !isServer(b.cmd, b.what)) || one.detached?.some(d => !isServer(d.cmd, d.what)) || one.wakeWhen || list.some(kid => kid.parentId === one.id && kid.status === 'working'))
+  })
 const HELD_AT_END = (n: number) =>
   `You have ${n === 1 ? 'a helper' : `${n} helpers`} still running in the background. Don't hand back your report yet: ${n === 1 ? 'its result' : 'their results'} would reach the chat instead of you. Carry on with what needs nothing from ${n === 1 ? 'it' : 'them'}, or end your step without a report: each result starts you again, and Claudopus tells the chat you wait for ${n === 1 ? 'it' : 'them'}. One you no longer need: tell it with SendMessage to hand back what it has now, as Claude Code does not let you stop it yourself.`
 const HELPERS_STARTED = 'Your helpers run in the background: each call came back at once, and each result comes to you as a message when it ends, even after you end your step. Continue now with your own part, and when nothing else is left, end your step: never wait for them with a command.'
