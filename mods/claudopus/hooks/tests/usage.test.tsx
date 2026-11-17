@@ -1050,6 +1050,8 @@ test("a task's heavy command waits its turn while the Mac is busy and another ru
   expect(held.some(text => /^Wait · its turn: Take the card shots/.test(text))).toBe(true)
   expect(held.some(text => /^waits for room on the Mac · next in line/.test(text))).toBe(true)
   expect(held.some(text => /^Wait · its turn: Take the menu shots/.test(text))).toBe(true)
+  // (said once, on the row: the card's line does not say a time it is started again by)
+  expect(held.some(text => /starts Claude again/.test(text))).toBe(false)
   // The same command sent again before its turn keeps its place
   expect((await shoot('s2b', 'a2', 'Take the card shots')).deny).toMatch(/waits its turn, next in line\./)
   // Nobody is woken while the load stays

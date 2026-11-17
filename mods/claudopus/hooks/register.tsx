@@ -9123,7 +9123,7 @@ const lookWakes = async ($: EngineInterface) => {
 }
 const wakeLine = (one: Todo) => {
   const w = one.wakeWhen
-  if (!w) return ''
+  if (!w || (one.heldCalls?.length && w.what.startsWith('its turn on the Mac'))) return ''
   return w.file || w.url ? `Claudopus starts Claude again when this is there: ${w.what}; at ${hhmm(w.until)} if it never comes` : `Claudopus starts Claude again at ${hhmm(w.until)}: ${w.what}`
 }
 
