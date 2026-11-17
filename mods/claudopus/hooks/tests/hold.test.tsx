@@ -510,6 +510,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // as the engine says it: an error result in words, the same for an approval cut short
     if (files.get('refuse') === e.tool) return { result: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", isError: true } as never
     if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
+    // A command marked to fail at its end (npm run build # fails) fails as the engine's does, with what the test lays in `fails`
+    if (e.tool === 'Bash' && command.endsWith(' # fails')) return { result: `Exit code 1\n${files.get('fails') ?? ''}`, isError: true } as never
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,
@@ -759,7 +761,7 @@ test('a chat whose ended tasks have records of 4 MB and 170 MB loads without hol
   await pane.unmount()
 })
 
-test('behind, the mod gives its panes as they were and leaves out what can wait until it has caught up, then draws them again; a long hold is logged with the steps begun then', async ($, on) => {
+test('behind, the mod gives its panes as they were and leaves out what can wait until it has caught up, then draws them again; a long hold is logged with its chat and the steps begun then', async ($, on) => {
   const { files, clock } = world(on, { env: { CLAUDOPUS_TIMING: 'real' } })
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -775,7 +777,7 @@ test('behind, the mod gives its panes as they were and leaves out what can wait 
   const end = Date.now() + 1800
   while (Date.now() < end) Math.sqrt(Date.now())
   await clock.advance(250)
-  expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/Claude's helper was held (\d+) ms; steps begun then: [^\n]*draw the panel/)?.[0])).toBeDefined()
+  expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/Claude's helper was held (\d+) ms in chat engine-id; steps begun then: [^\n]*draw the panel/)?.[0])).toBeDefined()
   // A note that would change the card: the pane is given as it was while behind
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'Measured the nose' } as never)
   await pane.redraw()

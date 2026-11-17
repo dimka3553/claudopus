@@ -510,6 +510,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // as the engine says it: an error result in words, the same for an approval cut short
     if (files.get('refuse') === e.tool) return { result: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", isError: true } as never
     if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
+    // A command marked to fail at its end (npm run build # fails) fails as the engine's does, with what the test lays in `fails`
+    if (e.tool === 'Bash' && command.endsWith(' # fails')) return { result: `Exit code 1\n${files.get('fails') ?? ''}`, isError: true } as never
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,
@@ -816,13 +818,18 @@ test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper
   expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ ids: ['a1'] })
 })
 
-test('each chat beats for the watcher that brings Claudopus back, naming its process, the key its copy has in the settings and the settings file, and starts the watcher', async ($, on) => {
+test('each chat beats for the watcher that brings Claudopus back, naming its process, the key its copy has in the settings, the settings file and its load, and starts the watcher', async ($, on) => {
   const { files, clock } = world(on)
   // This copy is loaded from a marketplace that is a folder on this Mac, as Claudopus's own checkout: its key is that marketplace's
   files.set(`${HOME}/.claude/plugins/known_marketplaces.json`, JSON.stringify({ other: { installLocation: '/elsewhere' }, mine: { installLocation: PLUGIN.replace(/\/mods\/claudopus$/, '') } }))
   await $.session.start(start)
   const beat = `${MEMORY}/keep/engine-id.beat`
-  expect(files.get(beat)).toBe(`4242\tclaudopus@mine\t${HOME}/.claude/settings.json\n`)
+  // (the load, so the watcher tells a load that beats again after its change, never off, from one that came back)
+  // (on a line of its own, so a watcher of an older version still reads the first as before)
+  const [first, load, ...rest] = (files.get(beat) ?? '').split('\n')
+  expect(first).toBe(`4242\tclaudopus@mine\t${HOME}/.claude/settings.json`)
+  expect(load).toMatch(/^\d{15}-[a-z0-9]+$/)
+  expect(rest).toEqual([''])
   expect(files.get(`${MEMORY}/log.md`)).not.toContain('was not started')
   files.set(beat, 'old')
   await clock.advance(3_000)

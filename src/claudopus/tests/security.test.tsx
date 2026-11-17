@@ -127,9 +127,21 @@ test("F-007 F-014 F-021 · work's change to config.json, the rules or the roles 
   await press('gate-w2-f-once')
   expect((await edit).result).toBe('ran')
   // By a command, it is refused outright; reading it is not
-  for (const command of [`echo '{"admin":"never"}' > ~/.claude/claudopus/config.json`, `sed -i '' s/a/b/ "$HOME/.claude/claudopus/roles/work.md"`, `cd ~/.claude/claudopus && cp /tmp/x rules/CLAUDE.md`, `python3 -c "open('/home/sam/.claude/claudopus/config.json','w')"`])
+  for (const command of [`echo '{"admin":"never"}' > ~/.claude/claudopus/config.json`, `sed -i '' s/a/b/ "$HOME/.claude/claudopus/roles/work.md"`, `cd ~/.claude/claudopus && cp /tmp/x rules/CLAUDE.md`, `python3 -c "open('/home/sam/.claude/claudopus/config.json','w')"`,
+    `python3 -c "import json;json.dump({},open('/home/sam/.claude/claudopus/config.json','w'))"`,
+    `python3 -c "import pathlib;pathlib.Path('/home/sam/.claude/claudopus/config.json').write_text('{}')"`,
+    `python3 -c "import os;os.remove('/home/sam/.claude/claudopus/config.json')"`,
+    `python3 -c "print(open('/home/sam/.claude/claudopus/config.json').read())" > /home/sam/.claude/claudopus/rules/CLAUDE.md`,
+    `python3 -c "exec('x=1');print(open('/home/sam/.claude/claudopus/config.json').read())"`,
+    `node -e "require('fs').writeFileSync('/home/sam/.claude/claudopus/config.json','{}')"`])
     expect(((await $.tool.call({ tool: 'Bash', tool_use_id: `b${command.length}`, agentId: 'a1', command } as never)) as { deny?: string }).deny).toContain('only with the Edit or Write tool')
-  expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'r1', agentId: 'a1', command: 'cat ~/.claude/claudopus/config.json' } as never)) as { result?: unknown }).result).toBe('ran')
+  for (const [i, command] of [
+    'cat ~/.claude/claudopus/config.json',
+    `python3 -c "import json;print(json.load(open('/home/sam/.claude/claudopus/config.json'))['macs'][0])"`,
+    `python3 -c "import sys;sys.stdout.write(open('/home/sam/.claude/claudopus/rules/CLAUDE.md', encoding='utf-8').read())"`,
+    `node -e "console.log(JSON.parse(require('fs').readFileSync('/home/sam/.claude/claudopus/config.json','utf8')).name)"`,
+  ].entries())
+    expect([command, ((await $.tool.call({ tool: 'Bash', tool_use_id: `r${i}`, agentId: 'a1', command } as never)) as { result?: unknown }).result]).toEqual([command, 'ran'])
   void files
 })
 

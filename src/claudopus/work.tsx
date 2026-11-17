@@ -103,9 +103,9 @@ const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<
   if (!dir) return ''
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
   if (e.tool === 'Bash') {
-    // The command as written and unquoted, and each script it runs
+    // The command as written and unquoted, and each script it runs; a program handed code that only reads names a file to read it
     const command = String(input.command ?? '')
-    const texts = [command, ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
+    const texts = [...(codeOnlyReads(command) ? [] : [command]), ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
     if (texts.some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
     if (texts.some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
     return ''
@@ -292,7 +292,7 @@ const workHooks = (on: On) => {
     // The branch a push would go from, which is never main
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool)
+    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !PANE_SERVERS.test(e.tool)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
       // A call refused after a press (another of its commands denied, a grant not sealed) ends here: its note goes with it
@@ -347,8 +347,8 @@ const workHooks = (on: On) => {
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
       const shown = await hideKept($, call, r)
       // What it wrote is kept as it ends, and what crossed another task's is told then
-      const broke = r.deny || (r.isError && e.tool !== 'Bash') ? '' : await crossEnded($, e, crossed, r.result).catch(() => '')
-      const crossing = r.deny ? [] : [crossed.context ?? '', broke].filter(Boolean)
+      const broke = r.deny ? '' : await crossEnded($, e as never, crossed, r.result, Boolean(r.isError)).catch(() => '')
+      const crossing = r.deny ? [] : [r.isError && e.tool !== 'Bash' ? '' : (crossed.context ?? ''), broke].filter(Boolean)
       const told = crossing.length && !shown.deny ? ({ ...shown, context: [...((shown as { context?: string[] }).context ?? []), ...crossing] } as typeof shown) : shown
       return isMovedBack && !told.deny && !told.isError ? ({ ...told, context: [...((told as { context?: string[] }).context ?? []), MOVED_BACK(who())] } as typeof told) : told
     }
@@ -522,7 +522,7 @@ const workHooks = (on: On) => {
       }
       return r
     }
-    if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return next(e)
+    if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) || PANE_SERVERS.test(e.tool)) return next(e)
     // The chat's single command always runs in the background, so no command holds the chat; Claudopus stops it at its limit
     if (isChatCommand) {
       const r = await next({ ...e, run_in_background: true } as typeof e)
@@ -679,7 +679,7 @@ const workHooks = (on: On) => {
     // and where the runner is that does an admin command with a Mac's kept password
     const rules = isTold ? await workRules($) : ''
     // and a scratch folder of its own in the chat's scratchpad, which every task of the chat shares
-    const scratch = isTold ? scratchName(await read($, todos), e.description ?? '') : ''
+    const scratch = isTold ? scratchName(await read($, todos), e.description ?? '', await $.clock.now()) : ''
     const isBackground = isHelperSpawn(e)
     const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}\n${SCRATCH_LINE(scratch)}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)

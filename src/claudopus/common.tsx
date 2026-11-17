@@ -19,6 +19,9 @@ const RARE_SERVERS = ['mcp__Claude_Browser__', 'mcp__Claude_Code_iOS_Simulator__
 const OWN = ['Agent', 'Workflow', 'SendMessage', 'ListAgents', 'TaskStop', 'ToolSearch', 'AskUserQuestion', 'SendUserFile', 'ReadNotifications', 'Skill']
 // And what it reads with, to answer a question a few files answer: none of them changes a file or runs a command
 const READS = ['Read', 'Grep', 'Glob']
+// And the browser pane's preview, which shows a page or a local server in the app's own browser: started, listed, its server's log
+// read, stopped, its tabs looked at. The pane's other tools (clicks, typing, forms, scripts on a page) are a task's
+const PANE_SERVERS = /^mcp__(?:remote-devices__)?Claude_Browser__(?:preview_(?:start|list|logs|stop)|tabs_context)$/
 // The mod's own tools, as the chat names them; work recorded before the rename called them by the old name
 const TOOLS = 'mcp__claudopus__'
 const OLD_TOOLS = 'mcp__progress__'
@@ -175,6 +178,8 @@ const BEHIND_HELD = 30_000
 // A hold this long is written in the log with the steps begun meanwhile, so a switch-off can be traced to the step that caused it
 const HOLD_SAID = 1500
 let holdAt = 0
+// The chat whose helper it is: on a Mac with many chats a long hold in the shared log names its own
+let heldChat = ''
 // Looks left while behind: each late one starts the count again
 let behindLooks = 0
 let longestHold = 0
@@ -198,7 +203,7 @@ const lookHold = ($: EngineInterface) => {
   longestHold = Math.max(longestHold, late)
   if (late < HOLD_SAID) return
   const steps = [...new Set(begun.filter(one => one.at >= now - late - HOLD_LOOK - 1000).map(one => one.name))]
-  void log($, `Claude's helper was held ${late} ms${steps.length ? `; steps begun then: ${steps.join(', ')}` : ''}`)
+  void log($, `Claude's helper was held ${late} ms${heldChat ? ` in chat ${heldChat}` : ''}${steps.length ? `; steps begun then: ${steps.join(', ')}` : ''}`)
 }
 // A step that goes through much at once hands the helper back every BREATH ms, so the engine's question is answered meanwhile
 const BREATH = 40

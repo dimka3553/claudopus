@@ -67,6 +67,67 @@ const globalsOf = (lines, toPart) => {
   ].join('\n')
 }
 
+// The engine reads no hooks file over 1 MB (1,048,576 bytes), so the shipped file leaves out the parts' whole-line comments, which
+// stay in the parts: a line goes only when it starts with // in plain code, never inside a string, a template or a block comment.
+// Regular expressions are told from division by what comes before them, so a // inside one is never taken for a comment
+const HOOKS_MOST = 1_048_576
+const commentLinesOut = text => {
+  const out = []
+  // The state at each line's start: 'code', or inside a template (with ${} depth kept), a block comment, a string
+  const stack = [] // template literals and the ${ depth that returns to each
+  let inBlock = false
+  let last = '' // the last meaningful character of code, to tell a regex from division
+  let i = 0
+  const lines = text.split('\n')
+  for (const line of lines) {
+    const isCode = !inBlock && !stack.length
+    if (isCode && /^\s*\/\/(\s|$)/.test(line)) continue
+    out.push(line)
+    // Walk the line to carry the state to the next
+    for (i = 0; i < line.length; i++) {
+      const c = line[i]
+      const top = stack.at(-1)
+      if (inBlock) {
+        if (c === '*' && line[i + 1] === '/') ((inBlock = false), i++)
+        continue
+      }
+      if (top && top.depth === 0) {
+        // inside a template's text
+        if (c === '\\') i++
+        else if (c === '`') ((stack.pop()), (last = ')'))
+        else if (c === '$' && line[i + 1] === '{') ((top.depth = 1), i++, (last = '('))
+        continue
+      }
+      if (c === '/' && line[i + 1] === '/') break
+      if (c === '/' && line[i + 1] === '*') ((inBlock = true), i++)
+      else if (c === '"' || c === "'") {
+        for (i++; i < line.length && line[i] !== c; i++) if (line[i] === '\\') i++
+        last = 'a'
+      } else if (c === '`') ((stack.push({ depth: 0 })), (last = 'a'))
+      else if (c === '/' && (last === '' || /[(,=:[!&|?{};+\-*%<>~^]/.test(last) || /\b(return|typeof|in|of|case|void|delete|throw|new|else|do|yield|await)\s*$/.test(line.slice(0, i)))) {
+        let inClass = false
+        for (i++; i < line.length; i++) {
+          if (line[i] === '\\') i++
+          else if (line[i] === '[') inClass = true
+          else if (line[i] === ']') inClass = false
+          else if (line[i] === '/' && !inClass) break
+        }
+        last = 'a'
+      } else if (c === '{' && top) ((top.depth++), (last = c))
+      else if (c === '}' && top) ((top.depth--), (last = top.depth === 0 ? 'a' : c))
+      else if (!/\s/.test(c)) last = c
+    }
+  }
+  if (inBlock || stack.length) throw new Error('build.mjs: the joined file ends inside a comment or a template, so its comments were not left out right')
+  return out.join('\n')
+}
+
+const shippable = text => {
+  const size = Buffer.byteLength(text)
+  if (size > HOOKS_MOST) throw new Error(`build.mjs: the joined hooks file is ${size} bytes, over the ${HOOKS_MOST} the engine reads: make the parts shorter`)
+  return text
+}
+
 const joined = (dir, parts, out, listed = parts) => {
   // A part left off the list would be left out of the joined file
   const unlisted = readdirSync(dir).filter(name => name.endsWith('.tsx') && name !== 'imports.tsx' && !listed.includes(name))
@@ -206,7 +267,7 @@ const versionPage = () => {
 }
 
 const files = [
-  [join(hooks, 'register.tsx'), joined(here, PARTS, 'It is the hooks module hooks.json names.')],
+  [join(hooks, 'register.tsx'), shippable(commentLinesOut(joined(here, PARTS, 'It is the hooks module hooks.json names. Whole-line comments are only in the parts.')))],
   [join(here, 'globals.d.ts'), globalsOf(importsOf(join(here, 'imports.tsx')), m => (m.startsWith('./') ? `../../mods/claudopus/hooks/${m.slice(2)}` : m === '../types' ? '../../mods/claudopus/types' : m))],
   // Each area's tests are a file of their own, world.tsx's set-up joined before them, so the engine's plugin test runs them side by side
   ...TEST_PARTS.filter(name => name !== 'world.tsx').map(name => [
