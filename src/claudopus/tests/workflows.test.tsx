@@ -52,7 +52,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   // Built as every card is: the title opens Details and Stop sits at its right end; where it stands, as a card's facts line says it
   expect(await keyed(pane, 'flow-open-wf_1')).toBeDefined()
   expect((await pane.find({ type: 'Button', key: 'flow-stop-wf_1' }))?.props.plain).toBe(true)
-  expect(await pane.find({ type: 'Text', text: /^Opus 5\.5 · 3 agents · round 2 of 3 · \d+s$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Opus 5\.5 · 3 helpers · round 2 of 3 · \d+s$/ })).toBeDefined()
   // The bar it is held to, under it
   expect(await pane.find({ type: 'Text', text: /^Every case holds\.$/ })).toBeDefined()
   // A row per round up to the cap, each led by its own squares: round 1's make done and its check failed, round 2's make running
@@ -80,7 +80,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   await until(async () => words.find({ type: 'Text', text: /^Roman numerals$/ }))
   expect((await words.findAll({ type: 'Text', text: /^[■□]$/ })).map(one => one.text).join('')).toBe('■■■□□□')
   await words.unmount()
-  expect(await pane.find({ type: 'Text', text: /^Working on 1 thing$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^1 task working$/ })).toBeDefined()
   // Kept in a file of its own, for the chat that started this session
   expect(JSON.parse(files.get(`${MEMORY}/flows/wf_1.json`) ?? '{}').session).toBe('local_1')
 
@@ -88,17 +88,17 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   await pressed(pane, 'flow-open-wf_1')
   expect(await until(async () => tabs.includes('flow-wf_1: Roman numerals') || undefined)).toBe(true)
   const tab = await $.ui.mount({ ...LIST, requestId: 'flow-wf_1', surface: 'desktop' } as never)
-  expect(await tab.find({ type: 'Text', text: /^the checker tests it against the bar · Opus 5.5 · 1 agent$/ })).toBeDefined()
-  expect(await tab.find({ type: 'Text', text: /^Round 1: failed: to_roman\(True\) is not refused$/ })).toBeDefined()
+  expect(await tab.find({ type: 'Text', text: /^the checker tests it against the bar · Opus 5.5 · 1 helper$/ })).toBeDefined()
+  expect(await tab.find({ type: 'Text', text: /^Round 1: failed · to_roman\(True\) is not refused$/ })).toBeDefined()
   // Each failed round lists what the checker found, and each round has its own squares
   expect(await tab.find({ type: 'Text', text: /^– to_roman\(True\) returns I$/ })).toBeDefined()
   expect((await tab.findAll({ type: 'Svg' })).map(one => one.props.alt)).toEqual(['round 1: done, failed; round 2: running, waiting', 'round 1: done, failed', 'round 2: running, waiting'])
-  expect(await tab.find({ type: 'Text', text: /^Conversation of the maker, round 2$/ })).toBeDefined()
+  expect(await tab.find({ type: 'Text', text: /^Conversation of the maker · round 2$/ })).toBeDefined()
   expect(await tab.find({ type: 'Markdown', text: /Booleans are refused now/ })).toBeDefined()
   expect(JSON.stringify(await tab.findAll({ type: 'Markdown' }))).not.toContain('SECRET')
   // Another agent's chat is a press away
   await pressed(tab, 'flow-pick-a2')
-  expect(await until(async () => tab.find({ type: 'Text', text: /^Conversation of the checker, round 1$/ }))).toBeDefined()
+  expect(await until(async () => tab.find({ type: 'Text', text: /^Conversation of the checker · round 1$/ }))).toBeDefined()
   await tab.unmount()
 
   // The notice that it ended ends its card: it leaves the running cards and is under Finished
@@ -113,13 +113,13 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   expect(await pane.find({ type: 'Text', text: /^not needed$/ })).toBeDefined()
   // A workflow that passed makes the octopus happy for its pause too, then it rests
   const octopus = async () => (await pane.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).find(alt => /^Claudopus/.test(alt))
-  expect(await octopus()).toBe('Claudopus, task finished')
+  expect(await octopus()).toBe('Claudopus, a task is done')
   expect((await pane.findAll({ type: 'Button' })).some(b => /Finished/.test(String(b.props.label)))).toBe(false)
   await clock.advance(2_100)
   expect(await pane.find({ type: 'Text', text: /^Roman numerals$/ })).toBeUndefined()
   expect(await octopus()).toBe('Claudopus')
   await pressed(pane, 'finished-fold')
-  expect(await until(async () => pane.find({ type: 'Text', text: /^Finished · (Opus 5\.5 · )?(\d agents · )?round 2 of 3/ }))).toBeDefined()
+  expect(await until(async () => pane.find({ type: 'Text', text: /^Done · (Opus 5\.5 · )?(\d helpers · )?round 2 of 3/ }))).toBeDefined()
   expect(JSON.parse(files.get(`${MEMORY}/flows/wf_1.json`) ?? '{}').result).toBe('passed in 2 rounds')
   // Its end was heard and told, as a piece of work's is
   expect(played).toEqual(['sounds/ready.wav'])

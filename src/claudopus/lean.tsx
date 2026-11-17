@@ -242,8 +242,8 @@ const chatCommandEnded = async ($: EngineInterface, text: string): Promise<strin
 // work"); and a task that ended its step to wait for its helpers or a wake_me, which Claude Code does not count as its own at work,
 // so says it "ended without delivering a report" while Claudopus knows it waits. Only a notice made of nothing but Claude Code's own
 // sentences for these is such a notice: a security warning, a refused report, an agent's own words, a note of a limit or of messages
-// that came late, a worktree, any line Claudopus does not know, keeps it. A prompt of only such notices is left out; beside anything
-// else, each task in it that waits goes with the word that it is still at work (waitsText)
+// that came late, a worktree, any line Claudopus does not know, keeps it. A prompt of only such notices costs the chat no turn of
+// the model's; beside anything else, each task in it that waits goes with the word that it is still at work (waitsText)
 const ENGINE_FILLER = [
   /This agent has not reported yet: it is waiting on its own background work and will deliver its report through \w+ when that finishes\./g,
   /This agent's report was delivered to you as a message from "[^"]*" \(its \w+ call\)\. Read it there; it is not repeated here\./g,
@@ -283,6 +283,18 @@ const quietNotices = (text: string, waiting: Set<string>): Quiet => {
   const isQuiet = notices.length > 0 && !rest && notices.every(body => isRepeat(body) || isWaitingOwn(body) || (isCompleted(body) && isEndedWaiting(body)))
   return { isQuiet, isRepeat: isQuiet && notices.every(isRepeat), waits }
 }
+// Such a prompt is let in and its turn answered with no model (workHooks' turn.step): Claude Code shows every prompt a hook drops
+// as a warning card, "Prompt dropped by a hook" (2.1.325), and asks the model again after an answer with no visible text ("Your
+// previous response had no visible output"). Its own line for a turn with nothing to say ends the turn; it counts that line as no
+// answer (the turn's result is empty)
+const NO_ANSWER = 'No response requested.'
+// The notices a prompt is made of, each whole: a turn is quiet when every notice in it was let in as quiet and it brings nothing
+// else (Claude Code may put its header before them, or join several in one turn)
+const noticesOf = (text: string) => [...text.matchAll(/<task-notification>[\s\S]*?<\/task-notification>/g)].map(m => m[0])
+const isQuietTurn = (text: string, quiet: ReadonlySet<string>) => {
+  const notices = noticesOf(text)
+  return notices.length > 0 && notices.every(one => quiet.has(one)) && !text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').replace(NOTICE_HEADER, '').trim()
+}
 
 // ---- The last step on a go-ahead ----
 
@@ -316,14 +328,14 @@ const stepsAtEnd = async ($: EngineInterface) => {
     const id = card.id
     const isDone = !card.byYou && !(card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) && card.status === 'done'
     if (!isDone) await unsettleAsked($, id, held.ask.at).catch(err => log($, `result's question not opened again for ${id}: ${String(err)}`))
-    if (card.byYou) await stepLine($, id, `Nothing was done on your "${held.said}": you stopped it first`)
-    else if (card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) await stepLine($, id, `Nothing was done on your "${held.said}": Claude asked something else first`)
+    if (card.byYou) await stepLine($, id, `Claudopus didn't do “${held.said}” · you stopped the task first`)
+    else if (card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) await stepLine($, id, `Claudopus didn't do “${held.said}” · Claude asked something else first`)
     else if (card.status !== 'done') {
       // pressed again as a fresh answer, as when an answer could not be sent (answerNow)
       answeredAsks.delete(`${id}:${held.ask.at}:${held.ask.text}`)
       if (answeredAt.get(id) === held.ask.at) answeredAt.delete(id)
       sentReplies.delete(id)
-      await stepLine($, id, `Nothing was done on your "${held.said}": Claude's turn ${card.status === 'stopped' ? 'was stopped' : 'failed'} first, so the question is back`)
+      await stepLine($, id, `Claudopus didn't do “${held.said}” · Claude ${card.status === 'stopped' ? 'stopped' : 'failed'} first, so the question is back`)
       // The chat is shown it again too, the refusal notice it took the place of gone from the chat with it, so an answer to that
       // notice is never taken for an answer to the question
       if (card.ask?.refused) await askGone($, card).catch(err => log($, `refusal notice not cleared in the chat: ${String(err)}`))
@@ -345,8 +357,8 @@ const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['as
   const prompt = named(
     `Do the last step of the task "${titleOf(one)}", which {name} just gave the go-ahead for by pressing "${said}" (to: ${ask.text}): ${step}\nWork in ${folder}${branch && branch !== 'HEAD' ? `, on its branch ${branch}` : ''}. It is this one step: do only that, then report in one or two lines what happened. If it fails in a way that needs what the task that built it knows (a merge conflict, a failing check, a question only it can answer), send that task, "${one.id}", a message with SendMessage saying what failed and the last lines of the output, and end; do not fix it yourself.`,
   )
-  await stepLine($, one.id, `On your "${said}", a small fresh task does the last step: ${cut(step, 160)}`)
-  const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: last step`, subagentType: 'claudopus:quick', model: clearModel(models, lean), cwd: folder } }
+  await stepLine($, one.id, `You pressed “${said}” · Claudopus starts a new task for it: ${cut(step, 160)}`)
+  const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: finishing`, subagentType: 'claudopus:quick', model: clearModel(models, lean), cwd: folder } }
   wakes.push(wake)
   void $.clock.after(WAKE_WAIT, () => {
     const at = wakes.indexOf(wake)
@@ -362,21 +374,21 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   const name = (/\/\.git$/.test(common) ? common.replace(/\/\.git$/, '') : repo).split('/').pop() || repo
   const id = `step-${one.id}-${at}`
   const gate: Gate = { id, call: id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at, from: one.id }
-  await stepLine($, one.id, `On your "${said}", Claudopus releases ${branch} itself once you allow it below`)
+  await stepLine($, one.id, `You pressed “${said}” · Claudopus releases ${branch} once you allow it below`)
   const allowed = await holdGate($, {}, gate, one.id)
-  if (allowed !== 'once') return stepLine($, one.id, `Nothing was released: the release was ${allowed === 'deny' ? 'denied' : 'not allowed'}`)
+  if (allowed !== 'once') return stepLine($, one.id, `Nothing was released · ${allowed === 'deny' ? 'you denied it' : "it wasn't allowed"}`)
   const logFile = `${dir}/releases/${id}.log`
   const isLogged = await $.fs.write(logFile, '').then(() => true).catch(() => false)
-  if (!isLogged) return stepLine($, one.id, 'Nothing was released: Claudopus could not start the release')
+  if (!isLogged) return stepLine($, one.id, "Nothing was released · Claudopus couldn't start the release")
   const grant = await issueGrant($, id, { host: 'release', command: `${repo}\n${branch}` }, 'release-grant')
-  if (!grant) return stepLine($, one.id, 'Nothing was released: the allow could not be secured')
+  if (!grant) return stepLine($, one.id, "Nothing was released · Claudopus couldn't use its keychain key")
   // Detached, so it outlives the ten minutes a call of the mod may take; its exit is written as its last line
   const run = await $.process
     .run(['/bin/sh', '-c', 'nohup /bin/sh -c \'"$1" > "$2" 2>&1; echo "claudopus-exit $?" >> "$2"\' sh "$1" "$2" > /dev/null 2>&1 &', 'sh', `${$.plugin.root}/bin/release`, logFile], { cwd: repo, env: { CLAUDECODE: '1' }, timeoutMs: 15_000 })
     .catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (run.exitCode !== 0) {
     await dropGrants($, [grant])
-    return stepLine($, one.id, 'Nothing was released: Claudopus could not start the release')
+    return stepLine($, one.id, "Nothing was released · Claudopus couldn't start the release")
   }
   await log($, `release of ${branch} in ${name} started by Claudopus for ${one.id}`)
   const timer = everyLoad($, STEP_LOOK, () => {
@@ -390,11 +402,12 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       timer.cancel()
       const tail = text.replace(/claudopus-exit \d+\s*$/, '').replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n')
       if (exit === '0') {
-        await stepLine($, one.id, `Released: ${cut(oneLine(tail.split('\n').at(-1) ?? ''), 160)}`)
-        await sayInChat($, named(`Claudopus released "${titleOf(one)}" on {name}'s go-ahead. Its last lines:\n${tail}`), `Released "${titleOf(one)}".`)
+        await stepLine($, one.id, `Released · ${cut(oneLine(tail.split('\n').at(-1) ?? ''), 160)}`)
+        await sayInChat($, named(`Claudopus released "${titleOf(one)}" on {name}'s go-ahead. Its last lines:\n${tail}`), `Claudopus released "${titleOf(one)}".`)
         return
       }
-      await stepLine($, one.id, `The release ${isLate ? 'has run 90 minutes' : `stopped (exit ${exit})`}: Claude is started again to look at it`)
+      await stepLine($, one.id, `The release ${isLate ? 'is still running after 1h 30m' : 'failed'} · Claudopus started Claude again to look at it`)
+
       await toEnded($, one, one.id, isLate ? `${wakeText}\nClaudopus started the release itself after the go-ahead, and it has run 90 minutes without ending. It may still be running: look at its log, ${logFile}, and at what is running, before anything else; do not start a second release while it runs. Its last lines:\n${tail}` : `${wakeText}\nClaudopus ran the release itself after the go-ahead, and it failed with exit ${exit}. Its log is ${logFile}; its last lines:\n${tail}\nSort out what it needs (exit 2: merge main and keep what both sides meant; exit 3: a build or check failed), then run the release as your rules say.`, { text: said, ask: ask.text, at, line: '', isCard: true, askAt: ask.at })
     })().catch(err => log($, `release of ${one.id} not followed: ${String(err)}`))
   })

@@ -580,6 +580,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { text: e.text, context: e.context }
   })
   on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
   // The sounds played and the notifications raised, each as "title | text"
   on('audio.play', (_, e) => {
     played.push(String((e.clip as { asset?: string }).asset))
@@ -806,7 +807,7 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   const before = stepped.length
   const said: string[] = []
   for await (const chunk of $.turn.step({ turnId: 'h1p', index: 1, model: 'm', messageCount: 2, agentId: 'a1' })) if (chunk.kind === 'text') said.push((chunk as { text: string }).text)
-  expect([stepped.length - before, said]).toEqual([0, ['My own work is still going; I am started again when it is done, and give my report then.']])
+  expect([stepped.length - before, said]).toEqual([0, ["My command is still running. Claudopus starts me again when it's done, and I'll send my result then."]])
   await $.turn.complete({ answer: 'Waiting for the drawing.', durationMs: 1, isAborted: false, turnId: 'h1', reason: 'answer', agentId: 'a1' } as never)
   // The engine then tells the chat it ended without its report. Claudopus adds no note of its own, which would ride into a later
   // turn of the chat's; at rest, the chat takes the notice as a prompt of its own, which is left out (16 Nov evening: 67 of 152 turns)
@@ -819,20 +820,34 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   const toldOfWait = (texts: readonly string[] | undefined) => (texts ?? []).flatMap(text => text.split('\n\n')).filter(one => waits.test(one)).length
   await clock.advance(1_000)
   expect(appended.filter(one => /ended its step without its report/.test(one))).toEqual([])
-  expect((await asNotice(endedNotice('a1'))).drop).toContain('nothing new')
+  // Let in, never dropped (a warning card), its turn answered with no model, and with the word that the task is still at work for the
+  // chat to read beside it later
+  let quietTurn = 0
+  const answeredQuietly = async (text: string) => {
+    const turnId = `notice-${++quietTurn}`
+    await $.turn.start({ text, turnId })
+    const asked = stepped.length
+    const said: string[] = []
+    for await (const chunk of $.turn.step({ turnId, index: 0, model: 'm', messageCount: 2 })) if (chunk.kind === 'text') said.push((chunk as { text: string }).text)
+    return stepped.length === asked && said.join('') === 'No response requested.'
+  }
+  const alone = await asNotice(endedNotice('a1'))
+  expect([alone.drop, toldOfWait(alone.context), await answeredQuietly(endedNotice('a1'))]).toEqual([undefined, 1, true])
   // Beside a notice that says something, or with a security warning of its own, it goes on with the word that the task is still at
   // work in the same prompt
   const mixed = await asNotice(`${endedNotice('a1')}\n<task-notification>\n<task-id>bx1</task-id>\n<status>completed</status>\n<summary>Background command "Build" completed (exit code 0)</summary>\n</task-notification>`)
   const warned = await asNotice(endedNotice('a1', `SECURITY WARNING: This subagent performed actions that may violate security policy. Reason: [Data Exfiltration]. Review the subagent's actions carefully before acting on its output.\n\n${RESULT}`))
   expect([mixed.drop, toldOfWait(mixed.context), warned.drop, toldOfWait(warned.context)]).toEqual([undefined, 1, undefined, 1])
+  expect(await answeredQuietly(endedNotice('a1'))).toBe(false)
   // Joining a turn of the chat's under way, the notice still comes through here (seen on Claude Code 2.1.325: a notice that came
-  // mid-turn was handed to this hook with that turn's id, and left out there), so the same holds
-  const midTurn = (await $.prompt.submit({ text: endedNotice('a1'), wait: false, turnId: 'chat1', origin: { kind: 'task-notification' } } as never)) as { drop?: string }
-  expect(midTurn.drop).toContain('nothing new')
+  // mid-turn was handed to this hook with that turn's id): it goes into that turn with the same word, or makes a turn of its own
+  // answered with no model should that turn end first
+  const midTurn = (await $.prompt.submit({ text: endedNotice('a1'), wait: false, turnId: 'chat1', origin: { kind: 'task-notification' } } as never)) as { drop?: string; context?: string[] }
+  expect([midTurn.drop, toldOfWait(midTurn.context), await answeredQuietly(endedNotice('a1'))]).toEqual([undefined, 1, true])
   // A helper the engine no longer lists at work, its card left behind, is no wait: the notice reaches the chat as it is
   agents.a3 = 'completed'
   const gone = await asNotice(endedNotice('a1'))
-  expect([gone.drop, toldOfWait(gone.context)]).toEqual([undefined, 0])
+  expect([gone.drop, toldOfWait(gone.context), await answeredQuietly(endedNotice('a1'))]).toEqual([undefined, 0, false])
   agents.a3 = 'running'
   // A step of its own and another pause: still no note of Claudopus's own in the chat
   talk.splice(0, talk.length, { role: 'user', content: 'Carry on.' })
@@ -845,7 +860,7 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
   const texts = (await list.findAll({ type: 'Text' })).map(one => one.text)
   await list.unmount()
-  expect(texts).toContain('Working on 1 thing')
+  expect(texts).toContain('1 task working')
   expect(texts).toContain('Fix the nose')
   agents.a3 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a3', message: 'The nose is drawn at every size.' } as never)
@@ -937,7 +952,7 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
     await list.unmount()
     return texts
   }
-  expect(await until(async () => (await lines()).find(text => /^Claudopus starts Claude again when this is there: the deploy marker; at \d\d:\d\d if it never comes$/.test(text)))).toBeDefined()
+  expect(await until(async () => (await lines()).find(text => /^Waiting for the deploy marker · Claudopus starts Claude again when it comes, or at \d\d:\d\d$/.test(text)))).toBeDefined()
   // A helper that ended its step would have ended: it hands back what it waits for, and its task asks
   expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w2', agentId: 'a2', what: 'the build to finish', file: '/w/build.log', text: 'BUILD DONE' } as never)) as { result?: string }).result).toContain('hand back your result now')
   await clock.advance(40_000)
@@ -946,7 +961,7 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
   files.set('/w/deployed.flag', '')
   await clock.advance(40_000)
   expect(await until(async () => resumed.find(one => one === 'a1: From Claudopus: what you asked to be started again for is there: the deploy marker. Carry on from it.'))).toBeDefined()
-  expect(await until(async () => !(await lines()).some(text => text.startsWith('Claudopus starts Claude again')) || undefined)).toBe(true)
+  expect(await until(async () => !(await lines()).some(text => text.includes('Claudopus starts Claude again')) || undefined)).toBe(true)
   // A time only, and a file that never comes: started when the time comes, or told it never came
   agents.a1 = 'completed'
   expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w3l', agentId: 'a1', what: 'a look much later', minutes: 500 } as never)) as { result?: string }).result).toContain('in 60 min (at most 60 min).')
@@ -1002,7 +1017,7 @@ test('a helper quiet for five minutes is named to its work once, and the card sa
   expect(await pane.find({ type: 'Text', text: /looked in on|helper running/ })).toBeUndefined()
   await clock.advance(5 * 60_000)
   expect(appended.filter(line => line.startsWith('a1: Your helper "Read the nose code" (a2) has shown nothing new'))).toHaveLength(1)
-  expect((await pane.find({ type: 'Text', text: /^1 helper quiet for 5\+ min, Claudopus told Claude$/ }))?.text).toBeDefined()
+  expect((await pane.find({ type: 'Text', text: /^1 helper has shown nothing new for over 5m · Claude was told to check it$/ }))?.text).toBeDefined()
   await clock.advance(3 * 60_000)
   expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1)
 })

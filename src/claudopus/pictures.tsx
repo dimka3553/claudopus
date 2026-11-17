@@ -40,7 +40,7 @@ const shQuoted = (text: string) => `'${text.replaceAll("'", "'\\''")}'`
 const sendPicture = async ($: EngineInterface, path: string) => {
   const say = (text: string, copy?: string) => (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text, copy }), drawAgain($))
   // A terminal with no word of where it is watched from: where the picture is, and no more
-  if (!termFrom) return say(`It is at ${path} on ${thisMac()}`)
+  if (!termFrom) return say(`It’s at ${path} on ${thisMac()}.`)
   say('Sending it to your device…')
   for (const bin of TAILSCALES) {
     const targets = await $.process.run([bin, 'file', 'cp', '--targets'], { timeoutMs: 8_000 }).catch(() => undefined)
@@ -49,14 +49,14 @@ const sendPicture = async ($: EngineInterface, path: string) => {
     const [, name = '', ...state] = targets.stdout.split('\n').map(line => line.trim().split(/\s+/)).find(parts => parts[0] === termFrom) ?? []
     if (!name || state.join(' ').startsWith('offline')) break
     const sent = await $.process.run([bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 60_000 }).catch(err => ({ exitCode: 1, stderr: String(err) }))
-    if (sent.exitCode === 0) return say(`✓ Sent to ${name} by Tailscale, which keeps what it is sent in Downloads`)
+    if (sent.exitCode === 0) return say(`✓ Claudopus sent it to ${name} with Tailscale. It’s in Downloads there.`)
     await log($, `picture ${path} not sent to ${termFrom}: ${sent.stderr}`)
     break
   }
   const user = (await $.env.get('USER')) ?? ''
   const port = termPort && termPort !== '22' ? `-P ${termPort} ` : ''
   const command = `scp ${port}${shQuoted(`${user ? `${user}@` : ''}${termHere.includes(':') ? `[${termHere}]` : termHere}:${path}`)} ~/Downloads/ && open ~/Downloads/${shQuoted(fileName(path))}`
-  say('Run this on your own device (a Mac), and it opens there:', command)
+  say('Run this on your Mac to open it there:', command)
 }
 // Under a picture's row in the terminal: what its press came to, with the command to copy when there is one
 const pictureSaidRow = ($: EngineInterface, ui: Ui, key: string, path: string) => {
@@ -209,7 +209,7 @@ const largeOf = ($: EngineInterface, path: string, id: string): Large | undefine
 // What the tab draws: the picture as wide as the tab, its name and size, and how to see it larger
 const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], path = pictureShown) => {
   const ui = uiOf($, e)
-  if (!path) return <ui.Text dimColor>Pictures now open large in the Details tab they are pressed in. This tab can be closed.</ui.Text>
+  if (!path) return <ui.Text dimColor>Pictures now open in the Details tab where you press them. You can close this tab.</ui.Text>
   const name = fileName(path)
   const stat = await $.fs.stat(path).catch(() => undefined)
   const said = (text: string) => (
@@ -228,10 +228,10 @@ const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui
       </ui.Box>
     )
   }
-  if (!('Svg' in ui)) return said(`This screen cannot draw pictures. It is at ${path}`)
+  if (!('Svg' in ui)) return said(`This screen can’t show pictures. It’s at ${path}.`)
   const large = largeOf($, path, `${path}:${stat.mtimeMs}:${stat.size}`)
   if (large === undefined) return said('Making a large copy…')
-  if (!large) return said(`This picture could not be drawn here. Press its row again to try again. It is at ${path}`)
+  if (!large) return said(`Claudopus couldn’t show this picture. Press its row to try again. It’s at ${path}.`)
   return (
     <ui.Box flexDirection="column" gap={1} width="100%">
       <ui.Text bold wrap="wrap">{name}</ui.Text>

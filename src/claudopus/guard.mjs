@@ -15,7 +15,7 @@
 //
 //   node src/claudopus/guard.mjs area <area> [<area> ...]
 //       Runs only those areas' tests (cards, asking, stats: the name of a test file, with or without .test.tsx) on the code as it
-//       is now: what to run while working, as the release runs every test.
+//       is now: what to run while working; test-all.sh runs every test once before the release.
 //
 // break takes one build and one run of every test: about a minute on a quiet Mac, a few on a busy one; area and new run only
 // their files, as long as the slowest of them. ENGINE names the engine (the `claude` on the PATH when unset).

@@ -9,16 +9,18 @@ const commandHooks = (on: On) => {
     // Asked for where it can be drawn, it is open in every chat from now on
     if (opened.isPlaced) await choosePanel($, true)
 
-    return { text: opened.isPlaced ? 'Claudopus panel opened.' : nowhere('Claudopus') }
+    return { text: opened.isPlaced ? 'Claudopus opened its panel.' : nowhere('Claudopus') }
   })
 
   // A box the person moves the focus into holds the panel's drawing, so nothing is drawn under them as they start typing; the focus
   // moved by them anywhere else, or out of the pane, lets it go
   on('ui.focus', async ($, e, next) => {
-    // The bar holds its drawing for as long as its reply box has the cursor (band.tsx), however the cursor came there: by the
-    // person's click in the box, as the box takes it when they click into the bar (autoFocus), or by the mod's own call
+    // The bar holds its drawing for as long as its reply box has the cursor (band.tsx), however the cursor came there first: by the
+    // person's click in the box, as the box takes it when they click into the bar (autoFocus), or by the mod's own call. After that
+    // only the person's own focus renews it (and each letter): the app may give the box the cursor again each time it builds it
+    // anew, and each redraw would renew the hold that puts redraws off (asking.tsx, isBoxHeld)
     const isInBarBox = e.plugin === 'claudopus' && isBarBox(e.element)
-    if (isInBarBox) barBoxAt = await $.clock.now()
+    if (isInBarBox && (e.origin.kind === 'person' || barBoxAt === 0)) barBoxAt = await $.clock.now()
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
       // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
       if (e.plugin === 'claudopus') await engage($)
@@ -60,7 +62,8 @@ const commandHooks = (on: On) => {
     await scanServers($).catch(err => log($, `servers not read: ${String(err)}`))
     const opened = await $.ui.open({ id: PANE, title: PANE_TITLE })
 
-    return { text: opened.isPlaced ? 'Servers panel opened.' : nowhere('Servers') }
+    return { text: opened.isPlaced ? 'Claudopus opened the Servers panel.'
+ : nowhere('Servers') }
   })
 
 }

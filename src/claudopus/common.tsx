@@ -193,7 +193,7 @@ const lookHold = ($: EngineInterface) => {
   holdAt = now
   if (late < LATE) {
     // Caught up: drawn again, with what was left out meanwhile
-    if (behindLooks > 0 && (behindLooks -= 1) === 0) $.ui.invalidate('ui.render')
+    if (behindLooks > 0 && (behindLooks -= 1) === 0) drawAgain($)
     return
   }
   behindLooks = BEHIND_FOR / HOLD_LOOK
@@ -297,16 +297,16 @@ const took = (ms: number) => {
   const [hrs, m, sec] = [Math.floor(all / 3600), Math.floor(all / 60) % 60, all % 60]
   const two = (n: number) => String(n).padStart(2, '0')
   if (isRunFromAfar) return hrs ? `${hrs}h ${two(m)}m` : m ? `${m}m` : '<1m'
-  return hrs ? `${hrs}h ${two(m)}m ${two(sec)}s` : m ? `${m}m ${two(sec)}s` : `${sec}s`
+  return hrs ? `${hrs}h ${two(m)}m` : m ? `${m}m ${two(sec)}s` : `${sec}s`
 }
 // A count of tokens as the app writes it
 const thousands = (tokens: number) =>
   isRunFromAfar ? (tokens < 10_000 ? '<10k' : `${Math.round(tokens / 10_000) * 10}k`) : `${(tokens / 1000).toFixed(tokens < 100_000 ? 1 : 0)}k`
-// How full a context window is: the share when the window is known, and the tokens
-const fill = (tokens: number, window: number) => (window ? `${percent(tokens, window)}% · ${thousands(tokens)} of ${thousands(window)}` : thousands(tokens))
+// How full a chat's memory is, in words: the share when the window is known; the bare token count says nothing to a person
+const fill = (tokens: number, window: number) => (window ? `${percent(tokens, window)}% full` : '')
 // The same for a piece of work, short enough for its status line
 const percent = (tokens: number, window: number) => (isRunFromAfar ? Math.floor((tokens / window) * 20) * 5 : Math.round((tokens / window) * 100))
-const share = (tokens: number, window: number) => (window ? `context ${percent(tokens, window)}% (${thousands(tokens)})` : `context ${thousands(tokens)}`)
+const share = (tokens: number, window: number) => (window ? `${percent(tokens, window)}% full` : '')
 
 // A model's name as the app writes it, from its id or alias: "Opus 5.5". Nothing for a name it cannot read
 const modelName = (id: string) => {

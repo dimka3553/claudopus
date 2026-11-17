@@ -580,6 +580,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { text: e.text, context: e.context }
   })
   on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
   // The sounds played and the notifications raised, each as "title | text"
   on('audio.play', (_, e) => {
     played.push(String((e.clip as { asset?: string }).asset))
@@ -731,6 +732,6 @@ test('the servers panel opens when asked, lists the servers running from my fold
   await press
   expect(killed).toEqual(['700'])
   expect(await pane.find({ type: 'Link' })).toBeUndefined()
-  expect((await pane.find({ type: 'Text' }))?.text).toBe('Nothing is listening from your folders.')
+  expect((await pane.find({ type: 'Text' }))?.text).toBe('No servers are running from your folders.')
   await pane.unmount()
 })

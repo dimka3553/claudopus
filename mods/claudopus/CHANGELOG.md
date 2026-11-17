@@ -2,6 +2,27 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.181 · 17 November 2026
+- Questions, allow boxes, key and password boxes and their notices now use the same plain words everywhere: a card asks "Release claudopus to main?", says "waiting for you", and after a press says who did what, such as "You allowed it. Claudopus is releasing it now."
+- Config, Stats, Results, Memory, About, the Changelog and the update box use shorter, plainer words: each setting says what it does in a sentence or two, Stats explains tokens and prices in everyday words, and every update step names the version as v0.2.177.
+- The update box and About say the same thing once a new version is in place: type /reload-plugins to use it.
+- Every word Claudopus shows follows one short guide (docs/words.md): one word for each thing (task, helper, command, question, to-do, result), who does what in every sentence, one way to say each state (Working, Waiting for you, Done, Failed, Stopped), and the same forms for times and counts everywhere.
+- A quiet command never says only "nothing printed for 29m" any more: its line keeps the last thing it said ("Last: 2 of 6 stills · nothing new for 29m"), says "No output yet" when it has shown nothing, and adds "Claude was told to check it" once Claudopus has told Claude.
+- Each helper at work has a second line saying what it is doing now, in plain words ("Reading files", "Rendering the song stills · 4m", "Waiting for its commands"), in place of its token count.
+- A command's time says "of about 5m", in amber once it runs past that; ended commands say "Done in 1m 05s", "Failed after 2m 05s" or "Stopped after 1m", with no exit codes.
+- The panel's header says "2 tasks working" or "1 question waiting for you · 2 working", and how full the chat is as "This chat is 45% full"; cards say "45% full" in place of context and token figures.
+- A task's card line says what Claude is doing now ("Reading files", "Rendering the song stills · 4m") instead of "Starting" until it writes a note; a helper quiet for minutes says what it did last and for how long.
+
+## 0.2.180 · 17 November 2026
+- The reply box above the chat no longer flashes blue or jumps while you type: it stays four lines tall and scrolls inside, and while you type in it, and for half a minute after your last letter, Claudopus redraws nothing else. A question, key box or admin box that newly needs you still shows at once.
+- Send and Close sit a little below the box, so the Send button no longer covers the box's lower edge. The key box's response in the bar works the same way, and the card's own reply box (bar folded) is four lines with the same gap.
+
+## 0.2.179 · 17 November 2026
+- A release goes out within a minute of your press: it no longer waits up to 45 minutes for GitHub's tests, which now run after it and never hold it up. Each task runs every test once before it asks you to release.
+
+## 0.2.178 · 17 November 2026
+- The chat no longer shows a red "A hook blocked your prompt" card each time Claude Code tells it that a task is still at work or that a report already came. Such a notice now goes into the chat and ends its own turn at once with Claude Code's own "No response requested." line, without asking Claude and at no cost; one that comes while the chat is busy joins the turn already running.
+
 ## 0.2.177 · 17 November 2026
 - A program a task's command left running is named on its card by what that command does, in the words Claude gave it, never by the program's own name: no more rows of "Run Google Chrome" for a test's hidden browser
 - Everything one command left running is one row, with how many programs it is and their memory added up; Stop on it ends them all, and only once the last of them ends does the card say the command has ended, as one line under Commands ended, with its task told once

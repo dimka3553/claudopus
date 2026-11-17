@@ -580,6 +580,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { text: e.text, context: e.context }
   })
   on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
   // The sounds played and the notifications raised, each as "title | text"
   on('audio.play', (_, e) => {
     played.push(String((e.clip as { asset?: string }).asset))
@@ -953,7 +954,7 @@ test('a background command whose shell ends leaving its scripts running hands th
   expect(await until(async () => ((await leftTexts($)).some(text => /3 commands ended/.test(text)) || undefined))).toBe(true)
   const shown = await leftTexts($)
   expect(shown.some(text => /2 programs/.test(text))).toBe(true)
-  expect(shown).toContain('Run a build of the scene has ended and Run a check of the scene has ended')
+  expect(shown).toContain('Run a build of the scene: ended · Run a check of the scene: ended')
   expect(shown.some(text => /commands have ended|Run the renders (has|have) /.test(text))).toBe(false)
 })
 

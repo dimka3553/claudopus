@@ -3,15 +3,15 @@
 test('/claudopus and /servers say the panel opened, and say plainly where it can be seen when this screen has nowhere to draw it', async ($, on) => {
   world(on)
   await $.session.start(start)
-  expect((await $.command.run({ command: 'claudopus', args: '' } as never)).text).toBe('Claudopus panel opened.')
-  expect((await $.command.run({ command: 'servers', args: '' } as never)).text).toBe('Servers panel opened.')
+  expect((await $.command.run({ command: 'claudopus', args: '' } as never)).text).toBe('Claudopus opened its panel.')
+  expect((await $.command.run({ command: 'servers', args: '' } as never)).text).toBe('Claudopus opened the Servers panel.')
 })
 
 test('/claudopus and /servers on a screen with nowhere to draw a panel say it cannot be shown there and where it can', async ($, on) => {
   world(on, { unplaced: true })
   await $.session.start(start)
-  expect((await $.command.run({ command: 'claudopus', args: '' } as never)).text).toBe("The Claudopus panel can't be shown on this screen. It shows in the Claude app on the Mac this chat runs on.")
-  expect((await $.command.run({ command: 'servers', args: '' } as never)).text).toBe("The Servers panel can't be shown on this screen. It shows in the Claude app on the Mac this chat runs on.")
+  expect((await $.command.run({ command: 'claudopus', args: '' } as never)).text).toBe("Claudopus can't show the Claudopus panel on this screen. Open it in the Claude app on the Mac this chat runs on.")
+  expect((await $.command.run({ command: 'servers', args: '' } as never)).text).toBe("Claudopus can't show the Servers panel on this screen. Open it in the Claude app on the Mac this chat runs on.")
 })
 
 test('opened in one chat, the panel opens in every other chat, at once in one that starts and within seconds in one already running', async ($, on) => {
