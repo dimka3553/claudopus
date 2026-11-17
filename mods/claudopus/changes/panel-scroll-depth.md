@@ -1,0 +1,2 @@
+- The panel no longer lets you scroll far past its cards: while you scrolled it, it kept the length of the longest list it had shown in the chat, so blank space ran down to the Finished row under one card. Now it never reaches past the bottom of what you see
+- Folding Finished while scrolled down brings the view back to what is left, instead of leaving blank space with the cards above it
