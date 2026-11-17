@@ -598,8 +598,7 @@ const wakeForRun = async ($: EngineInterface, one: Todo | undefined, runs: NonNu
 // A run in its own words, without the time it was given when it began
 const runWords = (what: string, cmd = '') => labelOf(what, cmd).replace(/\s*\((?:about|under|over|around|up to|~)?\s*[\d.,\-– ]+\s*(?:s|sec|seconds?|m|mins?|minutes?|h|hours?)\)\s*$/i, '').trim()
 
-// How a run ended, said after its words
-const RUN_ENDED_AS: Record<EndedRun['how'], string> = { finished: 'has finished', failed: 'failed', killed: 'was stopped', stopped: 'was stopped', 'timed out': 'ran out of time', ended: 'has ended' }
+
 
 // A press on a run's row opens a Terminal window that shows its output as it is, from its start (the last thousand lines) and as
 // it goes on; on this Mac only, as the window is this Mac's
@@ -614,7 +613,7 @@ const openJobOutput = async ($: EngineInterface, job: Job) => {
   const base = `${dir}/terminal`
   const home = `${base}/output-${slug(job.id) || 'job'}-${at}`
   const path = file.startsWith('~/') ? `"$HOME"/${zshQuoted(file.slice(2))}` : zshQuoted(file)
-  const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `[[ -e ${path} ]] || print -r -- 'No output yet. This window shows it as soon as the command prints something.'`, `exec tail -n 1000 -F ${path}`, ''].join('\n')
+  const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `[[ -e ${path} ]] || print -r -- 'No output yet. It shows here as soon as the command writes something.'`, `exec tail -n 1000 -F ${path}`, ''].join('\n')
   await $.fs.write(`${home}/output.command`, script)
   const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready

@@ -26,6 +26,51 @@ const restartedOnce = new Set<string>()
 const inFlight = new Map<string, { agent: string; what: string; at: number; cmd?: string; label?: string }>()
 const seenLines = new Map<string, Set<string>>()
 
+// What each agent began last and whether it has ended, in plain words, for the second line of a helper's row. Kept here, not on
+// its card, so a call does not write the cards and redraw every panel
+const lastCall = new Map<string, { id: string; what: string; at: number; endedAt?: number }>()
+// A command's own words turned into what it is doing: "Render the song stills" is "Rendering the song stills"
+const DOUBLED = new Set(['run', 'stop', 'get', 'set', 'put', 'cut', 'plan', 'drop', 'ship', 'scan', 'grab', 'trim', 'zip', 'pin', 'tag', 'map', 'log', 'shut', 'chat', 'swap', 'skip', 'step', 'wrap', 'snap', 'clip', 'dig', 'begin'])
+const VERBS = new Set(['run', 'download', 'upload', 'watch', 'serve', 'wait', 'check', 'render', 'build', 'test', 'install', 'fetch', 'copy', 'move', 'make', 'find', 'read', 'write', 'draw', 'train', 'fit', 'compute', 'count', 'convert', 'compress', 'push', 'pull', 'clone', 'deploy', 'start', 'stop', 'open', 'save', 'sync', 'update', 'fix', 'look', 'search', 'list', 'measure', 'compare', 'merge', 'release', 'export', 'import', 'generate', 'create', 'delete', 'remove', 'clean', 'tidy', 'record', 'capture', 'take', 'shoot', 'encode', 'decode', 'transcribe', 'play', 'send', 'load', 'prepare', 'set', 'get', 'sort', 'scan', 'crop', 'resize', 'split', 'join', 'bake', 'solve', 'analyse', 'analyze', 'plot', 'extract', 'unpack', 'pack', 'zip', 'grade', 'score', 'rank', 'evaluate', 'label', 'align', 'compile', 'lint', 'format', 'verify', 'validate', 'probe', 'query', 'print', 'show', 'restart', 'stage', 'commit', 'rebuild', 'retry', 'redo', 'rerun', 'resize', 'collect', 'gather', 'process', 'index', 'upscale', 'mesh', 'paint', 'cut', 'trim', 'publish', 'post', 'preview', 'shrink', 'combine', 'reset', 'apply', 'mark', 'tag', 'map', 'kill', 'begin', 'close', 'add', 'try'])
+const doingOf = (said: string) => {
+  const [first = '', ...rest] = said.trim().split(/\s+/)
+  const word = first.toLowerCase()
+  if (!VERBS.has(word) || !rest.length) return said.trim()
+  const ing = DOUBLED.has(word) ? `${word}${word.at(-1)}ing` : /[^aeiou]e$/.test(word) && word !== 'be' ? `${word.slice(0, -1)}ing` : /ie$/.test(word) ? `${word.slice(0, -2)}ying` : `${word}ing`
+  return [ing[0]?.toUpperCase() + ing.slice(1), ...rest].join(' ')
+}
+// What a call does, in a few plain words; nothing for the mod's own tools and the app's bookkeeping
+const callWords = (tool: string, input?: { description?: unknown; command?: unknown }) => {
+  const said = oneLine(String(input?.description ?? '')).replace(/\s*\((?:about|under|over|around|up to|~)?\s*[\d.,\-– ]+\s*(?:s|sec|seconds?|m|mins?|minutes?|h|hours?)\)\s*$/i, '').trim()
+  if (tool.startsWith(TOOLS) || tool.startsWith(OLD_TOOLS) || ['ToolSearch', 'TodoWrite', 'SubagentHandback', 'ExitPlanMode'].includes(tool)) return ''
+  if (tool === 'Bash') return said ? doingOf(said) : 'Running a command'
+  if (tool === 'Monitor') return said ? `Watching: ${said}` : 'Watching for news'
+  if (tool === 'Read') return 'Reading files'
+  if (tool === 'Grep' || tool === 'Glob') return 'Searching the files'
+  if (tool === 'Edit' || tool === 'Write' || tool === 'MultiEdit' || tool === 'NotebookEdit') return 'Changing files'
+  if (tool === 'WebFetch') return 'Reading a web page'
+  if (tool === 'WebSearch') return 'Searching the web'
+  if (tool === 'Agent' || tool === 'Task') return said ? `Starting a helper: ${said}` : 'Starting a helper'
+  if (tool === 'SendMessage') return 'Sending a message'
+  if (tool === 'TaskStop' || tool === 'KillShell') return 'Stopping a command'
+  if (tool === 'Skill') return 'Using a skill'
+  if (/chrome|browser|playwright|puppeteer/i.test(tool)) return 'Using the browser'
+  const server = /^mcp__([^_]+(?:_[^_]+)*)__/.exec(tool)?.[1]
+  return server ? `Using ${server.replace(/[-_]+/g, ' ')}` : `Using ${tool}`
+}
+// What a helper is doing now: its own latest note where that is newer than its latest action; else the action, with how long it
+// has run once that is a minute; between actions, thinking
+const helperNow = (one: Todo, at: number, commands = 0) => {
+  const call = lastCall.get(one.id)
+  const note = [...one.entries].reverse().find(entry => entry.kind !== 'steer' && entry.text)
+  if (note && (!call || (note.at ?? 0) >= call.at)) return note.text
+  if (!call) return ''
+  if (!call.endedAt) return at - call.at >= 60_000 ? `${call.what} · ${took(at - call.at)}` : call.what
+  // (a helper whose commands run in the background waits for them, as their rows under it show)
+  if (commands) return commands === 1 ? 'Waiting for its command' : 'Waiting for its commands'
+  return at - call.endedAt >= 60_000 ? `Thinking · ${took(at - call.endedAt)}` : 'Thinking'
+}
+
 // What a running call is, in a few words, for its row
 const runningWhat = (tool: string) =>
   tool === 'Bash' ? 'a command running' : tool === 'Grep' || tool === 'Glob' ? 'a search running' : tool === 'Agent' ? 'a helper running' : `${tool.replace(/^mcp__.*__/, '')} running`
@@ -64,7 +109,10 @@ const callBegun = async ($: EngineInterface, id: string, agent: string, tool: st
   // A command keeps itself and its own words for itself, so its row can say which
   const cmd = tool === 'Bash' ? oneLine(String(input?.command ?? '')).slice(0, 400) : ''
   const label = oneLine(String(input?.description ?? '') || cmd.split('\n')[0] || '').slice(0, 160)
-  inFlight.set(id, { agent, what: runningWhat(tool), at: await $.clock.now(), ...(cmd ? { cmd, label } : {}) })
+  const begun = await $.clock.now()
+  inFlight.set(id, { agent, what: runningWhat(tool), at: begun, ...(cmd ? { cmd, label } : {}) })
+  const words = callWords(tool, input)
+  if (words) lastCall.set(agent, { id, what: words, at: begun })
   await changeTodos($, list => withRunning(list, agent))
 }
 
@@ -73,6 +121,8 @@ const callBegun = async ($: EngineInterface, id: string, agent: string, tool: st
 const callEnded = async ($: EngineInterface, id: string, agent: string, tool: string, r: { result?: unknown; deny?: unknown } | undefined) => {
   inFlight.delete(id)
   const now = await $.clock.now()
+  const last = lastCall.get(agent)
+  if (last?.id === id) lastCall.set(agent, { ...last, endedAt: now })
   let isNew = false
   if (r && !r.deny && !tool.startsWith(TOOLS) && !tool.startsWith(OLD_TOOLS)) {
     const whole = (typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? '')).slice(0, 20_000)
@@ -256,20 +306,20 @@ const stuckLine = (list: Todo[], one: Todo, at: number) => {
   if (!one.stuckAt) return ''
   const mins = Math.max(1, Math.round((at - one.stuckAt) / 60_000))
   // A helper at work (a render in the background, a long call, output that changes) is no sign that nothing moves
-  if (runningKids(list, one.id).some(kid => isBusy(list, kid, at))) return "Waits on its helpers' work."
+  if (runningKids(list, one.id).some(kid => isBusy(list, kid, at))) return "Waiting for its helpers"
   const isLong = (kid: Todo) => Boolean(kid.running && at - kid.running.at >= RUNNING_SHOWN)
   const helpers = underOf(list, one.id).filter(kid => kid.status === 'working')
   const tail = helpers.length
     ? helpers.every(isLong) ? ` ${helpers.length === 1 ? 'Its helper is still' : helpers.length === 2 ? 'Both helpers are still' : `All ${helpers.length} helpers are still`} waiting.` : ''
-    : isLong(one) ? ` One step has been running for ${took(at - (one.running?.at ?? at))}.` : ''
+    : isLong(one) ? ` One action has been running for ${took(at - (one.running?.at ?? at))}.` : ''
   // and what Claudopus did about it
   const done = one.helperWait?.done ?? 0
   const nudge = !done
     ? ''
     : done >= 3
-      ? ' Claudopus asked Claude to check on its helpers, then to hand back what it has, and told the chat it is stuck.'
-      : ` Claudopus asked Claude ${done >= 2 ? 'to hand back what it has' : 'to check on its helpers'}.`
-  return `No progress for ${mins} min.${tail}${nudge}`
+      ? ' Claudopus asked Claude to check on its helpers, then to finish with what it has, and told the chat it may be stuck.'
+      : ` Claudopus asked Claude ${done >= 2 ? 'to finish with what it has' : 'to check on its helpers'}.`
+  return `Nothing new for ${mins}m.${tail}${nudge}`
 }
 
 // A row's running call, with its time, once it has run RUNNING_SHOWN
@@ -304,14 +354,17 @@ const keepBackground = async ($: EngineInterface, agent: string, call: { tool: s
 const WATCH_MOST = 30 * 60_000
 type EndedRun = NonNullable<Todo['endedRuns']>[number]
 // How a run ended, said plainly: on its card's summary and in Details
-const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => (run.how === 'failed' ? `failed${run.code ? ` (exit code ${run.code})` : ''}` : run.how === 'stopped' ? 'stopped' : run.how)
+const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => ({ finished: 'done', failed: 'failed', killed: 'stopped', stopped: 'stopped', 'timed out': 'ran out of time', ended: 'ended' })[run.how] ?? run.how
+// The same with how long it ran, as a line of its own: "Done in 1m 05s", "Failed after 2m 05s"
+const endedLine = (run: Pick<EndedRun, 'how' | 'code'>, ran: string) =>
+  run.how === 'finished' ? `Done in ${ran}` : `${{ failed: 'Failed', killed: 'Stopped', stopped: 'Stopped', 'timed out': 'Ran out of time', ended: 'Ended' }[run.how] ?? 'Ended'} after ${ran}`
 // The closing row under a card: how many helpers and runs have ended, then how many of the runs did not finish well, in words
 const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
   const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
   const head = helpers && runs.length ? `${n(helpers, 'helper')} and ${n(runs.length, 'command')} ended` : helpers ? `${n(helpers, 'helper')} ended` : `${n(runs.length, 'command')} ended`
   const bad = (['failed', 'killed', 'timed out'] as const).flatMap(how => {
     const count = runs.filter(r => r.how === how).length
-    return count ? [`${count} ${how}`] : []
+    return count ? [`${count} ${endedWord({ how })}`] : []
   })
   return bad.length ? `${head} · ${bad.join(', ')}` : head
 }
@@ -354,9 +407,9 @@ const waitLine = (one: Todo, at: number, isShort = false) => {
   const first = commands.at(-1)
   if (one.status !== 'working' || !one.waitsSince || one.answeredAt || !first) return ''
   const more = commands.length > 1 ? ` and ${commands.length - 1} more` : ''
-  if (isShort) return `Still working: Claude is waiting for a background command${more} to finish`
-  return `Still working: Claude is waiting for a background command${more} to finish, running ${took(at - first.at)}${first.what ? `: ${cut(first.what, 90)}` : ''}`
+  if (isShort) return `Waiting for a command${more} to finish`
+  return `Waiting for a command${more} to finish · ${took(at - first.at)}${first.what ? ` · ${cut(first.what, 90)}` : ''}`
 }
 
 // What finished work left running says on its card
-const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'working' ? `Claude left something running in the background, ${took(at - one.leftSince)}` : '')
+const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'working' ? `A command Claude started is still running · ${took(at - one.leftSince)}` : '')

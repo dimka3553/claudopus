@@ -345,15 +345,15 @@ export const openUrl = (c: { host: string; link?: Link }, held = '') => {
 // The panel's header: one line for everything the panel shows, every chat's, so it never says less than the cards under it.
 // What needs the person comes first; then what runs, here, in other chats, or both; then what just finished; else nothing
 export type Head = { here: number; there: number; chats: number; asks: number; isDone: boolean }
-const things = (n: number) => (n === 1 ? '1 thing' : `${n} things`)
+const tasks = (n: number) => (n === 1 ? '1 task' : `${n} tasks`)
 export const headLine = ({ here, there, chats, asks, isDone }: Head) => {
   const running = here + there
-  if (asks) return `${things(asks)} ${asks === 1 ? 'needs' : 'need'} you${running ? `, ${running} running` : ''}`
+  if (asks) return `${tasks(asks)} waiting for you${running ? ` · ${running} working` : ''}`
   const others = chats === 1 ? '1 other chat' : `${chats} other chats`
-  if (here && there) return `Working on ${things(running)} here and in ${others}`
-  if (there) return `Working on ${things(there)} in ${chats === 1 ? 'another chat' : others}`
-  if (here) return `Working on ${things(here)}`
-  return isDone ? 'Just finished' : 'Nothing is running'
+  if (here && there) return `${tasks(running)} working, here and in ${others}`
+  if (there) return `${tasks(there)} working in ${chats === 1 ? 'another chat' : others}`
+  if (here) return `${tasks(here)} working`
+  return isDone ? 'Just finished' : 'Nothing running'
 }
 // The octopus beside it: happy for the moment work finishes, whatever else goes on, so no finish passes unseen; else amber while
 // anything needs the person, at work while anything runs, resting only when nothing goes on anywhere
