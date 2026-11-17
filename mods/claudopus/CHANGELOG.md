@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.179 · 17 November 2026
+- A release goes out within a minute of your press: it no longer waits up to 45 minutes for GitHub's tests, which now run after it and never hold it up. Each task runs every test once before it asks you to release.
+
 ## 0.2.178 · 17 November 2026
 - The chat no longer shows a red "A hook blocked your prompt" card each time Claude Code tells it that a task is still at work or that a report already came. Such a notice now goes into the chat and ends its own turn at once with Claude Code's own "No response requested." line, without asking Claude and at no cost; one that comes while the chat is busy joins the turn already running.
 
