@@ -40,7 +40,7 @@ A running command or helper is two lines:
 - After three minutes with nothing new, line 2 keeps the last thing it said and adds how long: `Last: 2 of 6 stills rendered · nothing new for 29m`. With nothing ever said: `No output yet · started 29m ago`. Never "nothing new" alone.
 - Once Claudopus has told Claude about the quiet, the line says so: `· Claude was told to check it`.
 - A server: `Serving`. A watch: `Watching · last: series arrived`.
-- A helper's line 2 is what it is doing now, in plain words: `Reading files`, `Rendering the song stills · 4m`, `Searching the web`, `Waiting for its commands`, or its own last note.
+- A helper's line 2 is what it is doing now, in plain words: `Reading files`, `Rendering the song stills · 4m`, `Searching the web`, `Waiting for its commands`, or its own last note. Quiet for three minutes, it is `Last: Reading files · nothing new for 29m`. A task's own card line says the same of the task.
 - Ended: `Done in 2m 05s`, `Failed after 2m 05s`, `Stopped after 1m`.
 
 ## Questions, notices, errors

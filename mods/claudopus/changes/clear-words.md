@@ -3,3 +3,4 @@
 - Each helper at work has a second line saying what it is doing now, in plain words ("Reading files", "Rendering the song stills · 4m", "Waiting for its commands"), in place of its token count.
 - A command's time says "of about 5m", in amber once it runs past that; ended commands say "Done in 1m 05s", "Failed after 2m 05s" or "Stopped after 1m", with no exit codes.
 - The panel's header says "2 tasks working" or "1 task waiting for you · 2 working", and how full the chat is as "This chat is 45% full"; cards say "45% full" in place of context and token figures.
+- A task's card line says what Claude is doing now ("Reading files", "Rendering the song stills · 4m") instead of "Starting" until it writes a note; a helper quiet for minutes says what it did last and for how long.
