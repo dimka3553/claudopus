@@ -29,28 +29,28 @@ const promptOf = (tool, input, list, isWork = false) => {
     if (tool === 'Bash' || tool === 'PowerShell')
         return allow(`Run a command: ${cut(field('description'), 90) || cut(field('command'), 90) || 'no description'}`, 'the command runs on its Mac.', whole('command', 400));
     if (tool === 'Write')
-        return allow(`Write the file ${file(field('file_path')) || 'a file'}`, 'the file is saved, replacing any file of that name.', field('file_path'));
+        return allow(`Write the file ${file(field('file_path')) || 'a file'}`, 'Claude saves the file, replacing any file of that name.', field('file_path'));
     if (tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit')
-        return allow(`Change the file ${file(field('file_path') || field('notebook_path')) || 'a file'}`, 'the change is made to the file.', field('file_path') || field('notebook_path'));
+        return allow(`Change the file ${file(field('file_path') || field('notebook_path')) || 'a file'}`, 'Claude changes the file.', field('file_path') || field('notebook_path'));
     if (tool === 'Read')
-        return allow(`Read the file ${file(field('file_path')) || 'a file'}`, 'Claude reads the file; nothing is changed.', field('file_path'));
+        return allow(`Read the file ${file(field('file_path')) || 'a file'}`, 'Claude reads the file and changes nothing.', field('file_path'));
     if (tool === 'Glob' || tool === 'Grep')
-        return allow(`Search files for ${cut(field('pattern'), 80) || 'a pattern'}`, 'Claude searches; nothing is changed.', field('path'));
+        return allow(`Search files for ${cut(field('pattern'), 80) || 'a pattern'}`, 'Claude searches and changes nothing.', field('path'));
     if (tool === 'WebFetch')
-        return allow(`Open a web page on ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'the web'}`, 'Claude reads the page; nothing is sent but the address.', field('url'));
+        return allow(`Open a web page on ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'the web'}`, 'Claude reads the page and sends nothing but its address.', field('url'));
     if (tool === 'WebSearch')
         return allow(`Search the web for “${cut(field('query'), 80)}”`, 'Claude searches the web and reads the results.');
     if (tool === 'SendMessage') {
         const to = workNamed(field('to'));
         return {
-            ...allow(to === 'its chat' ? 'Pass a message back to its chat' : `Pass a message to ${to}`, to === 'its chat' ? 'its chat gets the message.' : 'that task gets the message and acts on it.', whole('message', 400) || field('summary'), isWork ? "No: it isn't sent, and Claudopus tells Claude you said no." : "No: it isn't sent, and the chat waits for what you say next."),
-            done: 'it was sent',
+            ...allow(to === 'its chat' ? 'Send a message to its chat' : `Send a message to ${to}`, to === 'its chat' ? 'its chat gets the message.' : 'that task gets the message and acts on it.', whole('message', 400) || field('summary'), isWork ? "No: it isn't sent, and Claudopus tells Claude you said no." : "No: it isn't sent, and the chat waits for what you say next."),
+            done: 'Claude sent it',
         };
     }
     if (tool === 'Agent' || tool === 'Task')
-        return { ...allow(`Start a background task: ${cut(field('description'), 90) || 'with no title'}`, 'it starts in the background and gets a card here.', whole('prompt', 300), isWork ? NO_TOLD : "No: it isn't started, and the chat waits for what you say next."), done: 'it was started' };
+        return { ...allow(`Start a task: ${cut(field('description'), 90) || 'with no title'}`, 'the task starts in the background and gets a card here.', whole('prompt', 300), isWork ? NO_TOLD : "No: it doesn't start, and the chat waits for what you say next."), done: 'Claude started it' };
     if (tool === 'TaskStop')
-        return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that task is stopped where it is.', '', isWork ? 'No: that task keeps running, and Claudopus tells Claude you said no.' : 'No: that task keeps running, and the chat waits for what you say next.'), done: 'it was stopped' };
+        return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that task stops where it is.', '', isWork ? 'No: that task keeps running, and Claudopus tells Claude you said no.' : 'No: that task keeps running, and the chat waits for what you say next.'), done: 'Claude stopped it' };
     if (tool === 'Skill')
         return allow(`Use the skill “${field('skill') || field('name')}”`, 'Claude loads those instructions and follows them.');
     if (tool === 'AskUserQuestion') {
@@ -58,12 +58,12 @@ const promptOf = (tool, input, list, isWork = false) => {
         return {
             text: typeof first === 'string' && first.trim() ? `Answer a question: ${cut(oneLine(first), 120)}` : 'Answer a question',
             kind: 'question',
-            yes: 'Pick an answer: it goes back and Claude continues with it.',
-            no: 'Skip it: no answer goes back, and Claude waits for what you say next.',
+            yes: 'Pick an answer: Claude gets it and carries on.',
+            no: 'Skip it: Claude gets no answer and waits for what you say next.',
         };
     }
     if (tool === 'ExitPlanMode')
-        return { text: 'Approve a plan', kind: 'plan', detail: whole('plan', 400), yes: 'Yes: Claude starts doing what the plan says.', no: 'No: Claude keeps planning; say what to change.' };
+        return { text: 'Approve a plan', kind: 'plan', detail: whole('plan', 400), yes: 'Yes: Claude starts doing what the plan says.', no: 'No: Claude keeps planning. Say what to change.' };
     const mcp = tool.match(/^mcp__(.+?)__(.+)$/);
     const words = field('description') || field('text') || field('query') || field('title') || field('name') || field('url');
     if (mcp)
@@ -111,7 +111,7 @@ const tellWaiting = async ($) => {
     const { title } = await read($, me);
     const chat = title.trim() || cwd.split('/').filter(Boolean).pop() || 'A chat';
     for (const one of due)
-        await aloud($, 'prompt', `${one.title ?? chat} needs your OK`, one.text, `prompt-${one.id}`).catch(err => log($, `prompt not told: ${String(err)}`));
+        await aloud($, 'prompt', `${one.title ?? chat} has a question for you`, one.text, `prompt-${one.id}`).catch(err => log($, `prompt not told: ${String(err)}`));
 };
 let answeredPrompts = [];
 const PROMPT_SHOWN = 15000;
@@ -277,6 +277,77 @@ const agentStarted = ($, toolUseId) => {
     if (toolUseId && waiting.some(one => one.id === toolUseId))
         settle($, toolUseId, undefined, undefined, 'running');
 };
+// ---- A call Claude Code refused a background task with no prompt for the person: a notice on the task's card ----
+// A background task or helper has no box of the app's own: Claude Code's auto mode, its safety checks, or a call that needs a person
+// in a run nobody can be asked in refuse the call outright, and no PermissionRequest is raised for it (16 Nov: 47 refusals that
+// way, none put to the person). Its task's card says what was refused and why, and that the task carries on without it. Claudopus
+// never lets a refused call through, and nothing it says invites the task to reach what was refused another way
+const CARRY_ON = 'Carry on without it';
+// Claude Code's own refusals, as its result or its deny begins (its texts in 2.1.325), and who refused, for the card
+const CC_REFUSALS = [
+    ['Permission for this action was denied by the Claude Code auto mode classifier', "Claude Code's auto mode blocked it"],
+    ['Permission for this command was denied by a built-in Claude Code safety check', 'a built-in Claude Code safety check blocked it'],
+    ['Permission for this tool use was denied. It requires approval, and this session has no approval surface', "it needs your OK, and Claude Code can't ask you in a background task"],
+    ['Permission for this tool use was denied: it requires interactive approval', "it needs your OK, and Claude Code can't ask you in a background task"],
+    ['no approval surface in this session', "it needs your OK, and Claude Code can't ask you in a background task"],
+    ['nobody can be asked in this headless run', "it needs your OK, and Claude Code can't ask you in a background task"],
+];
+// A check that gave no verdict is no refusal: Claude may try again as it is
+const NO_VERDICT = /gave no verdict|transient failure/i;
+// Only Claude Code's own refusal counts, never a failing call whose output holds the same words (a search, a test); the reason kept
+// is only what Claude Code gave in its "Reason: [...]", never the rest of its words, which are for the model
+const refusalOf = (r) => {
+    if (!r)
+        return undefined;
+    const said = [r.deny, ...(r.isError ? [r.result, r.text] : [])].map(one => (typeof one === 'string' ? one.trim() : '')).filter(Boolean);
+    for (const words of said) {
+        const found = CC_REFUSALS.find(([start]) => words.startsWith(start));
+        if (!found || NO_VERDICT.test(words))
+            continue;
+        const reason = /^[^\n]*?Reason: \[([^\]\n]{1,200})\]/.exec(words)?.[1] ?? '';
+        return { who: found[1], reason: cut(oneLine(reason), 120) };
+    }
+    return undefined;
+};
+const refusedByClaudeCode = async ($, agent, tool, call, r) => {
+    const refusal = refusalOf(r);
+    if (!refusal || !dir || isOff)
+        return;
+    const list = await read($, todos);
+    const top = list.find(one => one.id === topOf(list, agent));
+    const own = list.find(one => one.id === agent);
+    if (!top || top.chat)
+        return;
+    const what = promptOf(tool, call, list, true);
+    const who = own?.parentId ? `a helper of this task ("${titleOf(own)}")` : 'this task';
+    const text = cut(`Claude Code blocked ${who}: ${what.text}.`, ASK_TEXT);
+    // A command is shown whole, to copy or for the person to run on their own press (runit.tsx)
+    const runnable = runnableOf(tool, call);
+    const details = [
+        what.detail && !runnable ? `What it is: ${what.detail}` : '',
+        `Why: ${refusal.who}${refusal.reason ? ` (${refusal.reason})` : ''}.`,
+        runnable ? runDetails() : "Claude carries on without it and won't try another way.",
+    ]
+        .filter(Boolean)
+        .join('\n\n');
+    const at = await $.clock.now();
+    // A question waiting on the person, there already or put up meanwhile, is never replaced: the refusal is in the task's own result
+    let isPut = false;
+    const command = runnable ? { copy: runnable.command, isCommand: true, cwd: runnable.cwd } : {};
+    await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text, details, ...command, choices: [CARRY_ON], from: agent, at, refused: true } }));
+    if (!isPut)
+        return void (await log($, `refusal of ${tool} for ${agent} not put on its card: its card asks something already`));
+    if (runnable)
+        await offerRun($, top.id, agent, at, runnable);
+    await log($, `refusal of ${tool} for ${agent} put to the person on its card`);
+    const card = (await read($, todos)).find(one => one.id === top.id);
+    if (card)
+        await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`));
+    if (card)
+        await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`));
+};
+// What the task is told of the person's answer to that card: what was refused stays refused
+const REFUSAL_ANSWERED = (asked, said, isReply) => `${isReply ? `${who(true)} replied, in their own words, to the notice that Claude Code refused your call ("${asked}"): ${said}` : `${who(true)} saw the notice that Claude Code refused your call ("${asked}").`} What Claude Code refused stays refused: do not do it, nor reach its result by other means. Carry on without it, and say in your report what was left out.`;
 const OWN_CALLS = ['SendMessage', 'TaskStop'];
 const isOwnCall = (next) => next.origin?.plugin === 'claudopus';
 const promptHooks = (on) => {

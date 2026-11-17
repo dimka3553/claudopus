@@ -63,7 +63,7 @@ test('asked each time: the call is held, its card shows the exact command and th
   expect(await list.find({ type: 'Text', text: "Allow once: it runs as admin. Deny: it doesn't run, and Claudopus tells Claude." })).toBeDefined()
   expect((await labels()).filter(one => ['Allow once', 'Always allow this command', 'Deny'].includes(one))).toEqual(['Allow once', 'Always allow this command', 'Deny'])
   // Said in the chat and as a notification; its Details tab has it at the top
-  expect(logged.some(line => line.includes('"Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts') && line.includes('Nothing you type in the chat allows it'))).toBe(true)
+  expect(logged.some(line => line === '"Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts. Allow it on its card; typing here doesn\'t.')).toBe(true)
   expect(notified).toContain('Fix the hosts file has a question for you | Run an admin command on this Mac: chmod 644 /etc/hosts')
   const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   expect(await details.find({ type: 'Text', text: 'Waiting for you' })).toBeDefined()

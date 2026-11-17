@@ -170,7 +170,7 @@ export const squaresKept = (groups) => {
     return { groups: groups.slice(from), earlier: from, steps: 0 };
 };
 // What came before the squares drawn, in words: '' when nothing did
-export const squaresBefore = (kept) => [kept.earlier ? `${kept.earlier} earlier round${kept.earlier === 1 ? '' : 's'}` : '', kept.steps ? `${kept.steps} earlier step${kept.steps === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ');
+export const squaresBefore = (kept) => [kept.earlier ? `${kept.earlier} earlier round${kept.earlier === 1 ? '' : 's'}` : '', kept.steps ? `${kept.steps} earlier stage${kept.steps === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ');
 // The squares for a surface that draws no pictures: one letter each, grouped by round
 export const SQUARE_GLYPH = { done: '■', running: '■', waiting: '□', passed: '■', failed: '■', broke: '□' };
 // A stage's name as what is being done: Make is Making, Check is Checking
@@ -208,7 +208,7 @@ export const firstFit = (wordings, most) => {
 export const castOf = (flow) => {
     const seen = new Map();
     for (const one of flow.agents) {
-        const role = one.label.replace(/[-\s#]*\d+$/, '') || one.phase || 'agent';
+        const role = one.label.replace(/[-\s#]*\d+$/, '') || one.phase || 'helper';
         if (!seen.has(role) || (!seen.get(role) && one.model))
             seen.set(role, one.model ?? '');
     }

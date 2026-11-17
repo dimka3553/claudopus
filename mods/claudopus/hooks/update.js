@@ -179,29 +179,29 @@ export const folderReady = async (io, folder) => {
     const named = (text) => text.replace(/[^\w./-]/g, '').slice(0, 40);
     const branch = named((await git(['symbolic-ref', '-q', '--short', 'HEAD'])).stdout.trim());
     if (gitDir.trim() !== commonDir.trim())
-        return { ok: false, what: 'a build of Claudopus that a task is changing', why: 'Update leaves it alone; it gets the newest version when that task merges it in' };
+        return { ok: false, what: 'a copy of Claudopus that a task is changing', why: 'Update leaves it alone. It gets the newest version when that task is merged' };
     if (!branch)
-        return { ok: false, what: 'a test build of Claudopus', why: 'Update leaves it alone' };
+        return { ok: false, what: 'a test copy of Claudopus', why: 'Update leaves it alone' };
     const upstream = named((await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])).stdout.trim());
     if (branch !== 'main' || !/^[^/]+\/main$/.test(upstream))
-        return { ok: false, what: 'a test build of Claudopus', why: 'Update leaves it alone' };
+        return { ok: false, what: 'a test copy of Claudopus', why: 'Update leaves it alone' };
     return { ok: true, branch, upstream };
 };
 export const FAILS = {
-    page: "claudopus.ai's version page couldn't be read",
-    unchecked: 'the version page has nothing to check the new version against',
+    page: "Claudopus couldn't read the version page on claudopus.ai",
+    unchecked: "the version page doesn't say how to check the download",
     fetch: "the release couldn't be downloaded from GitHub",
-    mismatch: "what was downloaded isn't what the release published, so it was thrown away",
-    'own-commits': "your copy of Claudopus has changes of its own that this version doesn't have, so Update leaves it as it is",
-    overwrite: 'your copy of Claudopus has changes of its own in files this version changes, so updating would lose them: ask a chat to set them aside, then press Try again',
-    moved: "it couldn't be put in place",
-    install: "Claude Code's update step failed",
-    'installed-mismatch': "the copy Claude Code installed isn't what the release published, so the old one was put back",
+    mismatch: "the download didn't match the release, so Claudopus deleted it",
+    'own-commits': "your copy of Claudopus has changes this version doesn't have, so Update leaves it alone",
+    overwrite: 'your copy of Claudopus has changes in files this version changes. Ask a chat to set them aside, then press Try again',
+    moved: "Claudopus couldn't put the new version in place",
+    install: "Claude Code couldn't install it",
+    'installed-mismatch': "Claude Code's copy didn't match the release, so Claudopus put the old one back",
     'newer-out': 'a newer version came out since this one was downloaded',
-    stopped: 'it stopped before it finished, when its chat closed or reloaded',
+    stopped: 'the update stopped when its chat closed or reloaded',
     busy: 'another chat is updating Claudopus right now',
     gone: 'the download is no longer there',
-    'kept-copy': "changes of your own kept Claude Code's copy on the old version: ask a chat to set them aside, then press Try again",
+    'kept-copy': "your own changes kept Claude Code's copy on the old version. Ask a chat to set them aside, then press Try again",
 };
 export const stepsOf = (text) => {
     try {

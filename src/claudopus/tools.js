@@ -51,17 +51,90 @@ const toolHooks = (on) => {
         });
         return { result: items.map(item => `${item.state === 'done' ? '[x]' : item.state === 'dropped' ? '[dropped]' : item.state === 'doing' ? '[doing]' : '[ ]'} ${item.text}`).join('\n') };
     });
-    // The work says what in its report waits on the person: it knows best. Its next report takes them, one item each
-    on('tool.call', { tool: 'mcp__claudopus__waits' }, async ($, e) => {
+    // A file, a page or a time nothing of the work's own makes is looked for by Claudopus, which starts the work again when it is
+    // there: no command of the work's ever only waits (lookWakes)
+    on('tool.call', { tool: 'mcp__claudopus__wake_me' }, async ($, e) => {
         const input = e;
         if (e.agentId === undefined)
-            return { result: "Only a background task leaves a result; the chat has none." };
+            return { result: 'Only a background task is started again this way; the chat is started by the next message.' };
+        // A helper that ends its step has ended: it hands back what it found and what it waits for, and its task asks to be woken
+        if (!(await read($, todos)).some(one => one.id === e.agentId))
+            await sync($);
+        if ((await read($, todos)).find(one => one.id === e.agentId)?.parentId)
+            return { result: 'A helper is not started again this way: hand back your result now, saying what you were waiting for, and the task that started you asks Claudopus to wake it.' };
+        const what = cut(oneLine(String(input.what ?? '')), 80);
+        if (!what)
+            return { result: 'Say in a few words what you wait for.' };
+        const file = typeof input.file === 'string' && input.file.trim() ? input.file.trim() : undefined;
+        const url = typeof input.url === 'string' && /^https?:\/\/\S+$/.test(input.url.trim()) ? input.url.trim() : undefined;
+        const text = file && typeof input.text === 'string' && input.text.trim() ? input.text.trim().slice(0, 200) : undefined;
+        if (typeof input.url === 'string' && input.url.trim() && !url)
+            return { result: 'A page is named by its whole web address, starting http:// or https://.' };
+        if (file && !file.startsWith('/') && !file.startsWith('~/'))
+            return { result: 'Name the file by its full path.' };
+        const minutes = Math.min(WAKE_MOST, Math.max(0.25, Number(input.minutes) > 0 ? Number(input.minutes) : file || url ? WAKE_LONGEST : 0));
+        if (!file && !url && !(Number(input.minutes) > 0))
+            return { result: 'Name a file, a page, or the minutes after which to start you again.' };
+        // A look for the same file, line or page ran out already: it is not coming, and the work hands back what it has
+        const missed = (await read($, todos)).find(one => one.id === e.agentId)?.wakeMissed;
+        if ((file || url) && missed?.key === wakeKey({ file, text, url }))
+            return { result: `Refused by Claudopus: the look for ${missed.what} ran out already. Hand back your report now with what you have, saying what never came and why.` };
+        const at = await $.clock.now();
+        // (its own card: a helper's is its own, not its work's)
+        const agent = e.agentId;
+        if (!(await read($, todos)).some(one => one.id === agent))
+            await sync($);
+        let isCard = false;
+        await changeTodos($, list => list.map(one => (one.id === agent ? ((isCard = true), { ...one, wakeWhen: { what, ...(file ? { file } : {}), ...(text ? { text } : {}), ...(url ? { url } : {}), at, until: at + minutes * 60000 } }) : one)));
+        if (!isCard)
+            return { result: 'Claudopus has no card for you here, so it cannot start you again: carry on with what you can do now.' };
+        redraw($);
+        return { result: `Claudopus looks ${file ? `for ${text ? `"${text}" in ` : ''}${file}` : url ? `at ${url}` : `at the clock`} and starts you again ${file || url ? `the moment it is there, or after ${Math.round(minutes)} min with word that it never came` : `in ${Math.round(minutes)} min`}${Number(input.minutes) > minutes ? ` (at most ${WAKE_MOST} min)` : ''}. End your step now, or carry on with what needs nothing from it.` };
+    });
+    // The work says what in its report waits on the person: it knows best. Its next report takes them, one item each, each with its own
+    // answers when it is not yes or no: 16 Nov "settled by hand, or left behind?" came with Yes / No / Not now, which cannot answer it.
+    // Each call lists everything still waiting; one that repeats the question on the work's card is tied to that ask
+    on('tool.call', { tool: 'mcp__claudopus__waits' }, async ($, e) => {
+        const input = e;
+        // The chat records, for the result it names, which of its numbered questions the person's own words answered
+        if (e.agentId === undefined) {
+            const given = typeof input.result === 'string' ? input.result.trim() : '';
+            const numbers = (Array.isArray(input.answered) ? input.answered : []).map(Number).filter(n => Number.isInteger(n) && n > 0);
+            if (!given)
+                return { result: `Only a background task records what its result waits on. In the chat, once ${who()}'s own words have answered what a result waits on, name it as \`result\` (its report.md path) and give the numbers of the questions they answered as \`answered\`.` };
+            const r = (await loadReports($)).find(one => given.includes(`${reportPath(one)}/`) || given === reportPath(one) || given === one.id);
+            if (!r)
+                return { result: `No result is "${cut(given, 120)}": give its report.md path from the results list.` };
+            const answered = await settleWaits($, r, (_, index) => (numbers.includes(index + 1) ? { answer: IN_WORDS } : undefined));
+            redraw($);
+            const now = (await read($, reports)).find(one => one.id === r.id) ?? r;
+            const open = waitsOf(now).flatMap((one, n) => (one.answer ? [] : [`(${n + 1}) ${one.text}`]));
+            const unknown = numbers.filter(n => !waitsOf(r)[n - 1] || waitsOf(r)[n - 1]?.answer);
+            return {
+                result: `"${r.title}": ${answered ? `${answered} answered in ${who()}'s words` : 'nothing answered'}; ${open.length ? `still waiting: ${open.join(' ')}`.replace(/([^.?!])$/, '$1.') : 'nothing waits on them now.'}${unknown.length ? ` Not an open question there, so not marked: ${unknown.join(', ')}.` : ''}`,
+            };
+        }
         // A helper's answer is no report: the work it answers to records what waits
         if ((await read($, todos)).find(one => one.id === e.agentId)?.parentId)
             return { result: 'A helper records nothing here: say what waits in your answer, and the task that started you records it.' };
-        const items = [...new Set((Array.isArray(input.items) ? input.items : []).filter((one) => typeof one === 'string').map(one => cut(oneLine(one), 200)).filter(Boolean))].slice(0, 12);
-        await change($, e.agentId, one => ({ ...one, waits: items.length ? items : undefined }));
-        return { result: items.length ? `Recorded ${items.length} waiting on ${who()}; the panel shows them with your result.` : `Nothing waits on ${who()}.` };
+        if (!Array.isArray(input.items))
+            return { result: `Nothing recorded: give \`items\`, everything still waiting on ${who()}, or [] when nothing does.` };
+        const asked = (Array.isArray(input.items) ? input.items : []).flatMap(one => {
+            const item = typeof one === 'string' ? { text: one } : one && typeof one === 'object' ? one : {};
+            const text = typeof item.text === 'string' ? cut(oneLine(item.text), 200) : '';
+            const choices = Array.isArray(item.choices) ? [...new Set(item.choices.filter((c) => typeof c === 'string').map(c => cut(oneLine(c), 40)).filter(c => c && plainWords(c) !== 'not now' && plainWords(c) !== plainWords(ANSWER_IN_WORDS)))].slice(0, 4) : undefined;
+            return text ? [{ text, ...(choices?.length ? { choices } : {}), ...('asked' in item && item.asked === true ? { isAsked: true } : {}) }] : [];
+        });
+        const items = asked.filter((one, n) => asked.findIndex(other => other.text === one.text) === n).slice(0, 12);
+        let tied = 0;
+        await change($, e.agentId, one => {
+            const waits = items.map(wait => tiedTo(wait, one));
+            tied = waits.filter(wait => wait.ask).length;
+            return { ...one, waits: waits.length ? waits : undefined, waitsSet: true };
+        });
+        redraw($);
+        const isTied = tied ? ` ${tied === 1 ? 'One is' : `${tied} are`} the question on your card, and answering it there answers ${tied === 1 ? 'it' : 'them'} here.` : '';
+        return { result: `${items.length ? `Recorded ${items.length} waiting on ${who()}; the panel shows them with your result.` : `Nothing waits on ${who()}.`}${isTied} Once you finish, this replaces what your earlier results waited on.` };
     });
     // Work that needs the person's hands now: its card stands out with the ask and its Copy, until they answer or the work clears it
     on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
@@ -107,7 +180,11 @@ const toolHooks = (on) => {
         const stepGiven = typeof input.last_step === 'string' ? oneLine(input.last_step).slice(0, 400) : '';
         const stepFolder = typeof input.folder === 'string' ? input.folder.trim() : '';
         const isStepped = Boolean(stepGiven && choices.length && stepFolder.startsWith('/') && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(stepFolder).catch(() => undefined))?.kind === 'dir');
-        await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(isStepped ? { lastStep: stepGiven, folder: stepFolder } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), ...(pictures.length ? { pictures } : {}), at } : undefined }));
+        await change($, e.agentId, was => {
+            const one = { ...was, ask: text ? { text, ...(isStepped ? { lastStep: stepGiven, folder: stepFolder } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), ...(pictures.length ? { pictures } : {}), at } : undefined };
+            // An item recorded as the question on the card, or the same line as it, is tied to this ask
+            return one.ask ? { ...one, ...(one.waits?.length ? { waits: one.waits.map(askedWait).map(wait => tiedTo(wait, one)) } : {}) } : one;
+        });
         const list = await read($, todos);
         const card = list.find(one => one.id === topOf(list, e.agentId ?? ''));
         if (!text) {
@@ -153,10 +230,7 @@ const toolHooks = (on) => {
         const card = list.find(one => one.id === topOf(list, e.agentId ?? ''));
         const words = [...(card?.entries ?? [])].reverse().find(entry => entry.kind === 'steer')?.text ?? '';
         said = words || task;
-        const isHandingOn = Boolean(card?.isFork && (card.steps ?? 0) >= FORK_STEPS);
-        const handed = isHandingOn
-            ? `The copy of this chat that did "${card?.title || 'a small job'}" took its steps and hands on what is left. Start it as its own background task: ${task}`
-            : `A message from ${who()} to the task "${card?.title || 'in the background'}" is a new task of its own, not part of that task, and that task hasn't done it. Start it as its own background task: ${task}${words ? `\n${who(true)}'s words: “${words}”` : ''}`;
-        return { result: `Noted. Hand the task to the chat now: call SendMessage (load it with ToolSearch if needed) with to "main" and this message, exactly:\n${handed}\n${isHandingOn ? 'Then end with your report.' : "Then continue your own task; don't do that new one here."}` };
+        const handed = `A message from ${who()} to the task "${card?.title || 'in the background'}" is a new task of its own, not part of that task, and that task hasn't done it. Start it as its own background task: ${task}${words ? `\n${who(true)}'s words: “${words}”` : ''}`;
+        return { result: `Noted. Hand the task to the chat now: call SendMessage (load it with ToolSearch if needed) with to "main" and this message, exactly:\n${handed}\nThen continue your own task; don't do that new one here.` };
     });
 };

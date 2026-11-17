@@ -800,12 +800,14 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   }
   await frames(13)
   expect(resumed.filter(line => line.includes('stopped partway through'))).toHaveLength(1)
-  expect(logged.filter(line => line.includes('"Fit the video" stopped partway') && line.includes('started it again'))).toHaveLength(1)
+  // Told to the chat's model, not shown: the card says so
+  expect(appended.filter(line => line.includes('"Fit the video" stopped partway') && line.includes('started it again'))).toHaveLength(1)
+  expect(logged.filter(line => line.includes('stopped partway'))).toEqual([])
   // 12 minutes on: started again to check on its helper, and the chat told so
   const nudges = (id = 'a2') => resumed.filter(line => line.startsWith(`${id}: From Claudopus:`) && line.includes('helpers'))
   expect(nudges()).toHaveLength(1)
   expect(nudges()[0]).toMatch(/^a2: From Claudopus: nothing new has come back from your helpers for 1[2-6] min while your step had ended: "[^"]+" \(a3\)\. Ask each with SendMessage/)
-  expect(logged.filter(line => line.startsWith('Nothing new from the helpers of "Draw the lids"') && line.endsWith('Claudopus started Claude again and asked it to check on them.'))).toHaveLength(1)
+  expect(appended.filter(line => line.startsWith('undefined: Nothing new from the helpers of "Draw the lids"') && line.endsWith('Claudopus started Claude again and asked it to check on them.'))).toHaveLength(1)
   // Until then it may not hand back while its helper runs
   expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-early', agentId: 'a2', message: 'Lids drawn.' } as never)) as { deny?: string }).deny).toContain("Don't hand back your report yet")
   // It asks its helper, which never answers, and ends its step again: a step and a message start nothing over
@@ -818,7 +820,7 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   // 24 minutes on: started again, once, to hand back what it has; a message from the chat then takes nothing back
   expect(await until(async () => nudges().length === 2 || undefined)).toBe(true)
   expect(nudges()[1]).toContain('hand back your report now with what you have')
-  expect(logged.filter(line => line.startsWith('Nothing new from the helpers of "Draw the lids"') && line.endsWith('asked it to send what it has now.'))).toHaveLength(1)
+  expect(appended.filter(line => line.startsWith('undefined: Nothing new from the helpers of "Draw the lids"') && line.endsWith('asked it to send what it has now.'))).toHaveLength(1)
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm-chat', to: 'a2', message: 'Carry on.' } as never)
   agents.a2 = 'completed'
   // 36 minutes on, still not handed back: no third start; the chat is told plainly it is stuck and may write to it, and the card says so
@@ -851,7 +853,7 @@ test('the schedule for silent helpers keeps its time: each step comes though the
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = { a1: 'general-purpose', a2: 'general-purpose' }
   const unresumable = new Set(['a1'])
-  const { keep, settle, clock, held, logged, resumed } = world(on, { agents, kinds, parents: { a2: 'a1' }, unresumable })
+  const { keep, settle, clock, held, logged, resumed, appended } = world(on, { agents, kinds, parents: { a2: 'a1' }, unresumable })
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Draw the lids', prompt: 'lids' } as never)
   await $.agent.spawn({ ...spawn, description: 'Render the lids', prompt: 'render', parentAgentId: 'a1' } as never)
@@ -859,7 +861,7 @@ test('the schedule for silent helpers keeps its time: each step comes though the
   for (const id of ['a1', 'a2']) await $.tool.call({ tool: 'Bash', tool_use_id: `s-${id}`, agentId: id, command: 'git status' } as never)
   agents.a1 = 'completed'
   await $.turn.complete({ answer: 'Waiting for my helper.', durationMs: 1, isAborted: false, turnId: 'e1', reason: 'answer', agentId: 'a1' } as never)
-  const said = () => logged.filter(line => line.startsWith('Nothing new from the helpers of "Draw the lids"'))
+  const said = () => appended.filter(line => line.startsWith('undefined: Nothing new from the helpers of "Draw the lids"'))
   await clock.advance(13 * 60_000)
   expect(said()).toHaveLength(1)
   expect(resumed.filter(line => line.startsWith('a1:'))).toEqual([])

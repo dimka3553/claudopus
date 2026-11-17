@@ -1,2 +1,5 @@
-- When a helper's result reaches your chat only because its task paused to let it work, Claudopus passes it on to that task and the chat no longer takes a turn for it: no "Nothing needs you here." line, and no second copy sent on.
-- Your own answer or reply on a task's card is no longer echoed into the chat as "✓ You replied to …": the card already shows it, and the chat still knows.
+- A helper's report goes to the task that started it, not to your chat: when that task has paused, Claudopus starts it first, so Claude Code hands the report to the task. No "Report from subagent" box in your chat, and no "Nothing needs you here." line.
+- Should a helper's report still reach your chat, the chat no longer takes a turn for it.
+- A task's question shows in your chat as one line; what it is about, its answers and pictures stay on its card.
+- A command waiting for your Allow shows in your chat as one line.
+- Your own answers, replies and taken-back answers on a card, a question a task took back, a task Claudopus restarted or asked to check on its helpers, and tasks started again after the chat dropped no longer show in your chat: the cards show them, and the chat still knows.

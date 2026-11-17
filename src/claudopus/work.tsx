@@ -502,7 +502,10 @@ const workHooks = (on: On) => {
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       // The engine hands the hand-back on as it goes through: the chat may be given it from now (isQuietHandback)
       handingBack.add(e.agentId)
+      // A helper's task that has ended its step is started first, so the engine hands the result to it, not to the chat (wakeForHandback)
+      await wakeForHandback($, e.agentId).catch(err => log($, `task not started for its helper's hand-back: ${String(err)}`))
       const r = await next(e)
+      if ((r.deny || r.isError) && wokenFor.delete(e.agentId)) await handbackRefused($, e.agentId).catch(err => log($, `task not told its helper's hand-back was refused: ${String(err)}`))
       if (r.deny || r.isError) handingBack.delete(e.agentId)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       // A helper whose work has ended its step hands its result to the chat: the chat is told once the hand-back went through, before

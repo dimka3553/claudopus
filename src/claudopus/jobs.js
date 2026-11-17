@@ -36,10 +36,13 @@ const jobOf = (id, what, cmd, at, isWatch = false, theirs) => {
 // The jobs a card has running: what it sent to the background, and a command it has waited on a while; jobs alike are one
 const jobsOf = (one, at) => foldJobs([
     ...(one.bg ?? []).map(b => jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id])),
-    ...(one.detached ?? []).map(d => jobOf(d.id, d.what, d.cmd, d.at, false, one.seenJobs?.[d.id])),
+    // (what a background command left going while it still runs is a row of its own, with its Stop, named as what that command
+    // started, never a second row of the command's own name)
+    ...(one.detached ?? []).map(d => jobOf(d.id, d.from && one.bg?.some(b => b.id === d.from) ? `What “${runWords(d.what, d.cmd)}” started` : d.what, d.cmd, d.at, false, one.seenJobs?.[d.id])),
     ...(one.status === 'working' && one.running?.cmd && at - one.running.at >= ROW_SHOWN
         ? [jobOf(`call-${one.id}`, one.running.label ?? '', one.running.cmd, one.running.at)]
         : []),
+    ...heldJobs(one),
 ]);
 // A job's name on its row: what kind, a server's port, and its own words
 // Its kind leads in words, so it is never taken for a helper, then how many alike it stands for; a wait's own "Wait" is not said
@@ -47,10 +50,15 @@ const jobsOf = (one, at) => foldJobs([
 const jobHead = (job) => {
     if (job.id.startsWith('more-'))
         return job.label;
-    const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`;
+    // What a command left going is said in that command's own words alone, as the person reads what it is doing first; how many
+    // programs it is goes on the line under it (17 Nov "Command · 12 programs · Test whe…" cut the words that said what it was)
+    if (leftCommandOf(job.id) && job.count && job.count > 1)
+        return job.label;
+    const many = job.count && job.count > 1 ? ` ×${job.count}` : '';
+    const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${many}`;
     // Its own words alone when they say its kind already (Download the CT scans, Wait for the deploy)
     if (job.isNamed && isKindSaid(job.label))
-        return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`;
+        return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${many}`;
     // A wait leads with what it waits for, its own words after
     const label = job.kind === 'wait' ? (job.waitsFor ?? job.label.replace(/^wait(s|ing)?\s+/i, '')) : job.label;
     return `${kind} · ${label}`;
@@ -184,7 +192,8 @@ const lookJobs = async ($) => {
     const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean));
     const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]));
     // A detached job whose process ended leaves its card, kept as ended (how its process ended is not known)
-    const gone = owned.filter(o => o.pid && !alive.has(o.pid)).map(o => o.id);
+    // (one being stopped is left to its stop, which ends it as stopped with the rest of its command)
+    const gone = owned.filter(o => o.pid && !alive.has(o.pid) && !stoppingJobs.has(o.id)).map(o => o.id);
     if (gone.length && /@@ALIVE@@/.test(r.stdout)) {
         const runsOf = (one) => (one.detached ?? []).filter(d => gone.includes(d.id)).map(d => ({ id: d.id, what: d.what, at: d.at, endedAt: now, how: 'ended' }));
         // (what this look took off its card: a run another look or a stop already took off is not woken for again)
@@ -193,9 +202,11 @@ const lookJobs = async ($) => {
             const ended = (one.detached ?? []).filter(d => gone.includes(d.id));
             if (!ended.length)
                 return one;
-            // (one being stopped now is told by its stop, read here as the run leaves its card)
-            taken.set(one.id, ended.filter(d => !stoppingJobs.has(d.id)));
             const left = (one.detached ?? []).filter(d => !gone.includes(d.id));
+            // (one being stopped now is told by its stop, read here as the run leaves its card; what one command left going is told
+            // once its last program has ended, never while others of it still work)
+            const isRest = (d) => leftCommandOf(d.id) !== '' && left.some(l => leftCommandOf(l.id) === leftCommandOf(d.id));
+            taken.set(one.id, ended.filter(d => !stoppingJobs.has(d.id) && !isRest(d)));
             return { ...one, detached: left.length ? left : undefined, ...keepEnded(one, runsOf(one)) };
         }));
         void drawFresh($);
@@ -244,12 +255,12 @@ const lookJobs = async ($) => {
                 : undefined;
         if (runs && jobProcs.length) {
             if (!runs.length)
-                return wait.isStart ? '' : 'what it waits for has ended';
+                return wait.isStart ? '' : 'What it waits for ended';
             if (runs.some(p => treeOf(jobProcs, p.pid).some(isPausedProc)))
-                return 'what it waits for is paused';
+                return 'What it waits for is paused';
         }
         const at = wait.file ? changed.get(wait.file) : undefined;
-        return at && now - at >= JOB_QUIET ? `what it waits on has not changed for ${shortAgo(now - at)}` : '';
+        return at && now - at >= JOB_QUIET ? `What it waits for hasn't changed for ${shortAgo(now - at)}` : '';
     };
     const parts = body.split(/\n@@JOB@@ ([^\n]*)\n/);
     let isChanged = false;
@@ -264,6 +275,15 @@ const lookJobs = async ($) => {
         const end = job?.pid ? undefined : runEndOf(text);
         if (end)
             (ended.includes(id) || ended.push(id), (endedAs[id] = { ...end, ...(m ? { at: m } : {}) }));
+        // A task's background command that failed is read as one held open is: an error in its last lines naming a file another running
+        // task changed lately in the same checkout tells that task, and the task whose command it was (crossing.tsx)
+        const failedCmd = end?.how === 'failed' && job?.owner ? (list.find(one => one.id === job.owner)?.bg?.find(b => b.id === id)?.cmd ?? '') : '';
+        if (failedCmd && job?.owner) {
+            const owner = job.owner;
+            void crossEnded($, { tool: 'Bash', agentId: owner, command: failedCmd }, {}, text, true)
+                .then(line => (line ? tell($, owner, line) : undefined))
+                .catch(err => log($, `a failed background command not read for crossing: ${String(err)}`));
+        }
         // An output that is there but holds nothing has printed nothing yet: its time is when it was made, not when it last wrote (on
         // 15 Nov such rows read "updated 9m ago" for runs that sent all they printed elsewhere)
         const seen = { ...latestOf(text), ...(m && !text.trim() ? { isEmpty: true } : {}) };
@@ -309,17 +329,26 @@ const lookJobs = async ($) => {
     // (not waited for: a work's chat may take its time to take a line, and the look goes on meanwhile)
     void tellSilent($, list, now).catch(err => log($, `silent runs not told: ${String(err)}`));
     void endWatchers($, await read($, todos), now).catch(err => log($, `watchers not stopped: ${String(err)}`));
+    if (psText !== undefined)
+        void endWaiters($, await read($, todos), now).catch(err => log($, `waits not stopped: ${String(err)}`));
     for (const owner of moved)
         jobNews.set(owner, now);
     if (moved.size)
         await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)));
-    if (isChanged)
+    // A command that ended leaves its row at once; new output alone waits for the panel's next calm drawing (calmLook, every CALM while
+    // work runs): drawn afresh at each output, seven tasks' commands drew the panel without a pause and no click held (16 Nov)
+    if (ended.length)
         void drawFresh($);
+    else if (isChanged)
+        outputMoved = true;
 };
+let outputMoved = false;
 // The memory a followed process and all it started hold, as the processes were last listed
 const memSeen = (pid) => {
-    const mem = pid && jobProcs.length ? memOf(treeOf(jobProcs, pid)) : undefined;
-    return mem ? { mem } : {};
+    const tree = pid && jobProcs.length ? treeOf(jobProcs, pid) : [];
+    const mem = memOf(tree);
+    // (and in KB, so the programs of one command are added up exactly)
+    return mem ? { mem, memKb: tree.reduce((sum, p) => sum + (p.rss ?? 0), 0) } : {};
 };
 let spans = [];
 const SPANS_KEPT = 300;
@@ -357,7 +386,11 @@ const keepSpan = async ($, agent, call, from, at, result) => {
     const bgId = result?.backgroundTaskId;
     const isBackground = Boolean(call.run_in_background) && typeof bgId === 'string';
     const span = { id: String(call.tool_use_id ?? now), agent, what: oneLine(String(call.description ?? '')).slice(0, 160), cmd: oneLine(command).slice(0, 4000), from, to, at, endAt: now, ...(isBackground ? { bgId: String(bgId) } : { until: now }) };
-    spans = [...spans.filter(s => s.id !== span.id), span].slice(-SPANS_KEPT);
+    // (a command sent to the background that still runs is kept however many have come since, so what another task starts while it
+    // runs never goes to a short command beside it)
+    const rest = [...spans.filter(s => s.id !== span.id), span];
+    const open = rest.filter(s => s.bgId && s.until === undefined);
+    spans = [...open, ...rest.filter(s => !(s.bgId && s.until === undefined)).slice(-Math.max(0, SPANS_KEPT - open.length))].sort((a, b) => a.at - b.at);
     if (call.run_in_background)
         return;
     const r = await $.process.run(['sh', '-c', `printf '@@LEFT@@\\n'; ps -axww -o ${PS_COLUMNS}`], { timeoutMs: 5000 }).catch(() => undefined);
@@ -367,8 +400,24 @@ const keepSpan = async ($, agent, call, from, at, result) => {
     // Among every command kept, so a run held back while another ran goes to its own
     await adoptLeft($, procs, now);
 };
-// What commands left going becomes runs on their cards: each topmost process, with its command's words when it left one, else
-// its own program and script; its log where its output goes to a file, so its progress line is read as any other
+// Whose each process is, by its environment: `mine` where it carries this chat's session (every command the engine runs for this
+// chat does, and all it starts), `other` where its environment is there without it, `hidden` where it cannot be read
+const ownersOf = async ($, pids) => {
+    const sid = await $.session.id().catch(() => '');
+    const out = new Map();
+    if (!sid || !pids.length)
+        return out;
+    const script = `sid=$1; shift; for p; do if [ -r "/proc/$p/environ" ]; then e=$(tr '\\0' '\\n' < "/proc/$p/environ" 2>/dev/null); else e=$(ps -E -ww -o command= -p "$p" 2>/dev/null | tr ' ' '\\n'); fi; if printf '%s\\n' "$e" | grep -qxF "CLAUDE_CODE_SESSION_ID=$sid"; then echo "$p mine"; elif printf '%s\\n' "$e" | grep -qE '^(HOME|PATH|USER)='; then echo "$p other"; else echo "$p hidden"; fi; done # whose runs`;
+    const r = await $.process.run(['sh', '-c', script, 'sh', sid, ...pids.filter(isPid)], { timeoutMs: 5000 }).catch(() => undefined);
+    for (const line of r?.stdout.split('\n') ?? []) {
+        const [pid = '', who = ''] = line.trim().split(' ');
+        if (who === 'mine' || who === 'other' || who === 'hidden')
+            out.set(pid, who);
+    }
+    return out;
+};
+// What commands left going becomes runs on their cards: each topmost process, in its command's words; its log where its output
+// goes to a file, so its progress line is read as any other
 const adoptLeft = async ($, procs, now, only) => {
     const list = await read($, todos);
     // A process number gone from the list may be handed out again: it no longer stands for a run made already
@@ -376,7 +425,20 @@ const adoptLeft = async ($, procs, now, only) => {
         if (!procs.some(p => p.pid === pid))
             adopted.delete(pid);
     const known = new Set([...adopted, ...list.flatMap(one => (one.detached ?? []).flatMap(d => (d.pid ? [d.pid] : [])))]);
-    const left = leftoversOf(procs, only ?? spans, known, [...openCalls.values()]);
+    const found = leftoversOf(procs, only ?? spans, known, [...openCalls.values()]);
+    if (!found.length)
+        return;
+    // Only what this chat's commands started: a process whose environment can be read and does not carry this chat's session is some
+    // other program's (on 17 Nov a git push and a dig took the helpers of headless Chrome other work had started, and Grok's and
+    // Chrome's own crash reporters, as runs they had left: "Run Google Chrome" ×12 on cards that never opened a browser). One that
+    // hides its environment (the system's own tools, and apps signed to, as Google's are) counts only where its command names it
+    const whose = await ownersOf($, found.map(l => l.top.pid));
+    const spanOfLeft = (l) => spans.find(s => s.id === l.span) ?? only?.find(s => s.id === l.span);
+    const isTheirs = (l) => whose.get(l.top.pid) === 'other' || (whose.get(l.top.pid) === 'hidden' && !isNamedBy(l.top.command, spanOfLeft(l)?.cmd ?? ''));
+    const left = found.filter(l => !isTheirs(l));
+    for (const l of found)
+        if (isTheirs(l))
+            adopted.add(l.top.pid);
     if (!left.length)
         return;
     const fd = await $.process
@@ -390,10 +452,11 @@ const adoptLeft = async ($, procs, now, only) => {
             continue;
         const file = logs.get(one.top.pid) ?? '';
         const log = file.startsWith('/') && !file.startsWith('/dev/') ? file : '';
-        const several = left.filter(l => l.span === one.span).length > 1;
-        const what = several || !span.what ? leftName(one.top.command) : span.what;
+        // Named by the command that left it, in the words the work gave it, never by the program it runs: the person reads what it is
+        // doing, not "Run Google Chrome" or "Run torch_shm_manager"; what one command left is one row (foldJobs)
+        const what = span.what || labelOf('', span.cmd);
         adopted.add(one.top.pid);
-        added.set(span.agent, [...(added.get(span.agent) ?? []), { id: `left-${one.top.pid}-${span.id}`, what, at: Math.min(now, Math.max(span.at, one.top.startAt)), cmd: oneLine(one.top.command).slice(0, 400), log, pid: one.top.pid, isLeft: true }]);
+        added.set(span.agent, [...(added.get(span.agent) ?? []), { id: `left-${one.top.pid}-${span.id}`, what, at: Math.min(now, Math.max(span.at, one.top.startAt)), cmd: oneLine(one.top.command).slice(0, 400), log, pid: one.top.pid, isLeft: true, ...(span.bgId ? { from: span.bgId } : {}) }]);
     }
     if (!added.size)
         return;
@@ -421,7 +484,7 @@ const isLike = (command, pattern) => {
 // detached or left going has its process and all it started ended, a command held open has its shell's processes ended (the work's
 // call then comes back with it ended). The work is told in its own chat that the person stopped it as stuck, and what to do next.
 // On this Mac only, as the processes are this Mac's
-const canStopJob = (job) => !isRunFromAfar && !job.id.startsWith('more-');
+const canStopJob = (job) => !isRunFromAfar && !job.id.startsWith('more-') && !job.id.startsWith('held-');
 const stoppingJobs = new Set();
 const RUN_STOPPED = (what, silent) => silent
     ? `${who(true)} stopped your command "${what}" from the panel because it looked stuck: it had printed nothing for ${silent}. A command must never be stuck or silent. Don't start it again as it was: find out why it stalled, make it print a plain \`progress:\` line at least every 10 seconds, and start it again only if it is still needed.`
@@ -476,6 +539,71 @@ const endWatchers = async ($, list, now) => {
         }
     }
 };
+// A command of a work's or a helper's whose processes, at two looks in a row, do nothing but pass time or follow something (only a
+// sleep, a log followed, a tool made to wait at the end of its tree), however its words were written: it only waits, so it is
+// stopped and its work told what wakes it instead. What the words let through is caught here as it runs (a function, a nested
+// shell, a sleep given by a variable). Not a Monitor watch, whose lines the work is told, nor a server
+const WAITER_STOPPED = (what) => `Claudopus stopped your command "${what}": all it did was wait, and nothing you start may only wait. Your own commands wake you the moment they end, and each helper's result comes to you as a message: carry on, or end your step. For a file, a page or a time that nothing of yours makes, a task calls \`wake_me\`; a helper hands back what it waits for.`;
+// What each run's processes have shown at the looks: since when they only waited, the sleeps seen, and whether they ever did work.
+// A run that ever did work is never stopped (a script that sleeps between its steps, a retry, a deploy that waits for a service);
+// one is stopped only when, at every look over a minute, it did nothing but pass time, by sleeps that came and went (a loop) or one
+// that has run two minutes
+const waiterSeen = new Map();
+const workSeen = new Set();
+const WAITER_FOR = 60000;
+const WAITER_LONE = 120000;
+const endWaiters = async ($, list, now) => {
+    // (every card's commands matched against the shells at once, so two alike never claim the same shell)
+    const allBgs = list.flatMap(one => (one.chat || one.status !== 'working' ? [] : (one.bg ?? []).filter(b => !b.isWatch && !SERVER_CMD.test(b.cmd ?? '') && describedOf(b.what).kind !== 'server')));
+    const shells = allBgs.length ? shellsOf(jobProcs, allBgs.map(b => ({ id: b.id, cmd: b.cmd ?? '', at: b.at }))) : new Map();
+    const runs = list.flatMap(one => {
+        if (one.chat || one.status !== 'working')
+            return [];
+        const bgs = allBgs.filter(b => (one.bg ?? []).includes(b));
+        return [
+            ...bgs.flatMap(b => (typeof shells.get(b.id) === 'string' ? [{ owner: one, id: b.id, pid: shells.get(b.id) }] : [])),
+            ...(one.detached ?? []).filter(d => d.pid && !SERVER_CMD.test(d.cmd) && describedOf(d.what).kind !== 'server').map(d => ({ owner: one, id: d.id, pid: d.pid ?? '' })),
+            ...(one.running?.cmd && now - one.running.at >= ROW_SHOWN ? ((pid => (pid ? [{ owner: one, id: `call-${one.id}`, pid }] : []))(heldShellOf(jobProcs, one.running.cmd, one.running.at))) : []),
+        ];
+    });
+    for (const id of waiterSeen.keys())
+        if (!runs.some(run => run.id === id))
+            waiterSeen.delete(id);
+    for (const id of workSeen)
+        if (!runs.some(run => run.id === id))
+            workSeen.delete(id);
+    for (const run of runs) {
+        if (workSeen.has(run.id))
+            continue;
+        const leaves = waiterLeavesOf(jobProcs, run.pid);
+        if (!leaves) {
+            // (a shell with nothing under it shows nothing of what it does: neither work nor a wait)
+            if (treeOf(jobProcs, run.pid).length > 1)
+                (workSeen.add(run.id), waiterSeen.delete(run.id));
+            continue;
+        }
+        const seen = waiterSeen.get(run.id) ?? { since: now, looks: 0, sleepers: new Set(), longest: 0 };
+        seen.looks += 1;
+        for (const leaf of leaves)
+            (seen.sleepers.add(leaf.pid), (seen.longest = Math.max(seen.longest, now - leaf.startAt)));
+        waiterSeen.set(run.id, seen);
+        const isLoop = seen.sleepers.size >= 3 && seen.looks >= 3 && now - seen.since >= WAITER_FOR;
+        if ((!isLoop && seen.longest < WAITER_LONE) || stoppingJobs.has(run.id))
+            continue;
+        const job = jobsOf(run.owner, now).find(j => j.id === run.id) ?? jobsOf({ ...run.owner, bg: run.owner.bg?.filter(b => b.id === run.id), detached: run.owner.detached?.filter(d => d.id === run.id) }, now).find(j => j.id === run.id);
+        if (!job)
+            continue;
+        waiterSeen.delete(run.id);
+        stoppingJobs.add(job.id);
+        try {
+            await stopping($, run.owner.id, job, WAITER_STOPPED(job.label));
+        }
+        finally {
+            stoppingJobs.delete(job.id);
+        }
+        await log($, `run ${job.id} of ${run.owner.parentId ? 'helper' : 'work'} ${run.owner.id} stopped: all it did was wait`);
+    }
+};
 // (`said`: what the work is told instead of the person's stop, nothing when empty)
 const stopping = async ($, owner, job, said) => {
     const now = await $.clock.now();
@@ -483,13 +611,29 @@ const stopping = async ($, owner, job, said) => {
     const card = list.find(one => one.id === owner);
     const bg = card?.bg?.find(b => b.id === job.id);
     const detached = card?.detached?.find(d => d.id === job.id);
-    // The processes to end: the detached one's, or the held shell's, with every process under them
+    // What one command left going is one row, so the person's Stop on it ends every program of it; a stop Claudopus makes itself (a
+    // watcher, a run that only waits) ends only the program it judged. All of them count as being stopped meanwhile, so none is
+    // taken for ended while the others are made to end
+    const alike = detached ? (card?.detached ?? []).filter(d => d.id === detached.id || (said === undefined && leftCommandOf(d.id) !== '' && leftCommandOf(d.id) === leftCommandOf(detached.id) && d.what === detached.what)) : [];
+    const marked = alike.filter(d => !stoppingJobs.has(d.id)).map(d => d.id);
+    for (const id of marked)
+        stoppingJobs.add(id);
+    try {
+        await stoppingNow($, owner, job, said, now, card, bg, detached, alike);
+    }
+    finally {
+        for (const id of marked)
+            stoppingJobs.delete(id);
+    }
+};
+const stoppingNow = async ($, owner, job, said, now, card, bg, detached, alike) => {
+    // The processes to end: the detached ones', or the held shell's, with every process under them
     const procs = jobProcs.length ? jobProcs : procsOf((await $.process.run(['ps', '-axww', '-o', PS_COLUMNS], { timeoutMs: 5000 }).catch(() => ({ stdout: '' }))).stdout, now);
     // A background command's own shell, found as the look finds it, so it is ended even where the engine does not stop it
     const bgShell = bg && !bg.isWatch && procs.length ? shellsOf(procs, [{ id: bg.id, cmd: bg.cmd ?? '', at: bg.at }]).get(bg.id) : undefined;
-    const top = detached?.pid ?? (typeof bgShell === 'string' ? bgShell : undefined) ?? (job.id.startsWith('call-') && card?.running?.cmd ? heldShellOf(procs, card.running.cmd, card.running.at) : undefined);
+    const tops = detached ? alike.flatMap(d => (d.pid ? [d.pid] : [])) : [(typeof bgShell === 'string' ? bgShell : undefined) ?? (job.id.startsWith('call-') && card?.running?.cmd ? heldShellOf(procs, card.running.cmd, card.running.at) : undefined)].flatMap(p => (p ? [p] : []));
     // (the top one itself even where the processes could not be listed)
-    const pids = top ? [...new Set([top, ...treeOf(procs, top).map(p => p.pid)])].filter(isPid) : [];
+    const pids = [...new Set(tops.flatMap(top => [top, ...treeOf(procs, top).map(p => p.pid)]))].filter(isPid);
     let isStopped = false;
     if (bg) {
         const r = await $.tool.call({ tool: 'TaskStop', task_id: bg.id }).catch(err => ({ deny: String(err) }));
@@ -512,7 +656,8 @@ const stopping = async ($, owner, job, said) => {
     if (bg)
         await dropBackground($, [bg.id], 'stopped');
     if (detached) {
-        await changeTodos($, cards => cards.map(one => (one.id === owner && one.detached?.some(d => d.id === job.id) ? { ...one, detached: one.detached.filter(d => d.id !== job.id).length ? one.detached.filter(d => d.id !== job.id) : undefined, ...keepEnded(one, [{ id: detached.id, what: detached.what, at: detached.at, endedAt: now, how: 'stopped' }]) } : one)));
+        const isAlike = (d) => alike.some(a => a.id === d.id);
+        await changeTodos($, cards => cards.map(one => (one.id === owner && one.detached?.some(isAlike) ? { ...one, detached: one.detached.filter(d => !isAlike(d)).length ? one.detached.filter(d => !isAlike(d)) : undefined, ...keepEnded(one, alike.map(d => ({ id: d.id, what: d.what, at: d.at, endedAt: now, how: 'stopped' }))) } : one)));
     }
     const silent = job.wroteAt && !job.isEmpty ? now - job.wroteAt : now - job.at;
     if (said === undefined)
@@ -557,9 +702,6 @@ const tellSilent = async ($, list, now) => {
         if (jobLog.get(id)?.wroteAt && now - (jobLog.get(id)?.wroteAt ?? 0) < RUN_SILENT_TOLD)
             silentTold.delete(id);
 };
-// The runs a card has going that end of themselves, as a wait for one names it: a background command, or one left detached by its
-// process (not a server, which is not waited on to end)
-const ownRunsOf = (one) => [...(one?.bg ?? []).filter(b => !b.isWatch).map(b => ({ id: b.id, what: b.what, cmd: b.cmd ?? '' })), ...(one?.detached ?? []).map(d => ({ id: d.id, what: d.what, cmd: d.cmd, ...(d.pid ? { pid: d.pid } : {}) }))].filter(run => !SERVER_CMD.test(run.cmd) && describedOf(run.what).kind !== 'server');
 // The detached runs a piece of work stopped itself with a kill naming its process: their end wakes no one
 const killedByWork = new Set();
 const noteKills = (one, command) => {
@@ -573,7 +715,11 @@ const wakeForRun = async ($, one, runs) => {
     const first = runs[0];
     if (!one || !first || isHeld(one) || one.status === 'stopped' || one.status === 'failed' || (one.status === 'done' && (one.handedBackAt !== undefined || endedByHandback.has(one.id) || one.endedAt < first.at)))
         return;
-    const text = runs.length === 1 ? RUN_ENDED(runWords(first.what, first.cmd), first.log) : RUNS_ENDED(runs.map(d => runWords(d.what, d.cmd)));
+    // (what one command left going is named once, however many programs it was)
+    const words = [...new Set(runs.map(d => runWords(d.what, d.cmd)))];
+    // (a program's own log is the command's only where it was the command's one program)
+    const isAlone = runs.length === 1 && (!leftCommandOf(first.id) || (one.endedRuns?.find(r => leftCommandOf(r.id) === leftCommandOf(first.id))?.count ?? 1) === 1);
+    const text = words.length === 1 ? RUN_ENDED(words[0] ?? '', isAlone ? first.log : '') : RUNS_ENDED(words);
     if (one.status === 'working' && !one.waitsSince) {
         await tell($, one.id, text);
         return void (await log($, `work ${one.id} told ${runs.length} run(s) of it ended`));
@@ -586,8 +732,6 @@ const wakeForRun = async ($, one, runs) => {
 };
 // A run in its own words, without the time it was given when it began
 const runWords = (what, cmd = '') => labelOf(what, cmd).replace(/\s*\((?:about|under|over|around|up to|~)?\s*[\d.,\-– ]+\s*(?:s|sec|seconds?|m|mins?|minutes?|h|hours?)\)\s*$/i, '').trim();
-// How a run ended, said after its words
-const RUN_ENDED_AS = { finished: 'has finished', failed: 'failed', killed: 'was stopped', stopped: 'was stopped', 'timed out': 'ran out of time', ended: 'has ended' };
 // A press on a run's row opens a Terminal window that shows its output as it is, from its start (the last thousand lines) and as
 // it goes on; on this Mac only, as the window is this Mac's
 const canOpenJob = (job) => Boolean(jobFiles.get(job.id)) && !isRunFromAfar && !isLinux;
@@ -602,7 +746,7 @@ const openJobOutput = async ($, job) => {
     const base = `${dir}/terminal`;
     const home = `${base}/output-${slug(job.id) || 'job'}-${at}`;
     const path = file.startsWith('~/') ? `"$HOME"/${zshQuoted(file.slice(2))}` : zshQuoted(file);
-    const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `[[ -e ${path} ]] || print -r -- 'No output yet. This window shows it as soon as the command prints something.'`, `exec tail -n 1000 -F ${path}`, ''].join('\n');
+    const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `[[ -e ${path} ]] || print -r -- 'No output yet. It shows here as soon as the command writes something.'`, `exec tail -n 1000 -F ${path}`, ''].join('\n');
     await $.fs.write(`${home}/output.command`, script);
     const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }));
     const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready;

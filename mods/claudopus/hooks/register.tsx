@@ -717,18 +717,9 @@ const PANEL_RULE =
   '{Name} follows this task in a panel beside the chat, as a card with its to-dos. Keep the card up to date as you work: with the `todo` tool (mcp__claudopus__todo), list what you set out to do, mark the one you are on, tick what is done and drop what a change of direction left behind; with the `note` tool (mcp__claudopus__note), say in one short line how far you have got whenever that changes. A message from {name} changes the to-dos first. Write these for someone who does not read code: say what each step is for, speak to {name} as "you", and use no file names, commands or code. When a step needs {name}\'s own hands or go-ahead, say so right away with the `ask` tool (mcp__claudopus__ask). If a panel tool replies that no hook answered it, the panel did not get it: continue without it for notes and to-dos, but for a question, end your turn right away with a report whose first line is the question.'
 const AFAR_RULE =
   "## This chat runs on another Mac\n\n- I work from my own device and can't see this Mac's screen. Anything that needs my hands, I do from my own device: a sign-in by device code, or a link that works when I open it on my device. Never a browser, window, dialog or keychain prompt on this Mac, and nothing I would need to see its screen for. Give me a command only I can run in full, with its folder and full paths, so I can run it as it is in my own SSH session to this Mac; never open a terminal on this Mac for it."
-const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
-  [
-    `"${title}" has a question for you: ${ask.text}`,
-    ask.details ? `Details:\n${ask.details.replaceAll('**', '')}` : '',
-    `Answers: ${answers.join(' · ')}, or answer in your own words, here or on its card.`,
-    ask.copy ? `${ask.isCommand ? 'Command to run' : 'Text to paste'}: ${ask.copy}` : '',
-    ask.pictures?.length ? `Pictures: ${ask.pictures.join(', ')}` : '',
-  ]
-    .filter(Boolean)
-    .join('\n')
+const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>) => `"${title}" asks you: ${oneLine(ask.text)} Answer on its card, or here.`
 const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
-  `In the background task "${title}", Claude asked {name} a question. {Name} sees it on the task's card and in this chat as a Claudopus notice, which you do not see: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, which {name} sees in full with it on the card and in the notice: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} already has it: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, do not answer it yourself, and do not start a task for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that task with SendMessage to "${id}", in their words; its card then stops showing the question.`
+  `In the background task "${title}", Claude asked {name} a question. {Name} sees it in full on the task's card, and its question alone in this chat as a Claudopus notice, which you do not see: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, which {name} sees in full with it on the card: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} already has it: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, do not answer it yourself, and do not start a task for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that task with SendMessage to "${id}", in their words; its card then stops showing the question.`
 const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered "${title}" on its card: ${said}. Claude already has the answer from the card, so it needs no second copy.`
 const ANSWER_ALREADY_SENT = (said: string) => `Not sent: "${said}" is the answer {name} gave on that task's card. Claude already has it from there and has asked nothing since, so a second copy would only start it again. If {name} means those words for something new, send them with what they are for.`
 const ANSWER_ECHO = 60 * 60_000
@@ -5068,7 +5059,7 @@ const takeBackNow = async ($: EngineInterface, one: Todo, shownAt: number) => {
   redraw($)
   void log($, `answer "${cut(sent.text, 40)}" for ${one.id} taken back`)
   if (isBack) {
-    await sayInChat($, named(`${who(true)} took back their answer “${cut(sent.text, 120)}” to "${titleOf(one)}": the question is open again on its card.`), `You took back your answer “${cut(sent.text, 120)}” to "${titleOf(one)}". The question is back on its card.`)
+    await tellChat($, named(`${who(true)} took back their answer “${cut(sent.text, 120)}” to "${titleOf(one)}": the question is open again on its card.`))
     inChat.delete(one.id)
     void askInChat($, { ...one, ask })
   }
@@ -5178,9 +5169,7 @@ const askInChat = async ($: EngineInterface, one: Todo) => {
   if (!ask || isOff || !dir || inChat.get(one.id) === askKey(ask)) return
   inChat.set(one.id, askKey(ask))
   const answers = ask.choices?.length ? ask.choices : DEFAULT_ANSWERS
-  const notice = named(ASK_IN_CHAT(titleOf(one), ask, answers))
-  const surfaces = await $.session.surfaces().catch(() => [])
-  for (const line of surfaces.length && surfaces.every(s => s === 'terminal') ? notice.split('\n').filter(line => line.trim()) : [notice]) $.ui.log(line)
+  $.ui.log(named(ASK_IN_CHAT(titleOf(one), ask)))
   await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(ASK_RELAY(one.id, titleOf(one), ask, answers)) }] } }).catch(err => (inChat.get(one.id) === askKey(ask) && inChat.delete(one.id), log($, `chat not told of an ask: ${String(err)}`)))
 }
 const sayInChat = async ($: EngineInterface, text: string, shown = text) => {
@@ -5193,8 +5182,7 @@ const tellChat = async ($: EngineInterface, text: string) => {
 const askGone = async ($: EngineInterface, one: Todo, said?: string) => {
   if (!inChat.has(one.id)) return
   inChat.delete(one.id)
-  if (said === undefined) await sayInChat($, ASK_CLEARED(titleOf(one)))
-  else await tellChat($, named(ASK_ANSWERED(titleOf(one), `“${cut(said, 120)}”`)))
+  await tellChat($, said === undefined ? ASK_CLEARED(titleOf(one)) : named(ASK_ANSWERED(titleOf(one), `“${cut(said, 120)}”`)))
 }
 const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNullable<Todo['ask']>; key: string; words: string; at: number }, to: string, isSent: boolean) => {
   if (!isSent) return void answeredAsks.delete(a.key)
@@ -6509,7 +6497,7 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   await (card ? askAloud($, card, text) : aloud($, 'ask', 'This chat has a question for you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
   const act = gateAct(gate)
   $.ui.log(
-    `${card ? `"${titleOf(card)}"` : 'This chat'} wants to ${act.charAt(0).toLowerCase()}${act.slice(1)}: ${cut(oneLine(gate.command), 300)}. Press ${gate.kind ? 'Allow once or Deny' : `${gate.isWork ? 'Allow for this task' : 'Allow once'}, Always allow this command or Deny`} ${card ? 'on its card in' : 'at the top of'} the Claudopus panel. /claudopus opens it. Nothing you type in the chat allows it.`,
+    `${card ? `"${titleOf(card)}"` : 'This chat'} wants to ${act.charAt(0).toLowerCase()}${act.slice(1)}: ${cut(oneLine(gate.command), 120)}. Allow it ${card ? 'on its card' : 'at the top of the Claudopus panel'}; typing here doesn't.`,
   )
   let said: GateSaid | 'gone' | 'late' | undefined
   try {
@@ -8593,7 +8581,7 @@ const lookStuck = async ($: EngineInterface) => {
     const r = isStopped && !(await isReplaced($)) ? await sendOwn($, { to: { agentId: one.id }, text: named(RESTARTED_WORK) }).catch(err => ({ isDelivered: false as const, reason: String(err) })) : undefined
     if (r?.isDelivered) {
       await log($, `work ${one.id} had stopped mid-step (the engine lists it ${status}): started again`)
-      await sayInChat($, named(RESTARTED_IN_CHAT(titleOf(one), mins)))
+      await tellChat($, named(RESTARTED_IN_CHAT(titleOf(one), mins)))
     } else await tellStuck($, one, mins, now)
   }
   for (const one of (await read($, todos)).filter(card => !card.parentId && !card.chat && card.status === 'working' && card.stuckAt !== undefined && card.stuckTold === undefined && now - card.stuckAt >= STUCK_TOLD_BY)) {
@@ -8653,7 +8641,7 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
     const line = (step === 2 ? HELPERS_STILL_SILENT : HELPERS_SILENT)(mins, silentHelpers(list, id, now))
     const r = await sendOwn($, { to: { agentId: id }, text: line }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     await log($, `work ${id} waits on helpers silent for ${mins} min: ${r.isDelivered ? 'started again' : `not reached (${r.reason})`} to ${step === 2 ? 'hand back what it has' : 'check on them'}`)
-    await sayInChat($, named(NUDGED_IN_CHAT(titleOf(one), mins, step === 2)))
+    await tellChat($, named(NUDGED_IN_CHAT(titleOf(one), mins, step === 2)))
   }
 }
 
@@ -9703,7 +9691,7 @@ const notedAtHandback = new Set<string>()
 const noteHandback = async ($: EngineInterface, helperId: string) => {
   if (!dir || isOff) return
   const to = passedTo(await read($, todos), helperId)
-  if (!to || handedBackLetGo.has(to.parent.id)) return
+  if (!to || handedBackLetGo.has(to.parent.id) || wokenFor.has(helperId)) return
   const listed = (await $.agent.list().catch(() => [])).find(one => one.id === to.parent.id)?.status
   if (listed === 'running' || listed === 'waiting') return
   notedAtHandback.add(helperId)
@@ -9717,10 +9705,39 @@ const isQuietHandback = async ($: EngineInterface, origin: { kind: string }, tex
   if (!helperId || !handingBack.has(helperId)) return false
   const to = passedTo(await read($, todos), helperId)
   if (!to || handedBackLetGo.has(to.parent.id)) return false
-  const listed = (await $.agent.list().catch(() => [])).find(one => one.id === to.parent.id)?.status
+  const isWoken = wokenFor.delete(helperId)
+  const isSkipped = handedOnSkipped.delete(helperId)
+  const listed = isWoken || isSkipped ? undefined : (await $.agent.list().catch(() => [])).find(one => one.id === to.parent.id)?.status
   if (listed === 'running' || listed === 'waiting') return false
   handingBack.delete(helperId)
+  notedAtHandback.add(helperId)
+  if (isSkipped) {
+    passedOn.delete(helperId)
+    await passOnHelper($, helperId, handedBack.get(helperId) ?? '', 'done')
+  }
   return true
+}
+const wokenFor = new Set<string>()
+const handedOnSkipped = new Set<string>()
+const HANDBACK_COMING = (helper: string) => `From Claudopus: your helper "${helper}" is handing you its report now. It comes as a message of its own right after this one: read it there.`
+const handbackRefused = async ($: EngineInterface, helperId: string) => {
+  const list = await read($, todos)
+  const helper = list.find(one => one.id === helperId)
+  const parent = list.find(one => one.id === helper?.parentId)
+  if (parent) await sendOwn($, { to: { agentId: parent.id }, text: `From Claudopus: the report of your helper "${titleOf(helper ?? parent)}" did not come after all: Claude Code refused it. Carry on without it; the helper carries on too.` }).catch(() => undefined)
+}
+const wakeForHandback = async ($: EngineInterface, helperId: string) => {
+  if (!dir || isOff) return
+  const to = passedTo(await read($, todos), helperId)
+  if (!to || handedBackLetGo.has(to.parent.id)) return
+  const listed = (await $.agent.list().catch(() => [])).find(one => one.id === to.parent.id)?.status
+  if (listed === 'running' || listed === 'waiting') return
+  if (await isReplaced($)) return
+  const r = await sendOwn($, { to: { agentId: to.parent.id }, text: HANDBACK_COMING(titleOf(to.helper)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  if (!r.isDelivered) return void (await log($, `task ${to.parent.id} not started for the hand-back of ${helperId}: ${r.reason}`))
+  wokenFor.add(helperId)
+  await wakeCard($, to.parent.id)
+  await log($, `task ${to.parent.id} started so its helper ${helperId}'s hand-back goes to it, not to the chat`)
 }
 const passedOn = new Map<string, string>()
 const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status'], isUnheard = false) => {
@@ -9728,6 +9745,7 @@ const passOnHelper = async ($: EngineInterface, helperId: string, report: string
   const key = report.trim().slice(0, ANSWER_CHARS)
   if (passedOn.get(helperId) === key) return
   passedOn.set(helperId, key)
+  if (wokenFor.delete(helperId)) return void (handedOnSkipped.add(helperId), await log($, `helper ${helperId}'s result went to its task, started for it`))
   const isNoted = notedAtHandback.delete(helperId)
   const all = await read($, todos)
   const late = all.find(one => one.id === all.find(kid => kid.id === helperId)?.parentId)
@@ -9917,13 +9935,14 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   const cards = await read($, todos)
   const titled = (one: string) => `"${titleOf(cards.find(card => card.id === one) ?? started(one, '', '', '', cutAt))}"`
   const where = isCopy ? ', in the background on this Mac' : ''
+  const startedAgain = back.length ? `Claudopus started ${back.length === 1 ? titled(back[0] ?? '') : `${back.length} tasks`} again at ${hhmm(now)}${where}, after the chat stopped at ${hhmm(cutAt)}.` : ''
   const text = [
-    back.length ? `Claudopus started ${back.length === 1 ? titled(back[0] ?? '') : `${back.length} tasks`} again at ${hhmm(now)}${where}, after the chat stopped at ${hhmm(cutAt)}.` : '',
+    startedAgain,
     lost.length ? `Claudopus couldn't start ${lost.length === 1 ? titled(lost[0] ?? '') : `${lost.length} tasks`} again after the chat stopped at ${hhmm(cutAt)}.` : '',
   ]
     .filter(Boolean)
     .join(' ')
-  $.ui.log(text)
+  if (lost.length) $.ui.log(text.replace(startedAgain, '').trim())
   await tellDevice($, text)
 }
 
@@ -10875,7 +10894,9 @@ const workHooks = (on: On) => {
       if (hold) return { deny: hold }
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       handingBack.add(e.agentId)
+      await wakeForHandback($, e.agentId).catch(err => log($, `task not started for its helper's hand-back: ${String(err)}`))
       const r = await next(e)
+      if ((r.deny || r.isError) && wokenFor.delete(e.agentId)) await handbackRefused($, e.agentId).catch(err => log($, `task not told its helper's hand-back was refused: ${String(err)}`))
       if (r.deny || r.isError) handingBack.delete(e.agentId)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       if (!r.deny && !r.isError) await noteHandback($, e.agentId).catch(err => log($, `chat not told of a helper's hand-back: ${String(err)}`))

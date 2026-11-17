@@ -1599,9 +1599,8 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   await clock.advance(10)
   const inChat = (await until(async () => logged.find(line => line.includes('Which logo do you want?')))) ?? ''
   expect(submitted.some(line => line.includes('Which logo do you want?'))).toBe(false)
-  expect(inChat).toContain('"Redraw the logo" has a question for you: Which logo do you want?')
-  expect(inChat).toContain('Answers: A · B, or answer in your own words, here or on its card.')
-  expect(inChat).toContain('Pictures: /w/shots/a.png, /w/shots/b.png')
+  // One line: its answers, pictures and what it is about are on its card (17 Nov: "Why does this huge text even appear in my chat?")
+  expect(inChat).toBe('"Redraw the logo" asks you: Which logo do you want? Answer on its card, or here.')
   // The chat's model reads the ask, and how to pass an answer on, in a row the person does not see
   expect(inChat).not.toContain('SendMessage')
   const relay = appended.find(line => line.startsWith('undefined: In the background task "Redraw the logo", Claude asked the person')) ?? ''
@@ -1626,7 +1625,7 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   // A press on the card no longer counts for that ask
   expect((await list.findAll({ type: 'Button' })).find(b => b.props.label === 'B')).toBeUndefined()
 
-  // An ask answered on the card is told to the chat's model alone, as the person answered it there; one the work withdraws is shown too
+  // An ask answered on the card, or withdrawn by the work, is told to the chat's model alone: the card shows it
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'May I push it?', choices: ['Push', 'Not now'] } as never)
   await clock.advance(10)
   expect(await until(async () => logged.some(line => line.includes('May I push it?')) || undefined)).toBe(true)
@@ -1635,10 +1634,10 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   expect(logged.some(line => line.startsWith('✓'))).toBe(false)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a1', text: 'Sign in to Vercel.' } as never)
   await clock.advance(10)
-  expect(await until(async () => logged.some(line => line.includes('Answers: Done · Not now')) || undefined)).toBe(true)
+  expect(await until(async () => logged.some(line => line === '"Redraw the logo" asks you: Sign in to Vercel. Answer on its card, or here.') || undefined)).toBe(true)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k5', agentId: 'a1', text: '' } as never)
   expect(appended.some(line => line === 'undefined: Claude took back its question in "Redraw the logo". You don\'t need to answer it.')).toBe(true)
-  expect(logged.some(line => line === 'Claude took back its question in "Redraw the logo". You don\'t need to answer it.')).toBe(true)
+  expect(logged.some(line => line.startsWith('Claude took back its question'))).toBe(false)
   expect(submitted).toEqual([])
   await list.unmount()
 })
@@ -1677,12 +1676,12 @@ test('an ask carries what it is about, whole, on the small card, in Details and 
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
   expect(await band.find({ type: 'Text', text: /The details are in the chat above and on its card/ })).toBeDefined()
   await band.unmount()
-  // The chat's notice carries it whole, before the answers, plain (no marks for bold), and so does the row the chat's model reads
+  // The chat's notice is the question alone, as the card carries the rest; the row the chat's model reads carries it whole
   await clock.advance(10)
-  const notice = (await until(async () => logged.find(line => line.includes('Release PR 54 to production?') && line.includes('Details:')))) ?? ''
-  expect(notice).toContain(`Release PR 54 to production?\nDetails:\n${differences.replaceAll('**', '')}\nAnswers: Release it · Not now`)
+  const notice = (await until(async () => logged.find(line => line.includes('Release PR 54 to production?')))) ?? ''
+  expect(notice).toBe('"Fix the wallet" asks you: Release PR 54 to production? Answer on its card, or here.')
   const relay = [...appended].reverse().find(line => line.startsWith('undefined: In the background task "Fix the wallet", Claude asked the person') && line.includes('Release PR 54 to production?')) ?? ''
-  expect(relay).toContain(`what it is about, which the person sees in full with it on the card and in the notice: ${differences}`)
+  expect(relay).toContain(`what it is about, which the person sees in full with it on the card: ${differences}`)
   // The chat is told not to say it again: the person has just read it
   expect(relay).toContain('do not repeat what it is about')
   // A pressed answer still matches the ask that carries details
@@ -1699,13 +1698,14 @@ test('an ask carries what it is about, whole, on the small card, in Details and 
   expect(question).toBeDefined()
   expect(String(question?.text).length).toBeLessThanOrEqual(302)
   expect(String(question?.text)).toMatch(/[a-z.] …$/)
-  // Long details: whole in Details and in the notice, cut on the small card with where the rest is, and cut in the model's row
+  // Long details: whole in Details, cut on the small card with where the rest is, never in the notice, and cut in the model's row
   const many = Array.from({ length: 120 }, (_, n) => `- Line ${n + 1} of what changes on the payout screens.`).join('\n')
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a1', text: 'Release the payout screens?', details: many, choices: ['Release it', 'Not now'] } as never)
   expect(await big.find({ type: 'Markdown', text: many })).toBeDefined()
   expect(await list.find({ type: 'Markdown', text: /The rest is in its Details\.$/ })).toBeDefined()
   await clock.advance(10)
-  expect(await until(async () => logged.find(line => line.includes('Line 120 of what changes')))).toBeDefined()
+  expect(await until(async () => logged.find(line => line === '"Fix the wallet" asks you: Release the payout screens? Answer on its card, or here.'))).toBeDefined()
+  expect(logged.some(line => line.includes('Line 120 of what changes'))).toBe(false)
   const longRelay = (await until(async () => [...appended].reverse().find(line => line.includes('Release the payout screens?') && line.includes('asked the person')))) ?? ''
   expect(longRelay).toContain('(the rest is on the card)')
   expect(longRelay).not.toContain('Line 120 of what changes')
