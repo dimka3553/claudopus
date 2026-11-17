@@ -1775,6 +1775,8 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
 test("where the bar above the prompt takes a box, a key box has no field in the panel, whose window the app drags to a field that holds the cursor: Paste the key or Give a response instead opens its field in the bar; the key goes only to the keychain, a response only to the command that asked, and one that looks like the key itself is held until the person says which", async ($, on) => {
   const { keep, settle, files, logged, keychain, clock } = world(on, { panes: ['claudopus'] })
   await $.session.start(start)
+  await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Deploy the site', prompt: 'deploy it' } as never)
   void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
@@ -1787,6 +1789,12 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
   const key = '0a1e2d3c-4b5a-4987-a654-3210fedcba98'
   await ask(key)
   expect(await until(async () => list.find({ type: 'Text', text: GITHUB_BOX }))).toBeDefined()
+  // On the card of the task whose command asked, under its title, its edge amber; counted once as what waits
+  const order = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  expect(order.indexOf('Deploy the site')).toBeGreaterThan(-1)
+  expect(order.indexOf('Deploy the site')).toBeLessThan(order.indexOf(GITHUB_BOX))
+  expect(order.find(one => /needs? you|waiting for you/.test(one))).toMatch(/^1 /)
+  expect(((await list.findAll({ type: 'Box' })) as { props: Record<string, unknown> }[]).some(one => one.props.width === 1 && one.props.backgroundColor === '#E5A50A')).toBe(true)
   expect(await until(async () => ((await labelled(list, 'Give a response instead')).length === 1 ? true : undefined))).toBe(true)
   expect(await fieldsIn(list, key)).toEqual([])
   expect((await labelled(list, 'Cancel')).length).toBe(1)
@@ -2436,13 +2444,16 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   expect(await says(list, /^✎ Type it in the box above the chat$/)).toBe(true)
   expect((await labelled(list, CLOSE)).length).toBe(1)
   expect((await labelled(list, OPEN)).length).toBe(0)
-  // The panel scrolled away from its top with the box open: the bar still points at what waits there
-  const MARK = '↑ 1 thing is waiting for you at the top of the panel'
+  // With the box open the bar still says what waits, and once the panel is scrolled away from its top, Show takes it back there
+  const MARK = /^● 1 waiting for you · first: /
+  const isShow = async () => (await labelled(bar, '↑ Show')).length > 0
   const scrolled = async (offset: number) => (await list.unmount(), (list = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset, bodyRows: 20 } }, surface: 'desktop' } as never)))
   await scrolled(40)
-  expect(await until(async () => bar.find({ type: 'Text', text: MARK }))).toBeDefined()
+  expect(await until(async () => ((await isShow()) ? true : undefined))).toBe(true)
+  expect(await bar.find({ type: 'Text', text: MARK })).toBeDefined()
   await scrolled(0)
-  expect(await until(async () => ((await bar.find({ type: 'Text', text: MARK })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await isShow()) ? undefined : true))).toBe(true)
+  expect(await bar.find({ type: 'Text', text: MARK })).toBeDefined()
   // It grows a line for each line typed, Shift+Enter's or wrapped, up to six, and keeps the same box, the text typed in it its own
   const [growing] = await boxesIn(bar)
   await bar.input({ key: growing?.key ?? '', text: 'The left.\nThen the right.\nThen both, side by side.', kind: 'change' } as never)

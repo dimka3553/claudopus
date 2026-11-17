@@ -3,29 +3,38 @@
 // The answer picked above the prompt by its number, and how long the pick waits for the same number again
 let bandPick: { id: string; n: number } | undefined
 const BAND_PICK = 6000
-// Above the prompt, which never scrolls: once the list is scrolled away from its top, how many things wait there for the person.
-// Pressed, it takes the list back to its top; nothing else moves the list
-// Work that just finished, in its moment at the top, is pointed at the same way, in green, under what waits
+// Above the prompt, which never scrolls: on the desktop, one steady line for as long as anything waits for the person, however the
+// list is scrolled: how many, and what the first asks (17 Nov: the line came only once the list was scrolled, so what waited was
+// told nowhere near where the person types). Scrolled away from the top, Show takes the list back there; nothing else moves it.
+// In the terminal the band itself holds the first ask, so the line comes only once the list is scrolled.
+// Work that just finished, in its moment at the top, is pointed at the same way, in green, once the list is scrolled
+const isListPlaced = async ($: EngineInterface) => (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
+const isScrolled = (surface: string) => (listOffsets.get(surface) ?? 0) > 0
 const isMarkerShown = async ($: EngineInterface, surface: string) =>
-  (waitsAtTop > 0 || finishedAtTop.length > 0) && (listOffsets.get(surface) ?? 0) > 0 && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
+  ((waitsAtTop > 0 && (surface !== 'terminal' || isScrolled(surface))) || (finishedAtTop.length > 0 && isScrolled(surface))) && (await isListPlaced($))
 // What the marker says, empty when it is not drawn: a bar held with a box in it is drawn again when this moves, but not while the
 // box is typed in or holds the cursor
-const markerSign = async ($: EngineInterface, surface: string) => ((await isMarkerShown($, surface)) ? `${waitsAtTop}|${finishedAtTop.join('|')}` : '')
+const markerSign = async ($: EngineInterface, surface: string) => ((await isMarkerShown($, surface)) ? `${waitsAtTop}|${firstAtTop}|${isScrolled(surface)}|${finishedAtTop.join('|')}` : '')
+const markerWords = (surface: string) =>
+  waitsAtTop > 0
+    ? `● ${waitsAtTop} waiting for you${firstAtTop ? ` · first: ${firstAtTop}` : ''}${isScrolled(surface) && finishedAtTop.length ? ` · ${finishedAtTop.length} just finished` : ''}`
+    : `↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} finished` : `${finishedAtTop.length} just finished`}, at the top of the panel`
 const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
   (await isMarkerShown($, surface)) ? (
-    <ui.Box key="band-waits" flexDirection="row" flexShrink={0} height={1} overflow="hidden">
-      <ui.Button
-        key={`band-waits-${presses}`}
-        plain
-        hover={{ scope: 'band-waits', underline: true }}
-        onPress={() => ((presses += 1), void (recordEvent($, 'scroll-call', { to: 'start' }), $.ui.scroll({ in: LIST, to: 'start', block: 'start' })).catch(() => undefined))}
-      >
-        {waitsAtTop > 0 ? (
-          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 thing is' : `${waitsAtTop} things are`} waiting for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} just finished` : ''}`}</ui.Text>
-        ) : (
-          <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} finished` : `${finishedAtTop.length} just finished`}, at the top of the panel`}</ui.Text>
-        )}
-      </ui.Button>
+    <ui.Box key="band-waits" flexDirection="row" flexShrink={0} height={1} overflow="hidden" gap={1}>
+      <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
+        <ui.Text color={waitsAtTop > 0 ? NEEDS : DONE} bold wrap="truncate-end">{markerWords(surface)}</ui.Text>
+      </ui.Box>
+      {isScrolled(surface) ? (
+        <ui.Box flexShrink={0}>
+          <ui.Button
+            key={`band-waits-${presses}`}
+            label="↑ Show"
+            plain
+            onPress={() => ((presses += 1), void (recordEvent($, 'scroll-call', { to: 'start' }), $.ui.scroll({ in: LIST, to: 'start', block: 'start' })).catch(() => undefined))}
+          />
+        </ui.Box>
+      ) : null}
     </ui.Box>
   ) : null
 // The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: the work the reply goes to on a
@@ -200,7 +209,7 @@ const bandHooks = (on: On) => {
     // A message may begin with a digit too, so one press only picks the answer and says so; the same digit again sends it
     if (e.surface === 'terminal') {
       // What waits on the person comes before an ask whose work is acting on their reply, which is drawn in the work's purple
-      const asking = [...cards.filter(one => !one.parentId && one.ask)].sort((a, b) => Number(needsPerson(b)) - Number(needsPerson(a)))
+      const asking = [...cards.filter(one => !one.parentId && one.ask)].sort((a, b) => Number(needsPerson(b)) - Number(needsPerson(a)) || (a.ask?.at ?? 0) - (b.ask?.at ?? 0))
       const [first] = asking
       const ask = first?.ask
       if (first && ask) {

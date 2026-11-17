@@ -10,12 +10,13 @@
 // word (a host on a key, a name on a password), a kind it does not know or a host or name it would not take, is drawn as nothing;
 // any other field is left unread. A planted request so shows only what the runners would ask. This stops slips and common tricks;
 // it is no wall against code set on getting round it
-type Asked = { id: string; text: string; at: number; chat?: string; command?: string; key?: string; call?: string }
+// agent: the task whose command asked, so the box is drawn on that task's card
+type Asked = { id: string; text: string; at: number; chat?: string; command?: string; key?: string; call?: string; agent?: string }
 // The Bash calls of this chat that run bin/admin or bin/secret, by call id, with their command: a box is drawn only for a request of
 // this chat's own while one of them runs (one sent to the background for BOX_OLD after it began), and says which command asked. A
 // request no runner of this chat could have made, however it is worded, is drawn nowhere
-const runnerCalls = new Map<string, { command: string; at: number; until: number }>()
-const runnerBegun = (id: string, command: string, at: number) => void runnerCalls.set(id, { command, at, until: Infinity })
+const runnerCalls = new Map<string, { command: string; at: number; until: number; agent?: string }>()
+const runnerBegun = (id: string, command: string, at: number, agent?: string) => void runnerCalls.set(id, { command, at, until: Infinity, ...(agent ? { agent } : {}) })
 const runnerEnded = (id: string, isBackground: boolean, at: number) => {
   const one = runnerCalls.get(id)
   if (!one) return
@@ -193,7 +194,7 @@ const lookBoxes = async ($: EngineInterface) => {
       const key = typeof one.key === 'string' ? one.key : undefined
       if (key && !boxKeys.has(id)) boxKeys.set(id, key)
       const isKeySame = !key || boxKeys.get(id) === key
-      if (one.id === id && text && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, text, at: one.at, chat: one.chat, command: runner.command, call: runner.call, ...(one.kind === 'admin' && key ? { key } : {}) })
+      if (one.id === id && text && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, text, at: one.at, chat: one.chat, command: runner.command, call: runner.call, ...(runner.agent ? { agent: runner.agent } : {}), ...(one.kind === 'admin' && key ? { key } : {}) })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && (now - one.at >= BOX_OLD || one.at - now > BOX_SKEW)) {
@@ -464,20 +465,22 @@ const barKeyRows = (id: string, mode: BoxMode, columns: number) => (mode === 're
 // The key box open in the bar on a surface that takes one, none once it is answered, cancelled or gone
 const barKeyTarget = () => (boxOpen ? boxes.find(one => one.id === boxOpen?.id && !one.key) : undefined)
 
-// Each box with when it was asked, so the panel puts it among what waits on the person, the newest first
-const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '') => {
+// Each box with when it was asked and the box itself: the panel draws a box of a task's command on that task's card, and any other
+// among what waits on the person, in the order they came (only: the boxes wanted)
+const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '', only: (one: Asked) => boolean = () => true) => {
   if (!boxes.length || !('Input' in ui)) return []
   // This chat's own first request holds the keys, so a value typed for the notice it told goes to its own box, wherever it is drawn
   const shown = [...boxes.filter(one => one.chat === boxChat), ...boxes.filter(one => one.chat !== boxChat)]
   const isBar = repliesInBar(surface)
-  return shown.map((one, n) => {
+  return shown.flatMap((one, n) => {
+    if (!only(one)) return []
     const isKey = !one.key
     const name = boxNameOf(one)
     const inBar = isKey && isBar
     const mode: BoxMode = (inBar ? undefined : boxModes.get(one.id)) ?? 'key'
     const isOpen = inBar && boxOpen?.id === one.id
     const what = isNameBox(one) ? 'the name' : 'the key'
-    return { at: one.at, node: (
+    return [{ at: one.at, one, node: (
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
       <ui.Text dimColor wrap="truncate-end">{isKey ? 'Key · waits for you' : 'Admin password · waits for you to type it'}</ui.Text>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
@@ -505,7 +508,7 @@ const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '') =
       {isOpen ? null : heldReplyButtons($, ui, one.id, 'box')}
       <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
         {inBar && isOpen ? <ui.Button key={`box-${one.id}-close-${boxPresses}`} label="Close the box" onPress={press => openBox($, undefined, 'key', press.surface)} /> : null}
-        {inBar && !isOpen ? <ui.Button key={`box-${one.id}-paste-${boxPresses}`} label={isNameBox(one) ? 'Type the name' : 'Paste the key'} onPress={press => openBox($, one.id, 'key', press.surface)} /> : null}
+        {inBar && !isOpen ? <ui.Button key={`box-${one.id}-paste-${boxPresses}`} label={isNameBox(one) ? 'Type the name' : 'Paste the key'} variant="primary" onPress={press => openBox($, one.id, 'key', press.surface)} /> : null}
         {inBar && !isOpen ? <ui.Button key={`box-${one.id}-respond-${boxPresses}`} label="Give a response instead" onPress={press => openBox($, one.id, 'reply', press.surface)} /> : null}
         {isKey && !inBar ? (
           <ui.Button key={`box-${one.id}-mode-${boxPresses}`} label={mode === 'reply' ? `Type ${what} instead` : 'Give a response instead'} onPress={() => void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($))} />
@@ -513,6 +516,6 @@ const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '') =
         <ui.Button key={`box-${one.id}-cancel-${boxPresses}`} label="Cancel" plain onPress={() => void cancelBox($, one.id)} />
       </ui.Box>
     </ui.Box>
-  ) }
+  ) }]
   })
 }
