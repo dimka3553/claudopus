@@ -1494,6 +1494,7 @@ const follow = async ($: EngineInterface) => {
   await lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))
   await lookStuck($).catch(err => log($, `stuck work not looked for: ${String(err)}`))
   await lookInDue($).catch(err => log($, `helpers not looked in on: ${String(err)}`))
+  await lookHeld($).catch(err => log($, `held commands not looked at: ${String(err)}`))
   await lookWakes($).catch(err => log($, `wakes not looked at: ${String(err)}`))
   await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
   const isShown = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
@@ -8140,7 +8141,7 @@ const isBusy = (list: Todo[], helper: Todo, at: number) =>
     .filter(one => one.status === 'working')
     .some(one => {
       const call = runningOf(one.id)
-      return Boolean((call && at - call.at < LIVE_CALL_MOST) || one.bg?.some(b => !b.isWatch))
+      return Boolean((call && at - call.at < LIVE_CALL_MOST) || one.bg?.some(b => !b.isWatch) || one.heldCalls?.length)
     })
 const runningKids = (list: Todo[], id: string) => list.filter(kid => kid.parentId === id && kid.status === 'working')
 
@@ -8156,7 +8157,7 @@ const lookStuck = async ($: EngineInterface) => {
     const next = list.map(one => {
       if (one.parentId || one.chat) return one
       const isWaitingOwn = Boolean(one.waitsSince && one.bg?.some(b => !b.isWatch))
-      const isStuck = one.status === 'working' && !one.wakeWhen && !(one.ask && !one.ask.replied) && !one.admins?.length && !one.heldCalls?.length && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
+      const isStuck = one.status === 'working' && !one.wakeWhen && !(one.ask && !one.ask.replied) && !one.admins?.length && ![one, ...underOf(list, one.id)].some(kid => kid.heldCalls?.length) && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
       if (isStuck && !one.stuckAt) return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) })
       if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined })
       return one
@@ -8828,20 +8829,22 @@ const openJobOutput = async ($: EngineInterface, job: Job) => {
 
 const HEAVY_MOST = 15 * 60_000
 const HEAVY_RAMP = 20_000
-type HeldCall = { id: string; agent: string; what: string; cmd: string; kind: HeavyKind; at: number }
+type HeldCall = { id: string; agent: string; what: string; cmd: string; at: number }
 let heavyQueue: HeldCall[] = []
+const HEAVY_PASS = 3 * 60_000
+const heavyPass = new Map<string, number>()
 const heavyOpen = new Map<string, string>()
 const heavySeen = new Set<string>()
 let heavyLetAt = 0
 const keptCmd = (command: string) => oneLine(command).slice(0, 400)
 
-const heavyRunning = (list: Todo[]) =>
-  heavyOpen.size + list.filter(one => !one.chat).reduce((n, one) => n + [...(one.bg ?? []), ...(one.detached ?? [])].filter(run => run.cmd && heavySeen.has(run.cmd)).length, 0)
+const heavyRunning = (list: Todo[], now: number) =>
+  heavyOpen.size + [...heavyPass.values()].filter(until => until > now).length + list.filter(one => !one.chat).reduce((n, one) => n + [...(one.bg ?? []), ...(one.detached ?? [])].filter(run => run.cmd && heavySeen.has(run.cmd)).length, 0)
 const isMacBusy = (f: UsageFigures | undefined, mode: HeavyMode) =>
   Boolean(f && ((f.load !== undefined && f.loadCores && f.load >= mode.load * f.loadCores) || (f.memTotal > 0 && f.memUsed / f.memTotal >= mode.memory)))
 const heavyRoom = (list: Todo[], f: UsageFigures | undefined, mode: HeavyMode, now: number) => {
   if (mode.value === 'never') return true
-  const running = heavyRunning(list)
+  const running = heavyRunning(list, now)
   if (!running) return true
   if (isMacBusy(f, mode)) return false
   return running < Math.max(2, Math.round((f?.loadCores ?? 8) / 4)) || now - heavyLetAt >= HEAVY_RAMP
@@ -8849,11 +8852,12 @@ const heavyRoom = (list: Todo[], f: UsageFigures | undefined, mode: HeavyMode, n
 const busyWords = (f: UsageFigures | undefined) =>
   !f ? 'busy' : [f.load !== undefined && f.loadCores ? `load ${Math.round(f.load)} on ${f.loadCores} cores` : '', f.memTotal ? `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB memory in use` : ''].filter(Boolean).join(', ')
 const placeWords = (n: number) => (n === 1 ? 'next in line' : `${n}${n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : n % 10 === 1 && n % 100 !== 11 ? 'st' : 'th'} in line`)
-const HEAVY_WAITED = (what: string, waited: string, f: UsageFigures | undefined, isLate: boolean) =>
+const HEAVY_HELD = (what: string, place: number, f: UsageFigures | undefined, isHelper: boolean) =>
+  `Not run yet: the Mac is busy (${busyWords(f)}) and other heavy commands of Claudopus's tasks run, so this one ("${what}") waits its turn, ${placeWords(place)}. ${isHelper ? 'Do other work that does not need it meanwhile: Claudopus tells you when its turn comes, in 15 minutes at the latest.' : 'Do other work that does not need it, or end your step: Claudopus starts you again when its turn comes, in 15 minutes at the latest.'} Then send the same command again.`
+const HEAVY_TURN = (what: string, isLate: boolean) =>
   isLate
-    ? `Claudopus held this command ("${what}") ${waited} while the Mac was busy (${busyWords(f)}), then ran it anyway. If it failed or timed out for lack of room, run it again later.`
-    : `Claudopus held this command ("${what}") ${waited}, until the Mac had room for it, and ran it as soon as its turn came.`
-const HEAVY_GONE = 'Not run: your task was stopped while this command waited its turn for the Mac to have room.'
+    ? `Your command "${what}" has waited 15 minutes for room on the Mac: send it again now, and it runs whatever the load. If it fails or times out for lack of room, try it again later.`
+    : `It is your command's turn: the Mac has room for "${what}" now. Send it again now, and it runs at once.`
 
 const showHeld = ($: EngineInterface) =>
   changeTodos($, list =>
@@ -8868,51 +8872,73 @@ const showHeld = ($: EngineInterface) =>
 const heldJobs = (one: Todo): Job[] =>
   (one.heldCalls ?? []).map(call => ({ ...jobOf(`held-${call.id}`, call.what, call.cmd, call.at), kind: 'wait' as const, waitsFor: `its turn: ${labelOf(call.what, call.cmd)}`, target: `waits for room on the Mac · ${placeWords(call.place)}` }))
 
-const holdHeavy = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ id?: string; said?: string; deny?: string }> => {
+const turnHeavy = async ($: EngineInterface, e: ToolCallInput): Promise<{ id?: string; deny?: string }> => {
   const input = e as { command?: unknown; description?: unknown; tool_use_id?: unknown }
   const command = String(input.command ?? '')
-  const kind = heavyOf(command, await scriptsRun($, command))
-  if (!kind) return {}
+  if (!heavyOf(command, await scriptsRun($, command))) return {}
   const agent = e.agentId ?? ''
-  if (!(await read($, todos)).some(one => one.id === agent && !one.chat)) return {}
-  const modeNow = async () => heavyModeOf(await readConfig($, dir))
-  if ((await modeNow()).value === 'never') return {}
-  const id = String(input.tool_use_id ?? '')
-  heavySeen.add(keptCmd(command))
-  await lookUsage($).catch(() => undefined)
-  const at = await $.clock.now()
   const list = await read($, todos)
-  const mode = await modeNow()
-  if (!heavyQueue.length && heavyRoom(list, usageNow(at), mode, at)) return (heavyOpen.set(id, agent), (heavyLetAt = at), { id })
-  const call: HeldCall = { id, agent, what: oneLine(String(input.description ?? '')) || labelOf('', command), cmd: keptCmd(command), kind, at }
-  let isLate = false
-  let now = at
-  try {
-    heavyQueue.push(call)
-    await log($, `work ${agent}'s ${kind} command waits its turn (${heavyQueue.length} held, Mac ${busyWords(usageNow(at))})`)
-    await showHeld($)
-    for (;;) {
-      const card = (await read($, todos)).find(one => one.id === agent)
-      if (next.signal?.aborted || !card || card.status !== 'working') return { deny: HEAVY_GONE }
-      now = await $.clock.now()
-      isLate = now - at >= HEAVY_MOST || (next.budget?.remainingMs ?? Infinity) < 3000 || (await isReplaced($))
-      if (isLate) break
-      await lookUsage($).catch(() => undefined)
-      if (heavyQueue[0]?.id === id && heavyRoom(await read($, todos), usageNow(now), await modeNow(), now)) break
-      await $.process.run(['/bin/sleep', '2'], { timeoutMs: 10_000 }).catch(() => undefined)
-    }
-  } finally {
-    heavyQueue = heavyQueue.filter(one => one.id !== id)
-    await showHeld($).catch(() => undefined)
+  if (!list.some(one => one.id === agent && !one.chat)) return {}
+  const mode = heavyModeOf(await readConfig($, dir))
+  if (mode.value === 'never') return {}
+  const id = String(input.tool_use_id ?? '')
+  const cmd = keptCmd(command)
+  heavySeen.add(cmd)
+  await lookUsage($).catch(() => undefined)
+  const now = await $.clock.now()
+  const pass = heavyPass.get(agent)
+  heavyPass.delete(agent)
+  const waiting = heavyQueue.find(one => one.agent === agent && one.cmd === cmd)
+  if ((pass && pass > now) || (!heavyQueue.length && heavyRoom(list, usageNow(now), mode, now))) {
+    if (waiting) await leaveLine($, waiting.id)
+    return (heavyOpen.set(id, agent), (heavyLetAt = now), { id })
   }
-  heavyOpen.set(id, agent)
+  const call = waiting ?? { id, agent, what: oneLine(String(input.description ?? '')) || labelOf('', command), cmd, at: now }
+  if (!waiting) {
+    heavyQueue.push(call)
+    await log($, `work ${agent}'s heavy command waits its turn (${heavyQueue.length} held, Mac ${busyWords(usageNow(now))})`)
+    await changeTodos($, cards => cards.map(one => (one.id === agent && !one.parentId && !one.wakeWhen ? { ...one, wakeWhen: { what: `its turn on the Mac for "${cut(call.what, 80)}"`, at: now, until: now + HEAVY_MOST + 2 * 60_000 } } : one)))
+    await showHeld($)
+  }
+  return { deny: HEAVY_HELD(cut(call.what, 120), heavyQueue.indexOf(call) + 1, usageNow(now), Boolean(list.find(one => one.id === agent)?.parentId)) }
+}
+const leaveLine = async ($: EngineInterface, id: string) => {
+  const call = heavyQueue.find(one => one.id === id)
+  heavyQueue = heavyQueue.filter(one => one.id !== id)
+  if (call && !heavyQueue.some(one => one.agent === call.agent)) await changeTodos($, cards => cards.map(one => (one.id === call.agent && one.wakeWhen?.what.startsWith('its turn on the Mac') ? { ...one, wakeWhen: undefined } : one)))
+  await showHeld($)
+}
+const lookHeld = async ($: EngineInterface) => {
+  if (!dir || isOff || !heavyQueue.length) return
+  const list = await read($, todos)
+  for (const call of heavyQueue) {
+    const card = list.find(one => one.id === call.agent)
+    if (!card || card.status === 'stopped' || card.status === 'failed' || card.handedBackAt !== undefined || (card.parentId && card.status === 'done')) await leaveLine($, call.id)
+  }
+  const first = heavyQueue[0]
+  if (!first) return
+  await lookUsage($).catch(() => undefined)
+  const now = await $.clock.now()
+  for (const [agent, until] of heavyPass) if (until <= now) heavyPass.delete(agent)
+  const isLate = now - first.at >= HEAVY_MOST && now - heavyLetAt >= HEAVY_RAMP
+  if (!isLate && !heavyRoom(await read($, todos), usageNow(now), heavyModeOf(await readConfig($, dir)), now)) return
+  await leaveLine($, first.id)
+  heavyPass.set(first.agent, now + HEAVY_PASS)
   heavyLetAt = now
-  const waited = shortAgo(now - at)
-  await log($, `work ${agent}'s ${kind} command let go after ${waited}${isLate ? ', before the Mac had room' : ''}`)
-  return { id, said: HEAVY_WAITED(cut(call.what, 120), waited, usageNow(now), isLate) }
+  const text = HEAVY_TURN(cut(first.what, 120), isLate)
+  const isAtStep = (await $.agent.list().catch(() => [])).find(agent => agent.id === first.agent)?.status === 'running'
+  const r = isAtStep
+    ? await tell($, first.agent, text).then(() => ({ isDelivered: true as const, reason: '' })).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    : await sendOwn($, { to: { agentId: first.agent }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  if (r.isDelivered && !isAtStep) await wakeCard($, first.agent)
+  await log($, `work ${first.agent}'s heavy command's turn came after ${shortAgo(now - first.at)}${isLate ? ', before the Mac had room' : ''}: ${r.isDelivered ? (isAtStep ? 'told' : 'started again') : `not reached (${r.reason})`}`)
+  redraw($)
 }
 const clearHeld = async ($: EngineInterface) => {
-  if ((await read($, todos)).some(one => !one.chat && one.heldCalls?.some(call => !heavyQueue.some(held => held.id === call.id)))) await showHeld($)
+  if (heavyQueue.length) return
+  const kept = (await read($, todos)).filter(one => !one.chat && one.status === 'working').flatMap(one => (one.heldCalls ?? []).map(call => ({ ...call, agent: one.id })))
+  heavyQueue = kept.sort((a, b) => a.place - b.place).map(({ id, agent, what, cmd, at }) => ({ id, agent, what, cmd, at }))
+  await showHeld($)
 }
 
 
@@ -9104,7 +9130,7 @@ const lookWakes = async ($: EngineInterface) => {
 }
 const wakeLine = (one: Todo) => {
   const w = one.wakeWhen
-  if (!w) return ''
+  if (!w || (one.heldCalls?.length && w.what.startsWith('its turn on the Mac'))) return ''
   return w.file || w.url ? `Claudopus starts Claude again when this is there: ${w.what}; at ${hhmm(w.until)} if it never comes` : `Claudopus starts Claude again at ${hhmm(w.until)}: ${w.what}`
 }
 
@@ -10201,11 +10227,10 @@ const workHooks = (on: On) => {
     }
     let woken = ''
     const next = async (asked: typeof e) => {
-      const held = dir && !isOff && e.agentId !== undefined && asked.tool === 'Bash' && !grants.length ? await holdHeavy($, asked, raw as never) : {}
+      const held = dir && !isOff && e.agentId !== undefined && asked.tool === 'Bash' && !grants.length ? await turnHeavy($, asked) : {}
       if (held.deny) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: held.deny } as Awaited<ReturnType<typeof raw>>)
       try {
-        const r = await nextHere(asked)
-        return held.said && !r.deny ? ({ ...r, context: [...((r as { context?: string[] }).context ?? []), held.said] } as typeof r) : r
+        return await nextHere(asked)
       } finally {
         if (held.id) heavyOpen.delete(held.id)
       }

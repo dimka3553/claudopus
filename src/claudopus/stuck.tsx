@@ -99,7 +99,8 @@ const isBusy = (list: Todo[], helper: Todo, at: number) =>
     .filter(one => one.status === 'working')
     .some(one => {
       const call = runningOf(one.id)
-      return Boolean((call && at - call.at < LIVE_CALL_MOST) || one.bg?.some(b => !b.isWatch))
+      // (a command Claudopus holds for its turn is at work too: its wait is Claudopus's own)
+      return Boolean((call && at - call.at < LIVE_CALL_MOST) || one.bg?.some(b => !b.isWatch) || one.heldCalls?.length)
     })
 const runningKids = (list: Todo[], id: string) => list.filter(kid => kid.parentId === id && kid.status === 'working')
 
@@ -122,7 +123,7 @@ const lookStuck = async ($: EngineInterface) => {
       // Nor work that waits for a command of its own it started in the background: a long copy is not stuck
       const isWaitingOwn = Boolean(one.waitsSince && one.bg?.some(b => !b.isWatch))
       // Nor work that asked Claudopus to start it again: that look has its own end, which starts it (lookWakes)
-      const isStuck = one.status === 'working' && !one.wakeWhen && !(one.ask && !one.ask.replied) && !one.admins?.length && !one.heldCalls?.length && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
+      const isStuck = one.status === 'working' && !one.wakeWhen && !(one.ask && !one.ask.replied) && !one.admins?.length && ![one, ...underOf(list, one.id)].some(kid => kid.heldCalls?.length) && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
       if (isStuck && !one.stuckAt) return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) })
       if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined })
       return one
