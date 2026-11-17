@@ -991,6 +991,7 @@ test('what another task of the same chat starts while its command runs in the ba
     const all = await leftTexts($)
     return all.some(text => text.startsWith('Run the screenshots of both sides')) ? all : undefined
   })
-  // (they may be the other task's, whose command started them; never the push's)
-  expect(shown?.some(text => /^Upload the fix|Chrome/.test(text))).toBe(false)
+  // (they are the other task's, whose command started them, and under its one row while it runs; never the push's)
+  expect(shown?.some(text => /^Upload the fix|Chrome|programs/.test(text))).toBe(false)
+  expect(shown?.filter(text => text.startsWith('Run the screenshots of both sides')).length).toBe(1)
 })
