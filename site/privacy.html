@@ -98,24 +98,24 @@ section li::before{content:"";position:absolute;left:0;top:.6em;width:var(--s2);
   <p class="lead">What claudopus.ai collects about your visit, and how to change your choice. What Claudopus itself does on your computer is on <a href="https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/docs/privacy.md">its own page</a>.</p>
 </div>
 <section>
-  <h2>Nothing until you say yes</h2>
+  <h2>Before you choose</h2>
   <p>Until you press Accept on the cookie banner, this site loads no analytics and sets no cookies. Decline keeps it that way.</p>
   <p>The site is hosted on Vercel, which sees each request, as any web host does, to send you the page.</p>
 </section>
 <section>
-  <h2>With your yes: Microsoft Clarity</h2>
+  <h2>Microsoft Clarity, if you accept</h2>
   <p>After you press Accept, the site loads Microsoft Clarity, Microsoft's analytics tool. It records:</p>
   <ul>
     <li>which pages you open and how you scroll, click and move the pointer, and replays of the visit made from those</li>
-    <li>which install command you copy and whether you open Claudopus on GitHub, counted as events</li>
+    <li>which command you copy and whether you open Claudopus on GitHub, counted as events</li>
     <li>your browser, device and screen size, and your rough location from your internet address</li>
   </ul>
-  <p>Clarity sets its cookies <code>_clck</code> and <code>_clsk</code> on claudopus.ai, and Microsoft can set its own on clarity.ms and bing.com. The site tells Clarity that nothing may be used for ads. Microsoft handles the data as its <a href="https://privacy.microsoft.com/privacystatement">privacy statement</a> says.</p>
+  <p>Clarity sets its cookies <code>_clck</code> and <code>_clsk</code> on claudopus.ai. It also contacts bing.com, and Microsoft sets its own cookies on clarity.ms and bing.com. The site tells Clarity that nothing may be used for ads. Microsoft handles the data as its <a href="https://privacy.microsoft.com/privacystatement">privacy statement</a> says.</p>
 </section>
 <section>
-  <h2>Change your choice</h2>
+  <h2>Your choice</h2>
   <p>Your choice is kept in this browser only. Now: <b id="choice">no choice yet</b>. <a href="#cookies" data-cookies>Change it</a></p>
-  <p>If you decline after accepting, the site tells Clarity to stop and to delete its cookies here.</p>
+  <p>If you decline after accepting, the site removes <code>_clck</code> and <code>_clsk</code> and loads the page again without Clarity. Microsoft's own cookies on clarity.ms and bing.com stay until you clear them in your browser.</p>
 </section>
 <section>
   <h2>Questions</h2>

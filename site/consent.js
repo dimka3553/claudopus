@@ -26,24 +26,28 @@
     }
     clarity('consentv2', { ad_Storage: 'denied', analytics_Storage: 'granted' })
   }
+  // a loaded Clarity keeps sending in its no-consent mode, so after its cookies are dropped the page loads again without it
   const stop = () => {
     if (!window.clarity) return
     clarity('consentv2', { ad_Storage: 'denied', analytics_Storage: 'denied' })
     clarity('consent', false)
+    location.reload()
   }
   const count = name => { if (choice === 'accept' && window.clarity) clarity('event', name) }
 
-  document.addEventListener('click', e => {
-    const copy = e.target.closest?.('[data-copy]')
+  const pressed = e => {
+    const copy = e.type === 'click' && e.target.closest?.('[data-copy]')
     if (copy) { count(COPY[copy.dataset.copy] || 'copy_other'); return }
     const link = e.target.closest?.('a[href]')
     if (link && /^https:\/\/github\.com\//.test(link.href)) count('click_github')
-  }, true)
+  }
+  document.addEventListener('click', pressed, true)
+  document.addEventListener('auxclick', e => { if (e.button === 1) pressed(e) }, true)
 
   // ---- the banner ----
   const style = document.createElement('style')
   style.textContent = `
-.cookies{position:fixed;z-index:50;left:var(--s6);bottom:var(--s6);max-width:400px;display:grid;gap:var(--s3);padding:var(--s4);
+.cookies{position:fixed;z-index:50;right:var(--s6);bottom:var(--s6);max-width:400px;display:grid;gap:var(--s3);padding:var(--s4);
   background:var(--raised);color:var(--ink);font:400 var(--t-small)/1.45 var(--sans);box-shadow:inset 0 0 0 1px var(--line);
   --n:var(--cell);clip-path:polygon(var(--n) 0,calc(100% - var(--n)) 0,calc(100% - var(--n)) var(--n),100% var(--n),100% calc(100% - var(--n)),calc(100% - var(--n)) calc(100% - var(--n)),calc(100% - var(--n)) 100%,var(--n) 100%,var(--n) calc(100% - var(--n)),0 calc(100% - var(--n)),0 var(--n),var(--n) var(--n))}
 .cookies[hidden]{display:none}
@@ -64,21 +68,27 @@
   box.className = 'cookies'
   box.setAttribute('role', 'region')
   box.setAttribute('aria-label', 'Cookies')
-  box.innerHTML = '<p><b>May we count visits?</b> With your yes, Microsoft Clarity records clicks, scrolling and which commands you copy, and sets cookies. <a href="privacy.html">Privacy</a></p>'
+  box.innerHTML = '<p><b>May we record your visit?</b> If you accept, Microsoft Clarity records your clicks and scrolling as a replay of the visit, counts which commands you copy, and sets cookies. <a href="privacy.html">Privacy</a></p>'
     + '<div class="row"><button type="button" class="yes">Accept</button><button type="button" class="no">Decline</button></div>'
   box.hidden = true
-  const show = () => { box.hidden = false; box.querySelector('.yes').focus({ preventScroll: true }) }
+  // while it shows, the page gets room below its end, so the banner never covers the footer
+  const room = () => { document.body.style.paddingBottom = box.hidden ? '' : box.offsetHeight + 32 + 'px' }
+  addEventListener('resize', room, { passive: true })
+  let opener = null
+  const show = from => { opener = from || null; box.hidden = false; room(); box.querySelector('.yes').focus({ preventScroll: true }) }
   const decide = value => {
     const was = choice
-    choice = value; save(value); box.hidden = true
+    choice = value; save(value); box.hidden = true; room()
+    opener?.focus({ preventScroll: true }); opener = null
     if (value === 'accept') start(); else if (was === 'accept') stop()
     document.dispatchEvent(new CustomEvent('cookies', { detail: value }))
   }
   box.querySelector('.yes').addEventListener('click', () => decide('accept'))
   box.querySelector('.no').addEventListener('click', () => decide('decline'))
-  document.addEventListener('click', e => { if (e.target.closest?.('[data-cookies]')) { e.preventDefault(); show() } })
-  window.claudopusCookies = { get: () => choice, set: decide, show }
+  document.addEventListener('click', e => { const link = e.target.closest?.('[data-cookies]'); if (link) { e.preventDefault(); show(link) } })
+  box.addEventListener('keydown', e => { if (e.key === 'Escape' && choice) { box.hidden = true; room(); opener?.focus({ preventScroll: true }); opener = null } })
+  window.claudopusCookies = { get: () => choice, set: decide, show: () => show() }
 
-  const ready = () => { document.body.append(box); if (choice === 'accept') start(); else if (choice !== 'decline') box.hidden = false }
+  const ready = () => { document.body.append(box); if (choice === 'accept') start(); else if (choice !== 'decline') { box.hidden = false; room() } }
   if (document.body) ready(); else document.addEventListener('DOMContentLoaded', ready)
 })()
