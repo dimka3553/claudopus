@@ -103,9 +103,9 @@ const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<
   if (!dir) return ''
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
   if (e.tool === 'Bash') {
-    // The command as written and unquoted, and each script it runs
+    // The command as written and unquoted, and each script it runs; a program handed code that only reads names a file to read it
     const command = String(input.command ?? '')
-    const texts = [command, ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
+    const texts = [...(codeOnlyReads(command) ? [] : [command]), ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
     if (texts.some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
     if (texts.some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
     return ''
@@ -292,7 +292,7 @@ const workHooks = (on: On) => {
     // The branch a push would go from, which is never main
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool)
+    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !PANE_SERVERS.test(e.tool)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
       // A call refused after a press (another of its commands denied, a grant not sealed) ends here: its note goes with it
@@ -517,7 +517,7 @@ const workHooks = (on: On) => {
       }
       return r
     }
-    if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return next(e)
+    if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) || PANE_SERVERS.test(e.tool)) return next(e)
     // The chat's single command always runs in the background, so no command holds the chat; Claudopus stops it at its limit
     if (isChatCommand) {
       const r = await next({ ...e, run_in_background: true } as typeof e)

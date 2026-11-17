@@ -483,8 +483,43 @@ test("a chat's own thread may only read, run a single command in the background,
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1f${i}`, command } as never)).deny).toContain('Start a fresh agent')
   // and it names the quick task for a clearly stated job
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1f-q', command: 'git pull' } as never)).deny).toContain('"claudopus:quick" for a clearly stated job')
-  for (const [i, command] of ['git status', 'git log --oneline -5', 'gh pr checks 12', 'git branch -a', 'git remote -v'].entries())
-    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1g${i}`, command } as never)).deny).toBeUndefined()
+  // A look, an open of a file or page, and a status check of a local server run; braces and the like inside quotes are as written
+  for (const [i, command] of [
+    'git status',
+    'git log --oneline -5',
+    'gh pr checks 12',
+    'git branch -a',
+    'git remote -v',
+    'open -a Vivaldi "/repo/out/before after [1].png"',
+    'open /repo/out/shot.png',
+    'open http://localhost:3000/pricing',
+    'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/pricing',
+    'curl -sSI --max-time 5 http://127.0.0.1:8080/',
+  ].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `t1g${i}`, command } as never)).deny]).toEqual([command, undefined])
+  // but nothing that runs what it opens, sends data, writes a file or asks another machine
+  for (const [i, command] of [
+    'open /repo/deploy.command',
+    'open -a Terminal /repo/run.sh',
+    'open /Applications/Calculator.app',
+    'open x-apple.systempreferences:com.apple.preference.security',
+    'open --stdout /repo/out.txt /repo/a.png',
+    'open -a Vivaldi "$HOME/x.png"',
+    'curl -s -o /repo/page.html http://localhost:3000/',
+    'curl -O http://localhost:3000/a.js',
+    'curl -X POST http://localhost:3000/api/reset',
+    'curl -d x=1 http://localhost:3000/api',
+    'curl -s -w "%output{/repo/x}%{http_code}" http://localhost:3000/',
+    'curl -K /repo/curlrc http://localhost:3000/',
+    'curl -s https://example.com/',
+    'curl -s http://localhost@example.com/',
+  ].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `t1o${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('Start a fresh agent')])
+  // The browser pane's preview, which shows a page or a local server, the chat starts itself; the pane's clicks and scripts are a task's
+  for (const [i, tool] of ['mcp__Claude_Browser__preview_start', 'mcp__Claude_Browser__preview_list', 'mcp__remote-devices__Claude_Browser__preview_start'].entries())
+    expect([tool, (await $.tool.call({ tool, tool_use_id: `t1p${i}`, url: 'http://localhost:3000' } as never)).deny]).toEqual([tool, undefined])
+  for (const [i, tool] of ['mcp__Claude_Browser__computer', 'mcp__Claude_Browser__javascript_tool', 'mcp__Claude_Browser__form_input'].entries())
+    expect([tool, (await $.tool.call({ tool, tool_use_id: `t1q${i}` } as never)).deny]).toEqual([tool, expect.stringContaining('Start a fresh agent')])
   // A push only of the branch it is on, never from main and never to it by another spelling, nor anything git is set to run
   files.set('git:branch', 'fix-nose')
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1h', command: 'git push -u origin fix-nose' } as never)).deny).toBeUndefined()

@@ -19,6 +19,9 @@ const RARE_SERVERS = ['mcp__Claude_Browser__', 'mcp__Claude_Code_iOS_Simulator__
 const OWN = ['Agent', 'Workflow', 'SendMessage', 'ListAgents', 'TaskStop', 'ToolSearch', 'AskUserQuestion', 'SendUserFile', 'ReadNotifications', 'Skill']
 // And what it reads with, to answer a question a few files answer: none of them changes a file or runs a command
 const READS = ['Read', 'Grep', 'Glob']
+// And the browser pane's preview, which shows a page or a local server in the app's own browser: started, listed, its server's log
+// read, stopped, its tabs looked at. The pane's other tools (clicks, typing, forms, scripts on a page) are a task's
+const PANE_SERVERS = /^mcp__(?:remote-devices__)?Claude_Browser__(?:preview_(?:start|list|logs|stop)|tabs_context)$/
 // The mod's own tools, as the chat names them; work recorded before the rename called them by the old name
 const TOOLS = 'mcp__claudopus__'
 const OLD_TOOLS = 'mcp__progress__'
