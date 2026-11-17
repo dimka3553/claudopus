@@ -2070,6 +2070,8 @@ test('while the person uses the panel its running times stand still, and move ag
   await $.agent.spawn({ ...spawn, description: 'Check the nose', prompt: 'nose' } as never)
   // (scrolled down: at the top only the running times stand still)
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 20, bodyRows: 50 } }, surface: 'desktop' } as never)
+  // The list was 140 rows long a moment ago, as the app said on a scroll then
+  await ($.ui as any).scroll({ component: 'Pane', requestId: LIST.requestId, offset: 20, by: 1, bodyRows: 50, contentRows: 140, origin: { kind: 'person' } }).catch(() => undefined)
   await clock.advance(12_000)
   await list.findAll({ type: 'Text' })
   // A press in the panel: drawn once for what it did, then still while the person is at it
@@ -2077,8 +2079,9 @@ test('while the person uses the panel its running times stand still, and move ag
   expect(title).toBeDefined()
   await list.press({ key: title?.key ?? '' })
   await list.findAll({ type: 'Text' })
-  // Scrolled down by the person, who the app says sees a list 90 rows tall: drawn at least that tall while they use it, so a card
-  // that shrinks never snaps the view up under them
+  // Scrolled down by the person, who sees rows 20 to 70 of a list the app says is 90 rows tall: drawn at least as tall as the bottom
+  // of what they see while they use it, so a card that shrinks never snaps the view up under them; and never taller, whatever the
+  // list once was or the app says (16 Nov: held at its longest moment, it left blank space under three cards)
   await ($.ui as any).scroll({ component: 'Pane', requestId: LIST.requestId, offset: 20, by: 20, bodyRows: 50, contentRows: 90, origin: { kind: 'person' } }).catch(() => undefined)
   const tall = async () => Number((await list.find({ type: 'Box' }))?.props.minHeight ?? 0)
   counting.isOn = true
@@ -2091,14 +2094,36 @@ test('while the person uses the panel its running times stand still, and move ag
   // An ask comes: shown at once all the same
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a2', text: 'May I go on?', choices: ['Approve', 'Not now'] } as never)
   expect(await list.find({ type: 'Text', text: 'May I go on?' })).toBeDefined()
-  expect(await tall()).toBeGreaterThanOrEqual(90)
+  expect(await tall()).toBe(70)
   // Left alone, the times move again
   const asked = JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))
   await clock.advance(30_000)
   expect(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))).not.toBe(asked)
   // with what came meanwhile, and its own height again
   expect(await until(async () => list.find({ type: 'Text', text: 'Check the chin' }))).toBeDefined()
-  expect(await tall()).toBeLessThan(90)
+  expect(await tall()).toBe(50)
+  await list.unmount()
+})
+
+test('folding Finished while scrolled down draws one card and the fold at their own height, even after the list was long', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'five pieces of work', wait: false, origin: composer })
+  for (const what of ['ears', 'nose', 'chin', 'eyes', 'mouth']) await $.agent.spawn({ ...spawn, description: `Check the ${what}`, prompt: what } as never)
+  for (const n of [2, 3, 4, 5]) await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: `t${n}`, reason: 'answer', agentId: `a${n}` } as never)
+  await clock.advance(2_100)
+  // The person opened Finished, the list ran to 300 rows as the app said, and they scrolled down to its fold, 200 rows in
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 200, bodyRows: 50 } }, surface: 'desktop' } as never)
+  const fold = async () => (await list.findAll({ type: 'Button' })).find(b => /Finished 4$/.test(String(b.props.label)))
+  await list.press({ key: String((await fold())?.key) })
+  expect((await fold())?.props.label).toBe('▾ Finished 4')
+  await ($.ui as any).scroll({ component: 'Pane', requestId: LIST.requestId, offset: 200, by: 20, bodyRows: 50, contentRows: 300, origin: { kind: 'person' } }).catch(() => undefined)
+  // They fold it: one card and the fold are left, drawn at the pane's own height, so the view comes back to them and no blank runs
+  // under them to scroll through (17 Nov, Dima's screenshot: one card, the fold at the bottom and blank down to it. Held at the
+  // list's longest moment on 0.2.170, and with the hold at the bottom of the view alone, blank down to where the fold was pressed)
+  await list.press({ key: String((await fold())?.key) })
+  expect((await fold())?.props.label).toBe('▸ Finished 4')
+  expect(Number((await list.find({ type: 'Box' }))?.props.minHeight ?? 0)).toBe(50)
   await list.unmount()
 })
 

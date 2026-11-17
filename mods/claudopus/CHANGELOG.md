@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.171 · 17 November 2026
+- The panel no longer lets you scroll far past its cards: while you scrolled it, it kept the length of the longest list it had shown in the chat, so blank space ran down to the Finished row under one card. Now, while you scroll, it is never longer than the bottom of what you see; blank space can still show there for a moment where cards ended while you scrolled, until you leave the panel alone
+- Folding Finished while scrolled down brings the view back to what is left, instead of leaving blank space with the cards above it
+
 ## 0.2.170 · 17 November 2026
 - When you answer a question in your own words in the box above the chat, only the big Send button shows now; the second, small send beside the box is gone, and Enter still sends.
 
