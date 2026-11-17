@@ -8721,7 +8721,8 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
     if (!one || isHeld(one) || stoppedHere.has(id) || pressed.has(id) || (await isReplaced($))) continue
     if (step < 3 && WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))) continue
     const from = list.find(card => card.id === id)?.helperWait?.from ?? now
-    const changed = await helpersChangedAt($, list, id, from)
+    const { changed, printed } = await helpersRecord($, list, id)
+    if (printed && now - printed < LIVE_CALL_MOST) continue
     if (changed > from) {
       await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { from: changed, done: 0 } } : card)))
       await log($, `work ${id} waits on helpers, one of which had a call return something new ${took(now - changed)} ago that Claudopus had not seen: not started again`)
@@ -8741,28 +8742,43 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
   }
 }
 
-const helpersChangedAt = async ($: EngineInterface, list: Todo[], id: string, since: number) => {
+const helpersRecord = async ($: EngineInterface, list: Todo[], id: string) => {
   const { id: session } = await read($, me)
-  if (!session || !cwd) return 0
+  const seen = { changed: 0, printed: 0 }
+  if (!session || !cwd) return seen
   const folder = await agentsFolder($, session)
-  let latest = 0
   for (const kid of underOf(list, id).filter(one => one.status === 'working')) {
     const path = `${folder}/agent-${kid.id}.jsonl`
-    if (((await $.fs.stat(path).catch(() => undefined))?.mtimeMs ?? 0) <= since) continue
     const tail = (await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? ''
+    const tools = new Map<string, string>()
+    const runs = new Map<string, { output: string; at: number }>()
     let before: string | undefined
-    for (const row of tail.split('\n').slice(1)) {
+    for (const row of tail.split('\n')) {
       const o = parsedOr<{ type?: string; timestamp?: string; message?: { content?: unknown } }>(row, {})
-      const content = o.type === 'user' && Array.isArray(o.message?.content) ? (o.message.content as { type?: string; content?: unknown }[]) : []
-      for (const part of content.filter(one => one.type === 'tool_result')) {
+      const at = Date.parse(o.timestamp ?? '') || 0
+      const content = o.message?.content
+      const text = typeof content === 'string' ? content : ''
+      for (const ended of text.matchAll(/<task-id>(\w+)<\/task-id>/g)) runs.delete(ended[1] ?? '')
+      if (!Array.isArray(content)) continue
+      for (const part of content as { type?: string; id?: string; name?: string; tool_use_id?: string; content?: unknown; is_error?: boolean }[]) {
+        if (o.type === 'assistant' && part.type === 'tool_use') tools.set(part.id ?? '', part.name ?? '')
+        if (o.type !== 'user' || part.type !== 'tool_result') continue
+        for (const ended of JSON.stringify(part.content ?? '').matchAll(/<task-id>(\w+)<\/task-id>/g)) runs.delete(ended[1] ?? '')
+        const tool = tools.get(part.tool_use_id ?? '') ?? ''
+        if (part.is_error || tool.startsWith(TOOLS) || tool.startsWith(OLD_TOOLS)) continue
         const said = resultLines(part.content).join('\n')
-        const at = Date.parse(o.timestamp ?? '') || 0
-        if (before !== undefined && said !== before && at > latest) latest = at
+        const started = /Command running in background with ID: (\w+)\. Output is being written to: (\S+?\.output)/.exec(JSON.stringify(part.content ?? ''))
+        if (started) runs.set(started[1] ?? '', { output: started[2] ?? '', at })
+        if (before !== undefined && said !== before && at > seen.changed) seen.changed = at
         before = said
       }
     }
+    for (const run of runs.values()) {
+      const wrote = (await $.fs.stat(run.output).catch(() => undefined))?.mtimeMs ?? 0
+      seen.printed = Math.max(seen.printed, wrote || run.at)
+    }
   }
-  return latest
+  return seen
 }
 const silentHelpers = (list: Todo[], id: string, at: number) =>
   list

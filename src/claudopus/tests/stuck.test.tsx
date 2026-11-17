@@ -175,7 +175,7 @@ test('the schedule for silent helpers keeps its time: each step comes though the
   await settle()
 })
 
-test("helpers are not taken for silent while their own record shows calls returning something new that Claudopus did not see; a record of calls that say the same again, or of messages to the helper, is no news, and the check-ins and the word to the chat still come (17 Nov: a task was started again three times to check on helpers that were mid-step)", SLOW, async ($, on) => {
+test("helpers are not taken for silent while their own record shows calls returning something new that Claudopus did not see, or a command in the background still printing; a record of calls that say the same again, of Claudopus's own tools, of refused calls or of messages to the helper is no news, and the check-ins and the word to the chat still come (17 Nov: a task was started again three times to check on helpers that were mid-step)", SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = { a1: 'general-purpose', a2: 'general-purpose' }
   const { clock, resumed, appended, files } = world(on, { agents, kinds, parents: { a2: 'a1' } })
@@ -192,11 +192,27 @@ test("helpers are not taken for silent while their own record shows calls return
   const rows: string[] = ['{"type":"system"}']
   const write = (row: object) => (rows.push(JSON.stringify({ ...row, timestamp: new Date(clock.now()).toISOString() })), files.set(record, rows.join('\n')), files.set(`mtime:${record}`, String(clock.now())))
   const returned = (text: string) => write({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: text }] } })
-  // For 30 minutes each returns something new: no check-in
+  const called = (id: string, name: string, text: string) => (write({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input: {} }] } }), write({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] } }))
+  // It parks on a command in the background that follows its run, and the command prints each minute for 20 minutes: no check-in
+  const output = '/tmp/claude-1/x/tasks/bfollow.output'
+  returned('Command running in background with ID: bfollow. Output is being written to: /tmp/claude-1/x/tasks/bfollow.output. You will be notified when it completes.')
+  files.set(output, 'progress: 1/40 heads fitting')
+  for (let m = 1; m <= 20; m++) (files.set(`mtime:${output}`, String(clock.now())), await clock.advance(60_000))
+  expect(nudges()).toEqual([])
+  write({ type: 'user', message: { role: 'user', content: '<task-notification>\n<task-id>bfollow</task-id>\n<status>completed</status>\n</task-notification>' } })
+  // For 30 minutes each call returns something new: no check-in
   for (let m = 1; m <= 30; m++) (returned(`fitted head ${['one', 'two', 'three', 'four', 'five', 'six'][m % 6]} of the batch, file ${m}.npz`), await clock.advance(60_000))
   expect(nudges()).toEqual([])
-  // Then each says what the last said, and Claudopus's own messages to it land there too: the check-ins come, and the chat is told
-  for (let m = 1; m <= 40; m++) (returned('Running'), write({ type: 'user', message: { role: 'user', content: 'From Claudopus: a note' } }), await clock.advance(60_000))
+  // Then each says what the last said, and Claudopus's own messages to it land there too, beside its notes with new words and
+  // refused calls: the check-ins come, and the chat is told
+  for (let m = 1; m <= 40; m++) {
+    const word = ['still', 'fitting', 'waiting', 'looking'][m % 4]
+    returned('Running')
+    write({ type: 'user', message: { role: 'user', content: 'From Claudopus: a note' } })
+    called(`n${m}`, 'mcp__claudopus__note', `Noted: ${word}`)
+    write({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `x${m}`, content: `Not run: ${word}`, is_error: true }] } })
+    await clock.advance(60_000)
+  }
   expect(await until(async () => nudges().length >= 2 || undefined)).toBe(true)
   expect(await until(async () => appended.some(line => line.includes('"Rebuild the head model" is stuck')) || undefined)).toBe(true)
 })
