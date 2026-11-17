@@ -729,14 +729,10 @@ const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: stri
     .join('\n')
 const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
   `In the background task "${title}", Claude asked {name} a question. {Name} sees it on the task's card and in this chat as a Claudopus notice, which you do not see: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, which {name} sees in full with it on the card and in the notice: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} already has it: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, do not answer it yourself, and do not start a task for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that task with SendMessage to "${id}", in their words; its card then stops showing the question.`
-const ASK_ANSWERED = (title: string, said: string, isYou = false) =>
-  isYou ? `✓ You answered "${title}" on its card: ${said}. Claude has your answer.` : `✓ {Name} answered "${title}" on its card: ${said}. Claude already has the answer from the card, so it needs no second copy.`
+const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered "${title}" on its card: ${said}. Claude already has the answer from the card, so it needs no second copy.`
 const ANSWER_ALREADY_SENT = (said: string) => `Not sent: "${said}" is the answer {name} gave on that task's card. Claude already has it from there and has asked nothing since, so a second copy would only start it again. If {name} means those words for something new, send them with what they are for.`
 const ANSWER_ECHO = 60 * 60_000
-const ASK_REPLIED = (title: string, said: string, isYou = false) =>
-  isYou
-    ? `✓ You replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs you.`
-    : `✓ {Name} replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs {name}.`
+const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs {name}.`
 const REPLY_HOLDS = `That reply does not settle your question by itself: act on it. Their card shows your question with their reply under it, and nothing more to press or type while you work on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still needs them after you have done what they said, ask it again, which brings back its answers.`
 const RESUMED_BY_ANSWER = `You had finished; this answer starts you again. Continue the task with it, then end with your report as before.`
 const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = false) =>
@@ -5081,7 +5077,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true, askAt: ask.at })
   redraw($)
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
-  if (inChat.has(one.id)) (inChat.delete(one.id), void sayInChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`)), ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`, true)))
+  if (inChat.has(one.id)) (inChat.delete(one.id), void tellChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`))))
   const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
   const to = `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
   const told = working ? await tell($, target, to) : undefined
@@ -5168,12 +5164,16 @@ const askInChat = async ($: EngineInterface, one: Todo) => {
 }
 const sayInChat = async ($: EngineInterface, text: string, shown = text) => {
   $.ui.log(shown)
+  await tellChat($, text)
+}
+const tellChat = async ($: EngineInterface, text: string) => {
   await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } }).catch(err => log($, `chat not told: ${String(err)}`))
 }
 const askGone = async ($: EngineInterface, one: Todo, said?: string) => {
   if (!inChat.has(one.id)) return
   inChat.delete(one.id)
-  await sayInChat($, named(said === undefined ? ASK_CLEARED(titleOf(one)) : ASK_ANSWERED(titleOf(one), `“${cut(said, 120)}”`)), said === undefined ? ASK_CLEARED(titleOf(one)) : ASK_ANSWERED(titleOf(one), `“${cut(said, 120)}”`, true))
+  if (said === undefined) await sayInChat($, ASK_CLEARED(titleOf(one)))
+  else await tellChat($, named(ASK_ANSWERED(titleOf(one), `“${cut(said, 120)}”`)))
 }
 const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNullable<Todo['ask']>; key: string; words: string; at: number }, to: string, isSent: boolean) => {
   if (!isSent) return void answeredAsks.delete(a.key)
@@ -7534,8 +7534,9 @@ const quietNotices = (text: string, waiting: Set<string>): Quiet => {
 const NO_ANSWER = 'No response requested.'
 const noticesOf = (text: string) => [...text.matchAll(/<task-notification>[\s\S]*?<\/task-notification>/g)].map(m => m[0])
 const isQuietTurn = (text: string, quiet: ReadonlySet<string>) => {
-  const notices = noticesOf(text)
-  return notices.length > 0 && notices.every(one => quiet.has(one)) && !text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').replace(NOTICE_HEADER, '').trim()
+  let rest = text
+  for (const one of quiet) rest = rest.split(one).join('')
+  return rest !== text && !rest.replace(NOTICE_HEADER, '').trim()
 }
 
 
@@ -7982,6 +7983,11 @@ const chatHooks = (on: On) => {
         return next(waits.length ? { ...e, context: [...(e.context ?? []), ...waits] } : e)
       }
       if (waits.length) return next({ ...e, context: [...(e.context ?? []), ...waits] })
+    }
+    if (await isQuietHandback($, e.origin, e.text).catch(err => (void log($, `hand-back not looked at: ${String(err)}`), false))) {
+      quietHeld.add(e.text)
+      await log($, 'let in a helper\'s result that Claudopus passes on to its task, with no turn of the model\'s')
+      return next(e)
     }
     if (e.isMeta || e.command || !dir) return next(e)
     const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text)
@@ -9367,6 +9373,17 @@ const noteHandback = async ($: EngineInterface, helperId: string) => {
   notedAtHandback.add(helperId)
   await toChat($, HELPER_PASSED(titleOf(to.helper), titleOf(to.parent)))
 }
+const handingBack = new Set<string>()
+const HANDBACK_FROM = /^\s*(?:Another Claude session sent a message:\s*)?<agent-message from="([^"]+)">\s*\[Subagent hand-back\]/
+const isQuietHandback = async ($: EngineInterface, origin: { kind: string }, text: string) => {
+  if (!dir || isOff || origin.kind !== 'peer') return false
+  const helperId = HANDBACK_FROM.exec(text)?.[1]
+  if (!helperId || !handingBack.has(helperId)) return false
+  const to = passedTo(await read($, todos), helperId)
+  if (!to || handedBackLetGo.has(to.parent.id)) return false
+  handingBack.delete(helperId)
+  return true
+}
 const passedOn = new Map<string, string>()
 const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status'], isUnheard = false) => {
   if (!dir || isOff) return
@@ -10518,7 +10535,9 @@ const workHooks = (on: On) => {
       const hold = await holdAtHandback($, e.agentId).catch(() => '')
       if (hold) return { deny: hold }
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
+      handingBack.add(e.agentId)
       const r = await next(e)
+      if (r.deny || r.isError) handingBack.delete(e.agentId)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       if (!r.deny && !r.isError) await noteHandback($, e.agentId).catch(err => log($, `chat not told of a helper's hand-back: ${String(err)}`))
       if (!r.deny && !r.isError && isLetGoNow) handedBackLetGo.add(e.agentId)

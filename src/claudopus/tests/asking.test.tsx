@@ -695,10 +695,11 @@ test('once the person has answered, by a button or in their own words, the card 
   expect((await labels()).filter(label => label === 'Stop it' || label === 'Not now')).toEqual([])
   expect(await inputs()).toEqual([])
   expect(await list.find({ type: 'Text', text: DETAILS })).toBeUndefined()
-  // The chat is told it acts on the reply, not that it still asks
-  const toChat = (await until(async () => logged.find(line => line.includes('You replied to "Why the M4 is stuck"')))) ?? ''
-  expect(toChat).toContain('will ask again if it still needs you')
+  // The chat's model is told it acts on the reply, not that it still asks; the person, who replied on the card, is not shown it
+  const toChat = (await until(async () => appended.find(line => line.startsWith('undefined: ✓ The person replied to "Why the M4 is stuck"')))) ?? ''
+  expect(toChat).toContain('will ask again if it still needs the person')
   expect(toChat).not.toContain('It still asks')
+  expect(logged.filter(line => line.startsWith('✓'))).toEqual([])
   // The work asks the same again: amber, its answers and an empty box back, and the chat shown it afresh
   await clock.advance(1000)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: ASK, details: DETAILS, choices: ['Stop it', 'Not now'] } as never)
@@ -915,13 +916,13 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   // A press on the card no longer counts for that ask
   expect((await list.findAll({ type: 'Button' })).find(b => b.props.label === 'B')).toBeUndefined()
 
-  // An ask answered on the card is said in the chat, which sees and reads it; one the work withdraws is said too
+  // An ask answered on the card is told to the chat's model alone, as the person answered it there; one the work withdraws is shown too
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'May I push it?', choices: ['Push', 'Not now'] } as never)
   await clock.advance(10)
   expect(await until(async () => logged.some(line => line.includes('May I push it?')) || undefined)).toBe(true)
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Push')?.key ?? '' })
   expect(await until(async () => appended.find(line => line.startsWith('undefined: ✓ The person answered "Redraw the logo" on its card: “Push”')))).toBeDefined()
-  expect(logged.some(line => line.startsWith('✓ You answered "Redraw the logo" on its card: “Push”'))).toBe(true)
+  expect(logged.some(line => line.startsWith('✓'))).toBe(false)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a1', text: 'Sign in to Vercel.' } as never)
   await clock.advance(10)
   expect(await until(async () => logged.some(line => line.includes('Answers: Done · Not now')) || undefined)).toBe(true)

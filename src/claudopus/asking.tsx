@@ -647,7 +647,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   // Said in the chat once; the ask is then done with there, so the work asking again is sent to the chat afresh
-  if (inChat.has(one.id)) (inChat.delete(one.id), void sayInChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`)), ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`, true)))
+  if (inChat.has(one.id)) (inChat.delete(one.id), void tellChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`))))
   const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
   const to = `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
   const told = working ? await tell($, target, to) : undefined
@@ -770,13 +770,20 @@ const askInChat = async ($: EngineInterface, one: Todo) => {
 // see), sent with no turn of its own. The notice is the mod's log line: the desktop app leaves out a system row the mod appends
 const sayInChat = async ($: EngineInterface, text: string, shown = text) => {
   $.ui.log(shown)
+  await tellChat($, text)
+}
+// A row only the chat's model reads, with no turn of its own: an answer the person gave on a card themselves, which the card already
+// shows them (17 Nov: "✓ You replied to … on its card" in the chat was among the updates they called pointless)
+const tellChat = async ($: EngineInterface, text: string) => {
   await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } }).catch(err => log($, `chat not told: ${String(err)}`))
 }
 // The ask sent into the chat is gone from the card: answered there, or withdrawn by the work
 const askGone = async ($: EngineInterface, one: Todo, said?: string) => {
   if (!inChat.has(one.id)) return
   inChat.delete(one.id)
-  await sayInChat($, named(said === undefined ? ASK_CLEARED(titleOf(one)) : ASK_ANSWERED(titleOf(one), `“${cut(said, 120)}”`)), said === undefined ? ASK_CLEARED(titleOf(one)) : ASK_ANSWERED(titleOf(one), `“${cut(said, 120)}”`, true))
+  // What the person did on the card themselves is no news to them: only the chat's model is told. A question the work withdrew is
+  if (said === undefined) await sayInChat($, ASK_CLEARED(titleOf(one)))
+  else await tellChat($, named(ASK_ANSWERED(titleOf(one), `“${cut(said, 120)}”`)))
 }
 // The person's answer typed in the chat, passed on by the chat to the work: once on its way the card stops asking and says what was
 // answered, and a helper that asked is told too when the chat sent it to the work it helps; refused, the ask stays to be answered

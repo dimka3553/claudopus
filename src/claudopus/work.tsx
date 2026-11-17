@@ -500,7 +500,10 @@ const workHooks = (on: On) => {
       const hold = await holdAtHandback($, e.agentId).catch(() => '')
       if (hold) return { deny: hold }
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
+      // The engine hands the hand-back on as it goes through: the chat may be given it from now (isQuietHandback)
+      handingBack.add(e.agentId)
       const r = await next(e)
+      if (r.deny || r.isError) handingBack.delete(e.agentId)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       // A helper whose work has ended its step hands its result to the chat: the chat is told once the hand-back went through, before
       // the helper's turn ends, so its turn starts knowing; a refused hand-back leaves no note

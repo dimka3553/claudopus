@@ -424,6 +424,12 @@ const chatHooks = (on: On) => {
       }
       if (waits.length) return next({ ...e, context: [...(e.context ?? []), ...waits] })
     }
+    // A helper's result Claudopus passes on to its task costs the chat no turn of the model's either (isQuietHandback)
+    if (await isQuietHandback($, e.origin, e.text).catch(err => (void log($, `hand-back not looked at: ${String(err)}`), false))) {
+      quietHeld.add(e.text)
+      await log($, 'let in a helper\'s result that Claudopus passes on to its task, with no turn of the model\'s')
+      return next(e)
+    }
     if (e.isMeta || e.command || !dir) return next(e)
     // A message the mod sent from a press or reply in the panel starts work as a message of the person's does
     const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text)

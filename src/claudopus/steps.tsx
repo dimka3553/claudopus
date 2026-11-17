@@ -361,6 +361,23 @@ const noteHandback = async ($: EngineInterface, helperId: string) => {
   notedAtHandback.add(helperId)
   await toChat($, HELPER_PASSED(titleOf(to.helper), titleOf(to.parent)))
 }
+// A helper's hand-back the engine gives the chat because the task that started it had ended its step, whose result Claudopus passes
+// on to that task (passOnHelper): Claude Code shows it, and the chat need not act on it, so it costs the chat no turn of the model's
+// (17 Nov: after a "Report from subagent" box the chat sent the result on a second time and wrote "Nothing needs you here."). Only a
+// helper whose hand-back went through here (handingBack), each once; one for work that already handed back what it had, held by the
+// person, stopped or failed is the chat's to act on, as before. Claude Code gives a hook no way to keep the box itself from the chat:
+// session.receive does not see a message from one of the chat's own agents (seen on 2.1.325), and a prompt dropped is a warning card
+const handingBack = new Set<string>()
+const HANDBACK_FROM = /^\s*(?:Another Claude session sent a message:\s*)?<agent-message from="([^"]+)">\s*\[Subagent hand-back\]/
+const isQuietHandback = async ($: EngineInterface, origin: { kind: string }, text: string) => {
+  if (!dir || isOff || origin.kind !== 'peer') return false
+  const helperId = HANDBACK_FROM.exec(text)?.[1]
+  if (!helperId || !handingBack.has(helperId)) return false
+  const to = passedTo(await read($, todos), helperId)
+  if (!to || handedBackLetGo.has(to.parent.id)) return false
+  handingBack.delete(helperId)
+  return true
+}
 // The result each helper's end was last passed on with: its turn's end, the look shortly after it and the look for work that ended
 // unheard may each come to the same end, and it is passed on once. A helper started again ends again with a result of its own
 // By the helper and its report alone: the same report ended again as failed or stopped is not passed on twice; a step of the helper's

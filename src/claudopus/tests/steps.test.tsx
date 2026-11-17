@@ -161,6 +161,15 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   agents.a3 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a3', message: 'The nose is drawn at every size.' } as never)
   const atHandbackEnd = appended.length
+  // The hand-back itself, which Claude Code gives the chat as it goes through, is let in and its turn answered with no model: the
+  // chat has nothing to do with it (17 Nov: it sent it on again and wrote "Nothing needs you here."); once, and only a hand-back
+  const handbackOf = (id: string, report: string) => `<agent-message from="${id}">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:\n  ${report}\n</agent-message>`
+  const asPeer = (text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'peer' } } as never) as Promise<{ drop?: string }>
+  const nose = handbackOf('a3', 'The nose is drawn at every size.')
+  expect([(await asPeer(nose)).drop, await answeredQuietly(nose)]).toEqual([undefined, true])
+  expect([(await asPeer(nose)).drop, await answeredQuietly(nose)]).toEqual([undefined, false])
+  const words = '<agent-message from="a3">\nThe nose is drawn.\n</agent-message>'
+  expect([(await asPeer(words)).drop, await answeredQuietly(words)]).toEqual([undefined, false])
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h3', reason: 'answer', agentId: 'a3' } as never)
   expect(await until(async () => resumed.find(one => one.startsWith('a1: From Claudopus: your helper "Draw the nose" has finished') && one.endsWith('The nose is drawn at every size.')))).toBeDefined()
   // and the chat is told so as the hand-back goes through, before the helper's turn ends, as the chat's turn starts with the
@@ -280,6 +289,13 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
   expect(await until(async () => submitted.find(one => /^From Claudopus, in place of its word that it passes on the result of the helper "[^"]+": the task "[^"]+" had already handed back what it had, so Claudopus did not pass it on, and the result stays in this chat\./.test(one)))).toBeDefined()
   agents.a3 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-a3', agentId: 'a3', message: 'The test log is clean.' } as never)
+  // Its hand-back reaches the chat, which is the one to act on it: the model's turn
+  const late = '<agent-message from="a3">\n[Subagent hand-back] The report follows:\n  The test log is clean.\n</agent-message>'
+  await $.prompt.submit({ text: late, wait: false, origin: { kind: 'peer' } } as never)
+  await $.turn.start({ text: late, turnId: 'late' } as never)
+  const lateSaid: string[] = []
+  for await (const chunk of $.turn.step({ turnId: 'late', index: 0, model: 'm', messageCount: 2 })) if (chunk.kind === 'text') lateSaid.push((chunk as { text: string }).text)
+  expect(lateSaid.join('')).not.toBe('No response requested.')
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h-a3', reason: 'answer', agentId: 'a3' } as never)
   expect(await until(async () => submitted.find(one => /^From Claudopus: the result of the helper "[^"]+" came after the task "[^"]+" handed back what it had, so it reached this chat\./.test(one)))).toBeDefined()
   expect(submitted.filter(one => one.includes('handed back what it had'))).toHaveLength(2)

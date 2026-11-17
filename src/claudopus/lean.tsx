@@ -288,12 +288,13 @@ const quietNotices = (text: string, waiting: Set<string>): Quiet => {
 // previous response had no visible output"). Its own line for a turn with nothing to say ends the turn; it counts that line as no
 // answer (the turn's result is empty)
 const NO_ANSWER = 'No response requested.'
-// The notices a prompt is made of, each whole: a turn is quiet when every notice in it was let in as quiet and it brings nothing
-// else (Claude Code may put its header before them, or join several in one turn)
+// The notices a prompt is made of, each whole, and the helpers' results let in as quiet whole: a turn is quiet when it is made of
+// nothing but those (Claude Code may put its header before them, or join several in one turn)
 const noticesOf = (text: string) => [...text.matchAll(/<task-notification>[\s\S]*?<\/task-notification>/g)].map(m => m[0])
 const isQuietTurn = (text: string, quiet: ReadonlySet<string>) => {
-  const notices = noticesOf(text)
-  return notices.length > 0 && notices.every(one => quiet.has(one)) && !text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').replace(NOTICE_HEADER, '').trim()
+  let rest = text
+  for (const one of quiet) rest = rest.split(one).join('')
+  return rest !== text && !rest.replace(NOTICE_HEADER, '').trim()
 }
 
 // ---- The last step on a go-ahead ----
