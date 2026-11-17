@@ -5602,12 +5602,13 @@ const draftOf = (id: string, ask: NonNullable<Todo['ask']>) => `${id}|${askMark(
 // Whether the person has typed something not sent into a work's reply box
 const hasDraft = (id: string) => [...drafts].some(([key, value]) => key.startsWith(`${id}|`) && Boolean(value))
 // How many lines tall a box for words is drawn, for what it holds: as the chat's own box it grows with the text, from BOX_LEAST
-// lines up to BOX_MOST, then scrolls within. The app draws a box of `rows` that tall whatever it holds and never grows one by itself
+// lines up to BOX_MOST, then scrolls within (the bar above the prompt is at most 11 lines and 40px tall, its title, buttons and
+// the panel's marker included). The app draws a box of `rows` that tall whatever it holds and never grows one by itself
 // (its renderer: a textarea of fixed rows), so the mod draws it again with more rows as the text needs them; the text is the box's
 // own then, as the drawing keeps the value it was last drawn with (17 Nov, the person: "it doesn't extend taller").
 // A line is counted as wrapping at the columns the box has, less a margin, so it grows a little before the text reaches its edge
 const BOX_LEAST = 2
-const BOX_MOST = 8
+const BOX_MOST = 6
 const boxLines = (text: string, columns: number) => {
   const wide = Math.max(12, columns - 6)
   const lines = text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil([...line].length / wide)), 0)
@@ -5645,7 +5646,7 @@ const draftDrawn = (key: string) => {
   drawnDrafts.set(key, value)
   return value
 }
-// What a pane shows, as far as it moves while the person types: a box that grows a line too (rowsAsked); work that starts, finishes, asks, waits on an admin command, is cut
+// What a pane shows, as far as it moves while the person types: a box that grows a line too (growths); work that starts, finishes, asks, waits on an admin command, is cut
 // or stuck, or leaves after its pause, here or in another chat; workflows; boxes, gates and prompts that come or go; a Details
 // tab's own to-dos
 const paneShape = async ($: EngineInterface, paneId: string) => {
@@ -5656,7 +5657,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], replyTo, replyMark, [...rowsAsked]])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], replyTo, replyMark, growths])
 }
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
@@ -12632,10 +12633,16 @@ const barFoot = ($: EngineInterface, ui: Ui, where: string, mark: number, onSend
 )
 // A box whose text now needs another number of lines is drawn again at that height, once for each height asked: a box of `rows`
 // stays that tall whatever it holds. Drawn with the text it was last drawn with, the box keeps what is typed in it (draftDrawn)
-const rowsAsked = new Map<string, number>()
+// A box drawn anew (sent, closed and opened, a new question) is drawn at its own height, so an ask is skipped only when it is the same
+// as the last one from the same drawn height. growths counts the asks: the panel, held while its card's box is typed in, is drawn
+// again for one (paneShape)
+let lastGrow = ''
+let growths = 0
 const growBox = ($: EngineInterface, key: string, drawn: number, wanted: number) => {
-  if (wanted === drawn || rowsAsked.get(key) === wanted) return
-  rowsAsked.set(key, wanted)
+  const ask = `${key}|${drawn}|${wanted}`
+  if (wanted === drawn || ask === lastGrow) return
+  lastGrow = ask
+  growths += 1
   drawAgain($)
 }
 // The bar as last drawn on each surface while a reply box was in it: while the person types, and for as long as the box holds the
@@ -12655,9 +12662,10 @@ const barShape = (surface: string) => {
   const columns = barColumns.get(surface) ?? 80
   const keyBox = barKeyTarget()
   if (boxOpen && keyBox) return `key|${barKeyBoxKey(keyBox.id, boxOpen.mode)}|${boxSaid.get(keyBox.id) ?? ''}|${boxHeldReply.has(keyBox.id)}|${barKeyRows(keyBox.id, boxOpen.mode, columns) ?? 1}`
-  return replyTo ? `reply|${barBoxKey(replyTo)}|${boxLines(drafts.get(barDraft(replyTo)) ?? '', columns)}` : ''
+  return replyTo ? `reply|${barBoxKey(replyTo)}|${boxLines(drafts.get(barDraft(replyTo)) ?? '', columns)}|${barCardsDrawn}` : ''
 }
-// What the cards say of the box open in the bar as it was drawn: its card, still asking, under its title
+// What the cards say of the box open in the bar as last looked at: its card, still asking, under its title. Part of the held shape,
+// so a card that stops asking (answered elsewhere, its question withdrawn, the work stopped) takes its box away within a second
 let barCardsDrawn = ''
 const barCardsSign = (cards: Todo[]) => {
   const target = barTarget(cards)
@@ -12822,6 +12830,7 @@ const bandHooks = (on: On) => {
       // Drawn as it was while the box is typed in or holds the cursor: only the card it is for draws it anew, so neither the panel
       // scrolled under the cursor nor work starting or ending puts a new box under it. The row takes the place of the figures
       // while it is open: figures drawn under a held box would stand still, and a row that came and went would move the box
+      barCardsDrawn = barCardsSign(cards)
       const shape = barShape(e.surface)
       // What waits at the top of a panel scrolled away is still pointed at, as the bar is drawn; not while the box is held
       const marker = await waitMarker($, ui, e.surface)
@@ -12835,7 +12844,6 @@ const bandHooks = (on: On) => {
         reply
       )
       barHeld.set(e.surface, { shape, mark: await markerSign($, e.surface), drawing })
-      barCardsDrawn = barCardsSign(cards)
       return drawing
     }
     barHeld.delete(e.surface)
@@ -13228,7 +13236,8 @@ const panelHooks = (on: On) => {
       if (!ask) return null
       // The card's own box: the columns it wraps at, how many lines tall it is drawn for what is typed in it, and its send
       const columns = e.props.bodyColumns - 9
-      const rows = boxLines(drafts.get(draftOf(one.id, ask)) ?? '', columns)
+      // (the terminal keeps its one line, Enter sending: how a terminal draws a box of rows is not known here)
+      const rows = e.surface === 'terminal' ? undefined : boxLines(drafts.get(draftOf(one.id, ask)) ?? '', columns)
       const sendCard = (value: string) =>
         void (value.trim() && (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`))))
       const answers = ask.choices?.length ? ask.choices : DEFAULT_ANSWERS
@@ -13304,7 +13313,7 @@ const panelHooks = (on: On) => {
                 value={draftShown(one.id, ask)}
                 rows={rows}
                 submitLabel={e.surface === 'terminal' ? 'send' : undefined}
-                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($), growBox($, `${key}-reply`, rows, boxLines(value, columns)))}
+                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($), rows ? growBox($, `${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`, rows, boxLines(value, columns)) : undefined)}
                 onSubmit={value => sendCard(value)}
               />
               {e.surface === 'terminal' ? null : (

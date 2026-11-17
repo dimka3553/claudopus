@@ -344,7 +344,8 @@ const panelHooks = (on: On) => {
       if (!ask) return null
       // The card's own box: the columns it wraps at, how many lines tall it is drawn for what is typed in it, and its send
       const columns = e.props.bodyColumns - 9
-      const rows = boxLines(drafts.get(draftOf(one.id, ask)) ?? '', columns)
+      // (the terminal keeps its one line, Enter sending: how a terminal draws a box of rows is not known here)
+      const rows = e.surface === 'terminal' ? undefined : boxLines(drafts.get(draftOf(one.id, ask)) ?? '', columns)
       const sendCard = (value: string) =>
         void (value.trim() && (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`))))
       const answers = ask.choices?.length ? ask.choices : DEFAULT_ANSWERS
@@ -420,7 +421,7 @@ const panelHooks = (on: On) => {
                 value={draftShown(one.id, ask)}
                 rows={rows}
                 submitLabel={e.surface === 'terminal' ? 'send' : undefined}
-                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($), growBox($, `${key}-reply`, rows, boxLines(value, columns)))}
+                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($), rows ? growBox($, `${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`, rows, boxLines(value, columns)) : undefined)}
                 onSubmit={value => sendCard(value)}
               />
               {e.surface === 'terminal' ? null : (

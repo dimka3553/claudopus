@@ -77,10 +77,16 @@ const barFoot = ($: EngineInterface, ui: Ui, where: string, mark: number, onSend
 )
 // A box whose text now needs another number of lines is drawn again at that height, once for each height asked: a box of `rows`
 // stays that tall whatever it holds. Drawn with the text it was last drawn with, the box keeps what is typed in it (draftDrawn)
-const rowsAsked = new Map<string, number>()
+// A box drawn anew (sent, closed and opened, a new question) is drawn at its own height, so an ask is skipped only when it is the same
+// as the last one from the same drawn height. growths counts the asks: the panel, held while its card's box is typed in, is drawn
+// again for one (paneShape)
+let lastGrow = ''
+let growths = 0
 const growBox = ($: EngineInterface, key: string, drawn: number, wanted: number) => {
-  if (wanted === drawn || rowsAsked.get(key) === wanted) return
-  rowsAsked.set(key, wanted)
+  const ask = `${key}|${drawn}|${wanted}`
+  if (wanted === drawn || ask === lastGrow) return
+  lastGrow = ask
+  growths += 1
   drawAgain($)
 }
 // The bar as last drawn on each surface while a reply box was in it: while the person types, and for as long as the box holds the
@@ -100,9 +106,10 @@ const barShape = (surface: string) => {
   const columns = barColumns.get(surface) ?? 80
   const keyBox = barKeyTarget()
   if (boxOpen && keyBox) return `key|${barKeyBoxKey(keyBox.id, boxOpen.mode)}|${boxSaid.get(keyBox.id) ?? ''}|${boxHeldReply.has(keyBox.id)}|${barKeyRows(keyBox.id, boxOpen.mode, columns) ?? 1}`
-  return replyTo ? `reply|${barBoxKey(replyTo)}|${boxLines(drafts.get(barDraft(replyTo)) ?? '', columns)}` : ''
+  return replyTo ? `reply|${barBoxKey(replyTo)}|${boxLines(drafts.get(barDraft(replyTo)) ?? '', columns)}|${barCardsDrawn}` : ''
 }
-// What the cards say of the box open in the bar as it was drawn: its card, still asking, under its title
+// What the cards say of the box open in the bar as last looked at: its card, still asking, under its title. Part of the held shape,
+// so a card that stops asking (answered elsewhere, its question withdrawn, the work stopped) takes its box away within a second
 let barCardsDrawn = ''
 const barCardsSign = (cards: Todo[]) => {
   const target = barTarget(cards)
@@ -267,6 +274,7 @@ const bandHooks = (on: On) => {
       // Drawn as it was while the box is typed in or holds the cursor: only the card it is for draws it anew, so neither the panel
       // scrolled under the cursor nor work starting or ending puts a new box under it. The row takes the place of the figures
       // while it is open: figures drawn under a held box would stand still, and a row that came and went would move the box
+      barCardsDrawn = barCardsSign(cards)
       const shape = barShape(e.surface)
       // What waits at the top of a panel scrolled away is still pointed at, as the bar is drawn; not while the box is held
       const marker = await waitMarker($, ui, e.surface)
@@ -280,7 +288,6 @@ const bandHooks = (on: On) => {
         reply
       )
       barHeld.set(e.surface, { shape, mark: await markerSign($, e.surface), drawing })
-      barCardsDrawn = barCardsSign(cards)
       return drawing
     }
     barHeld.delete(e.surface)

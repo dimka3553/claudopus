@@ -1707,14 +1707,14 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   expect(await until(async () => bar.find({ type: 'Text', text: MARK }))).toBeDefined()
   await scrolled(0)
   expect(await until(async () => ((await bar.find({ type: 'Text', text: MARK })) ? undefined : true))).toBe(true)
-  // It grows a line for each line typed, Shift+Enter's or wrapped, up to eight, and keeps the same box, the text typed in it its own
+  // It grows a line for each line typed, Shift+Enter's or wrapped, up to six, and keeps the same box, the text typed in it its own
   const [growing] = await boxesIn(bar)
   await bar.input({ key: growing?.key ?? '', text: 'The left.\nThen the right.\nThen both, side by side.', kind: 'change' } as never)
   expect(await until(async () => ((await boxesIn(bar))[0]?.props.rows === 3 ? true : undefined))).toBe(true)
   expect((await boxesIn(bar))[0]?.key).toBe(growing?.key)
   expect((await boxesIn(bar))[0]?.props.value ?? '').toBe('')
   await bar.input({ key: growing?.key ?? '', text: `${'a long line that wraps '.repeat(30)}\n`.repeat(4), kind: 'change' } as never)
-  expect(await until(async () => ((await boxesIn(bar))[0]?.props.rows === 8 ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await boxesIn(bar))[0]?.props.rows === 6 ? true : undefined))).toBe(true)
   // Half typed: the same box through the bar's own drawings, drawn with the text it was last drawn with, never with letters
   // older than the box holds
   const [first] = await boxesIn(bar)
@@ -1834,6 +1834,33 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Monday')?.key ?? '' })
   expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"Monday"')))).toBeDefined()
   expect(await until(async () => ((await boxesIn(again)).length === 0 ? true : undefined))).toBe(true)
-  await Promise.all([list.unmount(), details.unmount(), again.unmount()])
+  // The work taking its question back while the box is open and typed in: the box leaves the bar within a second or so, as the bar
+  // held for the box is looked at once a second (the same as a card stopped or answered elsewhere)
+  await clock.advance(2000)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k5', agentId: 'a2', text: 'Which hour?', choices: ['9', '10'] } as never)
+  expect(await until(async () => ((await labelled(list, OPEN)).length === 1 ? true : undefined))).toBe(true)
+  await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
+  expect(await until(async () => ((await boxesIn(again)).length === 1 ? true : undefined))).toBe(true)
+  await again.input({ key: (await boxesIn(again))[0]?.key ?? '', text: 'Nine', kind: 'change' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k6', agentId: 'a2', text: '' } as never)
+  await clock.advance(1000)
+  await clock.advance(1000)
+  expect(await until(async () => ((await boxesIn(again)).length === 0 ? true : undefined))).toBe(true)
+  // The card's own box, the bar folded, grows as it is typed in, and grows again from its own height once a reply was sent and the
+  // work asks anew
+  await again.unmount()
+  await clock.advance(2000)
+  const shut = await $.ui.mount({ ...BAND, props: { ...BAND.props, isCollapsed: true }, surface: 'desktop' } as never)
+  const five = 'one\ntwo\nthree\nfour\nfive'
+  for (const [n, text] of [[7, 'Which minute?'], [8, 'Which second?']] as const) {
+    await clock.advance(2000)
+    await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k${n}`, agentId: 'a2', text, choices: ['Now', 'Later'] } as never)
+    expect(await until(async () => ((await boxesIn(list)).length === 1 && (await boxesIn(list))[0]?.props.rows === 2 ? true : undefined))).toBe(true)
+    await list.input({ key: (await boxesIn(list))[0]?.key ?? '', text: five, kind: 'change' } as never)
+    expect(await until(async () => ((await boxesIn(list))[0]?.props.rows === 5 ? true : undefined))).toBe(true)
+    await list.press({ key: (await labelled(list, 'Send'))[0]?.key ?? '' })
+    expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('in their own words: one\ntwo')))).toBeDefined()
+  }
+  await Promise.all([list.unmount(), details.unmount(), shut.unmount()])
 })
 
