@@ -82,7 +82,7 @@ section h2{font-size:var(--t-title)}
 section .note{margin:var(--s1) 0 var(--s3)}
 section li{position:relative;padding-left:var(--s6);margin-top:var(--s2)}
 section li::before{content:"";position:absolute;left:0;top:.6em;width:var(--s2);height:var(--s2);background:var(--purple)}
-.foot{padding:var(--s12) 0 var(--s16);color:var(--soft);font-size:var(--t-small)}
+.foot{display:flex;flex-wrap:wrap;gap:var(--s3) var(--s6);padding:var(--s12) 0 var(--s16);color:var(--soft);font-size:var(--t-small)}
 </style>
 </head>
 <body>
@@ -96,6 +96,7 @@ section li::before{content:"";position:absolute;left:0;top:.6em;width:var(--s2);
   <h1>Changelog</h1>
   <p class="lead">What changed in each version of Claudopus, newest first. Claudopus never updates itself. When a new version is out, its panel shows what is new, and you press Download and then Install.</p>
 </div>
+<section id="v0.2.185"><h2>v0.2.185</h2><p class="note">17 November 2026</p><ul><li>claudopus.ai asks before it counts visits: a small cookie banner offers Accept and Decline, and only Accept loads Microsoft Clarity. The footer's Cookies link changes the choice, and a new Privacy page says what Clarity records.</li></ul></section>
 <section id="v0.2.184"><h2>v0.2.184</h2><p class="note">17 November 2026</p><ul><li>A helper's result goes to the task that started it, not to your chat: when that task has paused, Claudopus starts it first, so Claude Code hands the result to the task. No "Report from subagent" box in your chat, and no "Nothing needs you here." line.</li><li>Should a helper's result still reach your chat, the chat no longer takes a turn for it.</li><li>A task's question shows in your chat as one line; what it is about, its answers and pictures stay on its card.</li><li>A command waiting for your Allow shows in your chat as one line.</li><li>Your own answers, replies and taken-back answers on a card, a question a task took back, a task Claudopus restarted or asked to check on its helpers, and tasks started again after the chat dropped no longer show in your chat: the cards show them, and the chat still knows.</li></ul></section>
 <section id="v0.2.183"><h2>v0.2.183</h2><p class="note">17 November 2026</p><ul><li>What waits for you stays at the top of the panel in the order it came: the oldest first, and a new one goes under it, so nothing you're about to press moves down.</li><li>A key to paste or a permission that a task's own command asks for now sits inside that task's card. It no longer floats in a box above the cards.</li><li>Once you allow something, the line saying so stays inside that task's card, not loose between the cards.</li><li>After you answer, the card keeps its place while anything else still waits. Cards go back down once nothing waits.</li><li>The bar above the chat always shows one line while anything waits: how many, and what the first one asks. Show takes the panel back to the top.</li><li>On every question the main answer is the filled button, and Answer in words is the quiet one at the end.</li></ul></section>
 <section id="v0.2.182"><h2>v0.2.182</h2><p class="note">17 November 2026</p><ul><li>When Claude Code refuses a task's command, its card now shows the command whole, where it would run and for how long at most, and a Run it button. Your press, and only your press, has Claudopus run exactly that command once, as a command you type in your terminal would run (your shell and its start files, without Claude Code's own settings). The card shows it running with what it last printed and a Stop it button; a command is stopped after 10 minutes at most, or an hour for one Claude would have run in the background. The task is told where the output goes and gets its last lines when it ends; a task that had ended is started again with them at the chat's next step, or at once when you press Send it to Claude now. Nothing about the task's own permissions changes, and the task never runs it itself.</li></ul></section>
@@ -283,7 +284,8 @@ section li::before{content:"";position:absolute;left:0;top:.6em;width:var(--s2);
 <section id="v0.2.0"><h2>v0.2.0</h2><p class="note">12 November 2026</p><ul><li>Adds the Stats, Memory, About and Config tabs to the panel.</li><li>Adds a card that shows when a task needs you, a way to store keys and passwords, and a short clip of the panel.</li><li>Adds a website and the details Anthropic's plugin directory asks for.</li></ul></section>
 <section id="v0.1.0"><h2>v0.1.0</h2><p class="note">11 November 2026</p><ul><li>First public version: every chat does its tasks in the background and says how they are going.</li><li>Saves your words and Claude's answers, keeps topics, and keeps chats small.</li></ul></section>
 </main>
-<footer class="foot"><a href="https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/CHANGELOG.md">The same changelog on GitHub</a></footer>
+<footer class="foot"><a href="https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/CHANGELOG.md">The same changelog on GitHub</a> <a href="privacy.html">Privacy</a> <a href="#cookies" data-cookies>Cookies</a></footer>
+<script src="consent.js"></script>
 </div>
 </body>
 </html>

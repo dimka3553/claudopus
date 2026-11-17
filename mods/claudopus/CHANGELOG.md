@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.185 · 17 November 2026
+- claudopus.ai asks before it counts visits: a small cookie banner offers Accept and Decline, and only Accept loads Microsoft Clarity. The footer's Cookies link changes the choice, and a new Privacy page says what Clarity records.
+
 ## 0.2.184 · 17 November 2026
 - A helper's result goes to the task that started it, not to your chat: when that task has paused, Claudopus starts it first, so Claude Code hands the result to the task. No "Report from subagent" box in your chat, and no "Nothing needs you here." line.
 - Should a helper's result still reach your chat, the chat no longer takes a turn for it.
