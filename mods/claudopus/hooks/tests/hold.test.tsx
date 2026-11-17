@@ -83,6 +83,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const submitted: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
+  // How many lines the mod had written into chats as each SubagentHandback reached the engine
+  const atHandback: number[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
   // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
@@ -510,6 +512,12 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // as the engine says it: an error result in words, the same for an approval cut short
     if (files.get('refuse') === e.tool) return { result: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", isError: true } as never
     if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
+    // A command marked to fail at its end (npm run build # fails) fails as the engine's does, with what the test lays in `fails`
+    if (e.tool === 'Bash' && command.endsWith(' # fails')) return { result: `Exit code 1\n${files.get('fails') ?? ''}`, isError: true } as never
+    // Claude Code's auto mode refuses this tool outright, as it does a background task's call, with no prompt to the person
+    if (files.get('auto-refuse') === e.tool) return { result: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access]. If you have other tasks that don't depend on this action, continue working on those.", isError: true } as never
+    // What the chat had been told when a hand-back reached the engine, which hands it on at once
+    if (String(e.tool) === 'SubagentHandback') atHandback.push(appended.length)
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,
@@ -591,7 +599,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -759,7 +767,7 @@ test('a chat whose ended tasks have records of 4 MB and 170 MB loads without hol
   await pane.unmount()
 })
 
-test('behind, the mod gives its panes as they were and leaves out what can wait until it has caught up, then draws them again; a long hold is logged with the steps begun then', async ($, on) => {
+test('behind, the mod gives its panes as they were and leaves out what can wait until it has caught up, then draws them again; a long hold is logged with its chat and the steps begun then', async ($, on) => {
   const { files, clock } = world(on, { env: { CLAUDOPUS_TIMING: 'real' } })
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -775,7 +783,7 @@ test('behind, the mod gives its panes as they were and leaves out what can wait 
   const end = Date.now() + 1800
   while (Date.now() < end) Math.sqrt(Date.now())
   await clock.advance(250)
-  expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/Claude's helper was held (\d+) ms; steps begun then: [^\n]*draw the panel/)?.[0])).toBeDefined()
+  expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/Claude's helper was held (\d+) ms in chat engine-id; steps begun then: [^\n]*draw the panel/)?.[0])).toBeDefined()
   // A note that would change the card: the pane is given as it was while behind
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'Measured the nose' } as never)
   await pane.redraw()

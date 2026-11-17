@@ -3,9 +3,9 @@
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
 const BRIEF =
-  'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command, a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
+  'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
 const REFUSED =
-  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow, if any; it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
+  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, sent with `run_in_background: true`; a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
   `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
 // A command that would print a password or key the keychain keeps (on Linux, the files bin/keyring keeps). Work uses a kept key only through `bin/secret`, which reads it itself
@@ -187,7 +187,7 @@ const writesMemory = (text: string, names: readonly string[]): boolean => {
 const NO_MEMORY =
   "Only Claudopus writes the files chats share and answer one another through, and the update's own files: Claude never writes them with any tool."
 const NO_MEMORY_BASH = () =>
-  named("Claude changes {name}'s own settings and texts (config.json, the rules and roles in the memory folder, a repo's release.local) only with the Edit or Write tool, never with a command, so the change shows on the task's card and waits for {name} to press.")
+  named("Claude changes {name}'s own settings and texts (config.json, the rules and roles in the memory folder, a repo's release.local) only with the Edit or Write tool, never with a command, so the change shows on the task's card and waits for {name} to press. To read one, use the Read tool, or cat or jq.")
 const NO_BOXES =
   'Only the password and key runners use their boxes: Claude never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner, and for a key only through the secret runner the task rules name.'
 const NO_PUSH = 'Claude never pushes or merges to main itself, so two tasks never release at once: commit on your own branch and run the release runner the task rules name, from your worktree.'
@@ -295,8 +295,21 @@ const OWED =
 const drifted = (steps: number) =>
   `You have taken ${steps} steps since you last touched your to-dos or said how far you have got. In your next step, send the to-do calls that bring the list up to date (tick what is done, mark the one you are on as doing, add what you took on) and a \`note\` saying how far you have got, together with your next working call in that same step, never in a step of their own. If all of it is already up to date, continue.`
 // The chat is told once when nothing new has come back under a piece of work for a while
-const STUCK_IN_CHAT = (title: string, mins: number) =>
-  `"${title}" hasn't made progress for ${mins} minutes: nothing new has come back to Claude or its helpers. It may be stuck waiting for something. Its card shows how far it has got.`
+// (`isHelpersAtWork`: a helper of its still runs something, which brought nothing back meanwhile)
+const STUCK_IN_CHAT = (title: string, mins: number, isHelpersAtWork = false) =>
+  `"${title}" hasn't made progress for ${mins} minutes: nothing new has come back to Claude${isHelpersAtWork ? ', though its helpers still run something' : ' or its helpers'}. It may be stuck waiting for something. Its card shows how far it has got.`
+// What the chat alone reads with it: it may ask the task what it waits on, as nothing of Claudopus's will
+const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to hand back what it has if nothing is coming.'
+// A task that ended its step to wait for its helpers, from which nothing new has come back: Claudopus starts it again with a nudge,
+// first to ask them, then to hand back what it has. What it is told, and what the chat is told
+const HELPERS_SILENT = (mins: number, helpers: string) =>
+  `From Claudopus: nothing new has come back from your helpers for ${mins} min while your step had ended: ${helpers}. Ask each with SendMessage what it is doing and when it will end, and tell one that is stuck or waits on nothing to hand back what it has now. Then carry on with what needs nothing from them, or end your step.`
+const HELPERS_STILL_SILENT = (mins: number, helpers: string) =>
+  `From Claudopus: nothing new has come back from your helpers for ${mins} min, nor since you were asked to check on them: ${helpers}. Unless one told you it is still making progress and when it ends, hand back your report now with what you have, saying what each was still doing: Claudopus lets you hand it back while they run, and stops those that sit silent as you do.`
+const GAVE_UP_IN_CHAT = (title: string, mins: number) =>
+  `"${title}" is stuck: nothing new has come back from its helpers for ${mins} minutes, and it has not handed back what it has though Claudopus asked it to.`
+const NUDGED_IN_CHAT = (title: string, mins: number, isLast: boolean) =>
+  `"${title}" hasn't made progress for ${mins} minutes: it waits for its helpers, and nothing new has come back from them. Claudopus started it again and asked it ${isLast ? 'to hand back what it has now' : 'to check on them'}.`
 // A task that had stopped partway through a step without a report, restarted by Claudopus: what Claude is told, and what the chat is told
 const RESTARTED_WORK = `From Claudopus, not {name}: you stopped partway through a step without a report (the app restarted, the Mac slept or a command was interrupted). First check what you already have, then continue from where you were; a command or helper you started may still be running, or may need starting again.`
 const RESTARTED_IN_CHAT = (title: string, mins: number) =>

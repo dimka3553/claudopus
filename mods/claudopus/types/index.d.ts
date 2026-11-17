@@ -66,13 +66,16 @@ export type Todo = {
   subject?: string
   // The report it was started from, by id, when the person's message named one
   from?: string
-  // What it recorded with the `waits` tool as waiting on the person; its next report takes them
-  waits?: string[]
+  // What it recorded with the `waits` tool as waiting on the person, each with its answers when it is not yes or no (a plain line
+  // was kept before answers were); its next report takes them
+  waits?: (Wait | string)[]
+  // It called the `waits` tool this round: once the round is done, what it recorded replaces what its earlier results waited on
+  waitsSet?: boolean
   // What it needs the person's own hands for now, said with the `ask` tool: what to do, and the exact text to copy for it. Its card
   // stands out with the ask in view until the work clears it or ends
   // `replied`: the person's reply in their own words that did not settle it; the ask stays while the work acts on it, with nothing to press or type, until the work clears it or asks again, or ends with it open, when every answer is back. `isWaking`: the work had ended and is being started again with the reply
-  // `isCommand`: `copy` is a command the person types in a terminal opened in `cwd`. `choices` are buttons the person answers with, sent back to `from`, the agent that asked (a helper's ask shows on its work's card). `pictures` are the picture files the ask is about, shown with it in the chat. `details` is what the ask is about, in full, shown with it on the card and in the chat
-  ask?: { text: string; details?: string; lastStep?: string; folder?: string; copy?: string; isCommand?: boolean; cwd?: string; choices?: string[]; pictures?: string[]; from?: string; at: number; replied?: { text: string; at: number; isWaking?: boolean } }
+  // `isCommand`: `copy` is a command the person types in a terminal opened in `cwd`. `choices` are buttons the person answers with, sent back to `from`, the agent that asked (a helper's ask shows on its work's card). `pictures` are the picture files the ask is about, shown with it in the chat. `details` is what the ask is about, in full, shown with it on the card and in the chat. `refused`: Claudopus's notice of a call Claude Code refused, whose answer tells the work to carry on without it and never starts ended work again
+  ask?: { text: string; details?: string; lastStep?: string; folder?: string; copy?: string; isCommand?: boolean; cwd?: string; choices?: string[]; pictures?: string[]; from?: string; at: number; refused?: boolean; replied?: { text: string; at: number; isWaking?: boolean } }
   // Admin commands it, or a helper of it, wants to run, each held until the person presses Allow or Deny on this card: the Mac
   // (`here` or an ssh host), the exact command, the agent that runs it, and whether Allow covers the whole piece of work
   // What waits for the person's press: an admin command, a release to main ('release'), or a change to a file of theirs ('file')
@@ -97,6 +100,9 @@ export type Todo = {
   newAt?: number
   // Set while nothing new has come back to it or any helper under it for a while: when something last did
   stuckAt?: number
+  // The chat was told it is stuck (Claudopus's word that it made no progress, or that it did not hand back what it has): when.
+  // Once per time it is flagged stuck
+  stuckTold?: number
   // Finished work that its own background work still holds: since when the mod has seen it so. Absent once nothing holds it
   leftSince?: number
   // What it started in the background itself that wakes it when it ends (a command, a watch): the engine's task id, what it is
@@ -117,13 +123,31 @@ export type Todo = {
   // The rules it was last handed after its brief, by their text's hash, and whether a compaction has taken them from its context
   rulesSent?: string
   rulesDue?: boolean
+  // Its own folder in the chat's scratchpad, by name, which its rules name
+  scratch?: string
   detached?: { id: string; what: string; at: number; cmd: string; log: string; pid?: string; isLeft?: boolean; from?: string }[]
+  // Its heavy commands (a browser it drives, a build, a render) that wait their turn while the Mac is busy: the call, its own words,
+  // the command, since when, and its place in the line of every piece of work's held commands
+  heldCalls?: { id: string; what: string; cmd: string; at: number; place: number }[]
+  // Its heavy command's turn came: until when its next heavy command runs at once
+  heavyPass?: number
   // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
   // so. It is still at work, and its card says what it waits for
   waitsSince?: number
   // What it asked Claudopus to start it again for (wake_me), in place of a command that only waits: in its own words, a file to
   // appear, a line in that file, a page that answers, or only a time; when it asked, and the latest it is looked for
   wakeWhen?: { what: string; file?: string; text?: string; url?: string; at: number; until: number }
+  // What it was last woken for when that look ran out, by its file, line and page: a look for the same again is refused
+  wakeMissed?: { key: string; what: string }
+  // When its step last ended with helpers of its still running; absent while it takes a step
+  endedStepAt?: number
+  // Its step ended while all its helpers sit silent: since when, and how many of the steps Claudopus takes on a fixed schedule are
+  // done (1 a check-in at 12 minutes, 2 the order to hand back at 24, 3 the chat told it is stuck at 36). Starts over only when a
+  // helper hands back a result or prints something new. `at`: when the last step was taken; steps come at least 12 minutes apart
+  helperWait?: { from: number; done: number; at?: number }
+  // Claudopus told it to hand back what it has (its wait ran out, or its helpers sat silent): since when. Its report goes through
+  // while helpers run, until it hands back
+  mayHandBack?: number
   // Work cut off as the chat's process ended, not stopped by anyone: when, and when it went on again; `backAt` is absent while it
   // could not be started again
   cutAt?: number
@@ -219,8 +243,13 @@ export type Report = {
   broughtBack?: number
 }
 
-// One thing a report leaves for the person to decide or do; open until `answer` is "Yes", "No", or "Not now" for one set aside
-export type Wait = { text: string; answer?: string }
+// One thing a report leaves for the person to decide or do; open until it has an `answer`: what they pressed ("Yes", "No", one of
+// its `choices`, "Not now"), the answer to the work's ask it repeats, "In your words" for one their message answered, "Settled" once
+// the work said nothing waits, "Replaced" once a newer round of its work said what waits, or "Moved" once a newer result of a round
+// that said nothing of it took it over. `ask`: when the ask it repeats was made
+// (`isAsked` until one is asked in the same round); `byAsk`: the ask whose answer answered it, so that answer taken back opens it
+// again. `choices`: its answers when it is not yes or no
+export type Wait = { text: string; answer?: string; choices?: string[]; ask?: number; isAsked?: boolean; byAsk?: number }
 
 // A process on this Mac that listens on a port, started from one of the person's folders
 export type Server = {

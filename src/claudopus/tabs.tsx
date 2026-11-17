@@ -143,7 +143,8 @@ const watchTabs = async ($: EngineInterface, ids: string[], why: string, since =
       const empty = ids.filter(id => open.has(id) && (tabAsked.get(id) ?? 0) < from)
       if (!empty.length) return
       drawAgain($)
-      if (wait === TAB_CHECKS.at(-1)) await log($, `tab ${empty.join(', ')} not asked for in ${wait / 1000}s after ${why}: drawn again`)
+      // (naming the chat: the app asks only the chat it shows, so after a reload every chat out of sight says so, and the one in sight should not)
+      if (wait === TAB_CHECKS.at(-1)) await log($, `tab ${empty.join(', ')} not asked for in ${wait / 1000}s after ${why}${heldChat ? ` in chat ${heldChat}` : ''}: drawn again`)
     })
 }
 // As this code loads: the tab in front where the engine says which it is, else every tab open (a tab behind the others is never

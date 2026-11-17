@@ -186,8 +186,8 @@ test('an older report waits by its one question, a report that only ends with a 
   expect(await list.find({ type: 'Text', text: /^Waiting on you$/ })).toBeDefined()
   expect(await list.find({ type: 'Text', text: /^2$/ })).toBeDefined()
   const told = (await $.prompt.submit({ text: 'what waits', wait: false, origin: composer })).context?.join('\n') ?? ''
-  expect(told).toContain('waiting on: Ship the old one?')
-  expect(told).toContain('waiting on: Make it public?')
+  expect(told).toContain('waiting on: (1) Ship the old one?')
+  expect(told).toContain('waiting on: (2) Make it public?')
   expect(told).not.toContain('Delete the folder?')
   expect(told).not.toContain('Shall I go on?')
 })
@@ -383,4 +383,145 @@ test('every button of the results list and of a result takes a new key whenever 
   await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't2', query: 'found' } as never)
   expect(await until(async () => ((await tab.findAll({ type: 'Button' })).some(one => one.props.label === 'Yes') ? undefined : true))).toBe(true)
   expect((await tab.findAll({ type: 'Button' })).map(one => String(one.key)).filter(key => tabKeys.includes(key))).toEqual([])
+})
+
+test("what a result waits on is answered however the person answers it, and only that: the ask on its card it repeats, a newer result of its work, the chat by number, their message by number", async ($, on) => {
+  const { files, clock } = world(on)
+  const metaOf = (id: string) => JSON.parse(files.get(`${MEMORY}/reports/${id}/meta.json`) ?? '{}') as { waiting?: { text: string; answer?: string }[] }
+  const answers = (id: string) => metaOf(id).waiting?.map(one => [one.text, one.answer ?? ''])
+  const reportOf = async (slugged: string, after = '') =>
+    ((await until(async () => [...files.keys()].filter(one => new RegExp(`reports/\\d{8}-\\d{4}-${slugged}[^/]*/meta\\.json$`).test(one)).find(one => one !== after))) ?? '').split('/').at(-2) ?? ''
+  const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [], agent: '', gist: 'Three things.' }
+  files.set(`${MEMORY}/reports/three/meta.json`, JSON.stringify({ ...base, id: 'three', title: 'Three', at: 1_600_000_100_000, waiting: [{ text: 'Delete the folder?' }, { text: 'Make it public?' }, { text: 'Rename it to "Shared"?' }] }))
+  files.set(`${MEMORY}/reports/three/report.md`, 'Three things.\n')
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'release it', wait: false, origin: composer })
+  // 16 Nov: the work asked on its card and recorded the same go-ahead as waiting a moment later, in other words, marked as that ask
+  await $.agent.spawn({ ...spawn, description: 'Waits fix', prompt: 'build it' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release 0.2.168?' } as never)
+  expect((await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w1', agentId: 'a1', items: [{ text: 'Release 0.2.168 with the waits fix?', asked: true }, 'Shall I redraw its icon?'] } as never)).result).toContain('One is the question on your card')
+  await $.turn.complete({ agentId: 'a1', answer: 'Built the waits fix.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  // The same line as its ask is that ask's without the mark; a question that only shares its words is another question
+  await $.agent.spawn({ ...spawn, description: 'Key box', prompt: 'build it' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Release the new key box?' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w2', agentId: 'a2', items: ['release the new key box', 'Should the new key box replace the old one in Settings?'] } as never)
+  await $.turn.complete({ agentId: 'a2', answer: 'Built the key box.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
+  await clock.advance(10)
+  const fix = await reportOf('waits-fix')
+  const box = await reportOf('key-box')
+  // The person answers each ask in the chat: exactly the item tied to it is answered
+  await $.prompt.submit({ text: 'yes, release both', wait: false, origin: composer })
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Sam: “yes, release both”' } as never)
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a2', message: 'Sam: “yes, release both”' } as never)
+  expect(await until(async () => metaOf(fix).waiting?.[0]?.answer)).toBe('In your words')
+  expect(await until(async () => metaOf(box).waiting?.[0]?.answer)).toBe('In your words')
+  await clock.advance(10)
+  expect(answers(fix)?.[1]).toEqual(['Shall I redraw its icon?', ''])
+  expect(answers(box)?.[1]).toEqual(['Should the new key box replace the old one in Settings?', ''])
+  // A newer result of a round that never said what waits leaves what the earlier one waited on
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2b', to: 'a2', message: 'Sam: “and a short guide”' } as never)
+  for await (const _ of $.turn.step({ turnId: 't2b', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a2' })) void _
+  await $.turn.complete({ agentId: 'a2', answer: `The guide is written.\n\n${'Each step is in the guide. '.repeat(30)}`, durationMs: 1, isAborted: false, turnId: 't2b', reason: 'answer' })
+  await clock.advance(10)
+  const guide = await reportOf('key-box', `${MEMORY}/reports/${box}/meta.json`)
+  expect(answers(guide)).toEqual([['Should the new key box replace the old one in Settings?', '']])
+  expect(answers(box)?.[1]).toEqual(['Should the new key box replace the old one in Settings?', 'Moved'])
+  // Started again, the work lists what waits now: its newer result takes the place of what the earlier one waited on. A question
+  // marked as the card's, with no ask open now, is tied to no older ask, answered or not
+  await $.prompt.submit({ text: 'add a dark mode too', wait: false, origin: composer })
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's3', to: 'a1', message: 'Sam: “add a dark mode too”' } as never)
+  for await (const _ of $.turn.step({ turnId: 't3', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
+  expect((await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w3', agentId: 'a1', items: ['Shall I turn the dark mode on for everyone?', { text: 'Release 0.2.168 to everyone?', asked: true }] } as never)).result).toContain('replaces what your earlier results waited on')
+  expect(answers(fix)?.[1]).toEqual(['Shall I redraw its icon?', ''])
+  await $.turn.complete({ agentId: 'a1', answer: 'Added a dark mode.', durationMs: 1, isAborted: false, turnId: 't3', reason: 'answer' })
+  await clock.advance(10)
+  const second = await reportOf('waits-fix', `${MEMORY}/reports/${fix}/meta.json`)
+  expect(answers(second)).toEqual([['Shall I turn the dark mode on for everyone?', ''], ['Release 0.2.168 to everyone?', '']])
+  expect(await until(async () => metaOf(fix).waiting?.[1]?.answer)).toBe('Replaced')
+  // The chat is told each result's open questions whole, by number, and marks those the person's words answered by their numbers
+  const told = (await $.prompt.submit({ text: 'delete it, and the name is fine', wait: false, origin: composer })).context?.join('\n') ?? ''
+  expect(told).toContain('waiting on: (1) Delete the folder? (2) Make it public? (3) Rename it to "Shared"?')
+  expect(told).toContain('the numbers of the questions they answered as `answered`')
+  const marked = (await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w5', result: `${MEMORY}/reports/three/report.md`, answered: [1, 3, 7] } as never)).result
+  expect(marked).toBe('"Three": 2 answered in the person\'s words; still waiting: (2) Make it public? Not an open question there, so not marked: 7.')
+  expect(answers('three')).toEqual([['Delete the folder?', 'In your words'], ['Make it public?', ''], ['Rename it to "Shared"?', 'In your words']])
+  // The line Answer in words puts in the box names the question by its number, and counts once words follow it
+  const line = `About question 2 of the result "Three" (14 Sep 2020, 12:28), ${MEMORY}/reports/three/report.md: `
+  await $.prompt.submit({ text: line, wait: false, origin: composer })
+  await clock.advance(10)
+  expect(metaOf('three').waiting?.[1]?.answer).toBeUndefined()
+  // One message may carry lines for several results: each counts only within its own part
+  await $.prompt.submit({ text: `About question 1 of the result "Waits fix" (15 Nov, 02:13), ${MEMORY}/reports/${second}/report.md: yes\n${line}not yet`, wait: false, origin: composer })
+  expect(await until(async () => metaOf('three').waiting?.[1]?.answer)).toBe('In your words')
+  expect(await until(async () => metaOf(second).waiting?.[0]?.answer)).toBe('In your words')
+  expect(metaOf(second).waiting?.[1]?.answer).toBeUndefined()
+  const after = (await $.prompt.submit({ text: 'what waits now', wait: false, origin: composer })).context?.join('\n') ?? ''
+  expect(after).toContain('waiting on: (2) Release 0.2.168 to everyone?')
+  expect(after).toContain('waiting on: (1) Should the new key box replace the old one in Settings?')
+  expect(after).not.toContain('Make it public?')
+  expect(after).not.toContain('redraw its icon')
+})
+
+test('an answer taken back from the card opens again the question its work recorded for it; words that are none of its buttons answer it, and it goes on to its result answered', async ($, on) => {
+  const { files, clock, appended } = world(on)
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Make the banner', prompt: 'banner' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const labels = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label))
+  const press = async (label: string) => list.press({ key: (await list.findAll({ type: 'Button' })).find(b => String(b.props.label) === label)?.key ?? '' })
+  // Recorded as the card's question before the work asks it: tied to the ask once it comes
+  await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w1', agentId: 'a1', items: [{ text: 'Shall I use banner 5 on your page?', asked: true }, 'Shall I make the banner taller?'] } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Use banner 5 on your page?', choices: ['Use it', 'Not now'] } as never)
+  expect(await until(async () => ((await labels()).includes('Use it') ? true : undefined))).toBe(true)
+  await press('Use it')
+  expect(await until(async () => ((await labels()).includes('↶ Take back “Use it”') ? true : undefined))).toBe(true)
+  await press('↶ Take back “Use it”')
+  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('took back their answer "Use it"')))).toBeDefined()
+  // Back on the card, the ask is answered in words that are none of its buttons: it stays while the work acts on them, and the
+  // question its work recorded for it is answered in their words, also once the work clears the ask
+  await $.prompt.submit({ text: 'only once it is bigger', wait: false, origin: composer })
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Sam: “only once it is bigger”' } as never)
+  for await (const _ of $.turn.step({ turnId: 't1', index: 1, model: 'claude-opus-5-5', messageCount: 3, agentId: 'a1' })) void _
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: '' } as never)
+  await $.turn.complete({ agentId: 'a1', answer: 'The banner is ready.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.advance(10)
+  const path = await until(async () => [...files.keys()].find(one => /reports\/\d{8}-\d{4}-make-the-banner\/meta\.json$/.test(one)))
+  const waiting = (JSON.parse(files.get(path ?? '') ?? '{}') as { waiting?: { text: string; answer?: string }[] }).waiting
+  expect(waiting?.map(one => [one.text, one.answer ?? ''])).toEqual([['Shall I use banner 5 on your page?', 'In your words'], ['Shall I make the banner taller?', '']])
+  await list.unmount()
+})
+
+test("every question of a result can be answered in words beside its own answers or Yes and No; Not now and No stay in view with what was said", async ($, on) => {
+  const { files, clock, opened } = world(on)
+  const filled: string[] = []
+  on('prompt.fill', (_, e) => (filled.push(e.text), { isFilled: true }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'plan the coupon move', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Coupon move', prompt: 'plan the coupon move' } as never)
+  const items = ['Should Claude use Muse or Gemini?', { text: 'Should the 11 codes be settled by hand, or left behind?', choices: ['By hand', 'Leave them', 'Not now'] }, 'Which page is the complaint about?', 'Shall I release it?', { text: 'Shall I ship it?', choices: [] }, { text: 'Shall I tag it?', choices: ['Not now'] }]
+  expect((await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w1', agentId: 'a1', items } as never)).result).toContain('Recorded 6')
+  await $.turn.complete({ agentId: 'a1', answer: 'The move is planned.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.advance(10)
+  const path = await until(async () => [...files.keys()].find(one => /reports\/\d{8}-\d{4}-coupon-move\/meta\.json$/.test(one)))
+  const id = (path ?? '').split('/').at(-2) ?? ''
+  const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Reports', bodyColumns: 80 }, surface: 'desktop' } as never)
+  await pressed(list, `report-${id}`)
+  await until(async () => opened.includes(`report-${id}`) || undefined)
+  const one = await $.ui.mount({ ...LIST, requestId: `report-${id}`, props: { ...LIST.props, title: 'Coupon move', bodyColumns: 80 }, surface: 'desktop' } as never)
+  const labels = async (index: number) => (await one.findAll({ type: 'Button' })).filter(b => new RegExp(`^report-say-${index}-`).test(b.key ?? '')).map(b => b.props.label)
+  expect(await until(async () => ((await labels(0)).length ? labels(0) : undefined))).toEqual(['Yes', 'No', 'Not now', 'Answer in words'])
+  expect(await labels(1)).toEqual(['By hand', 'Leave them', 'Not now', 'Answer in words'])
+  // No answers of its own named is a yes-or-no question
+  expect(await labels(4)).toEqual(['Yes', 'No', 'Not now', 'Answer in words'])
+  expect(await labels(5)).toEqual(['Yes', 'No', 'Not now', 'Answer in words'])
+  // Answer in words puts a line naming it by its number in the chat's box; sent with the person's words, it answers it
+  await pressed(one, 'report-say-2-Answer in words')
+  const line = (await until(async () => filled.find(text => text.includes('About question 3 of the result')))) ?? ''
+  expect(line).toContain(`${MEMORY}/reports/${id}/report.md`)
+  await $.prompt.submit({ text: `${line}the pricing page`, wait: false, origin: composer })
+  expect(await until(async () => one.find({ type: 'Text', text: 'Which page is the complaint about? · you answered in your words' }))).toBeDefined()
+  await pressed(one, 'report-say-3-Not now')
+  expect(await until(async () => one.find({ type: 'Text', text: 'Shall I release it? · you said not now' }))).toBeDefined()
+  await pressed(one, 'report-say-0-No')
+  expect(await until(async () => one.find({ type: 'Text', text: 'Should Claude use Muse or Gemini? · you answered “No”' }))).toBeDefined()
 })
