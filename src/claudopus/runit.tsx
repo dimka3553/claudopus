@@ -13,7 +13,7 @@ const RUN_IT = 'Run it'
 const RUN_TEXT_MOST = 4000
 // Nor one holding a character that is drawn otherwise than the shell reads it, or not at all: a control character but a line break
 // or tab, a direction mark or override, a zero-width or invisible one, a tag character
-const RUN_UNSEEN = new RegExp('[\\u0000-\\u0008\\u000B-\\u001F\\u007F-\\u009F\\u00AD\\u034F\\u115F\\u1160\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u206F\\u3164\\uFEFF\\uFFF9-\\uFFFB\\u{E0000}-\\u{E007F}]', 'u')
+const RUN_UNSEEN = new RegExp('[\\u0000-\\u0008\\u000B-\\u001F\\u007F-\\u009F\\u00AD\\u034F\\u115F\\u1160\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u206F\\u2800\\u3164\\uFEFF\\uFFA0\\uFFF9-\\uFFFB\\u{1D173}-\\u{1D17A}\\u{E0000}-\\u{E007F}]', 'u')
 // The longest a command runs once pressed: one Claude would have held open, at most its own timeout or ten minutes; one it would
 // have sent to the background, an hour. Then Claudopus stops it, and the task gets what it printed by then
 const RUN_LIMIT = 10 * 60_000
@@ -58,18 +58,13 @@ const runKey = (run: Pick<PressRun, 'card' | 'askAt'>) => `${run.card}:${run.ask
 const runPressed = new Set<string>()
 const runAsked = new Map<string, PressRun>()
 // Ended runs whose output waits to start their ended task again, at the next hook of this chat (or the person's press of Send it
-// now): kept with the run (`waiting`), and queued by this load in `runWaking`. Queued and no longer in the queue, it has gone
+// now): kept with the run (`waiting`) until the wake that carries it is sent (runsSent), and queued by this load in `runWaking`
 const runWaking = new Set<string>()
-const isRunWaking = (run: PressRun) => Boolean(run.waiting) && !(runWaking.has(runKey(run)) && !wakes.some(w => w.target === run.waiting?.target && w.isHookOnly))
-// Queues what waits, for a run this load has not queued yet (after a reload too); drops what has gone
+const isRunWaking = (run: PressRun) => Boolean(run.waiting)
+// Queues what waits, for a run this load has not queued yet (after a reload too)
 const queueWaiting = async ($: EngineInterface) => {
   for (const run of runList.filter(one => one.waiting)) {
     const key = runKey(run)
-    if (!isRunWaking(run)) {
-      runWaking.delete(key)
-      await saveRuns($, list => list.map(one => (isSameRun(one, run) ? { ...one, waiting: undefined } : one)))
-      continue
-    }
     if (runWaking.has(key) || !run.waiting) continue
     const card = (await read($, todos)).find(one => one.id === run.card)
     if (!card || isHeld(card)) {
@@ -78,7 +73,23 @@ const queueWaiting = async ($: EngineInterface) => {
       continue
     }
     runWaking.add(key)
-    await toEnded($, card, run.waiting.target, `${run.waiting.text}\n${RESUMED_BY_ANSWER}`, { text: RUN_IT, ask: `the command Claude Code refused (${cut(run.description || run.command, 60)})`, at: run.endedAt ?? 0, line: lineOf(card), isCard: true, askAt: run.askAt }, true)
+    const target = run.waiting.target
+    await toEnded($, card, target, `${run.waiting.text}\n${RESUMED_BY_ANSWER}`, { text: RUN_IT, ask: `the command Claude Code refused (${cut(run.description || run.command, 60)})`, at: run.endedAt ?? 0, line: lineOf(card), isCard: true, askAt: run.askAt }, true)
+    const wake = wakes.find(w => w.target === target && w.isHookOnly)
+    if (wake) wake.runs = [...(wake.runs ?? []), key]
+  }
+}
+// The wake that carried what runs printed has gone: sent, not sent as the person stopped the task, or not delivered (the chat is
+// then given it, wakeFailed). Each run stops waiting, and its card says what became of it
+const runsSent = async ($: EngineInterface, wake: { runs?: string[] }, how: 'sent' | 'held' | 'failed') => {
+  const keys = wake.runs ?? []
+  if (!keys.length) return
+  const done = runList.filter(run => keys.includes(runKey(run)) && run.waiting)
+  await saveRuns($, list => list.map(one => (keys.includes(runKey(one)) ? { ...one, waiting: undefined } : one)))
+  for (const run of done) {
+    runWaking.delete(runKey(run))
+    if (how === 'held') await stepLine($, run.card, `Claude was not sent what your command printed: you stopped the task. It is in ${run.log ?? 'its output file'}`)
+    if (how === 'failed') await stepLine($, run.card, `What your command printed couldn't start Claude again, so it went to the chat. It is in ${run.log ?? 'its output file'}`)
   }
 }
 const limitText = (ms: number) => (ms >= 60 * 60_000 ? `${Math.round(ms / 3_600_000)} hour${ms >= 2 * 3_600_000 ? 's' : ''}` : `${Math.max(1, Math.round(ms / 60_000))} min`)
@@ -223,7 +234,8 @@ const deliverRun = async ($: EngineInterface, cardId: string, target: string, ru
 const endRun = async ($: EngineInterface, run: PressRun, end: NonNullable<PressRun['end']>, exit: number | undefined, lines: string[]) => {
   const at = await $.clock.now()
   let isFirst = false
-  await saveRuns($, list => ((isFirst = false), list).map(one => (isSameRun(one, run) && !one.endedAt ? ((isFirst = true), { ...one, endedAt: at, end, ...(exit === undefined ? {} : { exit }) }) : one)))
+  const last = oneLine(lines.filter(line => line.trim()).at(-1) ?? '').slice(0, 300)
+  await saveRuns($, list => ((isFirst = false), list).map(one => (isSameRun(one, run) && !one.endedAt ? ((isFirst = true), { ...one, endedAt: at, end, ...(exit === undefined ? {} : { exit }), ...(last ? { last } : {}) }) : one)))
   if (!isFirst) return
   runStopped.delete(runKey(run))
   const ran = took(at - (run.startedAt ?? at))
@@ -258,7 +270,7 @@ const runBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number
   return (
     <ui.Box key={key} flexDirection="column" gap={1}>
       {list.map(run => {
-        const last = runLast.get(runKey(run)) ?? ''
+        const last = runLast.get(runKey(run)) ?? run.last ?? ''
         const isStopping = runStopped.has(runKey(run))
         const isEnded = Boolean(run.endedAt)
         const state = isEnded ? 'ended · what it printed waits for Claude' : isStopping ? 'stopping' : `running ${took(at - (run.startedAt ?? at))} · at most ${limitText(run.limitMs)}`

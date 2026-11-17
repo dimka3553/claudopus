@@ -253,7 +253,7 @@ export type Report = {
 // it was (`from`), the command whole, the folder it runs in, what the task called it, and the longest it may run. Once pressed:
 // when it started, its output file and the process group it runs as; once ended: when, how, and its exit, and while what it
 // printed waits to start its ended task again, the task and the message (kept, so a reload sends it still)
-export type PressRun = { card: string; from: string; askAt: number; command: string; cwd: string; description: string; limitMs: number; startedAt?: number; log?: string; pid?: string; endedAt?: number; end?: 'exited' | 'limit' | 'stopped' | 'lost'; exit?: number; waiting?: { target: string; text: string } }
+export type PressRun = { card: string; from: string; askAt: number; command: string; cwd: string; description: string; limitMs: number; startedAt?: number; log?: string; pid?: string; endedAt?: number; end?: 'exited' | 'limit' | 'stopped' | 'lost'; exit?: number; last?: string; waiting?: { target: string; text: string } }
 
 export type Wait = { text: string; answer?: string; choices?: string[]; ask?: number; isAsked?: boolean; byAsk?: number }
 

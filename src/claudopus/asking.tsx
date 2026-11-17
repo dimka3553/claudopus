@@ -675,7 +675,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
 // holds goes to the chat instead: a notice the person sees and a row its model reads, with no turn of its own
 const WAKE_WAIT = 4000
 // Each wake carries every answer joined into it, so each card's line and the chat's notice are settled for every one
-const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Sent, 'to'> }[]; isHookOnly?: boolean; spawn?: { prompt: string; description: string; subagentType: string; model: string; cwd: string } }[] = []
+const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Sent, 'to'> }[]; isHookOnly?: boolean; runs?: string[]; spawn?: { prompt: string; description: string; subagentType: string; model: string; cwd: string } }[] = []
 // `isHookOnly`: never from the timer, for what no press of this chat's started (a command run on a press ending, runit.tsx): it
 // waits for the next hook, and its card offers a press meanwhile
 const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>, isHookOnly = false) => {
@@ -710,7 +710,7 @@ const sendWakes = async ($: EngineInterface, isAnswering = false) => {
 }
 const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number], isInHook = true) => {
   // Work the person stopped is not woken by an answer that was on its way
-  if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`))
+  if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`), await runsSent($, wake, 'held'))
   // A small fresh task for a last step, started from inside a hook so it keeps the mod's own tools and guards; from the timer, where
   // the mod's hooks would be skipped for it, its work is started again instead, as before
   if (wake.spawn && isInHook) {
@@ -724,7 +724,8 @@ const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number], isInHo
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
     : await sendOwn($, { to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
-  if (!r.isDelivered) return wakeFailed($, wake, r.reason)
+  if (!r.isDelivered) return void (await runsSent($, wake, 'failed'), await wakeFailed($, wake, r.reason))
+  await runsSent($, wake, 'sent')
   // Only once it is on its way: work at work when the mod's own message reaches it would take that message for the chat's note
   await wakeCard($, wake.target)
   // Started by the message, the work reads it in the run it starts: that run's end never sends it a second time, even when no hook
