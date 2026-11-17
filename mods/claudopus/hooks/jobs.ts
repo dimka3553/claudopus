@@ -899,6 +899,8 @@ const inSpan = (pid: number, span: Pick<Span, 'from' | 'to'>) => (span.to >= spa
 // The system's own programs, which launchd starts in sessions of their own whenever it likes, are never a command's
 // (and an app's own updaters and helpers in a Library folder, the person's own as well: GoogleUpdater, 17 Nov)
 const SYSTEM_PROG = /^(\/System\/|\/usr\/libexec\/|\/usr\/sbin\/|\/sbin\/|\/Library\/Apple\/|\/Applications\/|(\/Users\/[^/]+|\/home\/[^/]+|~)?\/Library\/Application Support\/)/
+// An app's own helper, updater or crash reporter: inside its bundle's frameworks or helpers, or in a Library folder of its own
+const APP_HELPER = /\.app\/Contents\/(Frameworks|Helpers|Library)\/|\/Library\/Application Support\/|crashpad_handler/
 export type Left = { span: string; top: Proc; tree: Proc[] }
 // What each command left running: the topmost of each group whose shell has gone (or a session it started of its own), with all it
 // started under it; never one already followed (`known`), nor what runs under one
@@ -928,7 +930,10 @@ export const leftoversOf = (procs: Proc[], spans: Span[], known: Set<string> = n
     // number since its first is in its range, so what another task's running command starts is never given to a short command
     // beside it by its number alone (17 Nov: another task's screenshot script, sent to the background, started headless Chrome
     // while a git push ran, and the push's card took its crash reporters)
-    const fits = spans.filter(s => (inSpan(pid, s) || (s.until === undefined && after(pid, s.from) > 0 && after(pid, s.from) < 50_000)) && isTimely(p, s))
+    // (as long as it runs, however far the numbers have gone: process numbers go round in minutes on a busy Mac. So a short command's
+    // own leftover that it does not name, started while another task's background command runs, goes to neither: a card shows
+    // nothing rather than another task's programs)
+    const fits = spans.filter(s => (inSpan(pid, s) || (s.until === undefined && after(pid, s.from) > 0)) && isTimely(p, s))
     if (fits.length <= 1) return fits[0]
     // The process's own words, past its program: a command that holds them started it. A session of its own also goes by the
     // command's words it holds
@@ -947,9 +952,9 @@ export const leftoversOf = (procs: Proc[], spans: Span[], known: Set<string> = n
     const isOwnSession = p.pgid === p.pid
     // (nor one ps can only name in brackets, as it does a process that is ending or not this person's: on 16 Nov the system's
     // own indexer, "(mdworker_shared)", was taken for runs of four tasks)
-    // (nor an app's or the system's own program in a group whose leader has gone: an app's crash reporter forks away from the
-    // app that started it, as Chrome's did on 17 Nov)
-    if (/^\(/.test(p.command.trim()) || SYSTEM_PROG.test(p.command) || (!isOwnSession && pids.has(p.pgid))) continue
+    // (nor an app's own helper in a group whose leader has gone: an app's crash reporter forks away from the app that started it, as
+    // Chrome's did on 17 Nov; an app's own program a script drives, such as Blender, still counts)
+    if (/^\(/.test(p.command.trim()) || (isOwnSession ? SYSTEM_PROG.test(p.command) : pids.has(p.pgid) || (SYSTEM_PROG.test(p.command) && APP_HELPER.test(p.command)))) continue
     const n = Number(isOwnSession ? p.pid : p.pgid)
     if (isOpenOnes(n, p)) continue
     const span = spanOf(n, p, isOwnSession)

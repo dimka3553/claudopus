@@ -353,7 +353,11 @@ const keepSpan = async ($: EngineInterface, agent: string, call: { tool: string;
   const bgId = (result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId
   const isBackground = Boolean(call.run_in_background) && typeof bgId === 'string'
   const span: KeptSpan = { id: String(call.tool_use_id ?? now), agent, what: oneLine(String(call.description ?? '')).slice(0, 160), cmd: oneLine(command).slice(0, 4000), from, to, at, endAt: now, ...(isBackground ? { bgId: String(bgId) } : { until: now }) }
-  spans = [...spans.filter(s => s.id !== span.id), span].slice(-SPANS_KEPT)
+  // (a command sent to the background that still runs is kept however many have come since, so what another task starts while it
+  // runs never goes to a short command beside it)
+  const rest = [...spans.filter(s => s.id !== span.id), span]
+  const open = rest.filter(s => s.bgId && s.until === undefined)
+  spans = [...open, ...rest.filter(s => !(s.bgId && s.until === undefined)).slice(-Math.max(0, SPANS_KEPT - open.length))].sort((a, b) => a.at - b.at)
   if (call.run_in_background) return
   const r = await $.process.run(['sh', '-c', `printf '@@LEFT@@\\n'; ps -axww -o ${PS_COLUMNS}`], { timeoutMs: 5000 }).catch(() => undefined)
   if (!r || r.exitCode !== 0 || !r.stdout.includes('@@LEFT@@')) return
@@ -635,7 +639,9 @@ const wakeForRun = async ($: EngineInterface, one: Todo | undefined, runs: NonNu
   if (!one || !first || isHeld(one) || one.status === 'stopped' || one.status === 'failed' || (one.status === 'done' && (one.handedBackAt !== undefined || endedByHandback.has(one.id) || one.endedAt < first.at))) return
   // (what one command left going is named once, however many programs it was)
   const words = [...new Set(runs.map(d => runWords(d.what, d.cmd)))]
-  const text = words.length === 1 ? RUN_ENDED(words[0] ?? '', runs.length === 1 ? first.log : '') : RUNS_ENDED(words)
+  // (a program's own log is the command's only where it was the command's one program)
+  const isAlone = runs.length === 1 && (!leftCommandOf(first.id) || (one.endedRuns?.find(r => leftCommandOf(r.id) === leftCommandOf(first.id))?.count ?? 1) === 1)
+  const text = words.length === 1 ? RUN_ENDED(words[0] ?? '', isAlone ? first.log : '') : RUNS_ENDED(words)
   if (one.status === 'working' && !one.waitsSince) {
     await tell($, one.id, text)
     return void (await log($, `work ${one.id} told ${runs.length} run(s) of it ended`))

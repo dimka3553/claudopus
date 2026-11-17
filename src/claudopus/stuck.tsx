@@ -319,13 +319,14 @@ const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
 // in one go is one run, with how many programs it was (17 Nov: twelve rows of "Run Google Chrome" for one test's browser)
 const keepEnded = (one: Todo, runs: EndedRun[]) => {
   if (!runs.length) return {}
-  const keyOf = (run: EndedRun) => (leftCommandOf(run.id) ? `${leftCommandOf(run.id)}|${run.what}|${run.how}` : '')
+  // (one row however each program ended: the latest end says how the command ended)
+  const keyOf = (run: EndedRun) => (leftCommandOf(run.id) ? `${leftCommandOf(run.id)}|${run.what}` : '')
   // (joined with the programs of the same command that ended earlier, in another look, so it stays one row)
   const kept = (one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id))
   const joined = runs.reduce<EndedRun[]>((all, run) => {
     const same = keyOf(run) ? all.find(r => keyOf(r) === keyOf(run)) : undefined
     if (!same) return [...all, run]
-    return all.map(r => (r === same ? { ...r, at: Math.min(r.at, run.at), endedAt: Math.max(r.endedAt, run.endedAt), count: (r.count ?? 1) + (run.count ?? 1) } : r))
+    return all.map(r => (r === same ? { ...r, at: Math.min(r.at, run.at), endedAt: Math.max(r.endedAt, run.endedAt), how: run.endedAt >= r.endedAt ? run.how : r.how, ...(run.endedAt >= r.endedAt ? (run.code ? { code: run.code } : { code: undefined }) : {}), count: (r.count ?? 1) + (run.count ?? 1) } : r))
   }, kept)
   // (the newest end goes last, as the list is kept in the order runs ended)
   return { endedRuns: [...joined.filter(r => !runs.some(n => keyOf(n) && keyOf(n) === keyOf(r)) && !runs.some(n => n.id === r.id)), ...joined.filter(r => runs.some(n => (keyOf(n) && keyOf(n) === keyOf(r)) || n.id === r.id))].slice(-BG_KEPT) }

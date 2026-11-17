@@ -514,6 +514,13 @@ test('what a command left running is told by its group and by when it started: o
   expect(leftoversOf(ps(['20 1 20 S 00:05 1000 /u/bin/python daemon.py']), [{ ...span, from: 99_990, to: 40 }], new Set(), [{ from: 99_995, at: now - 8_000 }]).length).toBe(0)
   // An app's own helper forked away from it, its group's leader gone, is no command's, nor an updater in the person's Library
   expect(leftoversOf(ps(['5060 1 5050 S 00:05 1000 /Applications/Google Chrome.app/Contents/Frameworks/Helpers/chrome_crashpad_handler', '5061 1 5061 S 00:05 1000 /Users/sam/Library/Application Support/Google/GoogleUpdater/GoogleUpdater.app/Contents/MacOS/GoogleUpdater --wake']), [span]).length).toBe(0)
+  // while an app's own program a script drives still is
+  expect(leftoversOf(ps(['5060 1 5050 S 00:05 1000 /Applications/Blender.app/Contents/MacOS/Blender -b scene.blend']), [span]).length).toBe(1)
+  // Another task's command sent to the background still runs, its numbers long past: what starts beside a short command now, that
+  // the short command does not name, goes to neither
+  const shoot = { ...span, id: 'shoot', agent: 'pics', from: 60_000, to: 60_100, at: now - 900_000, until: undefined, cmd: 'node shoot.mjs' }
+  const push = { ...span, id: 'push', agent: 'fix', from: 5000, to: 5100, cmd: 'git push -q origin fix' }
+  expect(leftoversOf(ps(['5060 1 5050 S 00:05 1000 /u/.cache/chrome/Chrome for Testing.app/Contents/MacOS/Chrome for Testing --headless']), [shoot, push]).length).toBe(0)
   // A command names a process by its program or a word of its own, never by a word that only starts the same
   const named: [string, string, boolean][] = [
     ['/usr/bin/python3 daemon.py --serve', 'cd /w && python3 daemon.py --serve &', true],
