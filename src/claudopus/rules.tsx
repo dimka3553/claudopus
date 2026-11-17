@@ -184,6 +184,31 @@ const writesMemory = (text: string, names: readonly string[]): boolean => {
     .join('\n')
   return namesMemory(kept, names) || (names === MEMORY_PERSON && /\brelease\.local\b/.test(kept))
 }
+// A command that is only Python or Node handed code that reads (`python3 -c "print(json.load(open(p)))"`, `node -e`): nothing joined
+// to it, nothing sent into a file, and in its code no open for writing and nothing that writes, moves, removes or runs anything. Read
+// as plainly as the guard above, so a trick in the code still counts as a write; a command that changes a file anyway is undone as it ends
+const CODE_WRITES =
+  /write|append|dump(?!s)|rename|replace|remove|delete|unlink|\brm\w*\s*\(|\bcp\w*\s*\(|copy|move|mkd|makedirs|link|truncate|chmod|chown|utime|touch|system|popen|spawn|exec|eval|compile|subprocess|child_process|shutil|pathlib|fileutils|__import__|import\s*\(|importlib|getattr|setattr|globals|\bvm\b|\bFunction\s*\(|mmap|ctypes|\bpty\b|\bsocket|`/i
+const CODE_RUNNERS: Record<string, readonly string[]> = { python: ['-c'], python3: ['-c'], node: ['-e', '-p', '--eval', '--print'] }
+const codeOnlyReads = (command: string): boolean => {
+  if (/\n|\$\(|`/.test(command)) return false
+  const parts = shellWords(command)
+  if (parts.length !== 1) return false
+  const words = parts[0]!
+  const name = (words[0] ?? '').split('/').pop() ?? ''
+  const flags = CODE_RUNNERS[/^python3\.\d+$/.test(name) ? 'python3' : name]
+  // its code straight after the program: nothing set before it, no other flag (a module, an import hook, perl's -i) beside it
+  if (!flags || !flags.includes(words[1] ?? '') || words.length < 3) return false
+  const code = words[2]!
+  // what follows the code is its arguments, never a file it is sent into
+  if (words.slice(3).some(one => /[<>]/.test(one))) return false
+  // (printing is not writing)
+  if (CODE_WRITES.test(code.replace(/\bstd(?:out|err)\.write\b/g, ''))) return false
+  // an open whose arguments name no mode that writes ('w', 'a', 'x', '+') and no flag of os.open's or Node's; an open whose
+  // arguments cannot be read plainly counts as one that writes
+  const opens = code.replace(/\bopen\w*\s*\(((?:[^()]|\([^()]*\))*)\)/gi, (all, args: string) => (/(['"])[rwabxtU+]*[wax+][rwabxtU+]*\1|\bO_|\bflags?\b/.test(args) ? all : ''))
+  return !/\bopen\w*\s*\(/i.test(opens)
+}
 const NO_MEMORY =
   "Only Claudopus writes the files chats share and answer one another through, and the update's own files: Claude never writes them with any tool."
 const NO_MEMORY_BASH = () =>

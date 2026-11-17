@@ -1,427 +1,772 @@
-"use strict";
 // The Results tab and each result's own tab: the list, a result drawn whole, put away and brought back
-// Puts a line naming the report in the chat's box, for the person to finish and send; where there is no box, nothing is sent for them
-const carryOn = async ($, r, now) => {
-    const text = `Continue from the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: `;
-    // What the person had typed stays: the line goes after it
-    const typed = (await $.prompt.read().catch(() => ({ text: '' }))).text;
-    const filled = await $.prompt.fill(typed.trim() ? { text: `\n${text}`, mode: 'append' } : { text, mode: 'replace' }).catch(() => ({ isFilled: false }));
-    if (!filled.isFilled)
-        await log($, 'the chat box was not filled from a report');
+var __assign = (this && this.__assign) || function () {
+    __assign = Object.assign || function(t) {
+        for (var s, i = 1, n = arguments.length; i < n; i++) {
+            s = arguments[i];
+            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
+                t[p] = s[p];
+        }
+        return t;
+    };
+    return __assign.apply(this, arguments);
 };
-// The person's answer to one thing a report waits on them for: Yes and No go to the chat as their message; Not now sets it aside.
-// It clears that one alone
-const answering = new Set();
-const answerWait = async ($, r, index, said, now) => {
-    const wait = waitsOf(r)[index];
-    // A second press before the answer is kept sends nothing more
-    if (!wait || wait.answer || answering.has(`${r.id}:${index}`))
-        return;
-    answering.add(`${r.id}:${index}`);
-    if (said !== 'Not now')
-        await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "${said}" to answer the question in the result "${r.title}" (${dated(r.at, now)}): ${wait.text}\nThe result: ${reportPath(r)}/report.md`);
-    // Not now kept nowhere can be pressed again; a Yes or No already sent is not sent twice
-    await markReport($, r, stored => ({ waiting: waitsOf(stored).map((one, at) => (at === index ? { ...one, answer: said } : one)) })).catch(err => {
-        if (said === 'Not now')
-            answering.delete(`${r.id}:${index}`);
-        throw err;
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __generator = (this && this.__generator) || function (thisArg, body) {
+    var _ = { label: 0, sent: function() { if (t[0] & 1) throw t[1]; return t[1]; }, trys: [], ops: [] }, f, y, t, g = Object.create((typeof Iterator === "function" ? Iterator : Object).prototype);
+    return g.next = verb(0), g["throw"] = verb(1), g["return"] = verb(2), typeof Symbol === "function" && (g[Symbol.iterator] = function() { return this; }), g;
+    function verb(n) { return function (v) { return step([n, v]); }; }
+    function step(op) {
+        if (f) throw new TypeError("Generator is already executing.");
+        while (g && (g = 0, op[0] && (_ = 0)), _) try {
+            if (f = 1, y && (t = op[0] & 2 ? y["return"] : op[0] ? y["throw"] || ((t = y["return"]) && t.call(y), 0) : y.next) && !(t = t.call(y, op[1])).done) return t;
+            if (y = 0, t) op = [op[0] & 2, t.value];
+            switch (op[0]) {
+                case 0: case 1: t = op; break;
+                case 4: _.label++; return { value: op[1], done: false };
+                case 5: _.label++; y = op[1]; op = [0]; continue;
+                case 7: op = _.ops.pop(); _.trys.pop(); continue;
+                default:
+                    if (!(t = _.trys, t = t.length > 0 && t[t.length - 1]) && (op[0] === 6 || op[0] === 2)) { _ = 0; continue; }
+                    if (op[0] === 3 && (!t || (op[1] > t[0] && op[1] < t[3]))) { _.label = op[1]; break; }
+                    if (op[0] === 6 && _.label < t[1]) { _.label = t[1]; t = op; break; }
+                    if (t && _.label < t[2]) { _.label = t[2]; _.ops.push(op); break; }
+                    if (t[2]) _.ops.pop();
+                    _.trys.pop(); continue;
+            }
+            op = body.call(thisArg, _);
+        } catch (e) { op = [6, e]; y = 0; } finally { f = t = 0; }
+        if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
+    }
+};
+var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
+    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
+        if (ar || !(i in from)) {
+            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
+            ar[i] = from[i];
+        }
+    }
+    return to.concat(ar || Array.prototype.slice.call(from));
+};
+var _this = this;
+// Puts a line naming the report in the chat's box, for the person to finish and send; where there is no box, nothing is sent for them
+var carryOn = function ($, r, now) { return __awaiter(_this, void 0, void 0, function () {
+    var text, typed, filled;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0:
+                text = "Continue from the result \"".concat(r.title, "\" (").concat(dated(r.at, now), "), ").concat(reportPath(r), "/report.md: ");
+                return [4 /*yield*/, $.prompt.read().catch(function () { return ({ text: '' }); })];
+            case 1:
+                typed = (_a.sent()).text;
+                return [4 /*yield*/, $.prompt.fill(typed.trim() ? { text: "\n".concat(text), mode: 'append' } : { text: text, mode: 'replace' }).catch(function () { return ({ isFilled: false }); })];
+            case 2:
+                filled = _a.sent();
+                if (!!filled.isFilled) return [3 /*break*/, 4];
+                return [4 /*yield*/, log($, 'the chat box was not filled from a report')];
+            case 3:
+                _a.sent();
+                _a.label = 4;
+            case 4: return [2 /*return*/];
+        }
+    });
+}); };
+// The person's answer to one thing a report waits on them for: Yes and No go to the chat as their message; Not now sets it aside.
+// It clears that one alone
+var answering = new Set();
+var answerWait = function ($, r, index, said, now) { return __awaiter(_this, void 0, void 0, function () {
+    var wait;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0:
+                wait = waitsOf(r)[index];
+                // A second press before the answer is kept sends nothing more
+                if (!wait || wait.answer || answering.has("".concat(r.id, ":").concat(index)))
+                    return [2 /*return*/];
+                answering.add("".concat(r.id, ":").concat(index));
+                if (!(said !== 'Not now')) return [3 /*break*/, 2];
+                return [4 /*yield*/, sendForPerson($, "From the Claudopus panel: ".concat(who(true), " pressed \"").concat(said, "\" to answer the question in the result \"").concat(r.title, "\" (").concat(dated(r.at, now), "): ").concat(wait.text, "\nThe result: ").concat(reportPath(r), "/report.md"))
+                    // Not now kept nowhere can be pressed again; a Yes or No already sent is not sent twice
+                ];
+            case 1:
+                _a.sent();
+                _a.label = 2;
+            case 2: 
+            // Not now kept nowhere can be pressed again; a Yes or No already sent is not sent twice
+            return [4 /*yield*/, markReport($, r, function (stored) { return ({ waiting: waitsOf(stored).map(function (one, at) { return (at === index ? __assign(__assign({}, one), { answer: said }) : one); }) }); }).catch(function (err) {
+                    if (said === 'Not now')
+                        answering.delete("".concat(r.id, ":").concat(index));
+                    throw err;
+                })];
+            case 3:
+                // Not now kept nowhere can be pressed again; a Yes or No already sent is not sent twice
+                _a.sent();
+                return [2 /*return*/];
+        }
+    });
+}); };
 // ---- Reports in panes of their own: the list as "Reports", and each report opened as a pane titled with its name ----
 // The list's pane; a report's pane is named after the report. At most this many reports are open as panes: opening one more
 // closes the one opened longest ago
-const REPORTS_PANE = 'reports';
-const REPORTS_TITLE = 'Results';
-const REPORT_PANES = 3;
+var REPORTS_PANE = 'reports';
+var REPORTS_TITLE = 'Results';
+var REPORT_PANES = 3;
 // A pane's id is at most 64 letters, digits, '_' and '-': a longer one keeps its head and a mark of the whole, so two never meet
-const paneOf = (r) => {
-    const id = `report-${r.id.replace(/[^A-Za-z0-9_-]/g, '-')}`;
-    return id.length <= 64 ? id : `${id.slice(0, 52)}-${mark(r.id).replace(/\D/g, '').slice(-11)}`;
+var paneOf = function (r) {
+    var id = "report-".concat(r.id.replace(/[^A-Za-z0-9_-]/g, '-'));
+    return id.length <= 64 ? id : "".concat(id.slice(0, 52), "-").concat(mark(r.id).replace(/\D/g, '').slice(-11));
 };
 // Which picture each open report shows, by its pane
-const pictureAt = new Map();
+var pictureAt = new Map();
 // A number for what one pane's drawing shows, for its buttons' keys: it moves each time that drawing differs from the one before
-const drawings = new Map();
-const drawingMark = (pane, shown) => {
-    const look = JSON.stringify(shown);
-    const was = drawings.get(pane);
-    if (was?.look === look)
+var drawings = new Map();
+var drawingMark = function (pane, shown) {
+    var _a;
+    var look = JSON.stringify(shown);
+    var was = drawings.get(pane);
+    if ((was === null || was === void 0 ? void 0 : was.look) === look)
         return String(was.n);
     // The first number of a load starts past any key an earlier load drew, so a pane that stayed up across a reload is taken afresh
-    const n = (was?.n ?? presses * 1000) + 1;
-    drawings.set(pane, { look, n });
+    var n = ((_a = was === null || was === void 0 ? void 0 : was.n) !== null && _a !== void 0 ? _a : presses * 1000) + 1;
+    drawings.set(pane, { look: look, n: n });
     return String(n);
 };
-const redraw = ($) => drawAgain($);
+var redraw = function ($) { return drawAgain($); };
 // Opens a pane from a press, in front: the app leaves a pane already open where it is, behind another tab, so one open but not
 // shown is opened again
 // The tabs as the engine lists them, one word each: id, then s shown, f holding the keyboard, p drawn, for the log
-const rosterOf = (panes) => panes.map(pane => `${pane.id}:${pane.isShown ? 's' : ''}${pane.isFocused ? 'f' : ''}${pane.isPlaced ? 'p' : ''}`).join(' ') || 'none';
+var rosterOf = function (panes) {
+    return panes.map(function (pane) { return "".concat(pane.id, ":").concat(pane.isShown ? 's' : '').concat(pane.isFocused ? 'f' : '').concat(pane.isPlaced ? 'p' : ''); }).join(' ') || 'none';
+};
 // A button's onPress runs with the handle of the drawing it sits in, which the engine never counts as the person asking: a narrow
 // terminal (under 144 columns, a phone over ssh) left every tab a press opened undrawn, and the panel, opened again to take back the
 // keys, vanished with it. So while a press of the mod's in the terminal is answered, a tab move is handed to that press's own
 // `ui.press` hook (tabHooks), whose handle the engine counts as the person's, and done there
-const tabMoves = tabMoveQueue();
-const comingTab = (opening) => tabMoves.coming(opening);
-const front = async ($, id, title) => {
-    if (tabMoves.isPressing())
-        return tabMoves.handOver({ kind: 'front', id, title });
-    await frontAsked($, id, title);
-};
-// What a press's hook does with a move handed over, by its own handle
-const runTabMove = ($, move) => (move.kind === 'front' ? frontAsked($, move.id, move.title) : backAsked($, move.id));
-const frontAsked = async ($, id, title) => {
-    const shown = async () => Boolean((await $.ui.panes()).find(pane => pane.id === id)?.isShown);
-    // A press inside a tab gives that tab the keyboard, and the engine never shows a new tab over the one holding it: it waits on
-    // the screen to honour the open's focus, which a screen with a turn running or text in the box refuses (seen every press in a
-    // chat the app runs on another Mac over ssh). The tab holding the keyboard is closed and opened again first, so it lets go.
-    // The new tab opens behind it before that, so the sidebar always holds a tab: with none open it slid shut and open again
-    // In a chat the app runs on another Mac over ssh the engine has no surface to ask ("no-surface"): it lists the open tabs but
-    // says of none that it is shown, drawn or holding the keyboard, though the app draws them and one does hold it. There every
-    // other tab of the mod may be the one pressed in, so each is closed and opened again, in the order they stand. Elsewhere a
-    // roster that says nothing has nothing drawn, and is left alone
-    const before = await $.ui.panes();
-    // A terminal has one narrow row of tabs: every press opening a tab of its own crowded it past reading, and the panel, closed and
-    // opened again to let go of the keys, moved along it. There the panel stays first and one other tab is open beside it at a time
-    const surfaces = await $.session.surfaces().catch(() => []);
-    if (surfaces.length && surfaces.every(one => one === 'terminal')) {
-        for (const pane of before)
-            if (pane.id !== LIST && pane.id !== id)
-                await $.ui.close({ id: pane.id }).catch(() => undefined);
-        const list = before.find(pane => pane.id === LIST);
-        const was = before.find(pane => pane.id === id);
-        if (list?.isFocused || (was && !was.isShown)) {
-            if (was)
-                await $.ui.close({ id }).catch(() => undefined);
-            if (list?.isFocused) {
-                await $.ui.close({ id: LIST }).catch(() => undefined);
-                await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS }).catch(err => log($, `panel not opened again: ${String(err)}`));
-            }
+var tabMoves = tabMoveQueue();
+var comingTab = function (opening) { return tabMoves.coming(opening); };
+var front = function ($, id, title) { return __awaiter(_this, void 0, void 0, function () {
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0:
+                if (tabMoves.isPressing())
+                    return [2 /*return*/, tabMoves.handOver({ kind: 'front', id: id, title: title })];
+                return [4 /*yield*/, frontAsked($, id, title)];
+            case 1:
+                _a.sent();
+                return [2 /*return*/];
         }
-        await $.ui.open({ id, title, focus: true });
-        return;
-    }
-    const isBlind = isRunFromAfar && before.length > 0 && !before.some(pane => pane.isPlaced || pane.isShown || pane.isFocused);
-    const holding = before.filter(pane => (isBlind || pane.isFocused) && pane.id !== id);
-    if (isBlind)
-        await log($, `front ${id}: the engine says no tab is shown or holding the keyboard; ${holding.length} other tabs closed and opened again first`);
-    if (holding.length && !(await $.ui.panes()).some(pane => pane.id === id))
-        await $.ui.open({ id, title });
-    for (const held of holding) {
-        await $.ui.close({ id: held.id }).catch(() => undefined);
-        await $.ui.open({ id: held.id, title: held.title }).catch(err => log($, `${held.id} not opened again: ${String(err)}`));
-    }
-    // A tab open behind another is not shown, and opening it again would leave it behind: it is closed and opened again, which
-    // brings it to the front (seen in the app on a press of Results and of one result)
-    const was = (await $.ui.panes()).find(pane => pane.id === id);
-    if (was && !was.isShown)
-        await $.ui.close({ id }).catch(() => undefined);
-    const opened = await $.ui.open({ id, title, focus: true });
-    void watchTabs($, [id], 'it opened').catch(() => undefined);
-    if (isRunFromAfar)
-        await log($, `front ${id}: ${holding.length} let go first; opened ${opened.isPlaced ? 'drawn' : `undrawn (${opened.reason})`}; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`);
-    // The pane pressed in stays in front while its press runs: once it has run, the new pane is opened again, which brings it forward
-    // Only where the surface says which pane it shows: a chat the app runs on another Mac over ssh says none is shown, ever, and there
-    // this open from a timer, which no press asked for, left a tab the mod never drew in place of the one drawn (seen on the M4)
-    if (!(await shown()))
-        $.clock.after(150, async () => {
-            const panes = await $.ui.panes();
-            const mine = panes.find(pane => pane.id === id);
-            // Closed by the person meanwhile, already in front, or a screen that says nothing of what it shows: left as it is
-            if (!mine || mine.isShown || !panes.some(pane => pane.isShown))
-                return;
-            await $.ui.close({ id }).catch(() => undefined);
-            await $.ui.open({ id, title, focus: true });
-            const now = (await $.ui.panes()).find(pane => pane.id === id);
-            await log($, `front ${id} again: shown ${Boolean(now?.isShown)}, drawn ${Boolean(now?.isPlaced)}`);
-        });
-};
+    });
+}); };
+// What a press's hook does with a move handed over, by its own handle
+var runTabMove = function ($, move) { return (move.kind === 'front' ? frontAsked($, move.id, move.title) : backAsked($, move.id)); };
+var frontAsked = function ($, id, title) { return __awaiter(_this, void 0, void 0, function () {
+    var shown, before, surfaces, _i, before_1, pane, list, was_1, isBlind, holding, _a, _loop_1, _b, holding_1, held_1, was, opened, _c, _d, _e, _f, _g;
+    var _this = this;
+    return __generator(this, function (_h) {
+        switch (_h.label) {
+            case 0:
+                shown = function () { return __awaiter(_this, void 0, void 0, function () { var _a; var _b; return __generator(this, function (_c) {
+                    switch (_c.label) {
+                        case 0:
+                            _a = Boolean;
+                            return [4 /*yield*/, $.ui.panes()];
+                        case 1: return [2 /*return*/, _a.apply(void 0, [(_b = (_c.sent()).find(function (pane) { return pane.id === id; })) === null || _b === void 0 ? void 0 : _b.isShown])
+                            // A press inside a tab gives that tab the keyboard, and the engine never shows a new tab over the one holding it: it waits on
+                            // the screen to honour the open's focus, which a screen with a turn running or text in the box refuses (seen every press in a
+                            // chat the app runs on another Mac over ssh). The tab holding the keyboard is closed and opened again first, so it lets go.
+                            // The new tab opens behind it before that, so the sidebar always holds a tab: with none open it slid shut and open again
+                            // In a chat the app runs on another Mac over ssh the engine has no surface to ask ("no-surface"): it lists the open tabs but
+                            // says of none that it is shown, drawn or holding the keyboard, though the app draws them and one does hold it. There every
+                            // other tab of the mod may be the one pressed in, so each is closed and opened again, in the order they stand. Elsewhere a
+                            // roster that says nothing has nothing drawn, and is left alone
+                        ];
+                    }
+                }); }); };
+                return [4 /*yield*/, $.ui.panes()
+                    // A terminal has one narrow row of tabs: every press opening a tab of its own crowded it past reading, and the panel, closed and
+                    // opened again to let go of the keys, moved along it. There the panel stays first and one other tab is open beside it at a time
+                ];
+            case 1:
+                before = _h.sent();
+                return [4 /*yield*/, $.session.surfaces().catch(function () { return []; })];
+            case 2:
+                surfaces = _h.sent();
+                if (!(surfaces.length && surfaces.every(function (one) { return one === 'terminal'; }))) return [3 /*break*/, 13];
+                _i = 0, before_1 = before;
+                _h.label = 3;
+            case 3:
+                if (!(_i < before_1.length)) return [3 /*break*/, 6];
+                pane = before_1[_i];
+                if (!(pane.id !== LIST && pane.id !== id)) return [3 /*break*/, 5];
+                return [4 /*yield*/, $.ui.close({ id: pane.id }).catch(function () { return undefined; })];
+            case 4:
+                _h.sent();
+                _h.label = 5;
+            case 5:
+                _i++;
+                return [3 /*break*/, 3];
+            case 6:
+                list = before.find(function (pane) { return pane.id === LIST; });
+                was_1 = before.find(function (pane) { return pane.id === id; });
+                if (!((list === null || list === void 0 ? void 0 : list.isFocused) || (was_1 && !was_1.isShown))) return [3 /*break*/, 11];
+                if (!was_1) return [3 /*break*/, 8];
+                return [4 /*yield*/, $.ui.close({ id: id }).catch(function () { return undefined; })];
+            case 7:
+                _h.sent();
+                _h.label = 8;
+            case 8:
+                if (!(list === null || list === void 0 ? void 0 : list.isFocused)) return [3 /*break*/, 11];
+                return [4 /*yield*/, $.ui.close({ id: LIST }).catch(function () { return undefined; })];
+            case 9:
+                _h.sent();
+                return [4 /*yield*/, $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS }).catch(function (err) { return log($, "panel not opened again: ".concat(String(err))); })];
+            case 10:
+                _h.sent();
+                _h.label = 11;
+            case 11: return [4 /*yield*/, $.ui.open({ id: id, title: title, focus: true })];
+            case 12:
+                _h.sent();
+                return [2 /*return*/];
+            case 13:
+                isBlind = isRunFromAfar && before.length > 0 && !before.some(function (pane) { return pane.isPlaced || pane.isShown || pane.isFocused; });
+                holding = before.filter(function (pane) { return (isBlind || pane.isFocused) && pane.id !== id; });
+                if (!isBlind) return [3 /*break*/, 15];
+                return [4 /*yield*/, log($, "front ".concat(id, ": the engine says no tab is shown or holding the keyboard; ").concat(holding.length, " other tabs closed and opened again first"))];
+            case 14:
+                _h.sent();
+                _h.label = 15;
+            case 15:
+                _a = holding.length;
+                if (!_a) return [3 /*break*/, 17];
+                return [4 /*yield*/, $.ui.panes()];
+            case 16:
+                _a = !(_h.sent()).some(function (pane) { return pane.id === id; });
+                _h.label = 17;
+            case 17:
+                if (!_a) return [3 /*break*/, 19];
+                return [4 /*yield*/, $.ui.open({ id: id, title: title })];
+            case 18:
+                _h.sent();
+                _h.label = 19;
+            case 19:
+                _loop_1 = function (held_1) {
+                    return __generator(this, function (_j) {
+                        switch (_j.label) {
+                            case 0: return [4 /*yield*/, $.ui.close({ id: held_1.id }).catch(function () { return undefined; })];
+                            case 1:
+                                _j.sent();
+                                return [4 /*yield*/, $.ui.open({ id: held_1.id, title: held_1.title }).catch(function (err) { return log($, "".concat(held_1.id, " not opened again: ").concat(String(err))); })];
+                            case 2:
+                                _j.sent();
+                                return [2 /*return*/];
+                        }
+                    });
+                };
+                _b = 0, holding_1 = holding;
+                _h.label = 20;
+            case 20:
+                if (!(_b < holding_1.length)) return [3 /*break*/, 23];
+                held_1 = holding_1[_b];
+                return [5 /*yield**/, _loop_1(held_1)];
+            case 21:
+                _h.sent();
+                _h.label = 22;
+            case 22:
+                _b++;
+                return [3 /*break*/, 20];
+            case 23: return [4 /*yield*/, $.ui.panes()];
+            case 24:
+                was = (_h.sent()).find(function (pane) { return pane.id === id; });
+                if (!(was && !was.isShown)) return [3 /*break*/, 26];
+                return [4 /*yield*/, $.ui.close({ id: id }).catch(function () { return undefined; })];
+            case 25:
+                _h.sent();
+                _h.label = 26;
+            case 26: return [4 /*yield*/, $.ui.open({ id: id, title: title, focus: true })];
+            case 27:
+                opened = _h.sent();
+                void watchTabs($, [id], 'it opened').catch(function () { return undefined; });
+                if (!isRunFromAfar) return [3 /*break*/, 30];
+                _c = log;
+                _d = [$];
+                _f = (_e = "front ".concat(id, ": ").concat(holding.length, " let go first; opened ").concat(opened.isPlaced ? 'drawn' : "undrawn (".concat(opened.reason, ")"), "; tabs ")).concat;
+                _g = rosterOf;
+                return [4 /*yield*/, $.ui.panes().catch(function () { return []; })];
+            case 28: return [4 /*yield*/, _c.apply(void 0, _d.concat([_f.apply(_e, [_g.apply(void 0, [_h.sent()])])]))
+                // The pane pressed in stays in front while its press runs: once it has run, the new pane is opened again, which brings it forward
+                // Only where the surface says which pane it shows: a chat the app runs on another Mac over ssh says none is shown, ever, and there
+                // this open from a timer, which no press asked for, left a tab the mod never drew in place of the one drawn (seen on the M4)
+            ];
+            case 29:
+                _h.sent();
+                _h.label = 30;
+            case 30: return [4 /*yield*/, shown()];
+            case 31:
+                // The pane pressed in stays in front while its press runs: once it has run, the new pane is opened again, which brings it forward
+                // Only where the surface says which pane it shows: a chat the app runs on another Mac over ssh says none is shown, ever, and there
+                // this open from a timer, which no press asked for, left a tab the mod never drew in place of the one drawn (seen on the M4)
+                if (!(_h.sent()))
+                    $.clock.after(150, function () { return __awaiter(_this, void 0, void 0, function () {
+                        var panes, mine, now;
+                        return __generator(this, function (_a) {
+                            switch (_a.label) {
+                                case 0: return [4 /*yield*/, $.ui.panes()];
+                                case 1:
+                                    panes = _a.sent();
+                                    mine = panes.find(function (pane) { return pane.id === id; });
+                                    // Closed by the person meanwhile, already in front, or a screen that says nothing of what it shows: left as it is
+                                    if (!mine || mine.isShown || !panes.some(function (pane) { return pane.isShown; }))
+                                        return [2 /*return*/];
+                                    return [4 /*yield*/, $.ui.close({ id: id }).catch(function () { return undefined; })];
+                                case 2:
+                                    _a.sent();
+                                    return [4 /*yield*/, $.ui.open({ id: id, title: title, focus: true })];
+                                case 3:
+                                    _a.sent();
+                                    return [4 /*yield*/, $.ui.panes()];
+                                case 4:
+                                    now = (_a.sent()).find(function (pane) { return pane.id === id; });
+                                    return [4 /*yield*/, log($, "front ".concat(id, " again: shown ").concat(Boolean(now === null || now === void 0 ? void 0 : now.isShown), ", drawn ").concat(Boolean(now === null || now === void 0 ? void 0 : now.isPlaced)))];
+                                case 5:
+                                    _a.sent();
+                                    return [2 /*return*/];
+                            }
+                        });
+                    }); });
+                return [2 /*return*/];
+        }
+    });
+}); };
 // A tab of the mod's own, other than the list, that is open and not drawn was left by an open no press asked for: it is closed, so
 // the person never looks at an empty tab, and a press opens it again, drawn. Run as the mod loads and as the session starts
 // Only while a surface places this chat's panes (one of them is drawn): with none attached every pane waits undrawn, rightly
-const closeUndrawn = async ($) => {
-    const panes = await $.ui.panes().catch(() => []);
-    if (!panes.some(pane => pane.isPlaced))
-        return;
-    for (const pane of panes) {
-        if (pane.id === LIST || pane.isPlaced)
-            continue;
-        // Read again just before: a press meanwhile may have opened it afresh, drawn
-        if ((await $.ui.panes().catch(() => [])).find(one => one.id === pane.id)?.isPlaced !== false)
-            continue;
-        await $.ui.close({ id: pane.id }).catch(() => undefined);
-        await log($, `undrawn tab ${pane.id} closed`);
-    }
-};
+var closeUndrawn = function ($) { return __awaiter(_this, void 0, void 0, function () {
+    var panes, _loop_2, _i, panes_1, pane;
+    var _a;
+    return __generator(this, function (_b) {
+        switch (_b.label) {
+            case 0: return [4 /*yield*/, $.ui.panes().catch(function () { return []; })];
+            case 1:
+                panes = _b.sent();
+                if (!panes.some(function (pane) { return pane.isPlaced; }))
+                    return [2 /*return*/];
+                _loop_2 = function (pane) {
+                    return __generator(this, function (_c) {
+                        switch (_c.label) {
+                            case 0:
+                                if (pane.id === LIST || pane.isPlaced)
+                                    return [2 /*return*/, "continue"];
+                                return [4 /*yield*/, $.ui.panes().catch(function () { return []; })];
+                            case 1:
+                                // Read again just before: a press meanwhile may have opened it afresh, drawn
+                                if (((_a = (_c.sent()).find(function (one) { return one.id === pane.id; })) === null || _a === void 0 ? void 0 : _a.isPlaced) !== false)
+                                    return [2 /*return*/, "continue"];
+                                return [4 /*yield*/, $.ui.close({ id: pane.id }).catch(function () { return undefined; })];
+                            case 2:
+                                _c.sent();
+                                return [4 /*yield*/, log($, "undrawn tab ".concat(pane.id, " closed"))];
+                            case 3:
+                                _c.sent();
+                                return [2 /*return*/];
+                        }
+                    });
+                };
+                _i = 0, panes_1 = panes;
+                _b.label = 2;
+            case 2:
+                if (!(_i < panes_1.length)) return [3 /*break*/, 5];
+                pane = panes_1[_i];
+                return [5 /*yield**/, _loop_2(pane)];
+            case 3:
+                _b.sent();
+                _b.label = 4;
+            case 4:
+                _i++;
+                return [3 /*break*/, 2];
+            case 5: return [2 /*return*/];
+        }
+    });
+}); };
 // A picture that is an SVG of the work's own is drawn as it is, when it is small enough to draw
-const svgOf = async ($, path) => {
-    const text = await readOr($, path);
-    return text.includes('<svg') && text.length <= SVG_CHARS ? { source: text, width: 0, height: 0 } : null;
-};
-const openReport = ($, id) => {
+var svgOf = function ($, path) { return __awaiter(_this, void 0, void 0, function () {
+    var text;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0: return [4 /*yield*/, readOr($, path)];
+            case 1:
+                text = _a.sent();
+                return [2 /*return*/, text.includes('<svg') && text.length <= SVG_CHARS ? { source: text, width: 0, height: 0 } : null];
+        }
+    });
+}); };
+var openReport = function ($, id) {
     presses += 1;
-    void comingTab((async () => {
-        const r = (await read($, reports)).find(one => one.id === id);
-        if (!r)
-            return;
-        // A report brought in by hand gets its small copies when it is first opened
-        await makeThumbs($, r).catch(err => log($, `small copies of report ${id} not made: ${String(err)}`));
-        const open = (await $.ui.panes()).filter(pane => pane.id.startsWith('report-') && pane.id !== paneOf(r));
-        for (const pane of open.slice(0, Math.max(0, open.length - (REPORT_PANES - 1))))
-            await $.ui.close({ id: pane.id }).catch(() => undefined);
-        // Its tab is named after it; rounds of one piece of work, which share a name, by their time too
-        const kept = await read($, reports);
-        const now = await $.clock.now();
-        await front($, paneOf(r), kept.some(one => one.id !== r.id && one.title === r.title) ? `${cut(r.title, 22)} · ${time(r.at, now)}` : cut(r.title, 30));
-        // The pressed row gets a new name, so the app does not hold the list where that button was
-        redraw($);
-    })()).catch(err => log($, `report ${id} not opened: ${String(err)}`));
+    void comingTab((function () { return __awaiter(_this, void 0, void 0, function () {
+        var r, open, _i, _a, pane, kept, now;
+        return __generator(this, function (_b) {
+            switch (_b.label) {
+                case 0: return [4 /*yield*/, read($, reports)];
+                case 1:
+                    r = (_b.sent()).find(function (one) { return one.id === id; });
+                    if (!r)
+                        return [2 /*return*/];
+                    // A report brought in by hand gets its small copies when it is first opened
+                    return [4 /*yield*/, makeThumbs($, r).catch(function (err) { return log($, "small copies of report ".concat(id, " not made: ").concat(String(err))); })];
+                case 2:
+                    // A report brought in by hand gets its small copies when it is first opened
+                    _b.sent();
+                    return [4 /*yield*/, $.ui.panes()];
+                case 3:
+                    open = (_b.sent()).filter(function (pane) { return pane.id.startsWith('report-') && pane.id !== paneOf(r); });
+                    _i = 0, _a = open.slice(0, Math.max(0, open.length - (REPORT_PANES - 1)));
+                    _b.label = 4;
+                case 4:
+                    if (!(_i < _a.length)) return [3 /*break*/, 7];
+                    pane = _a[_i];
+                    return [4 /*yield*/, $.ui.close({ id: pane.id }).catch(function () { return undefined; })
+                        // Its tab is named after it; rounds of one piece of work, which share a name, by their time too
+                    ];
+                case 5:
+                    _b.sent();
+                    _b.label = 6;
+                case 6:
+                    _i++;
+                    return [3 /*break*/, 4];
+                case 7: return [4 /*yield*/, read($, reports)];
+                case 8:
+                    kept = _b.sent();
+                    return [4 /*yield*/, $.clock.now()];
+                case 9:
+                    now = _b.sent();
+                    return [4 /*yield*/, front($, paneOf(r), kept.some(function (one) { return one.id !== r.id && one.title === r.title; }) ? "".concat(cut(r.title, 22), " \u00B7 ").concat(time(r.at, now)) : cut(r.title, 30))
+                        // The pressed row gets a new name, so the app does not hold the list where that button was
+                    ];
+                case 10:
+                    _b.sent();
+                    // The pressed row gets a new name, so the app does not hold the list where that button was
+                    redraw($);
+                    return [2 /*return*/];
+            }
+        });
+    }); })()).catch(function (err) { return log($, "report ".concat(id, " not opened: ").concat(String(err))); });
 };
 // Puts a result away, or brings it back: its entry, every round of its work, leaves the list and the chat's note, nothing in it
 // waits, and its open tabs close. The mark is kept beside each report; nothing is deleted or rewritten
-const archiving = new Set();
-const archiveReport = ($, r, isArchived) => {
-    const entry = r.agent || r.id;
+var archiving = new Set();
+var archiveReport = function ($, r, isArchived) {
+    var entry = r.agent || r.id;
     if (archiving.has(entry))
         return;
     archiving.add(entry);
     presses += 1;
-    void (async () => {
-        // A round already put away keeps when it was; a round that came after is put away with the rest
-        const kept = (await read($, reports)).filter(one => Boolean(one.archived) !== isArchived);
-        const rounds = entriesOf(kept).find(entry => entry.some(one => one.id === r.id)) ?? [];
-        const now = await $.clock.now();
-        // Each round is marked even when another's mark fails, so the press leaves as little half done as it can
-        // Brought back keeps when, so another Mac that has it put away follows the later of the two
-        for (const one of rounds)
-            await markReport($, one, isArchived ? { archived: now } : { archived: undefined, broughtBack: now }).catch(err => log($, `result ${one.id} not ${isArchived ? 'archived' : 'brought back'}: ${String(err)}`));
-        // One brought back is listed in its place, even one that came after the list was opened
-        if (!isArchived && reportsListed.length)
-            reportsListed = [...new Set([...reportsListed, ...rounds.map(one => one.id)])];
-        if (isArchived) {
-            const tabs = new Set(rounds.map(paneOf));
-            for (const pane of (await $.ui.panes()).filter(one => tabs.has(one.id)))
-                await $.ui.close({ id: pane.id }).catch(() => undefined);
-        }
-    })()
-        .catch(err => log($, `result ${r.id} not ${isArchived ? 'archived' : 'brought back'}: ${String(err)}`))
-        .finally(() => (archiving.delete(entry), redraw($)));
+    void (function () { return __awaiter(_this, void 0, void 0, function () {
+        var kept, rounds, now, _loop_3, _i, rounds_1, one, tabs_1, _a, _b, pane;
+        var _c;
+        return __generator(this, function (_d) {
+            switch (_d.label) {
+                case 0: return [4 /*yield*/, read($, reports)];
+                case 1:
+                    kept = (_d.sent()).filter(function (one) { return Boolean(one.archived) !== isArchived; });
+                    rounds = (_c = entriesOf(kept).find(function (entry) { return entry.some(function (one) { return one.id === r.id; }); })) !== null && _c !== void 0 ? _c : [];
+                    return [4 /*yield*/, $.clock.now()
+                        // Each round is marked even when another's mark fails, so the press leaves as little half done as it can
+                        // Brought back keeps when, so another Mac that has it put away follows the later of the two
+                    ];
+                case 2:
+                    now = _d.sent();
+                    _loop_3 = function (one) {
+                        return __generator(this, function (_e) {
+                            switch (_e.label) {
+                                case 0: return [4 /*yield*/, markReport($, one, isArchived ? { archived: now } : { archived: undefined, broughtBack: now }).catch(function (err) { return log($, "result ".concat(one.id, " not ").concat(isArchived ? 'archived' : 'brought back', ": ").concat(String(err))); })
+                                    // One brought back is listed in its place, even one that came after the list was opened
+                                ];
+                                case 1:
+                                    _e.sent();
+                                    return [2 /*return*/];
+                            }
+                        });
+                    };
+                    _i = 0, rounds_1 = rounds;
+                    _d.label = 3;
+                case 3:
+                    if (!(_i < rounds_1.length)) return [3 /*break*/, 6];
+                    one = rounds_1[_i];
+                    return [5 /*yield**/, _loop_3(one)];
+                case 4:
+                    _d.sent();
+                    _d.label = 5;
+                case 5:
+                    _i++;
+                    return [3 /*break*/, 3];
+                case 6:
+                    // One brought back is listed in its place, even one that came after the list was opened
+                    if (!isArchived && reportsListed.length)
+                        reportsListed = __spreadArray([], new Set(__spreadArray(__spreadArray([], reportsListed, true), rounds.map(function (one) { return one.id; }), true)), true);
+                    if (!isArchived) return [3 /*break*/, 11];
+                    tabs_1 = new Set(rounds.map(paneOf));
+                    _a = 0;
+                    return [4 /*yield*/, $.ui.panes()];
+                case 7:
+                    _b = (_d.sent()).filter(function (one) { return tabs_1.has(one.id); });
+                    _d.label = 8;
+                case 8:
+                    if (!(_a < _b.length)) return [3 /*break*/, 11];
+                    pane = _b[_a];
+                    return [4 /*yield*/, $.ui.close({ id: pane.id }).catch(function () { return undefined; })];
+                case 9:
+                    _d.sent();
+                    _d.label = 10;
+                case 10:
+                    _a++;
+                    return [3 /*break*/, 8];
+                case 11: return [2 /*return*/];
+            }
+        });
+    }); })()
+        .catch(function (err) { return log($, "result ".concat(r.id, " not ").concat(isArchived ? 'archived' : 'brought back', ": ").concat(String(err))); })
+        .finally(function () { return (archiving.delete(entry), redraw($)); });
 };
 // The reports shown when the list was last opened from the Claudopus pane. One that arrives while the person reads the list waits,
 // counted in its heading, so no row moves under the pointer
-let reportsListed = [];
+var reportsListed = [];
 // A subject in letters the slug drops stands alone, by its id
-const subjectOf = (r) => slug(r.subject || r.title) || r.id;
+var subjectOf = function (r) { return slug(r.subject || r.title) || r.id; };
 // One entry per piece of work, its newest report first and its earlier rounds after it. Rounds of one work are: the same work
 // reporting again; work started from a report (its `from`); and reports on one subject whose titles lead with that subject. A report
 // brought in by hand is an entry of its own unless one of these joins it
-const entriesOf = (list) => {
-    const head = new Map(list.map(r => [r.id, r.id]));
-    const find = (id) => {
-        const up = head.get(id) ?? id;
+var entriesOf = function (list) {
+    var head = new Map(list.map(function (r) { return [r.id, r.id]; }));
+    var find = function (id) {
+        var _a;
+        var up = (_a = head.get(id)) !== null && _a !== void 0 ? _a : id;
         return up === id ? id : find(up);
     };
-    const join = (a, b) => {
-        const [x, y] = [find(a), find(b)];
+    var join = function (a, b) {
+        var _a = [find(a), find(b)], x = _a[0], y = _a[1];
         if (x !== y)
             head.set(x, y);
     };
-    const firsts = new Map();
-    const by = (key, r) => (firsts.has(key) ? join(r.id, firsts.get(key)) : firsts.set(key, r.id));
-    for (const r of list) {
+    var firsts = new Map();
+    var by = function (key, r) { return (firsts.has(key) ? join(r.id, firsts.get(key)) : firsts.set(key, r.id)); };
+    for (var _i = 0, list_1 = list; _i < list_1.length; _i++) {
+        var r = list_1[_i];
         if (r.agent)
-            by(`agent:${r.agent}`, r);
+            by("agent:".concat(r.agent), r);
         if (r.from && head.has(r.from))
             join(r.id, r.from);
-        const subject = slug(r.subject);
-        if (subject && (slug(r.title) === subject || slug(r.title).startsWith(`${subject}-`)))
-            by(`subject:${subject}`, r);
+        var subject = slug(r.subject);
+        if (subject && (slug(r.title) === subject || slug(r.title).startsWith("".concat(subject, "-"))))
+            by("subject:".concat(subject), r);
     }
-    return [...list.reduce((all, r) => all.set(find(r.id), [...(all.get(find(r.id)) ?? []), r]), new Map()).values()];
+    return __spreadArray([], list.reduce(function (all, r) { var _a; return all.set(find(r.id), __spreadArray(__spreadArray([], ((_a = all.get(find(r.id))) !== null && _a !== void 0 ? _a : []), true), [r], false)); }, new Map()).values(), true);
 };
 // What a report waits on now: an earlier round's open items were asked again, or not, by its newest round
-const newestOf = (list) => new Set(entriesOf(list).map(entry => entry[0]?.id));
+var newestOf = function (list) { return new Set(entriesOf(list).map(function (entry) { var _a; return (_a = entry[0]) === null || _a === void 0 ? void 0 : _a.id; })); };
 // Words that say what a piece of work is about, for telling whether a brief that names a report goes on with that work
-const aboutWords = (text) => new Set(slug(text).split('-').filter(word => word.length >= 4 && !['with', 'from', 'that', 'this', 'into', 'your', 'what', 'when', 'work'].includes(word)));
-const openReports = ($) => {
+var aboutWords = function (text) { return new Set(slug(text).split('-').filter(function (word) { return word.length >= 4 && !['with', 'from', 'that', 'this', 'into', 'your', 'what', 'when', 'work'].includes(word); })); };
+var openReports = function ($) {
     presses += 1;
-    return comingTab((async () => {
-        reportsListed = (await read($, reports)).map(r => r.id);
-        redraw($);
-        await front($, REPORTS_PANE, REPORTS_TITLE);
-    })());
+    return comingTab((function () { return __awaiter(_this, void 0, void 0, function () {
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0: return [4 /*yield*/, read($, reports)];
+                case 1:
+                    reportsListed = (_a.sent()).map(function (r) { return r.id; });
+                    redraw($);
+                    return [4 /*yield*/, front($, REPORTS_PANE, REPORTS_TITLE)];
+                case 2:
+                    _a.sent();
+                    return [2 /*return*/];
+            }
+        });
+    }); })());
 };
-const day = (at, now) => dated(at, now).split(',')[0] ?? '';
-const time = (at, now) => (day(at, now) === day(now, now) ? (dated(at, now).split(', ')[1] ?? '') : dated(at, now));
+var day = function (at, now) { var _a; return (_a = dated(at, now).split(',')[0]) !== null && _a !== void 0 ? _a : ''; };
+var time = function (at, now) { var _a; return (day(at, now) === day(now, now) ? ((_a = dated(at, now).split(', ')[1]) !== null && _a !== void 0 ? _a : '') : dated(at, now)); };
 // On the Claudopus pane the reports are one small button. It sits on the line above the cards, beside the chat's own size, so
 // nothing below it moves when a report arrives
-const reportsButton = ($, ui, all, isKeyed = false) => {
-    const { Box, Button } = ui;
-    const list = all.filter(r => !r.archived);
+var reportsButton = function ($, ui, all, isKeyed) {
+    if (isKeyed === void 0) { isKeyed = false; }
+    var Box = ui.Box, Button = ui.Button;
+    var list = all.filter(function (r) { return !r.archived; });
     if (!list.length)
         return null;
     return (<Box key="reports-button" flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} hotkey={isKeyed ? 'r' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))}/>
+      <Button key={"reports-open-".concat(presses)} label={"Results ".concat(entriesOf(list).length)} hotkey={isKeyed ? 'r' : undefined} plain={isKeyed ? true : undefined} onPress={function () { return void openReports($).catch(function (err) { return log($, "reports not opened: ".concat(String(err))); }); }}/>
     </Box>);
 };
 // The list, one line a row: the title, when, and Archive at its right, a mark while it waits on the person. First what waits on
 // the person, then the few newest, then the rest folded into one row, "Earlier N", and those put away into "Archived N". Rounds of
 // one work are one row, its newest; the earlier rounds are listed inside its tab
-const RECENT = 5;
-let isEarlierOpen = false;
-let isArchivedOpen = false;
+var RECENT = 5;
+var isEarlierOpen = false;
+var isArchivedOpen = false;
 // When, as short as it fits its place: the time today, the day this year, the year before that
-const when = (at, now) => (day(at, now) === day(now, now) ? time(at, now) : new Date(at).getFullYear() === new Date(now).getFullYear() ? day(at, now) : String(new Date(at).getFullYear()));
-const reportsView = ($, ui, all, now, line, height = 0) => {
-    const { Box, Button, Text } = ui;
-    const list = all.filter(r => !r.archived);
-    const gone = entriesOf(all.filter(r => r.archived));
+var when = function (at, now) { return (day(at, now) === day(now, now) ? time(at, now) : new Date(at).getFullYear() === new Date(now).getFullYear() ? day(at, now) : String(new Date(at).getFullYear())); };
+var reportsView = function ($, ui, all, now, line, height) {
+    if (height === void 0) { height = 0; }
+    var Box = ui.Box, Button = ui.Button, Text = ui.Text;
+    var list = all.filter(function (r) { return !r.archived; });
+    var gone = entriesOf(all.filter(function (r) { return r.archived; }));
     // A new round of an entry already listed shows in its place; a new entry waits
-    const shown = reportsListed.length ? entriesOf(list).filter(entry => entry.some(r => reportsListed.includes(r.id))).flat() : list;
-    const entries = entriesOf(shown);
-    const fresh = entriesOf(list).length - entries.length;
-    const waiting = entries.filter(entry => isOpenQuestion(entry[0]));
-    const rest = entries.filter(entry => !isOpenQuestion(entry[0]));
-    const [recent, earlier] = [rest.slice(0, RECENT), rest.slice(RECENT)];
+    var shown = reportsListed.length ? entriesOf(list).filter(function (entry) { return entry.some(function (r) { return reportsListed.includes(r.id); }); }).flat() : list;
+    var entries = entriesOf(shown);
+    var fresh = entriesOf(list).length - entries.length;
+    var waiting = entries.filter(function (entry) { return isOpenQuestion(entry[0]); });
+    var rest = entries.filter(function (entry) { return !isOpenQuestion(entry[0]); });
+    var _a = [rest.slice(0, RECENT), rest.slice(RECENT)], recent = _a[0], earlier = _a[1];
     // The app keeps each button it drew by its key, with the handle of its first drawing; the engine gives every button a new handle
     // whenever anything in the drawing changes (a result arriving, a fold, a time). A key that stayed then pressed a dead handle and
     // nothing opened, press after press. So every key here carries a mark of what the drawing shows, which moves whenever it changes
-    const gen = drawingMark(REPORTS_PANE, [presses, line, height, fresh, isEarlierOpen, isArchivedOpen, 'isTerminal' in ui, ...[waiting, recent, earlier, gone].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))]);
-    const fold = (key, label, isOpen, onPress) => (<Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" alignItems="flex-start" flexShrink={0}>
+    var gen = drawingMark(REPORTS_PANE, __spreadArray([presses, line, height, fresh, isEarlierOpen, isArchivedOpen, 'isTerminal' in ui], [waiting, recent, earlier, gone].map(function (group) { return group.map(function (entry) { return (entry[0] ? "".concat(entry[0].id, "|").concat(entry[0].title, "|").concat(when(entry[0].at, now)) : ''); }); }), true));
+    var fold = function (key, label, isOpen, onPress) { return (<Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" alignItems="flex-start" flexShrink={0}>
       {/* In the rows' title column */}
       <Box width={1} flexShrink={0}/>
-      <Button key={`${key}-${gen}`} label={`${isOpen ? '▾' : '▸'} ${label}`} plain dimColor onPress={() => void ((presses += 1), onPress(), redraw($))}/>
-    </Box>);
+      <Button key={"".concat(key, "-").concat(gen)} label={"".concat(isOpen ? '▾' : '▸', " ").concat(label)} plain dimColor onPress={function () { return void ((presses += 1), onPress(), redraw($)); }}/>
+    </Box>); };
     // One row, one line: the title pressed opens it; when and Archive sit at the right, the same width on every row
-    let rowNo = 0;
-    const row = (entry) => {
-        const r = entry[0];
+    var rowNo = 0;
+    var row = function (entry) {
+        var r = entry[0];
         if (!r)
             return null;
         // In the terminal the first nine rows are numbered, and the number opens the result
         rowNo += 1;
-        const digit = 'isTerminal' in ui && rowNo <= 9 ? String(rowNo) : undefined;
-        return (<Box key={`entry-${r.id}`} flexDirection="row" alignItems="center" gap={2} height={1} overflow="hidden" flexShrink={0}>
+        var digit = 'isTerminal' in ui && rowNo <= 9 ? String(rowNo) : undefined;
+        return (<Box key={"entry-".concat(r.id)} flexDirection="row" alignItems="center" gap={2} height={1} overflow="hidden" flexShrink={0}>
         <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
           {/* In the column the folded rows' labels start in */}
           <Box width={1} flexShrink={0}/>
           <Box flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
-            <Button key={`report-${r.id}-${gen}`} label={cut(r.title, line - (digit ? 25 : 22))} plain hotkey={digit} onPress={() => openReport($, r.id)}/>
+            <Button key={"report-".concat(r.id, "-").concat(gen)} label={cut(r.title, line - (digit ? 25 : 22))} plain hotkey={digit} onPress={function () { return openReport($, r.id); }}/>
           </Box>
         </Box>
         <Box width={6} flexShrink={0} justifyContent="flex-end">
           <Text dimColor>{when(r.at, now)}</Text>
         </Box>
-        <Button key={`archive-${r.id}-${gen}`} label="Archive" plain dimColor onPress={() => archiveReport($, r, true)}/>
+        <Button key={"archive-".concat(r.id, "-").concat(gen)} label="Archive" plain dimColor onPress={function () { return archiveReport($, r, true); }}/>
       </Box>);
     };
-    const rows = (group) => (<Box flexDirection="column" flexShrink={0}>
+    var rows = function (group) { return (<Box flexDirection="column" flexShrink={0}>
       {group.map(row)}
-    </Box>);
+    </Box>); };
     return (<Box key="reports" flexDirection="column" gap={1} flexGrow={1}>
       <Box key="reports-head" flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
         <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" alignItems="center" gap={1}>
           <Text bold>Results</Text>
-          <Text dimColor>{`${entries.length}`}</Text>
+          <Text dimColor>{"".concat(entries.length)}</Text>
         </Box>
-        {fresh ? <Button key={`reports-fresh-${gen}`} label={`Show ${fresh} new`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))}/> : null}
+        {fresh ? <Button key={"reports-fresh-".concat(gen)} label={"Show ".concat(fresh, " new")} onPress={function () { return void openReports($).catch(function (err) { return log($, "reports not opened: ".concat(String(err))); }); }}/> : null}
       </Box>
       {!shown.length && !gone.length ? <Text dimColor>Nothing yet.</Text> : null}
-      {waiting.length ? band(ui, 'reports-waiting', 'Waiting on you', `${waiting.length}`, rows(waiting)) : null}
+      {waiting.length ? band(ui, 'reports-waiting', 'Waiting on you', "".concat(waiting.length), rows(waiting)) : null}
       {recent.length ? band(ui, 'reports-recent', waiting.length ? 'Recent' : 'Newest', '', rows(recent)) : null}
       {earlier.length || gone.length ? (<Box key="reports-folded" flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-          {earlier.length ? fold('earlier-fold', `Earlier ${earlier.length}`, isEarlierOpen, () => (isEarlierOpen = !isEarlierOpen)) : null}
+          {earlier.length ? fold('earlier-fold', "Earlier ".concat(earlier.length), isEarlierOpen, function () { return (isEarlierOpen = !isEarlierOpen); }) : null}
           {earlier.length && isEarlierOpen ? rows(earlier) : null}
-          {gone.length ? fold('archived-fold', `Archived ${gone.length}`, isArchivedOpen, () => (isArchivedOpen = !isArchivedOpen)) : null}
+          {gone.length ? fold('archived-fold', "Archived ".concat(gone.length), isArchivedOpen, function () { return (isArchivedOpen = !isArchivedOpen); }) : null}
           {gone.length && isArchivedOpen
-                ? gone.map(entry => {
-                    const r = entry[0];
+                ? gone.map(function (entry) {
+                    var r = entry[0];
                     if (!r)
                         return null;
-                    return (<Box key={`archived-${r.id}`} flexDirection="row" alignItems="center" gap={2} height={1} overflow="hidden" flexShrink={0}>
+                    return (<Box key={"archived-".concat(r.id)} flexDirection="row" alignItems="center" gap={2} height={1} overflow="hidden" flexShrink={0}>
                     <Box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
                       <Box width={1} flexShrink={0}/>
-                      <Button key={`report-${r.id}-${gen}`} label={cut(r.title, line - 24)} plain dimColor onPress={() => openReport($, r.id)}/>
+                      <Button key={"report-".concat(r.id, "-").concat(gen)} label={cut(r.title, line - 24)} plain dimColor onPress={function () { return openReport($, r.id); }}/>
                     </Box>
                     <Box width={6} flexShrink={0} justifyContent="flex-end">
                       <Text dimColor>{when(r.at, now)}</Text>
                     </Box>
-                    <Button key={`unarchive-${r.id}-${gen}`} label="Bring back" plain onPress={() => archiveReport($, r, false)}/>
+                    <Button key={"unarchive-".concat(r.id, "-").concat(gen)} label="Bring back" plain onPress={function () { return archiveReport($, r, false); }}/>
                   </Box>);
                 })
                 : null}
         </Box>) : null}
     </Box>);
 };
-const reportShown = ($, ui, r, text, list, now, at, thumb, height = 0) => {
-    const { Box, Button, Markdown, Text } = ui;
-    const table = ui;
+var reportShown = function ($, ui, r, text, list, now, at, thumb, height) {
+    var _a, _b, _c, _d, _e, _f, _g, _h;
+    if (height === void 0) { height = 0; }
+    var Box = ui.Box, Button = ui.Button, Markdown = ui.Markdown, Text = ui.Text;
+    var table = ui;
     // The other rounds of its work first, as the list shows them as one row; then what it started from or started, and the subject's others
-    const rounds = (entriesOf(list.filter(one => Boolean(one.archived) === Boolean(r.archived))).find(entry => entry.some(one => one.id === r.id)) ?? []).filter(one => one.id !== r.id);
-    const others = list.filter(one => one.id !== r.id && !rounds.includes(one) && (one.id === r.from || one.from === r.id || subjectOf(one) === subjectOf(r)));
-    const kin = [...rounds, ...others.slice(0, Math.max(0, 8 - rounds.length))];
-    const pictures = r.files.map(file => ({ file, path: `${reportPath(r)}/${file}`, href: `file://${encodeURI(`${reportPath(r)}/${file}`)}` }));
-    const how = (one) => [one.id === r.from ? 'this started from it' : one.from === r.id ? 'started from this' : rounds.includes(one) ? (one.at < r.at ? 'earlier round' : 'later round') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ');
-    const pane = paneOf(r);
+    var rounds = ((_a = entriesOf(list.filter(function (one) { return Boolean(one.archived) === Boolean(r.archived); })).find(function (entry) { return entry.some(function (one) { return one.id === r.id; }); })) !== null && _a !== void 0 ? _a : []).filter(function (one) { return one.id !== r.id; });
+    var others = list.filter(function (one) { return one.id !== r.id && !rounds.includes(one) && (one.id === r.from || one.from === r.id || subjectOf(one) === subjectOf(r)); });
+    var kin = __spreadArray(__spreadArray([], rounds, true), others.slice(0, Math.max(0, 8 - rounds.length)), true);
+    var pictures = r.files.map(function (file) { return ({ file: file, path: "".concat(reportPath(r), "/").concat(file), href: "file://".concat(encodeURI("".concat(reportPath(r), "/").concat(file))) }); });
+    var how = function (one) {
+        return [one.id === r.from ? 'this started from it' : one.from === r.id ? 'started from this' : rounds.includes(one) ? (one.at < r.at ? 'earlier round' : 'later round') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ');
+    };
+    var pane = paneOf(r);
     // As in the list: each key carries a mark of what this drawing shows, so the app never keeps a button whose handle is gone
-    const gen = drawingMark(pane, [presses, height, r, mark(text), at, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)]);
-    const show = (to) => void ((presses += 1), pictureAt.set(pane, to), redraw($));
-    return (<Box key={`report-${r.id}`} flexDirection="column" gap={1} flexGrow={1}>
+    var gen = drawingMark(pane, __spreadArray(__spreadArray(__spreadArray([presses, height, r, mark(text), at, (_b = thumb === null || thumb === void 0 ? void 0 : thumb.source.length) !== null && _b !== void 0 ? _b : 0], pictures.map(function (one) { var _a; return (_a = pictureSaid.get(one.path)) !== null && _a !== void 0 ? _a : null; }), true), [dated(r.at, now), 'isTerminal' in ui], false), kin.map(function (one) { return "".concat(one.id, "|").concat(one.title, "|").concat(dated(one.at, now), "|").concat(how(one)); }), true));
+    var show = function (to) { return void ((presses += 1), pictureAt.set(pane, to), redraw($)); };
+    return (<Box key={"report-".concat(r.id)} flexDirection="column" gap={1} flexGrow={1}>
       {/* Archive at the head's right: pressed, the tab closes; one archived says so, with Bring back */}
       <Box key="report-head" flexDirection="row" alignItems="flex-start" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
         <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Text bold wrap="wrap">{r.title}</Text>
           <Text dimColor wrap="wrap">{[dated(r.at, now), r.subject && slug(r.subject) !== slug(r.title) ? r.subject : '', r.archived ? 'archived' : answeredOf(r)].filter(Boolean).join(' · ')}</Text>
         </Box>
-        <Button key={`report-archive-${gen}`} label={r.archived ? 'Bring back' : 'Archive'} onPress={() => archiveReport($, r, !r.archived)}/>
+        <Button key={"report-archive-".concat(gen)} label={r.archived ? 'Bring back' : 'Archive'} onPress={function () { return archiveReport($, r, !r.archived); }}/>
       </Box>
       {isOpenQuestion(r)
-            ? band(ui, 'report-ask', 'Waiting on you', openWaits(r).length > 1 ? `${openWaits(r).length}` : '', 
+            ? band(ui, 'report-ask', 'Waiting on you', openWaits(r).length > 1 ? "".concat(openWaits(r).length) : '', 
             // Each thing it waits on with its own answers; one answered leaves the others
             <Box flexDirection="column" gap={2}>
-              {waitsOf(r).map((wait, index) => wait.answer ? null : (<Box key={`report-wait-${index}`} flexDirection="column" gap={1}>
+              {waitsOf(r).map(function (wait, index) {
+                    return wait.answer ? null : (<Box key={"report-wait-".concat(index)} flexDirection="column" gap={1}>
                     <Text wrap="wrap">{wait.text}</Text>
                     <Box flexDirection="row" flexWrap="wrap" gap={1}>
-                      {['Yes', 'No', 'Not now'].map(said => (<Button key={`report-say-${index}-${said}-${gen}`} label={said} onPress={() => void ((presses += 1), answerWait($, r, index, said, now).catch(err => log($, `answer not kept: ${String(err)}`)))}/>))}
+                      {['Yes', 'No', 'Not now'].map(function (said) { return (<Button key={"report-say-".concat(index, "-").concat(said, "-").concat(gen)} label={said} onPress={function () { return void ((presses += 1), answerWait($, r, index, said, now).catch(function (err) { return log($, "answer not kept: ".concat(String(err))); })); }}/>); })}
                     </Box>
-                  </Box>))}
+                  </Box>);
+                })}
             </Box>)
             : null}
       {r.gist
             ? band(ui, 'report-finding', 'Finding', '', <Text wrap="wrap">{r.gist}</Text>)
             : null}
       {pictures.length
-            ? band(ui, 'report-pictures', 'Pictures', 'isTerminal' in ui ? `${pictures.length}` : pictures.length > 1 ? `${at + 1} of ${pictures.length}` : '', 'isTerminal' in ui ? (
+            ? band(ui, 'report-pictures', 'Pictures', 'isTerminal' in ui ? "".concat(pictures.length) : pictures.length > 1 ? "".concat(at + 1, " of ").concat(pictures.length) : '', 'isTerminal' in ui ? (
             // The terminal draws no picture: each is a row, numbered, whose press opens it where the person is
             <Box flexDirection="column">
-                {pictures.map((one, n) => (<Box key={`report-pic-${n}`} flexDirection="column">
-                    <Button key={`report-pic-open-${n}-${gen}`} label={one.file} plain hotkey={n < 9 ? String(n + 1) : undefined} onPress={press => void showPicture($, one.path, '', '', press.surface)}/>
-                    {pictureSaidRow($, ui, `report-pic-said-${n}-${gen}`, one.path)}
-                  </Box>))}
+                {pictures.map(function (one, n) { return (<Box key={"report-pic-".concat(n)} flexDirection="column">
+                    <Button key={"report-pic-open-".concat(n, "-").concat(gen)} label={one.file} plain hotkey={n < 9 ? String(n + 1) : undefined} onPress={function (press) { return void showPicture($, one.path, '', '', press.surface); }}/>
+                    {pictureSaidRow($, ui, "report-pic-said-".concat(n, "-").concat(gen), one.path)}
+                  </Box>); })}
                 <Text dimColor wrap="wrap">{termFrom ? 'Press a picture to send it to the device you’re using' : 'Press a picture to open it'}</Text>
               </Box>) : (<Box flexDirection="column" gap={1}>
-              {thumb && table.Svg ? <table.Svg key={`report-picture-${r.id}-${at}`} source={thumb.source} alt={pictures[at]?.file ?? 'Picture'}/> : null}
+              {thumb && table.Svg ? <table.Svg key={"report-picture-".concat(r.id, "-").concat(at)} source={thumb.source} alt={(_d = (_c = pictures[at]) === null || _c === void 0 ? void 0 : _c.file) !== null && _d !== void 0 ? _d : 'Picture'}/> : null}
               {/* Shown here, never handed to another app: that would take the person out of Claude and switch their desktop. Where the
                     picture cannot be drawn, its path is given as text */}
-              <Text dimColor wrap="wrap">{thumb && table.Svg ? (pictures[at]?.file ?? '') : (pictures[at]?.path ?? '')}</Text>
+              <Text dimColor wrap="wrap">{thumb && table.Svg ? ((_f = (_e = pictures[at]) === null || _e === void 0 ? void 0 : _e.file) !== null && _f !== void 0 ? _f : '') : ((_h = (_g = pictures[at]) === null || _g === void 0 ? void 0 : _g.path) !== null && _h !== void 0 ? _h : '')}</Text>
               {pictures.length > 1 ? (<Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
-                  <Button key={`report-prev-${gen}`} label="‹ Previous" onPress={() => show((at + pictures.length - 1) % pictures.length)}/>
-                  <Button key={`report-next-${gen}`} label="Next ›" onPress={() => show((at + 1) % pictures.length)}/>
+                  <Button key={"report-prev-".concat(gen)} label="‹ Previous" onPress={function () { return show((at + pictures.length - 1) % pictures.length); }}/>
+                  <Button key={"report-next-".concat(gen)} label="Next ›" onPress={function () { return show((at + 1) % pictures.length); }}/>
                 </Box>) : null}
             </Box>))
             : null}
       {band(ui, 'report-text', 'In full', '', 
         // A link it names never leaves the app: one of its pictures is shown above, anything else stays as text
-        <Markdown key={`report-text-${r.id}`} text={text.length > REPORT_CHARS ? `${text.slice(0, REPORT_CHARS)}\n\n…` : text} onLinkPress={link => {
-                const to = pictures.findIndex(one => link.href.endsWith(`/${fileName(one.file)}`) || link.href === one.path);
+        <Markdown key={"report-text-".concat(r.id)} text={text.length > REPORT_CHARS ? "".concat(text.slice(0, REPORT_CHARS), "\n\n\u2026") : text} onLinkPress={function (link) {
+                var to = pictures.findIndex(function (one) { return link.href.endsWith("/".concat(fileName(one.file))) || link.href === one.path; });
                 if (to >= 0)
                     show(to);
             }}/>)}
       {band(ui, 'report-carry', 'Continue', '', <Box flexDirection="column" alignItems="flex-start" gap={1}>
           <Text dimColor wrap="wrap">Claudopus puts a line naming this result in the chat's box, for you to finish and send.</Text>
-          <Button key={`report-carry-${gen}`} label="Continue from this" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))}/>
+          <Button key={"report-carry-".concat(gen)} label="Continue from this" onPress={function () { return void ((presses += 1), redraw($), carryOn($, r, now)); }}/>
           {kin.length ? (<Box flexDirection="column" alignItems="flex-start">
-              {kin.map(one => (<Button key={`report-kin-${one.id}-${gen}`} label={[dated(one.at, now), one.title, how(one)].filter(Boolean).join(' · ')} plain dimColor onPress={() => openReport($, one.id)}/>))}
+              {kin.map(function (one) { return (<Button key={"report-kin-".concat(one.id, "-").concat(gen)} label={[dated(one.at, now), one.title, how(one)].filter(Boolean).join(' · ')} plain dimColor onPress={function () { return openReport($, one.id); }}/>); })}
             </Box>) : null}
         </Box>)}
     </Box>);

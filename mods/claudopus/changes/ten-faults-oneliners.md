@@ -1,0 +1,3 @@
+- The chat now runs a few more harmless one-liners itself instead of starting a task: opening a file or page (`open`, also in a named browser), and a status check of a server on this Mac (`curl` of a local address that only asks and saves nothing).
+- The chat can show a page or a local server in the browser pane itself (its preview), instead of a task doing it.
+- A command that only reads one of your settings files with a line of Python or Node is no longer refused as if it changed it; a command that writes them is still refused.

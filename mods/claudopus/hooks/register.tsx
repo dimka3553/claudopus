@@ -46,6 +46,9 @@ const RARE_SERVERS = ['mcp__Claude_Browser__', 'mcp__Claude_Code_iOS_Simulator__
 const OWN = ['Agent', 'Workflow', 'SendMessage', 'ListAgents', 'TaskStop', 'ToolSearch', 'AskUserQuestion', 'SendUserFile', 'ReadNotifications', 'Skill']
 // And what it reads with, to answer a question a few files answer: none of them changes a file or runs a command
 const READS = ['Read', 'Grep', 'Glob']
+// And the browser pane's preview, which shows a page or a local server in the app's own browser: started, listed, its server's log
+// read, stopped, its tabs looked at. The pane's other tools (clicks, typing, forms, scripts on a page) are a task's
+const PANE_SERVERS = /^mcp__(?:remote-devices__)?Claude_Browser__(?:preview_(?:start|list|logs|stop)|tabs_context)$/
 // The mod's own tools, as the chat names them; work recorded before the rename called them by the old name
 const TOOLS = 'mcp__claudopus__'
 const OLD_TOOLS = 'mcp__progress__'
@@ -953,6 +956,31 @@ const writesMemory = (text: string, names: readonly string[]): boolean => {
     })
     .join('\n')
   return namesMemory(kept, names) || (names === MEMORY_PERSON && /\brelease\.local\b/.test(kept))
+}
+// A command that is only Python or Node handed code that reads (`python3 -c "print(json.load(open(p)))"`, `node -e`): nothing joined
+// to it, nothing sent into a file, and in its code no open for writing and nothing that writes, moves, removes or runs anything. Read
+// as plainly as the guard above, so a trick in the code still counts as a write; a command that changes a file anyway is undone as it ends
+const CODE_WRITES =
+  /write|append|dump(?!s)|rename|replace|remove|delete|unlink|\brm\w*\s*\(|\bcp\w*\s*\(|copy|move|mkd|makedirs|link|truncate|chmod|chown|utime|touch|system|popen|spawn|exec|eval|compile|subprocess|child_process|shutil|pathlib|fileutils|__import__|import\s*\(|importlib|getattr|setattr|globals|\bvm\b|\bFunction\s*\(|mmap|ctypes|\bpty\b|\bsocket|`/i
+const CODE_RUNNERS: Record<string, readonly string[]> = { python: ['-c'], python3: ['-c'], node: ['-e', '-p', '--eval', '--print'] }
+const codeOnlyReads = (command: string): boolean => {
+  if (/\n|\$\(|`/.test(command)) return false
+  const parts = shellWords(command)
+  if (parts.length !== 1) return false
+  const words = parts[0]!
+  const name = (words[0] ?? '').split('/').pop() ?? ''
+  const flags = CODE_RUNNERS[/^python3\.\d+$/.test(name) ? 'python3' : name]
+  // its code straight after the program: nothing set before it, no other flag (a module, an import hook, perl's -i) beside it
+  if (!flags || !flags.includes(words[1] ?? '') || words.length < 3) return false
+  const code = words[2]!
+  // what follows the code is its arguments, never a file it is sent into
+  if (words.slice(3).some(one => /[<>]/.test(one))) return false
+  // (printing is not writing)
+  if (CODE_WRITES.test(code.replace(/\bstd(?:out|err)\.write\b/g, ''))) return false
+  // an open whose arguments name no mode that writes ('w', 'a', 'x', '+') and no flag of os.open's or Node's; an open whose
+  // arguments cannot be read plainly counts as one that writes
+  const opens = code.replace(/\bopen\w*\s*\(((?:[^()]|\([^()]*\))*)\)/gi, (all, args: string) => (/(['"])[rwabxtU+]*[wax+][rwabxtU+]*\1|\bO_|\bflags?\b/.test(args) ? all : ''))
+  return !/\bopen\w*\s*\(/i.test(opens)
 }
 const NO_MEMORY =
   "Only Claudopus writes the files chats share and answer one another through, and the update's own files: Claude never writes them with any tool."
@@ -8823,13 +8851,59 @@ const isOneCommand = (command: string) => {
 const CHAT_GIT = ['push', 'fetch', 'status', 'log', 'diff', 'show', 'branch', 'remote', 'rev-parse', 'ls-remote', 'describe', 'shortlog', 'blame']
 const CHAT_GH = ['view', 'list', 'status', 'checks', 'diff']
 const CHAT_LOOKS = ['ls', 'pwd', 'date', 'uptime', 'whoami', 'hostname', 'df', 'sw_vers', 'uname', 'which']
+// It shows a file or a page: macOS's open, of a file, a folder or a web page, in its own app or one named, never of a thing that
+// runs (an app, a script, an installer) or in an app that runs what it is handed
+const OPEN_RUNS = /\.(?:app|command|tool|terminal|sh|zsh|bash|csh|fish|py|rb|pl|js|mjs|jar|pkg|mpkg|dmg|workflow|action|scpt|scptd|applescript|shortcut|prefpane|mobileconfig|osax|kext|plugin|bundle)\/?$/i
+const OPEN_APPS_RUN = /^(?:terminal|iterm2?|ghostty|warp|alacritty|kitty|wezterm|hyper|script editor|automator|installer|shortcuts|system settings|system preferences)$/i
+const isChatOpen = (args: string[]) => {
+  let shown = 0
+  for (let i = 0; i < args.length; i++) {
+    const one = args[i]!
+    if (one === '-a') {
+      const app = (args[++i] ?? '').replace(/\/+$/, '').split('/').pop()!.replace(/\.app$/i, '')
+      if (!app || OPEN_APPS_RUN.test(app)) return false
+    } else if (/^-[gRFn]+$/.test(one)) continue
+    else if (one.startsWith('-')) return false
+    else if (/^[a-z][\w+.-]*:/i.test(one) && !/^(?:https?|file):/i.test(one)) return false
+    else if (OPEN_RUNS.test(one.replace(/[?#].*$/, ''))) return false
+    else shown++
+  }
+  return shown > 0
+}
+// It asks how a server on this Mac stands: curl's GET or HEAD of a local address, its body sent nowhere but /dev/null, and none of
+// curl's ways to send data, write a file or read its settings from one
+const CURL_LOCAL = /^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|[\w-]+\.localhost)(?::\d+)?(?:[/?#]|$)/i
+const CURL_FLAGS = ['--silent', '--show-error', '--fail', '--fail-with-body', '--location', '--head', '--include', '--insecure', '--compressed', '--verbose', '-4', '-6']
+const isChatCurl = (args: string[]) => {
+  let asked = 0
+  for (let i = 0; i < args.length; i++) {
+    const [flag, joined] = args[i]!.startsWith('--') && args[i]!.includes('=') ? [args[i]!.slice(0, args[i]!.indexOf('=')), args[i]!.slice(args[i]!.indexOf('=') + 1)] : [args[i]!, undefined]
+    const value = () => joined ?? args[++i] ?? ''
+    if (/^-[sSfLIikv]+$/.test(flag) || CURL_FLAGS.includes(flag)) continue
+    if (flag === '-o' || flag === '--output') {
+      if (value() !== '/dev/null') return false
+    } else if (flag === '-w' || flag === '--write-out') {
+      if (/output\{/i.test(value())) return false
+    } else if (flag === '-X' || flag === '--request') {
+      if (!/^(?:GET|HEAD)$/.test(value())) return false
+    } else if (['-m', '--max-time', '--connect-timeout', '--retry'].includes(flag)) {
+      if (!/^\d+(?:\.\d+)?$/.test(value())) return false
+    } else if (['-H', '--header', '-A', '--user-agent'].includes(flag)) value()
+    else if (flag.startsWith('-') || !CURL_LOCAL.test(flag)) return false
+    else asked++
+  }
+  return asked > 0
+}
 const isChatRunnable = (command: string, branch = '') => {
   if (!isOneCommand(command) || RUNNER_NAMED.test(command) || /claudopus\/p\W?stes|\bpastes\b/.test(command)) return false
-  // nothing the shell fills in or spreads out: no variables, braces, globs, escapes, home or history
-  if (/[$\\{}*?[\]~!]/.test(command)) return false
+  // nothing the shell fills in or spreads out: no variables, braces, globs, escapes, home or history, outside quotes; inside double
+  // quotes no variable or escape (single quotes hold anything as written)
+  if (/[$\\{}*?[\]~!]/.test(command.replace(/'[^']*'|"[^"$`\\]*"/g, '""'))) return false
   const words = shellWords(command)[0] ?? []
   const head = words[0] ?? ''
   const rest = words.slice(2)
+  if (head === 'open') return isChatOpen(words.slice(1))
+  if (head === 'curl') return isChatCurl(words.slice(1))
   if (head === 'git') {
     // the verb straight after git: no -c, -C or --config-env before it, which set what git runs
     const verb = words[1] ?? ''
@@ -8848,7 +8922,7 @@ const isChatRunnable = (command: string, branch = '') => {
   return CHAT_LOOKS.includes(head)
 }
 const NOT_ONE_COMMAND =
-  'Not run: the chat runs only a single command with nothing joined to it (no `&&`, `;`, `|`, `>`, `$( )` or backticks), and only one that changes no file: a push, a fetch, or a look with git or gh. Start a task for anything else.'
+  'Not run: the chat runs only a single command with nothing joined to it (no `&&`, `;`, `|`, `>`, `$( )` or backticks), and only one that changes no file: a push, a fetch, a look with git or gh, an `open` of a file or page, or a `curl` status check of a local server. Start a task for anything else.'
 // The chat's own commands under way, by their background id: when each started and what it was
 const chatCommands = new Map<string, { at: number; command: string; description: string }>()
 // The background id a command sent to the background answers with, as the engine writes it
@@ -11354,9 +11428,9 @@ const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<
   if (!dir) return ''
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
   if (e.tool === 'Bash') {
-    // The command as written and unquoted, and each script it runs
+    // The command as written and unquoted, and each script it runs; a program handed code that only reads names a file to read it
     const command = String(input.command ?? '')
-    const texts = [command, ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
+    const texts = [...(codeOnlyReads(command) ? [] : [command]), ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
     if (texts.some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
     if (texts.some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
     return ''
@@ -11537,7 +11611,7 @@ const workHooks = (on: On) => {
     // The branch a push would go from, which is never main
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool)
+    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !PANE_SERVERS.test(e.tool)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
       // A call refused after a press (another of its commands denied, a grant not sealed) ends here: its note goes with it
@@ -11743,7 +11817,7 @@ const workHooks = (on: On) => {
       }
       return r
     }
-    if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return next(e)
+    if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) || PANE_SERVERS.test(e.tool)) return next(e)
     // The chat's single command always runs in the background, so no command holds the chat; Claudopus stops it at its limit
     if (isChatCommand) {
       const r = await next({ ...e, run_in_background: true } as typeof e)
