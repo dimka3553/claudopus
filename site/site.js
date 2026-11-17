@@ -54,6 +54,8 @@
           return { el, front, s, bw, bh, x: Math.max(bw / 2, Math.min(w - bw / 2, p.x * w)), y: p.y * h }
         })
         const fronts = spots.filter(a => a.front)
+        // the head is the middle of the stage: a card over it is moved out to the nearer side
+        for (const a of fronts) { const off = a.x - w / 2, clear = w * 0.17 + a.bw / 2; if (Math.abs(off) < clear && Math.abs(a.y - h * 0.42) < h * 0.16) a.x = w / 2 + (off < 0 ? -clear : clear) }
         for (let pass = 0; pass < 4; pass++) for (const a of fronts) for (const b of fronts) {
           if (a === b || a.y > b.y) continue
           const dx = (a.bw + b.bw) / 2 + 6 - Math.abs(a.x - b.x), dy = (a.bh + b.bh) / 2 + 6 - (b.y - a.y)
@@ -62,7 +64,7 @@
         for (const a of spots) {
           a.el.style.transform = `translate(${a.x.toFixed(1)}px,${a.y.toFixed(1)}px) scale(${a.s.toFixed(3)})`
           a.el.style.zIndex = a.front ? 3 : 0
-          a.el.style.opacity = a.front ? 1 : w < 480 ? 0 : 0.4
+          a.el.style.opacity = a.front ? 1 : 0
         }
         if (on && !still.matches) raf = requestAnimationFrame(frame)
       }
