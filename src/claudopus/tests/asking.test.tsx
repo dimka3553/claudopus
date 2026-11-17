@@ -1492,7 +1492,7 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
   await list.unmount()
 })
 
-test('a reply never waits behind a long command: one that may run for minutes goes to the background, a wait for the person is refused, and a short one held open is named on the card while the reply waits', async ($, on) => {
+test('a reply never waits behind a long command: one that may run for minutes is refused with the same call to send in the background, a wait for the person is refused, and a short one held open is named on the card while the reply waits', async ($, on) => {
   const { keep, settle, clock, held } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'try the reply box', wait: false, origin: composer })
@@ -1510,15 +1510,20 @@ test('a reply never waits behind a long command: one that may run for minutes go
     expect(wait.deny).toContain('End your step now')
   }
   expect(held.has('record')).toBe(false)
-  // A script of minutes, by its time limit or by its words, comes back at once and runs on in the background, the work told why
+  // A script of minutes, by its time limit or by its words, is refused with the same call to send in the background, never changed
+  // on its way (auto mode refuses a call a hook changed after it reviewed it: 484 calls on 16-17 Nov); sent so, it runs
   for (const [id, more] of [['s1', { timeout: 600000, description: 'Run the head check on the CQ500 scans' }], ['s2', { description: 'Waiting for the CQ500 results (about 5 min)' }], ['s4', { timeout: 600000, description: 'Run the tests', command: 'hold s4 &>test.log' }]] as const) {
-    const r = (await $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command: `hold ${id}`, ...more } as never)) as { context?: string[] }
+    const r = (await $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command: `hold ${id}`, ...more } as never)) as { deny?: string }
+    expect([...held.keys()].some(key => key.startsWith(id))).toBe(false)
+    expect(r.deny).toContain('Send the same call again with `run_in_background: true` and nothing else changed')
+    expect(r.deny).toContain('replies reach you while it runs')
+    const sent = (await $.tool.call({ tool: 'Bash', tool_use_id: `${id}b`, agentId: 'a1', command: `hold ${id}`, ...more, run_in_background: true } as never)) as { deny?: string }
+    expect(sent.deny).toBeUndefined()
     expect([...held.keys()].some(key => key.startsWith(id))).toBe(true)
-    expect((r.context ?? []).join(' ')).toContain('replies reach you while it runs')
   }
   // A launcher that leaves its runs going is left as it is, as what it started is followed while it runs
   const launched = (await $.tool.call({ tool: 'Bash', tool_use_id: 's3', agentId: 'a1', command: 'nohup python run.py > run.log 2>&1 & echo $!', description: 'Wait for the head check to start on every set (about 20 min)', timeout: 600000 } as never)) as { context?: string[] }
-  expect((launched.context ?? []).join(' ')).not.toContain('replies reach you while it runs')
+  expect((launched as { deny?: string }).deny).toBeUndefined()
   // A short one is held open as asked; a reply given meanwhile is received at once and names what it waits behind
   void keep($.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1', command: 'hold build', description: 'Run the build' } as never))
   await until(async () => held.get('build'))

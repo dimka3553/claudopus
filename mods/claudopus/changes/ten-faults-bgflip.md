@@ -1,0 +1,3 @@
+- Claudopus no longer changes a task's or a helper's call on its way, which auto mode refused ("a hook changed this call's input after auto mode reviewed it": 484 calls on 16 and 17 November). A command that may run for minutes, held open, is now refused with one line saying to send the same call with `run_in_background: true`, and the call sent that way runs as auto mode reviewed it.
+- The chat's own single command is refused the same way when it is not sent in the background, and an agent named on an older model or on Haiku is refused with the model to name instead, rather than either being changed.
+- The rules tell tasks and the chat to send such commands in the background from the start, so the refusal is rarely needed.
