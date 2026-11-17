@@ -213,9 +213,9 @@ const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: stri
   [
     `"${title}" has a question for you: ${ask.text}`,
     // The chat's notice is plain text: Markdown's marks for bold would show as they are
-    ask.details ? `What it is about:\n${ask.details.replaceAll('**', '')}` : '',
-    `Answers: ${answers.join(' · ')}, or reply in your own words, here or on its card.`,
-    ask.copy ? `${ask.isCommand ? 'The command to type' : 'The text to paste'}: ${ask.copy}` : '',
+    ask.details ? `Details:\n${ask.details.replaceAll('**', '')}` : '',
+    `Answers: ${answers.join(' · ')}, or answer in your own words, here or on its card.`,
+    ask.copy ? `${ask.isCommand ? 'Command to run' : 'Text to paste'}: ${ask.copy}` : '',
     ask.pictures?.length ? `Pictures: ${ask.pictures.join(', ')}` : '',
   ]
     .filter(Boolean)
@@ -238,10 +238,10 @@ const RESUMED_BY_ANSWER = `You had finished; this answer starts you again. Conti
 // What the chat's model reads, and the person sees as a notice (isYou), when that work could not be started again with the answer
 const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = false) =>
   isYou
-    ? `You answered, on its card, the question Claude asked in "${title}" after it finished (${asked}): ${said}. Claudopus couldn't start that task again, so your answer goes with your next message here.`
+    ? `You answered "${asked}" from "${title}" on its card after it was done: ${said}. Claudopus couldn't start that task again, so your answer goes with your next message here.`
     : `{Name} answered, on its card, the question Claude asked in "${title}" after it finished (${asked}): ${said}. Claudopus couldn't start that task again, so the answer waits here for {name}'s next message.`
 const ANSWER_FOR_CHAT_RELAY = `With {name}'s next message here, continue that task with this answer, as you would with their own words, alongside whatever that message asks.`
-const ASK_CLEARED = (title: string) => `Claude no longer needs an answer for "${title}".`
+const ASK_CLEARED = (title: string) => `Claude took back its question in "${title}". You don't need to answer it.`
 // What the work is told when the chat passes on the person's answer to its ask, typed in the chat
 const ANSWERED_IN_CHAT = (asked: string, words: string, isHeld = false, isWhole = true) =>
   `The message sent to you just now that carries {name}'s words "${words}" is {name}'s own reply, typed by them in the chat, to your question: "${asked}".${isWhole ? '' : ' Only those words are theirs: the chat wrote anything else in that message, not {name}.'} ${isHeld ? REPLY_HOLDS : 'Their card no longer shows the question.'} If it answers your question, take it as their answer and continue, and ask again if it leaves something open. If it asks for something else, decide whether it is more for this task, a new task to hand back with the \`note\` tool and its \`task\`, or a change in how you work, and say with the \`note\` tool what you did with it.`
@@ -290,12 +290,14 @@ const OWED =
 // What the work is told when it has taken many steps without touching its to-dos or saying where it stands
 const drifted = (steps: number) =>
   `You have taken ${steps} steps since you last touched your to-dos or said how far you have got. In your next step, send the to-do calls that bring the list up to date (tick what is done, mark the one you are on as doing, add what you took on) and a \`note\` saying how far you have got, together with your next working call in that same step, never in a step of their own. If all of it is already up to date, continue.`
+// A count of minutes as the panel writes a time: 29m, over an hour 1h 05m
+const minutesSaid = (mins: number) => (mins >= 60 ? `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m` : `${mins}m`)
 // The chat is told once when nothing new has come back under a piece of work for a while
 // (`isHelpersAtWork`: a helper of its still runs something, which brought nothing back meanwhile)
 const STUCK_IN_CHAT = (title: string, mins: number, isHelpersAtWork = false) =>
-  `"${title}" hasn't made progress for ${mins} minutes: nothing new has come back to Claude${isHelpersAtWork ? ', though its helpers still run something' : ' or its helpers'}. It may be stuck waiting for something. Its card shows how far it has got.`
+  `Nothing new from "${title}" for ${minutesSaid(mins)}${isHelpersAtWork ? ', though its helpers are still running something' : ''}. Claude may be stuck waiting for something. Its card shows how far it got.`
 // What the chat alone reads with it: it may ask the task what it waits on, as nothing of Claudopus's will
-const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to hand back what it has if nothing is coming.'
+const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to finish with what it has if nothing is coming.'
 // A task that ended its step to wait for its helpers, from which nothing new has come back: Claudopus starts it again with a nudge,
 // first to ask them, then to hand back what it has. What it is told, and what the chat is told
 const HELPERS_SILENT = (mins: number, helpers: string) =>
@@ -303,13 +305,14 @@ const HELPERS_SILENT = (mins: number, helpers: string) =>
 const HELPERS_STILL_SILENT = (mins: number, helpers: string) =>
   `From Claudopus: nothing new has come back from your helpers for ${mins} min, nor since you were asked to check on them: ${helpers}. Unless one told you it is still making progress and when it ends, hand back your report now with what you have, saying what each was still doing: Claudopus lets you hand it back while they run, and stops those that sit silent as you do.`
 const GAVE_UP_IN_CHAT = (title: string, mins: number) =>
-  `"${title}" is stuck: nothing new has come back from its helpers for ${mins} minutes, and it has not handed back what it has though Claudopus asked it to.`
+  `"${title}" is stuck: nothing new from its helpers for ${minutesSaid(mins)}, and Claude hasn't sent what it has, though Claudopus asked it to.`
 const NUDGED_IN_CHAT = (title: string, mins: number, isLast: boolean) =>
-  `"${title}" hasn't made progress for ${mins} minutes: it waits for its helpers, and nothing new has come back from them. Claudopus started it again and asked it ${isLast ? 'to hand back what it has now' : 'to check on them'}.`
+  `Nothing new from the helpers of "${title}" for ${minutesSaid(mins)}. Claudopus started Claude again and asked it ${isLast ? 'to send what it has now' : 'to check on them'}.`
 // A task that had stopped partway through a step without a report, restarted by Claudopus: what Claude is told, and what the chat is told
 const RESTARTED_WORK = `From Claudopus, not {name}: you stopped partway through a step without a report (the app restarted, the Mac slept or a command was interrupted). First check what you already have, then continue from where you were; a command or helper you started may still be running, or may need starting again.`
 const RESTARTED_IN_CHAT = (title: string, mins: number) =>
-  `"${title}" had stopped partway through a step ${mins} minutes ago without a report, so Claudopus restarted it. Its card shows how far it has got.`
+  `"${title}" stopped partway ${minutesSaid(mins)} ago without a result, so Claudopus started it again. Its card shows how far it got.`
+
 // Work the person stopped with their own press on Stop: what the chat, or the work above a helper, is told, as the engine's notice
 // of the stop says only that it was stopped "by Claude"; what a call that would start it again is refused with; what their next
 // message carries while some is stopped so. `left` lists what it started detached that goes on running

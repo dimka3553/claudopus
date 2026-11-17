@@ -80,7 +80,7 @@ const readPage = async ($: EngineInterface): Promise<{ page?: Published; why: st
   const answer = await lookIo($).page()
   const page = answer.ok ? publishedOf(answer.text) : undefined
   if (page) pageRead = { page, at: await $.clock.now() }
-  return { page, why: page ? '' : answer.ok ? (versionOnPage(answer.text) ? FAILS.unchecked : 'claudopus.ai named no version') : answer.status ? `claudopus.ai answered ${answer.status}` : 'claudopus.ai did not answer' }
+  return { page, why: page ? '' : answer.ok ? (versionOnPage(answer.text) ? FAILS.unchecked : "claudopus.ai didn't name a version") : answer.status ? `claudopus.ai answered with error ${answer.status}` : "claudopus.ai didn't answer" }
 }
 // The page, read now under the lock, its version kept for every chat
 const lookOnly = async ($: EngineInterface) => {
@@ -112,7 +112,7 @@ const lookForNew = async ($: EngineInterface) => {
 }
 // Config's Check now: the page read now, whatever the setting; it only looks, and Config and the panel offer what it found
 const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: boolean; isOut?: boolean }> => {
-  if (!dir) return { text: "Couldn't check: Claudopus has no memory folder in this chat.", isError: true }
+  if (!dir) return { text: "Couldn't check: this chat has no Memory folder.", isError: true }
   const loaded = (await versionsOf($)).version
   for (let tries = 0; tries < 20; tries++) {
     if (!isUpdating) {
@@ -123,7 +123,7 @@ const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: bo
           await log($, `Claudopus looked for a new version from Config: ${got.page?.version ?? got.why}`)
           if (!got.page) return { text: `Couldn't check: ${got.why}. Try again later.`, isError: true }
           await knowSource($, true)
-          if (!loaded || !isNewer(got.page.version, loaded)) return { text: `You're on the newest version (v${got.page.version}).`, isError: false }
+          if (!loaded || !isNewer(got.page.version, loaded)) return { text: `You have the newest version, v${got.page.version}.`, isError: false }
           // Asked for now: a Not now pressed earlier no longer keeps it quiet, and Config shows its Update right under the press
           if ((await readOr($, laterPath())).trim()) await $.fs.write(laterPath(), JSON.stringify({ version: got.page.version, until: 0 }))
           return { text: `v${got.page.version} is out.`, isError: false, isOut: true }
@@ -134,7 +134,7 @@ const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: bo
     }
     await new Promise<void>(done => void $.clock.after(3000, done))
   }
-  return { text: "Couldn't check: another chat's update did not finish. Try again later.", isError: true }
+  return { text: "Couldn't check: another chat's update didn't finish. Try again later.", isError: true }
 }
 // A chat whose panel shows a newer version than any page it has read reads the page itself once, for that version's lines, at most
 // every PAGE_AGAIN; never while the look is set to only when asked, when only a press reads it
@@ -178,7 +178,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
       return done({
         src: { kind: 'folder', repo, sub: 'mods/claudopus', runs: 'copy', record },
         cannot: ready.ok ? undefined : { what: `Claude Code's copy is made from ${ready.what}`, why: ready.why },
-        where: ready.ok ? "Claude Code's installed copy, made from Claudopus's released code on this Mac" : `Claude Code's installed copy, made from ${ready.what}`,
+        where: ready.ok ? "Claude Code's copy of the released code on this Mac" : `Claude Code's copy of ${ready.what}`,
       })
     }
     const location = typeof entry?.installLocation === 'string' ? entry.installLocation.replace(/\/+$/, '') : ''
@@ -212,7 +212,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
   return done({
     src: { kind: 'folder', repo: top || root, sub, runs: 'folder', ...(marketplace && scope ? { record: { plugins, marketplace, plugin: 'claudopus', scope } } : {}) },
     cannot: ready.ok ? undefined : { what: `This chat runs ${ready.what}`, why: ready.why },
-    where: ready.ok ? "Claudopus's released code on this Mac" : ready.what,
+    where: ready.ok ? 'the released code on this Mac' : ready.what,
   })
 }
 
@@ -484,7 +484,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
   )
   const v = n.version
   // Update's press between its fetch and its move: still updating
-  if (isOne && (n.kind === 'installing' || (n.kind === 'downloaded' && (isStepping || isUpdatePress)))) return box('installing', [title(`Updating Claudopus ${v}…`), track(0)], [])
+  if (isOne && (n.kind === 'installing' || (n.kind === 'downloaded' && (isStepping || isUpdatePress)))) return box('installing', [title(`Updating Claudopus v${v}…`), track(0)], [])
   // A fetch checked earlier, left by a copy before Update was one press, is offered as any version out: its Update moves it forward,
   // after checking it once more
   if (n.kind === 'available' || n.kind === 'cannot' || (isOne && n.kind === 'downloaded')) {
@@ -494,7 +494,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     const more = missed.reduce((sum, one) => sum + 1 + one.more, 0) - 1
     const count = n.kind === 'available' ? n.count : missed.length || 1
     const what = newest?.line ? `${newest.line}${more > 0 ? ` · and ${more} more ${more === 1 ? 'change' : 'changes'}` : ''}` : ''
-    const head = title(`Claudopus ${v} is out`, count > 1 ? `· ${count} versions since v${loaded}` : '')
+    const head = title(`Claudopus v${v} is out`, count > 1 ? `· ${count} versions since v${loaded}` : '')
     if (n.kind === 'cannot') return box('cannot', [head, line('why', `${n.what}: ${n.why}.`)], quiet('cannot', v))
     return box(
       'available',
@@ -513,18 +513,18 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     const live = downloadProgress?.version === v ? downloadProgress : undefined
     const pct = live?.pct ?? n.pct
     const got = live?.got ?? n.got
-    const said = live?.phase === 'checking' ? 'checking it against what the release published' : [pct !== undefined ? `${Math.round(pct)}%` : '', got ? sizeText(got) : '', live?.phase === 'resolving' ? 'unpacking' : ''].filter(Boolean).join(' · ')
-    return box('downloading', [title(`${isOne ? 'Updating' : 'Downloading'} Claudopus ${v}…`, said ? `· ${said}` : ''), track(0)], [])
+    const said = live?.phase === 'checking' ? 'checking the download' : [pct !== undefined ? `${Math.round(pct)}%` : '', got ? sizeText(got) : '', live?.phase === 'resolving' ? 'unpacking' : ''].filter(Boolean).join(' · ')
+    return box('downloading', [title(`${isOne ? 'Updating' : 'Downloading'} Claudopus v${v}…`, said ? `· ${said}` : ''), track(0)], [])
   }
   if (n.kind === 'downloaded') {
-    const replaces = `Claudopus checked it against the release. Install replaces v${loaded}, and new chats start on v${v}.`
+    const replaces = `Install puts v${v} on this Mac in place of v${loaded}. Then type /reload-plugins to use it.`
     return box(
       'downloaded',
-      [title(`Claudopus ${v} downloaded`), line('replaces', replaces), track(1)],
+      [title(`Claudopus v${v} downloaded`), line('replaces', replaces), track(1)],
       [<ui.Button key={`update-install-${presses}`} label="Install" onPress={() => installPress($, v, n.commit)} />, ...quiet('downloaded', v, false)],
     )
   }
-  if (n.kind === 'installing') return box('installing', [title(`Installing Claudopus ${v}…`), track(1)], [])
+  if (n.kind === 'installing') return box('installing', [title(`Installing Claudopus v${v}…`), track(1)], [])
   // The Mac has it and this chat still runs the older one: the header says so beside the version, and to type /reload-plugins
   if (n.kind === 'reload') return null
   // A step that failed: what failed, and that what this chat runs is as it was
@@ -539,7 +539,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
         : `Nothing changed: this chat still runs v${loaded}.`
   return box(
     'failed',
-    [title(`Couldn't ${which} Claudopus ${v}`), line('why', `${why.replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`)],
+    [title(`Couldn't ${which} Claudopus v${v}`), line('why', `${why.replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`)],
     [<ui.Button key={`update-again-${presses}`} label="Try again" onPress={() => downloadPress($, v)} />, ...quiet('failed', v)],
   )
 }
@@ -551,7 +551,7 @@ const configUpdateBox = async ($: EngineInterface, ui: Ui) => {
   const versions = await versionsOf($)
   if (!versions.version) return null
   const n = await noticeNow($, versions.version, versions.installed).catch(() => undefined)
-  if (n?.kind === 'reload') return <ui.Text key="update-ready" wrap="wrap">{`Claudopus ${n.version} is ready: type /reload-plugins to switch this chat to it.`}</ui.Text>
+  if (n?.kind === 'reload') return <ui.Text key="update-ready" wrap="wrap">{`Claudopus v${n.version} is ready: type /reload-plugins to use it.`}</ui.Text>
   return noticeCard($, ui, n, versions.version).catch(() => null)
 }
 

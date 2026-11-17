@@ -1,6 +1,6 @@
 name: Check
-# A release (mods/claudopus/bin/release, GITHUB_CHECKS in .release) starts this file as main has it on the very commit it is to make
-# main, given as `sha`, and moves main only once every job here passed on it
+# Runs every test on each push of main, so after each release, which never waits for it, and on each pull request. A release
+# runner set to wait for GitHub (GITHUB_CHECKS in a .release or release.local) can still start it on a commit, given as `sha`
 run-name: ${{ inputs.sha && format('Release check {0}', inputs.sha) || github.event.pull_request.title || github.event.head_commit.message }}
 on:
   push:
@@ -50,18 +50,18 @@ jobs:
       - name: ImageMagick, which stands in for macOS's sips on Linux
         if: runner.os == 'Linux'
         run: command -v convert || { sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick; }
-      # Every test, as the release runs them, the shell tests beside the mod's, as most of their time is waiting: the admin runner's
+      # Every test, as src/claudopus/test-all.sh runs them, the shell tests beside the mod's, as most of their time is waiting: the admin runner's
       # gate holds (a keychain of its own on a Mac, bin/keyring's files on Linux), the keeper goes on with a chat's work, the watcher
       # brings Claudopus back in a chat where Claude switched it off, and what stands in on Linux for a Mac's own tools works. The
-      # mod's tests run in Claude Code's own test kit, from its public npm package, pinned to a version that passes them all. The
-      # release runs them again with the desktop app's engine
+      # mod's tests run in Claude Code's own test kit, from its public npm package, pinned to a version that passes them all. A piece
+      # of work runs them before its release with the desktop app's engine
       - name: The shell tests and the mod's tests pass
         run: |
           o=$(mktemp -d); r=0
-          for t in admin keep revive linux; do { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc" & done
+          for t in admin keep revive linux run-it; do { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc" & done
           npx --yes @anthropic-ai/claude-code@2.1.325 plugin test mods/claudopus || r=1
           wait
-          for t in admin keep revive linux; do
+          for t in admin keep revive linux run-it; do
             echo "::group::$t.test.sh"; cat "$o/$t"; echo "::endgroup::"
             [ "$(cat "$o/$t.rc")" = 0 ] || { echo "::error::$t.test.sh failed"; r=1; }
           done

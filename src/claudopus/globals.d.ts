@@ -34,6 +34,7 @@ declare global {
   export import Item = M1.Item
   export import Link = M1.Link
   export import Me = M1.Me
+  export import PressRun = M1.PressRun
   export import Prompt = M1.Prompt
   export import Report = M1.Report
   export import Server = M1.Server

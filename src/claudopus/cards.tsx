@@ -230,6 +230,8 @@ const sync = async ($: EngineInterface) => {
   if (listed) await endUnheard($, live, now).catch(err => log($, `work that ended unheard not looked for: ${String(err)}`))
   // A go-ahead pressed during a turn whose end only the engine's list showed does its last step now
   await stepsAtEnd($).catch(err => log($, `last step not done: ${String(err)}`))
+  // A command run on the person's press that a reload left running is followed again by this load
+  await followRuns($).catch(err => log($, `commands run on a press not followed: ${String(err)}`))
   await keepStoppedReports($, now)
   await lookEnds($)
   await saveKeep($).catch(err => log($, `work at work not kept for the keeper: ${String(err)}`))

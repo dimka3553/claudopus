@@ -39,41 +39,41 @@ const promptOf = (tool: string, input: unknown, list: Todo[], isWork = false): A
   const allow = (text: string, yes: string, detail = '', no = isWork ? NO_TOLD : NO_SKIPS): Asks => ({ text, kind: 'allow', ...(detail ? { detail } : {}), yes: `Yes: ${yes}`, no })
   if (tool === 'Bash' || tool === 'PowerShell')
     return allow(`Run a command: ${cut(field('description'), 90) || cut(field('command'), 90) || 'no description'}`, 'the command runs on its Mac.', whole('command', 400))
-  if (tool === 'Write') return allow(`Write the file ${file(field('file_path')) || 'a file'}`, 'the file is saved, replacing any file of that name.', field('file_path'))
+  if (tool === 'Write') return allow(`Write the file ${file(field('file_path')) || 'a file'}`, 'Claude saves the file, replacing any file of that name.', field('file_path'))
   if (tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit')
-    return allow(`Change the file ${file(field('file_path') || field('notebook_path')) || 'a file'}`, 'the change is made to the file.', field('file_path') || field('notebook_path'))
-  if (tool === 'Read') return allow(`Read the file ${file(field('file_path')) || 'a file'}`, 'Claude reads the file; nothing is changed.', field('file_path'))
-  if (tool === 'Glob' || tool === 'Grep') return allow(`Search files for ${cut(field('pattern'), 80) || 'a pattern'}`, 'Claude searches; nothing is changed.', field('path'))
-  if (tool === 'WebFetch') return allow(`Open a web page on ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'the web'}`, 'Claude reads the page; nothing is sent but the address.', field('url'))
+    return allow(`Change the file ${file(field('file_path') || field('notebook_path')) || 'a file'}`, 'Claude changes the file.', field('file_path') || field('notebook_path'))
+  if (tool === 'Read') return allow(`Read the file ${file(field('file_path')) || 'a file'}`, 'Claude reads the file and changes nothing.', field('file_path'))
+  if (tool === 'Glob' || tool === 'Grep') return allow(`Search files for ${cut(field('pattern'), 80) || 'a pattern'}`, 'Claude searches and changes nothing.', field('path'))
+  if (tool === 'WebFetch') return allow(`Open a web page on ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'the web'}`, 'Claude reads the page and sends nothing but its address.', field('url'))
   if (tool === 'WebSearch') return allow(`Search the web for “${cut(field('query'), 80)}”`, 'Claude searches the web and reads the results.')
   if (tool === 'SendMessage') {
     const to = workNamed(field('to'))
     return {
       ...allow(
-        to === 'its chat' ? 'Pass a message back to its chat' : `Pass a message to ${to}`,
+        to === 'its chat' ? 'Send a message to its chat' : `Send a message to ${to}`,
         to === 'its chat' ? 'its chat gets the message.' : 'that task gets the message and acts on it.',
         whole('message', 400) || field('summary'),
         isWork ? "No: it isn't sent, and Claudopus tells Claude you said no." : "No: it isn't sent, and the chat waits for what you say next.",
       ),
-      done: 'it was sent',
+      done: 'Claude sent it',
     }
   }
   if (tool === 'Agent' || tool === 'Task')
-    return { ...allow(`Start a background task: ${cut(field('description'), 90) || 'with no title'}`, 'it starts in the background and gets a card here.', whole('prompt', 300), isWork ? NO_TOLD : "No: it isn't started, and the chat waits for what you say next."), done: 'it was started' }
+    return { ...allow(`Start a task: ${cut(field('description'), 90) || 'with no title'}`, 'the task starts in the background and gets a card here.', whole('prompt', 300), isWork ? NO_TOLD : "No: it doesn't start, and the chat waits for what you say next."), done: 'Claude started it' }
   if (tool === 'TaskStop')
-    return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that task is stopped where it is.', '', isWork ? 'No: that task keeps running, and Claudopus tells Claude you said no.' : 'No: that task keeps running, and the chat waits for what you say next.'), done: 'it was stopped' }
+    return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that task stops where it is.', '', isWork ? 'No: that task keeps running, and Claudopus tells Claude you said no.' : 'No: that task keeps running, and the chat waits for what you say next.'), done: 'Claude stopped it' }
   if (tool === 'Skill') return allow(`Use the skill “${field('skill') || field('name')}”`, 'Claude loads those instructions and follows them.')
   if (tool === 'AskUserQuestion') {
     const first = Array.isArray(given.questions) ? (given.questions[0] as { question?: unknown } | undefined)?.question : undefined
     return {
       text: typeof first === 'string' && first.trim() ? `Answer a question: ${cut(oneLine(first), 120)}` : 'Answer a question',
       kind: 'question',
-      yes: 'Pick an answer: it goes back and Claude continues with it.',
-      no: 'Skip it: no answer goes back, and Claude waits for what you say next.',
+      yes: 'Pick an answer: Claude gets it and carries on.',
+      no: 'Skip it: Claude gets no answer and waits for what you say next.',
     }
   }
   if (tool === 'ExitPlanMode')
-    return { text: 'Approve a plan', kind: 'plan', detail: whole('plan', 400), yes: 'Yes: Claude starts doing what the plan says.', no: 'No: Claude keeps planning; say what to change.' }
+    return { text: 'Approve a plan', kind: 'plan', detail: whole('plan', 400), yes: 'Yes: Claude starts doing what the plan says.', no: 'No: Claude keeps planning. Say what to change.' }
   const mcp = tool.match(/^mcp__(.+?)__(.+)$/)
   const words = field('description') || field('text') || field('query') || field('title') || field('name') || field('url')
   if (mcp) return allow(`Use “${(mcp[2] ?? '').replace(/_/g, ' ')}” from ${(mcp[1] ?? '').replace(/^plugin_[^_]+_/, '').replace(/[_-]/g, ' ')}`, 'that action runs.', cut(words, 300))
@@ -117,7 +117,7 @@ const tellWaiting = async ($: EngineInterface) => {
   waiting = waiting.map(one => ({ ...one, isTold: true }))
   const { title } = await read($, me)
   const chat = title.trim() || cwd.split('/').filter(Boolean).pop() || 'A chat'
-  for (const one of due) await aloud($, 'prompt', `${one.title ?? chat} needs your OK`, one.text, `prompt-${one.id}`).catch(err => log($, `prompt not told: ${String(err)}`))
+  for (const one of due) await aloud($, 'prompt', `${one.title ?? chat} has a question for you`, one.text, `prompt-${one.id}`).catch(err => log($, `prompt not told: ${String(err)}`))
 }
 // The prompt of a call goes: by its id, else the oldest one of the same loop and tool whose id was not known. With what came of it,
 // it stays, answered: allowed and running, then ended (allowed and run, refused, or ended before an answer) for PROMPT_SHOWN more.
@@ -273,12 +273,12 @@ const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
 const CARRY_ON = 'Carry on without it'
 // Claude Code's own refusals, as its result or its deny begins (its texts in 2.1.325), and who refused, for the card
 const CC_REFUSALS: [string, string][] = [
-  ['Permission for this action was denied by the Claude Code auto mode classifier', "Claude Code's auto mode refused it"],
-  ['Permission for this command was denied by a built-in Claude Code safety check', 'a built-in Claude Code safety check refused it'],
-  ['Permission for this tool use was denied. It requires approval, and this session has no approval surface', 'it needs approval, and Claude Code cannot ask anyone in this run'],
-  ['Permission for this tool use was denied: it requires interactive approval', 'it needs approval, and Claude Code cannot ask anyone in this run'],
-  ['no approval surface in this session', 'it needs approval, and Claude Code cannot ask anyone in this run'],
-  ['nobody can be asked in this headless run', 'it needs approval, and Claude Code cannot ask anyone in this run'],
+  ['Permission for this action was denied by the Claude Code auto mode classifier', "Claude Code's auto mode blocked it"],
+  ['Permission for this command was denied by a built-in Claude Code safety check', 'a built-in Claude Code safety check blocked it'],
+  ['Permission for this tool use was denied. It requires approval, and this session has no approval surface', "it needs your OK, and Claude Code can't ask you in a background task"],
+  ['Permission for this tool use was denied: it requires interactive approval', "it needs your OK, and Claude Code can't ask you in a background task"],
+  ['no approval surface in this session', "it needs your OK, and Claude Code can't ask you in a background task"],
+  ['nobody can be asked in this headless run', "it needs your OK, and Claude Code can't ask you in a background task"],
 ]
 // A check that gave no verdict is no refusal: Claude may try again as it is
 const NO_VERDICT = /gave no verdict|transient failure/i
@@ -304,19 +304,23 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   if (!top || top.chat) return
   const what = promptOf(tool, call, list, true)
   const who = own?.parentId ? `a helper of this task ("${titleOf(own)}")` : 'this task'
-  const text = cut(`Claude Code refused ${who}: ${what.text}.`, ASK_TEXT)
+  const text = cut(`Claude Code blocked ${who}: ${what.text}.`, ASK_TEXT)
+  // A command is shown whole, to copy or for the person to run on their own press (runit.tsx)
+  const runnable = runnableOf(tool, call)
   const details = [
-    what.detail ? `What it is: ${what.detail}` : '',
+    what.detail && !runnable ? `What it is: ${what.detail}` : '',
     `Why: ${refusal.who}${refusal.reason ? ` (${refusal.reason})` : ''}.`,
-    'The task carries on without it, and does not do it another way.',
+    runnable ? runDetails() : "Claude carries on without it and won't try another way.",
   ]
     .filter(Boolean)
     .join('\n\n')
   const at = await $.clock.now()
   // A question waiting on the person, there already or put up meanwhile, is never replaced: the refusal is in the task's own result
   let isPut = false
-  await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text, details, choices: [CARRY_ON], from: agent, at, refused: true } }))
+  const command = runnable ? { copy: runnable.command, isCommand: true, cwd: runnable.cwd } : {}
+  await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text, details, ...command, choices: [CARRY_ON], from: agent, at, refused: true } }))
   if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: its card asks something already`))
+  if (runnable) await offerRun($, top.id, agent, at, runnable)
   await log($, `refusal of ${tool} for ${agent} put to the person on its card`)
   const card = (await read($, todos)).find(one => one.id === top.id)
   if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))

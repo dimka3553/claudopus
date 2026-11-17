@@ -55,9 +55,9 @@ const isOpenQuestion = (r: Report) => openWaits(r).length > 0
 const answeredOf = (r: Report) => {
   const answered = waitsOf(r).filter(one => one.answer && one.answer !== SETTLED)
   if (isOpenQuestion(r)) return ''
-  if (!answered.length) return waitsOf(r).length ? 'settled' : ''
+  if (!answered.length) return waitsOf(r).length ? 'no longer waiting' : ''
   const [first] = answered
-  return answered.length > 1 ? `you answered ${answered.length}` : first?.answer === IN_WORDS ? 'you answered in your words' : `you answered ${first?.answer}`
+  return answered.length > 1 ? `you answered ${answered.length} questions` : first?.answer === IN_WORDS ? 'you answered in words' : `you answered “${first?.answer}”`
 }
 // The answer kept for an item the person's own words answered, one its work said no longer waits, and one a newer result of its
 // work took the place of
@@ -73,7 +73,8 @@ const ANSWER_IN_WORDS = 'Answer in words'
 const answersOf = (wait: Wait) => [...new Set([...(wait.choices?.length ? wait.choices : ['Yes', 'No']), 'Not now', ANSWER_IN_WORDS])]
 // How an answered item reads on its result
 const answeredWords = (wait: Wait) =>
-  wait.answer === SETTLED ? 'no longer waits' : wait.answer === REPLACED ? 'replaced by a newer result' : wait.answer === MOVED ? 'moved to its newer result' : wait.answer === IN_WORDS ? 'you answered in your words' : wait.answer === 'Not now' ? 'you said not now' : `you answered “${wait.answer ?? ''}”`
+  wait.answer === SETTLED ? 'no longer waiting' : wait.answer === REPLACED ? 'replaced by a newer result' : wait.answer === MOVED ? 'moved to the newer result' : wait.answer === IN_WORDS ? 'you answered in words' : wait.answer === 'Not now' ? 'you pressed Not now' : `you answered “${wait.answer ?? ''}”`
+
 const byPerson = (wait: Wait) => Boolean(wait.answer) && wait.answer !== SETTLED && wait.answer !== REPLACED && wait.answer !== MOVED
 // The same line, case, punctuation and quotes aside: an item that repeats its work's ask word for word is that ask's
 const sameLine = (a: string, b: string) => Boolean(plainWords(a)) && plainWords(a) === plainWords(b)

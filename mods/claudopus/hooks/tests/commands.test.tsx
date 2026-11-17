@@ -83,6 +83,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const submitted: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
+  const pressRuns: string[][] = []
   // How many lines the mod had written into chats as each SubagentHandback reached the engine
   const atHandback: number[] = []
   // The model each step of a piece of work was sent to
@@ -231,6 +232,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The chat's own process, as the shell the mod starts names its parent
     if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
+    // bin/run-it, as a command Claude Code refused is run on the person's press: started detached, it prints its process group's
+    // number; it runs until the test lays run:gone; stopped, it is gone and its output says so
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'start') return (pressRuns.push([...e.argv]), ok('51234\n'))
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'alive') return ok('', files.has('run:gone') ? 1 : 0)
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'stop') return (pressRuns.push([...e.argv]), files.set('run:gone', ''), files.set(String(rest[2]), `${files.get(String(rest[2])) ?? ''}claudopus-exit 143 stopped\n`), ok())
     // Every admin password an earlier version kept, taken out of the keychain as the mod loads
     if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
     // What a password box sends, sealed by openssl to the key of the runner that asked: the test's own stand-in for it
@@ -602,7 +608,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, pressRuns, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -707,15 +713,15 @@ const otherChat = (at: number, chat = 'chat-b', title = 'Billing page') =>
 test('/claudopus and /servers say the panel opened, and say plainly where it can be seen when this screen has nowhere to draw it', async ($, on) => {
   world(on)
   await $.session.start(start)
-  expect((await $.command.run({ command: 'claudopus', args: '' } as never)).text).toBe('Claudopus panel opened.')
-  expect((await $.command.run({ command: 'servers', args: '' } as never)).text).toBe('Servers panel opened.')
+  expect((await $.command.run({ command: 'claudopus', args: '' } as never)).text).toBe('Claudopus opened its panel.')
+  expect((await $.command.run({ command: 'servers', args: '' } as never)).text).toBe('Claudopus opened the Servers panel.')
 })
 
 test('/claudopus and /servers on a screen with nowhere to draw a panel say it cannot be shown there and where it can', async ($, on) => {
   world(on, { unplaced: true })
   await $.session.start(start)
-  expect((await $.command.run({ command: 'claudopus', args: '' } as never)).text).toBe("The Claudopus panel can't be shown on this screen. It shows in the Claude app on the Mac this chat runs on.")
-  expect((await $.command.run({ command: 'servers', args: '' } as never)).text).toBe("The Servers panel can't be shown on this screen. It shows in the Claude app on the Mac this chat runs on.")
+  expect((await $.command.run({ command: 'claudopus', args: '' } as never)).text).toBe("Claudopus can't show the Claudopus panel on this screen. Open it in the Claude app on the Mac this chat runs on.")
+  expect((await $.command.run({ command: 'servers', args: '' } as never)).text).toBe("Claudopus can't show the Servers panel on this screen. Open it in the Claude app on the Mac this chat runs on.")
 })
 
 test('opened in one chat, the panel opens in every other chat, at once in one that starts and within seconds in one already running', async ($, on) => {

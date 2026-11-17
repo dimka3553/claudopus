@@ -43,7 +43,7 @@ Answer `y` to add the marketplace, then pick the user scope (the first one, Ente
 
 In the desktop app: **+** next to the prompt box, **Plugins**, **Add marketplace** `dimka3553/claudopus`, then add `claudopus`.
 
-It is on in every chat from then on. The first time, the panel opens with a welcome and an **Index my old chats** button that reads your past chats into its memory. After that, it opens by itself when a task starts. If you close it, it closes in every chat. Type `/claudopus` to open it again.
+It is on in every chat from then on. The first time, the panel opens with a welcome and an **Bring in old chats** button that reads your past chats into its memory. After that, it opens by itself when a task starts. If you close it, it closes in every chat. Type `/claudopus` to open it again.
 
 <details>
 <summary>If that fails</summary>

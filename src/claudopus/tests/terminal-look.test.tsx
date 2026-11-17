@@ -31,7 +31,7 @@ test('in the terminal each header button has a key, and a line says how to reach
 
   const idle = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
   expect(await keysOf(idle as never)).toMatchObject({ Stats: 's', Memory: 'm', Config: 'c', About: 'a' })
-  expect(await textOf(idle as never)).toContain('ctrl+x Tab')
+  expect(await textOf(idle as never)).toContain('ctrl+x then Tab')
   await idle.unmount()
 
   const held = await $.ui.mount({ ...LIST, props: { ...LIST.props, isFocused: true }, surface: 'terminal' } as never)
@@ -40,7 +40,7 @@ test('in the terminal each header button has a key, and a line says how to reach
 
   // The app has its own pointer and keys: no such line there
   const app = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await textOf(app as never)).not.toContain('ctrl+x Tab')
+  expect(await textOf(app as never)).not.toContain('ctrl+x then Tab')
   await app.unmount()
 })
 
@@ -70,7 +70,7 @@ test('in the terminal an ask is above the prompt with its answers numbered, and 
   expect(answers).toEqual([['Approve', '1', true], ['Not now', '2', true]])
   // A message may begin with a digit: the first press only picks the answer and says so, the same number again sends it
   await band.press({ key: String((await band.findAll({ type: 'Button' }))[0]?.key) })
-  await until(async () => band.find({ type: 'Text', text: /Press 1 again to answer “Approve”/ }))
+  await until(async () => band.find({ type: 'Text', text: /Type 1 again to answer “Approve”/ }))
   expect(await band.find({ type: 'Text', text: 'Release it?' })).toBeDefined()
   await band.press({ key: String((await band.findAll({ type: 'Button' }))[0]?.key) })
   await until(async () => ((await band.find({ type: 'Text', text: 'Release it?' })) ? undefined : true))

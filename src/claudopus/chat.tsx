@@ -253,8 +253,9 @@ const chatHooks = (on: On) => {
       },
       isDeferred: false,
     })
-    await $.command.register({ name: 'claudopus', description: 'Show the to-dos of this chat: what I asked for, what was done and decided, and each answer' })
-    await $.command.register({ name: 'servers', description: 'Show the servers running on this Mac, with a link to each and which chat started it' })
+    await $.command.register({ name: 'claudopus', description: "Open the Claudopus panel: this chat's tasks, questions and results" })
+    await $.command.register({ name: 'servers', description: 'Open the Servers panel: the servers running on this Mac, a link to each and the chat that started it' })
+
     void $.ui.close({ id: OLD_PANE }).catch(() => undefined)
 
     // Someone the mod has never set up has no index.md yet: they get the welcome, once

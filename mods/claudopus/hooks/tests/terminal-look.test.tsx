@@ -83,6 +83,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const submitted: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
+  const pressRuns: string[][] = []
   // How many lines the mod had written into chats as each SubagentHandback reached the engine
   const atHandback: number[] = []
   // The model each step of a piece of work was sent to
@@ -231,6 +232,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The chat's own process, as the shell the mod starts names its parent
     if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
+    // bin/run-it, as a command Claude Code refused is run on the person's press: started detached, it prints its process group's
+    // number; it runs until the test lays run:gone; stopped, it is gone and its output says so
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'start') return (pressRuns.push([...e.argv]), ok('51234\n'))
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'alive') return ok('', files.has('run:gone') ? 1 : 0)
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'stop') return (pressRuns.push([...e.argv]), files.set('run:gone', ''), files.set(String(rest[2]), `${files.get(String(rest[2])) ?? ''}claudopus-exit 143 stopped\n`), ok())
     // Every admin password an earlier version kept, taken out of the keychain as the mod loads
     if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
     // What a password box sends, sealed by openssl to the key of the runner that asked: the test's own stand-in for it
@@ -602,7 +608,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, pressRuns, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -735,7 +741,7 @@ test('in the terminal each header button has a key, and a line says how to reach
 
   const idle = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
   expect(await keysOf(idle as never)).toMatchObject({ Stats: 's', Memory: 'm', Config: 'c', About: 'a' })
-  expect(await textOf(idle as never)).toContain('ctrl+x Tab')
+  expect(await textOf(idle as never)).toContain('ctrl+x then Tab')
   await idle.unmount()
 
   const held = await $.ui.mount({ ...LIST, props: { ...LIST.props, isFocused: true }, surface: 'terminal' } as never)
@@ -744,7 +750,7 @@ test('in the terminal each header button has a key, and a line says how to reach
 
   // The app has its own pointer and keys: no such line there
   const app = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await textOf(app as never)).not.toContain('ctrl+x Tab')
+  expect(await textOf(app as never)).not.toContain('ctrl+x then Tab')
   await app.unmount()
 })
 
@@ -774,7 +780,7 @@ test('in the terminal an ask is above the prompt with its answers numbered, and 
   expect(answers).toEqual([['Approve', '1', true], ['Not now', '2', true]])
   // A message may begin with a digit: the first press only picks the answer and says so, the same number again sends it
   await band.press({ key: String((await band.findAll({ type: 'Button' }))[0]?.key) })
-  await until(async () => band.find({ type: 'Text', text: /Press 1 again to answer “Approve”/ }))
+  await until(async () => band.find({ type: 'Text', text: /Type 1 again to answer “Approve”/ }))
   expect(await band.find({ type: 'Text', text: 'Release it?' })).toBeDefined()
   await band.press({ key: String((await band.findAll({ type: 'Button' }))[0]?.key) })
   await until(async () => ((await band.find({ type: 'Text', text: 'Release it?' })) ? undefined : true))

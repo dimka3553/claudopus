@@ -83,6 +83,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const submitted: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
+  const pressRuns: string[][] = []
   // How many lines the mod had written into chats as each SubagentHandback reached the engine
   const atHandback: number[] = []
   // The model each step of a piece of work was sent to
@@ -231,6 +232,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The chat's own process, as the shell the mod starts names its parent
     if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
+    // bin/run-it, as a command Claude Code refused is run on the person's press: started detached, it prints its process group's
+    // number; it runs until the test lays run:gone; stopped, it is gone and its output says so
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'start') return (pressRuns.push([...e.argv]), ok('51234\n'))
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'alive') return ok('', files.has('run:gone') ? 1 : 0)
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'stop') return (pressRuns.push([...e.argv]), files.set('run:gone', ''), files.set(String(rest[2]), `${files.get(String(rest[2])) ?? ''}claudopus-exit 143 stopped\n`), ok())
     // Every admin password an earlier version kept, taken out of the keychain as the mod loads
     if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
     // What a password box sends, sealed by openssl to the key of the runner that asked: the test's own stand-in for it
@@ -602,7 +608,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, pressRuns, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -746,7 +752,7 @@ test('F-019 · the look only reads the version page: the panel says a newer vers
   await clock.advance(3 * 60_000)
   expect(await until(async () => fetches() || undefined)).toBe(1)
   const panel = await $.ui.mount(listAt())
-  await shownIn(panel, 'Claudopus 0.1.2 is out')
+  await shownIn(panel, 'Claudopus v0.1.2 is out')
   expect(await panel.find({ type: 'Text', text: '· 2 versions since v0.1.0' })).toBeDefined()
   await shownIn(panel, 'The bar shows the battery · and 3 more changes')
   expect((await keyed(panel, 'update-download'))?.props.label).toBe('Update')
@@ -777,10 +783,10 @@ test('Update fetches the release and checks it against what the release publishe
   await $.session.start(start)
   await clock.advance(3 * 60_000)
   const panel = await $.ui.mount(listAt())
-  await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
+  await until(() => panel.find({ type: 'Text', text: 'Claudopus v0.1.2 is out' }))
   await pressed(panel, 'update-download')
-  await shownIn(panel, "Couldn't update Claudopus 0.1.2")
-  await shownIn(panel, "What was downloaded isn't what the release published, so it was thrown away. Nothing changed: this chat still runs v0.1.0.")
+  await shownIn(panel, "Couldn't update Claudopus v0.1.2")
+  await shownIn(panel, "The download didn't match the release, so Claudopus deleted it. Nothing changed: this chat still runs v0.1.0.")
   expect(await keyed(panel, 'update-install')).toBeUndefined()
   expect(gitRan).toContain('update-ref -d refs/claudopus/update')
   // A steps file that says it was downloaded, planted or left from before: the panel checks the download it names, finds it is not
@@ -789,7 +795,7 @@ test('Update fetches the release and checks it against what the release publishe
   files.set('git:ref', COMMIT)
   await panel.unmount()
   const again = await $.ui.mount(listAt())
-  await shownIn(again, 'Claudopus 0.1.2 is out')
+  await shownIn(again, 'Claudopus v0.1.2 is out')
   expect(await keyed(again, 'update-install')).toBeUndefined()
   expect(gitRan.some(one => one.startsWith('merge '))).toBe(false)
   expect(files.get('manifest')).toBeUndefined()
@@ -803,10 +809,10 @@ test('Update is one press for a chat run from its checkout: the fetch, its check
   await $.session.start(start)
   await clock.advance(3 * 60_000)
   const panel = await $.ui.mount(listAt())
-  await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
+  await until(() => panel.find({ type: 'Text', text: 'Claudopus v0.1.2 is out' }))
   expect(changing(gitRan)).toEqual([])
   await pressed(panel, 'update-download')
-  await shownIn(panel, 'v0.1.0 · v0.1.2 ready, type /reload-plugins')
+  await shownIn(panel, 'v0.1.0 · v0.1.2 is ready: type /reload-plugins to use it')
   // One press: fetched, checked against the release's tree, and only then moved forward, fast-forward only
   const fetched = gitRan.findIndex(one => one.includes('fetch'))
   const checked = gitRan.findIndex(one => one.includes(`${COMMIT}:mods/claudopus`))
@@ -818,7 +824,7 @@ test('Update is one press for a chat run from its checkout: the fetch, its check
   expect(await keyed(panel, 'update-install')).toBeUndefined()
   expect(await panel.find({ type: 'Text', text: UPDATE_JARGON })).toBeUndefined()
   // No box and no press is left: only the line beside the version, and the chat is never reloaded for the person
-  expect(await panel.find({ type: 'Text', text: /^Claudopus 0\.1\.2/ })).toBeUndefined()
+  expect(await panel.find({ type: 'Text', text: /^Claudopus v0\.1\.2/ })).toBeUndefined()
   expect((await panel.findAll({ type: 'Button' })).some(one => /^update-/.test(one.key ?? ''))).toBe(false)
   await later(clock, 16 * 60_000)
   expect(reloads).toEqual([])
@@ -836,7 +842,7 @@ test('Update pressed while a look reads the version page waits for the look to e
   await $.session.start(start)
   await clock.advance(3 * 60_000)
   const panel = await $.ui.mount(listAt())
-  await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
+  await until(() => panel.find({ type: 'Text', text: 'Claudopus v0.1.2 is out' }))
   slow = true
   files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: (await clock.now()) - 2 * 3_600_000, version: '0.1.2', result: 'seen' }))
   // Second by second up to the timed look, and the press comes while it reads the page
@@ -845,16 +851,16 @@ test('Update pressed while a look reads the version page waits for the look to e
   await pressed(panel, 'update-download')
   expect(isReading).toBe(true)
   await clock.advance(30_000)
-  await shownIn(panel, 'v0.1.0 · v0.1.2 ready, type /reload-plugins')
+  await shownIn(panel, 'v0.1.0 · v0.1.2 is ready: type /reload-plugins to use it')
 })
 
 // What updating says speaks only of versions, Update and /reload-plugins: never of where the code sits or how git moves it
 const UPDATE_JARGON = /folder|checkout|fetch|forward|detached|brought|commit|\bmain\b|branch|worktree|\bgit\b|fingerprint|marketplace|~\/|\/Users\//i
 // Update never overwrites uncommitted work nor moves a main with commits of its own: it says why it could not move forward, and nothing moves
 const STAYS: { name: string; release: Release; said: string; isNewerAfterFetch?: boolean; title?: string }[] = [
-  { name: 'uncommitted changes the move would overwrite', release: { ...RELEASE, overwrite: true }, said: 'Your copy of Claudopus has changes of its own in files this version changes, so updating would lose them: ask a chat to set them aside, then press Try again. Nothing changed: this chat still runs v0.1.0.' },
-  { name: 'a newer version out between its fetch and its move', release: RELEASE, isNewerAfterFetch: true, title: 'Claudopus 0.1.3 is out', said: 'The bar shows the battery · and 3 more changes' },
-  { name: 'a main with commits of its own', release: { ...RELEASE, ownCommits: true }, said: "Your copy of Claudopus has changes of its own that this version doesn't have, so Update leaves it as it is. Nothing changed: this chat still runs v0.1.0." },
+  { name: 'uncommitted changes the move would overwrite', release: { ...RELEASE, overwrite: true }, said: 'Your copy of Claudopus has changes in files this version changes. Ask a chat to set them aside, then press Try again. Nothing changed: this chat still runs v0.1.0.' },
+  { name: 'a newer version out between its fetch and its move', release: RELEASE, isNewerAfterFetch: true, title: 'Claudopus v0.1.3 is out', said: 'The bar shows the battery · and 3 more changes' },
+  { name: 'a main with commits of its own', release: { ...RELEASE, ownCommits: true }, said: "Your copy of Claudopus has changes this version doesn't have, so Update leaves it alone. Nothing changed: this chat still runs v0.1.0." },
 ]
 for (const one of STAYS)
   test(`Update with ${one.name}: it says why it could not move forward, and nothing is overwritten or moved`, SLOW, async ($, on) => {
@@ -865,10 +871,10 @@ for (const one of STAYS)
     await $.session.start(start)
     await clock.advance(3 * 60_000)
     const panel = await $.ui.mount(listAt())
-    await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
+    await until(() => panel.find({ type: 'Text', text: 'Claudopus v0.1.2 is out' }))
     await pressed(panel, 'update-download')
     // Said why, or the newer version offered in its place
-    await shownIn(panel, one.title ?? "Couldn't update Claudopus 0.1.2")
+    await shownIn(panel, one.title ?? "Couldn't update Claudopus v0.1.2")
     await shownIn(panel, one.said)
     expect(await panel.find({ type: 'Text', text: UPDATE_JARGON })).toBeUndefined()
     // A merge is tried only where git itself refuses to overwrite: a fast-forward that stops before touching a changed file
@@ -890,7 +896,7 @@ test('each step stands through a reload: a chat that loads finds the download wa
   const panel = await $.ui.mount(listAt())
   // Fetched by a copy before Update was one press, or planted: offered as any version out, with what is new, and nothing moves until
   // its Update is pressed
-  await shownIn(panel, 'Claudopus 0.1.2 is out')
+  await shownIn(panel, 'Claudopus v0.1.2 is out')
   await shownIn(panel, 'The bar shows the battery · and 3 more changes')
   expect((await keyed(panel, 'update-install'))?.props.label).toBe('Update')
   await later(clock, 16 * 60_000)
@@ -900,13 +906,13 @@ test('each step stands through a reload: a chat that loads finds the download wa
   files.set(`${MEMORY}/update-steps.json`, JSON.stringify({ version: '0.1.2', stage: 'downloading', at: UPD_NOW - 10 * 60_000, pct: 40 }))
   await panel.unmount()
   const stopped = await $.ui.mount(listAt())
-  await shownIn(stopped, 'It stopped before it finished, when its chat closed or reloaded.')
+  await shownIn(stopped, 'The update stopped when its chat closed or reloaded.')
   expect(await keyed(stopped, 'update-again')).toBeDefined()
   // The folder already has the newer version: what is left is this chat's reload
   files.set('manifest', JSON.stringify({ name: 'claudopus', version: '0.1.2' }))
   await stopped.unmount()
   const behind = await $.ui.mount(listAt())
-  await shownIn(behind, 'v0.1.0 · v0.1.2 ready, type /reload-plugins')
+  await shownIn(behind, 'v0.1.0 · v0.1.2 is ready: type /reload-plugins to use it')
 })
 
 test('a steps file that says a download was checked, with no such download in the repo, is not believed: the panel offers the download again', SLOW, async ($, on) => {
@@ -916,7 +922,7 @@ test('a steps file that says a download was checked, with no such download in th
   files.set(`${MEMORY}/update-steps.json`, JSON.stringify({ version: '0.1.2', stage: 'downloaded', commit: 'f'.repeat(40), tree: TREE, at: UPD_NOW }))
   await $.session.start(start)
   const panel = await $.ui.mount(listAt())
-  await shownIn(panel, 'Claudopus 0.1.2 is out')
+  await shownIn(panel, 'Claudopus v0.1.2 is out')
   expect(await keyed(panel, 'update-install')).toBeUndefined()
 })
 
@@ -927,9 +933,9 @@ test('Not now keeps a version quiet for a day, Skip this version until a newer o
   await $.session.start(start)
   await clock.advance(3 * 60_000)
   const panel = await $.ui.mount(listAt())
-  await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
+  await until(() => panel.find({ type: 'Text', text: 'Claudopus v0.1.2 is out' }))
   await pressed(panel, 'update-later-available')
-  expect(await until(async () => ((await panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await panel.find({ type: 'Text', text: 'Claudopus v0.1.2 is out' })) ? undefined : true))).toBe(true)
   const put = JSON.parse(files.get(`${MEMORY}/update-later.json`) ?? '{}') as { version?: string; until?: number }
   expect(put.version).toBe('0.1.2')
   expect((put.until ?? 0) - (await clock.now())).toBe(24 * 3_600_000)
@@ -937,22 +943,22 @@ test('Not now keeps a version quiet for a day, Skip this version until a newer o
   files.set(`${MEMORY}/update-later.json`, JSON.stringify({ version: '0.1.2', until: (await clock.now()) - 1 }))
   await panel.unmount()
   const day = await $.ui.mount(listAt())
-  await shownIn(day, 'Claudopus 0.1.2 is out')
+  await shownIn(day, 'Claudopus v0.1.2 is out')
   await pressed(day, 'update-skip-available')
-  expect(await until(async () => ((await day.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await day.find({ type: 'Text', text: 'Claudopus v0.1.2 is out' })) ? undefined : true))).toBe(true)
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').skipVersion).toBe('0.1.2')
   version = '0.1.3'
   files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: (await clock.now()) - 2 * 3_600_000, version: '0.1.2', result: 'seen' }))
   await later(clock, 16 * 60_000)
   expect(JSON.parse(files.get(`${MEMORY}/update-seen.json`) ?? '{}').version).toBe('0.1.3')
   const term = await $.ui.mount(listAt('terminal'))
-  await shownIn(term, 'Claudopus 0.1.3 is out')
+  await shownIn(term, 'Claudopus v0.1.3 is out')
 })
 
 // A chat whose code Update must leave alone is told so in plain words, and offered no download
 const LEFT_ALONE: { name: string; release: Release; said: string }[] = [
-  { name: 'a build a piece of work is changing', release: { ...RELEASE, worktree: true }, said: 'This chat runs a build of Claudopus that a task is changing: Update leaves it alone; it gets the newest version when that task merges it in.' },
-  { name: 'a test build', release: { ...RELEASE, noBranch: true }, said: 'This chat runs a test build of Claudopus: Update leaves it alone.' },
+  { name: 'a build a piece of work is changing', release: { ...RELEASE, worktree: true }, said: 'This chat runs a copy of Claudopus that a task is changing: Update leaves it alone. It gets the newest version when that task is merged.' },
+  { name: 'a test build', release: { ...RELEASE, noBranch: true }, said: 'This chat runs a test copy of Claudopus: Update leaves it alone.' },
 ]
 for (const one of LEFT_ALONE)
   test(`a chat run from ${one.name} is told Update leaves it alone, and offered no download`, SLOW, async ($, on) => {
@@ -961,7 +967,7 @@ for (const one of LEFT_ALONE)
     await $.session.start(start)
     await clock.advance(3 * 60_000)
     const panel = await $.ui.mount(listAt())
-    await shownIn(panel, 'Claudopus 0.1.2 is out')
+    await shownIn(panel, 'Claudopus v0.1.2 is out')
     await shownIn(panel, one.said)
     expect(await panel.find({ type: 'Text', text: UPDATE_JARGON })).toBeUndefined()
     expect(await keyed(panel, 'update-download')).toBeUndefined()
@@ -977,7 +983,7 @@ test('F-019 · a chat run from another Mac moves at Install but is not sent a re
   await clock.advance(3 * 60_000)
   files.set('manifest', JSON.stringify({ name: 'claudopus', version: '0.1.2' }))
   const panel = await $.ui.mount(listAt())
-  await shownIn(panel, 'v0.1.0 · v0.1.2 ready, type /reload-plugins')
+  await shownIn(panel, 'v0.1.0 · v0.1.2 is ready: type /reload-plugins to use it')
   expect(await keyed(panel, 'update-reload')).toBeUndefined()
   expect(reloads).toEqual([])
 })

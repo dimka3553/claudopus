@@ -9,7 +9,7 @@ async function writeOwnText($: EngineInterface, memory: string, path: string, te
   if (path === 'rules/CLAUDE.md') return $.fs.write(`${memory}/rules/CLAUDE.md`, text)
   if (path === 'roles/chat.md') return $.fs.write(`${memory}/roles/chat.md`, text)
   if (path === 'roles/work.md') return $.fs.write(`${memory}/roles/work.md`, text)
-  throw new Error(`${path} is not one of the texts Claudopus ships`)
+  throw new Error(`${path} isn't one of Claudopus's rules files`)
 }
 // The text in force: the person's own copy when it holds anything, the shipped one otherwise
 async function inForce($: EngineInterface, root: string, memory: string, path: string) {
@@ -40,7 +40,7 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
     }
   })()
   // A file that does not parse is someone's edit under way: it is left as it is
-  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('config.json is not valid JSON')
+  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error("Claudopus can't read config.json")
   if ((key === 'models' || key === 'lean') && role) {
     const models = { ...((config[key] as Record<string, unknown>) ?? {}) }
     if (value === undefined) delete models[role]
@@ -56,7 +56,7 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
 async function openedInEditor($: EngineInterface, path: string) {
   // The text editor the Mac opens .md files in; elsewhere the desktop's own opener
   const r = await openOn($, path, true)
-  return r.exitCode === 0 ? '' : r.stderr || 'no editor opened'
+  return r.exitCode === 0 ? '' : r.stderr || 'no editor opened it'
 }
 // Edit: the person's own copy, made from the shipped text the first time, opened in their editor
 async function editText($: EngineInterface, root: string, memory: string, path: string) {
@@ -71,7 +71,7 @@ async function putBack($: EngineInterface, memory: string, path: string) {
   const at = new Date(await $.clock.now()).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
   await personWrote($, memory, path, null)
   const r = await $.process.run(['mv', '-n', own, `${own}.${at}.old`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  return r.exitCode === 0 ? '' : r.stderr || 'could not be undone'
+  return r.exitCode === 0 ? '' : r.stderr || "Claudopus couldn't move your copy aside"
 }
 
 // Save: what the person wrote in the tab becomes their own copy
@@ -167,7 +167,7 @@ const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
         JSON.parse(text || '{}')
         return ''
       } catch {
-        return `${dir}/config.json is not valid JSON, so Claudopus uses the default for every setting. Fix it or delete it.`
+        return `Claudopus can't read ${dir}/config.json, so every setting is at its default. Fix the file or delete it.`
       }
     })),
 })
@@ -176,10 +176,10 @@ const configAct = ($: EngineInterface, what: string, act: () => Promise<string |
   presses += 1
   void act()
     .then(failed => {
-      configFailed = failed ? `${what}: ${failed}` : ''
+      configFailed = failed ? `${what}: ${failed}${/[.!?]$/.test(failed) ? '' : '.'}` : ''
     })
     .catch(err => {
-      configFailed = `${what}: ${String(err instanceof Error ? err.message : err)}`
+      configFailed = `${what}: ${String(err instanceof Error ? err.message : err).replace(/([^.!?])$/, '$1.')}`
     })
     .then(async () => {
       if (configFailed) await log($, `config: ${configFailed}`)
@@ -188,27 +188,27 @@ const configAct = ($: EngineInterface, what: string, act: () => Promise<string |
     })
 }
 const configActs = ($: EngineInterface) => ({
-  open: (text: (typeof TEXTS)[number]) => configAct($, `${text.name} not opened`, () => editText($, $.plugin.root, dir, text.path)),
+  open: (text: (typeof TEXTS)[number]) => configAct($, `Couldn't open ${text.name}`, () => editText($, $.plugin.root, dir, text.path)),
   // Edit opens the text in the tab itself; Save makes it the person's own copy
   edit: (text: (typeof TEXTS)[number], body: string) => configAct($, '', async () => void Object.assign(editing, { key: text.key, draft: body })),
   save: (text: (typeof TEXTS)[number], body: string) =>
-    configAct($, `${text.name} not saved`, async () => {
+    configAct($, `Couldn't save ${text.name}`, async () => {
       const failed = body.trim() ? await saveText($, $.plugin.root, dir, text.path, body) : 'the text was empty, so nothing changed'
       Object.assign(editing, { key: '', draft: '' })
       return failed
     }),
   cancel: () => configAct($, '', async () => void Object.assign(editing, { key: '', draft: '' })),
-  putBack: (text: (typeof TEXTS)[number]) => configAct($, `${text.name} not reset`, () => putBack($, dir, text.path)),
+  putBack: (text: (typeof TEXTS)[number]) => configAct($, `Couldn't reset ${text.name}`, () => putBack($, dir, text.path)),
   set: (key: Parameters<typeof setConfig>[2], value: unknown, role?: Parameters<typeof setConfig>[4]) =>
-    configAct($, 'Not saved', async () => {
+    configAct($, "Couldn't save the setting", async () => {
       await setConfig($, dir, key, value, role)
     }),
   // Admin commands: each choice is sealed as it is made, and one that takes something back makes every earlier seal void
-  gateMode: (mode: 'each' | 'work' | 'never') => configAct($, 'Not saved', () => regate($, { mode })),
-  gateRemove: (host: string, command: string) => configAct($, 'Not removed', () => regate($, { remove: { host, command } })),
+  gateMode: (mode: 'each' | 'work' | 'never') => configAct($, "Couldn't save the setting", () => regate($, { mode })),
+  gateRemove: (host: string, command: string) => configAct($, "Couldn't remove the command", () => regate($, { remove: { host, command } })),
   // How often the look runs, or only at Check now: one choice, written as the two keys
   lookEvery: (hours: number) =>
-    configAct($, 'Not saved', async () => {
+    configAct($, "Couldn't save the setting", async () => {
       await setConfig($, dir, 'updates', hours ? undefined : false)
       await setConfig($, dir, 'updateEvery', hours && hours !== 1 ? hours : undefined)
     }),

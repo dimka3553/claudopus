@@ -83,6 +83,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const submitted: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
+  const pressRuns: string[][] = []
   // How many lines the mod had written into chats as each SubagentHandback reached the engine
   const atHandback: number[] = []
   // The model each step of a piece of work was sent to
@@ -231,6 +232,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The chat's own process, as the shell the mod starts names its parent
     if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
+    // bin/run-it, as a command Claude Code refused is run on the person's press: started detached, it prints its process group's
+    // number; it runs until the test lays run:gone; stopped, it is gone and its output says so
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'start') return (pressRuns.push([...e.argv]), ok('51234\n'))
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'alive') return ok('', files.has('run:gone') ? 1 : 0)
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'stop') return (pressRuns.push([...e.argv]), files.set('run:gone', ''), files.set(String(rest[2]), `${files.get(String(rest[2])) ?? ''}claudopus-exit 143 stopped\n`), ok())
     // Every admin password an earlier version kept, taken out of the keychain as the mod loads
     if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
     // What a password box sends, sealed by openssl to the key of the runner that asked: the test's own stand-in for it
@@ -602,7 +608,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, pressRuns, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -712,7 +718,7 @@ test('a new person gets a welcome once: it opens the panel, names /claudopus, an
     const pane = await $.ui.mount({ ...LIST, surface } as never)
     expect((await pane.find({ type: 'Text', text: 'Welcome to Claudopus' }))?.props.bold).toBe(true)
     expect(await pane.find({ type: 'Text', text: /Type \/claudopus to bring it back/ })).toBeDefined()
-    expect((await pane.findAll({ type: 'Button' })).some(b => b.props.label === 'Index my old chats')).toBe(true)
+    expect((await pane.findAll({ type: 'Button' })).some(b => b.props.label === 'Bring in old chats')).toBe(true)
     await pane.unmount()
   }
   // A reload of the same session keeps it
@@ -720,7 +726,7 @@ test('a new person gets a welcome once: it opens the panel, names /claudopus, an
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await pane.find({ type: 'Text', text: 'Welcome to Claudopus' })).toBeDefined()
   await pressed(pane, 'welcome-index')
-  const asked = await until(async () => submitted.find(text => text.startsWith('Index my old chats')))
+  const asked = await until(async () => submitted.find(text => text.startsWith('Bring in my old chats')))
   expect(asked).toContain('/onboard/extract.py" "/home/sam/.claude/claudopus/onboard"')
   expect(asked).toContain('/onboard/reader.md')
   expect(asked).toContain('`update` tool')

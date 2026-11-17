@@ -83,6 +83,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const submitted: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
+  const pressRuns: string[][] = []
   // How many lines the mod had written into chats as each SubagentHandback reached the engine
   const atHandback: number[] = []
   // The model each step of a piece of work was sent to
@@ -231,6 +232,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The chat's own process, as the shell the mod starts names its parent
     if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
+    // bin/run-it, as a command Claude Code refused is run on the person's press: started detached, it prints its process group's
+    // number; it runs until the test lays run:gone; stopped, it is gone and its output says so
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'start') return (pressRuns.push([...e.argv]), ok('51234\n'))
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'alive') return ok('', files.has('run:gone') ? 1 : 0)
+    if (tool?.endsWith('/bin/run-it') && rest[0] === 'stop') return (pressRuns.push([...e.argv]), files.set('run:gone', ''), files.set(String(rest[2]), `${files.get(String(rest[2])) ?? ''}claudopus-exit 143 stopped\n`), ok())
     // Every admin password an earlier version kept, taken out of the keychain as the mod loads
     if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
     // What a password box sends, sealed by openssl to the key of the runner that asked: the test's own stand-in for it
@@ -602,7 +608,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, pressRuns, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -749,8 +755,8 @@ test('work cut off as the process ended is started again with a message, its car
   expect(resumed[0]).toContain('not by')
   const lines = await cardText($ as never, /^Interrupted at /)
   expect(lines).toHaveLength(2)
-  expect(lines[0]?.text).toMatch(/^Interrupted at \d\d:\d\d because the chat's process ended; running again since \d\d:\d\d\.$/)
-  expect(logged.some(line => /^2 tasks were interrupted at \d\d:\d\d and have been running again since \d\d:\d\d\.$/.test(line))).toBe(true)
+  expect(lines[0]?.text).toMatch(/^Interrupted at \d\d:\d\d when the chat stopped · running again since \d\d:\d\d$/)
+  expect(logged.some(line => /^Claudopus started 2 tasks again at \d\d:\d\d, after the chat stopped at \d\d:\d\d\.$/.test(line))).toBe(true)
   expect(files.get(`${MEMORY}/log.md`)).toContain('cut-off notice pushed')
   // The keeper's file says both are at work again
   expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ count: 2 })
@@ -765,12 +771,12 @@ test('in the copy kept on this Mac, work Claude Code started again itself is onl
   const lines = await cardText($ as never, /^Interrupted at /)
   const said = (end: string) => lines.find(one => one.text?.endsWith(end))
   expect(lines.map(one => one.text?.replace(/\d\d:\d\d/g, 'hh:mm')).sort()).toEqual([
-    "Interrupted at hh:mm because the chat's process ended; it couldn't be restarted.",
-    "Interrupted at hh:mm because the chat's process ended; running again since hh:mm.",
+    "Interrupted at hh:mm when the chat stopped · Claudopus couldn't start it again",
+    'Interrupted at hh:mm when the chat stopped · running again since hh:mm',
   ])
-  expect(said("it couldn't be restarted.")?.color).toBe('#E5A50A')
+  expect(said("couldn't start it again")?.color).toBe('#E5A50A')
   expect(lines.find(one => one.text?.includes('running again'))?.color).toBeUndefined()
-  expect(logged.some(line => line.includes('has been running on this Mac by itself') && line.includes("couldn't be restarted"))).toBe(true)
+  expect(logged.some(line => line.includes('in the background on this Mac') && line.includes("couldn't start"))).toBe(true)
 })
 
 test('a chat with no keeper starts nothing again, and a cut is taken up once, through a reload of the mod before it was done', SLOW, async ($, on) => {
@@ -806,8 +812,8 @@ test('the notice names each piece by its own title', SLOW, async ($, on) => {
   leftAtWork(files, ['a7', 'a8'])
   await $.session.start(start)
   await clock.advance(31_000)
-  const said = logged.find(line => line.includes('was interrupted at')) ?? ''
-  expect(said).toMatch(/^"Solve the cameras" was interrupted at \d\d:\d\d and has been running again since \d\d:\d\d\. "Train the splats" interrupted at \d\d:\d\d couldn't be restarted\.$/)
+  const said = logged.find(line => line.includes('after the chat stopped at')) ?? ''
+  expect(said).toMatch(/^Claudopus started "Solve the cameras" again at \d\d:\d\d, after the chat stopped at \d\d:\d\d\. Claudopus couldn't start "Train the splats" again after the chat stopped at \d\d:\d\d\.$/)
 })
 
 test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper, its work counted as at work', SLOW, async ($, on) => {
