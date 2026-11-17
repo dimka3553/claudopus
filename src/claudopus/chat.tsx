@@ -103,7 +103,7 @@ const chatHooks = (on: On) => {
     // reached nothing. Keys no load before used make it take each button afresh: the moment of the load, with room for a thousand presses
     if ((await $.ui.panes().catch(() => [])).length) (loadMark = presses = 1 + ((await $.clock.now()) % 1_000_000_000) * 1000), (freshness += 1)
     // A chat begins with no record of drawings made before it: one slow drawing of an earlier start never holds this one's (isFreshTooSoon)
-    ;(freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0), (usedRows = 0))
+    ;(freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0))
     await loadSettings($)
     await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
     await clearHeld($).catch(err => log($, `held commands not cleared: ${String(err)}`))

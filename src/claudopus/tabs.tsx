@@ -64,7 +64,7 @@ const tabHooks = (on: On) => {
     const ui = uiOf($, e)
     return (
       <ui.Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {configView(ui, await configShown($), configActs($), band, presses, dir)}
+        {configView(ui, { ...(await configShown($)), updateBox: updateCheck.isChecking ? null : await configUpdateBox($, ui) }, configActs($), band, presses, dir)}
       </ui.Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))

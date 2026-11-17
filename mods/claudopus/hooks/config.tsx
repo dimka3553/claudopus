@@ -179,9 +179,11 @@ export const editing = { key: '', draft: '' }
 export type ConfigShown = {
   // The version this chat runs, and Check for updates as it stands
   version: string
-  check: { isChecking: boolean; said: string; isError: boolean }
+  check: { isChecking: boolean; said: string; isError: boolean; isOut?: boolean }
   // Where this chat's copy loads from, in words, and when the last look was and what it saw
   updates?: { where: string; lookedAt: number; seen: string; now: number }
+  // Where updating stands, drawn by the mod as the panel's header box, with its presses: shown under Check now
+  updateBox?: JSX.Element | null
   texts: { text: Text; isOwn: boolean; isStale: boolean; path: string; body: string }[]; config: Config; failed: string
   // Admin commands: what is in force, a "work" or "never" in config.json that no press here sealed, the commands always allowed
   // (and how many in the file carry no seal of this Mac's), and whether this chat is reached from another device
@@ -394,7 +396,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
           {item(
             'config-look',
             'Look for new versions',
-            'Reads the version page on claudopus.ai; the panel says when a newer one is out. Nothing downloads or installs until you press it.',
+            'Reads the version page on claudopus.ai; when a newer one is out, it shows here and in the panel. Nothing downloads or installs until you press it.',
             <Select
               key="config-look-pick"
               options={[...LOOK_CHOICES]}
@@ -420,10 +422,15 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
             ),
             false,
             () => undefined,
-            // What Check now found, unless that version was skipped since: then the Skipped line says it
-            shown.check.said && !(config.skipVersion && shown.updates?.seen === config.skipVersion) ? (
-              <Text key="config-check-said" color={shown.check.isError ? 'error' : undefined} wrap="wrap">{shown.check.said}</Text>
-            ) : null,
+            // What Check now found, unless that version was skipped since (then the Skipped line says it) or it is a newer version, which the
+            // update box below says;
+            // then where updating stands, with its presses, right here
+            <Box key="config-check-below" flexDirection="column" gap={1} flexShrink={0}>
+              {shown.check.said && !(shown.check.isOut && shown.updateBox) && !(config.skipVersion && shown.updates?.seen === config.skipVersion) ? (
+                <Text key="config-check-said" color={shown.check.isError ? 'error' : undefined} wrap="wrap">{shown.check.said}</Text>
+              ) : null}
+              {shown.updateBox ?? null}
+            </Box>,
           )}
           {typeof config.skipVersion === 'string' && config.skipVersion
             ? item('config-skip', 'Skipped', `You skipped v${config.skipVersion}: it and older ones stay quiet, and a newer one shows.`, <Button key={`config-skip-back-${presses}`} label="Show it again" plain dimColor onPress={() => acts.set('skipVersion', undefined)} />, false, () => undefined)

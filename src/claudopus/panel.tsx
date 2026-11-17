@@ -116,7 +116,7 @@ const panelHooks = (on: On) => {
       if (usedUntil !== until) ((usedUntil = until), $.clock.after(until - heldAt + 20, () => void (usedUntil === until && drawFresh($))))
       return ((listHeldAt = heldAt), recent as Awaited<ReturnType<typeof next>>)
     }
-    if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
+    if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt, false, false)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
     // (counted from the drawing's end: a call for a drawing it made itself, as its own count of what waits at the top, is in it)
     freshBegins(shownKey)
     const askedNo = (shownAsked.get(shownKey) ?? 0) + 1
@@ -1548,7 +1548,7 @@ const panelHooks = (on: On) => {
                 label={`${isOpen ? '▾' : '▸'} Finished ${finished.length + endedFlows.length}`}
                 plain
                 hotkey={keyed ? 'f' : undefined}
-                onPress={() => void ((presses += 1), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
+                onPress={() => void ((presses += 1), isOpen && (foldPress = presses), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
               />
             </Box>
             <Text dimColor>{endedElsewhere.length ? 'all chats' : 'this chat'}</Text>
@@ -1776,8 +1776,14 @@ const panelHooks = (on: On) => {
     // Where updating stands for this chat: a small box under the header's lines, its steps each a press
     const outCard = alone ? null : (await noticeCard($, ui, await noticeNow($, versions.version, versions.installed).catch(() => undefined), versions.version).catch(() => null)) ?? screen ?? null
 
+    // While the person uses the list scrolled down, it is drawn at least as tall as the bottom of what they see, so a card that
+    // shrinks under them (their own answer) never snaps the view up. Blank space shows only where a card shrank inside the view, and
+    // only until the list is drawn again once they leave it alone. The height the app reports is no guide: it
+    // is this drawing's own, held height included, and kept as the most it had ever been it left the list at the length of its
+    // longest moment of the chat, blank under three cards (16 Nov, Dima's screenshot). Folding Finished is not held (foldPress)
+    const heldRows = paneId === LIST && e.surface === 'desktop' && isInUse(at, e.props.scroll.offset) && presses !== foldPress ? e.props.scroll.offset + e.props.scroll.bodyRows : 0
     return (
-      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={Math.max(e.props.scroll.bodyRows, paneId === LIST && e.surface === 'desktop' && isInUse(at, e.props.scroll.offset) ? usedRows : 0)}>
+      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={Math.max(e.props.scroll.bodyRows, heldRows)}>
         {!alone ? (
           // The mark and its lines across the whole width, so the chat's size is read whole; the buttons on a row of their own under
           // them, which wraps onto a second row in a narrow pane rather than cutting anything off

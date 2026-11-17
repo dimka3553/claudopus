@@ -2,6 +2,27 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.173 · 17 November 2026
+- The panel and the bar above the prompt redraw themselves far less often with nothing new: when two requests for a drawing came together, each kept asking for another, in chains of up to 27 redraws, and every redraw made the hover under your pointer blink.
+
+## 0.2.172 · 17 November 2026
+- The banner at the top of the README shows the octopus in 3D, built from cubes and holding task cards, as on claudopus.ai's home page, and its line says tasks where it said jobs.
+
+## 0.2.171 · 17 November 2026
+- The panel no longer lets you scroll far past its cards: while you scrolled it, it kept the length of the longest list it had shown in the chat, so blank space ran down to the Finished row under one card. Now, while you scroll, it is never longer than the bottom of what you see; blank space can still show there for a moment where cards ended while you scrolled, until you leave the panel alone
+- Folding Finished while scrolled down brings the view back to what is left, instead of leaving blank space with the cards above it
+
+## 0.2.170 · 17 November 2026
+- When you answer a question in your own words in the box above the chat, only the big Send button shows now; the second, small send beside the box is gone, and Enter still sends.
+
+## 0.2.169 · 17 November 2026
+- Check now in Config shows a newer version right under the press, with its Update button (Download, then Install, on an installed copy) and how far it has got, then says to type /reload-plugins: you no longer go to the panel to update.
+- Check now also brings back a version you had put off with Not now.
+
+## 0.2.168 · 17 November 2026
+- claudopus.ai has a new home page: the octopus in 3D with a task on each arm, the problem drawn as three requests taken one by one against three side by side, six ways Claude Code alone gets in your way with what Claudopus does about each, and the panel and Results drawn in depth.
+- claudopus.ai/tour.html is new: a new film that shows today's Claudopus, and Results explained step by step, with why it is useful.
+
 ## 0.2.167 · 16 November 2026
 - A click on a button no longer goes missing because the panel was drawn again around it: a button that looks the same from one drawing to the next is kept as the same button, so a click on the drawing still on your screen reaches it. A button whose words have just changed can still miss a click in that instant
 - Every click that reaches its button is one line in Claudopus's log, so the clicks that land can be counted against the ones the app's log shows as dropped

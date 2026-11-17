@@ -919,7 +919,7 @@ const configButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
     <ui.Button key={`config-open-${presses}`} label="Config" hotkey={isKeyed ? 'c' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
   </ui.Box>
 )
-const updateCheck = { isChecking: false, said: '', isError: false }
+const updateCheck = { isChecking: false, said: '', isError: false, isOut: false }
 const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
   version: (await versionsOf($).catch(() => ({ version: '' }))).version,
   check: { ...updateCheck },
@@ -995,12 +995,12 @@ const configActs = ($: EngineInterface) => ({
   check: () => {
     if (updateCheck.isChecking) return
     presses += 1
-    Object.assign(updateCheck, { isChecking: true, said: '', isError: false })
+    Object.assign(updateCheck, { isChecking: true, said: '', isError: false, isOut: false })
     redraw($)
     void checkNow($)
-      .catch(err => ({ text: `Couldn't check: ${String(err instanceof Error ? err.message : err).slice(0, 160)}`, isError: true }))
+      .catch(err => ({ text: `Couldn't check: ${String(err instanceof Error ? err.message : err).slice(0, 160)}`, isError: true, isOut: false }))
       .then(said => {
-        Object.assign(updateCheck, { isChecking: false, said: said.text, isError: said.isError })
+        Object.assign(updateCheck, { isChecking: false, said: said.text, isError: said.isError, isOut: Boolean(said.isOut) })
         presses += 1
         redraw($)
       })
@@ -4016,7 +4016,7 @@ const lookForNew = async ($: EngineInterface) => {
     isUpdating = false
   }
 }
-const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: boolean }> => {
+const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: boolean; isOut?: boolean }> => {
   if (!dir) return { text: "Couldn't check: Claudopus has no memory folder in this chat.", isError: true }
   const loaded = (await versionsOf($)).version
   for (let tries = 0; tries < 20; tries++) {
@@ -4028,7 +4028,9 @@ const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: bo
           await log($, `Claudopus looked for a new version from Config: ${got.page?.version ?? got.why}`)
           if (!got.page) return { text: `Couldn't check: ${got.why}. Try again later.`, isError: true }
           await knowSource($, true)
-          return loaded && isNewer(got.page.version, loaded) ? { text: `v${got.page.version} is out. You can update from the panel.`, isError: false } : { text: `You're on the newest version (v${got.page.version}).`, isError: false }
+          if (!loaded || !isNewer(got.page.version, loaded)) return { text: `You're on the newest version (v${got.page.version}).`, isError: false }
+          if ((await readOr($, laterPath())).trim()) await $.fs.write(laterPath(), JSON.stringify({ version: got.page.version, until: 0 }))
+          return { text: `v${got.page.version} is out.`, isError: false, isOut: true }
         }
       } finally {
         isUpdating = false
@@ -4219,12 +4221,13 @@ const installStep = async ($: EngineInterface, version: string, commit: string) 
 const laterPress = async ($: EngineInterface, version: string) => {
   presses += 1
   await $.fs.write(laterPath(), JSON.stringify({ version, until: (await $.clock.now()) + LATER_FOR }))
+  Object.assign(updateCheck, { said: '', isError: false, isOut: false })
   redraw($)
 }
 const skipPress = async ($: EngineInterface, version: string) => {
   presses += 1
   await setConfig($, dir, 'skipVersion', version)
-  Object.assign(updateCheck, { said: '', isError: false })
+  Object.assign(updateCheck, { said: '', isError: false, isOut: false })
   await loadSettings($)
   redraw($)
 }
@@ -4392,6 +4395,14 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     [title(`Couldn't ${which} Claudopus ${v}`), line('why', `${why.replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`)],
     [<ui.Button key={`update-again-${presses}`} label="Try again" onPress={() => downloadPress($, v)} />, ...quiet('failed', v)],
   )
+}
+
+const configUpdateBox = async ($: EngineInterface, ui: Ui) => {
+  const versions = await versionsOf($)
+  if (!versions.version) return null
+  const n = await noticeNow($, versions.version, versions.installed).catch(() => undefined)
+  if (n?.kind === 'reload') return <ui.Text key="update-ready" wrap="wrap">{`Claudopus ${n.version} is ready: type /reload-plugins to switch this chat to it.`}</ui.Text>
+  return noticeCard($, ui, n, versions.version).catch(() => null)
 }
 
 
@@ -4751,8 +4762,7 @@ const personSign = async ($: EngineInterface) => {
     [...(await read($, todos)), ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], doneNotes.length, updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
   ])
 }
-let usedRows = 0
-const noteRows = (at: number, rows: number | undefined) => void (usedRows = isEngaged(at) ? Math.max(usedRows, rows ?? 0) : (rows ?? 0))
+let foldPress = -1
 const PRESS_HOLD = 2000
 let pressFrom = 0
 let pressFresh = 0
@@ -4770,10 +4780,13 @@ const freshDrawn = new Map<string, { at: number; ms: number; fresh: number }>()
 const freshDue = new Set<string>()
 const freshUnderWay = new Map<string, { fresh: number; isOvertaken: boolean }>()
 let pressedAt = 0
-const isFreshTooSoon = ($: EngineInterface, key: string, at: number, isLoaded = false) => {
+const isFreshTooSoon = ($: EngineInterface, key: string, at: number, isLoaded = false, canGiveMade = true) => {
   const going = freshUnderWay.get(key)
   if (going && going.fresh === freshness) return (going.isOvertaken = true)
   const last = freshDrawn.get(key)
+  const again = madeAgain.get(key)
+  madeAgain.delete(key)
+  if (canGiveMade && again && last && again.fresh === freshness && at - again.at < FRESH_GAP && last.fresh === freshness && pressedAt < last.at) return true
   if (!last || pressedAt >= last.at || last.fresh !== freshness) return false
   if (last.ms < SLOW_DRAW && !isLoaded) return false
   const gap = Math.max(FRESH_GAP, last.ms * 4)
@@ -4783,11 +4796,12 @@ const isFreshTooSoon = ($: EngineInterface, key: string, at: number, isLoaded = 
 }
 const isPanelSlow = (at: number) => [...freshDrawn].some(([key, last]) => key.startsWith(`${LIST}|`) && last.ms >= SLOW_DRAW && at - last.at < 10_000)
 const freshBegins = (key: string) => (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false }), freshness)
+const madeAgain = new Map<string, { fresh: number; at: number }>()
 const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: number; fresh: number }) => {
   const isOvertaken = freshUnderWay.get(key)?.isOvertaken
   freshUnderWay.delete(key)
   if (made) freshDrawn.set(key, made)
-  if (isOvertaken) void drawFresh($)
+  if (isOvertaken && made) (madeAgain.set(key, { fresh: made.fresh, at: made.at }), void drawFresh($))
 }
 let calmAt = 0
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
@@ -7649,7 +7663,7 @@ const chatHooks = (on: On) => {
     await noteSeen($).catch(err => log($, `changes seen not noted: ${String(err)}`))
     cwd = e.cwd
     if ((await $.ui.panes().catch(() => [])).length) (loadMark = presses = 1 + ((await $.clock.now()) % 1_000_000_000) * 1000), (freshness += 1)
-    ;(freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0), (usedRows = 0))
+    ;(freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0))
     await loadSettings($)
     await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
     await clearHeld($).catch(err => log($, `held commands not cleared: ${String(err)}`))
@@ -10528,7 +10542,6 @@ const commandHooks = (on: On) => {
   })
   on('ui.scroll', async ($, e, next) => {
     if (e.origin.kind === 'person' && (e.requestId === LIST || e.requestId.startsWith(WORK_PANE) || e.requestId.startsWith(FLOW_PANE))) await engage($)
-    if (e.requestId === LIST) noteRows(await $.clock.now(), e.contentRows)
     return next(e)
   }).catch(($, e, next) => next(e))
   on('ui.select', { plugin: 'claudopus' }, async ($, e, next) => (freeTimes($), next(e)))
@@ -11010,7 +11023,6 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
             key={barBoxKey(one.id)}
             placeholder="Type your reply"
             value={draftDrawn(draft)}
-            submitLabel="send"
             autoFocus
             onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
             onSubmit={send}
@@ -11279,7 +11291,7 @@ const panelHooks = (on: On) => {
       if (usedUntil !== until) ((usedUntil = until), $.clock.after(until - heldAt + 20, () => void (usedUntil === until && drawFresh($))))
       return ((listHeldAt = heldAt), recent as Awaited<ReturnType<typeof next>>)
     }
-    if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
+    if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt, false, false)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
     freshBegins(shownKey)
     const askedNo = (shownAsked.get(shownKey) ?? 0) + 1
     shownAsked.set(shownKey, askedNo)
@@ -12516,7 +12528,7 @@ const panelHooks = (on: On) => {
                 label={`${isOpen ? '▾' : '▸'} Finished ${finished.length + endedFlows.length}`}
                 plain
                 hotkey={keyed ? 'f' : undefined}
-                onPress={() => void ((presses += 1), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
+                onPress={() => void ((presses += 1), isOpen && (foldPress = presses), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
               />
             </Box>
             <Text dimColor>{endedElsewhere.length ? 'all chats' : 'this chat'}</Text>
@@ -12712,8 +12724,9 @@ const panelHooks = (on: On) => {
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
     const outCard = alone ? null : (await noticeCard($, ui, await noticeNow($, versions.version, versions.installed).catch(() => undefined), versions.version).catch(() => null)) ?? screen ?? null
 
+    const heldRows = paneId === LIST && e.surface === 'desktop' && isInUse(at, e.props.scroll.offset) && presses !== foldPress ? e.props.scroll.offset + e.props.scroll.bodyRows : 0
     return (
-      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={Math.max(e.props.scroll.bodyRows, paneId === LIST && e.surface === 'desktop' && isInUse(at, e.props.scroll.offset) ? usedRows : 0)}>
+      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={Math.max(e.props.scroll.bodyRows, heldRows)}>
         {!alone ? (
           <Box key="head" flexDirection="column" gap={isInline ? 0 : 1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
             <Box flexDirection="row" alignItems="center" gap={2}>
@@ -12852,7 +12865,7 @@ const tabHooks = (on: On) => {
     const ui = uiOf($, e)
     return (
       <ui.Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {configView(ui, await configShown($), configActs($), band, presses, dir)}
+        {configView(ui, { ...(await configShown($)), updateBox: updateCheck.isChecking ? null : await configUpdateBox($, ui) }, configActs($), band, presses, dir)}
       </ui.Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))

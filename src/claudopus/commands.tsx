@@ -39,7 +39,6 @@ const commandHooks = (on: On) => {
   // The person scrolling the panel or a Details tab is using it: what moves on its own waits (engage)
   on('ui.scroll', async ($, e, next) => {
     if (e.origin.kind === 'person' && (e.requestId === LIST || e.requestId.startsWith(WORK_PANE) || e.requestId.startsWith(FLOW_PANE))) await engage($)
-    if (e.requestId === LIST) noteRows(await $.clock.now(), e.contentRows)
     // Every move is let through as it comes. The app's own moves back to a box that holds the cursor in a pane arrive here as the
     // person's, already drawn: refusing them only undid each one a moment later, a bounce worse than the pull (0.2.135, taken out).
     // The reply box is drawn in the bar above the prompt instead, where there is nothing to pull (asking.tsx, repliesInBar)
