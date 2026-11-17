@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.168 · 17 November 2026
+- claudopus.ai has a new home page: the octopus in 3D with a task on each arm, the problem drawn as three requests taken one by one against three side by side, six ways Claude Code alone gets in your way with what Claudopus does about each, and the panel and Results drawn in depth.
+- claudopus.ai/tour.html is new: a new film that shows today's Claudopus, and Results explained step by step, with why it is useful.
+
 ## 0.2.167 · 16 November 2026
 - A click on a button no longer goes missing because the panel was drawn again around it: a button that looks the same from one drawing to the next is kept as the same button, so a click on the drawing still on your screen reaches it. A button whose words have just changed can still miss a click in that instant
 - Every click that reaches its button is one line in Claudopus's log, so the clicks that land can be counted against the ones the app's log shows as dropped
