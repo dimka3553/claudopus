@@ -546,8 +546,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (e.tool === 'Bash' && / # hold (\S+)$/.test(command)) return { result: { stdout: await new Promise<string>(done => held.set(command.match(/ # hold (\S+)$/)?.[1] ?? '', done)), stderr: '', interrupted: false } } as never
     // One sent to the background comes back at once, as the engine's does, and ends with the test
     if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background && command.startsWith('hold ')) {
-      void new Promise<string>(done => held.set(command.slice(5), done))
-      return { result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
+      void new Promise<string>(done => held.set(command.slice(5).replace(/ # with its step$/, ''), done))
+      return { result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: `bg-${e.tool_use_id}`, ...(command.endsWith('# with its step') ? { backgroundEndsWithFinalResponse: true } : {}) } } as never
     }
     if (e.tool === 'Bash' && command.startsWith('hold ')) return { result: { stdout: await new Promise<string>(done => held.set(command.slice(5), done)), stderr: '', interrupted: false } } as never
     if (e.tool === 'Bash' && command.includes('admin')) admins.push({ command, grants: [...files].filter(([path]) => path.startsWith(`${MEMORY}/admin-grants/`)).map(([, text]) => JSON.parse(text)) })
@@ -907,13 +907,17 @@ test('helpers are not taken for silent while the engine writes to one\'s transcr
   agents.a1 = 'completed'
   await $.turn.complete({ answer: 'Two helpers are fitting; I continue when they report.', durationMs: 1, isAborted: false, turnId: 'e-a1', reason: 'answer', agentId: 'a1' } as never)
   const nudges = () => resumed.filter(line => line.startsWith('a1: From Claudopus: nothing new has come back from your helpers'))
-  // 13 minutes on, the engine writes a3's steps to its transcript, though Claudopus saw none of its calls; a2's run prints
+  // 13 minutes on, a2's run prints each minute: no check-in
   const a3 = `${HOME}/.claude/projects/-repo/engine-id/subagents/agent-a3.jsonl`
   files.set(a3, '{}')
-  for (let m = 1; m <= 13; m++) ((printed['bg-f-a2'] = clock.now()), files.set(`mtime:${a3}`, String(clock.now())), await clock.advance(60_000))
+  for (let m = 1; m <= 13; m++) ((printed['bg-f-a2'] = clock.now()), await clock.advance(60_000))
   expect(nudges()).toEqual([])
-  // Both then sit silent: a3's transcript stays as it is, and a2's run prints nothing more for over half an hour
-  await clock.advance(31 * 60_000)
+  // a2's run then prints nothing more; for 40 minutes the engine writes a3's steps to its transcript, though Claudopus saw none of
+  // its calls: no check-in
+  for (let m = 1; m <= 40; m++) (files.set(`mtime:${a3}`, String(clock.now())), await clock.advance(60_000))
+  expect(nudges()).toEqual([])
+  // Both then sit silent: the task is started again to check on them
+  await clock.advance(13 * 60_000)
   expect(await until(async () => nudges().length > 0 || undefined)).toBe(true)
 })
 
