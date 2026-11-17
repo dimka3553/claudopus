@@ -413,7 +413,9 @@ const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a messa
 const HELPERS_SILENT = (mins: number, helpers: string) =>
   `From Claudopus: nothing new has come back from your helpers for ${mins} min while your step had ended: ${helpers}. Ask each with SendMessage what it is doing and when it will end, and tell one that is stuck or waits on nothing to hand back what it has now. Then carry on with what needs nothing from them, or end your step.`
 const HELPERS_STILL_SILENT = (mins: number, helpers: string) =>
-  `From Claudopus: nothing new has come back from your helpers for ${mins} min, nor since you were asked to check on them: ${helpers}. Unless one told you it is still making progress and when it ends, hand back your report now with what you have, saying what each was still doing: Claudopus lets you hand it back while they run, and stops them as you do.`
+  `From Claudopus: nothing new has come back from your helpers for ${mins} min, nor since you were asked to check on them: ${helpers}. Unless one told you it is still making progress and when it ends, hand back your report now with what you have, saying what each was still doing: Claudopus lets you hand it back while they run, and stops those that sit silent as you do.`
+const GAVE_UP_IN_CHAT = (title: string, mins: number) =>
+  `"${title}" is stuck: nothing new has come back from its helpers for ${mins} minutes, and it has not handed back what it has though Claudopus asked it to.`
 const NUDGED_IN_CHAT = (title: string, mins: number, isLast: boolean) =>
   `"${title}" hasn't made progress for ${mins} minutes: it waits for its helpers, and nothing new has come back from them. Claudopus started it again and asked it ${isLast ? 'to hand back what it has now' : 'to check on them'}.`
 // A task that had stopped partway through a step without a report, restarted by Claudopus: what Claude is told, and what the chat is told
