@@ -4,11 +4,12 @@ VERSION_FILE=mods/claudopus/.claude-plugin/plugin.json
 DERIVED="mods/claudopus/hooks/register.tsx mods/claudopus/hooks/tests/*.test.tsx src/claudopus/globals.d.ts src/claudopus/tests/globals.d.ts site/version.json site/changelog.html"
 BUILD="node src/claudopus/build.mjs"
 ENGINE=${CLAUDE_CODE_EXECPATH:-claude}
-# A release goes out seconds after the person's press: it waits for no test run, here or on GitHub. Before it pushes it makes
-# sure only that the joined files match their parts, the notification apps their checksums, and that the mod and the
-# marketplace pass the strict validation (which type checks every part), about ten seconds. Every test runs before the press, once
-# in the work's own worktree (src/claudopus/test-all.sh), and again on GitHub on each push of main (.github/workflows/check.yml),
-# after the release, never holding it
-CHECK="node src/claudopus/build.mjs --check && sh mods/claudopus/notifier/check.sh && '$ENGINE' plugin validate --strict mods/claudopus && '$ENGINE' plugin validate --strict ."
+# A release goes out seconds after the person's press: it waits for no full test run, here or on GitHub. Before it pushes it
+# makes sure only that the joined files match their parts, the notification apps their checksums, that the mod still loads and
+# works in the test kit (the welcome's tests, a few seconds, which fail when the mod throws as it loads), and that the mod and the
+# marketplace pass the strict validation (which type checks every part): about ten seconds in all. Every test runs before the
+# press, once in the work's own worktree (src/claudopus/test-all.sh), and again on GitHub on each push of main
+# (.github/workflows/check.yml), after the release, never holding it
+CHECK="node src/claudopus/build.mjs --check && sh mods/claudopus/notifier/check.sh && ENGINE='$ENGINE' node src/claudopus/guard.mjs area welcome && '$ENGINE' plugin validate --strict mods/claudopus && '$ENGINE' plugin validate --strict ."
 # Every version is made a GitHub release marked latest, with its changelog entry, so the repo page and its badge name it
 GITHUB_RELEASE="node src/claudopus/build.mjs --notes"
