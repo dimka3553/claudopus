@@ -1,3 +1,4 @@
-- The chat now runs a few more harmless one-liners itself instead of starting a task: opening a file or page (`open`, also in a named browser), and a status check of a server on this Mac (`curl` of a local address that only asks and saves nothing).
-- The chat can show a page or a local server in the browser pane itself (its preview), instead of a task doing it.
-- A command that only reads one of your settings files with a line of Python or Node is no longer refused as if it changed it; a command that writes them is still refused.
+- The chat now runs a few more harmless one-liners itself instead of starting a task: opening a web page, or a picture, PDF, page, text or video (also in a browser or viewer you name), showing a file in the Finder, and a status check of a server on this Mac with `curl` that only asks and saves nothing.
+- The chat can show a local server's page in the browser pane itself, instead of a task doing it. Starting a server by its name stays a task's.
+- When the chat cannot run one of these as written, its refusal says which shape it can run.
+- A task's line of Python or Node that only opens one of your settings files, parses and prints it is no longer refused as if it changed the file; anything else in such a line is still refused.
