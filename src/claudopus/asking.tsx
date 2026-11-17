@@ -363,7 +363,7 @@ const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = fals
 // or one that begins with the words of one of its buttons. Any other reply, such as a request first, leaves the ask open while the work acts on it
 const plainWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) =>
-  !isReply || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))
+  !isReply || Boolean(ask.refused) || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))
 // The asks a press answered, by card, as `${at}:${text}`: the panel draws the card answered from the press itself, its buttons and box
 // gone in the press's own drawing, before the answer is written; the mark goes once the card's file no longer carries the ask
 const askPressed = new Map<string, string>()
@@ -495,6 +495,8 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
     answeredAsks.delete(asked)
     if (answeredAt.get(one.id) === ask.at) answeredAt.delete(one.id)
     if (pending.get(target) === one.id) pending.delete(target)
+    // (what the work recorded as waiting for it, answered with the press, is open again with it)
+    if (isCleared) await unsettleAsked($, one.id, ask.at).catch(() => undefined)
     const isBack = !isCleared || (await changeTodos($, list => list.map(card => (card.id === one.id && !card.ask ? { ...card, ask, entries: card.entries.filter(entry => !(entry.kind === 'steer' && entry.at === steerAt)) } : card))).then(() => true).catch(() => false))
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'failed', at: await $.clock.now().catch(() => 0), line, isCard: true, askAt: ask.at })
     // and when even that could not be written, the chat is told, so the ask is not lost unseen
@@ -506,6 +508,8 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
 // The rest of an answer once its ask is cleared from the card's file: to the work, or to wake it
 const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, isReply: boolean, target: string, at: number, line: string) => {
   answeredAt.set(one.id, ask.at)
+  // What the work recorded as waiting for the same question is answered with it
+  await settleAsked($, one.id, ask, isReply ? IN_WORDS : said).catch(err => log($, `result's question not answered with the ask of ${one.id}: ${String(err)}`))
   dropDrafts($, one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   const back = isReply ? {} : { asked: ask, target }
@@ -532,6 +536,16 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       // (a turn that ended while this was written has had its end's look already)
       await stepsAtEnd($).catch(held)
     }
+    return void askGone($, one, said)
+  }
+  // A notice of a call Claude Code refused: the work it is for, still at work, is told to carry on without it, and work that has
+  // ended is not started again for it, neither now nor as it ends without having read it (no answer waits for it)
+  if (ask.refused) {
+    const isWorking = (await read($, todos)).find(card => card.id === target)?.status === 'working'
+    const told = isWorking ? await tell($, target, REFUSAL_ANSWERED(ask.text, said, isReply)) : undefined
+    if (!told || told.deny) await log($, `answer to the refusal on ${one.id} not sent: ${target} is not at work, or could not be written to`)
+    sentReplies.set(one.id, { text: said, ask: ask.text, to: told && !told.deny ? 'work' : 'other', at, line, isCard: true, askAt: ask.at })
+    redraw($)
     return void askGone($, one, said)
   }
   const to = isReply ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}`
@@ -583,6 +597,7 @@ const takeBackNow = async ($: EngineInterface, one: Todo, shownAt: number) => {
   }
   sentReplies.delete(one.id)
   answeredAsks.delete(`${one.id}:${ask.at}:${ask.text}`)
+  await unsettleAsked($, one.id, ask.at).catch(err => log($, `result's question not opened again for ${one.id}: ${String(err)}`))
   if (answeredAt.get(one.id) === ask.at) answeredAt.delete(one.id)
   if (pending.get(target) === one.id) pending.delete(target)
   for (const key of startedBy) if (key === `${one.id}:${sent.at}`) startedBy.delete(key)
@@ -619,6 +634,8 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
     ((isHeld = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isHeld) return
+  // Their reply answers what the work recorded for that question, as a press does; the ask stays while the work acts on it
+  await settleAsked($, one.id, ask, IN_WORDS).catch(err => log($, `result's question not answered with the ask of ${one.id}: ${String(err)}`))
   // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
   dropDrafts($, one.id)
   // A new box, empty, whenever it comes back: the surface keeps what was typed in a box it finds again by its key
@@ -769,6 +786,8 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   const isHeld = !settles(a.ask, a.words, true)
   // Either way the ask is done with in the chat: the work asking again is sent to it afresh
   if (isHeld) answeredAsks.delete(a.key)
+  // Their words answer what the work recorded for that question either way: the work clearing the ask later leaves it answered
+  await settleAsked($, a.card.id, a.ask, IN_WORDS).catch(err => log($, `result's question not answered with the ask of ${a.card.id}: ${String(err)}`))
   inChat.delete(a.card.id)
   await changeTodos($, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   dropDrafts($, a.card.id)

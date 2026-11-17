@@ -48,6 +48,7 @@ const afterReply = async ($: EngineInterface, text: string, answer: string) => {
 // listed as completed, and the look ends its card (sync) and passes on a reply it never read, as the turn's end would have
 const HELD_LOOK = 1500
 const heldLook = async ($: EngineInterface, id: string) => {
+  const wasWorking = (await read($, todos)).find(one => one.id === id)?.status === 'working'
   await sync($)
   // Listed as idle, or no longer listed, its run is over too: nothing holds it
   const listed = (await $.agent.list().catch(() => undefined))?.find(one => one.id === id)?.status
@@ -55,9 +56,14 @@ const heldLook = async ($: EngineInterface, id: string) => {
     const now = await $.clock.now()
     await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
   }
-  if ((await read($, todos)).find(one => one.id === id)?.status === 'working') return
+  const card = (await read($, todos)).find(one => one.id === id)
+  if (card?.status === 'working') return
   await replyUnread($, id)
   if (wakes.length) await sendWakes($)
+  // A helper the engine still listed as running as its turn ended, ended now: its result is passed on as at a heard end. Read as at
+  // work before the look, as the look itself ends it; one the look for work that ended unheard passed on is not passed on again
+  // (passOnHelper)
+  if (wasWorking && card?.parentId && card.parentId !== HELPER) await passOnHelper($, id, card.answer ?? '', card.status)
 }
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
@@ -71,6 +77,12 @@ const chatHooks = (on: On) => {
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
+    // How late the mod's own timer comes: behind, it does less until it has caught up (lookHold). From the start of the load, so a
+    // long hold in the load's own reads is logged with them too
+    holdAt = 0
+    // (not in the test kit, whose clock a test moves by hours at once: there only a test that asks for it has it)
+    isTimed = (await $.env.get('CLAUDOPUS_TIMING')) !== 'test'
+    if (isTimed) everyLoad($, HOLD_LOOK, () => lookHold($))
     // The mod's own kinds of agent, each starting with only the tools its work takes
     void registerKinds($)
     termLive = /truecolor|24bit/i.test((await $.env.get('COLORTERM')) ?? '') ? LIVE : DEEP_LIVE
@@ -94,6 +106,7 @@ const chatHooks = (on: On) => {
     ;(freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0))
     await loadSettings($)
     await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
+    await clearHeld($).catch(err => log($, `held commands not cleared: ${String(err)}`))
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
     await closeUndrawn($)
     $.clock.after(3000, () => closeUndrawn($))
@@ -102,6 +115,7 @@ const chatHooks = (on: On) => {
 
     // The engine's id names this chat's files, as its transcript is named
     const id = await $.session.id()
+    heldChat = id
     const title = await appTitle($)
     // The first load of a session sends the role text; a reload keeps what stands
     await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id ? m.needsContext : true }))
@@ -109,6 +123,7 @@ const chatHooks = (on: On) => {
     await noteCut($, id).catch(err => log($, `cut-off work not looked for: ${String(err)}`))
     // The other chats, on this Mac and the others, are read before the panel is drawn: a chat that starts, or comes back, showed
     // its panel without them until the rest of its start was done, and they seemed to drop out of it for a while
+    during('load: read the other chats')
     await readOthers($).catch(() => undefined)
     keysOnStart($)
 
@@ -188,7 +203,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'wake_me',
       description: named(
-        'For a file, a page or a time that nothing of yours makes (a file another program writes, a page that comes up, a moment to look again): Claudopus looks for it and starts you again the moment it is there, so you end your step instead of waiting with a command. Your own commands, in the background or detached, and your helpers wake you by themselves: never use this for them. Name a file, a line in it, a page, or only minutes. A new call replaces the last one.',
+        'For a file, a page or a time that nothing of yours makes (a file another program writes, a page that comes up, a moment to look again): Claudopus looks for it and starts you again the moment it is there, so you end your step instead of waiting with a command. Your own commands, in the background or detached, and your helpers wake you by themselves: never use this for them. Name a file, a line in it, a page, or only minutes; Claudopus looks for at most an hour, and not again for the same once a look ran out. A new call replaces the last one.',
       ),
       inputSchema: {
         type: 'object',
@@ -197,7 +212,7 @@ const chatHooks = (on: On) => {
           file: { type: 'string', description: 'The full path of a file to appear (with `text`, a file to hold that text)' },
           text: { type: 'string', description: 'A line of text to appear in `file`' },
           url: { type: 'string', description: 'A page to answer without an error' },
-          minutes: { type: 'number', description: 'With nothing else: start you after this many minutes. With a file or page: the longest to look, after which you are started with word that it never came (60 when left out, at most 360)' },
+          minutes: { type: 'number', description: 'With nothing else: start you after this many minutes. With a file or page: the longest to look, after which you are started with word that it never came (15 when left out, at most 60). Should it never come, you are started again and hand back what you have' },
         },
         required: ['what'],
       },
@@ -206,12 +221,32 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'waits',
       description: named(
-        "For background tasks, before you finish: records what in your report waits on {name}, each as one short line {name} can answer yes or no. The panel shows each with Yes / No / Not now. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. It replaces what was recorded before; do not call it when nothing waits.",
+        "For background tasks, before you finish: records what in your report waits on {name}, each as one short question. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. Each call lists everything still waiting: once you finish, it replaces what your earlier results waited on, and [] says nothing does. The panel answers each with Yes / No, or the answers you name in `choices` when it is not yes or no, and always with Not now and Answer in words. Mark a question you also asked on your card with the `ask` tool with `asked: true`: answering it there answers it here. In the chat: once {name}'s own words have answered what a result waits on, call it with that result's report.md path as `result` and the numbers of the questions they answered as `answered`.",
       ),
       inputSchema: {
         type: 'object',
-        properties: { items: { type: 'array', items: { type: 'string' }, description: 'Each a question of at most 140 characters, in plain words, speaking to them as "you"' } },
-        required: ['items'],
+        properties: {
+          items: {
+            type: 'array',
+            items: {
+              anyOf: [
+                { type: 'string', description: 'A yes-or-no question of at most 140 characters, in plain words, speaking to them as "you"' },
+                {
+                  type: 'object',
+                  properties: {
+                    text: { type: 'string', description: 'The question, at most 140 characters, in plain words, speaking to them as "you"' },
+                    choices: { type: 'array', items: { type: 'string' }, description: 'Its answers when it is not yes or no, a few words each (at most 4)' },
+                    asked: { type: 'boolean', description: 'true when it is the question you asked on your card with the `ask` tool' },
+                  },
+                  required: ['text'],
+                },
+              ],
+            },
+          },
+          answered: { type: 'array', items: { type: 'number' }, description: named("Only in the chat: the numbers of the result's questions {name}'s words answered") },
+          result: { type: 'string', description: named("Only in the chat: the report.md path of the result whose questions {name}'s words answered") },
+        },
+        required: [],
       },
       isDeferred: false,
     })
@@ -224,9 +259,12 @@ const chatHooks = (on: On) => {
     if (isNew) await $.fs.write(`${dir}/index.md`, INDEX_HEAD)
     await settleWelcome($, isNew, id).catch(err => log($, `welcome not settled: ${String(err)}`))
     await measure($).catch(() => undefined)
+    during('load: read finished work')
     await loadFinished($).catch(err => log($, `finished work not read: ${String(err)}`))
     void recoverEnded($).catch(err => log($, `ended work not read back: ${String(err)}`))
+    during('load: sync the memory')
     await sync($).catch(() => undefined)
+    during('load: read the results')
     await loadReports($).catch(() => undefined)
     // What the person had typed into a reply box before a reload of the mod is in its box again
     await readDrafts($).catch(() => undefined)
@@ -257,11 +295,6 @@ const chatHooks = (on: On) => {
       for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)])
         if (one.status !== 'working' && one.endedAt > last && one.endedAt <= now && now - one.endedAt < RELOAD_GRACE) lateFrom.set(`${one.id}:${one.endedAt}`, Infinity)
     }
-    // How late the mod's own timer comes: behind, it does less until it has caught up (lookHold)
-    holdAt = 0
-    // (not in the test kit, whose clock a test moves by hours at once: there only a test that asks for it has it)
-    isTimed = (await $.env.get('CLAUDOPUS_TIMING')) !== 'test'
-    if (isTimed) everyLoad($, HOLD_LOOK, () => lookHold($))
     let seconds = 0
     everyLoad($, 1000, async () => {
       if (drawnNow > (await read($, lastDrawn))) await update($, lastDrawn, () => drawnNow)
@@ -322,6 +355,7 @@ const chatHooks = (on: On) => {
     await readOthers($).catch(() => undefined)
     // The workflows kept, read back, and followed while they run
     await knowSession($)
+    during('load: read back workflows')
     await loadFlows($).catch(err => log($, `workflows not read back: ${String(err)}`))
     everyLoad($, FLOW_EVERY, () => followFlows($).catch(err => log($, `workflows not followed: ${String(err)}`)))
     // Every hour one chat looks at the version page, and only looks: an update is installed, and a chat reloaded to it, only by a press
@@ -361,21 +395,27 @@ const chatHooks = (on: On) => {
     if (dir && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) await flowEnded($, e.text).catch(err => log($, `workflow end not read: ${String(err)}`))
     // The engine's notice that work the person stopped has ended says it was stopped "by Claude": the chat is told it was them
     if (dir && !isOff && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) {
+      // Each notice that a work waiting on its helpers or a wake_me ended goes with the word that it is still at work, whatever else
+      // the prompt brings
+      const waitingWork = await waitingNow($)
+      const quiet = quietNotices(e.text, new Set(waitingWork.keys()))
+      const waits = quiet.waits.map(id => waitsText(waitingWork.get(id)!))
       const ids = [...e.text.matchAll(/<task-id>([^<]+)<\/task-id>/g)].map(m => m[1] ?? '')
       const held = (await read($, todos)).filter(one => !one.parentId && isHeld(one) && ids.includes(one.id))
       if (held.length) {
         const told = held.map(one => named(STOPPED_BY_YOU(titleOf(one), one.id, stopLeft.get(one.id) ?? [])))
         for (const one of held) stopLeft.delete(one.id)
-        return next({ ...e, context: [...(e.context ?? []), ...told] })
+        return next({ ...e, context: [...(e.context ?? []), ...told, ...waits] })
       }
       // The chat's own command ended: how it ended and its last lines go with the notice
       const ended = await chatCommandEnded($, e.text).catch(() => [] as string[])
-      if (ended.length) return next({ ...e, context: [...(e.context ?? []), ...ended] })
-      // A notice that a task whose report already came has stopped says nothing new: it is left out, so the chat takes no turn for it
-      if (isRepeatOnly(e.text)) {
-        await log($, 'left out the notice that repeats a report already given')
-        return { drop: "Left out a repeat notice: that task's report already came." }
+      if (ended.length) return next({ ...e, context: [...(e.context ?? []), ...ended, ...waits] })
+      // Notices with nothing new (a report already given, a task still at work) are left out, so the chat takes no turn for them
+      if (quiet.isQuiet) {
+        await log($, quiet.isRepeat ? 'left out the notice that repeats a report already given' : 'left out notices with nothing new: tasks still at work')
+        return { drop: quiet.isRepeat ? "Left out a repeat notice: that task's report already came." : 'Left out a notice with nothing new: the task is still at work.' }
       }
+      if (waits.length) return next({ ...e, context: [...(e.context ?? []), ...waits] })
     }
     if (e.isMeta || e.command || !dir) return next(e)
     // A message the mod sent from a press or reply in the panel starts work as a message of the person's does
@@ -423,6 +463,8 @@ const chatHooks = (on: On) => {
     heard = [...heard, text]
     // A message that names a report starts work from it: that work's own report is kept linked to it
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
+    // One that names a result and quotes what in it waits answers that, as "Answer in words" on the result starts it
+    await answeredInMessage($, text).catch(err => log($, `results answered in words not marked: ${String(err)}`))
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
     await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
 
@@ -469,7 +511,7 @@ const chatHooks = (on: On) => {
       if (!isHeld) await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
       await changeTodos($, list => {
         // (or for what it asked Claudopus to start it again for)
-        const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)))
+        const isWaiting = how === 'done' && !isHandedBack && (isHeld || isTurnWaited(list, id) || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)))
         // What it waits on of its own, since when: the card says so, and a long wait for it is not taken for being stuck
         // Work that gave its report waits on nothing it means to finish
         const waitsSince = (one: Todo) => (isHeld && !isReport && one.bg?.some(b => !b.isWatch) ? (one.waitsSince ?? now) : undefined)
@@ -482,7 +524,7 @@ const chatHooks = (on: On) => {
               one.status !== 'working' && how === 'done' && !isHandedBack && endedByHandback.has(id)
               ? one
               : isWaiting
-              ? { ...one, answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt, waitsSince: waitsSince(one) }
+              ? { ...one, answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt, waitsSince: waitsSince(one), endedStepAt: now }
               : how === 'stopped'
                 ? one.status === 'working'
                   ? ended(one, stoppedAs(one), now)
@@ -492,9 +534,6 @@ const chatHooks = (on: On) => {
       })
       if (how === 'stopped') await keepStoppedReports($, now)
       await lookEnds($)
-      // Work that ended its step to wait for its helpers, or to be started again, which the engine does not list as waiting: the chat
-      // is told it is still at work, as the engine tells it otherwise
-      if (how === 'done' && !isHandedBack && listed !== 'waiting') await tellWaitsOn($, id).catch(err => log($, `chat not told work ${id} waits: ${String(err)}`))
       // A reply it never read goes to the chat; work that waits for its helpers reads it at its next step
       if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
       // A go-ahead pressed during this turn does its last step now, before the wakes go, so its small task starts from this hook
@@ -506,6 +545,9 @@ const chatHooks = (on: On) => {
       const report = (e.answer ?? '').trim() || answer
       // A helper that has ended while its work had ended its step: its result is passed on to that work, which starts again with it
       if (card?.parentId && card.status !== 'working') await passOnHelper($, id, report, card.status).catch(err => log($, `helper's result not passed on: ${String(err)}`))
+      // One that handed back while a command or helper of its own still runs stays at work on its card, but its hand-back reached the
+      // chat, which was told it is passed on: it is passed on now
+      else if (card?.parentId && notedAtHandback.has(id)) await passOnHelper($, id, report, 'done').catch(err => log($, `helper's result not passed on: ${String(err)}`))
       if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
         $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
       }

@@ -83,6 +83,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const submitted: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
+  // How many lines the mod had written into chats as each SubagentHandback reached the engine
+  const atHandback: number[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
   // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
@@ -510,6 +512,12 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // as the engine says it: an error result in words, the same for an approval cut short
     if (files.get('refuse') === e.tool) return { result: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", isError: true } as never
     if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
+    // A command marked to fail at its end (npm run build # fails) fails as the engine's does, with what the test lays in `fails`
+    if (e.tool === 'Bash' && command.endsWith(' # fails')) return { result: `Exit code 1\n${files.get('fails') ?? ''}`, isError: true } as never
+    // Claude Code's auto mode refuses this tool outright, as it does a background task's call, with no prompt to the person
+    if (files.get('auto-refuse') === e.tool) return { result: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access]. If you have other tasks that don't depend on this action, continue working on those.", isError: true } as never
+    // What the chat had been told when a hand-back reached the engine, which hands it on at once
+    if (String(e.tool) === 'SubagentHandback') atHandback.push(appended.length)
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,
@@ -591,7 +599,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -1190,6 +1198,10 @@ test('a press on one ended work\'s ask leaves the other asks\' buttons where the
 
 test('a go-ahead to finish on ended work does its last step without waking it: a release in a repo with .release is held on the card for the allow, any other step goes to a small fresh task; a reply in words or the other choice still goes to the work', async ($, on) => {
   const { files, resumed, appended, clock, wake, asked } = world(on)
+  // (the cards as last written, read for what each recorded as waiting)
+  let written: unknown
+  on('state.set', (_, e, next) => (((e as { key?: string }).key === 'todos' && (written = (e as { value?: unknown }).value)), next(e)))
+  const cards = () => ((written as { value?: unknown } | undefined)?.value ?? []) as { id: string; waits?: unknown[] }[]
   await $.session.start(start)
   await $.prompt.submit({ text: 'four fixes', wait: false, origin: composer })
   for (const description of ['Fix the nose', 'Fix the ear', 'Fix the chin', 'Fix the brow']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
@@ -1246,7 +1258,7 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   // Release it pressed while the work is still in the turn that asked (writing its waits and report, as on 16 Nov 19:49 and 17 Nov
   // 07:49): the work is told the step is Claudopus's, not left it, and the step is done once its card has ended: the release's allow
   // box, a small fresh task for any other step. A turn that was stopped first does no step, and the question is back on the card
-  for (const description of ['Fix the jaw', 'Fix the cheek', 'Fix the lip', 'Fix the neck']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
+  for (const description of ['Fix the jaw', 'Fix the cheek', 'Fix the lip', 'Fix the neck', 'Fix the mouth']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
   const working = async (id: string, last_step: string, folder: string) => {
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${id}`, agentId: id, text: `Release ${id}?`, choices: ['Release it', 'Not now'], last_step, folder } as never)
     await press(id, 'Release it')
@@ -1269,16 +1281,35 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   // (found by its question: the small task a2's step started took the next number)
   expect(await until(async () => prompts.find(one => one.startsWith('Do the last step of the task') && one.includes('(to: Release a6?)')))).toContain('Merge the PR and look at the build')
   await working('a7', 'release', '/repo/wt')
+  // (Claude Code refused a call of its in that turn: the question back takes that notice's place, in the chat too)
+  files.set('auto-refuse', 'Edit')
+  await $.tool.call({ tool: 'Edit', tool_use_id: 'e-a7', agentId: 'a7', file_path: '/repo/wt/notes.md', old_string: 'old', new_string: 'new' } as never)
+  files.delete('auto-refuse')
+  expect(await until(async () => appended.find(line => line.includes('Claude Code refused this task')))).toBeDefined()
+  const beforeStop = appended.length
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 'turn-a7', reason: 'answer', agentId: 'a7' } as never)
   expect(await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it' && String(b.key ?? '').startsWith('ask-a7-')))).toBeDefined()
+  expect(await until(async () => appended.slice(beforeStop).find(line => line.includes('Release a7?')))).toBeDefined()
+  expect(appended.slice(beforeStop).filter(line => line.includes('no longer needs an answer for'))).toHaveLength(1)
   expect(files.get(`${MEMORY}/log.md`)).not.toContain('last step of a7 on')
-  // nor when it asks something else before its turn ends
+  // nor when it asks something else before its turn ends; what it recorded as waiting for the go-ahead, as its card's question, is
+  // then open again in its result, not answered by a Release it that did nothing
+  await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w-a8', agentId: 'a8', items: [{ text: 'Release a8 with the neck fix?', asked: true }] } as never)
   await working('a8', 'release', '/repo/wt')
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k-a8b', agentId: 'a8', text: 'A check failed: may I fix it first?', choices: ['Fix it', 'Not now'] } as never)
   await $.turn.complete({ answer: 'May I fix it first?', durationMs: 1, isAborted: false, turnId: 'turn-a8', reason: 'answer', agentId: 'a8' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Nothing was done on your "Release it": Claude asked something else first' }))).toBeDefined()
   expect(files.get(`${MEMORY}/log.md`)).not.toContain('last step of a8 on')
-  expect(resumed.filter(line => /^a[5678]: /.test(line))).toEqual([])
+  expect(cards().find(one => one.id === 'a8')?.waits).toEqual([{ text: 'Release a8 with the neck fix?', ask: expect.any(Number) }])
+  // A call Claude Code refused in that turn is Claudopus's notice on the card, not another question: the step is still done
+  await working('a9', 'Merge the PR and look at the build', '/repo/plain')
+  files.set('auto-refuse', 'Edit')
+  await $.tool.call({ tool: 'Edit', tool_use_id: 'e-a9', agentId: 'a9', file_path: '/repo/plain/notes.md', old_string: 'old', new_string: 'new' } as never)
+  files.delete('auto-refuse')
+  expect(await until(async () => list.find({ type: 'Text', text: 'Claude Code refused this task: Change the file notes.md.' }))).toBeDefined()
+  await $.turn.complete({ answer: 'Claudopus merges it.', durationMs: 1, isAborted: false, turnId: 'turn-a9', reason: 'answer', agentId: 'a9' } as never)
+  expect(await until(async () => ((files.get(`${MEMORY}/log.md`) ?? '').includes('last step of a9 on') ? true : undefined))).toBe(true)
+  expect(resumed.filter(line => /^a[56789]: /.test(line))).toEqual([])
   await list.unmount()
 })
 
@@ -2286,7 +2317,7 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
   await list.unmount()
 })
 
-test('a reply never waits behind a long command: one that may run for minutes goes to the background, a wait for the person is refused, and a short one held open is named on the card while the reply waits', async ($, on) => {
+test('a reply never waits behind a long command: one that may run for minutes is refused with the same call to send in the background, a wait for the person is refused, and a short one held open is named on the card while the reply waits', async ($, on) => {
   const { keep, settle, clock, held } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'try the reply box', wait: false, origin: composer })
@@ -2304,15 +2335,25 @@ test('a reply never waits behind a long command: one that may run for minutes go
     expect(wait.deny).toContain('End your step now')
   }
   expect(held.has('record')).toBe(false)
-  // A script of minutes, by its time limit or by its words, comes back at once and runs on in the background, the work told why
-  for (const [id, more] of [['s1', { timeout: 600000, description: 'Run the head check on the CQ500 scans' }], ['s2', { description: 'Waiting for the CQ500 results (about 5 min)' }], ['s4', { timeout: 600000, description: 'Run the tests', command: 'hold s4 &>test.log' }]] as const) {
-    const r = (await $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command: `hold ${id}`, ...more } as never)) as { context?: string[] }
-    expect([...held.keys()].some(key => key.startsWith(id))).toBe(true)
-    expect((r.context ?? []).join(' ')).toContain('replies reach you while it runs')
+  // A command known to run for minutes, by its words, or a build, render, browser run or download asking for a longer time limit, is
+  // refused with the same call to send in the background, never changed on its way (auto mode refuses a call a hook changed after it
+  // reviewed it: 484 calls on 16-17 Nov); sent so, it runs as written
+  for (const [id, more] of [['s1', { timeout: 600000, command: 'npm run build', description: 'Run the build' }], ['s2', { command: 'hold s2', description: 'Waiting for the CQ500 results (about 5 min)' }], ['s4', { timeout: 600000, description: 'Run the tests (about 6 min)', command: 'hold s4 &>test.log' }], ['s5', { timeout: 600000, command: 'curl -L -o scans.zip https://example.com/scans.zip', description: 'Get the scans' }]] as const) {
+    const r = (await $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', ...more } as never)) as { deny?: string }
+    expect([id, r.deny]).toEqual([id, expect.stringContaining('Send the same call again with `run_in_background: true` and nothing else changed')])
+    expect(r.deny).toContain('replies reach you while it runs')
+    expect([...held.keys()].some(key => key.startsWith(id))).toBe(false)
+    const sent = (await $.tool.call({ tool: 'Bash', tool_use_id: `${id}b`, agentId: 'a1', ...more, run_in_background: true } as never)) as { deny?: string; result?: { backgroundTaskId?: string } }
+    expect([id, sent.deny, sent.result?.backgroundTaskId]).toEqual([id, undefined, `bg-${id}b`])
+  }
+  // A long time limit alone says nothing: a push, a short test or a look runs as sent, held open and never refused
+  for (const [id, more] of [['q1', { timeout: 600000, command: 'git push', description: 'Push the branch' }], ['q2', { timeout: 300000, command: 'npm test', description: 'Run the tests' }], ['q3', { timeout: 600000, command: 'rg -n nose /repo', description: 'Look for the nose' }]] as const) {
+    const r = (await $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', ...more } as never)) as { deny?: string; result?: { backgroundTaskId?: string } }
+    expect([id, r.deny, r.result?.backgroundTaskId]).toEqual([id, undefined, undefined])
   }
   // A launcher that leaves its runs going is left as it is, as what it started is followed while it runs
   const launched = (await $.tool.call({ tool: 'Bash', tool_use_id: 's3', agentId: 'a1', command: 'nohup python run.py > run.log 2>&1 & echo $!', description: 'Wait for the head check to start on every set (about 20 min)', timeout: 600000 } as never)) as { context?: string[] }
-  expect((launched.context ?? []).join(' ')).not.toContain('replies reach you while it runs')
+  expect((launched as { deny?: string }).deny).toBeUndefined()
   // A short one is held open as asked; a reply given meanwhile is received at once and names what it waits behind
   void keep($.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1', command: 'hold build', description: 'Run the build' } as never))
   await until(async () => held.get('build'))
