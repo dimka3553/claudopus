@@ -782,7 +782,9 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   const frames = async (minutes: number) => {
     for (let at = 0; at < minutes; at += 4) {
       void keep(bash('a7', 'hold frame', `f-${(frame += 1)}`))
+      // Each call ends as it prints its count, before the clock moves: the last one's hold is taken away, so it is never let go twice
       const letFrame = await until(async () => held.get('frame'))
+      held.delete('frame')
       letFrame?.(`frame ${frame * 100}/9000`)
       await clock.advance(4 * 60_000)
     }
