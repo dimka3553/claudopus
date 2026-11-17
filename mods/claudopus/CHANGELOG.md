@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.174 · 17 November 2026
+- When you press Release it seconds after a task asks, while it is still finishing, Claudopus now releases it after your allow box once the task has ended, as it does when you press later. Before, such a press reached only the task, which left the release to Claudopus, so nothing went out.
+
 ## 0.2.173 · 17 November 2026
 - The panel and the bar above the prompt redraw themselves far less often with nothing new: when two requests for a drawing came together, each kept asking for another, in chains of up to 27 redraws, and every redraw made the hover under your pointer blink.
 

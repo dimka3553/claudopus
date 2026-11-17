@@ -499,11 +499,24 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
-  // A go-ahead to finish, on work that has ended, does its last step without starting the work again
-  if (!working && !isReply && ask.lastStep && ask.folder && ask.choices?.[0] === said) {
+  // A go-ahead to finish does its last step without starting the work again. Work still in the turn that asked is told the step is
+  // Claudopus's, and the step waits for that turn's end, so a release takes the branch as the task left it: a task asks, then writes
+  // its waits and report, and a press seconds later (16 Nov 19:49, 17 Nov 07:49) reached it as a plain answer, which it took, as its
+  // rules say, for Claudopus's to do, so nobody released
+  if (!isReply && ask.lastStep && ask.folder && ask.choices?.[0] === said) {
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line, isCard: true, askAt: ask.at })
     redraw($)
-    await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
+    if (!working) await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
+    else {
+      // Kept on the card first, so a reload meanwhile keeps it too, and done once the card has ended (stepsAtEnd); a write that fails
+      // here tells the work nothing and puts the question back (answerNow). The rest is caught, as the work has been told by then
+      await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, stepOnEnd: { ask, said } } : card)))
+      await tell($, one.id, `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\nClaudopus does that step (${cut(ask.lastStep, 160)}) once you end this turn: do not do it or start it yourself. Commit anything left on the branch now, change nothing on it after that, and end with your report.`)
+      const held = (err: unknown) => log($, `last step of ${one.id} not held: ${String(err)}`)
+      await stepLine($, one.id, `On your "${said}", Claudopus does the last step once Claude finishes`).catch(held)
+      // (a turn that ended while this was written has had its end's look already)
+      await stepsAtEnd($).catch(held)
+    }
     return void askGone($, one, said)
   }
   const to = isReply ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}`
