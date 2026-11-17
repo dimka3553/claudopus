@@ -21,8 +21,10 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
 }
 // A piece of work reads a message only between its calls, so a command it holds open keeps the person's reply from it until the
 // command ends (16 Nov: a reply waited 8 minutes behind a 9-minute wait for the person). One that may run past this long, by the
-// time limit it asks for or the time its words give it, goes to the background instead: the work is told when it ends, and reads a
-// reply at once meanwhile. Not the mod's own waits on helpers (which come back when a reply waits), a password or a key
+// time limit it asks for or the time its words give it, is refused with the same call to send in the background: the work is told
+// when it ends, and reads a reply at once meanwhile. Not turned to the background by the mod: auto mode reviews a call as the model
+// writes it, and refuses one a hook has changed since (16-17 Nov: 484 calls). Not the mod's own waits on helpers (which come back
+// when a reply waits), a password or a key
 const HELD_LONGEST = 2 * 60_000
 const isLongHeld = (call: { tool: string; command?: unknown; description?: unknown; timeout?: unknown; run_in_background?: unknown }) =>
   call.tool === 'Bash' &&
@@ -76,8 +78,12 @@ const NO_WAIT = (kind: WaitKind, isHelper = false) =>
   }`
 const NO_FOLLOW =
   'Not run: this only follows a log and would never end, so read the log once when you need it (tail -n 20); you are woken the moment your command ends.'
-const MOVED_BACK = (name: string) =>
-  `Claudopus started this command in the background instead of holding it open, because it may run for minutes. ${name}'s replies reach you while it runs. Claudopus will tell you when it ends; its output is in the file named above. Continue with what needs nothing from it, or end your step. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
+const SEND_BACKGROUND = (name: string) =>
+  `Not run: this command may run for minutes, and held open it keeps ${name}'s replies from you until it ends. Send the same call again with \`run_in_background: true\` and nothing else changed: Claudopus tells you when it ends, and ${name}'s replies reach you while it runs. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
+// The chat's own command, which runs only in the background
+const CHAT_SEND_BACKGROUND = 'Not run: the chat runs its own command only in the background. Send the same call again with `run_in_background: true` and nothing else changed.'
+// An agent named on an older model or on Haiku, told the alias to name instead
+const SEND_MODEL = (asked: string, better: string, alias: string) => `Not started: ${asked} is not used here. Send the same call again with \`model: "${alias}"\` (${better}) and nothing else changed.`
 
 // The files a command runs, as filesRun finds them, each read (the first megabyte): the mod's own runners (bin/admin, bin/secret,
 // bin/release, bin/keyring) are let through unread
@@ -302,6 +308,16 @@ const workHooks = (on: On) => {
       // a curl that would read a .curlrc of the home folder, which may send its output into a file, runs only with -q first
       && !(/^\s*curl\s/.test(chatCommand) && shellWords(chatCommand)[0]?.[1] !== '-q' && (await curlrcIn($)))
     const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
+    // A call is never changed on its way: auto mode reviews it as written and refuses one a hook has changed since, so one that must
+    // run in the background is refused with the same call to send that way, and the call sent again is reviewed as it runs
+    if (dir && !isOff && e.agentId !== undefined && isLongHeld(e as never)) {
+      await log($, `refused work ${e.agentId}'s long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
+      return { deny: SEND_BACKGROUND(who()) }
+    }
+    if (isChatCommand && !(e as { run_in_background?: unknown }).run_in_background) {
+      await log($, "refused the chat's own command held open")
+      return { deny: CHAT_SEND_BACKGROUND }
+    }
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
       // A call refused after a press (another of its commands denied, a grant not sealed) ends here: its note goes with it
@@ -337,9 +353,7 @@ const workHooks = (on: On) => {
       }
     }
     const nextHere = async (asked: typeof e) => {
-      const isMovedBack = Boolean(dir) && !isOff && e.agentId !== undefined && isLongHeld(asked as never)
-      const call = isMovedBack ? ({ ...asked, run_in_background: true } as typeof e) : asked
-      if (isMovedBack) await log($, `work ${e.agentId}'s long command started in the background: ${oneLine(String((asked as { description?: unknown }).description ?? '')).slice(0, 80)}`)
+      const call = asked
       // A piece of work's command is known by the process numbers handed out while it runs, so what it leaves going is found
       const isSpanned = Boolean(dir) && !isOff && e.agentId !== undefined && call.tool === 'Bash'
       const spanAt = isSpanned ? await $.clock.now() : 0
@@ -359,7 +373,7 @@ const workHooks = (on: On) => {
       const broke = r.deny ? '' : await crossEnded($, e as never, crossed, r.result, Boolean(r.isError)).catch(() => '')
       const crossing = r.deny ? [] : [r.isError && e.tool !== 'Bash' ? '' : (crossed.context ?? ''), broke].filter(Boolean)
       const told = crossing.length && !shown.deny ? ({ ...shown, context: [...((shown as { context?: string[] }).context ?? []), ...crossing] } as typeof shown) : shown
-      return isMovedBack && !told.deny && !told.isError ? ({ ...told, context: [...((told as { context?: string[] }).context ?? []), MOVED_BACK(who())] } as typeof told) : told
+      return told
     }
     // Work the person stopped is not set going again, by the chat or by the work above a helper of it: no message to it, no resume,
     // no fresh agent for the same task, until their next message
@@ -371,6 +385,17 @@ const workHooks = (on: On) => {
         await log($, `refused ${e.tool} that would set going again ${held.id}, which the person stopped`)
         return { deny: named(STOPPED_REFUSED(titleOf(held))) }
       }
+    }
+    // No agent, the chat's or a work's helper, is started on an older model or on Haiku: one named so is refused with its family's
+    // newest (Haiku's is Sonnet) to name, by its alias, which the Agent tool takes. One of the mod's kinds that starts on its kind's own
+    // model whatever is named (a quick task, a reader, a check) is left as written
+    const kindModel = ['quick', 'reader', 'check'].includes(KIND_OF(String((e as { subagent_type?: unknown }).subagent_type ?? '')) ?? '')
+    const askedModel = !isOff && e.tool === 'Agent' && (e as { subagent_type?: unknown }).subagent_type !== 'fork' && !kindModel ? String((e as { model?: unknown }).model ?? '') : ''
+    const better = askedModel ? rightModel(askedModel) : undefined
+    if (better) {
+      const alias = (modelName(better).split(' ')[0] ?? '').toLowerCase()
+      await log($, `refused an Agent call on ${modelName(askedModel)}: told to name ${modelName(better)}`)
+      return { deny: SEND_MODEL(modelName(askedModel), modelName(better), alias) }
     }
     // A message of the person's that the chat's own thread passes on to work under way is a steer: that work is told so, and owes
     // a line saying what it decided. It is kept by the card in their words. Any other message to work under way, a helper's reply,
@@ -500,15 +525,6 @@ const workHooks = (on: On) => {
       if (!r.deny && !r.isError && isLetGoNow) await stopHelpers($, e.agentId, true).catch(err => log($, `helpers of ${e.agentId} not stopped: ${String(err)}`))
       return r
     }
-    // No agent, the chat's or a work's helper, is started on an older model or on Haiku: one named so starts on its family's newest
-    // (Haiku's is Sonnet), by its alias, which the Agent tool takes
-    const askedModel = !isOff && e.tool === 'Agent' && (e as { subagent_type?: unknown }).subagent_type !== 'fork' ? String((e as { model?: unknown }).model ?? '') : ''
-    const better = askedModel ? rightModel(askedModel) : undefined
-    if (better) {
-      const alias = (modelName(better).split(' ')[0] ?? '').toLowerCase()
-      await log($, `an Agent call on ${modelName(askedModel)} starts on ${modelName(better)}`)
-      return next({ ...e, model: alias } as typeof e)
-    }
     if (e.agentId !== undefined) return next(e)
     if (isOff || !(await read($, me)).isChat) return next(e)
     // Work the chat starts is a fresh agent on a model it names: a copy of the chat, or an agent left to the chat's own model, is refused
@@ -537,7 +553,7 @@ const workHooks = (on: On) => {
     if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) || isPaneShow(e)) return next(e)
     // The chat's single command always runs in the background, so no command holds the chat; Claudopus stops it at its limit
     if (isChatCommand) {
-      const r = await next({ ...e, run_in_background: true } as typeof e)
+      const r = await next(e)
       if (!r.deny && !r.isError) await chatCommandStarted($, e as never, r.result).catch(err => log($, `the chat's command not followed: ${String(err)}`))
       return r
     }

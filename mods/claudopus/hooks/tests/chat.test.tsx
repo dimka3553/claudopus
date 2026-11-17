@@ -753,25 +753,29 @@ test('work starts as a fresh agent from written instructions, never as a copy of
   expect(prompts[0]).toContain(`${MEMORY}/words/engine-id.md`)
 })
 
-test('no agent is started on an older model or on Haiku, by the chat or by a piece of work: one named so starts on its family\'s newest; the aliases and their newest versions pass as named', async ($, on) => {
+test('no agent is started on an older model or on Haiku, by the chat or by a piece of work: one named so is refused with its family\'s newest to name, its input never changed; the aliases and their newest versions pass as named', async ($, on) => {
   const { files, agentModels } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   const call = async (model: string, agentId?: string) => {
+    const before = agentModels.length
     const r = await $.tool.call({ tool: 'Agent', tool_use_id: `m-${model}-${agentId ?? ''}`, prompt: 'fix the nose', subagent_type: 'general-purpose', model, ...(agentId ? { agentId } : {}) } as never)
-    return { deny: (r as { deny?: string }).deny, model: agentModels.at(-1) }
+    const deny = (r as { deny?: string }).deny
+    return deny ? { deny: /`model: "(\w+)"`/.exec(deny)?.[1] ? `send ${/`model: "(\w+)"`/.exec(deny)?.[1]}` : deny, model: agentModels.length > before ? agentModels.at(-1) : 'not started' } : { deny, model: agentModels.at(-1) }
   }
 
   // A newer version than the mod knows is no older model; nor is an id with a date, a window or a provider around it
   for (const model of ['opus', 'sonnet', 'fable', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2', 'claude-opus-5.5', 'claude-opus-5-6', 'claude-opus-6', 'claude-fable-5-3', 'claude-sonnet-6', 'claude-opus-5-5-20261001', 'opus[1m]', 'us.anthropic.claude-opus-5-5-v1:0', 'inherit']) expect(await call(model)).toEqual({ deny: undefined, model })
   // An older version, a full id or not, starts on its family's newest by its alias, and Haiku on Sonnet
-  for (const [model, alias] of [['haiku', 'sonnet'], ['claude-haiku-5-5', 'sonnet'], ['claude-opus-4-8', 'opus'], ['claude-opus-5', 'opus'], ['claude-sonnet-5', 'sonnet'], ['claude-fable-5-1', 'fable'], ['claude-3-5-sonnet-20241022', 'sonnet'], ['claude-sonnet-4-5-20250929', 'sonnet'], ['claude-opus-4-8[1m]', 'opus']]) expect(await call(model!)).toEqual({ deny: undefined, model: alias })
+  for (const [model, alias] of [['haiku', 'sonnet'], ['claude-haiku-5-5', 'sonnet'], ['claude-opus-4-8', 'opus'], ['claude-opus-5', 'opus'], ['claude-sonnet-5', 'sonnet'], ['claude-fable-5-1', 'fable'], ['claude-3-5-sonnet-20241022', 'sonnet'], ['claude-sonnet-4-5-20250929', 'sonnet'], ['claude-opus-4-8[1m]', 'opus']]) expect(await call(model!)).toEqual({ deny: `send ${alias}`, model: 'not started' })
   // A helper a piece of work starts is held to the same, and one that names no model keeps its work's
-  expect(await call('haiku', 'a1')).toEqual({ deny: undefined, model: 'sonnet' })
-  expect(await call('claude-opus-4-8', 'a1')).toEqual({ deny: undefined, model: 'opus' })
+  expect(await call('haiku', 'a1')).toEqual({ deny: 'send sonnet', model: 'not started' })
+  expect(await call('claude-opus-4-8', 'a1')).toEqual({ deny: 'send opus', model: 'not started' })
   expect(await call('sonnet', 'a1')).toEqual({ deny: undefined, model: 'sonnet' })
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'h0', prompt: 'look it up', subagent_type: 'general-purpose', agentId: 'a1' } as never)).deny).toBeUndefined()
-  expect(files.get(`${MEMORY}/log.md`)).toContain('an Agent call on Opus 4.8 starts on Opus 5.5')
+  // A kind that starts on its own kind's model whatever is named is left as written
+  for (const type of ['claudopus:quick', 'claudopus:reader', 'claudopus:check']) expect((await $.tool.call({ tool: 'Agent', tool_use_id: `k-${type}`, prompt: 'p', subagent_type: type, model: 'haiku' } as never)).deny).toBeUndefined()
+  expect(files.get(`${MEMORY}/log.md`)).toContain('refused an Agent call on Opus 4.8: told to name Opus 5.5')
 })
 
 test('every start is held to a current model: an older id, a parent on an older model, a checker weaker than its builder, a workflow agent and a copy', async ($, on) => {
@@ -868,8 +872,9 @@ test('what counts as current follows the newest model the engine offers, never a
   for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'claude-opus-6', messageCount: 2, agentId: 'a1' })) void _
   await $.agent.spawn({ ...spawn, prompt: 'p', model: 'claude-opus-5-5', parentModel: 'claude-opus-6', parentAgentId: 'a1' } as never)
   expect(asked.at(-1)).toBe('claude-opus-6')
-  await $.tool.call({ tool: 'Agent', tool_use_id: 'n1', prompt: 'p', subagent_type: 'general-purpose', model: 'claude-opus-5-5', agentId: 'a1' } as never)
-  expect(agentModels.at(-1)).toBe('opus')
+  const n1 = (await $.tool.call({ tool: 'Agent', tool_use_id: 'n1', prompt: 'p', subagent_type: 'general-purpose', model: 'claude-opus-5-5', agentId: 'a1' } as never)) as { deny?: string }
+  expect(n1.deny).toContain('`model: "opus"` (Opus 6)')
+  expect(agentModels).toEqual([])
 })
 
 test('with Haiku named in the settings for a kind of work, an agent on Haiku is let through; an older model still is not', async ($, on) => {
@@ -879,8 +884,8 @@ test('with Haiku named in the settings for a kind of work, an agent on Haiku is 
   await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', prompt: 'index', subagent_type: 'general-purpose', model: 'haiku' } as never)).deny).toBeUndefined()
   expect(agentModels.at(-1)).toBe('haiku')
-  await $.tool.call({ tool: 'Agent', tool_use_id: 'c2', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-opus-4-8' } as never)
-  expect(agentModels.at(-1)).toBe('opus')
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c2', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-opus-4-8' } as never)).deny).toContain('`model: "opus"`')
+  expect(agentModels).toEqual(['haiku'])
 })
 
 test('with the handing-over switched off the mod refuses no model and moves no step', async ($, on) => {
@@ -1160,7 +1165,11 @@ test("a chat's own thread may only read, run a single command in the background,
 
   // A single command it runs itself, always in the background; reading a file, more than one command, or a runner is not that
   files.set('git:branch', 'fix-nose')
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1', command: 'git push' } as never)).deny).toBeUndefined()
+  // Sent to be held open, it is refused with the same call to send, never changed on its way: auto mode refuses a call a hook changed
+  const held = (await $.tool.call({ tool: 'Bash', tool_use_id: 't0', command: 'git push', description: 'Push the branch' } as never)) as { deny?: string }
+  expect(held.deny).toContain('Send the same call again with `run_in_background: true` and nothing else changed')
+  expect(files.get(`${MEMORY}/log.md`)).not.toContain("the chat's own command started in the background (bg-t0)")
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1', command: 'git push', run_in_background: true } as never)).deny).toBeUndefined()
   files.delete('git:branch')
   expect(files.get(`${MEMORY}/log.md`)).toContain("the chat's own command started in the background (bg-t1)")
   // As it ends, its notice carries how it ended and its last three lines, read from its output file
@@ -1173,7 +1182,7 @@ test("a chat's own thread may only read, run a single command in the background,
   expect(endedText).toContain('ended (Background command "git push" completed (exit code 0))')
   // A kept key in those lines is hidden, as in any tool's answer
   files.set('keychain:API_KEY', 'sk-live-123456')
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1k', command: 'git status' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1k', command: 'git status', run_in_background: true } as never)).deny).toBeUndefined()
   files.set('/tmp/tasks/bg-t1k.output', 'On branch main\ntoken sk-live-123456\n')
   const keyed = ((await $.prompt.submit({ text: notice('bg-t1k', 'completed', 'Background command "git status" completed (exit code 0)'), wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[] }).context?.join('\n') ?? ''
   expect(keyed).toContain('token [hidden API_KEY]')
@@ -1220,7 +1229,7 @@ test("a chat's own thread may only read, run a single command in the background,
     'open -R /repo/run.sh',
     'open -e /repo/notes.txt',
   ].entries())
-    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `t1g${i}`, command } as never)).deny]).toEqual([command, undefined])
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `t1g${i}`, command, run_in_background: true } as never)).deny]).toEqual([command, undefined])
   // but nothing that runs what it opens, sends data, writes a file or asks another machine
   for (const [i, command] of [
     'open /repo/deploy.command',
@@ -1260,7 +1269,7 @@ test("a chat's own thread may only read, run a single command in the background,
   // A .curlrc in the home folder, which may send curl's output into a file, is kept out with -q first
   files.set('/home/sam/.curlrc', 'output = /repo/x')
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1rc', command: 'curl -s http://localhost:3000/' } as never)).deny).toContain('-q comes first')
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1rc-q', command: 'curl -q -s http://localhost:3000/' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1rc-q', command: 'curl -q -s http://localhost:3000/', run_in_background: true } as never)).deny).toBeUndefined()
   files.delete('/home/sam/.curlrc')
   // The browser pane's preview of a local page, its list, its server's log and its tabs the chat calls itself; a preview that starts a
   // server by name or shows another site, a stop, and the pane's clicks and scripts are a task's
@@ -1285,7 +1294,7 @@ test("a chat's own thread may only read, run a single command in the background,
   expect((await $.tool.call({ tool: 'mcp__Claude_Browser__preview_start', tool_use_id: 't1q-shape', name: 'dev' } as never)).deny).toContain('only with a `url` of a local address')
   // A push only of the branch it is on, never from main and never to it by another spelling, nor anything git is set to run
   files.set('git:branch', 'fix-nose')
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1h', command: 'git push -u origin fix-nose' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1h', command: 'git push -u origin fix-nose', run_in_background: true } as never)).deny).toBeUndefined()
   for (const [i, command] of ["git -c core.fsmonitor='touch x' status", 'git -c remote.origin.push=HEAD:main push origin', 'git push origin HEAD:heads/main', 'git push origin HEAD:{main,x}', "git push origin HEAD:$'main'", 'git push origin HEAD:${X:-main}', 'git push --all', 'git push --mirror', 'git push --force', 'git push --delete origin old', 'git fetch origin x:main', 'git push origin main', 'git --config-env=core.pager=X log'].entries())
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1i${i}`, command } as never)).deny ?? 'ran').not.toBe('ran')
   files.set('git:branch', 'main')
@@ -1323,7 +1332,7 @@ test("a chat's own thread may only read, run a single command in the background,
   await $.session.start(start)
   await $.prompt.submit({ text: 'push it', wait: false, origin: composer })
   files.set('git:branch', 'fix-nose')
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't9', command: 'git push' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't9', command: 'git push', run_in_background: true } as never)).deny).toBeUndefined()
   files.delete('git:branch')
 })
 

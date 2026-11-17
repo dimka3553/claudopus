@@ -9957,8 +9957,10 @@ const NO_WAIT = (kind: WaitKind, isHelper = false) =>
   }`
 const NO_FOLLOW =
   'Not run: this only follows a log and would never end, so read the log once when you need it (tail -n 20); you are woken the moment your command ends.'
-const MOVED_BACK = (name: string) =>
-  `Claudopus started this command in the background instead of holding it open, because it may run for minutes. ${name}'s replies reach you while it runs. Claudopus will tell you when it ends; its output is in the file named above. Continue with what needs nothing from it, or end your step. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
+const SEND_BACKGROUND = (name: string) =>
+  `Not run: this command may run for minutes, and held open it keeps ${name}'s replies from you until it ends. Send the same call again with \`run_in_background: true\` and nothing else changed: Claudopus tells you when it ends, and ${name}'s replies reach you while it runs. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
+const CHAT_SEND_BACKGROUND = 'Not run: the chat runs its own command only in the background. Send the same call again with `run_in_background: true` and nothing else changed.'
+const SEND_MODEL = (asked: string, better: string, alias: string) => `Not started: ${asked} is not used here. Send the same call again with \`model: "${alias}"\` (${better}) and nothing else changed.`
 
 const scriptsRun = async ($: EngineInterface, command: string) => {
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
@@ -10139,6 +10141,14 @@ const workHooks = (on: On) => {
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
       && !(/^\s*curl\s/.test(chatCommand) && shellWords(chatCommand)[0]?.[1] !== '-q' && (await curlrcIn($)))
     const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
+    if (dir && !isOff && e.agentId !== undefined && isLongHeld(e as never)) {
+      await log($, `refused work ${e.agentId}'s long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
+      return { deny: SEND_BACKGROUND(who()) }
+    }
+    if (isChatCommand && !(e as { run_in_background?: unknown }).run_in_background) {
+      await log($, "refused the chat's own command held open")
+      return { deny: CHAT_SEND_BACKGROUND }
+    }
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
       if (gated.deny) return (await callRefused($, e.tool_use_id), await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: gated.deny })
@@ -10169,9 +10179,7 @@ const workHooks = (on: On) => {
       }
     }
     const nextHere = async (asked: typeof e) => {
-      const isMovedBack = Boolean(dir) && !isOff && e.agentId !== undefined && isLongHeld(asked as never)
-      const call = isMovedBack ? ({ ...asked, run_in_background: true } as typeof e) : asked
-      if (isMovedBack) await log($, `work ${e.agentId}'s long command started in the background: ${oneLine(String((asked as { description?: unknown }).description ?? '')).slice(0, 80)}`)
+      const call = asked
       const isSpanned = Boolean(dir) && !isOff && e.agentId !== undefined && call.tool === 'Bash'
       const spanAt = isSpanned ? await $.clock.now() : 0
       const from = isSpanned ? await pidNow($) : 0
@@ -10187,7 +10195,7 @@ const workHooks = (on: On) => {
       const broke = r.deny ? '' : await crossEnded($, e as never, crossed, r.result, Boolean(r.isError)).catch(() => '')
       const crossing = r.deny ? [] : [r.isError && e.tool !== 'Bash' ? '' : (crossed.context ?? ''), broke].filter(Boolean)
       const told = crossing.length && !shown.deny ? ({ ...shown, context: [...((shown as { context?: string[] }).context ?? []), ...crossing] } as typeof shown) : shown
-      return isMovedBack && !told.deny && !told.isError ? ({ ...told, context: [...((told as { context?: string[] }).context ?? []), MOVED_BACK(who())] } as typeof told) : told
+      return told
     }
     if (dir && !isOff && (e.tool === 'SendMessage' || e.tool === 'Agent')) {
       const call = e as unknown as { to?: unknown; resume?: unknown; description?: unknown; prompt?: unknown; subagent_type?: unknown }
@@ -10197,6 +10205,14 @@ const workHooks = (on: On) => {
         await log($, `refused ${e.tool} that would set going again ${held.id}, which the person stopped`)
         return { deny: named(STOPPED_REFUSED(titleOf(held))) }
       }
+    }
+    const kindModel = ['quick', 'reader', 'check'].includes(KIND_OF(String((e as { subagent_type?: unknown }).subagent_type ?? '')) ?? '')
+    const askedModel = !isOff && e.tool === 'Agent' && (e as { subagent_type?: unknown }).subagent_type !== 'fork' && !kindModel ? String((e as { model?: unknown }).model ?? '') : ''
+    const better = askedModel ? rightModel(askedModel) : undefined
+    if (better) {
+      const alias = (modelName(better).split(' ')[0] ?? '').toLowerCase()
+      await log($, `refused an Agent call on ${modelName(askedModel)}: told to name ${modelName(better)}`)
+      return { deny: SEND_MODEL(modelName(askedModel), modelName(better), alias) }
     }
     let steered = ''
     let from = ''
@@ -10303,13 +10319,6 @@ const workHooks = (on: On) => {
       if (!r.deny && !r.isError && isLetGoNow) await stopHelpers($, e.agentId, true).catch(err => log($, `helpers of ${e.agentId} not stopped: ${String(err)}`))
       return r
     }
-    const askedModel = !isOff && e.tool === 'Agent' && (e as { subagent_type?: unknown }).subagent_type !== 'fork' ? String((e as { model?: unknown }).model ?? '') : ''
-    const better = askedModel ? rightModel(askedModel) : undefined
-    if (better) {
-      const alias = (modelName(better).split(' ')[0] ?? '').toLowerCase()
-      await log($, `an Agent call on ${modelName(askedModel)} starts on ${modelName(better)}`)
-      return next({ ...e, model: alias } as typeof e)
-    }
     if (e.agentId !== undefined) return next(e)
     if (isOff || !(await read($, me)).isChat) return next(e)
     if (e.tool === 'Agent') {
@@ -10335,7 +10344,7 @@ const workHooks = (on: On) => {
     }
     if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) || isPaneShow(e)) return next(e)
     if (isChatCommand) {
-      const r = await next({ ...e, run_in_background: true } as typeof e)
+      const r = await next(e)
       if (!r.deny && !r.isError) await chatCommandStarted($, e as never, r.result).catch(err => log($, `the chat's command not followed: ${String(err)}`))
       return r
     }
