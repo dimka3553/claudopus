@@ -10,13 +10,15 @@ const RUNNING_SHOWN = 2 * 60_000
 const SEEN_KEPT = 5000
 // Only this many lines of one result are looked at
 const LINES_READ = 2000
-// How many times work that waits on silent helpers is started again with a nudge: once to ask them, then to hand back what it has;
-// still stuck after that, the chat is told
-const NUDGES_MOST = 2
+// Work whose step ended while all its helpers sit silent: Claudopus checks in after this long, orders it to hand back what it has
+// after twice it, and tells the chat it is stuck after three times it, each on time
+const HELPER_WAIT_STEP = 12 * 60_000
 // A helper's call running this long no longer shows it at work: no command of the engine's runs so long in the foreground
 const LIVE_CALL_MOST = 30 * 60_000
-// When each agent last began or ended a call, so one that prints only a new number each call is still seen at work
-const lastCallAt = new Map<string, number>()
+// What each agent's last call returned, whole, and when a call last returned something different: a frame count that moves on is
+// output that changed, a call that says what the last one said is not
+const lastResult = new Map<string, string>()
+const changedAt = new Map<string, number>()
 
 // The calls running now, by tool_use_id: whose, what, since when
 // Work the mod started again after it had stopped mid-step: once only; stuck again, it is only told to the chat
@@ -63,7 +65,6 @@ const callBegun = async ($: EngineInterface, id: string, agent: string, tool: st
   const cmd = tool === 'Bash' ? oneLine(String(input?.command ?? '')).slice(0, 400) : ''
   const label = oneLine(String(input?.description ?? '') || cmd.split('\n')[0] || '').slice(0, 160)
   inFlight.set(id, { agent, what: runningWhat(tool), at: await $.clock.now(), ...(cmd ? { cmd, label } : {}) })
-  lastCallAt.set(agent, await $.clock.now())
   await changeTodos($, list => withRunning(list, agent))
 }
 
@@ -72,9 +73,10 @@ const callBegun = async ($: EngineInterface, id: string, agent: string, tool: st
 const callEnded = async ($: EngineInterface, id: string, agent: string, tool: string, r: { result?: unknown; deny?: unknown } | undefined) => {
   inFlight.delete(id)
   const now = await $.clock.now()
-  lastCallAt.set(agent, now)
   let isNew = false
   if (r && !r.deny && !tool.startsWith(TOOLS) && !tool.startsWith(OLD_TOOLS)) {
+    const whole = (typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? '')).slice(0, 20_000)
+    if (lastResult.get(agent) !== whole) (lastResult.set(agent, whole), changedAt.set(agent, now))
     const seen = seenLines.get(agent) ?? new Set<string>()
     for (const line of resultLines(r.result)) if (!seen.has(line)) ((isNew = true), seen.add(line))
     if (seen.size > SEEN_KEPT) seenLines.set(agent, new Set([...seen].slice(-SEEN_KEPT / 2)))
@@ -83,18 +85,23 @@ const callEnded = async ($: EngineInterface, id: string, agent: string, tool: st
   await changeTodos($, list => withRunning(list, agent, isNew ? now : undefined))
 }
 
-// A helper that sits silent: neither it nor any helper under it is in a call (or only one that has run past LIVE_CALL_MOST), runs a
-// command of its own in the background or detached, or has begun or ended a call or had something new for STUCK_AFTER. One rendering
-// for hours, a call or a command after another, is at work, whatever it prints
+// When a helper last showed it was at work: it started, ended (with its result), or a call of its returned something different
+const helperMovedAt = (one: Todo) => Math.max(one.startedAt, one.endedAt, one.newAt ?? 0, changedAt.get(one.id) ?? 0)
+// A helper that sits silent: neither it nor any helper under it is in a call younger than LIVE_CALL_MOST, runs a command of its own
+// in the background (a watch, or a process it left running such as a dev server, is no work), or has shown it was at work for
+// STUCK_AFTER. One rendering in the background, or printing a new frame count call after call, is at work
 const isSilent = (list: Todo[], helper: Todo, at: number) =>
+  !isBusy(list, helper, at) && [helper, ...underOf(list, helper.id)].filter(one => one.status === 'working').every(one => at - helperMovedAt(one) >= STUCK_AFTER)
+// A helper visibly at work now: it, or one under it, is in a call younger than LIVE_CALL_MOST or runs a command of its own in the
+// background
+const isBusy = (list: Todo[], helper: Todo, at: number) =>
   [helper, ...underOf(list, helper.id)]
     .filter(one => one.status === 'working')
-    .every(one => {
+    .some(one => {
       const call = runningOf(one.id)
-      if (call && at - call.at < LIVE_CALL_MOST) return false
-      if (one.bg?.length || one.detached?.length) return false
-      return at - Math.max(one.startedAt, one.newAt ?? 0, lastCallAt.get(one.id) ?? 0) >= STUCK_AFTER
+      return Boolean((call && at - call.at < LIVE_CALL_MOST) || one.bg?.some(b => !b.isWatch))
     })
+const runningKids = (list: Todo[], id: string) => list.filter(kid => kid.parentId === id && kid.status === 'working')
 
 // When something last moved under a piece of work: it or a helper started, ended, or had something new come back
 const movedAt = (list: Todo[], top: Todo) => Math.max(...[top, ...underOf(list, top.id)].map(one => Math.max(one.startedAt, one.endedAt, one.newAt ?? 0)))
@@ -105,12 +112,9 @@ const movedAt = (list: Todo[], top: Todo) => Math.max(...[top, ...underOf(list, 
 const lookStuck = async ($: EngineInterface) => {
   const now = await $.clock.now()
   const told: Todo[] = []
-  // Work nudged about its helpers that is still stuck a while after: nudged again
-  const again: Todo[] = []
   await changeTodos($, list => {
     // Told afresh on each run of the change, as it runs again on a list written meanwhile
     told.length = 0
-    again.length = 0
     let isChanged = false
     const isPrompted = (one: Todo) => waiting.some(p => p.agent && topOf(list, p.agent) === one.id)
     const next = list.map(one => {
@@ -119,46 +123,27 @@ const lookStuck = async ($: EngineInterface) => {
       const isWaitingOwn = Boolean(one.waitsSince && one.bg?.some(b => !b.isWatch))
       // Nor work that asked Claudopus to start it again: that look has its own end, which starts it (lookWakes)
       const isStuck = one.status === 'working' && !one.wakeWhen && !(one.ask && !one.ask.replied) && !one.admins?.length && !one.heldCalls?.length && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
-      // The nudges a wait on helpers had start over once a helper of its brings something new, with the leave to hand back they gave,
-      // and are let go once none of its helpers runs
-      const kids = underOf(list, one.id)
-      const isHelperNews = Boolean(one.nudged && kids.some(kid => Math.max(kid.startedAt, kid.endedAt, kid.newAt ?? 0, lastCallAt.get(kid.id) ?? 0) > (one.nudged?.at ?? 0)))
-      if (isHelperNews) ((isChanged = true), (one = { ...one, nudged: undefined, mayHandBack: undefined }))
-      if (one.nudged && !kids.some(kid => kid.parentId === one.id && kid.status === 'working')) ((isChanged = true), (one = { ...one, nudged: undefined }))
       if (isStuck && !one.stuckAt) return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) })
       if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined })
-      // Looked at again: work nudged a while ago and still stuck, and work flagged earlier whose helpers have all gone silent since
-      if (isStuck && one.nudged && !one.nudged.isGivenUp && now - one.nudged.at >= STUCK_AFTER) again.push(one)
-      const running = kids.filter(kid => kid.parentId === one.id && kid.status === 'working')
-      if (isStuck && one.stuckAt && !one.nudged && running.length && running.every(kid => isSilent(list, kid, now))) again.push(one)
       return one
     })
     return isChanged ? next : list
   })
   // Stuck work the engine no longer runs had stopped mid-step (the app restarted, the Mac slept, its run was cut off): it is
   // started again at once with a message of the mod's own, rather than waiting for the chat or the person to notice
-  for (const one of [...told, ...again]) {
-    const isAgain = !told.includes(one)
-    const mins = Math.round((now - movedAt(await read($, todos), one)) / 60_000)
-    // Asked to check on its helpers and then to hand back, and still stuck: nothing more of Claudopus's would start it, so the chat
-    // is told plainly, and may write to it; its card says so
-    if (isAgain && (one.nudged?.count ?? 0) >= NUDGES_MOST) {
-      await changeTodos($, list => list.map(todo => (todo.id === one.id && todo.nudged ? { ...todo, nudged: { ...todo.nudged, isGivenUp: true } } : todo)))
-      await log($, `work ${one.id} still stuck after Claudopus asked it to hand back: the chat is told`)
-      await sayInChat($, named(`${GAVE_UP_IN_CHAT(titleOf(one), mins)} ${STUCK_ASK}`), named(GAVE_UP_IN_CHAT(titleOf(one), mins)))
-      continue
-    }
-    // Work that ended its step to wait for helpers that all sit silent is started again with a nudge, as nothing else would start it
-    // (16 Nov: tasks sat for hours waiting on helpers, the chat told only that they might be stuck). The engine is read right before,
-    // so work already at a step again is not sent one
-    if (await nudgeAboutHelpers($, one, mins, now)) continue
-    // Already flagged and told: nothing more is said
-    if (isAgain) continue
+  for (const one of told) {
+    const list = await read($, todos)
+    const mins = Math.round((now - movedAt(list, one)) / 60_000)
+    // Work that waits on its helpers is not told of here: one visibly at work makes its card say it waits on their work, and with all
+    // of them silent and its step ended Claudopus follows its schedule (lookHelperWaits)
+    const helpers = runningKids(list, one.id)
+    const isScheduled = list.find(card => card.id === one.id)?.endedStepAt !== undefined && helpers.every(kid => isSilent(list, kid, now))
+    if (helpers.length && (helpers.some(kid => isBusy(list, kid, now)) || isScheduled)) continue
     const engine = await $.agent.list().catch(() => undefined)
     const status = engine?.find(agent => agent.id === one.id)?.status
     // Not work that only waits: on a helper the engine still runs, or on background work it holds
-    const helpers = underOf(await read($, todos), one.id).map(kid => kid.id)
-    const isHelped = Boolean(engine?.some(agent => (agent.parentId === one.id || helpers.includes(agent.id)) && WORKING.includes(agent.status)))
+    const under = underOf(list, one.id).map(kid => kid.id)
+    const isHelped = Boolean(engine?.some(agent => (agent.parentId === one.id || under.includes(agent.id)) && WORKING.includes(agent.status)))
     const isWaiting = WORKING.includes(String(status)) || isHelped
     // Only work the engine lists as no longer running: work it does not list at all is only flagged. Not work cut off by a
     // restart that the mod brings back itself, nor work just answered on its card, nor work started so once already
@@ -171,34 +156,57 @@ const lookStuck = async ($: EngineInterface) => {
       await sayInChat($, named(RESTARTED_IN_CHAT(titleOf(one), mins)))
     } else await sayInChat($, named(`${STUCK_IN_CHAT(titleOf(one), mins)} ${STUCK_ASK}`), named(STUCK_IN_CHAT(titleOf(one), mins)))
   }
+  await lookHelperWaits($, now)
   // What agents that have ended had seen come back is let go
   const list = await read($, todos)
   for (const agent of seenLines.keys()) if (!list.some(one => one.id === agent && one.status === 'working')) seenLines.delete(agent)
+  for (const agent of [...lastResult.keys()]) if (!list.some(one => one.id === agent && one.status === 'working')) (lastResult.delete(agent), changedAt.delete(agent))
 }
 
-// Work whose step has ended, waiting on helpers that all sit silent, is started again: first to check on them, then to hand back what
-// it has, which then goes through while they run. Whether it was
-const nudgeAboutHelpers = async ($: EngineInterface, one: Todo, mins: number, now: number) => {
-  const list = await read($, todos)
-  const card = list.find(todo => todo.id === one.id)
-  const nudges = card?.nudged?.count ?? 0
-  const kids = list.filter(kid => kid.parentId === one.id && kid.status === 'working')
-  if (!card || !kids.length || nudges >= NUDGES_MOST || card.handedBackAt !== undefined || isHeld(card) || stoppedHere.has(one.id) || pressed.has(one.id)) return false
-  // Not while a helper is at work, whatever it prints
-  if (!kids.every(kid => isSilent(list, kid, now))) return false
-  const engine = await $.agent.list().catch(() => undefined)
-  const status = engine?.find(agent => agent.id === one.id)?.status
-  const helpers = underOf(list, one.id).map(kid => kid.id)
-  const isHelped = Boolean(engine?.some(agent => (agent.parentId === one.id || helpers.includes(agent.id)) && WORKING.includes(agent.status)))
-  if (!status || WORKING.includes(String(status)) || !isHelped || (await isReplaced($))) return false
-  const isLast = nudges >= 1
-  const line = (isLast ? HELPERS_STILL_SILENT : HELPERS_SILENT)(mins, silentHelpers(list, one.id, now))
-  const r = await sendOwn($, { to: { agentId: one.id }, text: line }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
-  if (!r.isDelivered) return (await log($, `work ${one.id} not nudged about its helpers: ${r.reason}`), false)
-  await changeTodos($, all => all.map(todo => (todo.id === one.id ? { ...todo, nudged: { count: nudges + 1, at: now }, ...(isLast ? { mayHandBack: now } : {}) } : todo)))
-  await log($, `work ${one.id} waits on helpers that brought nothing new for ${mins} min: started again to ${isLast ? 'hand back what it has' : 'check on them'}`)
-  await sayInChat($, named(NUDGED_IN_CHAT(titleOf(one), mins, isLast)))
-  return true
+// Work whose step ended while all its helpers sit silent follows a fixed schedule from then: at HELPER_WAIT_STEP it is started again
+// to check on them, at twice it to hand back what it has (its report then goes through while they run), at three times it the chat
+// is told plainly that it is stuck and may write to it. Each step comes on time whether or not the last reached it; the schedule
+// starts over only when a helper hands back a result or prints something different (16 Nov: tasks sat for hours on helpers, the chat
+// told only that they might be stuck). Only working cards: one that has finished is left as it is
+const lookHelperWaits = async ($: EngineInterface, now: number) => {
+  const due: { id: string; step: number; mins: number }[] = []
+  await changeTodos($, list => {
+    due.length = 0
+    let isChanged = false
+    const next = list.map(one => {
+      if (one.parentId || one.chat || one.status !== 'working' || one.handedBackAt !== undefined) return one
+      const helpers = runningKids(list, one.id)
+      if (!helpers.length) return one.helperWait ? ((isChanged = true), { ...one, helperWait: undefined }) : one
+      // Since when: its step's end, or the latest a helper of its showed it was at work, whichever is later
+      const moved = Math.max(0, ...underOf(list, one.id).map(helperMovedAt))
+      let wait = one.helperWait
+      if (wait && moved > wait.from) wait = undefined
+      if (!wait && one.endedStepAt !== undefined) wait = { from: Math.max(one.endedStepAt, moved), done: 0 }
+      if (wait !== one.helperWait) ((isChanged = true), (one = { ...one, helperWait: wait }))
+      // A step is due once its time has come, its step has ended and every helper sits silent
+      if (wait && wait.done < 3 && now - wait.from >= HELPER_WAIT_STEP * (wait.done + 1) && one.endedStepAt !== undefined && helpers.every(kid => isSilent(list, kid, now)))
+        due.push({ id: one.id, step: wait.done + 1, mins: Math.round((now - wait.from) / 60_000) })
+      return one
+    })
+    return isChanged ? next : list
+  })
+  for (const { id, step, mins } of due) {
+    const list = await read($, todos)
+    const one = list.find(card => card.id === id)
+    if (!one || isHeld(one) || stoppedHere.has(id) || pressed.has(id) || (await isReplaced($))) continue
+    // (read right before: work at a step of its own again is not sent one, and the step waits for its step to end)
+    if (step < 3 && WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))) continue
+    await changeTodos($, all => all.map(card => (card.id === id && card.helperWait ? { ...card, helperWait: { ...card.helperWait, done: step }, ...(step === 2 ? { mayHandBack: card.mayHandBack ?? now } : {}) } : card)))
+    if (step === 3) {
+      await log($, `work ${id} still stuck ${mins} min on silent helpers after Claudopus asked it to hand back: the chat is told`)
+      await sayInChat($, named(`${GAVE_UP_IN_CHAT(titleOf(one), mins)} ${STUCK_ASK}`), named(GAVE_UP_IN_CHAT(titleOf(one), mins)))
+      continue
+    }
+    const line = (step === 2 ? HELPERS_STILL_SILENT : HELPERS_SILENT)(mins, silentHelpers(list, id, now))
+    const r = await sendOwn($, { to: { agentId: id }, text: line }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    await log($, `work ${id} waits on helpers silent for ${mins} min: ${r.isDelivered ? 'started again' : `not reached (${r.reason})`} to ${step === 2 ? 'hand back what it has' : 'check on them'}`)
+    await sayInChat($, named(NUDGED_IN_CHAT(titleOf(one), mins, step === 2)))
+  }
 }
 
 // The helpers a piece of work waits on, each by its title and id with what it runs and for how long, for its nudge
@@ -212,17 +220,20 @@ const silentHelpers = (list: Todo[], id: string, at: number) =>
 const stuckLine = (list: Todo[], one: Todo, at: number) => {
   if (!one.stuckAt) return ''
   const mins = Math.max(1, Math.round((at - one.stuckAt) / 60_000))
+  // A helper at work (a render in the background, a long call, output that changes) is no sign that nothing moves
+  if (runningKids(list, one.id).some(kid => isBusy(list, kid, at))) return "Waits on its helpers' work."
   const isLong = (kid: Todo) => Boolean(kid.running && at - kid.running.at >= RUNNING_SHOWN)
   const helpers = underOf(list, one.id).filter(kid => kid.status === 'working')
   const tail = helpers.length
     ? helpers.every(isLong) ? ` ${helpers.length === 1 ? 'Its helper is still' : helpers.length === 2 ? 'Both helpers are still' : `All ${helpers.length} helpers are still`} waiting.` : ''
     : isLong(one) ? ` One step has been running for ${took(at - (one.running?.at ?? at))}.` : ''
   // and what Claudopus did about it
-  const nudge = !one.nudged
+  const done = one.helperWait?.done ?? 0
+  const nudge = !done
     ? ''
-    : one.nudged.isGivenUp
+    : done >= 3
       ? ' Claudopus asked Claude to check on its helpers, then to hand back what it has, and told the chat it is stuck.'
-      : ` Claudopus asked Claude ${one.nudged.count >= 2 ? 'to hand back what it has' : 'to check on its helpers'}.`
+      : ` Claudopus asked Claude ${done >= 2 ? 'to hand back what it has' : 'to check on its helpers'}.`
   return `No progress for ${mins} min.${tail}${nudge}`
 }
 
