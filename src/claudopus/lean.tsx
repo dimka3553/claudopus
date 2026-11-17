@@ -197,7 +197,7 @@ const stepsAtEnd = async ($: EngineInterface) => {
     if (!held) continue
     const id = card.id
     if (card.byYou) await stepLine($, id, `Nothing was done on your "${held.said}": you stopped it first`)
-    else if (card.ask && card.ask.at !== held.ask.at) await stepLine($, id, `Nothing was done on your "${held.said}": Claude asked something else first`)
+    else if (card.ask && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) await stepLine($, id, `Nothing was done on your "${held.said}": Claude asked something else first`)
     else if (card.status !== 'done') {
       // pressed again as a fresh answer, as when an answer could not be sent (answerNow)
       answeredAsks.delete(`${id}:${held.ask.at}:${held.ask.text}`)
