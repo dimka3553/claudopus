@@ -496,6 +496,9 @@ test("a chat's own thread may only read, run a single command in the background,
   // A summary that is not the engine's plain one (a stop at a turn limit) is news, kept even with the plain words below it
   const limited = (await $.prompt.submit({ text: withResultEarly('a7', 'Agent "Fix the jaw" stopped at its 40-turn limit'), wait: false, origin: { kind: 'task-notification' } } as never)) as { drop?: string }
   expect(limited.drop).toBeUndefined()
+  // Nor can a title made to look like the plain words before a limit pass it off as plain
+  const posing = (await $.prompt.submit({ text: withResultEarly('a7', 'Agent "x" finished. y" stopped at its 40-turn limit'), wait: false, origin: { kind: 'task-notification' } } as never)) as { drop?: string }
+  expect(posing.drop).toBeUndefined()
   // So is one that a task waiting on its own command has no report yet, with the engine's artifact lines or not, and the two together
   const withResult = (id: string, summary: string, result: string) => notice(id, 'completed', summary).replace('</summary>', `</summary>\n<result>${result}\n</result>`)
   const NOT_YET = 'This agent has not reported yet: it is waiting on its own background work and will deliver its report through SubagentHandback when that finishes.'

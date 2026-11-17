@@ -7491,7 +7491,7 @@ const isBareNotice = (body: string) => {
   const note = /<note>([\s\S]*?)<\/note>/.exec(body)?.[1]
   if (note !== undefined && !ENGINE_NOTES.includes(note.trim())) return false
   const summary = /<summary>([\s\S]*?)<\/summary>/.exec(body)?.[1]
-  if (summary !== undefined && !/^Agent ".*" (?:finished|completed|is waiting on its own background work)(?:$|\. )/.test(summary.trim())) return false
+  if (summary !== undefined && !/^Agent ".*" (?:finished|is waiting on its own background work|completed\. Its report was already delivered to you as a message, so it is not repeated here\.)$/.test(summary.trim())) return false
   const left = body.replace(/<(task-id|tool-use-id|output-file|status|summary|note|usage)>[\s\S]*?<\/\1>/g, '').replace(/<result>([\s\S]*?)<\/result>/g, (_, result: string) => ENGINE_FILLER.reduce((one, sentence) => one.replace(sentence, ''), result))
   return ENGINE_FILLER.reduce((one, sentence) => one.replace(sentence, ''), left).trim() === ''
 }
