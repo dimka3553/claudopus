@@ -421,17 +421,12 @@ const workHooks = (on: On) => {
                   ? 'the task that started you'
                   : `the task${title(sender)}`
         }
-        // Words from the chat or the person, or a helper's own, are news: the nudges about its helpers start over, and leave to hand
-        // back while they run goes with them, unless the chat asks it to hand back what it has
-        const isNews = e.agentId === undefined || list.find(one => one.id === e.agentId)?.parentId === target.id
-        const isHandBackAsked = e.agentId === undefined && HAND_BACK_ASKED.test(message)
         await changeTodos($, list =>
           list.map(one =>
             one.id !== target.id
               ? one
               : {
                   ...one,
-                  ...(isNews ? { nudged: undefined, mayHandBack: isHandBackAsked ? now : undefined } : {}),
                   owes: isSteer ? 0 : one.owes,
                   entries: words && one.entries.at(-1)?.text !== words ? [...one.entries, { at: now, kind: 'steer' as const, text: words }].slice(-ENTRIES_KEPT) : one.entries,
                 },
@@ -445,6 +440,7 @@ const workHooks = (on: On) => {
       // What this work starts with the Agent tool is its helper, which the engine's own record does not always say
       if (e.tool === 'Agent') helperCalls.set(e.tool_use_id, id)
       endedByHandback.delete(id)
+      handedBackLetGo.delete(id)
       stoppedHere.delete(id)
       // Work that calls a tool is working: a card that had ended is back. Its steps are counted: to place a steer among them,
       // to see that a steer got its decision, and to see that its to-dos are still being kept
@@ -455,7 +451,7 @@ const workHooks = (on: On) => {
         await changeTodos($, list =>
           list.map(one => {
             if (one.id !== id) return one
-            const base = { ...(one.status === 'working' ? one : resumed(one, now)), steps: (one.steps ?? 0) + 1, answeredAt: undefined, waitsSince: undefined }
+            const base = { ...(one.status === 'working' ? one : resumed(one, now)), steps: (one.steps ?? 0) + 1, answeredAt: undefined, waitsSince: undefined, endedStepAt: undefined }
             if (isKeeping) return { ...base, quiet: 0, owes: isTool(e.tool, 'note') ? undefined : one.owes }
             const owes = one.owes === undefined ? undefined : one.owes + 1
             const quiet = (one.quiet ?? 0) + 1
@@ -490,6 +486,7 @@ const workHooks = (on: On) => {
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       else notedAtHandback.delete(e.agentId)
       // The helpers it was let hand back over that sit silent end with its report; those at work go on, their results reaching the chat
+      if (!r.deny && !r.isError && isLetGoNow) handedBackLetGo.add(e.agentId)
       if (!r.deny && !r.isError && isLetGoNow) await stopHelpers($, e.agentId, true).catch(err => log($, `helpers of ${e.agentId} not stopped: ${String(err)}`))
       return r
     }

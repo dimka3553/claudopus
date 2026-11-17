@@ -131,14 +131,16 @@ export type Todo = {
   // What it asked Claudopus to start it again for (wake_me), in place of a command that only waits: in its own words, a file to
   // appear, a line in that file, a page that answers, or only a time; when it asked, and the latest it is looked for
   wakeWhen?: { what: string; file?: string; text?: string; url?: string; at: number; until: number }
-  // What it was last woken for when that look ran out, and how many looks for it ran out in a row: after two, a look for the same
-  // thing is refused and it hands back what it has
-  wakeMisses?: { what: string; count: number }
-  // Claudopus started it again, its step ended, because nothing new came back from its helpers for a while: how many times (once to
-  // check on them, once to hand back what it has) and when last; `isGivenUp` once the chat was told it is stuck. Gone once a helper
-  // brings something new, someone writes to it, or no helper of its runs
-  nudged?: { count: number; at: number; isGivenUp?: boolean }
-  // Claudopus, or the chat, told it to hand back what it has: since when. Its report goes through while helpers run; gone with `nudged`
+  // What it was last woken for when that look ran out, by its file, line and page: a look for the same again is refused
+  wakeMissed?: { key: string; what: string }
+  // When its step last ended with helpers of its still running; absent while it takes a step
+  endedStepAt?: number
+  // Its step ended while all its helpers sit silent: since when, and how many of the steps Claudopus takes on a fixed schedule are
+  // done (1 a check-in at 12 minutes, 2 the order to hand back at 24, 3 the chat told it is stuck at 36). Starts over only when a
+  // helper hands back a result or prints something new
+  helperWait?: { from: number; done: number }
+  // Claudopus told it to hand back what it has (its wait ran out, or its helpers sat silent): since when. Its report goes through
+  // while helpers run, until it hands back
   mayHandBack?: number
   // Work cut off as the chat's process ended, not stopped by anyone: when, and when it went on again; `backAt` is absent while it
   // could not be started again

@@ -54,7 +54,7 @@ const toolHooks = (on: On) => {
   // A file, a page or a time nothing of the work's own makes is looked for by Claudopus, which starts the work again when it is
   // there: no command of the work's ever only waits (lookWakes)
   on('tool.call', { tool: 'mcp__claudopus__wake_me' }, async ($, e) => {
-    const input = e as unknown as { what?: unknown; file?: unknown; text?: unknown; url?: unknown; minutes?: unknown; why?: unknown }
+    const input = e as unknown as { what?: unknown; file?: unknown; text?: unknown; url?: unknown; minutes?: unknown }
     if (e.agentId === undefined) return { result: 'Only a background task is started again this way; the chat is started by the next message.' }
     // A helper that ends its step has ended: it hands back what it found and what it waits for, and its task asks to be woken
     if (!(await read($, todos)).some(one => one.id === e.agentId)) await sync($)
@@ -66,14 +66,12 @@ const toolHooks = (on: On) => {
     const text = file && typeof input.text === 'string' && input.text.trim() ? input.text.trim().slice(0, 200) : undefined
     if (typeof input.url === 'string' && input.url.trim() && !url) return { result: 'A page is named by its whole web address, starting http:// or https://.' }
     if (file && !file.startsWith('/') && !file.startsWith('~/')) return { result: 'Name the file by its full path.' }
-    // Longer than an hour only when the work says why it takes so long
-    const why = typeof input.why === 'string' ? input.why.trim() : ''
-    const minutes = Math.min(why ? WAKE_MOST_SAID : WAKE_MOST, Math.max(0.25, Number(input.minutes) > 0 ? Number(input.minutes) : file || url ? WAKE_LONGEST : 0))
+    const minutes = Math.min(WAKE_MOST, Math.max(0.25, Number(input.minutes) > 0 ? Number(input.minutes) : file || url ? WAKE_LONGEST : 0))
     if (!file && !url && !(Number(input.minutes) > 0)) return { result: 'Name a file, a page, or the minutes after which to start you again.' }
-    // Two looks in a row for this same thing ran out: it is not coming, and the work hands back what it has
-    const missed = (await read($, todos)).find(one => one.id === e.agentId)?.wakeMisses
-    if (missed && missed.count >= WAKE_MISSES_MOST && isSameWait(missed.what, what))
-      return { result: `Refused by Claudopus: the last two looks for ${missed.what} ran out with it never there. Hand back your report now with what you have, saying what never came and why.` }
+    // A look for the same file, line or page ran out already: it is not coming, and the work hands back what it has
+    const missed = (await read($, todos)).find(one => one.id === e.agentId)?.wakeMissed
+    if ((file || url) && missed?.key === wakeKey({ file, text, url }))
+      return { result: `Refused by Claudopus: the look for ${missed.what} ran out already. Hand back your report now with what you have, saying what never came and why.` }
     const at = await $.clock.now()
     // (its own card: a helper's is its own, not its work's)
     const agent = e.agentId
@@ -82,7 +80,7 @@ const toolHooks = (on: On) => {
     await changeTodos($, list => list.map(one => (one.id === agent ? ((isCard = true), { ...one, wakeWhen: { what, ...(file ? { file } : {}), ...(text ? { text } : {}), ...(url ? { url } : {}), at, until: at + minutes * 60_000 } }) : one)))
     if (!isCard) return { result: 'Claudopus has no card for you here, so it cannot start you again: carry on with what you can do now.' }
     redraw($)
-    return { result: `Claudopus looks ${file ? `for ${text ? `"${text}" in ` : ''}${file}` : url ? `at ${url}` : `at the clock`} and starts you again ${file || url ? `the moment it is there, or after ${Math.round(minutes)} min with word that it never came` : `in ${Math.round(minutes)} min`}${Number(input.minutes) > minutes && !why ? ` (at most ${WAKE_MOST} min unless you say in \`why\` what takes longer)` : ''}. End your step now, or carry on with what needs nothing from it.` }
+    return { result: `Claudopus looks ${file ? `for ${text ? `"${text}" in ` : ''}${file}` : url ? `at ${url}` : `at the clock`} and starts you again ${file || url ? `the moment it is there, or after ${Math.round(minutes)} min with word that it never came` : `in ${Math.round(minutes)} min`}${Number(input.minutes) > minutes ? ` (at most ${WAKE_MOST} min)` : ''}. End your step now, or carry on with what needs nothing from it.` }
   })
 
   // The work says what in its report waits on the person: it knows best. Its next report takes them, one item each. Each is a yes-or-no

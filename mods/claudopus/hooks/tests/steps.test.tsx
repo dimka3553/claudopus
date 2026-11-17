@@ -876,10 +876,10 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   expect(stopped).toEqual(expect.arrayContaining(['a1', 'a6']))
 })
 
-test("what nothing of the work's own makes, a file, a line in it, a page or a time, Claudopus looks for when asked and starts the work again once it is there, or once the longest look (15 min unless given, at most an hour) runs out, though the engine lists it as ended; two looks in a row that run out have it hand back what it has; work never reached is told to the chat; the card says so, with by when, in place of a command that would wait; a helper hands back instead", SLOW, async ($, on) => {
+test("what nothing of the work's own makes, a file, a line in it, a page or a time, Claudopus looks for when asked and starts the work again once it is there, or once the longest look (15 min unless given, at most an hour, always) runs out, though the engine lists it as ended; a look that ran out has it hand back what it has, which goes through while a helper runs, and the same file, line or page is not looked for again; a helper's result that comes after is told to the chat as late; work never reached is told to the chat; the card says so, with by when, in place of a command that would wait; a helper hands back instead", SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const unresumable = new Set<string>()
-  const { clock, files, resumed, logged } = world(on, { agents, unresumable })
+  const { clock, files, resumed, logged, appended } = world(on, { agents, unresumable })
   await $.session.start(start)
   await $.prompt.submit({ text: 'wait for the deploy', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Check the deploy', prompt: 'check' } as never)
@@ -907,8 +907,7 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
   expect(await until(async () => !(await lines()).some(text => text.startsWith('Claudopus starts Claude again')) || undefined)).toBe(true)
   // A time only, and a file that never comes: started when the time comes, or told it never came
   agents.a1 = 'completed'
-  expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w3l', agentId: 'a1', what: 'a look much later', minutes: 500 } as never)) as { result?: string }).result).toContain('in 60 min (at most 60 min unless you say')
-  expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w3m', agentId: 'a1', what: 'a look much later', minutes: 500, why: 'the Azure render takes about five hours' } as never)) as { result?: string }).result).toContain('in 360 min.')
+  expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w3l', agentId: 'a1', what: 'a look much later', minutes: 500 } as never)) as { result?: string }).result).toContain('in 60 min (at most 60 min).')
   await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w3', agentId: 'a1', what: 'a look at the queue again', minutes: 2 } as never)
   await clock.advance(60_000)
   expect(resumed.filter(one => one.includes('a look at the queue again'))).toEqual([])
@@ -916,17 +915,19 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
   expect(await until(async () => resumed.find(one => one === 'a1: From Claudopus: the time you asked for has come: a look at the queue again. Carry on.'))).toBeDefined()
   await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w4', agentId: 'a1', what: 'the results file', file: '/w/never.json', minutes: 1 } as never)
   await clock.advance(100_000)
-  expect(await until(async () => resumed.find(one => one.startsWith('a1: From Claudopus: the results file was still not there after 1 min of looking. Find out why. Unless you can see it is about to come, hand back your report now with what you have')))).toBeDefined()
-  // Told to hand back, its report goes through though its helper runs
+  expect(await until(async () => resumed.find(one => one === 'a1: From Claudopus: the results file was still not there after 1 min of looking, and Claudopus will not look for it again. Hand back your report now with what you have, saying what never came and why; it goes through even while helpers run.'))).toBeDefined()
+  // Told to hand back, its report goes through though its helper runs, and the helper, at work, is not stopped; its result, which
+  // comes after, reaches the chat, which is told it came late
   expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-miss', agentId: 'a1', message: 'The results file never came.' } as never)) as { deny?: string }).deny).toBeUndefined()
-  // Run out a second time in a row: it hands back what it has, and a third look is refused
+  agents.a2 = 'completed'
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-a2', agentId: 'a2', message: 'The build log ends at step 9.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h-a2', reason: 'answer', agentId: 'a2' } as never)
+  expect(await until(async () => appended.find(one => /^undefined: From Claudopus: the result of the helper ".*" came after the task ".*" handed back what it had, so it reached this chat\./.test(one)))).toBeDefined()
+  expect(resumed.filter(one => one.startsWith('a1: From Claudopus: your helper'))).toEqual([])
+  // The same file looked for again is refused, whatever its words; another is looked for
   agents.a1 = 'completed'
-  await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w4b', agentId: 'a1', what: 'the results file', file: '/w/never.json', minutes: 1 } as never)
-  await clock.advance(100_000)
-  expect(await until(async () => resumed.find(one => one === 'a1: From Claudopus: the results file was still not there after 1 min of looking, the second look in a row that ran out. Hand back your report now with what you have, saying what never came and why.'))).toBeDefined()
-  expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w4c', agentId: 'a1', what: 'the results file', file: '/w/never.json', minutes: 1 } as never)) as { result?: string }).result).toContain('Refused by Claudopus: the last two looks for the results file ran out')
-  // Something else is still looked for
-  expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w4d', agentId: 'a1', what: 'the second run', file: '/w/second.json', minutes: 1 } as never)) as { result?: string }).result).toContain('End your step now')
+  expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w4c', agentId: 'a1', what: 'the results, once more', file: '/w/never.json', minutes: 1 } as never)) as { result?: string }).result).toContain('Refused by Claudopus: the look for the results file ran out already')
+  expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w4d', agentId: 'a1', what: 'the results file', file: '/w/second.json', minutes: 1 } as never)) as { result?: string }).result).toContain('End your step now')
   // Work that cannot be started again for what came would wait for good: the chat is told
   await $.agent.spawn({ ...spawn, description: 'Watch the queue', prompt: 'watch' } as never)
   agents.a3 = 'completed'

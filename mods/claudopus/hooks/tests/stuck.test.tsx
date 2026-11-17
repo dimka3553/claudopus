@@ -753,9 +753,10 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   await settle()
 })
 
-test('stuck work the engine no longer runs had stopped partway through: the mod starts it again at once and tells the chat; work that ended its step to wait on helpers that all sit silent is started again to check on them, then to hand back what it has, which then goes through, the silent ones stopped; still stuck, the chat is told plainly; helpers at work, in a long call or a call after another printing only new numbers, are left alone', SLOW, async ($, on) => {
-  const agents: Record<string, string> = { a1: 'idle', a2: 'idle', a3: 'running', a4: 'idle', a5: 'running', a6: 'idle', a7: 'running' }
-  const kinds: Record<string, string> = Object.fromEntries(Object.keys(agents).map(id => [id, 'general-purpose']))
+test('stuck work the engine no longer runs had stopped partway through: the mod starts it again at once and tells the chat; work whose step ended while all its helpers sit silent is, on a fixed schedule, started again to check on them at 12 minutes and to hand back what it has at 24, and the chat is told plainly at 36; its report then goes through, the silent helpers stopped; helpers at work, rendering in the background or printing a moving frame count, are left alone and their card says so', SLOW, async ($, on) => {
+  const all = { a1: 'idle', a2: 'running', a3: 'running', a4: 'running', a5: 'running', a6: 'running', a7: 'running' }
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = Object.fromEntries(Object.keys(all).map(id => [id, 'general-purpose']))
   const { keep, settle, clock, held, logged, resumed, stopped, appended } = world(on, { agents, kinds, parents: { a3: 'a2', a5: 'a4', a7: 'a6' } })
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Fit the video', prompt: 'fit' } as never)
@@ -765,10 +766,17 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   await $.agent.spawn({ ...spawn, description: 'Render the town', prompt: 'render', parentAgentId: 'a4' } as never)
   await $.agent.spawn({ ...spawn, description: 'Score the faces', prompt: 'score' } as never)
   await $.agent.spawn({ ...spawn, description: 'Score each frame', prompt: 'frames', parentAgentId: 'a6' } as never)
+  Object.assign(agents, all)
   const bash = (agentId: string, command: string, id: string) => $.tool.call({ tool: 'Bash', tool_use_id: id, agentId, command } as never)
   for (const id of ['a1', 'a2', 'a3', 'a4', 'a6']) await bash(id, 'git status', `s-${id}`)
-  // a5 renders in a command of its own in the background; a7 runs a call every few minutes that prints only a new frame number
+  // a5 renders in a command of its own in the background; a7 runs a call every few minutes that prints a new frame count
   await $.tool.call({ tool: 'Bash', tool_use_id: 'r-a5', agentId: 'a5', command: 'hold render', description: 'Render the town (about 2 h)', run_in_background: true } as never)
+  // The three tasks end their steps to wait for their helpers
+  const ends = async (id: string, turnId: string) => {
+    agents[id] = 'completed'
+    await $.turn.complete({ answer: 'Waiting for my helper.', durationMs: 1, isAborted: false, turnId, reason: 'answer', agentId: id } as never)
+  }
+  for (const id of ['a2', 'a4', 'a6']) await ends(id, `e-${id}`)
   let frame = 0
   const frames = async (minutes: number) => {
     for (let at = 0; at < minutes; at += 4) {
@@ -781,35 +789,41 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   await frames(13)
   expect(resumed.filter(line => line.includes('stopped partway through'))).toHaveLength(1)
   expect(logged.filter(line => line.includes('"Fit the video" had stopped partway through') && line.includes('restarted it'))).toHaveLength(1)
-  expect(logged.filter(line => line.includes(`"Fit the video" hasn't made progress`))).toEqual([])
-  // Its step ended, waiting on a helper from which nothing comes: started again to check on it, and the chat told so
+  // 12 minutes on: started again to check on its helper, and the chat told so
   const nudges = (id = 'a2') => resumed.filter(line => line.startsWith(`${id}: From Claudopus:`) && line.includes('helpers'))
   expect(nudges()).toHaveLength(1)
   expect(nudges()[0]).toMatch(/^a2: From Claudopus: nothing new has come back from your helpers for 1[2-6] min while your step had ended: "[^"]+" \(a3\)\. Ask each with SendMessage/)
-  expect(logged.filter(line => line.includes(`"Draw the lids" hasn't made progress`) && line.endsWith('Claudopus started it again and asked it to check on them.'))).toHaveLength(1)
+  expect(logged.filter(line => line.startsWith('"Draw the lids" hasn\'t made progress') && line.endsWith('Claudopus started it again and asked it to check on them.'))).toHaveLength(1)
   // Until then it may not hand back while its helper runs
   expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-early', agentId: 'a2', message: 'Lids drawn.' } as never)) as { deny?: string }).deny).toContain("Don't hand back your report yet")
-  // Stuck again, it is not started a second time: the chat is only told
+  // It asks its helper, which never answers, and ends its step again: a step and a message start nothing over
+  agents.a2 = 'running'
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm-a2', agentId: 'a2', to: 'a3', message: 'What are you doing?' } as never)
+  await ends('a2', 'e-a2b')
   await bash('a1', 'git status', 's-a1-again')
   await frames(13)
   expect(resumed.filter(line => line.includes('stopped partway through'))).toHaveLength(1)
-  expect(resumed.every(line => !line.includes('stopped partway through') || line.startsWith('a1: From Claudopus, not'))).toBe(true)
-  // Its helper still silent a while after: started again, once, to hand back what it has
+  // 24 minutes on: started again, once, to hand back what it has; a message from the chat then takes nothing back
   expect(await until(async () => nudges().length === 2 || undefined)).toBe(true)
   expect(nudges()[1]).toContain('hand back your report now with what you have')
-  expect(logged.filter(line => line.includes(`"Draw the lids" hasn't made progress`) && line.endsWith('asked it to hand back what it has now.'))).toHaveLength(1)
-  // It ends its step again without handing back: no third start, the chat is told plainly it is stuck and may write to it, and the
-  // card says so
+  expect(logged.filter(line => line.startsWith('"Draw the lids" hasn\'t made progress') && line.endsWith('asked it to hand back what it has now.'))).toHaveLength(1)
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm-chat', to: 'a2', message: 'Carry on.' } as never)
+  agents.a2 = 'completed'
+  // 36 minutes on, still not handed back: no third start; the chat is told plainly it is stuck and may write to it, and the card says so
   await frames(13)
   expect(nudges()).toHaveLength(2)
   expect(await until(async () => logged.find(line => line.startsWith('"Draw the lids" is stuck: nothing new has come back from its helpers')))).toBeDefined()
   expect(appended.filter(line => line.includes('"Draw the lids" is stuck') && line.includes('you may send it a message'))).toHaveLength(1)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect((await pane.findAll({ type: 'Text' })).map(one => (one as { text?: string }).text).filter(text => text?.startsWith('No progress for') && text.endsWith('and told the chat it is stuck.'))).toHaveLength(1)
+  const texts = (await pane.findAll({ type: 'Text' })).map(one => (one as { text?: string }).text ?? '')
   await pane.unmount()
-  // Helpers at work are never taken for silent: their tasks are not started again, whatever they print
+  expect(texts.filter(text => text.startsWith('No progress for') && text.endsWith('and told the chat it is stuck.'))).toHaveLength(1)
+  // Helpers at work are never taken for silent: their tasks are not started again; one rendering in the background is not told to
+  // the chat as maybe stuck, and its card says it waits on its helpers' work
   expect([nudges('a4'), nudges('a6')]).toEqual([[], []])
-  // Told to hand back, it may while its helpers run: the silent one is stopped with its report, one at work never is
+  expect(logged.filter(line => line.startsWith('"Film the town"'))).toEqual([])
+  expect(texts.filter(text => text === "Waits on its helpers' work.").length).toBeGreaterThanOrEqual(1)
+  // Its report goes through while its helpers run: the silent one is stopped with it, those at work never are
   expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-late', agentId: 'a2', message: 'Lids drawn; rendering never ended.' } as never)) as { deny?: string }).deny).toBeUndefined()
   expect(stopped).toContain('a3')
   expect(stopped.filter(id => id === 'a5' || id === 'a7')).toEqual([])
@@ -817,24 +831,38 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   await settle()
 })
 
-test('nudges about silent helpers start over when a helper brings something new or the chat writes to the task; the chat asking it to hand back lets its report through', SLOW, async ($, on) => {
-  const agents: Record<string, string> = { a1: 'idle', a2: 'running' }
+test('the schedule for silent helpers keeps its time: each step comes though the last never reached the task, and a bare call or a message does not start it over; a helper printing something different does, and the leave to hand back already given stays', SLOW, async ($, on) => {
+  const agents: Record<string, string> = {}
   const kinds: Record<string, string> = { a1: 'general-purpose', a2: 'general-purpose' }
-  const { settle, clock, resumed } = world(on, { agents, kinds, parents: { a2: 'a1' } })
+  const unresumable = new Set(['a1'])
+  const { keep, settle, clock, held, logged, resumed } = world(on, { agents, kinds, parents: { a2: 'a1' }, unresumable })
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Draw the lids', prompt: 'lids' } as never)
   await $.agent.spawn({ ...spawn, description: 'Render the lids', prompt: 'render', parentAgentId: 'a1' } as never)
+  Object.assign(agents, { a1: 'running', a2: 'running' })
   for (const id of ['a1', 'a2']) await $.tool.call({ tool: 'Bash', tool_use_id: `s-${id}`, agentId: id, command: 'git status' } as never)
-  const nudges = () => resumed.filter(line => line.startsWith('a1: From Claudopus:') && line.includes('helpers'))
+  agents.a1 = 'completed'
+  await $.turn.complete({ answer: 'Waiting for my helper.', durationMs: 1, isAborted: false, turnId: 'e1', reason: 'answer', agentId: 'a1' } as never)
+  const said = () => logged.filter(line => line.startsWith('"Draw the lids" hasn\'t made progress'))
   await clock.advance(13 * 60_000)
-  expect(nudges()).toHaveLength(1)
-  // The helper brings something new: the next stretch with nothing is a check-in again, not an order to hand back
-  await $.tool.call({ tool: 'Bash', tool_use_id: 'n-a2', agentId: 'a2', command: 'ls' } as never)
-  await clock.advance(13 * 60_000)
-  expect(await until(async () => nudges().length === 2 || undefined)).toBe(true)
-  expect(nudges()[1]).toContain('Ask each with SendMessage')
-  // The chat writes to it: the count starts over too, and its words asking it to hand back let the report through at once
-  await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm1', to: 'a1', message: 'Hand back what you have now.' } as never)
+  expect(said()).toHaveLength(1)
+  expect(resumed.filter(line => line.startsWith('a1:'))).toEqual([])
+  // A call that says what it said before, and a message from the chat, start nothing over: the order to hand back comes at 24
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'n-a2', agentId: 'a2', command: 'git status' } as never)
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm1', to: 'a1', message: 'How is it going?' } as never)
+  agents.a1 = 'completed'
+  await clock.advance(12 * 60_000)
+  expect(await until(async () => said().length === 2 || undefined)).toBe(true)
+  expect(said()[1]).toContain('asked it to hand back what it has now')
+  // The helper prints something different: the schedule starts over, its check-in 12 minutes on, and the leave stays
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'f1', agentId: 'a2', command: 'hold frame' } as never))
+  const letFrame = await until(async () => held.get('frame'))
+  letFrame?.('frame 100/9000')
+  await clock.advance(11 * 60_000)
+  expect(said()).toHaveLength(2)
+  await clock.advance(2 * 60_000)
+  expect(await until(async () => said().length === 3 || undefined)).toBe(true)
+  expect(said()[2]).toContain('asked it to check on them')
   expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: 'Lids drawn.' } as never)) as { deny?: string }).deny).toBeUndefined()
   await settle()
 })
