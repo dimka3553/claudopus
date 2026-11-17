@@ -8428,7 +8428,7 @@ const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = fals
 const jobsOf = (one: Todo, at: number): Job[] =>
   foldJobs([
     ...(one.bg ?? []).map(b => jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id])),
-    ...(one.detached ?? []).filter(d => !d.from || !one.bg?.some(b => b.id === d.from)).map(d => jobOf(d.id, d.what, d.cmd, d.at, false, one.seenJobs?.[d.id])),
+    ...(one.detached ?? []).map(d => jobOf(d.id, d.from && one.bg?.some(b => b.id === d.from) ? `What “${runWords(d.what, d.cmd)}” started` : d.what, d.cmd, d.at, false, one.seenJobs?.[d.id])),
     ...(one.status === 'working' && one.running?.cmd && at - one.running.at >= ROW_SHOWN
       ? [jobOf(`call-${one.id}`, one.running.label ?? '', one.running.cmd, one.running.at)]
       : []),
