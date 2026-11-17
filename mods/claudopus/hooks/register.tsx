@@ -1119,6 +1119,7 @@ const twigsOf = (branches: Branch[], isMore = false, depth = 1, rails: boolean[]
     const isLast = i === branches.length - 1 && !isMore
     return [{ one: b.one, ...(b.job ? { job: b.job } : {}), depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
   })
+const railText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}${t.hasKids ? '│ ' : '  '} `
 const twigText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}`
 const TWIG_STEP = 18
 const TWIG_ENDED = '#4EBA65'
@@ -1150,7 +1151,11 @@ const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'c
 
 const railSvg = (t: Twig, line: number) => {
   const x = (level: number) => level * TWIG_STEP + 9
-  const paths = [...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${line}`] : [])), ...(t.isLast ? [] : [`M${x(t.rails.length)} 0V${line}`])]
+  const paths = [
+    ...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${line}`] : [])),
+    ...(t.isLast ? [] : [`M${x(t.rails.length)} 0V${line}`]),
+    ...(t.hasKids ? [`M${x(t.rails.length + 1)} 0V${line}`] : []),
+  ]
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('') || 'M0 0'}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/></svg>`
 }
 
@@ -12431,7 +12436,7 @@ const panelHooks = (on: On) => {
         <Box key={`twig-pair-${scope}-${one.id}`} flexDirection="column" flexShrink={0}>
           {row}
           <Box key={`twig-now-${scope}-${one.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
-            {jobRails(t, `twig-rails-${scope}-${one.id}`)}
+            {twigRails(t, `twig-rails-${scope}-${one.id}`)}
             <Box flexGrow={1} flexShrink={1} minWidth={0} paddingLeft={lead}>
               <Text dimColor wrap="truncate-end">{doing}</Text>
             </Box>
@@ -12450,16 +12455,24 @@ const panelHooks = (on: On) => {
           <Text color={JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
         </Box>
       )
-    const jobRails = (t: Twig, key: string) =>
+    const twigRails = (t: Twig, key: string) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
           <table.Svg key={`${key}-svg`} source={railSvg(t, LINE)} alt={t.isLast ? 'Last row' : 'More rows below'} width={twigWidth(t)} height={LINE} />
         </Box>
       ) : (
         <Box key={key} flexShrink={0}>
-          <Text dimColor>{`${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}   `}</Text>
+          <Text dimColor>{railText(t)}</Text>
         </Box>
       )
+    const twigUnder = (t: Twig, key: string, body: JSX.Element, inset: typeof lead = lead) => (
+      <Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+        {twigRails(t, `${key}-rails`)}
+        <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden" paddingLeft={inset}>
+          {body}
+        </Box>
+      </Box>
+    )
     const guessLeft = (job: Job, ran: number) => {
       const share = Number.parseFloat(job.pct ?? '') / 100
       return !job.left && job.isOwn && !job.isEarlier && job.kind !== 'wait' && share >= 0.01 && share < 1 && ran >= 20_000 ? timeLeftText((ran / 1000) * ((1 - share) / share)) : undefined
@@ -12562,7 +12575,7 @@ const panelHooks = (on: On) => {
         <Box key={`job-${key}`} flexDirection="column" flexShrink={0}>
           {head}
           <Box key={`stand-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
-            {jobRails(t, `rails-${key}`)}
+            {twigRails(t, `rails-${key}`)}
             {/* (on a desktop by the step a plain Button pads a run's name with, where its name is one, so the two start in one column) */}
             <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden" paddingLeft={canOpenJob(job) ? lead : 0}>
               {pctAt >= 0 && job.pct ? (
@@ -12884,19 +12897,24 @@ const panelHooks = (on: On) => {
       )
     }
     const underTwig = (t: Twig) => {
-      const pad = t.depth * 2 + 4
       if (t.job) {
         const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).slice(-OUTPUT_LINES)
         if (!tail.length) return null
+        const inset = canOpenJob(t.job) ? lead : 0
         return (
-          <Box key={`tail-${t.job.id}`} flexDirection="row" paddingLeft={pad} flexShrink={0}>
-            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} backgroundColor={OUTPUT_FILL}>
-              {tail.map((line, n) => (
-                <Text key={`tail-${t.job?.id}-${n}`} dimColor wrap="truncate-end">
-                  {line}
-                </Text>
-              ))}
-            </Box>
+          <Box key={`tail-${t.job.id}`} flexDirection="column" flexShrink={0}>
+            {tail.map((line, n) =>
+              twigUnder(
+                t,
+                `tail-${t.job?.id}-${n}`,
+                <Box flexGrow={1} flexShrink={1} minWidth={0} backgroundColor={OUTPUT_FILL}>
+                  <Text dimColor wrap="truncate-end">
+                    {line}
+                  </Text>
+                </Box>,
+                inset,
+              ),
+            )}
           </Box>
         )
       }
@@ -12907,12 +12925,16 @@ const panelHooks = (on: On) => {
       const lines = [doing >= 0 ? `To-do ${doing + 1} of ${kept.length} · ${kept[doing]?.text ?? ''}` : '', now(kid)].filter(Boolean)
       if (!lines.length) return null
       return (
-        <Box key={`under-${kid.id}`} flexDirection="column" paddingLeft={pad} flexShrink={0}>
-          {lines.map((line, n) => (
-            <Text key={`under-${kid.id}-${n}`} dimColor wrap="truncate-end">
-              {line}
-            </Text>
-          ))}
+        <Box key={`under-${kid.id}`} flexDirection="column" flexShrink={0}>
+          {lines.map((line, n) =>
+            twigUnder(
+              t,
+              `under-${kid.id}-${n}`,
+              <Text dimColor wrap="truncate-end">
+                {line}
+              </Text>,
+            ),
+          )}
         </Box>
       )
     }

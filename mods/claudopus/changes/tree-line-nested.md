@@ -1,0 +1,1 @@
+- The tree on a task's card no longer breaks under a helper that has a line of what it's doing: the line from the helper down to its own commands and helpers runs unbroken at every depth, in Details too, past a command's last lines
