@@ -57,7 +57,7 @@ const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
   // What a command left going is said in that command's own words alone, as the person reads what it is doing first; how many
   // programs it is goes on the line under it (17 Nov "Command · 12 programs · Test whe…" cut the words that said what it was)
-  if (leftCommandOf(job.id)) return job.label
+  if (leftCommandOf(job.id) && job.count && job.count > 1) return job.label
   const many = job.count && job.count > 1 ? ` ×${job.count}` : ''
   const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${many}`
   // Its own words alone when they say its kind already (Download the CT scans, Wait for the deploy)
@@ -179,7 +179,8 @@ const lookJobs = async ($: EngineInterface) => {
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
   const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]))
   // A detached job whose process ended leaves its card, kept as ended (how its process ended is not known)
-  const gone = owned.filter(o => o.pid && !alive.has(o.pid)).map(o => o.id)
+  // (one being stopped is left to its stop, which ends it as stopped with the rest of its command)
+  const gone = owned.filter(o => o.pid && !alive.has(o.pid) && !stoppingJobs.has(o.id)).map(o => o.id)
   if (gone.length && /@@ALIVE@@/.test(r.stdout)) {
     const runsOf = (one: Todo) => (one.detached ?? []).filter(d => gone.includes(d.id)).map(d => ({ id: d.id, what: d.what, at: d.at, endedAt: now, how: 'ended' as const }))
     // (what this look took off its card: a run another look or a stop already took off is not woken for again)
@@ -188,9 +189,11 @@ const lookJobs = async ($: EngineInterface) => {
       cards.map(one => {
         const ended = (one.detached ?? []).filter(d => gone.includes(d.id))
         if (!ended.length) return one
-        // (one being stopped now is told by its stop, read here as the run leaves its card)
-        taken.set(one.id, ended.filter(d => !stoppingJobs.has(d.id)))
         const left = (one.detached ?? []).filter(d => !gone.includes(d.id))
+        // (one being stopped now is told by its stop, read here as the run leaves its card; what one command left going is told
+        // once its last program has ended, never while others of it still work)
+        const isRest = (d: { id: string }) => leftCommandOf(d.id) !== '' && left.some(l => leftCommandOf(l.id) === leftCommandOf(d.id))
+        taken.set(one.id, ended.filter(d => !stoppingJobs.has(d.id) && !isRest(d)))
         return { ...one, detached: left.length ? left : undefined, ...keepEnded(one, runsOf(one)) }
       }),
     )
@@ -383,11 +386,13 @@ const adoptLeft = async ($: EngineInterface, procs: Proc[], now: number, only?: 
   if (!found.length) return
   // Only what this chat's commands started: a process whose environment can be read and does not carry this chat's session is some
   // other program's (on 17 Nov a git push and a dig took the helpers of headless Chrome other work had started, and Grok's and
-  // Chrome's own crash reporters, as runs they had left: "Run Google Chrome" ×12 on cards that never opened a browser). Apple's
-  // own programs hide their environment, and are judged as before
+  // Chrome's own crash reporters, as runs they had left: "Run Google Chrome" ×12 on cards that never opened a browser). One that
+  // hides its environment (the system's own tools, and apps signed to, as Google's are) counts only where its command names it
   const whose = await ownersOf($, found.map(l => l.top.pid))
-  const left = found.filter(l => whose.get(l.top.pid) !== 'other')
-  for (const l of found) if (whose.get(l.top.pid) === 'other') adopted.add(l.top.pid)
+  const spanOfLeft = (l: (typeof found)[number]) => spans.find(s => s.id === l.span) ?? only?.find(s => s.id === l.span)
+  const isTheirs = (l: (typeof found)[number]) => whose.get(l.top.pid) === 'other' || (whose.get(l.top.pid) === 'hidden' && !isNamedBy(l.top.command, spanOfLeft(l)?.cmd ?? ''))
+  const left = found.filter(l => !isTheirs(l))
+  for (const l of found) if (isTheirs(l)) adopted.add(l.top.pid)
   if (!left.length) return
   const fd = await $.process
     .run(['sh', '-c', 'for p; do f=$(readlink "/proc/$p/fd/1" 2>/dev/null || lsof -a -p "$p" -d 1 -Fn 2>/dev/null | sed -n "s/^n//p" | head -1); printf "%s %s\\n" "$p" "$f"; done', 'sh', ...left.map(l => l.top.pid)], { timeoutMs: 5000 })
@@ -541,12 +546,23 @@ const stopping = async ($: EngineInterface, owner: string, job: Job, said?: stri
   const card = list.find(one => one.id === owner)
   const bg = card?.bg?.find(b => b.id === job.id)
   const detached = card?.detached?.find(d => d.id === job.id)
-  // The processes to end: the detached one's, or the held shell's, with every process under them
+  // What one command left going is one row, so the person's Stop on it ends every program of it; a stop Claudopus makes itself (a
+  // watcher, a run that only waits) ends only the program it judged. All of them count as being stopped meanwhile, so none is
+  // taken for ended while the others are made to end
+  const alike = detached ? (card?.detached ?? []).filter(d => d.id === detached.id || (said === undefined && leftCommandOf(d.id) !== '' && leftCommandOf(d.id) === leftCommandOf(detached.id) && d.what === detached.what)) : []
+  const marked = alike.filter(d => !stoppingJobs.has(d.id)).map(d => d.id)
+  for (const id of marked) stoppingJobs.add(id)
+  try {
+    await stoppingNow($, owner, job, said, now, card, bg, detached, alike)
+  } finally {
+    for (const id of marked) stoppingJobs.delete(id)
+  }
+}
+const stoppingNow = async ($: EngineInterface, owner: string, job: Job, said: string | undefined, now: number, card: Todo | undefined, bg: NonNullable<Todo['bg']>[number] | undefined, detached: NonNullable<Todo['detached']>[number] | undefined, alike: NonNullable<Todo['detached']>) => {
+  // The processes to end: the detached ones', or the held shell's, with every process under them
   const procs = jobProcs.length ? jobProcs : procsOf((await $.process.run(['ps', '-axww', '-o', PS_COLUMNS], { timeoutMs: 5000 }).catch(() => ({ stdout: '' }))).stdout, now)
   // A background command's own shell, found as the look finds it, so it is ended even where the engine does not stop it
   const bgShell = bg && !bg.isWatch && procs.length ? shellsOf(procs, [{ id: bg.id, cmd: bg.cmd ?? '', at: bg.at }]).get(bg.id) : undefined
-  // What one command left going is one row, so its Stop ends every program of it
-  const alike = detached ? (card?.detached ?? []).filter(d => d.id === detached.id || (leftCommandOf(d.id) !== '' && leftCommandOf(d.id) === leftCommandOf(detached.id) && d.what === detached.what)) : []
   const tops = detached ? alike.flatMap(d => (d.pid ? [d.pid] : [])) : [(typeof bgShell === 'string' ? bgShell : undefined) ?? (job.id.startsWith('call-') && card?.running?.cmd ? heldShellOf(procs, card.running.cmd, card.running.at) : undefined)].flatMap(p => (p ? [p] : []))
   // (the top one itself even where the processes could not be listed)
   const pids = [...new Set(tops.flatMap(top => [top, ...treeOf(procs, top).map(p => p.pid)]))].filter(isPid)

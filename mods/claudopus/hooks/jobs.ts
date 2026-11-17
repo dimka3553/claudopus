@@ -897,7 +897,8 @@ export type OpenCall = { from: number; at: number }
 const PID_MOST = 99_999
 const inSpan = (pid: number, span: Pick<Span, 'from' | 'to'>) => (span.to >= span.from ? pid > span.from && pid < span.to : pid > span.from || (pid < span.to && pid <= PID_MOST))
 // The system's own programs, which launchd starts in sessions of their own whenever it likes, are never a command's
-const SYSTEM_PROG = /^(\/System\/|\/usr\/libexec\/|\/usr\/sbin\/|\/sbin\/|\/Library\/Apple\/|\/Applications\/|\/Library\/Application Support\/)/
+// (and an app's own updaters and helpers in a Library folder, the person's own as well: GoogleUpdater, 17 Nov)
+const SYSTEM_PROG = /^(\/System\/|\/usr\/libexec\/|\/usr\/sbin\/|\/sbin\/|\/Library\/Apple\/|\/Applications\/|(\/Users\/[^/]+|\/home\/[^/]+|~)?\/Library\/Application Support\/)/
 export type Left = { span: string; top: Proc; tree: Proc[] }
 // What each command left running: the topmost of each group whose shell has gone (or a session it started of its own), with all it
 // started under it; never one already followed (`known`), nor what runs under one
@@ -923,7 +924,11 @@ export const leftoversOf = (procs: Proc[], spans: Span[], known: Set<string> = n
   // The command a number was handed out under; where two ran at once, the one that names the process (its script or its
   // arguments), else the one whose first number is nearest below
   const spanOf = (pid: number, p: Proc, isOwnSession: boolean) => {
-    const fits = spans.filter(s => inSpan(pid, s) && isTimely(p, s))
+    // A command sent to the background that still runs goes on being handed numbers after the one it had as it went there: every
+    // number since its first is in its range, so what another task's running command starts is never given to a short command
+    // beside it by its number alone (17 Nov: another task's screenshot script, sent to the background, started headless Chrome
+    // while a git push ran, and the push's card took its crash reporters)
+    const fits = spans.filter(s => (inSpan(pid, s) || (s.until === undefined && after(pid, s.from) > 0 && after(pid, s.from) < 50_000)) && isTimely(p, s))
     if (fits.length <= 1) return fits[0]
     // The process's own words, past its program: a command that holds them started it. A session of its own also goes by the
     // command's words it holds
@@ -942,13 +947,22 @@ export const leftoversOf = (procs: Proc[], spans: Span[], known: Set<string> = n
     const isOwnSession = p.pgid === p.pid
     // (nor one ps can only name in brackets, as it does a process that is ending or not this person's: on 16 Nov the system's
     // own indexer, "(mdworker_shared)", was taken for runs of four tasks)
-    if (/^\(/.test(p.command.trim()) || (isOwnSession ? SYSTEM_PROG.test(p.command) : pids.has(p.pgid))) continue
+    // (nor an app's or the system's own program in a group whose leader has gone: an app's crash reporter forks away from the
+    // app that started it, as Chrome's did on 17 Nov)
+    if (/^\(/.test(p.command.trim()) || SYSTEM_PROG.test(p.command) || (!isOwnSession && pids.has(p.pgid))) continue
     const n = Number(isOwnSession ? p.pid : p.pgid)
     if (isOpenOnes(n, p)) continue
     const span = spanOf(n, p, isOwnSession)
     if (span) out.push({ span: span.id, top: p, tree: treeOf(procs, p.pid) })
   }
   return out
+}
+// Whether a command names a process: its program, or a word of its own past its program (a script, a file it works on)
+export const isNamedBy = (command: string, cmd: string) => {
+  const words = command.trim().split(/\s+/)
+  const program = (words[0] ?? '').split('/').filter(Boolean).at(-1) ?? ''
+  const own = words.slice(1).filter(word => word.length >= 6 && !word.startsWith('-') && /^[\w./:=,@%+-]+$/.test(word)).map(word => word.split('/').filter(Boolean).at(-1) ?? word)
+  return [program, ...own].some(word => word.length >= 2 && new RegExp(`(^|[\\s/'"=])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[\\s'";|&)<>])`).test(cmd))
 }
 // The memory a process and all it started hold, in words (`7.1 GB`); undefined where ps gave none
 export const memOf = (tree: Proc[]) => {

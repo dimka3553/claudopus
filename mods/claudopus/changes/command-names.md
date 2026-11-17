@@ -1,3 +1,3 @@
 - A program a task's command left running is named on its card by what that command does, in the words Claude gave it, never by the program's own name: no more rows of "Run Google Chrome" for a test's hidden browser
-- Everything one command left running is one row, with how many programs it is and their memory added up; Stop on it ends them all, and once they end it is one line under Commands ended
-- A card no longer shows programs that another chat or another app started at the moment its command ran, such as a browser's crash reporter appearing during a git push
+- Everything one command left running is one row, with how many programs it is and their memory added up; Stop on it ends them all, and only once the last of them ends does the card say the command has ended, as one line under Commands ended, with its task told once
+- A card no longer shows programs that started elsewhere at the moment its command ran: another chat's or another app's (such as a browser's crash reporter or Google's updater appearing during a git push), or what another task's background command in the same chat started

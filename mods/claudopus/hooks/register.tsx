@@ -16,7 +16,7 @@ import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUD
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
 import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isKindSaid, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
-import { leftoversOf, leftCommandOf, memOf, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
+import { leftoversOf, leftCommandOf, isNamedBy, memOf, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
 import { heavyOf, isWaiterTree, waiterLeavesOf, waitingOf, watcherOf } from './jobs'
 import type { HeavyKind, OpenCall, Proc, Span, WaitKind } from './jobs'
 import type { Job, JobKind } from './jobs'
@@ -8356,12 +8356,13 @@ const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
 const keepEnded = (one: Todo, runs: EndedRun[]) => {
   if (!runs.length) return {}
   const keyOf = (run: EndedRun) => (leftCommandOf(run.id) ? `${leftCommandOf(run.id)}|${run.what}|${run.how}` : '')
+  const kept = (one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id))
   const joined = runs.reduce<EndedRun[]>((all, run) => {
     const same = keyOf(run) ? all.find(r => keyOf(r) === keyOf(run)) : undefined
     if (!same) return [...all, run]
     return all.map(r => (r === same ? { ...r, at: Math.min(r.at, run.at), endedAt: Math.max(r.endedAt, run.endedAt), count: (r.count ?? 1) + (run.count ?? 1) } : r))
-  }, [])
-  return { endedRuns: [...(one.endedRuns ?? []).filter(r => !joined.some(n => n.id === r.id)), ...joined].slice(-BG_KEPT) }
+  }, kept)
+  return { endedRuns: [...joined.filter(r => !runs.some(n => keyOf(n) && keyOf(n) === keyOf(r)) && !runs.some(n => n.id === r.id)), ...joined.filter(r => runs.some(n => (keyOf(n) && keyOf(n) === keyOf(r)) || n.id === r.id))].slice(-BG_KEPT) }
 }
 type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string; at?: number }
 const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Record<string, EndAs> = 'ended') => {
@@ -8436,7 +8437,7 @@ const jobsOf = (one: Todo, at: number): Job[] =>
 
 const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
-  if (leftCommandOf(job.id)) return job.label
+  if (leftCommandOf(job.id) && job.count && job.count > 1) return job.label
   const many = job.count && job.count > 1 ? ` ×${job.count}` : ''
   const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${many}`
   if (job.isNamed && isKindSaid(job.label)) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${many}`
@@ -8535,7 +8536,7 @@ const lookJobs = async ($: EngineInterface) => {
   if (psText !== undefined && spans.length) await adoptLeft($, jobProcs, now).catch(err => log($, `left runs not followed: ${String(err)}`))
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
   const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]))
-  const gone = owned.filter(o => o.pid && !alive.has(o.pid)).map(o => o.id)
+  const gone = owned.filter(o => o.pid && !alive.has(o.pid) && !stoppingJobs.has(o.id)).map(o => o.id)
   if (gone.length && /@@ALIVE@@/.test(r.stdout)) {
     const runsOf = (one: Todo) => (one.detached ?? []).filter(d => gone.includes(d.id)).map(d => ({ id: d.id, what: d.what, at: d.at, endedAt: now, how: 'ended' as const }))
     const taken = new Map<string, NonNullable<Todo['detached']>>()
@@ -8543,8 +8544,9 @@ const lookJobs = async ($: EngineInterface) => {
       cards.map(one => {
         const ended = (one.detached ?? []).filter(d => gone.includes(d.id))
         if (!ended.length) return one
-        taken.set(one.id, ended.filter(d => !stoppingJobs.has(d.id)))
         const left = (one.detached ?? []).filter(d => !gone.includes(d.id))
+        const isRest = (d: { id: string }) => leftCommandOf(d.id) !== '' && left.some(l => leftCommandOf(l.id) === leftCommandOf(d.id))
+        taken.set(one.id, ended.filter(d => !stoppingJobs.has(d.id) && !isRest(d)))
         return { ...one, detached: left.length ? left : undefined, ...keepEnded(one, runsOf(one)) }
       }),
     )
@@ -8698,8 +8700,10 @@ const adoptLeft = async ($: EngineInterface, procs: Proc[], now: number, only?: 
   const found = leftoversOf(procs, only ?? spans, known, [...openCalls.values()])
   if (!found.length) return
   const whose = await ownersOf($, found.map(l => l.top.pid))
-  const left = found.filter(l => whose.get(l.top.pid) !== 'other')
-  for (const l of found) if (whose.get(l.top.pid) === 'other') adopted.add(l.top.pid)
+  const spanOfLeft = (l: (typeof found)[number]) => spans.find(s => s.id === l.span) ?? only?.find(s => s.id === l.span)
+  const isTheirs = (l: (typeof found)[number]) => whose.get(l.top.pid) === 'other' || (whose.get(l.top.pid) === 'hidden' && !isNamedBy(l.top.command, spanOfLeft(l)?.cmd ?? ''))
+  const left = found.filter(l => !isTheirs(l))
+  for (const l of found) if (isTheirs(l)) adopted.add(l.top.pid)
   if (!left.length) return
   const fd = await $.process
     .run(['sh', '-c', 'for p; do f=$(readlink "/proc/$p/fd/1" 2>/dev/null || lsof -a -p "$p" -d 1 -Fn 2>/dev/null | sed -n "s/^n//p" | head -1); printf "%s %s\\n" "$p" "$f"; done', 'sh', ...left.map(l => l.top.pid)], { timeoutMs: 5000 })
@@ -8831,9 +8835,18 @@ const stopping = async ($: EngineInterface, owner: string, job: Job, said?: stri
   const card = list.find(one => one.id === owner)
   const bg = card?.bg?.find(b => b.id === job.id)
   const detached = card?.detached?.find(d => d.id === job.id)
+  const alike = detached ? (card?.detached ?? []).filter(d => d.id === detached.id || (said === undefined && leftCommandOf(d.id) !== '' && leftCommandOf(d.id) === leftCommandOf(detached.id) && d.what === detached.what)) : []
+  const marked = alike.filter(d => !stoppingJobs.has(d.id)).map(d => d.id)
+  for (const id of marked) stoppingJobs.add(id)
+  try {
+    await stoppingNow($, owner, job, said, now, card, bg, detached, alike)
+  } finally {
+    for (const id of marked) stoppingJobs.delete(id)
+  }
+}
+const stoppingNow = async ($: EngineInterface, owner: string, job: Job, said: string | undefined, now: number, card: Todo | undefined, bg: NonNullable<Todo['bg']>[number] | undefined, detached: NonNullable<Todo['detached']>[number] | undefined, alike: NonNullable<Todo['detached']>) => {
   const procs = jobProcs.length ? jobProcs : procsOf((await $.process.run(['ps', '-axww', '-o', PS_COLUMNS], { timeoutMs: 5000 }).catch(() => ({ stdout: '' }))).stdout, now)
   const bgShell = bg && !bg.isWatch && procs.length ? shellsOf(procs, [{ id: bg.id, cmd: bg.cmd ?? '', at: bg.at }]).get(bg.id) : undefined
-  const alike = detached ? (card?.detached ?? []).filter(d => d.id === detached.id || (leftCommandOf(d.id) !== '' && leftCommandOf(d.id) === leftCommandOf(detached.id) && d.what === detached.what)) : []
   const tops = detached ? alike.flatMap(d => (d.pid ? [d.pid] : [])) : [(typeof bgShell === 'string' ? bgShell : undefined) ?? (job.id.startsWith('call-') && card?.running?.cmd ? heldShellOf(procs, card.running.cmd, card.running.at) : undefined)].flatMap(p => (p ? [p] : []))
   const pids = [...new Set(tops.flatMap(top => [top, ...treeOf(procs, top).map(p => p.pid)]))].filter(isPid)
   let isStopped = false
@@ -11595,7 +11608,7 @@ const panelHooks = (on: On) => {
     }
     const now = (one: Todo) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
-      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim() && !one.detached?.some(d => d.from === r.id)) : []
+      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim() && !one.detached?.some(d => d.from === r.id || (leftCommandOf(r.id) !== '' && leftCommandOf(d.id) === leftCommandOf(r.id)))) : []
       const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))} ${RUN_ENDED_AS[r.how]}`)
       return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} and ${second}` : `${first}, ${second} and ${runs.length - 2} more ended`
     }
@@ -12092,7 +12105,7 @@ const panelHooks = (on: On) => {
     const withJobs = (branches: Branch[], isAll = false): Branch[] =>
       branches.map(b => (b.job ? b : { ...b, kids: [...jobBranches(b.one, isAll), ...withJobs(b.kids, isAll)] }))
     const rowOf = (t: Twig) => (t.job ? jobRow(t, 'list') : twigRow(t, 'list'))
-    const endedRunsOf = (one: Todo, list = all) => [one, ...underOf(list, one.id)].flatMap(kid => kid.endedRuns ?? []).sort((a, b) => a.endedAt - b.endedAt)
+    const endedRunsOf = (one: Todo, list = all) => [one, ...underOf(list, one.id)].flatMap(kid => (kid.endedRuns ?? []).filter(r => !leftCommandOf(r.id) || !kid.detached?.some(d => leftCommandOf(d.id) === leftCommandOf(r.id)))).sort((a, b) => a.endedAt - b.endedAt)
     const treeUnder = (one: Todo) => {
       const under = underOf(all, one.id)
       const own = jobBranches(one)

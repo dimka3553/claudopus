@@ -262,7 +262,8 @@ const panelHooks = (on: On) => {
     // stood above the two programs a launcher that had ended left working)
     const now = (one: Todo) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
-      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim() && !one.detached?.some(d => d.from === r.id)) : []
+      // (nor what one command left going while other programs of it still work)
+      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim() && !one.detached?.some(d => d.from === r.id || (leftCommandOf(r.id) !== '' && leftCommandOf(d.id) === leftCommandOf(r.id)))) : []
       const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))} ${RUN_ENDED_AS[r.how]}`)
       return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} and ${second}` : `${first}, ${second} and ${runs.length - 2} more ended`
     }
@@ -854,7 +855,8 @@ const panelHooks = (on: On) => {
     // rest are one closing row, laid out as the others, that says how many have ended and opens the card's Details, where every
     // helper is listed. A helper that ended with a job still running stays for it
     // The runs that ended under a card: its own and its helpers', oldest first
-    const endedRunsOf = (one: Todo, list = all) => [one, ...underOf(list, one.id)].flatMap(kid => kid.endedRuns ?? []).sort((a, b) => a.endedAt - b.endedAt)
+    // (what one command left going counts as ended once its last program has: before that it is still its running row)
+    const endedRunsOf = (one: Todo, list = all) => [one, ...underOf(list, one.id)].flatMap(kid => (kid.endedRuns ?? []).filter(r => !leftCommandOf(r.id) || !kid.detached?.some(d => leftCommandOf(d.id) === leftCommandOf(r.id)))).sort((a, b) => a.endedAt - b.endedAt)
     // Runs that ended leave the tree at once; the closing row counts them with the helpers that ended, and says how many of them
     // failed, were killed or ran out of time, so nothing goes without a trace
     const treeUnder = (one: Todo) => {

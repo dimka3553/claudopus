@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { heavyOf, leftoversOf, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, waitingOf, watcherOf, isWaiterTree, PLAIN_MOST } from './jobs'
+import { heavyOf, isNamedBy, leftoversOf, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, waitingOf, watcherOf, isWaiterTree, PLAIN_MOST } from './jobs'
 import type { WaitKind } from './jobs'
 import type { Job } from './jobs'
 
@@ -512,6 +512,16 @@ test('what a command left running is told by its group and by when it started: o
   expect(leftoversOf(ps(['5090 1 5090 Z 00:05 0 (mdworker_shared)']), [span]).length).toBe(0)
   // A call still open past the wrap holds back what it may have started
   expect(leftoversOf(ps(['20 1 20 S 00:05 1000 /u/bin/python daemon.py']), [{ ...span, from: 99_990, to: 40 }], new Set(), [{ from: 99_995, at: now - 8_000 }]).length).toBe(0)
+  // An app's own helper forked away from it, its group's leader gone, is no command's, nor an updater in the person's Library
+  expect(leftoversOf(ps(['5060 1 5050 S 00:05 1000 /Applications/Google Chrome.app/Contents/Frameworks/Helpers/chrome_crashpad_handler', '5061 1 5061 S 00:05 1000 /Users/sam/Library/Application Support/Google/GoogleUpdater/GoogleUpdater.app/Contents/MacOS/GoogleUpdater --wake']), [span]).length).toBe(0)
+  // A command names a process by its program or a word of its own, never by a word that only starts the same
+  const named: [string, string, boolean][] = [
+    ['/usr/bin/python3 daemon.py --serve', 'cd /w && python3 daemon.py --serve &', true],
+    ['/bin/sleep 600', 'nohup sleep 600 &', true],
+    ['/usr/bin/caffeinate -i', 'git push -q origin fix', false],
+    ['/usr/bin/python3 fig4.py page 3', 'python fig4.pyc', false],
+  ]
+  for (const [command, cmd, is] of named) expect([command, isNamedBy(command, cmd)]).toEqual([command, is])
 })
 
 test("a heavy command is one whose own program drives a browser, builds or renders, or runs a script that drives a browser; never a server, a word another program reads, or the mod's own release and tests (16 Nov: ten tasks shot pages with Playwright and headless Chrome at once)", async () => {

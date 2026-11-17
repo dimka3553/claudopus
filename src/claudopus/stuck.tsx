@@ -320,12 +320,15 @@ const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
 const keepEnded = (one: Todo, runs: EndedRun[]) => {
   if (!runs.length) return {}
   const keyOf = (run: EndedRun) => (leftCommandOf(run.id) ? `${leftCommandOf(run.id)}|${run.what}|${run.how}` : '')
+  // (joined with the programs of the same command that ended earlier, in another look, so it stays one row)
+  const kept = (one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id))
   const joined = runs.reduce<EndedRun[]>((all, run) => {
     const same = keyOf(run) ? all.find(r => keyOf(r) === keyOf(run)) : undefined
     if (!same) return [...all, run]
     return all.map(r => (r === same ? { ...r, at: Math.min(r.at, run.at), endedAt: Math.max(r.endedAt, run.endedAt), count: (r.count ?? 1) + (run.count ?? 1) } : r))
-  }, [])
-  return { endedRuns: [...(one.endedRuns ?? []).filter(r => !joined.some(n => n.id === r.id)), ...joined].slice(-BG_KEPT) }
+  }, kept)
+  // (the newest end goes last, as the list is kept in the order runs ended)
+  return { endedRuns: [...joined.filter(r => !runs.some(n => keyOf(n) && keyOf(n) === keyOf(r)) && !runs.some(n => n.id === r.id)), ...joined.filter(r => runs.some(n => (keyOf(n) && keyOf(n) === keyOf(r)) || n.id === r.id))].slice(-BG_KEPT) }
 }
 // Background work that has ended or was stopped leaves every card that kept it at once, and is kept as ended with how it ended
 // (by its id, or one word for them all), so the card's summary counts it
