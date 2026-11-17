@@ -5700,10 +5700,9 @@ const personSign = async ($: EngineInterface) => {
     [...(await read($, todos)), ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], doneNotes.length, updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
   ])
 }
-// How tall the list was while in use, from the app's own word on each scroll: the list is drawn at least that tall until the person
-// leaves it, so a card that shrinks (their own answer) never shortens it under them. At its end the view snapped up by the shrink
-let usedRows = 0
-const noteRows = (at: number, rows: number | undefined) => void (usedRows = isEngaged(at) ? Math.max(usedRows, rows ?? 0) : (rows ?? 0))
+// The press that folded Finished: the drawing for it is not held at the bottom of the view (panel.tsx, heldRows). The person
+// shortened the list on purpose, so the view comes back to what is left; held, it showed only blank and the fold, its cards above
+let foldPress = -1
 // A click is the focus moving onto a button, then the press: a drawing between them is a new button under the pointer, and the
 // click did nothing (16 Nov, recorded: the update note's What's new took several clicks while other chats' writes drew the panel
 // twice a second). From the person's focus on one of the panel's buttons until its press, or PRESS_HOLD, the panel is drawn as it
@@ -6007,14 +6006,20 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
-  // A go-ahead to finish does its last step without starting the work again. Work still in its last turn when the press lands is
-  // told Claudopus does it, not left to do it: a task asks, then writes its waits and report, and a press seconds later (16 Nov 19:49,
-  // 17 Nov 07:49) reached it as a plain answer, which it took, as its rules say, for Claudopus's to do, so nobody released
+  // A go-ahead to finish does its last step without starting the work again. Work still in the turn that asked is told the step is
+  // Claudopus's, and the step waits for that turn's end, so a release takes the branch as the task left it: a task asks, then writes
+  // its waits and report, and a press seconds later (16 Nov 19:49, 17 Nov 07:49) reached it as a plain answer, which it took, as its
+  // rules say, for Claudopus's to do, so nobody released
   if (!isReply && ask.lastStep && ask.folder && ask.choices?.[0] === said) {
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line, isCard: true, askAt: ask.at })
     redraw($)
-    if (working) await tell($, target, `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\nClaudopus does the last step itself (${cut(ask.lastStep, 160)}): do not do it yourself. End as you were, saying Claudopus does it.`)
-    await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
+    const done = (err: unknown) => log($, `last step of ${one.id} not done: ${String(err)}`)
+    if (!working) await lastStep($, one, ask, said).catch(done)
+    else {
+      await tell($, one.id, `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\nClaudopus does that step (${cut(ask.lastStep, 160)}) once you end this turn: do not do it or start it yourself. Commit anything left on the branch now, change nothing on it after that, and end with your report.`)
+      await stepLine($, one.id, `On your "${said}", Claudopus does the last step once Claude ends this turn`)
+      void afterTurn($, one.id).then(() => lastStep($, one, ask, said)).catch(done)
+    }
     return void askGone($, one, said)
   }
   const to = isReply ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}`
@@ -8941,6 +8946,16 @@ const stepLine = async ($: EngineInterface, id: string, text: string) => {
   await changeTodos($, list => list.map(card => (card.id === id ? { ...card, entries: [...card.entries, { at, kind: 'note' as const, text }].slice(-ENTRIES_KEPT) } : card)))
   redraw($)
 }
+// A go-ahead pressed while its work is still in the turn that asked waits for that turn's end (the card no longer working, or gone)
+const TURN_LOOK = 2_000
+const afterTurn = ($: EngineInterface, id: string) =>
+  new Promise<void>(resolve => {
+    const timer = everyLoad($, TURN_LOOK, () => {
+      void read($, todos)
+        .then(list => list.find(card => card.id === id)?.status === 'working' || (timer.cancel(), resolve()))
+        .catch(() => undefined)
+    })
+  })
 const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string) => {
   const folder = ask.folder ?? ''
   const step = ask.lastStep ?? ''
@@ -9103,7 +9118,7 @@ const chatHooks = (on: On) => {
     // reached nothing. Keys no load before used make it take each button afresh: the moment of the load, with room for a thousand presses
     if ((await $.ui.panes().catch(() => [])).length) (loadMark = presses = 1 + ((await $.clock.now()) % 1_000_000_000) * 1000), (freshness += 1)
     // A chat begins with no record of drawings made before it: one slow drawing of an earlier start never holds this one's (isFreshTooSoon)
-    ;(freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0), (usedRows = 0))
+    ;(freshDrawn.clear(), freshDue.clear(), freshUnderWay.clear(), (pressedAt = 0), (engagedAt = 0))
     await loadSettings($)
     await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
@@ -11991,7 +12006,6 @@ const commandHooks = (on: On) => {
   // The person scrolling the panel or a Details tab is using it: what moves on its own waits (engage)
   on('ui.scroll', async ($, e, next) => {
     if (e.origin.kind === 'person' && (e.requestId === LIST || e.requestId.startsWith(WORK_PANE) || e.requestId.startsWith(FLOW_PANE))) await engage($)
-    if (e.requestId === LIST) noteRows(await $.clock.now(), e.contentRows)
     // Every move is let through as it comes. The app's own moves back to a box that holds the cursor in a pane arrive here as the
     // person's, already drawn: refusing them only undid each one a moment later, a bounce worse than the pull (0.2.135, taken out).
     // The reply box is drawn in the bar above the prompt instead, where there is nothing to pull (asking.tsx, repliesInBar)
@@ -14308,7 +14322,7 @@ const panelHooks = (on: On) => {
                 label={`${isOpen ? '▾' : '▸'} Finished ${finished.length + endedFlows.length}`}
                 plain
                 hotkey={keyed ? 'f' : undefined}
-                onPress={() => void ((presses += 1), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
+                onPress={() => void ((presses += 1), isOpen && (foldPress = presses), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
               />
             </Box>
             <Text dimColor>{endedElsewhere.length ? 'all chats' : 'this chat'}</Text>
@@ -14536,8 +14550,14 @@ const panelHooks = (on: On) => {
     // Where updating stands for this chat: a small box under the header's lines, its steps each a press
     const outCard = alone ? null : (await noticeCard($, ui, await noticeNow($, versions.version, versions.installed).catch(() => undefined), versions.version).catch(() => null)) ?? screen ?? null
 
+    // While the person uses the list scrolled down, it is drawn at least as tall as the bottom of what they see, so a card that
+    // shrinks under them (their own answer) never snaps the view up. Blank space shows only where a card shrank inside the view, and
+    // only until the list is drawn again once they leave it alone. The height the app reports is no guide: it
+    // is this drawing's own, held height included, and kept as the most it had ever been it left the list at the length of its
+    // longest moment of the chat, blank under three cards (16 Nov, Dima's screenshot). Folding Finished is not held (foldPress)
+    const heldRows = paneId === LIST && e.surface === 'desktop' && isInUse(at, e.props.scroll.offset) && presses !== foldPress ? e.props.scroll.offset + e.props.scroll.bodyRows : 0
     return (
-      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={Math.max(e.props.scroll.bodyRows, paneId === LIST && e.surface === 'desktop' && isInUse(at, e.props.scroll.offset) ? usedRows : 0)}>
+      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={Math.max(e.props.scroll.bodyRows, heldRows)}>
         {!alone ? (
           // The mark and its lines across the whole width, so the chat's size is read whole; the buttons on a row of their own under
           // them, which wraps onto a second row in a narrow pane rather than cutting anything off
