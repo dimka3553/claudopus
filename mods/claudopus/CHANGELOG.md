@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.173 · 17 November 2026
+- The panel and the bar above the prompt redraw themselves far less often with nothing new: when two requests for a drawing came together, each kept asking for another, in chains of up to 27 redraws, and every redraw made the hover under your pointer blink.
+
 ## 0.2.172 · 17 November 2026
 - The banner at the top of the README shows the octopus in 3D, built from cubes and holding task cards, as on claudopus.ai's home page, and its line says tasks where it said jobs.
 

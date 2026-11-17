@@ -225,10 +225,15 @@ const freshUnderWay = new Map<string, { fresh: number; isOvertaken: boolean }>()
 let pressedAt = 0
 // (isLoaded: the bar above the prompt is drawn in 50-200 ms under the same load, under SLOW_DRAW, so it is given again
 // whenever the panel's own drawings are slow (isPanelSlow))
-const isFreshTooSoon = ($: EngineInterface, key: string, at: number, isLoaded = false) => {
+const isFreshTooSoon = ($: EngineInterface, key: string, at: number, isLoaded = false, canGiveMade = true) => {
   const going = freshUnderWay.get(key)
   if (going && going.fresh === freshness) return (going.isOvertaken = true)
   const last = freshDrawn.get(key)
+  // The ask for a drawing made while it was overtaken: given that one, once (the panel and a Details tab, which hold a drawing
+  // only while what they show is the same, look at that themselves: canGiveMade)
+  const again = madeAgain.get(key)
+  madeAgain.delete(key)
+  if (canGiveMade && again && last && again.fresh === freshness && at - again.at < FRESH_GAP && last.fresh === freshness && pressedAt < last.at) return true
   // The mod's own calls for a drawing (an ask, a box, a press, a picture: freshness) come at once
   if (!last || pressedAt >= last.at || last.fresh !== freshness) return false
   // Only while drawings are slow, as under a load that drops them: a quick one reaches the app before the next is asked for
@@ -243,11 +248,17 @@ const isFreshTooSoon = ($: EngineInterface, key: string, at: number, isLoaded = 
 const isPanelSlow = (at: number) => [...freshDrawn].some(([key, last]) => key.startsWith(`${LIST}|`) && last.ms >= SLOW_DRAW && at - last.at < 10_000)
 // Around each drawing made afresh: one asked for while it was made is made again the moment it is done
 const freshBegins = (key: string) => (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false }), freshness)
+// Asked for again only for a drawing made afresh, which the engine dropped: an ask answered with the drawing before (a held one) left
+// nothing unseen. And the ask that follows within FRESH_GAP is given the drawing just made, never a new one, while nothing of the
+// mod's own came (madeAgain). Asked for again after every overtaken ask, two asks that came together (as two per push) overtook each
+// other again and again: in the real panel three quarters of the full redraws began the moment a drawing ended, in chains of up to
+// 27, with the panel and the bar drawn about seven times a second and the hover under the pointer going out at each (17 Nov)
+const madeAgain = new Map<string, { fresh: number; at: number }>()
 const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: number; fresh: number }) => {
   const isOvertaken = freshUnderWay.get(key)?.isOvertaken
   freshUnderWay.delete(key)
   if (made) freshDrawn.set(key, made)
-  if (isOvertaken) void drawFresh($)
+  if (isOvertaken && made) (madeAgain.set(key, { fresh: made.fresh, at: made.at }), void drawFresh($))
 }
 let calmAt = 0
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
