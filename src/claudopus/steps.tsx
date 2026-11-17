@@ -387,14 +387,14 @@ const holdAtHandback = async ($: EngineInterface, agent: string): Promise<string
   const list = await read($, todos)
   const running = runningHelpers(list, agent).length
   if (!running) return ''
-  // Work told to hand back what it has (by Claudopus, as its helpers brought nothing new or its wait ran out, or by the chat) may:
+  // Work Claudopus told to hand back what it has (its helpers sat silent, or its wait ran out) may:
   // helpers that sit silent are stopped as it does, and a result that comes later from one at work reaches the chat (passOnHelper)
   if (isLetGo(list, agent)) return (await log($, `work ${agent} hands back while ${running} helpers run, as it was told to`), '')
   await log($, `work ${agent} held at its report: ${running} helpers run`)
   return HELD_AT_END(running)
 }
 
-// Work Claudopus told, for a second time, that its helpers bring nothing new: it may hand back its report while they run
+// Work Claudopus told to hand back what it has: its report goes through while its helpers run
 const isLetGo = (list: Todo[], id: string) => list.find(one => one.id === id)?.mayHandBack !== undefined
 
 // Work that is stopped takes the helpers it has running with it: they run in the background, and would go on spending, their
