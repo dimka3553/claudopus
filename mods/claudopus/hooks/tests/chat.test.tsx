@@ -1188,11 +1188,15 @@ test("a chat's own thread may only read, run a single command in the background,
   expect(keyed).toContain('token [hidden API_KEY]')
   expect(keyed).not.toContain('sk-live-123456')
   // The engine's notice that a task whose report already came has stopped is left out; one that also says something else is not
+  const withResultEarly = (id: string, summary: string) => notice(id, 'completed', summary).replace('</summary>', '</summary>\n<result>This agent has not reported yet: it is waiting on its own background work and will deliver its report through SubagentHandback when that finishes.\n</result>')
   const REPEAT = 'Agent "Fix the nose" completed. Its report was already delivered to you as a message, so it is not repeated here.'
   const repeat = (await $.prompt.submit({ text: notice('a9', 'completed', REPEAT), wait: false, origin: { kind: 'task-notification' } } as never)) as { drop?: string }
   expect(repeat.drop).toContain('Left out a repeat notice')
   const two = (await $.prompt.submit({ text: `${notice('a9', 'completed', REPEAT)}\n${notice('a8', 'completed', REPEAT)}`, wait: false, origin: { kind: 'task-notification' } } as never)) as { drop?: string }
   expect(two.drop).toContain('Left out a repeat notice')
+  // A summary that is not the engine's plain one (a stop at a turn limit) is news, kept even with the plain words below it
+  const limited = (await $.prompt.submit({ text: withResultEarly('a7', 'Agent "Fix the jaw" stopped at its 40-turn limit'), wait: false, origin: { kind: 'task-notification' } } as never)) as { drop?: string }
+  expect(limited.drop).toBeUndefined()
   // So is one that a task waiting on its own command has no report yet, with the engine's artifact lines or not, and the two together
   const withResult = (id: string, summary: string, result: string) => notice(id, 'completed', summary).replace('</summary>', `</summary>\n<result>${result}\n</result>`)
   const NOT_YET = 'This agent has not reported yet: it is waiting on its own background work and will deliver its report through SubagentHandback when that finishes.'
