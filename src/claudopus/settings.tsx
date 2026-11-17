@@ -133,7 +133,8 @@ const configButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   </ui.Box>
 )
 // Check now as it stands in this chat: under way, and what the last press found, kept until the next press
-const updateCheck = { isChecking: false, said: '', isError: false }
+// (isOut: it found a newer version, which the update box under it then says with its presses)
+const updateCheck = { isChecking: false, said: '', isError: false, isOut: false }
 const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
   version: (await versionsOf($).catch(() => ({ version: '' }))).version,
   check: { ...updateCheck },
@@ -211,16 +212,16 @@ const configActs = ($: EngineInterface) => ({
       await setConfig($, dir, 'updates', hours ? undefined : false)
       await setConfig($, dir, 'updateEvery', hours && hours !== 1 ? hours : undefined)
     }),
-  // A press while a check runs does nothing: the tab shows it checking. It only looks; the panel offers what it found
+  // A press while a check runs does nothing: the tab shows it checking. It only looks; Config and the panel offer what it found
   check: () => {
     if (updateCheck.isChecking) return
     presses += 1
-    Object.assign(updateCheck, { isChecking: true, said: '', isError: false })
+    Object.assign(updateCheck, { isChecking: true, said: '', isError: false, isOut: false })
     redraw($)
     void checkNow($)
-      .catch(err => ({ text: `Couldn't check: ${String(err instanceof Error ? err.message : err).slice(0, 160)}`, isError: true }))
+      .catch(err => ({ text: `Couldn't check: ${String(err instanceof Error ? err.message : err).slice(0, 160)}`, isError: true, isOut: false }))
       .then(said => {
-        Object.assign(updateCheck, { isChecking: false, said: said.text, isError: said.isError })
+        Object.assign(updateCheck, { isChecking: false, said: said.text, isError: said.isError, isOut: Boolean(said.isOut) })
         presses += 1
         redraw($)
       })

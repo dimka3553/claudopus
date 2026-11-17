@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.169 · 17 November 2026
+- Check now in Config shows a newer version right under the press, with its Update button (Download, then Install, on an installed copy) and how far it has got, then says to type /reload-plugins: you no longer go to the panel to update.
+- Check now also brings back a version you had put off with Not now.
+
 ## 0.2.168 · 17 November 2026
 - claudopus.ai has a new home page: the octopus in 3D with a task on each arm, the problem drawn as three requests taken one by one against three side by side, six ways Claude Code alone gets in your way with what Claudopus does about each, and the panel and Results drawn in depth.
 - claudopus.ai/tour.html is new: a new film that shows today's Claudopus, and Results explained step by step, with why it is useful.

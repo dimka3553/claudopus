@@ -822,8 +822,8 @@ test("Config's Tasks band shows only when Fable runs and when a second agent che
   }
 })
 
-test('Check now in Config only looks: it shows it is checking, then what it found, and a second press meanwhile starts no second look; nothing is fetched or moved', async ($, on) => {
-  const { files, gitRan } = world(on, { release: { version: '0.1.2', commit: 'c'.repeat(40), tree: 'a'.repeat(40) } })
+test('Check now in Config only looks: it shows it is checking, then what it found, and a second press meanwhile starts no second look; nothing is fetched or moved until Update, pressed right there in Config', async ($, on) => {
+  const { files, gitRan, clock } = world(on, { release: { version: '0.1.2', commit: 'c'.repeat(40), tree: 'a'.repeat(40) } })
   let page = JSON.stringify({ version: '0.1.0', tree: 'a'.repeat(40) })
   let answer: (() => void) | undefined
   let fetches = 0
@@ -848,12 +848,21 @@ test('Check now in Config only looks: it shows it is checking, then what it foun
   release()
   expect(await until(() => config.find({ type: 'Text', text: /^You're on the newest version \(v0\.1\.0\)/ }))).toBeDefined()
   expect(fetches).toBe(1)
-  // A newer release: Check now says so and the panel offers it; nothing was fetched, moved or installed
+  // A newer release, one that Not now in the panel had put off: Check now offers it right here, in the panel's own box with its
+  // Update, and sends the person nowhere else; nothing was fetched, moved or installed
   page = JSON.stringify({ version: '0.1.2', tree: 'a'.repeat(40) })
+  files.set(`${MEMORY}/update-later.json`, JSON.stringify({ version: '0.1.2', until: (await clock.now()) + 3_600_000 }))
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is out. You can update from the panel.' }))).toBeDefined()
+  expect((await until(() => keyed(config, 'update-download')))?.props.label).toBe('Update')
+  expect(await config.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' })).toBeDefined()
+  expect(await config.find({ type: 'Text', text: /from the panel/ })).toBeUndefined()
+  expect(await config.find({ type: 'Text', text: 'v0.1.2 is out.' })).toBeUndefined()
+  // Not now pressed there puts the box away and leaves no line saying it is out with nothing to press
+  await pressed(config, 'update-later-available')
+  expect(await until(async () => ((await keyed(config, 'update-download')) ? undefined : true))).toBe(true)
+  expect(await config.find({ type: 'Text', text: /0\.1\.2 is out/ })).toBeUndefined()
   expect(gitRan.filter(one => /^(fetch|merge)/.test(one) || one.includes('fetch --progress'))).toEqual([])
   expect(files.get('manifest')).toBeUndefined()
   // An older page with no fingerprint is no release: said as a failure, in the error colour
@@ -870,4 +879,13 @@ test('Check now in Config only looks: it shows it is checking, then what it foun
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toMatchObject({ updates: false })
   await config.select({ key: 'config-look-pick', value: '1' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
+  // Update pressed in Config updates, and Config says what is left: type /reload-plugins
+  page = JSON.stringify({ version: '0.1.2', tree: 'a'.repeat(40) })
+  await pressed(config, 'config-check')
+  await until(async () => answer)
+  release()
+  await until(() => keyed(config, 'update-download'))
+  await pressed(config, 'update-download')
+  expect(await until(async () => (release(), config.find({ type: 'Text', text: 'Claudopus 0.1.2 is ready: type /reload-plugins to switch this chat to it.' })))).toBeDefined()
+  expect(gitRan.some(one => /^merge\b/.test(one))).toBe(true)
 })
