@@ -68,7 +68,7 @@ within "grep -q '\"cutAt\":[0-9]*,\"movedAt\":[0-9]*,\"copy\":\"1a2b3c4d\"' '$me
 # 4. The app starts the chat again while the copy runs: the copy is stopped at once, and the state says when (backAt, which only
 # that stop writes). Up to 15 seconds, as it runs beside the mod's tests, where a loaded Mac took over 5
 touch "$tmp/ccd-cli/engine.run"; "$tmp/ccd-cli/engine" --resume=$s & app=$!
-within "grep -q 1a2b3c4d '$tmp/stopped' 2>/dev/null" 15 && grep -q '"backAt":' "$mem/keep/$s.state" && ok "the app's start of the chat stops the copy within seconds" || no "the app's start of the chat stops the copy within seconds"
+within "grep -q 1a2b3c4d '$tmp/stopped' 2>/dev/null" 15 && grep -q '"backAt":' "$mem/keep/$s.state" && ok "the app's start of the chat stops the copy within seconds" || no "the app's start of the chat stops the copy within seconds: stopped $(cat "$tmp/stopped" 2>/dev/null | tr '\n' ' '), its log: $(tail -n 3 "$mem/keep/$s.log" 2>/dev/null | cut -c21- | tr '\n' ' ')"
 rm -f "$tmp/ccd-cli/engine.run"; wait $app 2>/dev/null
 
 # 5. The copy's work is done: it is stopped once it has rested
