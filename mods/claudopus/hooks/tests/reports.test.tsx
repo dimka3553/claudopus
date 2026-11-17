@@ -761,7 +761,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(await pane.find({ type: 'Text', text: /^Results$/ })).toBeUndefined()
   const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Reports', bodyColumns: 80 }, surface: 'desktop' } as never)
   expect((await list.find({ type: 'Text', text: /^Results$/ }))?.props.bold).toBe(true)
-  expect((await list.find({ type: 'Text', text: /^Waiting on you$/ }))?.props.bold).toBe(true)
+  expect((await list.find({ type: 'Text', text: /^Waiting for you$/ }))?.props.bold).toBe(true)
   // One line a row: its title, when, and Archive; nothing under it, and no mark: its group says it waits
   expect((await keyed(list, `report-${folder.split('/').pop()}`))?.props.label).toBe('Weekly revenue')
   expect(await list.find({ type: 'Text', text: /^\d\d:\d\d$/ })).toBeDefined()
@@ -775,7 +775,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   await until(async () => opened.includes(id) || undefined)
   const one = await $.ui.mount({ ...LIST, requestId: id, props: { ...LIST.props, title: 'Weekly revenue', bodyColumns: 80 }, surface: 'desktop' } as never)
   const heads = (await one.findAll({ type: 'Text' })).filter(text => text.props.bold).map(text => text.text)
-  expect(heads).toEqual(['Weekly revenue', 'Waiting on you', 'Finding', 'Pictures', 'In full', 'Continue'])
+  expect(heads).toEqual(['Weekly revenue', 'Waiting for you', 'Summary', 'Pictures', 'In full', 'Follow-up'])
   expect((await one.find({ type: 'Markdown', text: /Revenue rose 12%/ }))?.props.text).toBe(`${report}\n`)
   // Its picture is shown in the pane, never handed to another app: where it cannot be drawn, its path is given as text
   expect(await keyed(one, 'report-page')).toBeUndefined()
@@ -791,16 +791,16 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(submitted[0]).toContain('Shall I send it to the team?')
   await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[0]?.answer ? true : undefined))
   expect(JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting).toEqual([{ text: 'Shall I send it to the team?', answer: 'Yes' }, { text: 'Post it in the channel too?' }])
-  expect(await list.find({ type: 'Text', text: /^Waiting on you$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeDefined()
   await until(async () => ((await one.find({ type: 'Text', text: 'Shall I send it to the team?' })) ? undefined : true))
   expect(await one.find({ type: 'Text', text: 'Post it in the channel too?' })).toBeDefined()
   // Not now clears the other and sends nothing
   await pressed(one, 'report-say-1-Not now')
   await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[1]?.answer ? true : undefined))
   expect(submitted).toHaveLength(1)
-  await until(async () => ((await list.find({ type: 'Text', text: /^Waiting on you$/ })) ? undefined : true))
-  expect(await list.find({ type: 'Text', text: /^Waiting on you$/ })).toBeUndefined()
-  expect(await one.find({ type: 'Text', text: /^Waiting on you$/ })).toBeUndefined()
+  await until(async () => ((await list.find({ type: 'Text', text: /^Waiting for you$/ })) ? undefined : true))
+  expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeUndefined()
+  expect(await one.find({ type: 'Text', text: /^Waiting for you$/ })).toBeUndefined()
 
   // The chat is told of the reports with each message, and reads one itself to answer from it
   const next = await $.prompt.submit({ text: 'what was revenue again', wait: false, origin: composer })
@@ -856,8 +856,8 @@ test('work started from a report keeps its own report linked to it, beside the o
   await until(async () => opened.includes(id) || undefined)
   const one = await $.ui.mount({ ...LIST, requestId: id, props: { ...LIST.props, title: 'Revenue again', bodyColumns: 80 }, surface: 'desktop' } as never)
   const kin = (await one.findAll({ type: 'Button' })).map(button => String(button.props.label))
-  expect(kin.some(label => label.includes('Revenue · this started from it'))).toBe(true)
-  expect(kin.some(label => label.includes('Revenue again · earlier round'))).toBe(true)
+  expect(kin.some(label => label.includes('Revenue · this result came from it'))).toBe(true)
+  expect(kin.some(label => label.includes('Revenue again · earlier result'))).toBe(true)
 })
 
 test('a report opened when three are open closes the one opened longest ago', async ($, on) => {
@@ -887,7 +887,7 @@ test('an older report waits by its one question, a report that only ends with a 
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Reports', bodyColumns: 80 }, surface: 'desktop' } as never)
   expect(await list.find({ type: 'Text', text: /^3$/ })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: /^Waiting on you$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeDefined()
   expect(await list.find({ type: 'Text', text: /^2$/ })).toBeDefined()
   const told = (await $.prompt.submit({ text: 'what waits', wait: false, origin: composer })).context?.join('\n') ?? ''
   expect(told).toContain('waiting on: (1) Ship the old one?')
@@ -913,7 +913,7 @@ test('a result archived with one press leaves the list, its tab, the count and t
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Reports', bodyColumns: 80 }, surface: 'desktop' } as never)
   expect(await list.find({ type: 'Text', text: /^3$/ })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: /^Waiting on you$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeDefined()
 
   // From its tab: the tab closes, nothing in it waits, and the text stays as it was
   const tab = await $.ui.mount({ ...LIST, requestId: 'report-b', surface: 'desktop' } as never)
@@ -946,7 +946,7 @@ test('a result archived with one press leaves the list, its tab, the count and t
   expect((await keyed(list, 'archived-fold'))?.props.label).toBe('▾ Archived 2')
   await pressed(list, 'unarchive-b')
   await until(async () => (JSON.parse(files.get(`${MEMORY}/reports/b/meta.json`) ?? '{}').archived ? undefined : true))
-  expect(await until(async () => list.find({ type: 'Text', text: /^Waiting on you$/ }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: /^Waiting for you$/ }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: /^2$/ })).toBeDefined()
   expect((await keyed(list, 'archived-fold'))?.props.label).toBe('▾ Archived 1')
 
@@ -993,7 +993,7 @@ test('the results list is one line a row: what waits first, the five newest, the
   const titles = async () => (await list.findAll({ type: 'Button' })).filter(one => /^report-/.test(one.key ?? '')).map(one => String(one.props.label))
   // 13 reports are 10 rows: the video one, the index one, eight panel changes
   expect(await list.find({ type: 'Text', text: /^10$/ })).toBeDefined()
-  expect((await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)).toEqual(['Results', 'Waiting on you', 'Recent'])
+  expect((await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)).toEqual(['Results', 'Waiting for you', 'Newest'])
   expect(await titles()).toEqual(['Video third cut', 'Panel change 0', 'Panel change 1', 'Panel change 2', 'Panel change 3', 'Panel change 4'])
   // Nothing under a title: no finding, no subject, no line saying it waits, no mark; the time, Archive
   expect(await list.find({ type: 'Text', text: /long line|waiting on you|Claude workflow/ })).toBeUndefined()
@@ -1021,8 +1021,8 @@ test('the results list is one line a row: what waits first, the five newest, the
   // Opened, its earlier rounds are listed inside it
   const tab = await $.ui.mount({ ...LIST, requestId: 'report-v3', surface: 'desktop' } as never)
   const kin = (await tab.findAll({ type: 'Button' })).map(one => String(one.props.label))
-  expect(kin.some(label => label.includes('Video second cut · this started from it'))).toBe(true)
-  expect(kin.some(label => label.includes('Explainer video · earlier round'))).toBe(true)
+  expect(kin.some(label => label.includes('Video second cut · this result came from it'))).toBe(true)
+  expect(kin.some(label => label.includes('Explainer video · earlier result'))).toBe(true)
 
   // Archived from its row, every round goes
   await pressed(list, 'archive-v3')
@@ -1223,9 +1223,9 @@ test("every question of a result can be answered in words beside its own answers
   const line = (await until(async () => filled.find(text => text.includes('About question 3 of the result')))) ?? ''
   expect(line).toContain(`${MEMORY}/reports/${id}/report.md`)
   await $.prompt.submit({ text: `${line}the pricing page`, wait: false, origin: composer })
-  expect(await until(async () => one.find({ type: 'Text', text: 'Which page is the complaint about? · you answered in your words' }))).toBeDefined()
+  expect(await until(async () => one.find({ type: 'Text', text: 'Which page is the complaint about? · you answered in words' }))).toBeDefined()
   await pressed(one, 'report-say-3-Not now')
-  expect(await until(async () => one.find({ type: 'Text', text: 'Shall I release it? · you said not now' }))).toBeDefined()
+  expect(await until(async () => one.find({ type: 'Text', text: 'Shall I release it? · you pressed Not now' }))).toBeDefined()
   await pressed(one, 'report-say-0-No')
   expect(await until(async () => one.find({ type: 'Text', text: 'Should Claude use Muse or Gemini? · you answered “No”' }))).toBeDefined()
 })

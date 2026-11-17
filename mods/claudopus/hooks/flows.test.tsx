@@ -14,7 +14,7 @@ test('a workflow of any length draws its squares in one drawing the app takes: i
   }
   // What was left out is said: earlier rounds, or one round's earlier steps
   expect(squaresBefore(squaresKept(Array.from({ length: 101 }, (): Square[] => Array(6).fill('done'))))).toBe('1 earlier round')
-  expect(squaresBefore(squaresKept([Array<Square>(5000).fill('done')]))).toBe('4400 earlier steps')
+  expect(squaresBefore(squaresKept([Array<Square>(5000).fill('done')]))).toBe('4400 earlier stages')
   // A run that fits is drawn whole
   const short: Square[][] = [['done', 'failed'], ['running', 'waiting']]
   expect(squaresKept(short)).toEqual({ groups: short, earlier: 0, steps: 0 })

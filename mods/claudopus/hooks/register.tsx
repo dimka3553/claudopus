@@ -202,13 +202,13 @@ const took = (ms: number) => {
   const [hrs, m, sec] = [Math.floor(all / 3600), Math.floor(all / 60) % 60, all % 60]
   const two = (n: number) => String(n).padStart(2, '0')
   if (isRunFromAfar) return hrs ? `${hrs}h ${two(m)}m` : m ? `${m}m` : '<1m'
-  return hrs ? `${hrs}h ${two(m)}m ${two(sec)}s` : m ? `${m}m ${two(sec)}s` : `${sec}s`
+  return hrs ? `${hrs}h ${two(m)}m` : m ? `${m}m ${two(sec)}s` : `${sec}s`
 }
 const thousands = (tokens: number) =>
   isRunFromAfar ? (tokens < 10_000 ? '<10k' : `${Math.round(tokens / 10_000) * 10}k`) : `${(tokens / 1000).toFixed(tokens < 100_000 ? 1 : 0)}k`
-const fill = (tokens: number, window: number) => (window ? `${percent(tokens, window)}% · ${thousands(tokens)} of ${thousands(window)}` : thousands(tokens))
+const fill = (tokens: number, window: number) => (window ? `${percent(tokens, window)}% full` : '')
 const percent = (tokens: number, window: number) => (isRunFromAfar ? Math.floor((tokens / window) * 20) * 5 : Math.round((tokens / window) * 100))
-const share = (tokens: number, window: number) => (window ? `context ${percent(tokens, window)}% (${thousands(tokens)})` : `context ${thousands(tokens)}`)
+const share = (tokens: number, window: number) => (window ? `${percent(tokens, window)}% full` : '')
 
 const modelName = (id: string) => {
   const m = /(fable|opus|sonnet|haiku)(?:-(\d+)(?:[-.](\d{1,2}))?(?!\d))?/.exec(id.toLowerCase())
@@ -720,9 +720,9 @@ const AFAR_RULE =
 const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
   [
     `"${title}" has a question for you: ${ask.text}`,
-    ask.details ? `What it is about:\n${ask.details.replaceAll('**', '')}` : '',
-    `Answers: ${answers.join(' · ')}, or reply in your own words, here or on its card.`,
-    ask.copy ? `${ask.isCommand ? 'The command to type' : 'The text to paste'}: ${ask.copy}` : '',
+    ask.details ? `Details:\n${ask.details.replaceAll('**', '')}` : '',
+    `Answers: ${answers.join(' · ')}, or answer in your own words, here or on its card.`,
+    ask.copy ? `${ask.isCommand ? 'Command to run' : 'Text to paste'}: ${ask.copy}` : '',
     ask.pictures?.length ? `Pictures: ${ask.pictures.join(', ')}` : '',
   ]
     .filter(Boolean)
@@ -735,16 +735,16 @@ const ANSWER_ALREADY_SENT = (said: string) => `Not sent: "${said}" is the answer
 const ANSWER_ECHO = 60 * 60_000
 const ASK_REPLIED = (title: string, said: string, isYou = false) =>
   isYou
-    ? `✓ You replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs you.`
+    ? `✓ You answered "${title}" on its card: ${said}. Claude is working on it, and asks again if it still needs you.`
     : `✓ {Name} replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs {name}.`
 const REPLY_HOLDS = `That reply does not settle your question by itself: act on it. Their card shows your question with their reply under it, and nothing more to press or type while you work on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still needs them after you have done what they said, ask it again, which brings back its answers.`
 const RESUMED_BY_ANSWER = `You had finished; this answer starts you again. Continue the task with it, then end with your report as before.`
 const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = false) =>
   isYou
-    ? `You answered, on its card, the question Claude asked in "${title}" after it finished (${asked}): ${said}. Claudopus couldn't start that task again, so your answer goes with your next message here.`
+    ? `You answered "${asked}" from "${title}" on its card after it was done: ${said}. Claudopus couldn't start that task again, so your answer goes with your next message here.`
     : `{Name} answered, on its card, the question Claude asked in "${title}" after it finished (${asked}): ${said}. Claudopus couldn't start that task again, so the answer waits here for {name}'s next message.`
 const ANSWER_FOR_CHAT_RELAY = `With {name}'s next message here, continue that task with this answer, as you would with their own words, alongside whatever that message asks.`
-const ASK_CLEARED = (title: string) => `Claude no longer needs an answer for "${title}".`
+const ASK_CLEARED = (title: string) => `Claude took back its question in "${title}". You don't need to answer it.`
 const ANSWERED_IN_CHAT = (asked: string, words: string, isHeld = false, isWhole = true) =>
   `The message sent to you just now that carries {name}'s words "${words}" is {name}'s own reply, typed by them in the chat, to your question: "${asked}".${isWhole ? '' : ' Only those words are theirs: the chat wrote anything else in that message, not {name}.'} ${isHeld ? REPLY_HOLDS : 'Their card no longer shows the question.'} If it answers your question, take it as their answer and continue, and ask again if it leaves something open. If it asks for something else, decide whether it is more for this task, a new task to hand back with the \`note\` tool and its \`task\`, or a change in how you work, and say with the \`note\` tool what you did with it.`
 const STEER = (words: string, isWhole = true) =>
@@ -781,20 +781,22 @@ const OWED =
   'A message from {name} is waiting for your decision, and you have kept working. Stop now and decide: more for your to-do list, a new task to hand back with the `note` tool and its `task`, or a change in how you work. Change your to-dos to match, then say with the `note` tool, in one plain line, what you did with their message.'
 const drifted = (steps: number) =>
   `You have taken ${steps} steps since you last touched your to-dos or said how far you have got. In your next step, send the to-do calls that bring the list up to date (tick what is done, mark the one you are on as doing, add what you took on) and a \`note\` saying how far you have got, together with your next working call in that same step, never in a step of their own. If all of it is already up to date, continue.`
+const minutesSaid = (mins: number) => (mins >= 60 ? `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m` : `${mins}m`)
 const STUCK_IN_CHAT = (title: string, mins: number, isHelpersAtWork = false) =>
-  `"${title}" hasn't made progress for ${mins} minutes: nothing new has come back to Claude${isHelpersAtWork ? ', though its helpers still run something' : ' or its helpers'}. It may be stuck waiting for something. Its card shows how far it has got.`
-const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to hand back what it has if nothing is coming.'
+  `Nothing new from "${title}" for ${minutesSaid(mins)}${isHelpersAtWork ? ', though its helpers are still running something' : ''}. Claude may be stuck waiting for something. Its card shows how far it got.`
+const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to finish with what it has if nothing is coming.'
 const HELPERS_SILENT = (mins: number, helpers: string) =>
   `From Claudopus: nothing new has come back from your helpers for ${mins} min while your step had ended: ${helpers}. Ask each with SendMessage what it is doing and when it will end, and tell one that is stuck or waits on nothing to hand back what it has now. Then carry on with what needs nothing from them, or end your step.`
 const HELPERS_STILL_SILENT = (mins: number, helpers: string) =>
   `From Claudopus: nothing new has come back from your helpers for ${mins} min, nor since you were asked to check on them: ${helpers}. Unless one told you it is still making progress and when it ends, hand back your report now with what you have, saying what each was still doing: Claudopus lets you hand it back while they run, and stops those that sit silent as you do.`
 const GAVE_UP_IN_CHAT = (title: string, mins: number) =>
-  `"${title}" is stuck: nothing new has come back from its helpers for ${mins} minutes, and it has not handed back what it has though Claudopus asked it to.`
+  `"${title}" is stuck: nothing new from its helpers for ${minutesSaid(mins)}, and Claude hasn't sent what it has, though Claudopus asked it to.`
 const NUDGED_IN_CHAT = (title: string, mins: number, isLast: boolean) =>
-  `"${title}" hasn't made progress for ${mins} minutes: it waits for its helpers, and nothing new has come back from them. Claudopus started it again and asked it ${isLast ? 'to hand back what it has now' : 'to check on them'}.`
+  `Nothing new from the helpers of "${title}" for ${minutesSaid(mins)}. Claudopus started Claude again and asked it ${isLast ? 'to send what it has now' : 'to check on them'}.`
 const RESTARTED_WORK = `From Claudopus, not {name}: you stopped partway through a step without a report (the app restarted, the Mac slept or a command was interrupted). First check what you already have, then continue from where you were; a command or helper you started may still be running, or may need starting again.`
 const RESTARTED_IN_CHAT = (title: string, mins: number) =>
-  `"${title}" had stopped partway through a step ${mins} minutes ago without a report, so Claudopus restarted it. Its card shows how far it has got.`
+  `"${title}" stopped partway ${minutesSaid(mins)} ago without a result, so Claudopus started it again. Its card shows how far it got.`
+
 const STOPPED_BY_YOU = (title: string, id: string, left: string[] = []) =>
   `{Name} stopped "${title}" (${id}) with Stop on its card. {Name} stopped this, not you: do not restart it, message it or start the same task again unless {name} asks.${left.length ? ` Still running, because it was started detached: ${left.join('; ')}.` : ''} Do not mention the stop unless {name} asks.`
 const STOPPED_REFUSED = (title: string) =>
@@ -815,7 +817,7 @@ async function writeOwnText($: EngineInterface, memory: string, path: string, te
   if (path === 'rules/CLAUDE.md') return $.fs.write(`${memory}/rules/CLAUDE.md`, text)
   if (path === 'roles/chat.md') return $.fs.write(`${memory}/roles/chat.md`, text)
   if (path === 'roles/work.md') return $.fs.write(`${memory}/roles/work.md`, text)
-  throw new Error(`${path} is not one of the texts Claudopus ships`)
+  throw new Error(`${path} isn't one of Claudopus's rules files`)
 }
 async function inForce($: EngineInterface, root: string, memory: string, path: string) {
   const own = memory ? await personText($, memory, path) : ''
@@ -839,7 +841,7 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
       return undefined
     }
   })()
-  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('config.json is not valid JSON')
+  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error("Claudopus can't read config.json")
   if ((key === 'models' || key === 'lean') && role) {
     const models = { ...((config[key] as Record<string, unknown>) ?? {}) }
     if (value === undefined) delete models[role]
@@ -854,7 +856,7 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
 
 async function openedInEditor($: EngineInterface, path: string) {
   const r = await openOn($, path, true)
-  return r.exitCode === 0 ? '' : r.stderr || 'no editor opened'
+  return r.exitCode === 0 ? '' : r.stderr || 'no editor opened it'
 }
 async function editText($: EngineInterface, root: string, memory: string, path: string) {
   const own = `${memory}/${path}`
@@ -866,7 +868,7 @@ async function putBack($: EngineInterface, memory: string, path: string) {
   const at = new Date(await $.clock.now()).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
   await personWrote($, memory, path, null)
   const r = await $.process.run(['mv', '-n', own, `${own}.${at}.old`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  return r.exitCode === 0 ? '' : r.stderr || 'could not be undone'
+  return r.exitCode === 0 ? '' : r.stderr || "Claudopus couldn't move your copy aside"
 }
 
 async function saveText($: EngineInterface, root: string, memory: string, path: string, text: string) {
@@ -951,7 +953,7 @@ const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
         JSON.parse(text || '{}')
         return ''
       } catch {
-        return `${dir}/config.json is not valid JSON, so Claudopus uses the default for every setting. Fix it or delete it.`
+        return `Claudopus can't read ${dir}/config.json, so every setting is at its default. Fix the file or delete it.`
       }
     })),
 })
@@ -959,10 +961,10 @@ const configAct = ($: EngineInterface, what: string, act: () => Promise<string |
   presses += 1
   void act()
     .then(failed => {
-      configFailed = failed ? `${what}: ${failed}` : ''
+      configFailed = failed ? `${what}: ${failed}${/[.!?]$/.test(failed) ? '' : '.'}` : ''
     })
     .catch(err => {
-      configFailed = `${what}: ${String(err instanceof Error ? err.message : err)}`
+      configFailed = `${what}: ${String(err instanceof Error ? err.message : err).replace(/([^.!?])$/, '$1.')}`
     })
     .then(async () => {
       if (configFailed) await log($, `config: ${configFailed}`)
@@ -971,24 +973,24 @@ const configAct = ($: EngineInterface, what: string, act: () => Promise<string |
     })
 }
 const configActs = ($: EngineInterface) => ({
-  open: (text: (typeof TEXTS)[number]) => configAct($, `${text.name} not opened`, () => editText($, $.plugin.root, dir, text.path)),
+  open: (text: (typeof TEXTS)[number]) => configAct($, `Couldn't open ${text.name}`, () => editText($, $.plugin.root, dir, text.path)),
   edit: (text: (typeof TEXTS)[number], body: string) => configAct($, '', async () => void Object.assign(editing, { key: text.key, draft: body })),
   save: (text: (typeof TEXTS)[number], body: string) =>
-    configAct($, `${text.name} not saved`, async () => {
+    configAct($, `Couldn't save ${text.name}`, async () => {
       const failed = body.trim() ? await saveText($, $.plugin.root, dir, text.path, body) : 'the text was empty, so nothing changed'
       Object.assign(editing, { key: '', draft: '' })
       return failed
     }),
   cancel: () => configAct($, '', async () => void Object.assign(editing, { key: '', draft: '' })),
-  putBack: (text: (typeof TEXTS)[number]) => configAct($, `${text.name} not reset`, () => putBack($, dir, text.path)),
+  putBack: (text: (typeof TEXTS)[number]) => configAct($, `Couldn't reset ${text.name}`, () => putBack($, dir, text.path)),
   set: (key: Parameters<typeof setConfig>[2], value: unknown, role?: Parameters<typeof setConfig>[4]) =>
-    configAct($, 'Not saved', async () => {
+    configAct($, "Couldn't save the setting", async () => {
       await setConfig($, dir, key, value, role)
     }),
-  gateMode: (mode: 'each' | 'work' | 'never') => configAct($, 'Not saved', () => regate($, { mode })),
-  gateRemove: (host: string, command: string) => configAct($, 'Not removed', () => regate($, { remove: { host, command } })),
+  gateMode: (mode: 'each' | 'work' | 'never') => configAct($, "Couldn't save the setting", () => regate($, { mode })),
+  gateRemove: (host: string, command: string) => configAct($, "Couldn't remove the command", () => regate($, { remove: { host, command } })),
   lookEvery: (hours: number) =>
-    configAct($, 'Not saved', async () => {
+    configAct($, "Couldn't save the setting", async () => {
       await setConfig($, dir, 'updates', hours ? undefined : false)
       await setConfig($, dir, 'updateEvery', hours && hours !== 1 ? hours : undefined)
     }),
@@ -1009,7 +1011,7 @@ const configActs = ($: EngineInterface) => ({
 
 
 
-const INDEX_HEAD = '# Streams\n\nname | repo | session | state | summary\n\n'
+const INDEX_HEAD = '# Topics\n\nname | repo | session | state | summary\n\n'
 
 const parseIndex = (text: string): Stream[] =>
   text
@@ -1572,11 +1574,11 @@ const stepOf = (use: ToolUseSummary): Line => {
   const given = (key: string) => (typeof input[key] === 'string' ? String(input[key]) : '')
   if (isTool(use.tool, 'note')) return { kind: 'said', text: given('text'), isUse: true }
   if (use.tool === 'SubagentHandback') return { kind: 'said', text: whole(given('message')), isUse: true }
-  if (use.tool === 'Agent') return { kind: 'step', text: `Started a helper: ${given('description') || 'no name'}`, isError: use.isError, isUse: true, tool: use.tool, name: given('description') }
+  if (use.tool === 'Agent') return { kind: 'step', text: `Started a helper: ${given('description') || 'unnamed'}`, isError: use.isError, isUse: true, tool: use.tool, name: given('description') }
   const file = given('file_path') || given('notebook_path')
   const text =
     isTool(use.tool, 'todo')
-      ? `${{ doing: 'Started on', done: 'Ticked', dropped: 'Dropped' }[given('state')] ?? 'To-do'}: ${given('item')}`
+      ? `${{ doing: 'Started', done: 'Done', dropped: 'Dropped' }[given('state')] ?? 'To-do'}: ${given('item')}`
       : given('description')
         ? oneLine(given('description'))
         : file
@@ -1631,7 +1633,7 @@ const folded = (steps: Line[]) => {
     some(count(['Grep', 'Glob']), 'made', 'search'),
     some(count(['Agent']), 'started', 'helper'),
     count([`${TOOLS}todo`, `${OLD_TOOLS}todo`]) ? 'updated its to-dos' : '',
-    some(steps.filter(line => !known.includes(line.tool ?? '')).length, 'took', 'other step'),
+    some(steps.filter(line => !known.includes(line.tool ?? '')).length, 'used', 'other tool'),
     steps.some(line => line.isError) ? `${steps.filter(line => line.isError).length} failed` : '',
   ]
     .filter(Boolean)
@@ -1794,15 +1796,15 @@ const serversTabHooks = (on: On) => {
 
     return (
       <Box flexDirection="column" gap={1}>
-        {found.length === 0 && <Text dimColor>Nothing is listening from your folders.</Text>}
+        {found.length === 0 && <Text dimColor>No servers are running from your folders.</Text>}
         {found.map(one => (
           <Box key={`server-${one.pid}`} flexDirection="row" alignItems="flex-start" gap={1}>
             <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-              <Text wrap="wrap">{one.url ? <Link href={one.url} label={`localhost:${one.port}`} /> : `Port ${one.port}`}</Text>
+              <Text wrap="wrap">{one.url ? <Link href={one.url} label={`localhost:${one.port}`} /> : `Serving on port ${one.port}`}</Text>
               <Text dimColor wrap="wrap">{one.about}</Text>
             </Box>
             <Box flexShrink={0}>
-              <Button key={`kill-${one.pid}`} label="■" onPress={() => void stopServer($, one.pid)} />
+              <Button key={`kill-${one.pid}`} label="Stop" onPress={() => void stopServer($, one.pid)} />
             </Box>
           </Box>
         ))}
@@ -1849,9 +1851,9 @@ const isOpenQuestion = (r: Report) => openWaits(r).length > 0
 const answeredOf = (r: Report) => {
   const answered = waitsOf(r).filter(one => one.answer && one.answer !== SETTLED)
   if (isOpenQuestion(r)) return ''
-  if (!answered.length) return waitsOf(r).length ? 'settled' : ''
+  if (!answered.length) return waitsOf(r).length ? 'no longer waiting' : ''
   const [first] = answered
-  return answered.length > 1 ? `you answered ${answered.length}` : first?.answer === IN_WORDS ? 'you answered in your words' : `you answered ${first?.answer}`
+  return answered.length > 1 ? `you answered ${answered.length} questions` : first?.answer === IN_WORDS ? 'you answered in words' : `you answered “${first?.answer}”`
 }
 const IN_WORDS = 'In your words'
 const SETTLED = 'Settled'
@@ -1861,7 +1863,8 @@ const askedWait = (one: Wait | string): Wait => (typeof one === 'string' ? { tex
 const ANSWER_IN_WORDS = 'Answer in words'
 const answersOf = (wait: Wait) => [...new Set([...(wait.choices?.length ? wait.choices : ['Yes', 'No']), 'Not now', ANSWER_IN_WORDS])]
 const answeredWords = (wait: Wait) =>
-  wait.answer === SETTLED ? 'no longer waits' : wait.answer === REPLACED ? 'replaced by a newer result' : wait.answer === MOVED ? 'moved to its newer result' : wait.answer === IN_WORDS ? 'you answered in your words' : wait.answer === 'Not now' ? 'you said not now' : `you answered “${wait.answer ?? ''}”`
+  wait.answer === SETTLED ? 'no longer waiting' : wait.answer === REPLACED ? 'replaced by a newer result' : wait.answer === MOVED ? 'moved to the newer result' : wait.answer === IN_WORDS ? 'you answered in words' : wait.answer === 'Not now' ? 'you pressed Not now' : `you answered “${wait.answer ?? ''}”`
+
 const byPerson = (wait: Wait) => Boolean(wait.answer) && wait.answer !== SETTLED && wait.answer !== REPLACED && wait.answer !== MOVED
 const sameLine = (a: string, b: string) => Boolean(plainWords(a)) && plainWords(a) === plainWords(b)
 const resultsOfWork = (list: Report[], agent: string) => list.filter(r => r.agent === agent && !r.archived).sort((a, b) => b.at - a.at)
@@ -2122,7 +2125,7 @@ const closeWelcome = async ($: EngineInterface) => {
 }
 const indexAsk = (root: string) =>
   [
-    'Index my old chats (pressed in the Claudopus panel).',
+    'Bring in my old chats (pressed in the Claudopus panel).',
     `Run python3 "${root}/onboard/extract.py" "${dir}/onboard": it saves each past chat's messages under ${dir}/words and writes digests of them, one or more per project, into ${dir}/onboard.`,
     'If python3 is missing (macOS asks to install the Command Line Tools), say so with the command xcode-select --install and stop.',
     `Then for each digest file it wrote, have a helper follow ${root}/onboard/reader.md on it, writing its streams to ${dir}/onboard/streams/<the digest's file name>.`,
@@ -2138,9 +2141,9 @@ const welcomeCard = ($: EngineInterface, ui: Ui) => (
     <ui.Text wrap="wrap">Each message you send in a chat starts a background task, and its card shows here while it runs.</ui.Text>
     <ui.Text wrap="wrap">Closed this panel? Type /claudopus to bring it back.</ui.Text>
     <ui.Text bold wrap="wrap">Bring in your old chats</ui.Text>
-    <ui.Text wrap="wrap">Claudopus can read your past Claude Code chats on {thisMac()} into its memory, so it knows what you were working on. It runs as a background task and takes a few minutes.</ui.Text>
+    <ui.Text wrap="wrap">Claudopus can read your past Claude Code chats on {thisMac()} into Memory, so it knows what you work on. A task does it in a few minutes.</ui.Text>
     <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-      <ui.Button key={`welcome-index-${presses}`} label="Index my old chats" onPress={() => void indexOldChats($).catch(err => log($, `old chats not indexed: ${String(err)}`))} />
+      <ui.Button key={`welcome-index-${presses}`} label="Bring in old chats" onPress={() => void indexOldChats($).catch(err => log($, `old chats not indexed: ${String(err)}`))} />
       <ui.Button key={`welcome-later-${presses}`} label="Not now" plain dimColor onPress={() => void closeWelcome($).catch(err => log($, `welcome not put away: ${String(err)}`))} />
     </ui.Box>
   </ui.Box>
@@ -2396,11 +2399,11 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
           <Text bold>Results</Text>
           <Text dimColor>{`${entries.length}`}</Text>
         </Box>
-        {fresh ? <Button key={`reports-fresh-${gen}`} label={`Show ${fresh} new`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
+        {fresh ? <Button key={`reports-fresh-${gen}`} label={`Show ${fresh} new ${fresh === 1 ? 'result' : 'results'}`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
       </Box>
-      {!shown.length && !gone.length ? <Text dimColor>Nothing yet.</Text> : null}
-      {waiting.length ? band(ui, 'reports-waiting', 'Waiting on you', `${waiting.length}`, rows(waiting)) : null}
-      {recent.length ? band(ui, 'reports-recent', waiting.length ? 'Recent' : 'Newest', '', rows(recent)) : null}
+      {!shown.length && !gone.length ? <Text dimColor>No results yet.</Text> : null}
+      {waiting.length ? band(ui, 'reports-waiting', 'Waiting for you', `${waiting.length}`, rows(waiting)) : null}
+      {recent.length ? band(ui, 'reports-recent', 'Newest', '', rows(recent)) : null}
       {earlier.length || gone.length ? (
         <Box key="reports-folded" flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
           {earlier.length ? fold('earlier-fold', `Earlier ${earlier.length}`, isEarlierOpen, () => (isEarlierOpen = !isEarlierOpen)) : null}
@@ -2439,7 +2442,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
   const kin = [...rounds, ...others.slice(0, Math.max(0, 8 - rounds.length))]
   const pictures = r.files.map(file => ({ file, path: `${reportPath(r)}/${file}`, href: `file://${encodeURI(`${reportPath(r)}/${file}`)}` }))
   const how = (one: Report) =>
-    [one.id === r.from ? 'this started from it' : one.from === r.id ? 'started from this' : rounds.includes(one) ? (one.at < r.at ? 'earlier round' : 'later round') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
+    [one.id === r.from ? 'this result came from it' : one.from === r.id ? 'came from this result' : rounds.includes(one) ? (one.at < r.at ? 'earlier result' : 'later result') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
   const pane = paneOf(r)
   const gen = drawingMark(pane, [presses, height, r, mark(text), at, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
   const show = (to: number) => void ((presses += 1), pictureAt.set(pane, to), redraw($))
@@ -2457,7 +2460,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         ? band(
             ui,
             'report-ask',
-            isOpenQuestion(r) ? 'Waiting on you' : 'Answered',
+            isOpenQuestion(r) ? 'Waiting for you' : 'Answered',
             openWaits(r).length > 1 ? `${openWaits(r).length}` : '',
             <Box flexDirection="column" gap={2}>
               {waitsOf(r).map((wait, index) =>
@@ -2481,7 +2484,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         ? band(
             ui,
             'report-finding',
-            'Finding',
+            'Summary',
             '',
             <Text wrap="wrap">{r.gist}</Text>,
           )
@@ -2500,7 +2503,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
                     {pictureSaidRow($, ui, `report-pic-said-${n}-${gen}`, one.path)}
                   </Box>
                 ))}
-                <Text dimColor wrap="wrap">{termFrom ? 'Press a picture to send it to the device you’re using' : 'Press a picture to open it'}</Text>
+                <Text dimColor wrap="wrap">{termFrom ? 'Press a picture to send it to the device you’re using.' : 'Press a picture to open it.'}</Text>
               </Box>
             ) : (
             <Box flexDirection="column" gap={1}>
@@ -2510,8 +2513,8 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
               <Text dimColor wrap="wrap">{thumb && table.Svg ? (pictures[at]?.file ?? '') : (pictures[at]?.path ?? '')}</Text>
               {pictures.length > 1 ? (
                 <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
-                  <Button key={`report-prev-${gen}`} label="‹ Previous" onPress={() => show((at + pictures.length - 1) % pictures.length)} />
-                  <Button key={`report-next-${gen}`} label="Next ›" onPress={() => show((at + 1) % pictures.length)} />
+                  <Button key={`report-prev-${gen}`} label="Previous" onPress={() => show((at + pictures.length - 1) % pictures.length)} />
+                  <Button key={`report-next-${gen}`} label="Next" onPress={() => show((at + 1) % pictures.length)} />
                 </Box>
               ) : null}
             </Box>
@@ -2535,11 +2538,11 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
       {band(
         ui,
         'report-carry',
-        'Continue',
+        'Follow-up',
         '',
         <Box flexDirection="column" alignItems="flex-start" gap={1}>
-          <Text dimColor wrap="wrap">Claudopus puts a line naming this result in the chat's box, for you to finish and send.</Text>
-          <Button key={`report-carry-${gen}`} label="Continue from this" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))} />
+          <Text dimColor wrap="wrap">Claudopus writes a line about this result where you type in the chat, for you to finish and send.</Text>
+          <Button key={`report-carry-${gen}`} label="Continue" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))} />
           {kin.length ? (
             <Box flexDirection="column" alignItems="flex-start">
               {kin.map(one => (
@@ -2685,7 +2688,7 @@ const memoryHooks = (on: On) => {
             }}
           />
         ) : (
-          <Text dimColor>This file is not there any more.</Text>
+          <Text dimColor>This file is no longer available.</Text>
         )}
       </Box>
     )
@@ -2770,7 +2773,7 @@ async function loadStats($: EngineInterface, scope: Scope, home: string, memory:
     const runs = (await Promise.all(ids.map(id => runsOf($, home, memory, id, id === chatId ? hint : '')))).flat()
     held.set(scope, { runs, at: now })
   } catch (err) {
-    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? `Stats reads Claude’s records with jq, and jq was not found on ${thisMac()}.` : `Claudopus couldn’t read the records: ${String(err)}` })
+    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? `Claudopus couldn’t read Claude’s logs because jq isn’t installed on ${thisMac()}. Install jq, then open Stats again.` : `Claudopus couldn’t read Claude’s logs: ${String(err)}. Open Stats again to try once more.` })
   } finally {
     reading.delete(scope)
     drawAgain($)
@@ -2791,7 +2794,7 @@ async function loadMemorySizes($: EngineInterface, memory: string) {
     { name: 'Results', count: reports.filter(e => e.kind === 'dir').length, bytes: kb.get('reports') ?? 0 },
     { name: 'Finished tasks, by chat', count: (await names('finished')).length, bytes: kb.get('finished') ?? 0 },
     { name: 'Workflows', count: (await names('flows')).length, bytes: kb.get('flows') ?? 0 },
-    { name: 'Thumbnails and sums', count: (await names('thumbs')).length + (await names('stats')).length, bytes: (kb.get('thumbs') ?? 0) + (kb.get('stats') ?? 0) },
+    { name: 'Picture previews and Stats', count: (await names('thumbs')).length + (await names('stats')).length, bytes: (kb.get('thumbs') ?? 0) + (kb.get('stats') ?? 0) },
   ]
   const bytes = [...kb.values()].reduce((sum, n) => sum + n, 0)
   memoryHeld.now = { parts, bytes }
@@ -2865,7 +2868,7 @@ const aboutView = async ($: EngineInterface, ui: Ui, surface?: string) => {
         {octopus(ui, `about-mark-${aboutOpens}`, 'wave', HEAD_MARK, 'Claudopus waving', $, { surface, requestId: ABOUT_PANE })}
         <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Text bold>Claudopus</Text>
-          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', isWaiting ? `${installed} ready, type /reload-plugins` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
+          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', isWaiting ? `v${installed} is ready: type /reload-plugins to use it` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A plugin for Claude Code'}</Text>
         </Box>
       </Box>
       {band(
@@ -2875,7 +2878,7 @@ const aboutView = async ($: EngineInterface, ui: Ui, surface?: string) => {
         '',
         <Box flexDirection="column" gap={1}>
           <Text wrap="wrap">Each message you send in a chat starts a task that Claude does in the background, so the chat stays small and free for your next message.</Text>
-          <Text wrap="wrap">This panel shows each task as a card with its to-dos. When a task finishes, Claudopus saves what it found under Results.</Text>
+          <Text wrap="wrap">This panel shows each task as a card with its to-dos. When a task finishes, Claudopus saves its result under Results.</Text>
           <Text wrap="wrap">Claudopus saves your words, the topics you work on and every result as plain files under Memory. Stats adds up what your tasks cost and the time they saved.</Text>
         </Box>,
       )}
@@ -3170,7 +3173,7 @@ const TAILSCALES = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tai
 const shQuoted = (text: string) => `'${text.replaceAll("'", "'\\''")}'`
 const sendPicture = async ($: EngineInterface, path: string) => {
   const say = (text: string, copy?: string) => (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text, copy }), drawAgain($))
-  if (!termFrom) return say(`It is at ${path} on ${thisMac()}`)
+  if (!termFrom) return say(`It’s at ${path} on ${thisMac()}.`)
   say('Sending it to your device…')
   for (const bin of TAILSCALES) {
     const targets = await $.process.run([bin, 'file', 'cp', '--targets'], { timeoutMs: 8_000 }).catch(() => undefined)
@@ -3178,14 +3181,14 @@ const sendPicture = async ($: EngineInterface, path: string) => {
     const [, name = '', ...state] = targets.stdout.split('\n').map(line => line.trim().split(/\s+/)).find(parts => parts[0] === termFrom) ?? []
     if (!name || state.join(' ').startsWith('offline')) break
     const sent = await $.process.run([bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 60_000 }).catch(err => ({ exitCode: 1, stderr: String(err) }))
-    if (sent.exitCode === 0) return say(`✓ Sent to ${name} by Tailscale, which keeps what it is sent in Downloads`)
+    if (sent.exitCode === 0) return say(`✓ Claudopus sent it to ${name} with Tailscale. It’s in Downloads there.`)
     await log($, `picture ${path} not sent to ${termFrom}: ${sent.stderr}`)
     break
   }
   const user = (await $.env.get('USER')) ?? ''
   const port = termPort && termPort !== '22' ? `-P ${termPort} ` : ''
   const command = `scp ${port}${shQuoted(`${user ? `${user}@` : ''}${termHere.includes(':') ? `[${termHere}]` : termHere}:${path}`)} ~/Downloads/ && open ~/Downloads/${shQuoted(fileName(path))}`
-  say('Run this on your own device (a Mac), and it opens there:', command)
+  say('Run this on your Mac to open it there:', command)
 }
 const pictureSaidRow = ($: EngineInterface, ui: Ui, key: string, path: string) => {
   const said = pictureSaid.get(path)
@@ -3316,7 +3319,7 @@ const largeOf = ($: EngineInterface, path: string, id: string): Large | undefine
 }
 const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], path = pictureShown) => {
   const ui = uiOf($, e)
-  if (!path) return <ui.Text dimColor>Pictures now open large in the Details tab they are pressed in. This tab can be closed.</ui.Text>
+  if (!path) return <ui.Text dimColor>Pictures now open in the Details tab where you press them. You can close this tab.</ui.Text>
   const name = fileName(path)
   const stat = await $.fs.stat(path).catch(() => undefined)
   const said = (text: string) => (
@@ -3334,10 +3337,10 @@ const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui
       </ui.Box>
     )
   }
-  if (!('Svg' in ui)) return said(`This screen cannot draw pictures. It is at ${path}`)
+  if (!('Svg' in ui)) return said(`This screen can’t show pictures. It’s at ${path}.`)
   const large = largeOf($, path, `${path}:${stat.mtimeMs}:${stat.size}`)
   if (large === undefined) return said('Making a large copy…')
-  if (!large) return said(`This picture could not be drawn here. Press its row again to try again. It is at ${path}`)
+  if (!large) return said(`Claudopus couldn’t show this picture. Press its row to try again. It’s at ${path}.`)
   return (
     <ui.Box flexDirection="column" gap={1} width="100%">
       <ui.Text bold wrap="wrap">{name}</ui.Text>
@@ -3839,7 +3842,7 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
   if (id.startsWith('flow:')) {
     const f = runs.find(one => `flow:${one.id}` === id)
     if (!f) return undefined
-    const what = f.status === 'done' ? fewWords(f.result) || 'Finished.' : f.status === 'failed' ? 'Failed with an error.' : 'Stopped.'
+    const what = f.status === 'done' ? fewWords(f.result) || 'Done.' : f.status === 'failed' ? 'Failed.' : 'Stopped.'
     return { title: f.title || f.name || 'Workflow', isDone: f.status === 'done', what }
   }
   const one = cards.find(card => card.id === id)
@@ -3849,10 +3852,10 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
   const what =
     one.status === 'done'
       ? waits.length
-        ? `Waiting for ${who()}: ${fewWords(waits[0] ? askedWait(waits[0]).text : '')}${waits.length > 1 ? ` (and ${waits.length - 1} more)` : ''}`
-        : fewWords(one.answer) || fewWords(said) || 'Finished.'
+        ? `Waiting for you: ${fewWords(waits[0] ? askedWait(waits[0]).text : '')}${waits.length > 1 ? `, and ${waits.length - 1} more` : ''}`
+        : fewWords(one.answer) || fewWords(said) || 'Done.'
       : one.status === 'failed'
-        ? 'Failed with an error.'
+        ? 'Failed.'
         : 'Stopped.'
   return { title: one.title || 'Task', isDone: one.status === 'done', what }
 }
@@ -3879,7 +3882,8 @@ const announce = async ($: EngineInterface) => {
   await alertPerson($, 'ready', title, text, `ready-${ids.map(one => one.id).join('-')}`)
 }
 
-const nowhere = (panel: string) => `The ${panel} panel can't be shown on this screen. It shows in the Claude app on the Mac this chat runs on.`
+const nowhere = (panel: string) => `Claudopus can't show the ${panel} panel on this screen. Open it in the Claude app on the Mac this chat runs on.`
+
 
 const DESKTOP_SESSION = /^local_[A-Za-z0-9-]{1,64}$/
 
@@ -3995,7 +3999,7 @@ const readPage = async ($: EngineInterface): Promise<{ page?: Published; why: st
   const answer = await lookIo($).page()
   const page = answer.ok ? publishedOf(answer.text) : undefined
   if (page) pageRead = { page, at: await $.clock.now() }
-  return { page, why: page ? '' : answer.ok ? (versionOnPage(answer.text) ? FAILS.unchecked : 'claudopus.ai named no version') : answer.status ? `claudopus.ai answered ${answer.status}` : 'claudopus.ai did not answer' }
+  return { page, why: page ? '' : answer.ok ? (versionOnPage(answer.text) ? FAILS.unchecked : "claudopus.ai didn't name a version") : answer.status ? `claudopus.ai answered with error ${answer.status}` : "claudopus.ai didn't answer" }
 }
 const lookOnly = async ($: EngineInterface) => {
   const now = await $.clock.now()
@@ -4023,7 +4027,7 @@ const lookForNew = async ($: EngineInterface) => {
   }
 }
 const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: boolean; isOut?: boolean }> => {
-  if (!dir) return { text: "Couldn't check: Claudopus has no memory folder in this chat.", isError: true }
+  if (!dir) return { text: "Couldn't check: this chat has no Memory folder.", isError: true }
   const loaded = (await versionsOf($)).version
   for (let tries = 0; tries < 20; tries++) {
     if (!isUpdating) {
@@ -4034,7 +4038,7 @@ const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: bo
           await log($, `Claudopus looked for a new version from Config: ${got.page?.version ?? got.why}`)
           if (!got.page) return { text: `Couldn't check: ${got.why}. Try again later.`, isError: true }
           await knowSource($, true)
-          if (!loaded || !isNewer(got.page.version, loaded)) return { text: `You're on the newest version (v${got.page.version}).`, isError: false }
+          if (!loaded || !isNewer(got.page.version, loaded)) return { text: `You have the newest version, v${got.page.version}.`, isError: false }
           if ((await readOr($, laterPath())).trim()) await $.fs.write(laterPath(), JSON.stringify({ version: got.page.version, until: 0 }))
           return { text: `v${got.page.version} is out.`, isError: false, isOut: true }
         }
@@ -4044,7 +4048,7 @@ const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: bo
     }
     await new Promise<void>(done => void $.clock.after(3000, done))
   }
-  return { text: "Couldn't check: another chat's update did not finish. Try again later.", isError: true }
+  return { text: "Couldn't check: another chat's update didn't finish. Try again later.", isError: true }
 }
 const pageFor = async ($: EngineInterface, version: string) => {
   if (pageRead && !isNewer(version, pageRead.page.version)) return pageRead.page
@@ -4083,7 +4087,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
       return done({
         src: { kind: 'folder', repo, sub: 'mods/claudopus', runs: 'copy', record },
         cannot: ready.ok ? undefined : { what: `Claude Code's copy is made from ${ready.what}`, why: ready.why },
-        where: ready.ok ? "Claude Code's installed copy, made from Claudopus's released code on this Mac" : `Claude Code's installed copy, made from ${ready.what}`,
+        where: ready.ok ? "Claude Code's copy of the released code on this Mac" : `Claude Code's copy of ${ready.what}`,
       })
     }
     const location = typeof entry?.installLocation === 'string' ? entry.installLocation.replace(/\/+$/, '') : ''
@@ -4116,7 +4120,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
   return done({
     src: { kind: 'folder', repo: top || root, sub, runs: 'folder', ...(marketplace && scope ? { record: { plugins, marketplace, plugin: 'claudopus', scope } } : {}) },
     cannot: ready.ok ? undefined : { what: `This chat runs ${ready.what}`, why: ready.why },
-    where: ready.ok ? "Claudopus's released code on this Mac" : ready.what,
+    where: ready.ok ? 'the released code on this Mac' : ready.what,
   })
 }
 
@@ -4347,7 +4351,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     </ui.Text>
   )
   const v = n.version
-  if (isOne && (n.kind === 'installing' || (n.kind === 'downloaded' && (isStepping || isUpdatePress)))) return box('installing', [title(`Updating Claudopus ${v}…`), track(0)], [])
+  if (isOne && (n.kind === 'installing' || (n.kind === 'downloaded' && (isStepping || isUpdatePress)))) return box('installing', [title(`Updating Claudopus v${v}…`), track(0)], [])
   if (n.kind === 'available' || n.kind === 'cannot' || (isOne && n.kind === 'downloaded')) {
     const page = await pageFor($, v)
     const missed = page && page.version === v ? missedOn(page, loaded) : []
@@ -4355,7 +4359,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     const more = missed.reduce((sum, one) => sum + 1 + one.more, 0) - 1
     const count = n.kind === 'available' ? n.count : missed.length || 1
     const what = newest?.line ? `${newest.line}${more > 0 ? ` · and ${more} more ${more === 1 ? 'change' : 'changes'}` : ''}` : ''
-    const head = title(`Claudopus ${v} is out`, count > 1 ? `· ${count} versions since v${loaded}` : '')
+    const head = title(`Claudopus v${v} is out`, count > 1 ? `· ${count} versions since v${loaded}` : '')
     if (n.kind === 'cannot') return box('cannot', [head, line('why', `${n.what}: ${n.why}.`)], quiet('cannot', v))
     return box(
       'available',
@@ -4374,18 +4378,18 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     const live = downloadProgress?.version === v ? downloadProgress : undefined
     const pct = live?.pct ?? n.pct
     const got = live?.got ?? n.got
-    const said = live?.phase === 'checking' ? 'checking it against what the release published' : [pct !== undefined ? `${Math.round(pct)}%` : '', got ? sizeText(got) : '', live?.phase === 'resolving' ? 'unpacking' : ''].filter(Boolean).join(' · ')
-    return box('downloading', [title(`${isOne ? 'Updating' : 'Downloading'} Claudopus ${v}…`, said ? `· ${said}` : ''), track(0)], [])
+    const said = live?.phase === 'checking' ? 'checking the download' : [pct !== undefined ? `${Math.round(pct)}%` : '', got ? sizeText(got) : '', live?.phase === 'resolving' ? 'unpacking' : ''].filter(Boolean).join(' · ')
+    return box('downloading', [title(`${isOne ? 'Updating' : 'Downloading'} Claudopus v${v}…`, said ? `· ${said}` : ''), track(0)], [])
   }
   if (n.kind === 'downloaded') {
-    const replaces = `Claudopus checked it against the release. Install replaces v${loaded}, and new chats start on v${v}.`
+    const replaces = `Install puts v${v} on this Mac in place of v${loaded}. Then type /reload-plugins to use it.`
     return box(
       'downloaded',
-      [title(`Claudopus ${v} downloaded`), line('replaces', replaces), track(1)],
+      [title(`Claudopus v${v} downloaded`), line('replaces', replaces), track(1)],
       [<ui.Button key={`update-install-${presses}`} label="Install" onPress={() => installPress($, v, n.commit)} />, ...quiet('downloaded', v, false)],
     )
   }
-  if (n.kind === 'installing') return box('installing', [title(`Installing Claudopus ${v}…`), track(1)], [])
+  if (n.kind === 'installing') return box('installing', [title(`Installing Claudopus v${v}…`), track(1)], [])
   if (n.kind === 'reload') return null
   const detail = ''
   const which = isOne ? 'update' : n.step === 'download' ? 'download' : 'install'
@@ -4398,7 +4402,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
         : `Nothing changed: this chat still runs v${loaded}.`
   return box(
     'failed',
-    [title(`Couldn't ${which} Claudopus ${v}`), line('why', `${why.replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`)],
+    [title(`Couldn't ${which} Claudopus v${v}`), line('why', `${why.replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`)],
     [<ui.Button key={`update-again-${presses}`} label="Try again" onPress={() => downloadPress($, v)} />, ...quiet('failed', v)],
   )
 }
@@ -4407,7 +4411,7 @@ const configUpdateBox = async ($: EngineInterface, ui: Ui) => {
   const versions = await versionsOf($)
   if (!versions.version) return null
   const n = await noticeNow($, versions.version, versions.installed).catch(() => undefined)
-  if (n?.kind === 'reload') return <ui.Text key="update-ready" wrap="wrap">{`Claudopus ${n.version} is ready: type /reload-plugins to switch this chat to it.`}</ui.Text>
+  if (n?.kind === 'reload') return <ui.Text key="update-ready" wrap="wrap">{`Claudopus v${n.version} is ready: type /reload-plugins to use it.`}</ui.Text>
   return noticeCard($, ui, n, versions.version).catch(() => null)
 }
 
@@ -4578,7 +4582,7 @@ const changelogView = async ($: EngineInterface, ui: Ui, surface?: string) => {
         </ui.Box>
       </ui.Box>
       {shown.length ? null : <ui.Text dimColor>This copy of Claudopus has no changelog.</ui.Text>}
-      {shown.map(v => versionBand(ui, `changelog-${v.version}`, v, [v.date, v.version === version ? 'this chat' : ''].filter(Boolean).join(' · ')))}
+      {shown.map(v => versionBand(ui, `changelog-${v.version}`, v, [v.date, v.version === version ? 'this chat runs it' : ''].filter(Boolean).join(' · ')))}
       {olderLine(ui, 'changelog-older', left)}
     </ui.Box>
   )
@@ -4621,13 +4625,13 @@ const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, _asks: n
     <ui.Box key="update-notice" flexDirection="column" borderStyle="round" borderColor={NOTICE_EDGE} paddingX={1} flexShrink={0}>
       <ui.Box key="update-title" flexDirection="row" gap={1} minWidth={0}>
         <ui.Box flexShrink={0}>
-          <ui.Text color={FLOW}>{`Updated to Claudopus ${loaded}`}</ui.Text>
+          <ui.Text color={FLOW}>{`Updated to Claudopus v${loaded}`}</ui.Text>
         </ui.Box>
         <ui.Text dimColor wrap="truncate-end">{`· from v${seen}${count > 1 ? `, ${count} versions` : ''}`}</ui.Text>
       </ui.Box>
       {shown[0]?.changes[0] ? <ui.Text key="update-what" dimColor wrap="wrap">{firstClause(shown[0].changes[0])}</ui.Text> : null}
       <ui.Box key="update-done-buttons" flexDirection="row" flexWrap="wrap" columnGap={2}>
-        <ui.Button key={`update-new-${presses}`} label="What's new" onPress={() => void ((presses += 1), closeScreen($, loaded).then(() => openChangelog($))).catch(err => log($, `changelog not opened: ${String(err)}`))} />
+        <ui.Button key={`update-new-${presses}`} label="See changes" onPress={() => void ((presses += 1), closeScreen($, loaded).then(() => openChangelog($))).catch(err => log($, `changelog not opened: ${String(err)}`))} />
         <ui.Button key={`update-close-${presses}`} label="Close" plain dimColor onPress={() => void closeScreen($, loaded).catch(err => log($, `update note not closed: ${String(err)}`))} />
       </ui.Box>
     </ui.Box>
@@ -4980,7 +4984,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
     if (isCleared) await unsettleAsked($, one.id, ask.at).catch(() => undefined)
     const isBack = !isCleared || (await changeTodos($, list => list.map(card => (card.id === one.id && !card.ask ? { ...card, ask, entries: card.entries.filter(entry => !(entry.kind === 'steer' && entry.at === steerAt)) } : card))).then(() => true).catch(() => false))
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'failed', at: await $.clock.now().catch(() => 0), line, isCard: true, askAt: ask.at })
-    if (!isBack) $.ui.log(`Your answer “${cut(said, 120)}” to "${titleOf(one)}" (${ask.text}) didn't reach Claude, and the question couldn't be put back on its card. Type your answer in this chat instead.`)
+    if (!isBack) $.ui.log(`Your answer “${cut(said, 120)}” to "${titleOf(one)}" didn't reach Claude, and Claudopus couldn't put the question back on its card. Type your answer in this chat instead. The question: ${ask.text}`)
     redraw($)
     throw err
   }
@@ -5003,7 +5007,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, stepOnEnd: { ask, said } } : card)))
       await tell($, one.id, `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\nClaudopus does that step (${cut(ask.lastStep, 160)}) once you end this turn: do not do it or start it yourself. Commit anything left on the branch now, change nothing on it after that, and end with your report.`)
       const held = (err: unknown) => log($, `last step of ${one.id} not held: ${String(err)}`)
-      await stepLine($, one.id, `On your "${said}", Claudopus does the last step once Claude finishes`).catch(held)
+      await stepLine($, one.id, `You pressed “${said}” · Claudopus does it when Claude is done`).catch(held)
       await stepsAtEnd($).catch(held)
     }
     return void askGone($, one, said)
@@ -5060,7 +5064,7 @@ const takeBackNow = async ($: EngineInterface, one: Todo, shownAt: number) => {
   redraw($)
   void log($, `answer "${cut(sent.text, 40)}" for ${one.id} taken back`)
   if (isBack) {
-    await sayInChat($, named(`${who(true)} took back their answer “${cut(sent.text, 120)}” to "${titleOf(one)}": the question is open again on its card.`), `You took back your answer “${cut(sent.text, 120)}” to "${titleOf(one)}". The question is open again on its card.`)
+    await sayInChat($, named(`${who(true)} took back their answer “${cut(sent.text, 120)}” to "${titleOf(one)}": the question is open again on its card.`), `You took back your answer “${cut(sent.text, 120)}” to "${titleOf(one)}". The question is back on its card.`)
     inChat.delete(one.id)
     void askInChat($, { ...one, ask })
   }
@@ -5229,26 +5233,27 @@ const waitsBehind = (one: Todo, at: number, now: number) => {
   const running = target !== undefined && one.status === 'working' ? runningOf(target) : undefined
   if (!running || running.at > at) return ''
   const name = running.label ? `“${cut(describedOf(running.label).text || running.label, 50)}”` : running.what.replace(/ running$/, '')
-  return `waiting: Claude will see it when ${name} ends (running ${took(now - running.at)})`
+  return `Claude reads it when ${name} ends · running ${took(now - running.at)}`
 }
 const sentLine = (one: Todo, now: number) => {
   const sent = sentReplies.get(one.id)
   const replied = one.ask?.replied
-  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You replied “${cut(replied.text, 60)}”${isActingOnReply(one) ? ' · Claude is working on it' : '; Claude still has this question'}`
+  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You answered “${cut(replied.text, 60)}”${isActingOnReply(one) ? ' · Claude is working on it' : ' · the question is still open'}`
   if (!sent) return ''
-  if (sent.to === 'failed') return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}” didn't reach Claude. Press it again` : ''
-  if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}”. That Mac couldn't be reached; answer it in its own chat` : ''
+  if (sent.to === 'failed') return one.ask?.text === sent.ask ? `Couldn't send “${cut(sent.text, 60)}” to Claude · press it again` : ''
+  if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Couldn't reach that Mac with “${cut(sent.text, 60)}” · answer in its own chat` : ''
   const newer = lineOf(one) !== sent.line
   const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text))
   if ((one.ask && !isHeld) || (!isHeld && (newer || now - sent.at > ANSWER_SHOWN))) return ''
   const how = {
     sending: 'Sending to Claude…',
-    work: waitsBehind(one, sent.at, now) || 'Claude will see this after its current step',
+    work: waitsBehind(one, sent.at, now) || 'Claude reads it next',
     read: 'Claude has read it',
-    chat: 'left in the chat, which continues the task',
-    other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", whose task will see it after its current step`,
+    chat: 'sent to the chat, which carries on the task',
+    other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", which passes it on`,
   }[sent.to]
-  if (isHeld) return `✓ You replied “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : '; Claude still has this question'}`
+  if (isHeld) return `✓ You answered “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : ' · the question is still open'}`
+
   return `✓ You answered “${cut(sent.text, 60)}” · ${how}`
 }
 
@@ -5807,12 +5812,12 @@ const afarPart = (ui: Ui) => {
   if (!stuckAt && !offChats.length) return null
   const there = macs.length === 1 ? macName(macs[0] ?? '') : 'the Mac it runs chats on over SSH'
   const lines = [
-    ...(stuckAt ? [`New chats on ${there} start without Claudopus. This Mac's Claude app decided at ${stuckAt} that Claudopus didn't load there, and since then it gives every new chat there its own copy, which has no Claudopus code: no panel, tools or rules. The app forgets this only when it is quit and opened again.`] : []),
-    ...offChats.map(one => `“${offName(one)}”${one.host ? ` on ${macName(one.host)}` : ' on this Mac'} runs without Claudopus: its tasks, questions and results don't reach any panel. A chat started after the app is reopened has it.`),
+    ...(stuckAt ? [`New chats on ${there} start without Claudopus. At ${stuckAt} this Mac's Claude app decided Claudopus didn't load there, so it starts every new chat there without it: no panel, tools or rules. Quit the Claude app and open it again to end this.`] : []),
+    ...offChats.map(one => `“${offName(one)}”${one.host ? ` on ${macName(one.host)}` : ' on this Mac'} runs without Claudopus, so its tasks, questions and results don't reach any panel. A chat you start after reopening the app has Claudopus.`),
   ]
   return (
     <ui.Box key="afar" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-      <ui.Text bold color={NEEDS} wrap="wrap">{offChats.length === 1 && !stuckAt ? 'Claudopus is off in a chat' : 'Claudopus is off in some chats'}</ui.Text>
+      <ui.Text bold color={NEEDS} wrap="wrap">{offChats.length === 1 && !stuckAt ? "Claudopus isn't running in a chat" : "Claudopus isn't running in some chats"}</ui.Text>
       {lines.map((line, i) => (
         <ui.Text key={`afar-${i}`} wrap="wrap">
           {line}
@@ -5852,7 +5857,8 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
         if (item) await tellOnce($, `end-${id}`, () => alertPerson($, 'ready', item.title, `${item.what} · ${where}`, `ready-${id}`, undefined, opens))
       }
     }
-    for (const p of s.prompts ?? []) if (Math.abs(now - p.at) < AFAR_FRESH) await tellOnce($, `prompt-${s.host}-${s.chat}-${p.id}`, () => aloud($, 'prompt', `${p.title ?? chatName(s)} needs your OK`, `${p.text} · ${where}`, `prompt-${s.chat}-${p.id}`, opens))
+    for (const p of s.prompts ?? []) if (Math.abs(now - p.at) < AFAR_FRESH) await tellOnce($, `prompt-${s.host}-${s.chat}-${p.id}`, () => aloud($, 'prompt', `${p.title ?? chatName(s)} has a question for you`
+, `${p.text} · ${where}`, `prompt-${s.chat}-${p.id}`, opens))
   }
 }
 
@@ -5880,22 +5886,22 @@ const sealedFor = async ($: EngineInterface, key: string, value: string) => {
   return /^[A-Za-z0-9+/]{300,}={0,2}$/.test(out) ? out : ''
 }
 const BOX_AGAIN: Record<string, string> = {
-  refused: 'That password was refused. ',
+  refused: 'That password was wrong. ',
   short: 'That was shorter than 4 characters. ',
-  control: 'That held a line break or another control character. ',
+  control: 'That had a line break or another special character. ',
 }
 const boxWording = (one: Record<string, unknown>): string | undefined => {
   const again = typeof one.again === 'string' && Object.hasOwn(BOX_AGAIN, one.again) ? BOX_AGAIN[one.again]! : ''
   if (one.kind === 'admin') {
     if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined || typeof one.key !== 'string' || !BOX_KEY.test(one.key)) return undefined
     const mac = one.host === 'here' ? thisMac() : one.host
-    return `${again}Claudopus needs the admin password of ${mac} to run the admin command below. Nothing is saved: it goes only to that command, and the next one asks again.`
+    return `${again}Claudopus needs the admin password of ${mac} to run the command below. It goes only to that command and isn't saved, so the next one asks again.`
   }
   if (one.kind === 'secret') {
     if (one.host !== undefined) return undefined
-    if (one.name === undefined) return 'Name of the key to save, such as GITHUB_TOKEN. Claude will use it by this name.'
+    if (one.name === undefined) return 'Name of the key to save, such as GITHUB_TOKEN. Claude uses it by this name.'
     if (typeof one.name !== 'string' || !BOX_NAME.test(one.name)) return undefined
-    return `${again}Claudopus needs ${one.name}. It is saved only in ${keptWhere()}. Claude uses it by name, and it is hidden in anything a command prints.`
+    return `${again}Claudopus needs ${one.name}. Claudopus saves it only in ${keptWhere()}. Claude uses it by name, and Claudopus hides it in anything a command shows.`
   }
   return undefined
 }
@@ -5942,7 +5948,7 @@ const cardNotesOf = (card: string, at: number) => doneNotes.filter(one => one.ca
 const cardNotesPart = (ui: Ui, card: string, at: number) =>
   cardNotesOf(card, at).map(one => (
     <ui.Box key={`done-${one.id}`} flexDirection="column" borderStyle="round" borderColor={one.isOn ? DONE : '#808080'} paddingX={1} flexShrink={0}>
-      <ui.Text wrap="truncate-end" dimColor>{`${one.head} · ${one.isOn ? 'allowed' : 'refused'}`}</ui.Text>
+      <ui.Text wrap="truncate-end" dimColor>{one.head}</ui.Text>
       <ui.Box flexDirection="row" gap={1}>
         <ui.Text color={one.isOn ? DONE : undefined} dimColor={!one.isOn}>{one.isOn ? '✓' : '✕'}</ui.Text>
         <ui.Box flexShrink={1} minWidth={0}>
@@ -5969,7 +5975,7 @@ const BOX_SERVICE = 'claudopus-box'
 const BOX_ID = /^[0-9a-f-]{36}$/
 const boxesDir = () => `${dir}/boxes`
 const BOX_GRACE = 5000
-const BOX_TOLD = (text: string) => `${text} Answer it in the box at the top of the Claudopus panel, never in this chat's prompt (/claudopus opens the panel): what is typed there for it goes only into ${keptWhere()}${text.includes('admin password') ? '' : ", or give a response instead, such as where it already is"}.`
+const BOX_TOLD = (text: string) => `${text} Type it in the box at the top of the Claudopus panel, not in this chat. /claudopus opens the panel. What you type there goes only into ${keptWhere()}${text.includes('admin password') ? '' : '. Or answer in words, such as where it already is'}.`
 let boxChat = ''
 const boxTold = new Set<string>()
 
@@ -6035,7 +6041,7 @@ const boxKeyring = async ($: EngineInterface, what: 'set' | 'has' | 'delete', id
       : Promise.resolve({ exitCode: -1 })
 const sendBox = async ($: EngineInterface, id: string, value: string) => {
   if (!value) return
-  const refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? `That was longer than ${BOX_LONGEST} characters, so it wasn't sent.` : /[^\x20-\x7E]/.test(value) ? "That held a line break, a curly quote or another character outside plain letters, digits and signs, so it wasn't sent. Type it again." : ''
+  const refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? `That's longer than ${BOX_LONGEST} characters, so Claudopus didn't send it.` : /[^\x20-\x7E]/.test(value) ? "That has a line break, a curly quote or another special character, so Claudopus didn't send it. Type it again." : ''
   if (refused) {
     boxSaid.set(id, refused)
     boxPresses += 1
@@ -6043,11 +6049,11 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     return void drawAgain($)
   }
   const request = `${boxesDir()}/${id}.json`
-  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'It was no longer waiting · nothing was saved'))
+  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'The command had stopped waiting. Nothing was saved.'))
   const asked = boxes.find(other => other.id === id)
   const sent = asked?.key ? await sealedFor($, asked.key, value) : value
   if (!sent) {
-    boxSaid.set(id, "It could not be secured for the command that asked, so it wasn't sent.")
+    boxSaid.set(id, "Claudopus couldn't encrypt it for the command that asked, so it didn't send it.")
     boxPresses += 1
     boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
     return void drawAgain($)
@@ -6065,7 +6071,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   boxPresses += 1
   boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
   if (!isKept) {
-    boxSaid.set(id, `It could not be put in ${keptWhere()}. Try again.`)
+    boxSaid.set(id, `Claudopus couldn't save it in ${keptWhere()}. Try again.`)
     await log($, `box ${id} not kept: security ended ${r.exitCode}`)
   } else {
     boxSent.add(id)
@@ -6074,12 +6080,12 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     if (boxOpen?.id === id) ((boxOpen = undefined), (barBoxAt = 0))
     const one = boxes.find(other => other.id === id)
     boxes = boxes.filter(other => other.id !== id)
-    if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: one.key ? 'You gave it · it went only to the command that asked, which continues now' : `You gave it · it is in ${keptWhere()}, and the command that asked for it continues now`, what: '', isOn: true })
+    if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: one.key ? 'You gave it. It went only to the command that asked, which carries on now.' : `You gave it. Claudopus saved it in ${keptWhere()}, and the command that asked carries on now.`, what: '', isOn: true })
     await log($, `box ${id} sent to the keychain`)
   }
   drawAgain($)
 }
-const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled · nothing was saved, and what asked for it stops without it') => {
+const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled it. Nothing was saved, and the command that asked stops without it.') => {
   boxSent.add(id)
   barKeyTyped.delete(id)
   const one = boxes.find(other => other.id === id)
@@ -6114,7 +6120,7 @@ const keyWords = (text: string) =>
       return (/[A-Za-z]/.test(bare) && (bare.match(/\d/g)?.length ?? 0) >= 3) || (bare.length >= 32 && /[a-z]/.test(bare) && /[A-Z]/.test(bare))
     })
 const looksLikeKey = (text: string) => keyWords(text).length > 0
-const BOX_LOOKS_KEY = (where: string) => `That looks like the key itself. A response goes to Claude as words, into the chat. Keep it as the key to put it only in ${where}, or send it as a response anyway.`
+const BOX_LOOKS_KEY = (where: string) => `That looks like the key itself. An answer in words goes into the chat, where Claude reads it. Save it as the key to keep it only in ${where}, or send it as an answer anyway.`
 const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surface: string) => {
   if (id && replyTo) (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''))
   boxOpen = id ? { id, mode } : undefined
@@ -6144,7 +6150,7 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
   }
   boxHeldReply.delete(id)
   const request = `${boxesDir()}/${id}.json`
-  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'It was no longer waiting · your response was not sent'))
+  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, "The command had stopped waiting. Your answer wasn't sent."))
   const name = boxNameOf(one)
   const asked = name ? `giving ${name}` : isNameBox(one) ? 'naming a key to save' : 'giving the key'
   const isWritten = await $.fs
@@ -6153,7 +6159,7 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
     .catch(() => false)
   if (isWritten) boxRepliedAt.set(id, await $.clock.now())
   if (!isWritten) {
-    boxSaid.set(id, "Your response couldn't be left for the command that asked. Try again.")
+    boxSaid.set(id, "Claudopus couldn't pass your answer to the command that asked. Try again.")
     boxPresses += 1
     return void drawAgain($)
   }
@@ -6163,7 +6169,7 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
   if (boxOpen?.id === id) ((boxOpen = undefined), (barBoxAt = 0))
   drawAgain($)
   await $.process.run(['rm', '-f', request]).catch(() => undefined)
-  await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: 'You gave a response instead · it went to the command that asked, and nothing was saved', what: `“${cut(oneLine(said), 160)}”`, isOn: true })
+  await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: 'You answered in words. Your answer went to the command that asked, and nothing was saved.', what: `“${cut(oneLine(said), 160)}”`, isOn: true })
   await log($, `box ${id} answered in words`)
 }
 const submitBox = ($: EngineInterface, id: string, mode: BoxMode, value: string) => {
@@ -6180,14 +6186,14 @@ const keepHeldAsKey = ($: EngineInterface, id: string, surface: string) => {
   if (words.length === 1) return void sendBox($, id, words[0] ?? '').catch(() => log($, `box ${id} not sent`))
   if (repliesInBar(surface)) openBox($, id, 'key', surface)
   else (boxModes.set(id, 'key'), (boxPresses += 1))
-  boxSaid.set(id, 'More than one word looked like a key: paste just the key.')
+  boxSaid.set(id, 'More than one word looks like a key. Paste only the key.')
   drawAgain($)
 }
 const heldReplyButtons = ($: EngineInterface, ui: Ui, id: string, where: string) =>
   boxHeldReply.has(id) ? (
     <ui.Box key={`${where}-${id}-held`} flexDirection="row" gap={1} flexWrap="wrap">
-      <ui.Button key={`${where}-${id}-askey-${boxPresses}`} label="Keep it as the key" onPress={press => keepHeldAsKey($, id, press.surface)} />
-      <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send it as a response" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)} />
+      <ui.Button key={`${where}-${id}-askey-${boxPresses}`} label="Save as the key" onPress={press => keepHeldAsKey($, id, press.surface)} />
+      <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send as answer" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)} />
     </ui.Box>
   ) : null
 const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
@@ -6203,7 +6209,7 @@ const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
         <ui.Box flexDirection="column" width="100%" flexShrink={0}>
           <ui.Input
             key={key}
-            placeholder={mode === 'reply' ? 'Type your response' : isNameBox(one) ? 'Type the name' : 'Paste the key'}
+            placeholder={mode === 'reply' ? 'Type your answer' : isNameBox(one) ? 'Type the name' : 'Paste the key'}
             rows={mode === 'reply' ? BOX_ROWS : undefined}
             autoFocus
             onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
@@ -6232,21 +6238,21 @@ const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '') =
     const what = isNameBox(one) ? 'the name' : 'the key'
     return { at: one.at, node: (
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
-      <ui.Text dimColor wrap="truncate-end">{isKey ? 'Key · waits for you' : 'Admin password · waits for you to type it'}</ui.Text>
+      <ui.Text dimColor wrap="truncate-end">{isKey ? 'Key · waiting for you' : 'Admin password · waiting for you'}</ui.Text>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
-      {one.command ? <ui.Text dimColor wrap="wrap">{`Asked by this chat's command: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
+      {one.command ? <ui.Text dimColor wrap="wrap">{`Command that asked: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
       <ui.Text dimColor wrap="wrap">{
-        !isKey ? 'What you type here shows as you type it. It goes only to the command that asked, locked to that command, never into a chat, and is not saved.'
-        : inBar ? `Paste ${what} in the box above the chat: it goes only into ${keptWhere()}, never into a chat. Or give a response instead, such as where ${name ?? 'the key'} already is, and the command that asked gets your words.`
-        : mode === 'reply' ? 'Your response goes to the command that asked, in place of the key, and nothing is saved.'
-        : `What you type here shows as you type it. It goes only into ${keptWhere()}, never into a chat.`
+        !isKey ? "You can see what you type here. It goes only to the command that asked, never into a chat, and isn't saved."
+        : inBar ? `Paste ${what} in the box above the chat. It goes only into ${keptWhere()}, never into a chat. Or answer in words, such as where ${name ?? 'the key'} already is, and the command that asked gets your words.`
+        : mode === 'reply' ? 'Your answer goes to the command that asked, in place of the key. Nothing is saved.'
+        : `You can see what you type here. It goes only into ${keptWhere()}, never into a chat.`
       }</ui.Text>
       {inBar ? null : (
       <ui.Box width="100%" flexDirection="column">
         <ui.Input
           key={`box-${one.id}-field-${mode === 'reply' ? 'reply-' : ''}${boxTries.get(one.id) ?? 0}`}
-          placeholder={mode === 'reply' ? 'Type your response' : 'Type or paste it here'}
-          submitLabel="send"
+          placeholder={mode === 'reply' ? 'Type your answer' : 'Type or paste it here'}
+          submitLabel="Send"
           autoFocus={n === 0 && !isKeysHeld ? true : undefined}
           onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($))}
           onSubmit={value => submitBox($, one.id, mode, value)}
@@ -6257,11 +6263,12 @@ const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '') =
       {boxSaid.get(one.id) && !isOpen ? <ui.Text key={`box-${one.id}-said`} color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
       {isOpen ? null : heldReplyButtons($, ui, one.id, 'box')}
       <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-        {inBar && isOpen ? <ui.Button key={`box-${one.id}-close-${boxPresses}`} label="Close the box" onPress={press => openBox($, undefined, 'key', press.surface)} /> : null}
+        {inBar && isOpen ? <ui.Button key={`box-${one.id}-close-${boxPresses}`} label="Close" onPress={press => openBox($, undefined, 'key', press.surface)} /> : null}
         {inBar && !isOpen ? <ui.Button key={`box-${one.id}-paste-${boxPresses}`} label={isNameBox(one) ? 'Type the name' : 'Paste the key'} onPress={press => openBox($, one.id, 'key', press.surface)} /> : null}
-        {inBar && !isOpen ? <ui.Button key={`box-${one.id}-respond-${boxPresses}`} label="Give a response instead" onPress={press => openBox($, one.id, 'reply', press.surface)} /> : null}
+        {inBar && !isOpen ? <ui.Button key={`box-${one.id}-respond-${boxPresses}`} label="Answer in words" onPress={press => openBox($, one.id, 'reply', press.surface)} /> : null}
         {isKey && !inBar ? (
-          <ui.Button key={`box-${one.id}-mode-${boxPresses}`} label={mode === 'reply' ? `Type ${what} instead` : 'Give a response instead'} onPress={() => void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($))} />
+          <ui.Button key={`box-${one.id}-mode-${boxPresses}`} label={mode === 'reply' ? `Type ${what} instead` : 'Answer in words'}
+ onPress={() => void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($))} />
         ) : null}
         <ui.Button key={`box-${one.id}-cancel-${boxPresses}`} label="Cancel" plain onPress={() => void cancelBox($, one.id)} />
       </ui.Box>
@@ -6289,8 +6296,9 @@ const GATE_UNSEALED = () => `This admin command did not run: Claudopus could not
 const NO_GATE_TOUCH = () =>
   named('Claude never reads or writes the list of admin commands {name} always allows, what {name} allowed, or the key that locks them. Only {name} adds to them, with a press on a card or in Config.')
 
-const gateWhat = (gate: Gate) =>
-  gate.isUndone ? (gate.isOutside ? `Something other than Claudopus changed ${gate.host}, and the change was undone` : `A command changed ${gate.host}, and the change was undone`) : gate.kind === 'release' ? `Wants to release ${gate.host} to its main branch` : gate.kind === 'file' ? `Wants to change ${gate.host}` : `Wants to run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
+const gateAct = (gate: Gate) =>
+  gate.isUndone ? `Make the change to ${gate.host} again` : gate.kind === 'release' ? `Release ${gate.host} to main` : gate.kind === 'file' ? `Change ${gate.host}` : `Run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
+const gateWhat = (gate: Gate) => `${gateAct(gate)}?`
 
 const isAdminPath = (word: string, root: string, name = 'admin') => {
   const parts: string[] = []
@@ -6486,10 +6494,11 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   await setGates($, top, list => [...list.filter(one => one.id !== gate.id), gate])
   await openList($).catch(() => undefined)
   const card = top ? (await read($, todos)).find(one => one.id === top) : undefined
-  const text = `${gateWhat(gate)}: ${cut(oneLine(gate.command), 200)}`
-  await (card ? askAloud($, card, text) : aloud($, 'ask', gate.kind === 'release' ? 'A release needs you' : gate.kind === 'file' ? 'A change to your settings needs you' : 'An admin command needs you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
+  const text = `${gateAct(gate)}: ${cut(oneLine(gate.command), 200)}`
+  await (card ? askAloud($, card, text) : aloud($, 'ask', 'This chat has a question for you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
+  const act = gateAct(gate)
   $.ui.log(
-    `${card ? `The task "${titleOf(card)}"` : 'This chat'} ${gateWhat(gate).replace(/^Wants/, 'wants')}: ${cut(oneLine(gate.command), 300)} · Press ${gate.kind ? 'Allow once or Deny' : `${gate.isWork ? 'Allow for this task' : 'Allow once'}, Always allow this command or Deny`} ${card ? 'on its card' : 'at the top'} in the Claudopus panel (/claudopus opens it). Nothing typed in the chat allows it.`,
+    `${card ? `"${titleOf(card)}"` : 'This chat'} wants to ${act.charAt(0).toLowerCase()}${act.slice(1)}: ${cut(oneLine(gate.command), 300)}. Press ${gate.kind ? 'Allow once or Deny' : `${gate.isWork ? 'Allow for this task' : 'Allow once'}, Always allow this command or Deny`} ${card ? 'on its card in' : 'at the top of'} the Claudopus panel. /claudopus opens it. Nothing you type in the chat allows it.`,
   )
   let said: GateSaid | 'gone' | 'late' | undefined
   try {
@@ -6508,11 +6517,11 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   }
   const pressed = gatePressed.get(gate.id)
   gatePressed.delete(gate.id)
-  if (pressed && pressed !== said) await gateNoteFailed($, gate, top, `It had stopped waiting when you pressed · ${gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing was changed' : 'it did not run'}`)
+  if (pressed && pressed !== said) await gateNoteFailed($, gate, top, `It had stopped waiting when you pressed. ${gate.kind === 'release' ? 'Nothing was released.' : gate.kind === 'file' ? 'Nothing changed.' : "It didn't run."}`)
   await log($, `${gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on'} ${gate.host}: ${said === 'once' ? 'allowed once' : said === 'always' ? 'always allowed' : said === 'deny' ? 'denied' : 'not answered'}`)
   return said
 }
-const gateHead = (gate: Gate) => (gate.kind === 'release' ? `Release of ${gate.branch ?? gate.host} into ${gate.host}` : gate.kind === 'file' ? `Change to ${gate.host}` : `Admin command on ${gate.host === 'here' ? thisMac() : gate.host}`)
+const gateHead = (gate: Gate) => (gate.kind === 'release' ? `Release of ${gate.branch ?? gate.host}` : gate.kind === 'file' ? `Change to ${gate.host}` : `Admin command on ${gate.host === 'here' ? thisMac() : gate.host}`)
 const gateWhatLine = (gate: Gate) => (gate.kind === 'release' && gate.folder ? `from ${shortPath(gate.folder)}` : gate.kind === 'file' ? '' : cut(oneLine(gate.command), 200))
 const gatePressed = new Map<string, GateSaid>()
 const gateNoteFailed = ($: EngineInterface, gate: Gate, card: string, said: string) =>
@@ -6522,7 +6531,7 @@ const gateNoteFailed = ($: EngineInterface, gate: Gate, card: string, said: stri
 const callRefused = async ($: EngineInterface, call: string) => {
   for (const one of doneNotes.filter(note => note.call === call && note.isOn && note.id.startsWith('gate-'))) {
     const { at: _at, ...rest } = one
-    await noteDone($, { ...rest, endedAt: 0, isOn: false, said: 'It did not run: another part of the same command was refused, so nothing in it ran' }).catch(() => undefined)
+    await noteDone($, { ...rest, endedAt: 0, isOn: false, said: "It didn't run: another part of the same command was denied, so none of it ran." }).catch(() => undefined)
   }
 }
 const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') => {
@@ -6547,14 +6556,14 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') =
       head: gateHead(gate),
       said:
         said === 'deny'
-          ? `You denied it · ${gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing was changed' : "it didn't run"}, and Claudopus told Claude`
+          ? `You denied it. ${gate.kind === 'release' ? 'Nothing was released' : gate.kind === 'file' ? 'Nothing changed' : "It didn't run"}, and Claudopus told Claude.`
           : gate.kind
-            ? `You allowed it once · ${gate.kind === 'release' ? 'it releases now' : 'the change is made now'}`
+            ? `You allowed it. ${gate.kind === 'release' ? 'Claude is releasing it now.' : 'Claude is making the change now.'}`
             : said === 'always'
-            ? 'You always allow this command · it runs now, and will not ask again'
+            ? "You always allow this command. It runs now, and Claudopus won't ask again."
             : gate.isWork
-              ? "You allowed this task's admin commands · it runs now"
-              : 'You allowed it once · it runs now',
+              ? 'You allowed admin commands for this task. This one runs now.'
+              : 'You allowed it. It runs now.',
       what: gateWhatLine(gate),
       isOn: said !== 'deny',
     }).catch(() => undefined)
@@ -6584,13 +6593,13 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
         await allowAlways($, call).catch(async err => {
           await log($, `admin command not always allowed: ${String(err)}`)
           const gate = { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: 0 }
-          if (doneNotes.some(one => one.id === `gate-${gate.id}`)) await noteDone($, { id: `gate-${gate.id}`, call: e.tool_use_id, ...(card ? { card: top } : {}), head: gateHead(gate), said: "You allowed it once · it runs now, but it couldn't be saved as always allowed", what: gateWhatLine(gate), isOn: true })
+          if (doneNotes.some(one => one.id === `gate-${gate.id}`)) await noteDone($, { id: `gate-${gate.id}`, call: e.tool_use_id, ...(card ? { card: top } : {}), head: gateHead(gate), said: "You allowed it. It runs now, but Claudopus couldn't save it as always allowed.", what: gateWhatLine(gate), isOn: true })
         })
       if (isWork) workAllowed.add(top)
     }
     const grant = await issueGrant($, `${e.tool_use_id}-${n}`, call)
     if (!grant) {
-      await gateNoteFailed($, { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: 0 }, card ? top : '', "It could not be secured · it didn't run, and Claudopus told Claude")
+      await gateNoteFailed($, { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: 0 }, card ? top : '', "Claudopus couldn't use its keychain key. It didn't run, and Claudopus told Claude.")
       await dropGrants($, grants)
       return { deny: GATE_UNSEALED(), grants: [] }
     }
@@ -6666,7 +6675,7 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
     }
     const grant = await issueGrant($, id, { host: 'release', command: `${repo}\n${branch}` }, 'release-grant')
     if (!grant) {
-      await gateNoteFailed($, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: 0 }, card ? top : '', 'It could not be secured · nothing was released, and Claudopus told Claude')
+      await gateNoteFailed($, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: 0 }, card ? top : '', "Claudopus couldn't use its keychain key. Nothing was released, and Claudopus told Claude.")
       await dropGrants($, grants)
       return { deny: GATE_UNSEALED(), grants: [] }
     }
@@ -6682,7 +6691,7 @@ const ownFileOf = (path: string) => {
   const lower = full.toLowerCase()
   if (lower === `${memory}/config.json`) return 'your Claudopus settings (config.json)'
   if (lower === `${memory}/rules` || lower.startsWith(`${memory}/rules/`)) return `your rules (${full.slice(dir.length + 1)})`
-  if (lower === `${memory}/roles` || lower.startsWith(`${memory}/roles/`)) return `your role text (${full.slice(dir.length + 1)})`
+  if (lower === `${memory}/roles` || lower.startsWith(`${memory}/roles/`)) return `your role file (${full.slice(dir.length + 1)})`
   if (/\/\.git\/release\.local$/.test(full)) return `this Mac's release settings (${full})`
   return ''
 }
@@ -6758,14 +6767,14 @@ const knownWarn = ($: EngineInterface, why: string) => {
   void log($, `the kept copy of the settings and texts is not in force: ${why}`)
   if (isKnownWarned) return
   isKnownWarned = true
-  $.ui.log(`Claudopus could not use its key in ${keptWhere()} (${why}), so a change made to your settings, principles or rules outside Claudopus is not undone in this chat until it can. Unlock the keychain, or start a new chat once it is unlocked.`)
+  $.ui.log(`Claudopus couldn't use its key in ${keptWhere()}: ${why}. Until it can, Claudopus won't undo changes made outside it to your settings or rules in this chat. Unlock the keychain, or start a new chat once it's unlocked.`)
 }
 const knownWrite = async ($: EngineInterface, known: Map<string, string | null>, after: number) => {
   const files = Object.fromEntries(known)
   const count = after + 1
   const seal = (await sealed($, 'known-make', [knownMessage(files, count)]))?.[0]
   if (!seal) {
-    knownWarn($, 'it could not be secured')
+    knownWarn($, "it couldn't make a seal")
     throw new Error(`the kept copy could not be sealed in ${keptWhere()}`)
   }
   const text = `${JSON.stringify({ files, count, seal }, null, 2)}\n`
@@ -6910,7 +6919,7 @@ const offerUndone = async ($: EngineInterface, by: ToolCallInput | undefined, na
   const list = await read($, todos)
   const top = by?.agentId === undefined ? '' : topOf(list, by.agentId)
   const card = list.find(one => one.id === top)
-  const what = name === 'config.json' ? 'your Claudopus settings (config.json)' : name.startsWith('rules/') ? `your rules (${name})` : `your role text (${name})`
+  const what = name === 'config.json' ? 'your Claudopus settings (config.json)' : name.startsWith('rules/') ? `your rules (${name})` : `your role file (${name})`
   const at = await $.clock.now()
   const id = `${by ? by.tool_use_id : `seen${at.toString(36)}`}-u-${name.replace(/[^A-Za-z0-9]/g, '')}`
   for (const [other, offer] of undoneOffers) {
@@ -6922,9 +6931,9 @@ const offerUndone = async ($: EngineInterface, by: ToolCallInput | undefined, na
   undoneOffers.set(id, { name, text, top: card ? top : '' })
   gateHeld.add(id)
   gatePressed.delete(id)
-  await setGates($, card ? top : '', gates => [...gates.filter(one => one.id !== id), { id, kind: 'file', isUndone: true, ...(by ? {} : { isOutside: true }), host: what, command: cut(text ?? '(the file taken away)', 2000), at, ...(by?.agentId ? { from: by.agentId } : {}) }])
+  await setGates($, card ? top : '', gates => [...gates.filter(one => one.id !== id), { id, kind: 'file', isUndone: true, ...(by ? {} : { isOutside: true }), host: what, command: cut(text ?? '(the file was removed)', 2000), at, ...(by?.agentId ? { from: by.agentId } : {}) }])
   await openList($).catch(() => undefined)
-  $.ui.log(`${card ? `A command of the task "${titleOf(card)}" changed` : by ? 'A command changed' : 'Something outside Claudopus changed'} ${what}, and the change was undone · Press Allow once ${card ? 'on its card' : 'at the top'} in the Claudopus panel to make the change again, or Deny.`)
+  $.ui.log(`${card ? `A command of "${titleOf(card)}" changed` : by ? 'A command changed' : 'Something outside Claudopus changed'} ${what}, so Claudopus undid it. To make the change again, press Allow once ${card ? 'on its card in' : 'at the top of'} the Claudopus panel. Deny keeps it undone.`)
 }
 const undoneOffers = new Map<string, { name: string; text: string | null; top: string }>()
 const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
@@ -6939,10 +6948,10 @@ const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
   await log($, `change to ${gate.host}: made again, as allowed`)
 }
 
-const gateKind = (gate: Gate) => (gate.isUndone ? 'Undone' : gate.kind === 'release' ? 'Release' : gate.kind === 'file' ? 'Change to your files' : 'Admin command')
+const gateKind = (gate: Gate) => (gate.isUndone ? 'Change undone' : gate.kind === 'release' ? 'Release' : gate.kind === 'file' ? 'Change to your files' : 'Admin command')
 const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean, card = '') => (
   <ui.Box key={key} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
-    <ui.Text wrap="truncate-end" dimColor>{`${gateKind(gate)} · ${gateHeld.has(gate.id) && !isElsewhere ? (gate.isUndone ? 'yours to decide' : 'waits for your press') : isElsewhere ? 'asked in another chat' : 'no longer waits'}`}</ui.Text>
+    <ui.Text wrap="truncate-end" dimColor>{`${gateKind(gate)} · ${gateHeld.has(gate.id) && !isElsewhere ? 'waiting for you' : isElsewhere ? 'waiting in another chat' : 'no longer waiting'}`}</ui.Text>
     <ui.Text wrap="wrap" color={NEEDS} bold>{gateWhat(gate)}</ui.Text>
     {gate.kind === 'release' && gate.folder ? (
       <ui.Box flexDirection="column">
@@ -6954,18 +6963,18 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
         <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
       </ui.Box>
     ) : (
-      <ui.Text dimColor wrap="wrap">What it is is shown only on its own Mac.</ui.Text>
+      <ui.Text dimColor wrap="wrap">Its details show only on its own Mac.</ui.Text>
     )}
     <ui.Text wrap="wrap">
       {gate.kind === 'release'
-        ? 'Allow: this branch is merged into main, checked and pushed, with its version and tag. Deny: nothing is released, and Claudopus tells Claude.'
+        ? 'Allow once: Claude merges this branch into main, checks it and pushes it with its version and tag. Deny: nothing is released, and Claudopus tells Claude.'
         : gate.isUndone && gate.isOutside
-          ? 'It changed while no command of a task was running: by you in an editor, or by a program a command left running. Claude changes this file only with Edit or Write, which ask you first, so the change was undone. Allow: the change is made again, as shown (if you made it yourself, allow it). Deny: the file stays as it was. Either way what it held is saved beside it as a .put-back copy.'
+          ? 'Something outside Claudopus changed this file, maybe you in an editor or a program a command left running, so Claudopus undid it. Allow once: Claudopus makes the change again. If you made it, allow it. Deny: the file stays as it was. Either way Claudopus keeps the changed text beside it as a .put-back copy.'
           : gate.isUndone
-          ? 'Claude changes this file only with Edit or Write, which ask you first, so what a command wrote to it was undone. Allow: the change is made again, as it was written (if you made it yourself, allow it). Deny: the file stays as it was. Either way what it held is saved beside it as a .put-back copy.'
+          ? 'A command wrote to this file, so Claudopus undid it: Claude changes it only with Edit or Write, which ask you first. Allow once: Claudopus makes the change again. If you made it, allow it. Deny: the file stays as it was. Either way Claudopus keeps the changed text beside it as a .put-back copy.'
           : gate.kind === 'file'
-          ? 'Allow: the change is made to this file of yours. Deny: the file stays as it is, and Claudopus tells Claude.'
-          : `Allow: it runs with admin rights${gate.isWork ? ', and this task runs its next admin commands without asking' : ''}. Deny: it doesn't run, and Claudopus tells Claude.`}
+          ? 'Allow once: Claude makes this change to your file. Deny: the file stays as it is, and Claudopus tells Claude.'
+          : `${gate.isWork ? "Allow for this task: it runs as admin, and so do this task's next admin commands, without asking" : 'Allow once: it runs as admin'}. Deny: it doesn't run, and Claudopus tells Claude.`}
     </ui.Text>
     {gateHeld.has(gate.id) && !isElsewhere ? (
       <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
@@ -6974,7 +6983,8 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
         <ui.Button key={`${key}-deny-${loadMark}`} label="Deny" onPress={() => answerGate($, gate, 'deny', card)} />
       </ui.Box>
     ) : (
-      <ui.Text dimColor wrap="wrap">{isElsewhere ? 'Allow or deny it on its card in its own chat.' : 'It no longer waits.'}</ui.Text>
+      <ui.Text dimColor wrap="wrap">{isElsewhere ? 'Allow or deny it on its card in its own chat.' : "It's no longer waiting for you."}</ui.Text>
+
     )}
   </ui.Box>
 )
@@ -7027,41 +7037,41 @@ const promptOf = (tool: string, input: unknown, list: Todo[], isWork = false): A
   const allow = (text: string, yes: string, detail = '', no = isWork ? NO_TOLD : NO_SKIPS): Asks => ({ text, kind: 'allow', ...(detail ? { detail } : {}), yes: `Yes: ${yes}`, no })
   if (tool === 'Bash' || tool === 'PowerShell')
     return allow(`Run a command: ${cut(field('description'), 90) || cut(field('command'), 90) || 'no description'}`, 'the command runs on its Mac.', whole('command', 400))
-  if (tool === 'Write') return allow(`Write the file ${file(field('file_path')) || 'a file'}`, 'the file is saved, replacing any file of that name.', field('file_path'))
+  if (tool === 'Write') return allow(`Write the file ${file(field('file_path')) || 'a file'}`, 'Claude saves the file, replacing any file of that name.', field('file_path'))
   if (tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit')
-    return allow(`Change the file ${file(field('file_path') || field('notebook_path')) || 'a file'}`, 'the change is made to the file.', field('file_path') || field('notebook_path'))
-  if (tool === 'Read') return allow(`Read the file ${file(field('file_path')) || 'a file'}`, 'Claude reads the file; nothing is changed.', field('file_path'))
-  if (tool === 'Glob' || tool === 'Grep') return allow(`Search files for ${cut(field('pattern'), 80) || 'a pattern'}`, 'Claude searches; nothing is changed.', field('path'))
-  if (tool === 'WebFetch') return allow(`Open a web page on ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'the web'}`, 'Claude reads the page; nothing is sent but the address.', field('url'))
+    return allow(`Change the file ${file(field('file_path') || field('notebook_path')) || 'a file'}`, 'Claude changes the file.', field('file_path') || field('notebook_path'))
+  if (tool === 'Read') return allow(`Read the file ${file(field('file_path')) || 'a file'}`, 'Claude reads the file and changes nothing.', field('file_path'))
+  if (tool === 'Glob' || tool === 'Grep') return allow(`Search files for ${cut(field('pattern'), 80) || 'a pattern'}`, 'Claude searches and changes nothing.', field('path'))
+  if (tool === 'WebFetch') return allow(`Open a web page on ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'the web'}`, 'Claude reads the page and sends nothing but its address.', field('url'))
   if (tool === 'WebSearch') return allow(`Search the web for “${cut(field('query'), 80)}”`, 'Claude searches the web and reads the results.')
   if (tool === 'SendMessage') {
     const to = workNamed(field('to'))
     return {
       ...allow(
-        to === 'its chat' ? 'Pass a message back to its chat' : `Pass a message to ${to}`,
+        to === 'its chat' ? 'Send a message to its chat' : `Send a message to ${to}`,
         to === 'its chat' ? 'its chat gets the message.' : 'that task gets the message and acts on it.',
         whole('message', 400) || field('summary'),
         isWork ? "No: it isn't sent, and Claudopus tells Claude you said no." : "No: it isn't sent, and the chat waits for what you say next.",
       ),
-      done: 'it was sent',
+      done: 'Claude sent it',
     }
   }
   if (tool === 'Agent' || tool === 'Task')
-    return { ...allow(`Start a background task: ${cut(field('description'), 90) || 'with no title'}`, 'it starts in the background and gets a card here.', whole('prompt', 300), isWork ? NO_TOLD : "No: it isn't started, and the chat waits for what you say next."), done: 'it was started' }
+    return { ...allow(`Start a task: ${cut(field('description'), 90) || 'with no title'}`, 'the task starts in the background and gets a card here.', whole('prompt', 300), isWork ? NO_TOLD : "No: it doesn't start, and the chat waits for what you say next."), done: 'Claude started it' }
   if (tool === 'TaskStop')
-    return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that task is stopped where it is.', '', isWork ? 'No: that task keeps running, and Claudopus tells Claude you said no.' : 'No: that task keeps running, and the chat waits for what you say next.'), done: 'it was stopped' }
+    return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that task stops where it is.', '', isWork ? 'No: that task keeps running, and Claudopus tells Claude you said no.' : 'No: that task keeps running, and the chat waits for what you say next.'), done: 'Claude stopped it' }
   if (tool === 'Skill') return allow(`Use the skill “${field('skill') || field('name')}”`, 'Claude loads those instructions and follows them.')
   if (tool === 'AskUserQuestion') {
     const first = Array.isArray(given.questions) ? (given.questions[0] as { question?: unknown } | undefined)?.question : undefined
     return {
       text: typeof first === 'string' && first.trim() ? `Answer a question: ${cut(oneLine(first), 120)}` : 'Answer a question',
       kind: 'question',
-      yes: 'Pick an answer: it goes back and Claude continues with it.',
-      no: 'Skip it: no answer goes back, and Claude waits for what you say next.',
+      yes: 'Pick an answer: Claude gets it and carries on.',
+      no: 'Skip it: Claude gets no answer and waits for what you say next.',
     }
   }
   if (tool === 'ExitPlanMode')
-    return { text: 'Approve a plan', kind: 'plan', detail: whole('plan', 400), yes: 'Yes: Claude starts doing what the plan says.', no: 'No: Claude keeps planning; say what to change.' }
+    return { text: 'Approve a plan', kind: 'plan', detail: whole('plan', 400), yes: 'Yes: Claude starts doing what the plan says.', no: 'No: Claude keeps planning. Say what to change.' }
   const mcp = tool.match(/^mcp__(.+?)__(.+)$/)
   const words = field('description') || field('text') || field('query') || field('title') || field('name') || field('url')
   if (mcp) return allow(`Use “${(mcp[2] ?? '').replace(/_/g, ' ')}” from ${(mcp[1] ?? '').replace(/^plugin_[^_]+_/, '').replace(/[_-]/g, ' ')}`, 'that action runs.', cut(words, 300))
@@ -7099,7 +7109,7 @@ const tellWaiting = async ($: EngineInterface) => {
   waiting = waiting.map(one => ({ ...one, isTold: true }))
   const { title } = await read($, me)
   const chat = title.trim() || cwd.split('/').filter(Boolean).pop() || 'A chat'
-  for (const one of due) await aloud($, 'prompt', `${one.title ?? chat} needs your OK`, one.text, `prompt-${one.id}`).catch(err => log($, `prompt not told: ${String(err)}`))
+  for (const one of due) await aloud($, 'prompt', `${one.title ?? chat} has a question for you`, one.text, `prompt-${one.id}`).catch(err => log($, `prompt not told: ${String(err)}`))
 }
 type Outcome = 'running' | 'ran' | 'no' | 'stopped'
 let answeredPrompts: Waiting[] = []
@@ -7224,12 +7234,12 @@ const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
 
 const CARRY_ON = 'Carry on without it'
 const CC_REFUSALS: [string, string][] = [
-  ['Permission for this action was denied by the Claude Code auto mode classifier', "Claude Code's auto mode refused it"],
-  ['Permission for this command was denied by a built-in Claude Code safety check', 'a built-in Claude Code safety check refused it'],
-  ['Permission for this tool use was denied. It requires approval, and this session has no approval surface', 'it needs approval, and Claude Code cannot ask anyone in this run'],
-  ['Permission for this tool use was denied: it requires interactive approval', 'it needs approval, and Claude Code cannot ask anyone in this run'],
-  ['no approval surface in this session', 'it needs approval, and Claude Code cannot ask anyone in this run'],
-  ['nobody can be asked in this headless run', 'it needs approval, and Claude Code cannot ask anyone in this run'],
+  ['Permission for this action was denied by the Claude Code auto mode classifier', "Claude Code's auto mode blocked it"],
+  ['Permission for this command was denied by a built-in Claude Code safety check', 'a built-in Claude Code safety check blocked it'],
+  ['Permission for this tool use was denied. It requires approval, and this session has no approval surface', "it needs your OK, and Claude Code can't ask you in a background task"],
+  ['Permission for this tool use was denied: it requires interactive approval', "it needs your OK, and Claude Code can't ask you in a background task"],
+  ['no approval surface in this session', "it needs your OK, and Claude Code can't ask you in a background task"],
+  ['nobody can be asked in this headless run', "it needs your OK, and Claude Code can't ask you in a background task"],
 ]
 const NO_VERDICT = /gave no verdict|transient failure/i
 const refusalOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isError?: unknown } | undefined): { who: string; reason: string } | undefined => {
@@ -7252,11 +7262,12 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   if (!top || top.chat) return
   const what = promptOf(tool, call, list, true)
   const who = own?.parentId ? `a helper of this task ("${titleOf(own)}")` : 'this task'
-  const text = cut(`Claude Code refused ${who}: ${what.text}.`, ASK_TEXT)
+  const text = cut(`Claude Code blocked ${who}: ${what.text}.`, ASK_TEXT)
   const details = [
     what.detail ? `What it is: ${what.detail}` : '',
     `Why: ${refusal.who}${refusal.reason ? ` (${refusal.reason})` : ''}.`,
-    'The task carries on without it, and does not do it another way.',
+    "Claude carries on without it and won't try another way.",
+
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -7562,13 +7573,13 @@ const stepsAtEnd = async ($: EngineInterface) => {
     const id = card.id
     const isDone = !card.byYou && !(card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) && card.status === 'done'
     if (!isDone) await unsettleAsked($, id, held.ask.at).catch(err => log($, `result's question not opened again for ${id}: ${String(err)}`))
-    if (card.byYou) await stepLine($, id, `Nothing was done on your "${held.said}": you stopped it first`)
-    else if (card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) await stepLine($, id, `Nothing was done on your "${held.said}": Claude asked something else first`)
+    if (card.byYou) await stepLine($, id, `Claudopus didn't do “${held.said}” · you stopped the task first`)
+    else if (card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) await stepLine($, id, `Claudopus didn't do “${held.said}” · Claude asked something else first`)
     else if (card.status !== 'done') {
       answeredAsks.delete(`${id}:${held.ask.at}:${held.ask.text}`)
       if (answeredAt.get(id) === held.ask.at) answeredAt.delete(id)
       sentReplies.delete(id)
-      await stepLine($, id, `Nothing was done on your "${held.said}": Claude's turn ${card.status === 'stopped' ? 'was stopped' : 'failed'} first, so the question is back`)
+      await stepLine($, id, `Claudopus didn't do “${held.said}” · Claude ${card.status === 'stopped' ? 'stopped' : 'failed'} first, so the question is back`)
       if (card.ask?.refused) await askGone($, card).catch(err => log($, `refusal notice not cleared in the chat: ${String(err)}`))
       await askInChat($, { ...card, ask: held.ask }).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
     } else await lastStep($, card, held.ask, held.said).catch(err => log($, `last step of ${id} not done: ${String(err)}`))
@@ -7587,8 +7598,8 @@ const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['as
   const prompt = named(
     `Do the last step of the task "${titleOf(one)}", which {name} just gave the go-ahead for by pressing "${said}" (to: ${ask.text}): ${step}\nWork in ${folder}${branch && branch !== 'HEAD' ? `, on its branch ${branch}` : ''}. It is this one step: do only that, then report in one or two lines what happened. If it fails in a way that needs what the task that built it knows (a merge conflict, a failing check, a question only it can answer), send that task, "${one.id}", a message with SendMessage saying what failed and the last lines of the output, and end; do not fix it yourself.`,
   )
-  await stepLine($, one.id, `On your "${said}", a small fresh task does the last step: ${cut(step, 160)}`)
-  const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: last step`, subagentType: 'claudopus:quick', model: clearModel(models, lean), cwd: folder } }
+  await stepLine($, one.id, `You pressed “${said}” · Claudopus starts a new task for it: ${cut(step, 160)}`)
+  const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: finishing`, subagentType: 'claudopus:quick', model: clearModel(models, lean), cwd: folder } }
   wakes.push(wake)
   void $.clock.after(WAKE_WAIT, () => {
     const at = wakes.indexOf(wake)
@@ -7603,20 +7614,20 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   const name = (/\/\.git$/.test(common) ? common.replace(/\/\.git$/, '') : repo).split('/').pop() || repo
   const id = `step-${one.id}-${at}`
   const gate: Gate = { id, call: id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at, from: one.id }
-  await stepLine($, one.id, `On your "${said}", Claudopus releases ${branch} itself once you allow it below`)
+  await stepLine($, one.id, `You pressed “${said}” · Claudopus releases ${branch} once you allow it below`)
   const allowed = await holdGate($, {}, gate, one.id)
-  if (allowed !== 'once') return stepLine($, one.id, `Nothing was released: the release was ${allowed === 'deny' ? 'denied' : 'not allowed'}`)
+  if (allowed !== 'once') return stepLine($, one.id, `Nothing was released · ${allowed === 'deny' ? 'you denied it' : "it wasn't allowed"}`)
   const logFile = `${dir}/releases/${id}.log`
   const isLogged = await $.fs.write(logFile, '').then(() => true).catch(() => false)
-  if (!isLogged) return stepLine($, one.id, 'Nothing was released: Claudopus could not start the release')
+  if (!isLogged) return stepLine($, one.id, "Nothing was released · Claudopus couldn't start the release")
   const grant = await issueGrant($, id, { host: 'release', command: `${repo}\n${branch}` }, 'release-grant')
-  if (!grant) return stepLine($, one.id, 'Nothing was released: the allow could not be secured')
+  if (!grant) return stepLine($, one.id, "Nothing was released · Claudopus couldn't use its keychain key")
   const run = await $.process
     .run(['/bin/sh', '-c', 'nohup /bin/sh -c \'"$1" > "$2" 2>&1; echo "claudopus-exit $?" >> "$2"\' sh "$1" "$2" > /dev/null 2>&1 &', 'sh', `${$.plugin.root}/bin/release`, logFile], { cwd: repo, env: { CLAUDECODE: '1' }, timeoutMs: 15_000 })
     .catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (run.exitCode !== 0) {
     await dropGrants($, [grant])
-    return stepLine($, one.id, 'Nothing was released: Claudopus could not start the release')
+    return stepLine($, one.id, "Nothing was released · Claudopus couldn't start the release")
   }
   await log($, `release of ${branch} in ${name} started by Claudopus for ${one.id}`)
   const timer = everyLoad($, STEP_LOOK, () => {
@@ -7629,11 +7640,12 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       timer.cancel()
       const tail = text.replace(/claudopus-exit \d+\s*$/, '').replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n')
       if (exit === '0') {
-        await stepLine($, one.id, `Released: ${cut(oneLine(tail.split('\n').at(-1) ?? ''), 160)}`)
-        await sayInChat($, named(`Claudopus released "${titleOf(one)}" on {name}'s go-ahead. Its last lines:\n${tail}`), `Released "${titleOf(one)}".`)
+        await stepLine($, one.id, `Released · ${cut(oneLine(tail.split('\n').at(-1) ?? ''), 160)}`)
+        await sayInChat($, named(`Claudopus released "${titleOf(one)}" on {name}'s go-ahead. Its last lines:\n${tail}`), `Claudopus released "${titleOf(one)}".`)
         return
       }
-      await stepLine($, one.id, `The release ${isLate ? 'has run 90 minutes' : `stopped (exit ${exit})`}: Claude is started again to look at it`)
+      await stepLine($, one.id, `The release ${isLate ? 'is still running after 1h 30m' : 'failed'} · Claudopus started Claude again to look at it`)
+
       await toEnded($, one, one.id, isLate ? `${wakeText}\nClaudopus started the release itself after the go-ahead, and it has run 90 minutes without ending. It may still be running: look at its log, ${logFile}, and at what is running, before anything else; do not start a second release while it runs. Its last lines:\n${tail}` : `${wakeText}\nClaudopus ran the release itself after the go-ahead, and it failed with exit ${exit}. Its log is ${logFile}; its last lines:\n${tail}\nSort out what it needs (exit 2: merge main and keep what both sides meant; exit 3: a build or check failed), then run the release as your rules say.`, { text: said, ask: ask.text, at, line: '', isCard: true, askAt: ask.at })
     })().catch(err => log($, `release of ${one.id} not followed: ${String(err)}`))
   })
@@ -7860,8 +7872,9 @@ const chatHooks = (on: On) => {
       },
       isDeferred: false,
     })
-    await $.command.register({ name: 'claudopus', description: 'Show the to-dos of this chat: what I asked for, what was done and decided, and each answer' })
-    await $.command.register({ name: 'servers', description: 'Show the servers running on this Mac, with a link to each and which chat started it' })
+    await $.command.register({ name: 'claudopus', description: "Open the Claudopus panel: this chat's tasks, questions and results" })
+    await $.command.register({ name: 'servers', description: 'Open the Servers panel: the servers running on this Mac, a link to each and the chat that started it' })
+
     void $.ui.close({ id: OLD_PANE }).catch(() => undefined)
 
     const isNew = !(await $.fs.exists(`${dir}/index.md`))
@@ -8153,6 +8166,53 @@ const restartedOnce = new Set<string>()
 const inFlight = new Map<string, { agent: string; what: string; at: number; cmd?: string; label?: string }>()
 const seenLines = new Map<string, Set<string>>()
 
+const lastCall = new Map<string, { id: string; what: string; at: number; endedAt?: number }>()
+const DOUBLED = new Set(['commit', 'rerun', 'plot', 'crop', 'fit', 'refit', 'format', 'submit', 'omit', 'permit', 'chop', 'prep', 'spin', 'run', 'stop', 'get', 'set', 'put', 'cut', 'plan', 'drop', 'ship', 'scan', 'grab', 'trim', 'zip', 'pin', 'tag', 'map', 'log', 'shut', 'chat', 'swap', 'skip', 'step', 'wrap', 'snap', 'clip', 'dig', 'begin'])
+const VERBS = new Set(['run', 'download', 'upload', 'watch', 'serve', 'wait', 'check', 'render', 'build', 'test', 'install', 'fetch', 'copy', 'move', 'make', 'find', 'read', 'write', 'draw', 'train', 'fit', 'compute', 'count', 'convert', 'compress', 'push', 'pull', 'clone', 'deploy', 'start', 'stop', 'open', 'save', 'sync', 'update', 'fix', 'look', 'search', 'list', 'measure', 'compare', 'merge', 'release', 'export', 'import', 'generate', 'create', 'delete', 'remove', 'clean', 'tidy', 'record', 'capture', 'take', 'shoot', 'encode', 'decode', 'transcribe', 'play', 'send', 'load', 'prepare', 'set', 'get', 'sort', 'scan', 'crop', 'resize', 'split', 'join', 'bake', 'solve', 'analyse', 'analyze', 'plot', 'extract', 'unpack', 'pack', 'zip', 'grade', 'score', 'rank', 'evaluate', 'label', 'align', 'compile', 'lint', 'format', 'verify', 'validate', 'probe', 'query', 'print', 'show', 'restart', 'stage', 'commit', 'rebuild', 'retry', 'redo', 'rerun', 'resize', 'collect', 'gather', 'process', 'index', 'upscale', 'mesh', 'paint', 'cut', 'trim', 'publish', 'post', 'preview', 'shrink', 'combine', 'reset', 'apply', 'mark', 'tag', 'map', 'kill', 'begin', 'close', 'add', 'try'])
+const doingOf = (said: string) => {
+  const [first = '', ...rest] = said.trim().split(/\s+/)
+  const word = first.toLowerCase()
+  if (!VERBS.has(word) || !rest.length) return said.trim()
+  const ing = DOUBLED.has(word) ? `${word}${word.at(-1)}ing` : /[^aeiou]e$/.test(word) && word !== 'be' ? `${word.slice(0, -1)}ing` : /ie$/.test(word) ? `${word.slice(0, -2)}ying` : `${word}ing`
+  return [ing[0]?.toUpperCase() + ing.slice(1), ...rest].join(' ')
+}
+const callWords = (tool: string, input?: { description?: unknown; command?: unknown }) => {
+  const said = oneLine(String(input?.description ?? '')).replace(/\s*\((?:about|under|over|around|up to|~)?\s*[\d.,\-– ]+\s*(?:s|sec|seconds?|m|mins?|minutes?|h|hours?)\)\s*$/i, '').trim()
+  if (tool.startsWith(TOOLS) || tool.startsWith(OLD_TOOLS) || ['ToolSearch', 'TodoWrite', 'SubagentHandback', 'ExitPlanMode'].includes(tool)) return ''
+  if (tool === 'Bash') return said ? doingOf(said) : 'Running a command'
+  if (tool === 'Monitor') return said ? `Watching: ${said}` : 'Watching for news'
+  if (tool === 'Read') return 'Reading files'
+  if (tool === 'Grep' || tool === 'Glob') return 'Searching the files'
+  if (tool === 'Edit' || tool === 'Write' || tool === 'MultiEdit' || tool === 'NotebookEdit') return 'Changing files'
+  if (tool === 'WebFetch') return 'Reading a web page'
+  if (tool === 'WebSearch') return 'Searching the web'
+  if (tool === 'Agent' || tool === 'Task') return said ? `Starting the helper “${said}”` : 'Starting a helper'
+  if (tool === 'SendMessage') return 'Sending a message'
+  if (tool === 'TaskStop' || tool === 'KillShell') return 'Stopping a command'
+  if (tool === 'TaskOutput' || tool === 'BashOutput') return "Reading a command's output"
+  if (tool === 'Skill') return 'Using a skill'
+  if (/chrome|browser|playwright|puppeteer/i.test(tool)) return 'Using the browser'
+  const server = /^mcp__([^_]+(?:_[^_]+)*)__/.exec(tool)?.[1]
+  const words = (server ?? '').replace(/^plugin_/, '').split(/[-_]+/).filter((word, n, all) => word && all.indexOf(word) === n)
+  return words.length ? `Using ${words.join(' ')}` : 'Using a tool'
+}
+const helperNow = (one: Todo, at: number, commands = 0, most = 200) => {
+  const call = lastCall.get(one.id)
+  const note = [...one.entries].reverse().find(entry => entry.kind !== 'steer' && entry.text)
+  const last = (words: string, tail: string) => `Last: ${cut(words, Math.max(8, most - tail.length - 9))} · ${tail}`
+  const waits = (idle: number) => `${commands === 1 ? 'Waiting for its command' : 'Waiting for its commands'} · ${took(idle)}`
+  if (note && (!call || (note.at ?? 0) >= call.at)) {
+    const quiet = at - (note.at ?? at)
+    return quiet < 3 * 60_000 ? cut(note.text, most) : commands ? waits(quiet) : last(note.text, `nothing new for ${took(quiet)}`)
+  }
+  if (!call) return ''
+  if (!call.endedAt) return at - call.at >= 60_000 ? `${cut(call.what, Math.max(8, most - 12))} · ${took(at - call.at)}` : cut(call.what, most)
+  const idle = at - call.endedAt
+  if (idle < 60_000) return 'Thinking'
+  if (commands) return waits(idle)
+  return idle < 3 * 60_000 ? `Thinking · ${took(idle)}` : last(call.what, `nothing new for ${took(idle)}`)
+}
+
 const runningWhat = (tool: string) =>
   tool === 'Bash' ? 'a command running' : tool === 'Grep' || tool === 'Glob' ? 'a search running' : tool === 'Agent' ? 'a helper running' : `${tool.replace(/^mcp__.*__/, '')} running`
 
@@ -8183,13 +8243,18 @@ const withRunning = (list: Todo[], agent: string, newAt?: number) => {
 const callBegun = async ($: EngineInterface, id: string, agent: string, tool: string, input?: { command?: unknown; description?: unknown }) => {
   const cmd = tool === 'Bash' ? oneLine(String(input?.command ?? '')).slice(0, 400) : ''
   const label = oneLine(String(input?.description ?? '') || cmd.split('\n')[0] || '').slice(0, 160)
-  inFlight.set(id, { agent, what: runningWhat(tool), at: await $.clock.now(), ...(cmd ? { cmd, label } : {}) })
+  const begun = await $.clock.now()
+  inFlight.set(id, { agent, what: runningWhat(tool), at: begun, ...(cmd ? { cmd, label } : {}) })
+  const words = callWords(tool, input)
+  if (words) lastCall.set(agent, { id, what: words, at: begun })
   await changeTodos($, list => withRunning(list, agent))
 }
 
 const callEnded = async ($: EngineInterface, id: string, agent: string, tool: string, r: { result?: unknown; deny?: unknown } | undefined) => {
   inFlight.delete(id)
   const now = await $.clock.now()
+  const last = lastCall.get(agent)
+  if (last?.id === id) lastCall.set(agent, { ...last, endedAt: now })
   let isNew = false
   if (r && !r.deny && !tool.startsWith(TOOLS) && !tool.startsWith(OLD_TOOLS)) {
     const whole = (typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? '')).slice(0, 20_000)
@@ -8330,22 +8395,21 @@ const silentHelpers = (list: Todo[], id: string, at: number) =>
 const stuckLine = (list: Todo[], one: Todo, at: number) => {
   if (!one.stuckAt) return ''
   const mins = Math.max(1, Math.round((at - one.stuckAt) / 60_000))
-  if (runningKids(list, one.id).some(kid => isBusy(list, kid, at))) return "Waits on its helpers' work."
+  if (runningKids(list, one.id).some(kid => isBusy(list, kid, at))) return "Waiting for its helpers"
   const isLong = (kid: Todo) => Boolean(kid.running && at - kid.running.at >= RUNNING_SHOWN)
   const helpers = underOf(list, one.id).filter(kid => kid.status === 'working')
   const tail = helpers.length
     ? helpers.every(isLong) ? ` ${helpers.length === 1 ? 'Its helper is still' : helpers.length === 2 ? 'Both helpers are still' : `All ${helpers.length} helpers are still`} waiting.` : ''
-    : isLong(one) ? ` One step has been running for ${took(at - (one.running?.at ?? at))}.` : ''
+    : isLong(one) ? ` One action has been running for ${took(at - (one.running?.at ?? at))}.` : ''
   const done = one.helperWait?.done ?? 0
   const nudge = !done
     ? ''
     : done >= 3
-      ? ' Claudopus asked Claude to check on its helpers, then to hand back what it has, and told the chat it is stuck.'
-      : ` Claudopus asked Claude ${done >= 2 ? 'to hand back what it has' : 'to check on its helpers'}.`
-  return `No progress for ${mins} min.${tail}${nudge}`
+      ? ' Claudopus asked Claude to check on its helpers, then to finish with what it has, and told the chat it may be stuck.'
+      : ` Claudopus asked Claude ${done >= 2 ? 'to finish with what it has' : 'to check on its helpers'}.`
+  return `Nothing new for ${mins}m.${tail}${nudge}`
 }
 
-const runningLine = (one: Todo, at: number) => (one.status === 'working' && one.running && at - one.running.at >= RUNNING_SHOWN ? `${one.running.what} · ${took(at - one.running.at)}` : '')
 
 
 const BG_KEPT = 20
@@ -8367,13 +8431,15 @@ const keepBackground = async ($: EngineInterface, agent: string, call: { tool: s
 }
 const WATCH_MOST = 30 * 60_000
 type EndedRun = NonNullable<Todo['endedRuns']>[number]
-const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => (run.how === 'failed' ? `failed${run.code ? ` (exit code ${run.code})` : ''}` : run.how === 'stopped' ? 'stopped' : run.how)
+const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => ({ finished: 'done', failed: 'failed', killed: 'stopped', stopped: 'stopped', 'timed out': 'ran out of time', ended: 'ended' })[run.how] ?? run.how
+const endedLine = (run: Pick<EndedRun, 'how' | 'code'>, ran: string) =>
+  run.how === 'finished' ? `Done in ${ran}` : `${{ failed: 'Failed', killed: 'Stopped', stopped: 'Stopped', 'timed out': 'Ran out of time', ended: 'Ended' }[run.how] ?? 'Ended'} after ${ran}`
 const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
   const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
   const head = helpers && runs.length ? `${n(helpers, 'helper')} and ${n(runs.length, 'command')} ended` : helpers ? `${n(helpers, 'helper')} ended` : `${n(runs.length, 'command')} ended`
   const bad = (['failed', 'killed', 'timed out'] as const).flatMap(how => {
     const count = runs.filter(r => r.how === how).length
-    return count ? [`${count} ${how}`] : []
+    return count ? [`${count} ${endedWord({ how })}`] : []
   })
   return bad.length ? `${head} · ${bad.join(', ')}` : head
 }
@@ -8417,11 +8483,11 @@ const waitLine = (one: Todo, at: number, isShort = false) => {
   const first = commands.at(-1)
   if (one.status !== 'working' || !one.waitsSince || one.answeredAt || !first) return ''
   const more = commands.length > 1 ? ` and ${commands.length - 1} more` : ''
-  if (isShort) return `Still working: Claude is waiting for a background command${more} to finish`
-  return `Still working: Claude is waiting for a background command${more} to finish, running ${took(at - first.at)}${first.what ? `: ${cut(first.what, 90)}` : ''}`
+  if (isShort) return `Waiting for a command${more} to finish`
+  return `Waiting for a command${more} to finish · ${took(at - first.at)}${first.what ? ` · ${cut(first.what, 90)}` : ''}`
 }
 
-const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'working' ? `Claude left something running in the background, ${took(at - one.leftSince)}` : '')
+const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'working' ? `A command Claude started is still running · ${took(at - one.leftSince)}` : '')
 
 
 
@@ -8601,11 +8667,11 @@ const lookJobs = async ($: EngineInterface) => {
         ? jobProcs.filter(p => p.pid === wait.pid)
         : undefined
     if (runs && jobProcs.length) {
-      if (!runs.length) return wait.isStart ? '' : 'what it waits for has ended'
-      if (runs.some(p => treeOf(jobProcs, p.pid).some(isPausedProc))) return 'what it waits for is paused'
+      if (!runs.length) return wait.isStart ? '' : 'What it waits for ended'
+      if (runs.some(p => treeOf(jobProcs, p.pid).some(isPausedProc))) return 'What it waits for is paused'
     }
     const at = wait.file ? changed.get(wait.file) : undefined
-    return at && now - at >= JOB_QUIET ? `what it waits on has not changed for ${shortAgo(now - at)}` : ''
+    return at && now - at >= JOB_QUIET ? `What it waits for hasn't changed for ${shortAgo(now - at)}` : ''
   }
   const parts = body.split(/\n@@JOB@@ ([^\n]*)\n/)
   let isChanged = false
@@ -8947,7 +9013,7 @@ const wakeForRun = async ($: EngineInterface, one: Todo | undefined, runs: NonNu
 }
 const runWords = (what: string, cmd = '') => labelOf(what, cmd).replace(/\s*\((?:about|under|over|around|up to|~)?\s*[\d.,\-– ]+\s*(?:s|sec|seconds?|m|mins?|minutes?|h|hours?)\)\s*$/i, '').trim()
 
-const RUN_ENDED_AS: Record<EndedRun['how'], string> = { finished: 'has finished', failed: 'failed', killed: 'was stopped', stopped: 'was stopped', 'timed out': 'ran out of time', ended: 'has ended' }
+
 
 const canOpenJob = (job: Job) => Boolean(jobFiles.get(job.id)) && !isRunFromAfar && !isLinux
 const openJobOutput = async ($: EngineInterface, job: Job) => {
@@ -8959,7 +9025,7 @@ const openJobOutput = async ($: EngineInterface, job: Job) => {
   const base = `${dir}/terminal`
   const home = `${base}/output-${slug(job.id) || 'job'}-${at}`
   const path = file.startsWith('~/') ? `"$HOME"/${zshQuoted(file.slice(2))}` : zshQuoted(file)
-  const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `[[ -e ${path} ]] || print -r -- 'No output yet. This window shows it as soon as the command prints something.'`, `exec tail -n 1000 -F ${path}`, ''].join('\n')
+  const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `[[ -e ${path} ]] || print -r -- 'No output yet. It shows here as soon as the command writes something.'`, `exec tail -n 1000 -F ${path}`, ''].join('\n')
   await $.fs.write(`${home}/output.command`, script)
   const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
@@ -8994,7 +9060,7 @@ const busyWords = (f: UsageFigures | undefined) =>
 const placeWords = (n: number) => (n === 1 ? 'next in line' : `${n}${n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : n % 10 === 1 && n % 100 !== 11 ? 'st' : 'th'} in line`)
 const HEAVY_HELD = (what: string, place: number, f: UsageFigures | undefined, isHelper: boolean) =>
   `Not run yet: the Mac is busy (${busyWords(f)}) and other heavy commands of Claudopus's tasks run, so this one ("${what}") waits its turn, ${placeWords(place)}. Do other work that does not need it, or end your step${isHelper ? ' without handing back' : ''}: Claudopus starts you again when its turn comes, in 15 minutes at the latest. Then send the same command again.`
-const HEAVY_LOST = (title: string, what: string) => `The task "${title}" could not be told that its command "${what}" may run now. Send it a message to carry on.`
+const HEAVY_LOST = (title: string, what: string) => `Claudopus couldn't tell the task "${title}" that its command "${what}" can run now. Send the task a message so it carries on.`
 const HEAVY_TURN = (what: string, isLate: boolean) =>
   isLate
     ? `Your command "${what}" has waited 15 minutes for room on the Mac: send it again now, and it runs whatever the load. If it fails or times out for lack of room, try it again later.`
@@ -9011,7 +9077,7 @@ const showHeld = ($: EngineInterface) =>
     }),
   ).then(() => redraw($))
 const heldJobs = (one: Todo): Job[] =>
-  (one.heldCalls ?? []).map(call => ({ ...jobOf(`held-${call.id}`, call.what, call.cmd, call.at), kind: 'wait' as const, waitsFor: `its turn: ${labelOf(call.what, call.cmd)}`, target: `waits for room on the Mac · ${placeWords(call.place)}` }))
+  (one.heldCalls ?? []).map(call => ({ ...jobOf(`held-${call.id}`, call.what, call.cmd, call.at), kind: 'wait' as const, waitsFor: `its turn to run ${labelOf(call.what, call.cmd)}`, target: `Waiting until the Mac is less busy · ${placeWords(call.place)}` }))
 
 const turnHeavy = async ($: EngineInterface, e: ToolCallInput): Promise<{ id?: string; deny?: string }> => {
   const input = e as { command?: unknown; description?: unknown; tool_use_id?: unknown }
@@ -9276,13 +9342,13 @@ const lookWakes = async ($: EngineInterface) => {
 const wakeLine = (one: Todo) => {
   const w = one.wakeWhen
   if (!w) return ''
-  return w.file || w.url ? `Claudopus starts Claude again when this is there: ${w.what}; at ${hhmm(w.until)} if it never comes` : `Claudopus starts Claude again at ${hhmm(w.until)}: ${w.what}`
+  return w.file || w.url ? `Waiting for ${w.what} · Claudopus starts Claude again when it comes, or at ${hhmm(w.until)}` : `Claudopus starts Claude again at ${hhmm(w.until)}: ${w.what}`
 }
 
 const lookedInLine = (one: Todo, at: number) => {
   const l = one.lookedIn
   if (!l || one.status !== 'working' || !l.running || !l.quiet) return ''
-  return `${l.quiet === 1 ? '1 helper' : `${l.quiet} helpers`} quiet for ${HELPER_QUIET / 60_000}+ min, Claudopus told Claude`
+  return `${l.quiet === 1 ? '1 helper has' : `${l.quiet} helpers have`} shown nothing new for over ${HELPER_QUIET / 60_000}m · Claude was told to check it`
 }
 
 const stepHooks = (on: On) => {
@@ -9566,10 +9632,10 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   redraw($)
   const cards = await read($, todos)
   const titled = (one: string) => `"${titleOf(cards.find(card => card.id === one) ?? started(one, '', '', '', cutAt))}"`
-  const where = isCopy ? 'on this Mac by itself' : 'again'
+  const where = isCopy ? ', in the background on this Mac' : ''
   const text = [
-    back.length ? `${back.length === 1 ? `${titled(back[0] ?? '')} was interrupted at ${hhmm(cutAt)} and has been running ${where}` : `${back.length} tasks were interrupted at ${hhmm(cutAt)} and have been running ${where}`} since ${hhmm(now)}.` : '',
-    lost.length ? `${lost.length === 1 ? titled(lost[0] ?? '') : `${lost.length} tasks`} interrupted at ${hhmm(cutAt)} couldn't be restarted.` : '',
+    back.length ? `Claudopus started ${back.length === 1 ? titled(back[0] ?? '') : `${back.length} tasks`} again at ${hhmm(now)}${where}, after the chat stopped at ${hhmm(cutAt)}.` : '',
+    lost.length ? `Claudopus couldn't start ${lost.length === 1 ? titled(lost[0] ?? '') : `${lost.length} tasks`} again after the chat stopped at ${hhmm(cutAt)}.` : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -9580,11 +9646,12 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
 const tellDevice = async ($: EngineInterface, text: string) => {
   const pushed = await $.tool.call({ tool: 'PushNotification', message: text.slice(0, 199) } as never).catch(err => ({ deny: String(err) }))
   await log($, `cut-off notice pushed: ${JSON.stringify(pushed).slice(0, 200)}`)
-  await alertPerson($, 'cut', 'Task interrupted and restarted', text, `cut-${Math.round((await $.clock.now()) / 60_000)}`)
+  await alertPerson($, 'cut', 'Task interrupted', text, `cut-${Math.round((await $.clock.now()) / 60_000)}`)
 }
 
 const cutLine = (one: Todo) =>
-  one.cutAt ? (one.backAt ? `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; running again since ${hhmm(one.backAt)}.` : `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; it couldn't be restarted.`) : ''
+  one.cutAt ? (one.backAt ? `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · running again since ${hhmm(one.backAt)}` : `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · Claudopus couldn't start it again`) : ''
+
 
 
 const BEAT_EVERY = 3000
@@ -10164,7 +10231,7 @@ const NO_PROGRESS_WAIT =
 const NO_PROGRESS_SCRIPT =
   'Not run: this long command would print nothing to show how far it has got. Make its script print, flushed right away, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
 const HANDBACK_PRESS = '[handback-send-enforce]'
-const LEFT_AT_WORK = 'My own work is still going; I am started again when it is done, and give my report then.'
+const LEFT_AT_WORK = "My command is still running. Claudopus starts me again when it's done, and I'll send my result then."
 const isPressedForReport = async ($: EngineInterface, id: string) => {
   const talk = await $.session.messages({ as: 'api', agentId: id }).catch(() => [])
   if (!Array.isArray(talk)) return false
@@ -10716,7 +10783,7 @@ const commandHooks = (on: On) => {
     const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS })
     if (opened.isPlaced) await choosePanel($, true)
 
-    return { text: opened.isPlaced ? 'Claudopus panel opened.' : nowhere('Claudopus') }
+    return { text: opened.isPlaced ? 'Claudopus opened its panel.' : nowhere('Claudopus') }
   })
 
   on('ui.focus', async ($, e, next) => {
@@ -10750,7 +10817,8 @@ const commandHooks = (on: On) => {
     await scanServers($).catch(err => log($, `servers not read: ${String(err)}`))
     const opened = await $.ui.open({ id: PANE, title: PANE_TITLE })
 
-    return { text: opened.isPlaced ? 'Servers panel opened.' : nowhere('Servers') }
+    return { text: opened.isPlaced ? 'Claudopus opened the Servers panel.'
+ : nowhere('Servers') }
   })
 
 }
@@ -10985,44 +11053,45 @@ const keepUsage = async ($: EngineInterface, kept: UsageKept) => {
 }
 const usageNow = (now: number) => (usageKept && now - usageKept.at < USAGE_EVERY * 6 ? usageKept.figures : undefined)
 
+const CLAUDE_ALL = 'Claude and what it started'
 const usageWords = (f: UsageFigures) => ({
-  memory: `Memory: ${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB in use, Claude ${gbText(f.memClaude)} GB`,
-  cpu: f.cpu === undefined ? '' : `Processor: ${pctText(f.cpu)}% busy, Claude ${pctText(f.cpuClaude ?? 0)}% of the whole`,
+  memory: `Memory: ${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB in use, ${gbText(f.memClaude)} GB by ${CLAUDE_ALL}`,
+  cpu: f.cpu === undefined ? '' : `Processor: ${pctText(f.cpu)}% busy, ${pctText(f.cpuClaude ?? 0)}% by ${CLAUDE_ALL}`,
   disk: f.disk === undefined ? '' : `Disk: ${rateText(f.disk).join(' ')} read and written`,
-  net: f.net === undefined ? '' : `Network: ${rateText(f.net).join(' ')} in and out`,
-  gpu: f.gpu === undefined ? '' : `Graphics processor: ${pctText(f.gpu)}% busy${f.gpuClaude !== undefined ? `, Claude ${pctText(f.gpuClaude)}% of the whole` : ''}`,
+  net: f.net === undefined ? '' : `Network: ${rateText(f.net).join(' ')} downloaded and uploaded`,
+  gpu: f.gpu === undefined ? '' : `Graphics processor: ${pctText(f.gpu)}% busy${f.gpuClaude !== undefined ? `, ${pctText(f.gpuClaude)}% by ${CLAUDE_ALL}` : ''}`,
   battery: f.battery ? `Battery: ${f.battery.pct}%, ${batteryWords(f.battery)}` : '',
 })
 const batteryWords = (read: UsageBattery, b = batteryShown(read)) =>
-  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : b.finishing ? 'finishing charge' : 'charging') : b.state === 'plugged' ? 'on power' : 'its state not said'
+  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : b.finishing ? 'finishing the charge' : 'charging') : b.state === 'plugged' ? 'on power' : "the system doesn't say if it's charging"
 const batteryAfter = (read: UsageBattery, b = batteryShown(read)) =>
   b.state === 'plugged' || b.state === 'unknown' ? '' : b.left ? ` ${leftText(b.left)}${b.state === 'charging' ? ' to full' : ' left'}` : b.state === 'charging' && b.finishing && b.pct >= 100 ? ' finishing' : ''
 
 const batteryNote = (read: UsageBattery, b = batteryShown(read)) =>
   b.state === 'battery'
-    ? b.left ? `on battery, ${leftText(b.left)} left as the system estimates it` : read.left ? 'on battery, at 0% as the system gives it' : 'on battery, the system is still estimating the time left'
+    ? b.left ? `on battery · about ${leftText(b.left)} left` : read.left ? 'on battery · the system calls it empty' : 'on battery · the system is still working out the time left'
     : b.state === 'charging'
-      ? b.left ? `charging, ${leftText(b.left)} to full` : b.pct >= 100 ? (b.finishing ? 'finishing the charge: the system calls it full and still tops it up' : 'charging: the system calls it full') : 'charging, the time to full still being estimated'
-      : b.state === 'unknown' ? 'the system does not say whether it charges' : b.pct >= 100 ? 'fully charged, on power' : 'on power, not charging'
+      ? b.left ? `charging · about ${leftText(b.left)} to full` : b.pct >= 100 ? (b.finishing ? 'finishing the charge · the system calls it full and still tops it up' : 'charging · the system calls it full') : 'charging · the system is still working out the time to full'
+      : b.state === 'unknown' ? "the system doesn't say if it's charging" : b.pct >= 100 ? 'full · on power' : 'on power · not charging'
 
 type UsageCard = { title: string; value: string; note?: string; rows: [string, string][]; most?: [string, string][] }
 const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
   const most = (top: UsageTop | undefined, text: (n: number) => string) => (top?.length ? top.map(([name, n]): [string, string] => [name, text(n)]) : undefined)
   const b = f.battery
   return {
-    memory: { title: 'Memory', value: `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB`, rows: [['Claude and what it started', `${gbText(f.memClaude)} GB`]], most: most(f.memTop, n => `${gbText(n)} GB`) },
+    memory: { title: 'Memory', value: `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB`, rows: [[CLAUDE_ALL, `${gbText(f.memClaude)} GB`]], most: most(f.memTop, n => `${gbText(n)} GB`) },
     cpu: f.cpu === undefined ? undefined : {
       title: 'Processor',
       value: `${pctText(f.cpu)}% busy`,
-      rows: [...(f.ncpu && f.ncpu > 1 ? [['Cores', `${f.ncpu}`] as [string, string]] : []), ['Claude and what it started', `${pctText(f.cpuClaude ?? 0)}%`]],
+      rows: [...(f.ncpu && f.ncpu > 1 ? [['Cores', `${f.ncpu}`] as [string, string]] : []), [CLAUDE_ALL, `${pctText(f.cpuClaude ?? 0)}%`]],
       most: most(f.cpuTop, n => `${pctText(n)}%`),
     },
     gpu: f.gpu === undefined ? undefined : {
       title: 'Graphics processor',
       value: `${pctText(f.gpu)}% busy`,
       rows: [
-        ...(f.gpuClaude !== undefined ? [['Claude and what it started', `${pctText(f.gpuClaude)}%`] as [string, string]] : []),
-        ...(f.wattsGpu !== undefined ? [['Drawing', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
+        ...(f.gpuClaude !== undefined ? [[CLAUDE_ALL, `${pctText(f.gpuClaude)}%`] as [string, string]] : []),
+        ...(f.wattsGpu !== undefined ? [['Power use', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
         ...(f.gpuMem !== undefined ? [['Graphics memory in use', f.gpuMemTotal ? `${gbText(f.gpuMem)} of ${gbText(f.gpuMemTotal)} GB` : `${gbText(f.gpuMem)} GB`] as [string, string]] : []),
       ],
       most: most(f.gpuTop?.map(([name, n]): [string, number] => [name === 'WindowServer' ? 'macOS drawing the screen' : name, n]), n => `${pctText(n)}%`),
@@ -11032,24 +11101,24 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
       value: `${batteryShown(b).pct}%`,
       note: upperFirst(batteryNote(b)),
       rows: [
-        ...(f.watts !== undefined ? [['The whole Mac draws', `${wattText(f.watts)} W`] as [string, string]] : []),
-        ...(f.wattsCpu !== undefined ? [['Processors, every program', `${wattText(f.wattsCpu)} W`] as [string, string]] : []),
-        ...(f.wattsClaude !== undefined ? [["Claude's own processes", `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
-        ...(f.wattsGpu !== undefined ? [['Graphics, every program', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
-        ...(f.wattsGpuClaude !== undefined ? [['Claude of that, estimated', `${wattText(f.wattsGpuClaude)} W`] as [string, string]] : []),
+        ...(f.watts !== undefined ? [['Power use, whole Mac', `${wattText(f.watts)} W`] as [string, string]] : []),
+        ...(f.wattsCpu !== undefined ? [['Power use, processors', `${wattText(f.wattsCpu)} W`] as [string, string]] : []),
+        ...(f.wattsClaude !== undefined ? [['Claude, processors', `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
+        ...(f.wattsGpu !== undefined ? [['Power use, graphics', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
+        ...(f.wattsGpuClaude !== undefined ? [['Claude, graphics', `about ${wattText(f.wattsGpuClaude)} W`] as [string, string]] : []),
       ],
     },
     disk: f.disk === undefined ? undefined : {
-      title: 'Disk, read and write',
+      title: 'Disk, read and written',
       value: rateText(f.disk).join(' '),
-      rows: f.diskClaude !== undefined ? [['Claude and what it runs', rateFine(Math.min(f.diskClaude, f.disk))]] : [],
+      rows: f.diskClaude !== undefined ? [[CLAUDE_ALL, rateFine(Math.min(f.diskClaude, f.disk))]] : [],
     },
     net: f.net === undefined ? undefined : {
       title: 'Network',
       value: rateText(f.net).join(' '),
       rows: [
         ...(f.netIn !== undefined && f.netOut !== undefined ? [['Download', rateFine(f.netIn)], ['Upload', rateFine(f.netOut)]] as [string, string][] : []),
-        ...(f.netInClaude !== undefined && f.netOutClaude !== undefined ? [['Claude downloading', rateFine(f.netIn !== undefined ? Math.min(f.netInClaude, f.netIn) : f.netInClaude)], ['Claude uploading', rateFine(f.netOut !== undefined ? Math.min(f.netOutClaude, f.netOut) : f.netOutClaude)]] as [string, string][] : []),
+        ...(f.netInClaude !== undefined && f.netOutClaude !== undefined ? [[CLAUDE_ALL, `${rateFine(f.netIn !== undefined ? Math.min(f.netInClaude, f.netIn) : f.netInClaude)} down · ${rateFine(f.netOut !== undefined ? Math.min(f.netOutClaude, f.netOut) : f.netOutClaude)} up`]] as [string, string][] : []),
       ],
     },
   }
@@ -11176,7 +11245,7 @@ const batteryText = (ui: Ui, b: UsageBattery) => {
   ]
 }
 const batteryAfterText = (read: UsageBattery, b = batteryShown(read)) =>
-  b.state === 'plugged' ? ' ac' : b.state === 'charging' ? (!b.left && b.finishing && b.pct >= 100 ? ' finishing' : ` ↑${b.left ? leftText(b.left) : ''}`) : b.left ? ` ${leftText(b.left)}` : ''
+  b.state === 'plugged' ? ' on power' : b.state === 'charging' ? (!b.left && b.finishing && b.pct >= 100 ? ' finishing' : ` ↑${b.left ? leftText(b.left).replace(' ', '') : ''}`) : b.left ? ` ${leftText(b.left).replace(' ', '')}` : ''
 const hashOf = (text: string) => {
   let h = 0
   for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0
@@ -11199,9 +11268,9 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
         onPress={() => ((presses += 1), void (recordEvent($, 'scroll-call', { to: 'start' }), $.ui.scroll({ in: LIST, to: 'start', block: 'start' })).catch(() => undefined))}
       >
         {waitsAtTop > 0 ? (
-          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 thing is' : `${waitsAtTop} things are`} waiting for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} just finished` : ''}`}</ui.Text>
+          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop} ${waitsAtTop === 1 ? 'question' : 'questions'} waiting for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} done` : ''}`}</ui.Text>
         ) : (
-          <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} finished` : `${finishedAtTop.length} just finished`}, at the top of the panel`}</ui.Text>
+          <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} is done` : `${finishedAtTop.length} tasks are done`}, at the top of the panel`}</ui.Text>
         )}
       </ui.Button>
     </ui.Box>
@@ -11212,7 +11281,7 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
   return (
     <ui.Box key="band-reply" flexDirection="column" flexShrink={0} width="100%">
       <ui.Box flexDirection="row" height={1} overflow="hidden">
-        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↳ Your reply to “${cut(titleOf(one), 60)}”`}</ui.Text>
+        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↳ Your answer to “${cut(titleOf(one), 60)}”`}</ui.Text>
       </ui.Box>
       {'Input' in ui ? (
         <ui.Box flexDirection="column" width="100%" flexShrink={0}>
@@ -11337,7 +11406,7 @@ const bandHooks = (on: On) => {
           <Box flexDirection="column">
             {await waitMarker($, ui, e.surface)}
             <Box flexDirection="row" gap={1}>
-              {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, something needs you' : 'Claudopus is working on your reply', $, { surface: e.surface, requestId: e.requestId })}
+              {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, waiting for you' : 'Claudopus, Claude is working on your reply', $, { surface: e.surface, requestId: e.requestId })}
               <Box flexShrink={1} minWidth={0}>
                 <Text wrap="wrap">
                   <Text dimColor>{`${titleOf(first)}: `}</Text>
@@ -11358,7 +11427,7 @@ const bandHooks = (on: On) => {
                     <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => press(n, choice)} />
                   ))}
                   <Text dimColor={picked < 0} color={picked < 0 ? undefined : needsPerson(first) ? NEEDS : LIVE}>
-                    {picked >= 0 ? `Press ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `press its number twice in the empty prompt${asking.filter(needsPerson).length > Number(needsPerson(first)) ? ` · ${asking.filter(needsPerson).length - Number(needsPerson(first))} more waiting` : ''} · /claudopus to reply in words`}
+                    {picked >= 0 ? `Type ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `Type its number twice in an empty box${asking.filter(needsPerson).length > Number(needsPerson(first)) ? ` · ${asking.filter(needsPerson).length - Number(needsPerson(first))} more waiting` : ''} · /claudopus to answer in words`}
                   </Text>
                 </Box>
               </Box>
@@ -11417,7 +11486,7 @@ const bandHooks = (on: On) => {
     const drawing = (spacers: JSX.Element | null) => {
       const row = (
         <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
-          {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, task finished' : 'Claudopus, working', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
+          {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, a task is done' : 'Claudopus, Claude is working', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
           {spacers}
           {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
           {/* The figures fill a phone's terminal: the hint shows until they come */}
@@ -11501,7 +11570,7 @@ const panelHooks = (on: On) => {
         <Box key="tab-back-row" flexDirection="row" gap={2} height={1} flexShrink={0} paddingX={2}>
           <Button key="tab-back" label="Close" plain hotkey="x" onPress={() => void backToPanel($, id).catch(err => log($, `not back to the panel: ${String(err)}`))} />
           {id.startsWith('report-') ? <Button key="tab-results" label="Results" plain hotkey="r" onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
-          <Text dimColor wrap="truncate-end">{e.props.isFocused ? 'Esc: back to the chat' : 'ctrl+x Tab for keys'}</Text>
+          <Text dimColor wrap="truncate-end">{e.props.isFocused ? 'Esc: back to the chat' : 'ctrl+x then Tab to use the keys'}</Text>
         </Box>
         {body}
       </Box>
@@ -11587,10 +11656,10 @@ const panelHooks = (on: On) => {
     const isAbovePrompt = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
     const isFinishMoment = (one: Todo) => one.status === 'done' && !one.ask && lingers(one, at)
     const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
-    const stood: Record<Todo['status'], string> = { working: '', done: 'Finished', stopped: 'Stopped before it finished', failed: 'Failed with an error' }
-    const offModel = (one: Todo) => (one.flagged ? `ended after a safety flag, so it doesn't continue on ${one.flagged}` : one.moved ? `moved to ${one.moved} by the app` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
+    const stood: Record<Todo['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
+    const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `Claude Code moved it to ${one.moved}` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
     const glance = (one: Todo, count = '') =>
-      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waits for your answer' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     const { picking = '' } = await read($, view)
     const lead = e.surface === 'terminal' ? 0 : 'xs'
     const facts = (one: Todo, isWhole: boolean, count = '') => {
@@ -11637,9 +11706,12 @@ const panelHooks = (on: On) => {
     const now = (one: Todo) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
       const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim() && !one.detached?.some(d => d.from === r.id || (leftCommandOf(r.id) !== '' && leftCommandOf(d.id) === leftCommandOf(r.id)))) : []
-      const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))} ${RUN_ENDED_AS[r.how]}`)
-      return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} and ${second}` : `${first}, ${second} and ${runs.length - 2} more ended`
+      const said: Record<string, string> = { finished: 'done', failed: 'failed', killed: 'stopped', stopped: 'stopped', ended: 'ended' }
+      const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))}: ${said[r.how] ?? 'ended'}`)
+      return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} · ${second}` : `${first} · ${second} · ${runs.length - 2} more ended`
     }
+    const isFreshNote = (one: Todo) => { const note = [...one.entries].reverse().find(one => one.kind !== 'steer' && one.text); return Boolean(note && at - (note.at ?? 0) < 3 * 60_000) }
+    const endedNow = (one: Todo) => now(one) !== ([...one.entries].reverse().find(one => one.kind !== 'steer')?.text ?? '')
 
     const table = uiOf($, e)
     const room = Math.max(40, Math.floor((e.props.bodyColumns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)))
@@ -11658,11 +11730,11 @@ const panelHooks = (on: On) => {
     const askPictures = (one: Todo, key: string, isWhole: boolean) => {
       const paths = one.ask?.pictures ?? []
       if (!paths.length) return null
-      if (one.chat?.host) return <Text key={`${key}-pics`} dimColor wrap="wrap">{`Its ${paths.length === 1 ? 'picture is' : `${paths.length} pictures are`} on the Mac that chat runs on, and shown in that chat.`}</Text>
+      if (one.chat?.host) return <Text key={`${key}-pics`} dimColor wrap="wrap">{`${paths.length === 1 ? 'Its picture is' : `Its ${paths.length} pictures are`} on the Mac that chat runs on. Open that chat to see ${paths.length === 1 ? 'it' : 'them'}.`}</Text>
       const drawing = uiOf($, e)
       const canDraw = e.surface !== 'terminal' && 'Svg' in drawing
       const made = canDraw ? askPicturesOf($, one) : paths.map(path => ({ name: fileName(path), path, thumb: null }) as Pic)
-      if (!made) return <Text key={`${key}-pics`} dimColor>Making its pictures small…</Text>
+      if (!made) return <Text key={`${key}-pics`} dimColor>Shrinking its pictures…</Text>
       if (!made.length) return null
       const chatChars = isWhole ? [...(shots.get(one.id)?.shots.values() ?? [])].flat().reduce((sum, pic) => sum + (pic.thumb?.source.length ?? 0), 0) : 0
       const most = isWhole ? Math.min(ASK_PICS_CHARS, PICTURES_CHARS + 30_000 - chatChars) : ASK_PICS_CHARS
@@ -11734,7 +11806,7 @@ const panelHooks = (on: On) => {
           {/* A command to type: Terminal opens with it typed, not run, only on this press */}
           {canOpenTerminal(one) ? (
             <Box flexDirection="row">
-              <Button key={`${key}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Opened in Terminal, typed, not run' : 'Open in Terminal'} onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} />
+              <Button key={`${key}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Typed into Terminal, not run yet' : 'Open in Terminal'} onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} />
             </Box>
           ) : null}
           {/* Another chat's ask is answered only in its own chat: no file carries an answer there */}
@@ -11749,9 +11821,9 @@ const panelHooks = (on: On) => {
             {/* Where the bar above the prompt holds the reply box, the last answer opens it there for this card, and closes it again */}
             {'Input' in table && repliesInBar(e.surface) ? (
               isReplyOpen(one) ? (
-                <Button key={`${key}-inbar-close-${presses}`} label="Close the reply box" onPress={press => openReply($, undefined, press.surface)} />
+                <Button key={`${key}-inbar-close-${presses}`} label="Close" onPress={press => openReply($, undefined, press.surface)} />
               ) : (
-                <Button key={`${key}-inbar-${presses}`} label="Reply in your own words" onPress={press => openReply($, one, press.surface)} />
+                <Button key={`${key}-inbar-${presses}`} label="Answer in words" onPress={press => openReply($, one, press.surface)} />
               )
             ) : null}
           </Box>
@@ -11767,7 +11839,7 @@ const panelHooks = (on: On) => {
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
                 autoFocus={e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
-                placeholder="Or reply in your own words"
+                placeholder="Or answer in words"
                 value={draftShown(one.id, ask)}
                 rows={rows}
                 submitLabel={e.surface === 'terminal' ? 'send' : undefined}
@@ -11800,13 +11872,13 @@ const panelHooks = (on: On) => {
       if (!named)
         return (
           <Box key={`step-${one.id}`} height={1} overflow="hidden" paddingLeft={lead}>
-            <Text dimColor wrap="truncate-end">{`All ${kept.length} steps done`}</Text>
+            <Text dimColor wrap="truncate-end">{`All ${kept.length} to-dos done`}</Text>
           </Box>
         )
       return (
         <Box key={`step-${one.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" paddingLeft={lead}>
           <Box flexShrink={0}>
-            <Text dimColor>{`${doing ? 'Step' : 'Next, step'} ${done + 1} of ${kept.length} ·`}</Text>
+            <Text dimColor>{`${doing ? 'To-do' : 'Next to-do'} ${done + 1} of ${kept.length} ·`}</Text>
           </Box>
           <Box flexShrink={1} minWidth={0}>
             <Text wrap="truncate-end" dimColor={!doing}>{named.text}</Text>
@@ -11840,7 +11912,7 @@ const panelHooks = (on: On) => {
                   </Box>
                 ) : null}
               </Box>
-              {facts(one, false, kept.length > 0 ? `${done} of ${kept.length} done` : '')}
+              {facts(one, false, kept.length > 0 ? `${done} of ${kept.length} to-dos done` : '')}
             </Box>
             {/* The to-do it is on, numbered by how many are done, as the edge's lighter part is, so the edge, the count and the row agree */}
             {stepLine(one, kept, done)}
@@ -11892,11 +11964,11 @@ const panelHooks = (on: On) => {
                 {/* In its pause after ending, the line says in a word how it ended: green when it finished, plain when it was stopped */}
                 {(!one.ask && lingers(one, at)) || leftLine(one, at) ? (
                   <Text wrap="truncate-end" color={one.status === 'done' ? DONE : one.status === 'failed' ? 'error' : undefined} dimColor={one.status !== 'done' && one.status !== 'failed'}>
-                    {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? '✕ Failed with an error' : one.byYou ? 'Stopped by you' : 'Stopped'}
+                    {one.status === 'done' ? '✓ Done' : one.status === 'failed' ? '✕ Failed' : one.byYou ? 'Stopped by you' : 'Stopped'}
                   </Text>
                 ) : (
                   <Box flexDirection="column" minWidth={0}>
-                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(now(one), room) || (one.status === 'working' ? 'Starting' : "Claude hasn't said what it's doing")}</Text>
+                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || (one.status === 'working' && !one.ask && !endedNow(one) && !isFreshNote(one) ? helperNow(one, at, jobsOf(one, at).length, room) : '') || cut(now(one), room) || (one.status === 'working' ? (one.ask ? 'Waiting for you' : 'Starting') : "Claude hasn't said what it's doing")}</Text>
                     {/* Held where it was after an answer, once a newer line of the work's took the answer's place: why it is still up there */}
                     {!one.ask && !sentLine(one, at) && heldAnswer(one, at) ? <Text key={`held-answer-${one.id}`} dimColor wrap="truncate-end">{`✓ You answered “${cut(heldAnswer(one, at)?.text ?? '', 60)}”`}</Text> : null}
                   </Box>
@@ -11951,7 +12023,7 @@ const panelHooks = (on: On) => {
           <table.Svg
             key={`${key}-svg`}
             source={twigSvg(t, LINE, status ? { working: LIVE, done: TWIG_ENDED, failed: TWIG_FAILED, stopped: '#808080' }[status] : '', status === 'working')}
-            alt={status ? { working: 'Working', done: 'Finished', failed: 'Failed with an error', stopped: 'Stopped' }[status] : 'Ended'}
+            alt={status ? { working: 'Working', done: 'Done', failed: 'Failed', stopped: 'Stopped' }[status] : 'Ended'}
             width={twigWidth(t)}
             height={LINE}
             isInteractive
@@ -11984,9 +12056,21 @@ const panelHooks = (on: On) => {
       const time = took((one.endedAt || at) - one.startedAt)
       const model = modelName(one.model ?? '')
       const width = perRow - 4 - t.depth * 2
-      const busy = one.running?.cmd ? '' : [runningLine(one, at), runningLine(one, at).replace(/^.* running · /, 'running · ')].find(text => text && width - text.length >= 12)
-      const side = busy ? busy : [[model, one.tokens ? thousands(one.tokens) : '', time], [model, time], [time]].map(parts => parts.filter(Boolean).join(' · ')).find(text => width - text.length >= 12) ?? time
-      return twigRowOf(t, `${scope}-${one.id}`, cut(titleOf(one), Math.max(12, width - side.length)), one.status !== 'working', side, () => openWork($, one.id), one.status)
+      const side = [[model, time], [time]].map(parts => parts.filter(Boolean).join(' · ')).find(text => width - text.length >= 12) ?? time
+      const row = twigRowOf(t, `${scope}-${one.id}`, cut(titleOf(one), Math.max(12, width - side.length)), one.status !== 'working', side, () => openWork($, one.id), one.status)
+      const doing = one.status === 'working' && !one.chat ? helperNow(one, at, jobsOf(one, at).length, Math.max(12, width)) : ''
+      if (!doing) return row
+      return (
+        <Box key={`twig-pair-${scope}-${one.id}`} flexDirection="column" flexShrink={0}>
+          {row}
+          <Box key={`twig-now-${scope}-${one.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+            {jobRails(t, `twig-rails-${scope}-${one.id}`)}
+            <Box flexGrow={1} flexShrink={1} minWidth={0} paddingLeft={lead}>
+              <Text dimColor wrap="truncate-end">{doing}</Text>
+            </Box>
+          </Box>
+        </Box>
+      )
     }
     const jobLines = (t: Twig, key: string, job: Job) =>
       'Svg' in table && e.surface !== 'terminal' ? (
@@ -12015,12 +12099,12 @@ const panelHooks = (on: On) => {
     }
     const jobTime = (job: Job, ran: number) => {
       if (!job.expectText || !job.expect) return { time: took(ran), isPast: false }
-      if (ran <= job.expect) return { time: `${took(ran)} of ~${job.expectText}`, isPast: false }
+      if (ran <= job.expect) return { time: `${took(ran)} of about ${job.expectText}`, isPast: false }
       const isFresh = !job.isPaused && Boolean(job.wroteAt) && at - (job.wroteAt ?? 0) < 60_000
       const printedAt = Math.min(ran, Math.max(0, (job.wroteAt ?? 0) - job.at))
       const left = isFresh ? leftSeconds(job.left ?? guessLeft(job, printedAt)) : undefined
       const fresh = left ? timeLeftText(Math.max(ran / 1000, printedAt / 1000 + left))?.replace(/ left$/, '') : undefined
-      return fresh ? { time: `${took(ran)} of ~${fresh}`, isPast: false } : { time: `${took(ran)} · past ~${job.expectText}`, isPast: true }
+      return fresh ? { time: `${took(ran)} of about ${fresh}`, isPast: false } : { time: `${took(ran)} · ${shortAgo(ran - job.expect)} over`, isPast: true }
     }
     const jobStand = (job: Job, width: number) => {
       const pct = job.pct ? [job.pct] : []
@@ -12030,32 +12114,47 @@ const panelHooks = (on: On) => {
         const all = Math.max(0, Math.floor(ms / 1000))
         return all < 60 || all >= 3600 ? shortAgo(ms) : `${Math.floor(all / 60)}m ${String(Math.floor((all % 60) / 10) * 10).padStart(2, '0')}s`
       }
-      const [state, short, isWarn]: [string, string, boolean] =
-        job.isPaused ? ['paused', 'paused', true]
-        : job.target ? [job.target, job.target.replace(/^what it waits (?:for|on) (?:is|has) /, '').replace(/^not changed for /, 'still for '), true]
-        : job.kind === 'server' ? ['serving', 'serving', false]
-        : job.kind === 'watch' ? ['watching', 'watching', false]
-        : quiet === undefined && !job.isEmpty && ran < SILENT_WARN ? ['', '', false]
-        : (quiet ?? ran) >= SILENT_AFTER ?[`nothing printed for ${ago(quiet ?? ran)}`, `nothing printed ${ago(quiet ?? ran)}`, (quiet ?? ran) >= SILENT_WARN]
-        : ['', '', false]
-      const warn = isWarn
+      const still = quiet ?? ran
+      const isSilent = !job.isPaused && !job.target && job.kind !== 'server' && job.kind !== 'watch' && !(quiet === undefined && !job.isEmpty && ran < SILENT_WARN) && still >= SILENT_AFTER
       const isFresh = quiet !== undefined && quiet < 10_000
       const guess = guessLeft(job, ran)
-      const left = isFresh ? (job.left ? [job.left] : guess ? [`~${guess}`] : []) : []
+      const left = isFresh ? (job.left ? [job.left] : guess ? [`about ${guess}`] : []) : []
       const rate = job.rate && isFresh ? [job.rate] : []
       const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
       const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
       const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
       const mem = job.mem && /\b[GT]B\b/.test(job.mem) ? [`${job.mem} memory`] : []
+      const words = plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, `${job.label} ${job.waitsFor ?? ''}`)
+      const hasSaid = Boolean(words || full.length || pct.length)
+      const told = isSilent && silentTold.has(job.id) ? 'Claude was told to check it' : ''
+      const [state, short]: [string, string] =
+        job.isPaused ? ['Paused', 'Paused']
+        : job.target ? [job.target, job.target.replace(/^What it waits for hasn't changed for /, 'No change for ').replace(/^What it waits for /, 'Its target ')]
+        : job.kind === 'server' || job.kind === 'watch' ? ['', '']
+        : !isSilent ? ['', '']
+        : hasSaid ? [`nothing new for ${ago(still)}`, `nothing new for ${shortAgo(still)}`]
+        : !job.wroteAt || job.isEmpty ? [`No output yet · started ${shortAgo(ran)} ago`, `No output yet · ${shortAgo(ran)}`]
+        : [`No progress shown · nothing new for ${ago(still)}`, `No progress for ${shortAgo(still)}`]
+      const isWarn = job.isPaused || Boolean(job.target) || isSilent
+      const lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving · ') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching · ') : isSilent && hasSaid ? 'Last: ' : ''
+      const near = left.map(one => one.replace(/^about /, ''))
       const programs = leftCommandOf(job.id) && job.count && job.count > 1 ? [`${job.count} programs`] : []
-      const far = firstFit([[...full, ...pct, ...rate, ...left, state, ...programs, ...mem], [...full, ...pct, ...left, short, ...programs, ...mem], [...full, ...pct, ...rate, ...left, state, ...mem], [...full, ...pct, ...left, short, ...mem], [...compact, ...pct, ...left, short, ...mem], [...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], ...(left.length ? [[...compact, ...left, short], [...compact, ...left], [...bare, ...left]] : []), [...compact, ...pct, short], [...compact, ...pct], [...bare, ...pct], [...pct, short], [short]], width)
-      const words = warn ? '' : plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, `${job.label} ${job.waitsFor ?? ''}`)
-      const parts = far ? far.split(' · ') : []
-      const end = state && (parts.at(-1) === state || parts.at(-1) === short) ? parts.length - 1 : parts.length
-      const room = width - far.length - (far ? 3 : 0)
-      const said = words && room >= 12 ? (words.length <= room ? words : `${words.slice(0, room - 1).replace(/\s+\S*$/, '')}…`) : ''
-      const text = said ? [...parts.slice(0, end), said, ...parts.slice(end)].join(' · ') : far
-      return { text: text || (job.kind === 'wait' ? 'waiting' : job.kind === 'download' ? 'downloading' : 'working'), isWarn: warn }
+      const numbers = [[...full, ...pct, ...rate, ...left, ...programs, ...mem], [...full, ...pct, ...rate, ...left, ...programs], [...full, ...pct, ...left, ...programs], [...full, ...pct, ...left], ...(near.length ? [[...full, ...near]] : []), [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...compact, ...near], [...bare, ...near]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]
+      const tails = [[state, told], [state], [short, told], [short]].map(t => t.filter(Boolean))
+      const tries = [...numbers.slice(0, 3).flatMap(nums => tails.map(tail => ({ nums, tail }))), ...tails.flatMap(tail => numbers.map(nums => ({ nums, tail })))]
+      for (const { nums, tail } of tries) {
+        const fixed = [...nums, ...tail].join(' · ')
+        if (lead.length + fixed.length > width) continue
+        if (lead && !nums.length && !(words && width - lead.length - fixed.length - 3 >= 12) && tail !== tails.at(-1)) continue
+        const room = width - lead.length - fixed.length - (fixed ? 3 : 0)
+        const said = words && room >= 12 ? (words.length <= room ? words : `${words.slice(0, room - 1).replace(/\s+\S*$/, '')}…`) : ''
+        const text = [...nums, said, ...tail].filter(Boolean).join(' · ')
+        const kindLead = job.kind === 'server' ? 'Serving' : job.kind === 'watch' ? 'Watching' : ''
+        const shownLead = kindLead ? `${kindLead} · ${said ? 'last: ' : ''}` : lead && (nums.length || said) ? lead : ''
+        const line = `${shownLead}${text}`
+        return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : kindLead || (job.kind === 'wait' ? 'Waiting' : job.kind === 'download' ? 'Downloading' : 'Working'), isWarn }
+      }
+      return { text: short, isWarn }
     }
     const jobRow = (t: Twig, scope: string) => {
       const job = t.job
@@ -12152,17 +12251,15 @@ const panelHooks = (on: On) => {
     const shownFlows = flowList.filter(f => f.status === 'working' || isLingering(f, at))
     const endedFlows = flowList.filter(f => f.status !== 'working' && !isLingering(f, at))
     const flowShown = paneId.startsWith(FLOW_PANE) ? flowList.find(f => flowPaneOf(f.id) === paneId) : undefined
-    const flowTokens = (f: Flow) => f.agents.reduce((sum, one) => sum + (one.tokens ?? 0), 0)
-    const agentsWord = (n: number) => `${n} ${n === 1 ? 'agent' : 'agents'}`
+    const agentsWord = (n: number) => `${n} ${n === 1 ? 'helper' : 'helpers'}`
     const flowGlance = (f: Flow, most = Infinity) => {
       const time = took((f.endedAt || at) - f.startedAt)
-      const tokens = flowTokens(f) ? `${thousands(flowTokens(f))} tokens` : ''
       const agents = agentsWord(f.agents.length)
       const head = stood[f.status] ? [stood[f.status], 'Workflow'] : ['Workflow']
-      return firstFit([[...head, agents, tokens, time], [...head, agents, time], [head.at(-1) ?? 'Workflow', agents, time], ['Workflow', time]], most)
+      return firstFit([[...head, agents, time], [head.at(-1) ?? 'Workflow', agents, time], ['Workflow', time]], most)
     }
     const roundsLabel = (f: Flow, rounds: Round[]) => (rounds.length ? `round ${rounds.length}${f.cap ? ` of ${f.cap}` : ''}` : f.cap ? `0 of ${f.cap} rounds` : '')
-    const verdict = (r: Round) => (r.isOpen ? (r.phase ? `${doing(r.phase).toLowerCase()} now` : 'starting') : r.pass === true ? `passed${r.why ? `: ${r.why}` : ''}` : r.pass === false ? `failed: ${r.why || 'no reason given'}` : r.why || 'ended')
+    const verdict = (r: Round) => (r.isOpen ? (r.phase ? `${doing(r.phase).toLowerCase()} now` : 'starting') : r.pass === true ? `passed${r.why ? ` · ${r.why}` : ''}` : r.pass === false ? `failed · ${r.why || 'no reason given'}` : r.why || 'ended')
     const squaresRow = (f: Flow, rounds: Round[], key: string, first = 1) => {
       const groups = squaresOf(f, rounds)
       if (!groups.length) groups.push(f.phases.length ? f.phases.map(() => 'waiting' as const) : ['waiting'])
@@ -12195,11 +12292,11 @@ const panelHooks = (on: On) => {
       const round = rounds.at(-1)
       if (f.status === 'working') {
         const one = round ? [...round.agents].reverse().find(agent => agent.status === 'working') : undefined
-        return one ? doing(one.phase || stageOf(f) || 'Working') : round ? 'Between steps' : 'Starting'
+        return one ? doing(one.phase || stageOf(f) || 'Working') : round ? 'Between stages' : 'Starting'
       }
       if (f.status === 'stopped') return 'Stopped'
-      if (f.status === 'failed') return 'Error'
-      return round?.pass === true ? 'Passed' : round?.pass === false ? 'Not passed' : 'Ended'
+      if (f.status === 'failed') return 'Failed'
+      return round?.pass === true ? 'Passed' : round?.pass === false ? 'Not passed' : 'Done'
     }
     const flowModel = (f: Flow) => modelName(f.agents.find(one => one.model)?.model ?? f.phases.find(one => one.model)?.model ?? '')
     const flowFacts = (f: Flow, rounds: Round[]) => {
@@ -12210,7 +12307,7 @@ const panelHooks = (on: On) => {
     const atWork = (f: Flow, r: Round) => {
       const one = [...r.agents].reverse().find(agent => agent.status === 'working')
       const phase = one?.phase || stageOf(f)
-      if (!one) return 'between steps'
+      if (!one) return 'between stages'
       if (phase === 'Make') return r.n === 1 ? 'Maker building it' : 'Maker fixing what the check found'
       if (phase === 'Check') return 'Checker testing it'
       return doing(phase || 'Working')
@@ -12397,7 +12494,7 @@ const panelHooks = (on: On) => {
         'To-dos',
         kept ? `${done} of ${kept} done` : '',
         <Box flexDirection="column">
-          {done > DONE_FOLDED ? opener(OPEN_DONE, isFolded ? `${done} done` : 'Hide the done ones') : null}
+          {done > DONE_FOLDED ? opener(OPEN_DONE, isFolded ? `${done} done` : 'Hide done') : null}
           {one.items.map((item, i) => {
             if (item.state === 'done' && isFolded) return null
             if (item.state === 'doing') {
@@ -12440,7 +12537,7 @@ const panelHooks = (on: On) => {
       if (!kid || kid.status !== 'working') return null
       const kept = kid.items.filter(item => item.state !== 'dropped')
       const doing = kept.findIndex(item => item.state === 'doing')
-      const lines = [doing >= 0 ? `Step ${doing + 1} of ${kept.length} · ${kept[doing]?.text ?? ''}` : '', now(kid)].filter(Boolean)
+      const lines = [doing >= 0 ? `To-do ${doing + 1} of ${kept.length} · ${kept[doing]?.text ?? ''}` : '', now(kid)].filter(Boolean)
       if (!lines.length) return null
       return (
         <Box key={`under-${kid.id}`} flexDirection="column" paddingLeft={pad} flexShrink={0}>
@@ -12463,7 +12560,7 @@ const panelHooks = (on: On) => {
       const side = [jobs ? `${jobs} ${jobs === 1 ? 'command' : 'commands'} running` : '', under.length ? helpers : ''].filter(Boolean).join(' · ')
       return part(
         'part-helpers',
-        !jobs ? 'Helpers' : under.length ? 'Helpers and commands' : 'Running',
+        !jobs ? 'Helpers' : under.length ? 'Helpers and commands' : 'Commands',
         side,
         <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>,
       )
@@ -12476,7 +12573,7 @@ const panelHooks = (on: On) => {
       return part(
         'part-ended-runs',
         'Commands ended',
-        `${runs.length} ${runs.length === 1 ? 'command' : 'commands'}${bad ? ` · ${bad} did not finish` : ''}`,
+        endedSummary(0, runs),
         <Box flexDirection="column">
           {runs.map(run => (
             <Box key={`ended-${run.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
@@ -12484,7 +12581,7 @@ const panelHooks = (on: On) => {
                 <Text wrap="truncate-end">{describedOf(run.what).text || run.what || 'A command'}</Text>
               </Box>
               <Box flexShrink={0}>
-                <Text dimColor={!isBad(run)} color={isBad(run) ? NEEDS : undefined}>{`${endedWord(run)} after ${took(run.endedAt - run.at)} · ${shortAgo(at - run.endedAt)} ago`}</Text>
+                <Text dimColor={!isBad(run)} color={isBad(run) ? NEEDS : undefined}>{`${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(at - run.endedAt)} ago`}</Text>
               </Box>
             </Box>
           ))}
@@ -12641,7 +12738,7 @@ const panelHooks = (on: On) => {
                   {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
                   {/* Work the person stopped stays stopped until they start it again from here or ask in a message */}
                   {one.status === 'stopped' && one.byYou && !one.chat ? <Button key={`again-${one.id}-${presses}`} label="Start again" onPress={() => ((presses += 1), void startAgain($, one.id))} /> : null}
-                  {left(one) ? <Button key={`artifact-${one.id}-${presses}`} label="Its result" onPress={() => void openReport($, left(one)?.id ?? '')} /> : null}
+                  {left(one) ? <Button key={`artifact-${one.id}-${presses}`} label="Result" onPress={() => void openReport($, left(one)?.id ?? '')} /> : null}
                 </Box>
               ) : null}
             </Box>
@@ -12650,7 +12747,7 @@ const panelHooks = (on: On) => {
             <Box key="part-gates" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
               <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-                <Text bold dimColor>Needs you now</Text>
+                <Text bold dimColor>Waiting for you</Text>
                 {adminBlock($, table, one, `gates-big-${one.id}`, at)}
               </Box>
             </Box>
@@ -12659,7 +12756,7 @@ const panelHooks = (on: On) => {
             <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE} />
               <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-                <Text bold dimColor>{needsPerson(one) ? 'Needs you now' : 'Claude is working on your reply'}</Text>
+                <Text bold dimColor>{needsPerson(one) ? 'Waiting for you' : 'Claude is working on your reply'}</Text>
                 {askBlock(one, `ask-big-${one.id}`, true)}
               </Box>
             </Box>
@@ -12696,7 +12793,7 @@ const panelHooks = (on: On) => {
     const promptCard = (p: Prompt, key: string, where: string, c?: Shared) => (
       <Box key={`prompt-${key}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
         <Box flexDirection="column">
-          <Text dimColor wrap="truncate-end">{`${p.kind === 'question' ? 'Question' : p.kind === 'plan' ? 'Plan' : 'Permission'} · ${isHeldHere(p, c) || !c ? 'waits for your answer' : 'asked in another chat'}`}</Text>
+          <Text dimColor wrap="truncate-end">{`${p.kind === 'question' ? 'Question' : p.kind === 'plan' ? 'Plan' : 'Permission'} · ${isHeldHere(p, c) || !c ? 'waiting for you' : 'waiting in another chat'}`}</Text>
           <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
           {/* At the top, away from its chat's name: which chat it is */}
           {c ? <Text key={`prompt-${key}-chat`} dimColor wrap="truncate-end">{`In the chat “${chatName(c)}”${c.host ? ` on ${macName(c.host)}` : ''}`}</Text> : null}
@@ -12726,9 +12823,9 @@ const panelHooks = (on: On) => {
     const saidOf = (p: Prompt) => {
       if (p.answered === 'stopped') return 'It ended before you answered · nothing happened'
       if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · Claude got no answer and is waiting for you' : p.kind === 'plan' ? 'You said no · Claude keeps planning' : p.title ? "You said no · it didn't run, and Claudopus told Claude" : "You said no · it didn't run, and Claude is waiting for what you say next"
-      if (p.kind === 'question') return p.isRunning ? 'You answered · Claude is taking your answer' : 'You answered · Claude is continuing with your answer'
+      if (p.kind === 'question') return p.isRunning ? 'You answered · Claude has your answer' : 'You answered · Claude is continuing with your answer'
       if (p.kind === 'plan') return 'You approved the plan · Claude is carrying it out'
-      if (p.isCut) return 'You allowed it · it was stopped before it finished'
+      if (p.isCut) return 'You allowed it · it stopped before it finished'
       return p.isRunning ? 'You allowed it · it is running now' : `You allowed it · ${p.done ?? 'it ran and is done'}`
     }
     const answeredCard = (p: Prompt, key: string, c?: Shared) =>
@@ -12792,12 +12889,12 @@ const panelHooks = (on: On) => {
       const current = stageOf(f)
       const agentRow = (one: FlowAgent) => {
         const isPicked = picked?.id === one.id
-        const facts = [modelName(one.model ?? ''), one.tokens ? `context ${thousands(one.tokens)}` : '', one.status === 'working' ? (f.status === 'working' ? 'working' : 'stopped') : one.status === 'failed' ? 'failed' : ''].filter(Boolean).join(' · ')
+        const facts = [modelName(one.model ?? ''), one.status === 'working' ? (f.status === 'working' ? 'working' : 'stopped') : one.status === 'failed' ? 'failed' : ''].filter(Boolean).join(' · ')
         return (
           <Box key={`flow-agent-${one.id}`} flexDirection="row" alignItems="flex-start" gap={1} paddingLeft={2}>
             <Button
               key={`flow-pick-${one.id}-${presses}`}
-              label={`${isPicked ? '▾' : '▸'} ${one.label || one.phase || 'agent'}`}
+              label={`${isPicked ? '▾' : '▸'} ${one.label || one.phase || 'helper'}`}
               plain
               dimColor={!isPicked}
               onPress={() => ((presses += 1), flowPicked.set(f.id, one.id), void update($, view, v => ({ ...v })))}
@@ -12849,7 +12946,7 @@ const panelHooks = (on: On) => {
                         {p.title}
                       </Text>
                       <Text wrap="wrap" dimColor>
-                        {[p.detail, modelName(p.model ?? ''), ran.length ? `${ran.length} ${ran.length === 1 ? 'agent' : 'agents'}` : ''].filter(Boolean).join(' · ')}
+                        {[p.detail, modelName(p.model ?? ''), ran.length ? `${ran.length} ${ran.length === 1 ? 'helper' : 'helpers'}` : ''].filter(Boolean).join(' · ')}
                       </Text>
                     </Box>
                   </Box>
@@ -12862,7 +12959,7 @@ const panelHooks = (on: On) => {
             'Rounds',
             roundsLabel(f, rounds),
             <Box flexDirection="column" gap={1}>
-              {rounds.length ? null : <Text dimColor>{f.status === 'working' ? 'The first round is starting.' : 'No agent ran.'}</Text>}
+              {rounds.length ? null : <Text dimColor>{f.status === 'working' ? 'The first round is starting.' : 'No helper ran.'}</Text>}
               {rounds.map(r => (
                 <Box key={`flow-round-${r.n}`} flexDirection="column">
                   <Box flexDirection="row" alignItems="flex-start" gap={1}>
@@ -12886,12 +12983,12 @@ const panelHooks = (on: On) => {
           {picked
             ? part(
                 'part-chat',
-                `Conversation of the ${picked.label || picked.phase || 'agent'}${rounds.length > 1 ? `, round ${rounds.find(r => r.agents.some(one => one.id === picked.id))?.n ?? ''}` : ''}`,
+                `Conversation of the ${picked.label || picked.phase || 'helper'}${rounds.length > 1 ? ` · round ${rounds.find(r => r.agents.some(one => one.id === picked.id))?.n ?? ''}` : ''}`,
                 modelName(picked.model ?? ''),
                 talk({ ...started(picked.id, '', picked.label, '', picked.at), answer: picked.result ?? '' }, lines, new Map()),
               )
             : null}
-          {f.status !== 'working' && f.result ? part('part-result', 'What it returned', '', <Markdown text={f.result} />) : null}
+          {f.status !== 'working' && f.result ? part('part-result', 'Result', '', <Markdown text={f.result} />) : null}
         </Box>
       )
     }
@@ -12907,7 +13004,7 @@ const panelHooks = (on: On) => {
     }
 
     const alone = [...all, ...elsewhere, ...helpersThere].find(one => one.id === workId)
-    if (paneId !== LIST && !alone) return <Text dimColor>{paneId.startsWith(`${WORK_PANE}r-`) ? 'This task has finished, or its chat is closed. Open that chat to see it.' : 'This task is no longer available.'}</Text>
+    if (paneId !== LIST && !alone) return <Text dimColor>{paneId.startsWith(`${WORK_PANE}r-`) ? 'This task is done, or its chat is closed. Open that chat to see it.' : 'This task is no longer available.'}</Text>
     if (alone) void (alone.chat ? loadTheirs($, alone) : loadWork($, alone.id)).catch(() => undefined)
     const talked = alone ? talks.get(alone.id) : undefined
     const kept = await read($, reports)
@@ -12980,7 +13077,7 @@ const panelHooks = (on: On) => {
             <Box flexDirection="row" alignItems="center" gap={2}>
               {/* Just moved to a newer version: the octopus turns blue and jumps for the moment. Above the prompt in a narrow terminal the
                   panel is a few rows tall, so it keeps them for the work and leaves the octopus to the line above the prompt */}
-              {isInline ? null : updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`, $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, task finished', working: 'Claudopus, working', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
+              {isInline ? null : updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`, $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, waiting for you', happy: 'Claudopus, a task is done', working: 'Claudopus, Claude is working', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* The version this chat loaded beside the name, and a newer one when the Mac has it, so two Macs on different ones are told apart */}
                 {/* Just moved to a newer version: "Claudopus updated" in blue, then the new version, for the moment */}
@@ -12993,12 +13090,12 @@ const panelHooks = (on: On) => {
                     </Box>
                     {/* The Mac has a newer copy than this chat runs: said beside the version, with what to type to switch to it */}
                     {versions.version ? (
-                      <Text key="head-version" dimColor wrap={versions.isWaiting ? 'wrap' : 'truncate-end'}>{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} ready, type /reload-plugins` : ''}`}</Text>
+                      <Text key="head-version" dimColor wrap={versions.isWaiting ? 'wrap' : 'truncate-end'}>{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} is ready: type /reload-plugins to use it` : ''}`}</Text>
                     ) : null}
                   </Box>
                 )}
                 <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head)}</Text>
-                {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>}
+                {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 && chat.window ? `This chat is ${fill(chat.tokens, chat.window)}` : chat.tokens > 0 ? 'This chat has started' : 'This chat has just begun'}</Text>}
               </Box>
             </Box>
             {outCard}
@@ -13009,13 +13106,13 @@ const panelHooks = (on: On) => {
               {memoryButton($, ui, isKeyed)}
               {configButton($, ui, isKeyed)}
               {aboutButton($, ui, isKeyed)}
-              {isInline && !e.props.isFocused ? <Text key="head-keys-short" dimColor>ctrl+x Tab for keys</Text> : null}
+              {isInline && !e.props.isFocused ? <Text key="head-keys-short" dimColor>ctrl+x then Tab to use the keys</Text> : null}
             </Box>
             {/* The terminal reaches a pane from the keys only after ctrl+x Tab, which nothing else tells; once it holds them each
                 button above answers its first letter */}
             {e.surface === 'terminal' && (e.props.isFocused || !isInline) ? (
               <Text key="head-keys" dimColor wrap="wrap">
-                {!e.props.isFocused ? 'ctrl+x Tab for keys' : [...own, ...elsewhere].some(one => one.ask) ? 'What you type goes in the reply box · Tab leaves it for the keys shown · Esc: back to the chat' : 'Esc: back to the chat'}
+                {!e.props.isFocused ? 'ctrl+x then Tab to use the keys' : [...own, ...elsewhere].some(one => one.ask) ? 'What you type goes in the reply box · Tab leaves it for the keys shown · Esc: back to the chat' : 'Esc: back to the chat'}
               </Text>
             ) : null}
           </Box>
@@ -13202,16 +13299,16 @@ const tabFailed = async ($: EngineInterface, e: Parameters<EngineInterface['ui']
   const now = await $.clock.now()
   const fails = [...(tabFails.get(id) ?? []).filter(at => now - at < 60_000), now]
   tabFails.set(id, fails)
-  const why = error?.kind === 'timeout' ? 'It took too long to draw.' : (error?.message ?? '').replace(/^\w*Error:\s*/, '') || 'No reason was given.'
+  const why = error?.kind === 'timeout' ? 'It took too long.' : (error?.message ?? '').replace(/^\w*Error:\s*/, '') || 'No reason was given.'
   await log($, `tab ${id} not drawn (${error?.kind ?? 'unknown'}): ${why}`)
   const isAgain = fails.length < 3
   if (isAgain) await watchTabs($, [id], 'its drawing failed')
   const { Box, Text } = uiOf($, e)
   return (
     <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
-      <Text bold>Claudopus couldn't draw this tab</Text>
+      <Text bold>Claudopus couldn't show this tab</Text>
       <Text dimColor wrap="wrap">{cut(why, 300)}</Text>
-      <Text dimColor wrap="wrap">{isAgain ? 'Trying again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
+      <Text dimColor wrap="wrap">{isAgain ? 'Claudopus tries again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
     </Box>
   )
 }

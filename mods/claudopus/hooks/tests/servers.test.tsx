@@ -732,6 +732,6 @@ test('the servers panel opens when asked, lists the servers running from my fold
   await press
   expect(killed).toEqual(['700'])
   expect(await pane.find({ type: 'Link' })).toBeUndefined()
-  expect((await pane.find({ type: 'Text' }))?.text).toBe('Nothing is listening from your folders.')
+  expect((await pane.find({ type: 'Text' }))?.text).toBe('No servers are running from your folders.')
   await pane.unmount()
 })

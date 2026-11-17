@@ -729,7 +729,7 @@ test("the panel shows every open chat's running work under that chat's name, thi
   expect(bold).not.toContain('Old landing page')
   expect(await list.find({ type: 'Text', text: 'billing' })).toBeDefined()
   // The header counts every chat's: the ask first, then all that runs, here and there
-  expect(await list.find({ type: 'Text', text: '1 thing needs you, 2 running' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: '1 question waiting for you · 2 working' })).toBeDefined()
   // Another chat's work is stopped in its own chat: no Stop here, and its model is no control
   const buttons = (await list.findAll({ type: 'Button' })).map(one => one.key ?? '')
   expect(buttons.filter(key => key.startsWith('stop-'))).toEqual(['stop-a1'])
@@ -794,7 +794,7 @@ test("with another Mac named in config.json, its chats' work shows here under it
   expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'billing · on m4' })).toBeDefined()
   // Its running time is told on this Mac's clock: a minute and some, not an hour
-  expect(await list.find({ type: 'Text', text: /^Opus 5\.5 · (\d+ of \d+ done · )?1m \d\ds$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Opus 5\.5 · (\d+ of \d+ to-dos done · )?1m \d\ds$/ })).toBeDefined()
   // Its ask is answered only in its own chat, on the M4: nothing to press here, and nothing goes there
   expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Send')).toBe(false)
   expect(await list.find({ type: 'Text', text: /^Answer it in its own chat, “.*”, on / })).toBeDefined()
@@ -811,18 +811,18 @@ test("the header says in one line what every chat's cards say, and the octopus b
     const one = { here, there, chats, asks, isDone }
     return [headLine(one), headMood(one)]
   }
-  expect(head(0, 0, 0)).toEqual(['Nothing is running', 'mark'])
-  expect(head(1, 0, 0)).toEqual(['Working on 1 thing', 'working'])
-  expect(head(2, 0, 0)).toEqual(['Working on 2 things', 'working'])
-  expect(head(0, 1, 1)).toEqual(['Working on 1 thing in another chat', 'working'])
-  expect(head(0, 3, 2)).toEqual(['Working on 3 things in 2 other chats', 'working'])
-  expect(head(1, 1, 1)).toEqual(['Working on 2 things here and in 1 other chat', 'working'])
-  expect(head(2, 3, 2)).toEqual(['Working on 5 things here and in 2 other chats', 'working'])
-  expect(head(0, 0, 0, 1)).toEqual(['1 thing needs you', 'asking'])
-  expect(head(1, 2, 1, 2)).toEqual(['2 things need you, 3 running', 'asking'])
+  expect(head(0, 0, 0)).toEqual(['Nothing running', 'mark'])
+  expect(head(1, 0, 0)).toEqual(['1 task working', 'working'])
+  expect(head(2, 0, 0)).toEqual(['2 tasks working', 'working'])
+  expect(head(0, 1, 1)).toEqual(['1 task working in another chat', 'working'])
+  expect(head(0, 3, 2)).toEqual(['3 tasks working in 2 other chats', 'working'])
+  expect(head(1, 1, 1)).toEqual(['2 tasks working, here and in 1 other chat', 'working'])
+  expect(head(2, 3, 2)).toEqual(['5 tasks working, here and in 2 other chats', 'working'])
+  expect(head(0, 0, 0, 1)).toEqual(['1 question waiting for you', 'asking'])
+  expect(head(1, 2, 1, 2)).toEqual(['2 questions waiting for you · 3 working', 'asking'])
   // A finish shows on the octopus for its moment whatever else goes on, the line still saying what needs the person or runs
-  expect(head(0, 0, 0, 1, true)).toEqual(['1 thing needs you', 'happy'])
-  expect(head(0, 1, 1, 0, true)).toEqual(['Working on 1 thing in another chat', 'happy'])
+  expect(head(0, 0, 0, 1, true)).toEqual(['1 question waiting for you', 'happy'])
+  expect(head(0, 1, 1, 0, true)).toEqual(['1 task working in another chat', 'happy'])
   expect(head(0, 0, 0, 0, true)).toEqual(['Just finished', 'happy'])
 })
 
@@ -836,13 +836,13 @@ test("with work only in another chat the header and octopus are at work, amber w
   files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, cards: file.cards.slice(1) }))
   await clock.advance(5000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Working on 1 thing in another chat' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: '1 task working in another chat' }))).toBeDefined()
   expect(await drawn(list)).toEqual(['working'])
   expect(await list.find({ type: 'Text', text: /^Nothing/ })).toBeUndefined()
   // It asks: the line turns amber and says so, and the octopus waves amber
   files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at: NOW + 5000 }))
   await clock.advance(5000)
-  const asks = await until(async () => list.find({ type: 'Text', text: '1 thing needs you, 1 running' }))
+  const asks = await until(async () => list.find({ type: 'Text', text: '1 question waiting for you · 1 working' }))
   expect(asks?.props.color).toBe('#E5A50A')
   expect(await drawn(list)).toEqual(['wave'])
   // Both finish: happy, "Just finished", for the pause; then at rest, "Nothing is running"
@@ -851,7 +851,7 @@ test("with work only in another chat the header and octopus are at work, amber w
   expect(await until(async () => list.find({ type: 'Text', text: 'Just finished' }))).toBeDefined()
   expect(await drawn(list)).toEqual(['happy'])
   await clock.advance(3000)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Nothing is running' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'Nothing running' }))).toBeDefined()
   expect(await drawn(list)).toEqual(['mark'])
   await list.unmount()
 })
@@ -868,7 +868,7 @@ test("open chats with nothing going on are listed nowhere, on any Mac and howeve
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'billing · on m4' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: '1 thing needs you, 1 running' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: '1 question waiting for you · 1 working' })).toBeDefined()
   // No idle chat by name, no row or count of them, and this chat, with nothing going on, gets no heading
   const texts = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
   expect(texts.filter(one => /^Quiet \d+$|^M4 idle$|^[▸▾]? ?\d+ other chats?$/.test(one))).toEqual([])
@@ -897,11 +897,11 @@ test("work that ends in another chat turns happy in this panel for its pause, th
   const ended = { ...file, at: NOW + 6000, cards: file.cards.map(card => ({ ...card, status: 'done', endedAt: NOW + 5500, ask: undefined })) }
   files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify(ended))
   await clock.advance(5000)
-  expect(await until(async () => list.find({ type: 'Text', text: '✓ Finished' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ Done' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Claudopus' })).toBeDefined()
   // After its pause it is in the Finished row, named as every chat's, and no longer under its chat
   await clock.advance(3000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Finished' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Done' })) ? undefined : true))).toBe(true)
   expect(await list.find({ type: 'Text', text: 'all chats' })).toBeDefined()
   expect((await list.findAll({ type: 'Button' })).some(b => /Finished 2/.test(String(b.props.label)))).toBe(true)
   // On one Mac a chat with only ended work is not listed by name, and this chat's work gets no heading of its own for it
@@ -930,7 +930,7 @@ test("while the person types a reply into an ask, work finishing here and in ano
   await list.input({ key: box?.key ?? '', text: 'Not y', kind: 'change' } as never)
   // This chat's work finishes mid-typing: green and happy at once, then gone after its pause, the times still held
   await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
-  expect((await until(async () => list.find({ type: 'Text', text: '✓ Finished' })))?.props.color).toBe('success')
+  expect((await until(async () => list.find({ type: 'Text', text: '✓ Done' })))?.props.color).toBe('success')
   expect(await drawn(list)).toContain('happy')
   await clock.advance(2_100)
   expect(await until(async () => ((await list.find({ type: 'Text', text: /Draw the eyes/ })) ? undefined : true))).toBe(true)
@@ -939,11 +939,11 @@ test("while the person types a reply into an ask, work finishing here and in ano
   files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at: NOW + 8000, cards: file.cards.map(card => ({ ...card, status: 'done', endedAt: NOW + 7500, ask: undefined })) }))
   await list.input({ key: box?.key ?? '', text: 'Not ye', kind: 'change' } as never)
   // This panel reads the other chats every few seconds: the pause runs from the look that saw the end
-  for (let n = 0; n < 6 && !(await list.find({ type: 'Text', text: '✓ Finished' })); n += 1) await clock.advance(1000)
-  expect((await until(async () => list.find({ type: 'Text', text: '✓ Finished' })))?.props.color).toBe('success')
+  for (let n = 0; n < 6 && !(await list.find({ type: 'Text', text: '✓ Done' })); n += 1) await clock.advance(1000)
+  expect((await until(async () => list.find({ type: 'Text', text: '✓ Done' })))?.props.color).toBe('success')
   expect(await drawn(list)).toContain('happy')
   await clock.advance(3000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Finished' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Done' })) ? undefined : true))).toBe(true)
   // The half reply is still in its box: while typing the box holds the letters itself, and once typing stops it is drawn with them
   await clock.advance(31_000)
   expect(await until(async () => ((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value === 'Not ye' ? true : undefined))).toBe(true)
@@ -1056,7 +1056,7 @@ test("Details of another chat's work on this Mac is as deep as this chat's own: 
   expect(texts).toContain('HOME is empty over ssh.')
   // Its helper on its tree, with the step it is on and where it is under it
   expect((await tab.findAll({ type: 'Button' })).some(b => String(b.props.label).startsWith("Check the M4's plugin"))).toBe(true)
-  expect(texts).toContain('Step 1 of 2 · List the caches')
+  expect(texts).toContain('To-do 1 of 2 · List the caches')
   expect(texts).toContain('Listing the caches.')
   // Its command's last lines, as that chat read them
   expect(texts).toContain('Updating marketplace claudopus')

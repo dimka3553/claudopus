@@ -730,7 +730,7 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect((await stats.find({ type: 'Text', text: 'Today' }))?.props.bold).toBe(true)
   expect((await keyed(stats, 'scope-All chats'))?.props.label).toBe('All chats')
   // Once read: 1.5M output tokens on Opus 5.5 at $20 a million, two pieces finished, two to-dos, 30 minutes of work in 20
-  expect(await until(async () => stats.find({ type: 'Text', text: 'Saved by running side by side' }))).toBeDefined()
+  expect(await until(async () => stats.find({ type: 'Text', text: 'Saved by running at once' }))).toBeDefined()
   expect(await stats.find({ type: 'Text', text: 'Opus 5.5' })).toBeDefined()
   expect(await stats.find({ type: 'Text', text: '1.5M' })).toBeDefined()
   expect(await stats.find({ type: 'Text', text: '$30.00' })).toBeDefined()
@@ -742,12 +742,12 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(await value('10m')).toBe('time saved')
   expect(await value('Tasks done')).toBe('2')
   expect(await value('To-dos done')).toBe('2')
-  expect(await value('Task time added up')).toBe('30m')
-  expect(await value('On the clock')).toBe('20m')
-  expect(await value('Saved by running side by side')).toBe('10m')
+  expect(await value('All task time')).toBe('30m')
+  expect(await value('Real time')).toBe('20m')
+  expect(await value('Saved by running at once')).toBe('10m')
   // From the person's message to the chat's last response or tool result before the next message: 20 seconds here
-  expect(await value('From your message to the chat’s last step, on average')).toBe('20s')
-  expect(await stats.find({ type: 'Text', text: /^Each of your messages is timed from when the chat takes it up/ })).toBeDefined()
+  expect(await value('Chat time per message, on average')).toBe('20s')
+  expect(await stats.find({ type: 'Text', text: /^A message’s time runs from when the chat takes it to the chat’s last step/ })).toBeDefined()
   // The sums are kept, so the transcripts are read again only when they change
   expect(JSON.parse(files.get(`${MEMORY}/stats/engine-id.json`) ?? '{}').folder).toBe(chat)
 })
@@ -772,11 +772,11 @@ test('Stats draws whatever the history: the timeline of 240 pieces of work at on
   const allTime = await until(async () => (await stats.findAll({ type: 'Button' })).find(one => one.props.label === 'All time'))
   await stats.press({ key: allTime?.key ?? '' })
   // The timeline is drawn, its bars on a coarser grid, in one drawing the app takes
-  const timeline = await until(async () => (await stats.findAll({ type: 'Svg' })).find(one => String(one.props.alt) === '240 tasks on a time axis'))
+  const timeline = await until(async () => (await stats.findAll({ type: 'Svg' })).find(one => String(one.props.alt) === '240 tasks on a timeline'))
   expect(String(timeline?.props.source)).toContain('#8A63F0')
   expect((await stats.findAll({ type: 'Svg' })).filter(one => String(one.props.source).length > 131_072)).toEqual([])
   // The rest of the tab is drawn as ever
-  expect(await stats.find({ type: 'Text', text: 'Saved by running side by side' })).toBeDefined()
+  expect(await stats.find({ type: 'Text', text: 'Saved by running at once' })).toBeDefined()
   expect(await stats.find({ type: 'Text', text: '240k' })).toBeDefined()
 })
 
@@ -794,7 +794,7 @@ test('the bar keeps its buttons whole on a row of their own under the header, wr
   expect((await term.findAll({ type: 'Box' })).find(one => one.key === 'head-buttons')?.props.rowGap).toBe(0)
   expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About'])
   // The chat's size is no longer squeezed beside the buttons
-  expect(await pane.find({ type: 'Text', text: /^This chat:/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^This chat /})).toBeDefined()
 })
 
 test('the header names the version this chat loaded beside Claudopus, and a newer one the Mac has installed, on the same line', async ($, on) => {
@@ -809,7 +809,7 @@ test('the header names the version this chat loaded beside Claudopus, and a newe
   expect(shown?.text).toBe('v0.1.0')
   expect(shown?.props.dimColor).toBe(true)
   // The header keeps its three lines: the name, what runs, this chat's size
-  expect(await pane.find({ type: 'Text', text: /^This chat:/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^This chat /})).toBeDefined()
   // The installed version is Claude Code's own record, not the last look's: a copy run from a folder of its code has none, so a
   // newer version in update.json names nothing (an installed copy's is read from installed_plugins.json, tested in update.test)
   await pane.unmount()
@@ -873,7 +873,7 @@ test('About opens the changelog in a tab of its own, every version newest first,
   const log = await $.ui.mount({ ...LIST, requestId: 'changelog', props: { ...LIST.props, title: 'Changelog', bodyColumns: 60 }, surface: 'desktop' } as never)
   const texts = (await log.findAll({ type: 'Text' })).map(one => one.text)
   expect(texts.filter(one => /^v0\./.test(one))).toEqual(['v0.1.0', 'v0.0.9', 'v0.0.8'])
-  expect(texts).toContain('13 November 2026 · this chat')
+  expect(texts).toContain('13 November 2026 · this chat runs it')
   expect(texts).toContain('Pictures open large.')
 })
 
@@ -882,19 +882,19 @@ test('a chat that moved to a newer version than the one whose changes were seen 
   files.set(`${MEMORY}/seen.json`, JSON.stringify({ version: '0.0.8' }))
   await $.session.start(start)
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
-  expect(await until(async () => pane.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' }))).toBeDefined()
+  expect(await until(async () => pane.find({ type: 'Text', text: 'Updated to Claudopus v0.1.0' }))).toBeDefined()
   expect(await pane.find({ type: 'Text', text: '· from v0.0.8, 2 versions' })).toBeDefined()
   // The panel stays whole beneath it: its header buttons are there
   expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toContain('Stats')
   await pressed(pane, 'update-close')
   expect(JSON.parse(files.get(`${MEMORY}/seen.json`) ?? '{}').version).toBe('0.1.0')
-  expect(await until(async () => ((await pane.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await pane.find({ type: 'Text', text: 'Updated to Claudopus v0.1.0' })) ? undefined : true))).toBe(true)
   // A load of the same version again shows nothing
   await pane.unmount()
   await $.session.start(start)
   const again = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
   expect(await until(async () => (await again.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
-  expect(await again.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' })).toBeUndefined()
+  expect(await again.find({ type: 'Text', text: 'Updated to Claudopus v0.1.0' })).toBeUndefined()
 })
 
 test('a first install starts the record of changes seen at its own version, and shows no update screen', async ($, on) => {
@@ -903,7 +903,7 @@ test('a first install starts the record of changes seen at its own version, and 
   expect(JSON.parse(files.get(`${MEMORY}/seen.json`) ?? '{}').version).toBe('0.1.0')
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
   expect(await until(async () => (await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'Updated to Claudopus v0.1.0' })).toBeUndefined()
 })
 
 

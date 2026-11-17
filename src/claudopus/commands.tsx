@@ -9,7 +9,7 @@ const commandHooks = (on: On) => {
     // Asked for where it can be drawn, it is open in every chat from now on
     if (opened.isPlaced) await choosePanel($, true)
 
-    return { text: opened.isPlaced ? 'Claudopus panel opened.' : nowhere('Claudopus') }
+    return { text: opened.isPlaced ? 'Claudopus opened its panel.' : nowhere('Claudopus') }
   })
 
   // A box the person moves the focus into holds the panel's drawing, so nothing is drawn under them as they start typing; the focus
@@ -61,7 +61,8 @@ const commandHooks = (on: On) => {
     await scanServers($).catch(err => log($, `servers not read: ${String(err)}`))
     const opened = await $.ui.open({ id: PANE, title: PANE_TITLE })
 
-    return { text: opened.isPlaced ? 'Servers panel opened.' : nowhere('Servers') }
+    return { text: opened.isPlaced ? 'Claudopus opened the Servers panel.'
+ : nowhere('Servers') }
   })
 
 }
