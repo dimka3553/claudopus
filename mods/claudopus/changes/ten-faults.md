@@ -46,3 +46,4 @@
 - An answered question stays in view on its result with what you answered, or "you said not now".
 - A Release it you press while the task is still finishing its turn is no longer lost when Claude Code refuses one of that task's calls in the same turn: the release still goes ahead as the turn ends, and if the turn was stopped or failed, your question comes back on the card to press again.
 - When nothing was done on such a Release it (you stopped the task, it asked something else, or its turn failed), the same question in its results shows as waiting on you again, instead of as answered.
+- When that question comes back on a card that showed Claude Code's refusal notice, the chat drops the notice and shows the question again, so an answer to the notice is not taken for an answer to the release.

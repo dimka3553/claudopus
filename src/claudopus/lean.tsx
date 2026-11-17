@@ -324,6 +324,10 @@ const stepsAtEnd = async ($: EngineInterface) => {
       if (answeredAt.get(id) === held.ask.at) answeredAt.delete(id)
       sentReplies.delete(id)
       await stepLine($, id, `Nothing was done on your "${held.said}": Claude's turn ${card.status === 'stopped' ? 'was stopped' : 'failed'} first, so the question is back`)
+      // The chat is shown it again too, the refusal notice it took the place of gone from the chat with it, so an answer to that
+      // notice is never taken for an answer to the question
+      if (card.ask?.refused) await askGone($, card).catch(err => log($, `refusal notice not cleared in the chat: ${String(err)}`))
+      await askInChat($, { ...card, ask: held.ask }).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
     } else await lastStep($, card, held.ask, held.said).catch(err => log($, `last step of ${id} not done: ${String(err)}`))
   }
 }

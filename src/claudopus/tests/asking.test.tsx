@@ -580,8 +580,16 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   // (found by its question: the small task a2's step started took the next number)
   expect(await until(async () => prompts.find(one => one.startsWith('Do the last step of the task') && one.includes('(to: Release a6?)')))).toContain('Merge the PR and look at the build')
   await working('a7', 'release', '/repo/wt')
+  // (Claude Code refused a call of its in that turn: the question back takes that notice's place, in the chat too)
+  files.set('auto-refuse', 'Edit')
+  await $.tool.call({ tool: 'Edit', tool_use_id: 'e-a7', agentId: 'a7', file_path: '/repo/wt/notes.md', old_string: 'old', new_string: 'new' } as never)
+  files.delete('auto-refuse')
+  expect(await until(async () => appended.find(line => line.includes('Claude Code refused this task')))).toBeDefined()
+  const beforeStop = appended.length
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 'turn-a7', reason: 'answer', agentId: 'a7' } as never)
   expect(await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it' && String(b.key ?? '').startsWith('ask-a7-')))).toBeDefined()
+  expect(await until(async () => appended.slice(beforeStop).find(line => line.includes('Release a7?')))).toBeDefined()
+  expect(appended.slice(beforeStop).filter(line => line.includes('no longer needs an answer for'))).toHaveLength(1)
   expect(files.get(`${MEMORY}/log.md`)).not.toContain('last step of a7 on')
   // nor when it asks something else before its turn ends; what it recorded as waiting for the go-ahead, as its card's question, is
   // then open again in its result, not answered by a Release it that did nothing
