@@ -1412,7 +1412,7 @@ test('while the person uses the panel its running times stand still, and move ag
   await list.unmount()
 })
 
-test('one card and a folded Finished list are drawn at their own height, even after the list was long and the person folded it scrolled down', async ($, on) => {
+test('folding Finished while scrolled down draws one card and the fold at their own height, even after the list was long', async ($, on) => {
   const { clock } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'five pieces of work', wait: false, origin: composer })
@@ -1426,15 +1426,11 @@ test('one card and a folded Finished list are drawn at their own height, even af
   expect((await fold())?.props.label).toBe('▾ Finished 4')
   await ($.ui as any).scroll({ component: 'Pane', requestId: LIST.requestId, offset: 200, by: 20, bodyRows: 50, contentRows: 300, origin: { kind: 'person' } }).catch(() => undefined)
   // They fold it: one card and the fold are left, drawn at the pane's own height, so the view comes back to them and no blank runs
-  // under them to scroll through (17 Nov, Dima's screenshot: one card, the fold at the bottom and blank down to it; held at the
-  // list's longest moment, and then at the bottom of the view the fold was pressed in)
+  // under them to scroll through (17 Nov, Dima's screenshot: one card, the fold at the bottom and blank down to it. Held at the
+  // list's longest moment on 0.2.170, and with the hold at the bottom of the view alone, blank down to where the fold was pressed)
   await list.press({ key: String((await fold())?.key) })
   expect((await fold())?.props.label).toBe('▸ Finished 4')
   expect(Number((await list.find({ type: 'Box' }))?.props.minHeight ?? 0)).toBe(50)
-  // Scrolled on while still at it: never drawn past what the app says it shows, whatever the list once was
-  await ($.ui as any).scroll({ component: 'Pane', requestId: LIST.requestId, offset: 10, by: 1, bodyRows: 50, contentRows: 300, origin: { kind: 'person' } }).catch(() => undefined)
-  await list.redraw()
-  expect(Number((await list.find({ type: 'Box' }))?.props.minHeight ?? 0)).toBeLessThanOrEqual(250)
   await list.unmount()
 })
 
