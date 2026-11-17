@@ -26,17 +26,17 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
     expect(firstBand).toBeDefined();
     expect(await band.find({ type: 'Text', text: /Check the ears/ })).toBeUndefined();
     // The other finishes in the pause: the same drawing stays, with nothing else running, and the band stays for the pause
-    await clock.advance(1000);
+    await clock.advance(1_000);
     await end('a2', 't2');
     expect(await drawn(pane)).toEqual(['happy']);
     expect(await drawn(band)).toEqual(['happy-small']);
     expect(await moment(pane)).toBe(first);
     expect(await moment(band)).toBe(firstBand);
     // The first pause ends but the second has not: still happy, the same drawing; once both are over, at rest and the band gone
-    await clock.advance(1100);
+    await clock.advance(1_100);
     expect(await drawn(pane)).toEqual(['happy']);
     expect(await moment(pane)).toBe(first);
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(await drawn(pane)).toEqual(['mark']);
     expect(await band.find({ type: 'Text', text: "the engine's own" })).toBeDefined();
     // Work finishing while another still runs goes back to work after its pause
@@ -49,7 +49,7 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
     expect(await moment(pane)).not.toBe(first);
     expect(await drawn(band)).toEqual(['happy-small']);
     expect(await moment(band)).not.toBe(firstBand);
-    await clock.advance(2100);
+    await clock.advance(2_100);
     expect(await drawn(pane)).toEqual(['working']);
     expect(await drawn(band)).toEqual(['working-small']);
     // Stopped work makes no one happy
@@ -57,13 +57,13 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
     expect(await pane.find({ type: 'Text', text: 'Stopped' })).toBeDefined();
     expect(await drawn(pane)).toEqual(['mark']);
     expect(await band.find({ type: 'Text', text: "the engine's own" })).toBeDefined();
-    await clock.advance(2100);
+    await clock.advance(2_100);
     // Work that finishes while the panel is closed leaves no happy octopus when it opens after the pause
     await pane.unmount();
     await band.unmount();
     await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'draw the ears' });
     await end('a5', 't5');
-    await clock.advance(2500);
+    await clock.advance(2_500);
     const again = await $.ui.mount({ ...LIST, surface: 'desktop' });
     expect(await drawn(again)).toEqual(['mark']);
     // Nor after a reload in the pause: the pause still ends, and the octopus is at rest
@@ -71,36 +71,36 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
     await end('a6', 't6');
     expect(await drawn(again)).toEqual(['happy']);
     await $.session.start(start);
-    await clock.advance(2100);
+    await clock.advance(2_100);
     expect(await drawn(again)).toEqual(['mark']);
     // Seen ended before the reload, it is not shown ended again after it
     await $.agent.spawn({ ...spawn, description: 'Draw the brows', prompt: 'draw the brows' });
     await end('a7', 't7');
     expect(await drawn(again)).toEqual(['happy']);
-    await clock.advance(2100);
+    await clock.advance(2_100);
     await $.session.start(start);
     expect(await drawn(again)).toEqual(['mark']);
     expect(await again.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined();
     // Work that ended long before a load is not
-    await clock.advance(30000);
+    await clock.advance(30_000);
     await $.session.start(start);
     expect(await drawn(again)).toEqual(['mark']);
     // Work that ends while nothing is drawn, as while the mod reloads, has its pause from the panel's first drawing after the load
     await again.unmount();
-    await clock.advance(1000);
+    await clock.advance(1_000);
     await $.agent.spawn({ ...spawn, description: 'Draw the lips', prompt: 'draw the lips' });
     await end('a8', 't8');
-    await clock.advance(10000);
+    await clock.advance(10_000);
     await $.session.start(start);
-    await clock.advance(5000);
+    await clock.advance(5_000);
     const after = await $.ui.mount({ ...LIST, surface: 'desktop' });
     expect((await after.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success');
-    await clock.advance(2100);
+    await clock.advance(2_100);
     expect(await after.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined();
     // Work stopped in the seconds of a load is not green after it
     await $.agent.spawn({ ...spawn, description: 'Draw the chin', prompt: 'draw the chin' });
     await after.press({ key: 'stop-a9' });
-    await clock.advance(5000);
+    await clock.advance(5_000);
     await $.session.start(start);
     expect(await after.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined();
     expect(await drawn(after)).toEqual(['mark']);
@@ -124,7 +124,7 @@ test('work that answered while only its own background work held it, then stoppe
     // The chat stops it with TaskStop once its report is in: it ends at once, green and happy, and its report is kept then, once
     await $.prompt.submit({ text: 'remove the hover', wait: false, origin: composer });
     await $.agent.spawn({ ...spawn, description: 'Remove the hover', prompt: 'remove the hover' });
-    await clock.advance(60000);
+    await clock.advance(60_000);
     await answer('a1', 't1');
     expect(await drawn(pane)).toEqual(['working']);
     const kept = () => [...files.keys()].filter(key => /\/reports\/[^/]+-remove-the-hover\/report\.md$/.test(key));
@@ -138,17 +138,17 @@ test('work that answered while only its own background work held it, then stoppe
     expect(await until(async () => kept()[0])).toBeDefined();
     expect(files.get(kept()[0] ?? '')).toBe(`${report.trim()}\n`);
     // The aborted turn that follows the stop changes nothing: its pause is not begun again, and its words are no report
-    await clock.advance(1000);
+    await clock.advance(1_000);
     await $.turn.complete({ answer: 'Partial words', durationMs: 1, isAborted: true, turnId: 't1x', reason: 'answer', agentId: 'a1' });
-    await clock.advance(1100);
+    await clock.advance(1_100);
     expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined();
     expect(files.get(kept()[0] ?? '')).toBe(`${report.trim()}\n`);
-    await clock.advance(2100);
+    await clock.advance(2_100);
     expect(await pane.find({ type: 'Text', text: /Remove the hover/ })).toBeUndefined();
     expect(await drawn(pane)).toEqual(['mark']);
     // The engine's next look lists it killed: nothing changes, and no second report
     agents.a1 = 'killed';
-    await clock.advance(20000);
+    await clock.advance(20_000);
     expect(kept()).toHaveLength(1);
     // Stopped some other way, the engine lists it killed at its next look: the same green moment from then
     await $.agent.spawn({ ...spawn, description: 'Fold the idle chats', prompt: 'fold them' });
@@ -158,7 +158,7 @@ test('work that answered while only its own background work held it, then stoppe
         await clock.advance(1000);
     expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success');
     expect(await drawn(pane)).toEqual(['happy']);
-    await clock.advance(2100);
+    await clock.advance(2_100);
     // Held after only a short line ("started it in the background"), it has not finished: stopped, it is stopped
     await $.agent.spawn({ ...spawn, description: 'Build the app', prompt: 'build it' });
     agents.a3 = 'waiting';
@@ -167,7 +167,7 @@ test('work that answered while only its own background work held it, then stoppe
     await $.tool.call({ tool: 'TaskStop', tool_use_id: 's3', task_id: 'a3' });
     expect(await pane.find({ type: 'Text', text: 'Stopped' })).toBeDefined();
     expect(await drawn(pane)).toEqual(['mark']);
-    await clock.advance(2100);
+    await clock.advance(2_100);
     // A report given with SubagentHandback ends the work's run: its card ends done at once, though what it left running in the
     // background goes on, unstopped, and the chat need not stop it
     await $.agent.spawn({ ...spawn, description: 'Name the octopus', prompt: 'name it' });
@@ -181,14 +181,14 @@ test('work that answered while only its own background work held it, then stoppe
     expect(await drawn(pane)).toEqual(['happy']);
     // The engine's next looks still list it held: its card stays done, and stays in the list saying it left something running, with a
     // way to stop it
-    await clock.advance(20000);
+    await clock.advance(20_000);
     expect(await drawn(pane)).toEqual(['mark']);
     expect((await pane.find({ type: 'Text', text: /^Claude left something running in the background, / }))?.props.color).toBe('#E5A50A');
     expect(await pane.find({ type: 'Button', text: 'Stop it' })).toBeDefined();
     // What it left running wakes it for a turn of words alone: it stays as it ended, not announced again, its report kept
     const otto = () => [...files.keys()].filter(key => /\/reports\/[^/]+-name-the-octopus\/report\.md$/.test(key));
     const reportsBefore = otto().length;
-    await clock.advance(11000);
+    await clock.advance(11_000);
     await $.turn.complete({ answer: 'The watch exited.', durationMs: 1, isAborted: false, turnId: 't4w', reason: 'answer', agentId: 'a4' });
     // Not announced again: no second pause, though the card still says what it left running
     expect(await pane.find({ type: 'Text', text: /^Claude left something running/ })).toBeDefined();
@@ -199,7 +199,7 @@ test('work that answered while only its own background work held it, then stoppe
     await $.tool.call({ tool: 'Bash', tool_use_id: 'b4w', agentId: 'a4', command: 'ls' });
     expect(await drawn(pane)).toEqual(['working']);
     await $.tool.call({ tool: 'TaskStop', tool_use_id: 's4', task_id: 'a4' });
-    await clock.advance(2100);
+    await clock.advance(2_100);
     // A report handed back while a helper of its own is still at work is refused: the helper's result would reach the chat, not
     // the work. Once the helper has ended, the report goes through and it is done
     await $.agent.spawn({ ...spawn, description: 'Name the squid', prompt: 'name it', resume: { agentId: 'h1' } });
@@ -211,14 +211,14 @@ test('work that answered while only its own background work held it, then stoppe
     expect(String(early.deny)).toContain('still running in the background');
     await $.turn.complete({ answer: 'Sid, Squidward, Inky', durationMs: 1, isAborted: false, turnId: 't4h', reason: 'answer', agentId: 'h2' });
     agents.h2 = 'completed';
-    await clock.advance(20000);
+    await clock.advance(20_000);
     await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'h1', message: 'Named it Sid.' });
     await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't4t', reason: 'answer', agentId: 'h1' });
     expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success');
     // Once nothing of it is held any more, at the engine's next look, it leaves the list
     agents.h2 = 'completed';
     agents.h1 = 'completed';
-    await clock.advance(20000);
+    await clock.advance(20_000);
     expect(await pane.find({ type: 'Text', text: /Name the squid/ })).toBeUndefined();
     // Sent a message after its report, it works again: stopped before it took a step, it is stopped
     await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'draw the ears' });
@@ -227,21 +227,21 @@ test('work that answered while only its own background work held it, then stoppe
     await $.tool.call({ tool: 'TaskStop', tool_use_id: 's5', task_id: 'a5' });
     expect(await pane.find({ type: 'Text', text: 'Stopped' })).toBeDefined();
     expect(await drawn(pane)).toEqual(['mark']);
-    await clock.advance(2100);
+    await clock.advance(2_100);
     // The engine ends it as aborted instead: the same
     await $.agent.spawn({ ...spawn, description: 'Fold the list', prompt: 'fold the list' });
     await answer('a6', 't2');
     await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 't2b', reason: 'answer', agentId: 'a6' });
     expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success');
     expect(await drawn(pane)).toEqual(['happy']);
-    await clock.advance(2100);
+    await clock.advance(2_100);
     // Stop pressed on its card in the panel: the same
     await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' });
     await answer('a7', 't3');
     await pane.press({ key: 'stop-a7' });
     expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success');
     expect(await drawn(pane)).toEqual(['happy']);
-    await clock.advance(2100);
+    await clock.advance(2_100);
     // Held work its watcher wakes takes a step again: from then it has not finished, and stopped it is stopped
     await $.agent.spawn({ ...spawn, description: 'Watch the M4', prompt: 'watch the m4' });
     await answer('a8', 't4');
@@ -250,15 +250,15 @@ test('work that answered while only its own background work held it, then stoppe
     expect(await pane.find({ type: 'Text', text: 'Stopped' })).toBeDefined();
     expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined();
     expect(await drawn(pane)).toEqual(['mark']);
-    await clock.advance(2100);
+    await clock.advance(2_100);
     // Work stopped before it ever answered is stopped, by the engine as by the panel; work that failed is not happy either
     await $.agent.spawn({ ...spawn, description: 'Draw the mouth', prompt: 'draw the mouth' });
     agents.a9 = 'killed';
     kinds.a9 = 'general-purpose';
-    await clock.advance(20000);
+    await clock.advance(20_000);
     expect(await drawn(pane)).toEqual(['mark']);
     expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined();
-    await clock.advance(2100);
+    await clock.advance(2_100);
     await $.agent.spawn({ ...spawn, description: 'Draw the chin', prompt: 'draw the chin' });
     await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't6', reason: 'error', agentId: 'a10' });
     expect(await drawn(pane)).toEqual(['mark']);
@@ -295,7 +295,7 @@ test('work that answers a question while a copy of its own still runs, with that
     expect(await job()).toBeDefined();
     // Nothing new past the twelve minutes that flag other work (STUCK_AFTER) is a long copy, not stuck work. Only a minute past it:
     // each second the clock moves runs the panel's every-second look, so forty minutes here took 5 to 20 s on GitHub's runner
-    await clock.advance(13 * 60000);
+    await clock.advance(13 * 60_000);
     expect(await pane.find({ type: 'Text', text: /^No progress for / })).toBeUndefined();
     expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(0);
     expect(await pane.find({ type: 'Text', text: '13m 00s' })).toBeDefined();
@@ -309,7 +309,7 @@ test('work that answers a question while a copy of its own still runs, with that
     expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined();
     expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined();
     expect(await wait()).toBeDefined();
-    await clock.advance(20000);
+    await clock.advance(20_000);
     expect(await drawn(pane)).toEqual(['working']);
     expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined();
     expect(kept()).toHaveLength(0);
@@ -351,7 +351,7 @@ test('work that reports with everything it set out to do done, leaving a server 
     await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' });
     expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success');
     expect(await pane.find({ type: 'Text', text: /^Still working/ })).toBeUndefined();
-    await clock.advance(20000);
+    await clock.advance(20_000);
     expect(await pane.find({ type: 'Text', text: /^Claude left something running in the background, / })).toBeDefined();
     await pane.unmount();
 });
@@ -373,7 +373,7 @@ test('work that answers on the way while a helper of its still works, with its t
     await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'x1', reason: 'answer', agentId: 'w1' });
     expect(await drawn(pane)).toEqual(['working']);
     expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined();
-    await clock.advance(20000);
+    await clock.advance(20_000);
     expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined();
     await pane.unmount();
 });
@@ -404,14 +404,14 @@ test('work that reports with nothing of its own running finishes, though the eng
     agents.a1 = 'waiting';
     await stop('a1');
     await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' });
-    await clock.advance(20000);
+    await clock.advance(20_000);
     // Ended, its question on its card to answer, its clock stopped, and never said to have left something running: nothing of its own runs
     expect(await drawn(pane)).toEqual(['wave']);
     expect(await labels()).toContain('Release it');
     expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined();
     const asking = await line();
     expect(asking).toMatch(/^Waits for your answer/);
-    await clock.advance(10 * 60000);
+    await clock.advance(10 * 60_000);
     expect(await line()).toBe(asking);
     // The press starts it again with the answer, once
     const release = (await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it');
@@ -419,7 +419,7 @@ test('work that reports with nothing of its own running finishes, though the eng
     expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it"')))).toBeDefined();
     // It finds the release already done and reports in words, still held by the engine
     await call('mcp__claudopus__note', 'n1', { text: 'Released: the route is on main.' });
-    await clock.advance(70000);
+    await clock.advance(70_000);
     const report = `The Azure heavy-jobs route is on main and its deploy succeeded. ${'Any worktree that merged main can send a job to its own large Azure machine. '.repeat(7)}`;
     await stop('a1');
     await $.turn.complete({ answer: report, durationMs: 1, isAborted: false, turnId: 'w2', reason: 'answer', agentId: 'a1' });
@@ -429,7 +429,7 @@ test('work that reports with nothing of its own running finishes, though the eng
     expect((await pane.findAll({ type: 'Button' })).some(b => b.key === 'stop-a1')).toBe(false);
     expect(await line()).toMatch(/^Finished · /);
     // and once its moment is over it leaves the list, as finished work does, never counting on
-    await clock.advance(60000);
+    await clock.advance(60_000);
     expect(await line()).toBeUndefined();
     expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined();
     // The chat, told of the press, passes the same answer on: it is not sent, so the ended work is not started a third time
@@ -451,13 +451,13 @@ test('the same words as a card answer still go when they answer a newer question
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Proceed?', choices: ['Yes', 'Not now'] });
     const yes = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Yes');
     await list.press({ key: yes?.key ?? '' });
-    await clock.advance(5000);
+    await clock.advance(5_000);
     // The work asks again, with the same answer to give: the chat passing the person's "Yes" on goes
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Also merge it?', choices: ['Yes', 'Not now'] });
     const sent = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Yes' });
     expect(sent.deny).toBeUndefined();
     // An answer typed in the chat and passed on, then passed on again in the same words: only a card's answer is refused as a repeat
-    await clock.advance(5000);
+    await clock.advance(5_000);
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'Tag it?', choices: ['Yes', 'Not now'] });
     await $.prompt.submit({ text: 'Yes', wait: false, origin: composer });
     const first = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a1', message: 'Yes' });
@@ -493,7 +493,7 @@ test('a finished card in the middle of a dozen comes to the top at once, outline
     expect(await order()).toEqual(['Piece 7', ...others([7])]);
     expect(await green()).toBe(1);
     expect((await list.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success');
-    await clock.advance(1900);
+    await clock.advance(1_900);
     expect(await order()).toEqual(['Piece 7', ...others([7])]);
     expect(await green()).toBe(1);
     // The two seconds end on time, by the clock alone: no card is left green, and it is the newest under Finished
@@ -509,7 +509,7 @@ test('two that finish close together stack at the top newest first, each for its
     await end('a9');
     expect(await order()).toEqual(['Piece 9', 'Piece 4', ...others([4, 9])]);
     expect(await green()).toBe(2);
-    await clock.advance(1300);
+    await clock.advance(1_300);
     expect(await order()).toEqual(['Piece 9', ...others([4, 9])]);
     expect(await green()).toBe(1);
     await clock.advance(800);
@@ -522,7 +522,7 @@ test('a finish while an ask waits goes right under the ask, never above it', asy
     await end('a7');
     expect(await order()).toEqual(['Piece 3', 'Piece 7', ...others([3, 7])]);
     expect(await green()).toBe(1);
-    await clock.advance(2100);
+    await clock.advance(2_100);
     expect(await order()).toEqual(['Piece 3', ...others([3, 7])]);
 });
 test('stopped and failed work is not brought up nor green: it pauses in its place, failed in red', async ($, on) => {
@@ -535,7 +535,7 @@ test('stopped and failed work is not brought up nor green: it pauses in its plac
     const failed = await list.find({ type: 'Text', text: '✕ Failed with an error' });
     expect(failed?.props.color).toBe('error');
     expect((await list.findAll({ type: 'Box' })).some(b => b.props.backgroundColor === 'error')).toBe(true);
-    await clock.advance(2100);
+    await clock.advance(2_100);
     expect(await order()).toEqual(others([5, 8]));
 });
 test('a finish while a reply is being typed still shows at the top in green, under the ask being typed into, its words kept', async ($, on) => {
@@ -546,7 +546,7 @@ test('a finish while a reply is being typed still shows at the top in green, und
     expect(await until(async () => ((await green()) ? true : undefined))).toBe(true);
     expect(await order()).toEqual(['Piece 3', 'Piece 7', ...others([3, 7])]);
     expect((await list.findAll({ type: 'Input' })).map(one => one.key)).toContain(box);
-    await clock.advance(2100);
+    await clock.advance(2_100);
     expect(await green()).toBe(0);
 });
 test('scrolled down, a finish at the top is pointed at in green above the prompt for its two seconds, beside what waits', async ($, on) => {
@@ -562,7 +562,7 @@ test('scrolled down, a finish at the top is pointed at in green above the prompt
     const mark = await until(async () => band.find({ type: 'Text', text: /finished, at the top of the panel/ }));
     expect(mark?.text).toBe('↑ Piece 7 finished, at the top of the panel');
     expect(mark?.props.color).toBe('success');
-    await w.clock.advance(2100);
+    await w.clock.advance(2_100);
     expect(await band.find({ type: 'Text', text: /finished/ })).toBeUndefined();
     // With an ask waiting, the amber line says both
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a3', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] });
@@ -590,7 +590,7 @@ test('a finished card that left something running stays at the top after its mom
     agents.a3 = 'waiting';
     await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w3', reason: 'answer', agentId: 'a3' });
     expect(await order()).toEqual(['Piece 3', 'Piece 1', 'Piece 2', 'Piece 4']);
-    await clock.advance(20000);
+    await clock.advance(20_000);
     expect(await list.find({ type: 'Text', text: /^Claude left something running in the background, / })).toBeDefined();
     expect(await order()).toEqual(['Piece 3', 'Piece 1', 'Piece 2', 'Piece 4']);
 });

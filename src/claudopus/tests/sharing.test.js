@@ -8,7 +8,7 @@ test("the panel shows every open chat's running work under that chat's name, thi
     await $.agent.spawn({ ...spawn, prompt: 'fix the nose' });
     files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW));
     // A chat that has said nothing for minutes was closed, or its Mac sleeps
-    files.set(`${MEMORY}/live/chat-c.json`, otherChat(NOW - 200000, 'chat-c', 'Old landing page'));
+    files.set(`${MEMORY}/live/chat-c.json`, otherChat(NOW - 200_000, 'chat-c', 'Old landing page'));
     await clock.advance(5000);
     // This chat says what it runs, for the others
     expect(JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}').cards?.[0]?.title).toBe('Fix the nose');
@@ -41,10 +41,10 @@ test("the panel shows every open chat's running work under that chat's name, thi
     expect(await list.find({ type: 'Text', text: 'Quiet chat' })).toBeUndefined();
     // It keeps saying it is open while it runs
     const was = JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}').at;
-    await clock.advance(25000);
+    await clock.advance(25_000);
     expect(JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}').at).toBeGreaterThan(was);
     // Once that chat stops saying so, its work leaves this panel
-    await clock.advance(95000);
+    await clock.advance(95_000);
     expect(await until(async () => ((await list.find({ type: 'Text', text: 'Billing page' })) ? undefined : true))).toBe(true);
     await list.unmount();
 });
@@ -76,10 +76,10 @@ test("with another Mac named in config.json, its chats' work shows here under it
     const { files, clock, sshed } = world(on);
     files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local', '-oProxyCommand=bad'] }));
     // What the M4 answers: a login banner, its clock (an hour behind this Mac's), then its chat's file by its own clock
-    const behind = NOW - 3600000;
+    const behind = NOW - 3_600_000;
     files.set('ssh:fetch', `Welcome to the M4\n${behind / 1000}\n---claudopus-live---\n${otherChat(behind, 'chat-m4', 'Robot arm')}\n`);
     await $.session.start(start);
-    await clock.advance(10000);
+    await clock.advance(10_000);
     // Only a Mac that ssh takes as a name is reached
     expect(sshed.every(([command]) => command?.startsWith("sh -c 'L=") || command?.startsWith("sh -c 'echo $HOME;") || command?.startsWith("sh -c 'cd $HOME/.claude/claudopus/live/outbox/") || command?.startsWith('d='))).toBe(true);
     expect(sshed.length).toBeGreaterThan(0);
@@ -94,7 +94,7 @@ test("with another Mac named in config.json, its chats' work shows here under it
     expect(sshed.some(([command]) => command?.startsWith('d='))).toBe(false);
     // The M4 goes to sleep: what was fetched from it goes stale, and its work leaves the panel
     files.delete('ssh:fetch');
-    await clock.advance(100000);
+    await clock.advance(100_000);
     expect(await until(async () => ((await list.find({ type: 'Text', text: 'Robot arm' })) ? undefined : true))).toBe(true);
     await list.unmount();
 });
@@ -136,7 +136,7 @@ test("with work only in another chat the header and octopus are at work, amber w
     expect(asks?.props.color).toBe('#E5A50A');
     expect(await drawn(list)).toEqual(['wave']);
     // Both finish: happy, "Just finished", for the pause; then at rest, "Nothing is running"
-    files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at: NOW + 11000, cards: file.cards.map(card => ({ ...card, status: 'done', endedAt: NOW + 10500, ask: undefined })) }));
+    files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at: NOW + 11_000, cards: file.cards.map(card => ({ ...card, status: 'done', endedAt: NOW + 10_500, ask: undefined })) }));
     await clock.advance(5000);
     expect(await until(async () => list.find({ type: 'Text', text: 'Just finished' }))).toBeDefined();
     expect(await drawn(list)).toEqual(['happy']);
@@ -154,7 +154,7 @@ test("open chats with nothing going on are listed nowhere, on any Mac and howeve
     for (let n = 0; n < 100; n += 1)
         files.set(`${MEMORY}/live/chat-q${n}.json`, idle(NOW, `chat-q${n}`, `Quiet ${n}`));
     await $.session.start(start);
-    await clock.advance(10000);
+    await clock.advance(10_000);
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
     expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined();
     expect(await list.find({ type: 'Text', text: 'billing · on m4' })).toBeDefined();
@@ -170,7 +170,7 @@ test("open chats with nothing going on are listed nowhere, on any Mac and howeve
     expect(files.has(`${MEMORY}/folds.json`)).toBe(false);
     // That Mac stops answering: its chat with work leaves too
     files.delete('ssh:fetch');
-    await clock.advance(100000);
+    await clock.advance(100_000);
     expect(await until(async () => ((await list.find({ type: 'Text', text: 'Robot arm' })) ? undefined : true))).toBe(true);
     await list.unmount();
 });
@@ -219,7 +219,7 @@ test("while the person types a reply into an ask, work finishing here and in ano
     await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' });
     expect((await until(async () => list.find({ type: 'Text', text: '✓ Finished' })))?.props.color).toBe('success');
     expect(await drawn(list)).toContain('happy');
-    await clock.advance(2100);
+    await clock.advance(2_100);
     expect(await until(async () => ((await list.find({ type: 'Text', text: /Draw the eyes/ })) ? undefined : true))).toBe(true);
     // Another chat's work finishes mid-typing: the same
     const file = JSON.parse(otherChat(NOW));
@@ -233,13 +233,13 @@ test("while the person types a reply into an ask, work finishing here and in ano
     await clock.advance(3000);
     expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Finished' })) ? undefined : true))).toBe(true);
     // The half reply is still in its box: while typing the box holds the letters itself, and once typing stops it is drawn with them
-    await clock.advance(31000);
+    await clock.advance(31_000);
     expect(await until(async () => ((await list.findAll({ type: 'Input' })).find(one => /-reply-/.test(one.key ?? ''))?.props.value === 'Not ye' ? true : undefined))).toBe(true);
     await list.unmount();
 });
 test('a chat shares the work that ended lately, the newest few, and not work that ended long ago', async () => {
     const card = (id, endedAt) => ({ id, parentId: '', isFork: false, tokens: 0, title: id, words: '', items: [], entries: [], answer: '', startedAt: endedAt - 10, endedAt, status: 'done' });
-    const list = [card('old', NOW - 13 * 3600000), ...Array.from({ length: 12 }, (_, i) => card(`n${i}`, NOW - i * 1000))];
+    const list = [card('old', NOW - 13 * 3_600_000), ...Array.from({ length: 12 }, (_, i) => card(`n${i}`, NOW - i * 1000))];
     const shared = shareable(list, NOW).map(one => one.id);
     expect(shared).toHaveLength(10);
     expect(shared).not.toContain('old');
@@ -275,7 +275,7 @@ test("another chat's name, shown while it has something going on, opens that cha
     files.set(`${HOME}/Library/Application Support/Claude/claude-code-sessions/acct/org/local_old-one.json`, JSON.stringify({ sessionId: 'local_old-one', cliSessionId: 'chat-old' }));
     files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${withLink}\n---claudopus-live---\n${noLink}\n---claudopus-live---\n${viaSsh}\n---claudopus-live---\n${old}\n`);
     await $.session.start(start);
-    await clock.advance(10000);
+    await clock.advance(10_000);
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
     expect(await until(async () => list.find({ type: 'Text', text: "Last month's work summary" }))).toBeDefined();
     expect(await list.find({ type: 'Text', text: 'Terminal chat' })).toBeDefined();
@@ -311,8 +311,8 @@ test("Details of another chat's work on this Mac is as deep as this chat's own: 
     const { files, clock, opened } = world(on);
     await $.session.start(start);
     const at = NOW;
-    const card = { id: 'b1', parentId: '', isFork: false, tokens: 0, model: 'claude-opus-5-5', title: 'Fix the M4 install path', words: 'fix the install path', items: [{ text: 'Find where it installs', state: 'done' }, { text: 'Fix the path', state: 'doing' }, { text: 'Run it again', state: 'open' }, { text: 'Check the app', state: 'open' }], entries: [{ at, kind: 'note', text: 'HOME is empty over ssh.' }], answer: '', startedAt: at - 60000, endedAt: 0, status: 'working', bg: [{ id: 'bx1', what: 'Update the plugin', at: at - 20000, cmd: 'claude plugin update claudopus' }], seenJobs: { bx1: { latest: 'Fetching the mod', tail: ['Updating marketplace claudopus', 'Fetching the mod'] } } };
-    const helper = { id: 'h1', parentId: 'b1', isFork: false, tokens: 0, title: "Check the M4's plugin folder", words: '', items: [{ text: 'List the caches', state: 'doing' }, { text: 'Report back', state: 'open' }], entries: [{ at, kind: 'note', text: 'Listing the caches.' }], answer: '', startedAt: at - 30000, endedAt: 0, status: 'working' };
+    const card = { id: 'b1', parentId: '', isFork: false, tokens: 0, model: 'claude-opus-5-5', title: 'Fix the M4 install path', words: 'fix the install path', items: [{ text: 'Find where it installs', state: 'done' }, { text: 'Fix the path', state: 'doing' }, { text: 'Run it again', state: 'open' }, { text: 'Check the app', state: 'open' }], entries: [{ at, kind: 'note', text: 'HOME is empty over ssh.' }], answer: '', startedAt: at - 60_000, endedAt: 0, status: 'working', bg: [{ id: 'bx1', what: 'Update the plugin', at: at - 20_000, cmd: 'claude plugin update claudopus' }], seenJobs: { bx1: { latest: 'Fetching the mod', tail: ['Updating marketplace claudopus', 'Fetching the mod'] } } };
+    const helper = { id: 'h1', parentId: 'b1', isFork: false, tokens: 0, title: "Check the M4's plugin folder", words: '', items: [{ text: 'List the caches', state: 'doing' }, { text: 'Report back', state: 'open' }], entries: [{ at, kind: 'note', text: 'Listing the caches.' }], answer: '', startedAt: at - 30_000, endedAt: 0, status: 'working' };
     files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ chat: 'chat-b', title: 'M4 setup', folder: '/repo/claudopus', host: '', at, cards: [card], helpers: [helper] }));
     const line = (one) => JSON.stringify(one);
     files.set(`${HOME}/.claude/projects/-repo-claudopus/chat-b/subagents/agent-b1.jsonl`, [
@@ -358,7 +358,7 @@ test("this chat's file carries the helpers of the work it shares, apart from its
     await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer });
     await $.agent.spawn({ ...spawn, prompt: 'fix the nose' });
     await $.agent.spawn({ ...spawn, agentId: 'a2', description: 'Read the scan', prompt: 'read', parentAgentId: 'a1' });
-    await clock.advance(25000);
+    await clock.advance(25_000);
     const mine = JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}');
     expect(mine.cards?.map(one => one.id)).toEqual(['a1']);
     expect(mine.helpers?.map(one => [one.id, one.parentId, one.title, one.words])).toEqual([['a2', 'a1', 'Read the scan', '']]);

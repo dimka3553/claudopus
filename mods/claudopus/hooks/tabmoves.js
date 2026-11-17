@@ -5,7 +5,7 @@
 // does a move and what sleeps
 // The engine counts an open as the person's for 10 s from their press, and runs a hook under the same 10 s: a press's hook waits for
 // coming opens at most this long after its onPress, leaving a margin for the onPress itself and the moves
-export const TAB_MOVES_WAIT = 8000;
+export const TAB_MOVES_WAIT = 8_000;
 export const tabMoveQueue = () => {
     // Presses being answered: two may overlap (a double tap, x while a Details tab reads its card)
     let pressing = 0;

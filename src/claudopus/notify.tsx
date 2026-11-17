@@ -15,7 +15,7 @@ const STALE_END = 60_000
 let lastSeen: Map<string, string> | undefined
 // Ends waiting to be announced together, with what waited on the person as the end was seen (its report takes that over soon
 // after), and when each was last announced, by id
-let ready: { id: string; waits?: string[] }[] = []
+let ready: { id: string; waits?: Todo['waits'] }[] = []
 let isSettling = false
 const announced = new Map<string, number>()
 // Work the person stopped with its Stop button: they saw it end, so it is not announced
@@ -28,7 +28,7 @@ const lookEnds = async ($: EngineInterface) => {
   const cards = (await read($, todos)).filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
-  const all = [...cards.map(one => ({ id: one.id, status: one.status, endedAt: one.endedAt, waits: one.waits })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt, waits: undefined as string[] | undefined }))]
+  const all = [...cards.map(one => ({ id: one.id, status: one.status, endedAt: one.endedAt, waits: one.waits })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt, waits: undefined as Todo['waits'] }))]
   const was = lastSeen
   lastSeen = new Map(all.map(one => [one.id, standing(one.status, one.endedAt)]))
   if (!was) return
@@ -54,7 +54,7 @@ const fewWords = (text: string) => {
 }
 
 // What one ended piece of work or workflow says in a notification
-const readyOf = ({ id, waits: seen }: { id: string; waits?: string[] }, cards: Todo[], runs: Flow[]) => {
+const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, cards: Todo[], runs: Flow[]) => {
   if (id.startsWith('flow:')) {
     const f = runs.find(one => `flow:${one.id}` === id)
     if (!f) return undefined
@@ -68,7 +68,7 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: string[] }, cards: T
   const what =
     one.status === 'done'
       ? waits.length
-        ? `Waiting for ${who()}: ${fewWords(waits[0] ?? '')}${waits.length > 1 ? ` (and ${waits.length - 1} more)` : ''}`
+        ? `Waiting for ${who()}: ${fewWords(waits[0] ? askedWait(waits[0]).text : '')}${waits.length > 1 ? ` (and ${waits.length - 1} more)` : ''}`
         : fewWords(one.answer) || fewWords(said) || 'Finished.'
       : one.status === 'failed'
         ? 'Failed with an error.'

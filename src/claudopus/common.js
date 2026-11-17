@@ -25,16 +25,16 @@ const OLD_TOOLS = 'mcp__progress__';
 const isTool = (tool, name) => tool === `${TOOLS}${name}` || tool === `${OLD_TOOLS}${name}`;
 const OWN_SERVERS = [TOOLS, 'mcp__ccd_'];
 // A message longer than this is a dump: the chat keeps the file's path, not the text
-const PASTE_CHARS = 12000;
+const PASTE_CHARS = 12_000;
 // Pieces of work kept in the list, ended ones included, and lines kept in the log of each
 const KEPT = 40;
 const ENTRIES_KEPT = 200;
 // How many of the to-dos not yet started an open card lists before "more"
 // What else a Details tab can unfold, kept beside its chat's numbers, far from them: the person's words whole, every to-do
 // not yet started, and those done or dropped
-const OPEN_ASK = -1000001;
-const OPEN_DONE = -1000003;
-const OPEN_RESULT = -1000004;
+const OPEN_ASK = -1_000_001;
+const OPEN_DONE = -1_000_003;
+const OPEN_RESULT = -1_000_004;
 // Under a command's row in Details, its last lines sit on a darker ground, as a terminal's
 const OUTPUT_FILL = '#0000003D';
 // How much of what work reported at its end its Details shows before Show all
@@ -43,11 +43,11 @@ const RESULT_SHOWN = 600;
 const DONE_FOLDED = 8;
 // How much of a piece of work's chat the panel draws, the newest: this many lines, and this many characters, which one drawing has room for
 const TALK_KEPT = 300;
-const TALK_CHARS = 40000;
+const TALK_CHARS = 40_000;
 // The most characters the app draws in one tab: it counts every text and every picture's source, and a drawing of more is thrown
 // away whole, so the tab keeps its old drawing, or after a switch away and back says "Nothing to show yet". The pictures a tab draws
 // keep well under it (262144), with room for its text
-const PICTURES_CHARS = 150000;
+const PICTURES_CHARS = 150_000;
 // How long one message of that chat may be
 const SAID_CHARS = 8000;
 // How much of a long message to the work is drawn before it is opened
@@ -62,7 +62,7 @@ const EDGE_PARTS = 14;
 // How long a line of the log may be
 const NOTE_CHARS = 200;
 // How much of an answer the panel keeps
-const ANSWER_CHARS = 30000;
+const ANSWER_CHARS = 30_000;
 // While the servers panel is open it looks again this often
 const TICK = 3000;
 // Work that has just ended stays in its place among the running cards this long, in its ended look, before it goes to Finished
@@ -71,7 +71,7 @@ const LINGER = 2000;
 // after the load instead (Infinity until then), by `<id>:<endedAt>`: a finish is never over before the panel could show it
 const lateFrom = new Map();
 // Ended work this long before a load may not have been drawn ended at all
-const RELOAD_GRACE = 30000;
+const RELOAD_GRACE = 30_000;
 // When ended work's pause begins
 const pauseFrom = (one) => Math.max(one.endedAt, lateFrom.get(`${one.id}:${one.endedAt}`) ?? 0);
 // Whether ended work is still in that pause at a time: a card that ended in the future, as from another clock, is not
@@ -86,7 +86,7 @@ const needsPerson = (one) => Boolean(one.admins?.length) || (Boolean(one.ask) &&
 // The moments a pause ends that a redraw is already set for, so each pause gets one
 const lingerSet = new Set();
 // The engine's list of agents is read again this often, and the minutes move on
-const FOLLOW_EVERY = 20000;
+const FOLLOW_EVERY = 20_000;
 // An agent in one of these states, as the engine names them, is still working
 const WORKING = ['pending', 'running', 'waiting'];
 // These listen on a port but serve no pages to open
@@ -165,6 +165,77 @@ const everyLoad = ($, ms, fn) => {
     const timer = $.clock.every(ms, () => void isReplaced($).then(left => (left ? timer.cancel() : fn())));
     return timer;
 };
+// ---- Never holding Claude's helper ----
+// Claude's engine runs every add-on's hooks on one shared helper and asks it each second whether it is there. With no answer for five
+// seconds it starts the helper again and switches off the add-on whose code was running, until /reload-plugins: Claudopus went off
+// three times in one afternoon (16 Nov). The helper answers between two of the mod's steps, so the mod keeps each step short and,
+// when it falls behind, does less until it has caught up
+// How often the mod looks at how late its own timer comes, and how late counts as behind: then fresh drawings and the looks that can
+// wait are left out for BEHIND_FOR
+const HOLD_LOOK = 250;
+const LATE = 400;
+const BEHIND_FOR = 10_000;
+// and a drawing is given as it was for this long at most, however long the mod stays behind
+const BEHIND_HELD = 30_000;
+// A hold this long is written in the log with the steps begun meanwhile, so a switch-off can be traced to the step that caused it
+const HOLD_SAID = 1500;
+let holdAt = 0;
+// Looks left while behind: each late one starts the count again
+let behindLooks = 0;
+let longestHold = 0;
+const isBehind = () => behindLooks > 0;
+// The heavier steps the mod began lately, by name, so a long hold names them: those begun from a second before the last look on time
+const begun = [];
+const during = (name) => void (begun.push({ at: Date.now(), name }), begun.length > 40 && begun.splice(0, begun.length - 40));
+// The test kit's clock moves only when a test moves it, so there the gaps in real time are the test's own: its world says so
+let isTimed = true;
+// Each look: the helper was held for as long as the timer came late
+const lookHold = ($) => {
+    const now = Date.now();
+    const late = holdAt && isTimed ? now - holdAt - HOLD_LOOK : 0;
+    holdAt = now;
+    if (late < LATE) {
+        // Caught up: drawn again, with what was left out meanwhile
+        if (behindLooks > 0 && (behindLooks -= 1) === 0)
+            $.ui.invalidate('ui.render');
+        return;
+    }
+    behindLooks = BEHIND_FOR / HOLD_LOOK;
+    longestHold = Math.max(longestHold, late);
+    if (late < HOLD_SAID)
+        return;
+    const steps = [...new Set(begun.filter(one => one.at >= now - late - HOLD_LOOK - 1000).map(one => one.name))];
+    void log($, `Claude's helper was held ${late} ms${steps.length ? `; steps begun then: ${steps.join(', ')}` : ''}`);
+};
+// A step that goes through much at once hands the helper back every BREATH ms, so the engine's question is answered meanwhile
+const BREATH = 40;
+let breathAt = 0;
+const breathe = async ($) => {
+    if (Date.now() - breathAt < BREATH)
+        return;
+    // Any call to the engine will do: it is answered from outside the helper, which answers the engine's question meanwhile (one the
+    // mod makes nowhere else, so the test world can answer it as late as the engine does)
+    await $.session.turns();
+    breathAt = Date.now();
+};
+// The engine gives no file over 4 MB whole (fs.read refuses it), and a whole one is worked through at once: what grows without end
+// (a log, a command's output) is read from its end
+const TAIL_BYTES = 200_000;
+const fileEnd = async ($, path, bytes = TAIL_BYTES) => {
+    const r = await $.process.run(['tail', '-c', String(bytes), path], { timeoutMs: 10_000 }).catch(() => undefined);
+    return r?.exitCode === 0 ? r.stdout : '';
+};
+// and is added to at its end, never read and written back whole: a file over 4 MB read as nothing would be written back as only the
+// new text
+const appendTo = async ($, path, text) => {
+    const r = await $.process.run(['sh', '-c', 'printf %s "$2" >> "$1"', 'sh', path, text]).catch(() => undefined);
+    if (r?.exitCode === 0)
+        return;
+    const was = await $.fs.read(path).then(String, (err) => (/ENOENT|no such file/i.test(String(err)) ? '' : undefined));
+    if (was === undefined)
+        throw new Error(`${path} not added to: it could not be read`);
+    await $.fs.write(path, `${was}${text}`);
+};
 // and one that fires once, unless a newer load took charge before it does
 const afterLoad = ($, ms, fn) => $.clock.after(ms, () => void isReplaced($).then(left => (left ? undefined : fn())));
 // The chat of the card that is open, as last read: read again only when that work has moved
@@ -236,7 +307,7 @@ const took = (ms) => {
     return hrs ? `${hrs}h ${two(m)}m ${two(sec)}s` : m ? `${m}m ${two(sec)}s` : `${sec}s`;
 };
 // A count of tokens as the app writes it
-const thousands = (tokens) => isRunFromAfar ? (tokens < 10000 ? '<10k' : `${Math.round(tokens / 10000) * 10}k`) : `${(tokens / 1000).toFixed(tokens < 100000 ? 1 : 0)}k`;
+const thousands = (tokens) => isRunFromAfar ? (tokens < 10_000 ? '<10k' : `${Math.round(tokens / 10_000) * 10}k`) : `${(tokens / 1000).toFixed(tokens < 100_000 ? 1 : 0)}k`;
 // How full a context window is: the share when the window is known, and the tokens
 const fill = (tokens, window) => (window ? `${percent(tokens, window)}% · ${thousands(tokens)} of ${thousands(window)}` : thousands(tokens));
 // The same for a piece of work, short enough for its status line
@@ -317,8 +388,9 @@ const startModel = (e) => {
     const parent = rightModel(parentModel) ?? parentModel;
     // An alias or `inherit` the engine resolves to the newest, or the parent's; an older id or Haiku goes to its family's newest
     let model = asked && asked !== 'inherit' ? (rightModel(asked) ?? '') : rightModel(parentModel) && (!asked || asked === 'inherit') ? parent : '';
-    // A check of what was built never runs weaker than what started it, nor below Opus
-    if (isChecker(e.description ?? '')) {
+    // A check of what was built never runs weaker than what started it, nor below Opus. A quick task the chat starts is a clearly stated
+    // job, however its title reads ("Push and check the build"), and keeps its kind's model; one a task starts is held to the check rule
+    if (!(e.subagentType === 'claudopus:quick' && !e.parentAgentId) && isChecker(e.description ?? '')) {
         const runs = model || (asked && asked !== 'inherit' ? asked : parent);
         const least = rankOf(parent) >= RANK.Opus ? parent : (newestModel('Opus') ?? 'opus');
         if (rankOf(runs) < rankOf(least))
@@ -331,7 +403,7 @@ const startedOn = new Map();
 // The work and helpers whose steps the app sent to such a model, each said in the log once
 const sentElsewhere = new Set();
 // What a fork is answered when the model it would copy is such a model
-const WRONG_MODEL = (named) => `Claudopus doesn't run tasks on ${modelName(named) || named}. Start a fresh agent and name the model by its alias: ${modelsShort(models)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`;
+const WRONG_MODEL = (named) => `Claudopus doesn't run tasks on ${modelName(named) || named}. Start a fresh agent and name the model by its alias: ${modelsShort(models, lean)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`;
 // The line written into a piece of work's own chat when the person moves it to another model; the panel draws it as a line of its own
 const MODEL_HEAD = 'Model changed to ';
 const MODEL_LINE = /^Model changed to (.+?) at (\d{1,2}:\d{2})\./;
@@ -345,7 +417,7 @@ const readOr = ($, path) => $.fs.read(path).catch(() => '').then(text => (listDr
 let listDrawing = 0;
 // Another hook may read while the panel is drawn: what grows as work runs (transcripts, logs, other chats' live files, words, asks,
 // keep files) and anything large is never watched, so it cannot draw the panel again each second
-const isWatched = (path, text) => text.length < 64000 && !/\.jsonl$|\/log\.md$|\/live\/|\/words\/|\/asks\/|\/keep\/|\/helpers\//.test(path);
+const isWatched = (path, text) => text.length < 64_000 && !/\.jsonl$|\/log\.md$|\/live\/|\/words\/|\/asks\/|\/keep\/|\/helpers\//.test(path);
 const drawnFiles = new Map();
 // Every file the mod writes is in its memory folder, ~/.claude/claudopus, each call naming its folder and kind of file
 // One line in ~/.claude/claudopus/log.md: each session's start, and anything that failed
@@ -364,9 +436,9 @@ const tidyLog = async ($) => {
         await $.fs.write(`${dir}/log.md`, text.replaceAll('\u0000', '')).catch(() => undefined);
 };
 // A chat's saved words, words/<chat id>.md: the person's messages and Claude's answers, added to the end
-const appendWords = async ($, chatId, text) => $.fs.write(`${dir}/words/${chatId}.md`, `${await readOr($, `${dir}/words/${chatId}.md`)}${text}`);
+const appendWords = async ($, chatId, text) => appendTo($, `${dir}/words/${chatId}.md`, text);
 // A chat's asks and answers, asks/<chat id>.md, added to the end
-const appendAsks = async ($, chatId, text) => $.fs.write(`${dir}/asks/${chatId}.md`, `${await readOr($, `${dir}/asks/${chatId}.md`)}${text}`);
+const appendAsks = async ($, chatId, text) => appendTo($, `${dir}/asks/${chatId}.md`, text);
 // A colour with a see-through part, #RRGGBBAA, and how much of it shows (0 to 255)
 const alphaOf = (color) => (typeof color === 'string' && /^#[0-9a-f]{8}$/i.test(color) ? parseInt(color.slice(7), 16) : 255);
 // The terminal has no see-through colour: it paints the app's faint grey tint (FILL) as a solid mid-grey bar that buries dim text,
@@ -389,13 +461,53 @@ const termBox = (Box) => (props) => {
     const framed = isFrame ? {} : { paddingY, paddingTop, paddingBottom };
     return Box({ ...rest, ...framed, ...(isFrame ? {} : { backgroundColor: TERM_SOLID }) });
 };
-// The element table a drawing uses: the surface's own, with the terminal's Box taking the app's tints as above and a mark
-// (isTerminal) the views in other files read, which are handed the table alone
+const keptButtons = new Map();
+// How many times each key has been drawn so far in one drawing, by the drawing's own event: the same key drawn twice in a pane
+// (a card shown both among the asks and under Finished) is two buttons, each kept apart
+const keptSeen = new WeakMap();
+// A kept button not drawn for this long goes; drawn again later, it is a new one
+const KEPT_FOR = 10 * 60_000;
+let keptSwept = 0;
+// What a button shows, without its handler. Anything in it that cannot be compared (a function inside, as a button within a
+// button would hold) says so, and that button is made anew each time
+const lookOf = (shown) => {
+    let isPlain = true;
+    const look = JSON.stringify(shown, (_name, value) => (typeof value === 'function' ? ((isPlain = false), undefined) : value));
+    return isPlain ? look : undefined;
+};
+const keptButton = (Button, e) => (props) => {
+    const { onPress, ...shown } = props;
+    const look = typeof shown.key === 'string' && typeof onPress === 'function' ? lookOf(shown) : undefined;
+    if (look === undefined)
+        return Button(props);
+    const seen = keptSeen.get(e) ?? new Map();
+    keptSeen.set(e, seen);
+    const nth = seen.get(shown.key) ?? 0;
+    seen.set(shown.key, nth + 1);
+    const place = `${String(e.component)}\u0000${String(e.requestId ?? '')}\u0000${String(e.surface)}\u0000${shown.key}\u0000${nth}`;
+    const now = Date.now();
+    if (now - keptSwept > 60_000) {
+        keptSwept = now;
+        for (const [where, one] of keptButtons)
+            if (now - one.at > KEPT_FOR)
+                keptButtons.delete(where);
+    }
+    const was = keptButtons.get(place);
+    if (was && was.look === look)
+        return ((was.latest = onPress), (was.at = now), was.element);
+    const kept = { element: undefined, look, latest: onPress, at: now };
+    kept.element = Button({ ...shown, onPress: (...args) => kept.latest(...args) });
+    keptButtons.set(place, kept);
+    return kept.element;
+};
+// The element table a drawing uses: the surface's own, with its buttons kept as above, and on the terminal its Box taking the
+// app's tints as above and a mark (isTerminal) the views in other files read, which are handed the table alone
 const uiOf = ($, e) => {
     const ui = $.ui.resolve(e);
+    const Button = keptButton(ui.Button, e);
     if (e.surface !== 'terminal')
-        return ui;
-    const marked = { ...ui, Box: termBox(ui.Box), isTerminal: true };
+        return { ...ui, Button };
+    const marked = { ...ui, Button, Box: termBox(ui.Box), isTerminal: true };
     return marked;
 };
 // One part of a report's view or of the list: a filled block with a bold heading and, at its right, a dim count
@@ -421,12 +533,29 @@ let hasDesktop = true;
 let keyringRoot = '';
 let keyringOldRoot = '';
 const knowSystem = async ($) => {
-    const r = await $.process.run(['uname', '-s'], { timeoutMs: 5000 }).catch(() => undefined);
+    const r = await $.process.run(['uname', '-s'], { timeoutMs: 5_000 }).catch(() => undefined);
     isLinux = r?.exitCode === 0 && r.stdout.trim() === 'Linux';
     hasDesktop = !isLinux || Boolean((await $.env.get('DISPLAY')) || (await $.env.get('WAYLAND_DISPLAY')));
     const data = (await $.env.get('XDG_DATA_HOME')) ?? '';
     keyringRoot = `${(await $.env.get('HOME')) ?? ''}/.local/share/claudopus/keyring`;
     keyringOldRoot = data.startsWith('/') ? `${data}/claudopus/keyring` : '';
+};
+// Whether this Mac's home folder holds a keychain. One without (a test's or a trial chat's home of its own) makes security ask on
+// the person's screen for a keychain to keep an item in ("Keychain Not Found"), so nothing is asked of the keychain there: what
+// would use it fails as a keychain that does not answer. Looked at each time, so one made later is used. Linux keeps files instead
+const hasKeychain = async ($) => {
+    if (isLinux)
+        return true;
+    const home = (await $.env.get('HOME')) ?? '';
+    if (!home.startsWith('/'))
+        return false;
+    // No folder of keychains at all is a home of its own; a folder that cannot be listed is left to security as before. A keychain
+    // there may be a link (one moved and linked back); metadata.keychain-db alone is no keychain
+    const where = `${home}/Library/Keychains`;
+    if (!(await $.fs.stat(where).then(() => true, err => !/ENOENT|ENOTDIR/.test(String(err)))))
+        return false;
+    const found = await $.fs.list(where).catch(() => undefined);
+    return !found || found.some(one => one.name !== 'metadata.keychain-db' && /\.keychain(?:-db)?$/.test(one.name));
 };
 // How this computer is named in what the person reads
 const thisMac = () => (isLinux ? 'this machine' : 'this Mac');

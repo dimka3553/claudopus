@@ -1,10 +1,11 @@
 "use strict";
 // Smaller starts and the chat's quicker ways: the mod's own kinds of agent, each with only the tools its work takes, the models they
-// run on, the single command the chat runs itself, the copy of the chat for a small job, and the repeated notice left out
+// run on, the single command the chat runs itself, and the repeated notice left out
 // What every kind of the mod's agents is told before its task, in place of the engine's own agent prompt
 const AGENT_HEAD = 'You are an agent of Claude Code, working in the background on a task you are given. Use the tools you have to do it fully: no more than it asks, and not half done. Read files you know you need yourself; send calls that need nothing from each other together. Paths you give are absolute. When you are done, give your report: what was done, what you found, and what is not done or not checked, short, with the file paths that matter. Use no emojis.';
-// The panel's tools, which work keeps its card with, and the handback its report goes through
-const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall'];
+// The panel's tools, which work keeps its card with, and the handback its report goes through. Each kind told to call `wake_me`
+// rather than wait has it: a task and a quick task to be started again, a helper to be told to hand back what it waits for instead
+const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall', 'mcp__claudopus__wake_me'];
 const READ_TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback'];
 // ToolSearch loads the ones among these the engine holds back until asked (Monitor, SendMessage, TaskStop and the like)
 const WORK_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEdit', 'Agent', 'SendMessage', 'TaskStop', 'Monitor', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback', ...PANEL_TOOLS];
@@ -12,9 +13,9 @@ const WORK_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEd
 const KINDS = {
     task: { description: 'A background task the chat starts: builds, fixes, researches, releases. Starts with only its working tools.', tools: WORK_TOOLS, prompt: AGENT_HEAD },
     quick: {
-        description: 'A small fresh task of a few steps: a push and a look at the build, a merge, a quick look-up. Starts small.',
+        description: 'A fresh task for a clearly stated job: a change described exactly, a push and a look at the build, a merge, a look-up. Starts small, on the model for clearly stated jobs.',
         tools: WORK_TOOLS,
-        prompt: `${AGENT_HEAD}\nThis is a small job: do it in as few steps as it takes.`,
+        prompt: `${AGENT_HEAD}\nThis is a clearly stated job: do what the instructions say, in as few steps as it takes.`,
     },
     helper: { description: "A task's helper that builds a part beside others, on the task's own model.", tools: WORK_TOOLS.filter(one => one !== 'mcp__claudopus__update' && one !== 'mcp__claudopus__waits'), prompt: AGENT_HEAD },
     reader: {
@@ -40,32 +41,31 @@ const registerKinds = async ($) => {
             .then(r => log($, `agent kind ${r.agent ?? name} registered`))
             .catch(err => log($, `agent kind ${name} not registered: ${String(err)}`));
 };
-// What a start of one of the mod's kinds becomes under the settings: everything for all of them when Tasks start with Everything; a
-// reader on Sonnet, or on its parent's model; a check on a model never weaker than what built it, the strongest when chosen
+// What a start of one of the mod's kinds becomes: a reader on the legwork model (Sonnet as shipped); a check on a model never weaker than
+// what built it, nor below Opus; a quick task always on the model for clearly stated jobs, whatever the chat named
 const kindStart = (e) => {
     if (e.fork || e.workflow || e.resume)
         return {};
     const kind = KIND_OF(e.subagentType ?? '');
     if (!kind)
         return {};
-    const type = lean.start === 'all' ? { subagentType: 'general-purpose' } : {};
     const parent = rightModel(String(e.parentModel ?? '')) ?? String(e.parentModel ?? '');
+    const asked = (e.model ?? '').trim();
     if (kind === 'reader')
-        return { ...type, model: lean.readers === 'own' ? parent || undefined : modelsIn(models, lean).legwork };
+        return { model: modelsIn(models, lean).legwork };
     if (kind === 'check') {
-        if (lean.checker === 'strongest')
-            return { ...type, model: newestModel('Fable') ?? 'fable' };
-        const asked = (e.model ?? '').trim();
         const least = rankOf(parent) >= RANK.Opus ? parent : (newestModel('Opus') ?? 'opus');
-        return { ...type, model: asked && asked !== 'inherit' && rankOf(rightModel(asked) ?? asked) >= rankOf(least) ? asked : least };
+        return { model: asked && asked !== 'inherit' && rankOf(rightModel(asked) ?? asked) >= rankOf(least) ? asked : least };
     }
+    // never the chat's own model or another it names: a quick task on Fable in a Fable chat costs four times as much (judgment work is a
+    // claudopus:task, on the model the chat names)
     if (kind === 'quick')
-        return { ...type, model: e.model?.trim() || quickModel(models, lean) };
-    return type;
+        return { model: clearModel(models, lean) };
+    return {};
 };
 // ---- The single command the chat runs itself ----
 // The longest a command the chat runs may take: it is stopped then
-const CHAT_COMMAND_MS = 10 * 60000;
+const CHAT_COMMAND_MS = 10 * 60_000;
 // How many of its last lines come back with its end
 const CHAT_TAIL = 3;
 // A command the chat may run itself: one command, with nothing joined to it or sent into a file
@@ -158,7 +158,8 @@ const chatCommandEnded = async ($, text) => {
         const file = /<output-file>([^<]+)<\/output-file>/.exec(body)?.[1] ?? '';
         const status = /<status>([^<]+)<\/status>/.exec(body)?.[1] ?? '';
         const summary = /<summary>([^<]+)<\/summary>/.exec(body)?.[1] ?? '';
-        const raw = file ? (await readOr($, file)).replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n') : '';
+        // From the end of its output, which may be far over what the engine gives whole
+        const raw = file ? (await fileEnd($, file, 64_000)).replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n') : '';
         // with every kept key hidden, as in any tool's answer; withheld when that could not be checked
         if (raw)
             await knowKept($, true);
@@ -169,17 +170,6 @@ const chatCommandEnded = async ($, text) => {
     }
     return told;
 };
-// ---- The copy of the chat for a small job ----
-// A copy takes about this many steps before it hands what is left to a fresh task
-const FORK_STEPS = 10;
-// What a copy is told as it starts: it is a task now, with the rules every task follows, and how long it may go
-const FORK_HEAD = () => named(`You are a copy of the chat, started for one small job: you are now a background task, not the chat. The chat's rules for what it may run do not apply to you; the rules for every task below do. You start no helpers and message no other task. Do the job in at most about ${FORK_STEPS} steps. If it needs more, hand what is left to a fresh task with the \`note\` tool and its \`task\` (the chat starts it), and end with your report.`);
-const FORK_PAST = () => named(`Not run: this copy of the chat has taken its ${FORK_STEPS} steps. Hand what is left to a fresh task now: call the \`note\` tool with \`task\` set to what is left, in one line with the folder and what done looks like, send the message it gives you to the chat, then end with your report of what you did and what you handed on.`);
-const FORK_ALONE = () => named('Not run: a copy of the chat does its small job itself, with no helper and no other task. If the job needs more, hand what is left to a fresh task with the `note` tool and its `task`, send the message it gives you to the chat, and end with your report.');
-// The tools a copy past its steps may still call: the ones that hand on what is left and end it
-const FORK_ENDING = ['mcp__claudopus__note', 'mcp__claudopus__todo', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'SubagentHandback', 'ToolSearch'];
-// and SendMessage to the chat alone, which the note's hand-on goes through
-const isForkEnding = (e) => FORK_ENDING.includes(e.tool) || (e.tool === 'SendMessage' && String(e.to ?? '') === 'main');
 // ---- The repeated notice ----
 // The engine's notice that a task stopped after its report came as a message: "it is not repeated here". It woke the chat for a turn
 // with nothing new (359 turns over 13-16 Nov), so a notice that says only that, for tasks whose report came, is left out
@@ -197,8 +187,8 @@ const isRepeatOnly = (text) => {
 // that needs what it knows
 const RELEASE_STEP = /^\s*(?:release|run (?:the )?release(?: runner)?|(?:cd \S+ && )?\S*bin\/release)\s*\.?\s*$/i;
 // How often a release Claudopus runs is looked at, and the longest it is waited for
-const STEP_LOOK = 10000;
-const STEP_LONGEST = 90 * 60000;
+const STEP_LOOK = 10_000;
+const STEP_LONGEST = 90 * 60_000;
 const stepLine = async ($, id, text) => {
     const at = await $.clock.now();
     await changeTodos($, list => list.map(card => (card.id === id ? { ...card, entries: [...card.entries, { at, kind: 'note', text }].slice(-ENTRIES_KEPT) } : card)));
@@ -207,7 +197,7 @@ const stepLine = async ($, id, text) => {
 const lastStep = async ($, one, ask, said) => {
     const folder = ask.folder ?? '';
     const step = ask.lastStep ?? '';
-    const git = (args) => $.process.run(['git', '-C', folder, ...args], { timeoutMs: 15000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '');
+    const git = (args) => $.process.run(['git', '-C', folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '');
     const repo = await git(['rev-parse', '--show-toplevel']);
     const branch = await git(['rev-parse', '--abbrev-ref', 'HEAD']);
     const wakeText = `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\n${RESUMED_BY_ANSWER}`;
@@ -218,7 +208,7 @@ const lastStep = async ($, one, ask, said) => {
         return void releaseItself($, one, ask, said, repo, branch, wakeText).catch(err => log($, `release of ${one.id} not done: ${String(err)}`));
     const prompt = named(`Do the last step of the task "${titleOf(one)}", which {name} just gave the go-ahead for by pressing "${said}" (to: ${ask.text}): ${step}\nWork in ${folder}${branch && branch !== 'HEAD' ? `, on its branch ${branch}` : ''}. It is this one step: do only that, then report in one or two lines what happened. If it fails in a way that needs what the task that built it knows (a merge conflict, a failing check, a question only it can answer), send that task, "${one.id}", a message with SendMessage saying what failed and the last lines of the output, and end; do not fix it yourself.`);
     await stepLine($, one.id, `On your "${said}", a small fresh task does the last step: ${cut(step, 160)}`);
-    const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: last step`, subagentType: 'claudopus:quick', model: quickModel(models, lean), cwd: folder } };
+    const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: last step`, subagentType: 'claudopus:quick', model: clearModel(models, lean), cwd: folder } };
     wakes.push(wake);
     void $.clock.after(WAKE_WAIT, () => {
         const at = wakes.indexOf(wake);
@@ -231,7 +221,7 @@ const lastStep = async ($, one, ask, said) => {
 // The release with no model: the card's allow box first, as for any release, then the runner on its own, followed by the mod
 const releaseItself = async ($, one, ask, said, repo, branch, wakeText) => {
     const at = await $.clock.now();
-    const common = await $.process.run(['git', '-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { timeoutMs: 15000 }).then(r => r.stdout.trim()).catch(() => '');
+    const common = await $.process.run(['git', '-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { timeoutMs: 15_000 }).then(r => r.stdout.trim()).catch(() => '');
     const name = (/\/\.git$/.test(common) ? common.replace(/\/\.git$/, '') : repo).split('/').pop() || repo;
     const id = `step-${one.id}-${at}`;
     const gate = { id, call: id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at, from: one.id };
@@ -248,7 +238,7 @@ const releaseItself = async ($, one, ask, said, repo, branch, wakeText) => {
         return stepLine($, one.id, 'Nothing was released: the allow could not be secured');
     // Detached, so it outlives the ten minutes a call of the mod may take; its exit is written as its last line
     const run = await $.process
-        .run(['/bin/sh', '-c', 'nohup /bin/sh -c \'"$1" > "$2" 2>&1; echo "claudopus-exit $?" >> "$2"\' sh "$1" "$2" > /dev/null 2>&1 &', 'sh', `${$.plugin.root}/bin/release`, logFile], { cwd: repo, env: { CLAUDECODE: '1' }, timeoutMs: 15000 })
+        .run(['/bin/sh', '-c', 'nohup /bin/sh -c \'"$1" > "$2" 2>&1; echo "claudopus-exit $?" >> "$2"\' sh "$1" "$2" > /dev/null 2>&1 &', 'sh', `${$.plugin.root}/bin/release`, logFile], { cwd: repo, env: { CLAUDECODE: '1' }, timeoutMs: 15_000 })
         .catch(err => ({ exitCode: 1, stderr: String(err) }));
     if (run.exitCode !== 0) {
         await dropGrants($, [grant]);
@@ -257,7 +247,9 @@ const releaseItself = async ($, one, ask, said, repo, branch, wakeText) => {
     await log($, `release of ${branch} in ${name} started by Claudopus for ${one.id}`);
     const timer = everyLoad($, STEP_LOOK, () => {
         void (async () => {
-            const text = await readOr($, logFile);
+            // Its end only: a release's whole log can be over the 4 MB the engine gives whole, and then its last line was never seen
+            during('look at a release');
+            const text = await fileEnd($, logFile, 64_000);
             const exit = /claudopus-exit (\d+)\s*$/.exec(text)?.[1];
             const isLate = (await $.clock.now()) - at > STEP_LONGEST;
             if (exit === undefined && !isLate)

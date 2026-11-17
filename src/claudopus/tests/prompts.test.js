@@ -7,7 +7,7 @@ test("this chat waiting on the app's own prompt is listed with its prompt, and i
     files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${idle}\n`);
     await $.session.start(start);
     void $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf build', description: 'Clear the build folder' } });
-    await clock.advance(10000);
+    await clock.advance(10_000);
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
     expect(await until(async () => list.find({ type: 'Text', text: 'Run a command: Clear the build folder' }))).toBeDefined();
     expect(await list.find({ type: 'Text', text: 'Quiet one' })).toBeUndefined();
@@ -60,7 +60,7 @@ test("a chat stopped on the app's own prompt shows it amber at the top of its pa
     const shared = JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}');
     expect(shared.prompts).toBeUndefined();
     expect(shared.answeredPrompts).toEqual([expect.objectContaining({ text: 'Run a command: Clear the build folder', answered: 'yes', isRunning: false })]);
-    await clock.advance(61000);
+    await clock.advance(61_000);
     expect(await until(async () => ((await list.find({ type: 'Text', text: 'You allowed it · it ran and is done' })) ? undefined : true))).toBe(true);
     // A prompt answered at once is not told
     await $.classic.PermissionRequest({ tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Which colour for the nose?' }] } });
@@ -107,7 +107,7 @@ test("another chat's open prompt shows amber under its name, first; on this Mac 
     // A chat of this Mac with no work but an open prompt is listed; a link that is not the app's own is dropped
     files.set(`${MEMORY}/live/chat-w.json`, waiting(NOW, 'chat-w', 'Web chat', 'claude://code/continue?session=local_ab-12'));
     files.set(`${MEMORY}/live/chat-x.json`, waiting(NOW, 'chat-x', 'Odd chat', 'https://example.com'));
-    await clock.advance(10000);
+    await clock.advance(10_000);
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
     expect(await until(async () => list.find({ type: 'Text', text: 'M4 GitHub' }))).toBeDefined();
     expect(await list.find({ type: 'Text', text: 'Answer it in that chat, on m4' })).toBeDefined();
@@ -126,7 +126,7 @@ test("another chat's open prompt shows amber under its name, first; on this Mac 
     await list.press({ key: opens.find(one => String(one.key).includes('chat-w'))?.key ?? '' });
     expect(await until(async () => shown.find(argv => argv[1]?.includes('local_ab-12')))).toEqual(['open', 'claude://code/continue?session=local_ab-12']);
     // Answered there, its file no longer carries it, and its amber card leaves; with nothing going on, its chat is listed no more
-    files.set(`${MEMORY}/live/chat-w.json`, JSON.stringify({ chat: 'chat-w', title: 'Web chat', folder: '/Users/sam/GitHub', host: '', at: NOW + 11000, cards: [] }));
+    files.set(`${MEMORY}/live/chat-w.json`, JSON.stringify({ chat: 'chat-w', title: 'Web chat', folder: '/Users/sam/GitHub', host: '', at: NOW + 11_000, cards: [] }));
     await clock.advance(5000);
     expect(await until(async () => ((await list.findAll({ type: 'Button' })).some(one => one.props.label === 'Open that chat' && String(one.key).includes('chat-w')) ? undefined : true))).toBe(true);
     expect(await list.find({ type: 'Text', text: 'Web chat' })).toBeUndefined();
@@ -153,7 +153,7 @@ test('a message the chat passes to running work names that work and the message;
     await until(async () => list.find({ type: 'Text', text: "You said no · it didn't run, and Claude is waiting for what you say next" }));
     expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain("You said no · it didn't run, and Claude is waiting for what you say next");
     expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Pass a message to the task “Fix the panel cards”');
-    await clock.advance(61000);
+    await clock.advance(61_000);
     expect(await until(async () => ((await list.find({ type: 'Text', text: "You said no · it didn't run, and Claude is waiting for what you say next" })) ? undefined : true))).toBe(true);
     // Allowed, a message says it was sent
     files.delete('refuse');

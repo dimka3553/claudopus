@@ -11,11 +11,11 @@ const PICTURE = /\.(png|jpe?g|gif|webp|svg|pdf|html?)$/i;
 const TEMP = /^\/(private\/)?(tmp|var\/folders)\//;
 // The most copies one report keeps, and how much of its text one drawing shows
 const COPIES_KEPT = 40;
-const REPORT_CHARS = 40000;
+const REPORT_CHARS = 40_000;
 // A shorter answer with no picture is a confirmation, not a report worth coming back to
 const REPORT_LEAST = 500;
 // The panel draws a picture as a small copy inside an Svg, one at a time: one drawing holds 100,000 characters
-const THUMB_BYTES = 36000;
+const THUMB_BYTES = 36_000;
 const THUMB_SIZES = ['640', '480', '360'];
 const RASTER = /\.(png|jpe?g|gif|webp)$/i;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -39,7 +39,7 @@ const dated = (at, now) => {
 };
 // How old it is, in the largest unit that fits
 const ago = (at, now) => {
-    const minutes = Math.floor(Math.max(0, now - at) / 60000);
+    const minutes = Math.floor(Math.max(0, now - at) / 60_000);
     const [hours, days] = [Math.floor(minutes / 60), Math.floor(minutes / 1440)];
     return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes}m ago` : hours < 24 ? `${hours}h ago` : days < 60 ? `${days}d ago` : `${Math.floor(days / 30)} months ago`;
 };
@@ -48,10 +48,98 @@ const waitsOf = (r) => r.waiting ?? (r.question ? [{ text: r.question, ...(r.ans
 // One put away waits on nothing; brought back, what was open waits again
 const openWaits = (r) => (r.archived ? [] : waitsOf(r).filter(one => !one.answer));
 const isOpenQuestion = (r) => openWaits(r).length > 0;
-// What the person answered, once nothing in it waits: their one answer, or how many they answered
+// What the person answered, once nothing in it waits: their one answer, or how many they answered; what the work itself no longer
+// records is settled
 const answeredOf = (r) => {
-    const answered = waitsOf(r).filter(one => one.answer);
-    return isOpenQuestion(r) || !answered.length ? '' : answered.length === 1 ? `you answered ${answered[0]?.answer}` : `you answered ${answered.length}`;
+    const answered = waitsOf(r).filter(one => one.answer && one.answer !== SETTLED);
+    if (isOpenQuestion(r))
+        return '';
+    if (!answered.length)
+        return waitsOf(r).length ? 'settled' : '';
+    const [first] = answered;
+    return answered.length > 1 ? `you answered ${answered.length}` : first?.answer === IN_WORDS ? 'you answered in your words' : `you answered ${first?.answer}`;
+};
+// The answer kept for an item the person's own words answered, and for one its work no longer records as waiting
+const IN_WORDS = 'In your words';
+const SETTLED = 'Settled';
+// An item as a card keeps it: a plain line, as kept before answers were, is a yes-or-no question
+const waitOf = (one) => (typeof one === 'string' ? { text: one } : one);
+// The answers an item is answered with on the panel, Not now last: Yes and No for a yes-or-no question, its own otherwise; one only
+// words answer is answered in the chat's box
+const ANSWER_IN_WORDS = 'Answer in words';
+const answersOf = (wait) => [...new Set([...(wait.choices === undefined ? ['Yes', 'No'] : wait.choices.length ? wait.choices : [ANSWER_IN_WORDS]), 'Not now'])];
+// A question Yes and No do not answer, told by its words alone, and only where they say so for sure: one that asks what, which or how,
+// or one that offers two ways, the second after ", or". "Use Muse or Gemini?" is not caught: the tool's own text asks for its choices
+const notYesNo = (text) => /^(?:what|which|how|when|where|who|whom|whose|why)\b|\b(?:and|or)\s+(?:what|which|how|when|where|who|whom|whose|why)\b/i.test(text)
+    ? 'asks for words'
+    : /,\s+or\s+(?!not\b|so\b|more\b|less\b|later\b|both\b)/i.test(text)
+        ? 'offers a choice of two ways'
+        : '';
+// Whether two lines put the same question: most of the words of the shorter one are in the other, endings aside ("release" and
+// "released"). An ask and the item its work recorded for the same go-ahead are seldom worded alike
+const stemsOf = (text) => new Set([...aboutWords(text)].map(word => (word.length > 5 ? word.replace(/(?:ing|ed|es|e|s)$/, '') : word)));
+const likeness = (a, b) => {
+    const [x, y] = [stemsOf(a), stemsOf(b)];
+    const shared = [...x].filter(word => y.has(word)).length;
+    return shared >= 2 && shared >= 0.6 * Math.min(x.size, y.size) ? shared / Math.max(x.size, y.size) : 0;
+};
+// The open item most like a question, by its place among all of them
+const likest = (waits, asked) => waits.reduce((best, one, index) => (one.answer || likeness(one.text, asked) <= best.score ? best : { index, score: likeness(one.text, asked) }), { index: -1, score: 0 }).index;
+// The newest result a work left: what of it is open is what waits on the person now
+const newestOfWork = (list, agent) => list.filter(r => r.agent === agent && !r.archived).sort((a, b) => b.at - a.at)[0];
+// Gives answers to open items of a result, each change made from what is stored then; how many it answered
+const settleWaits = async ($, r, answerOf) => {
+    let closed = 0;
+    if (!waitsOf(r).some((one, index) => !one.answer && answerOf(one, index)))
+        return 0;
+    await markReport($, r, stored => ({
+        waiting: waitsOf(stored).map((one, index) => {
+            const answer = one.answer ? undefined : answerOf(one, index);
+            return answer ? ((closed += 1), { ...one, answer }) : one;
+        }),
+    }));
+    return closed;
+};
+// An ask of a work's answered on its card, by the person's words in the chat, or by a go-ahead's last step: the item its work recorded
+// for the same question is answered with it, on its newest result and on its card before that result is kept. 16 Nov a release was
+// asked on the card and recorded as waiting at once; Release it did the release, and the result went on waiting on the person, told
+// to the chat with every message after. Kept by work and ask, so an answer taken back opens it again
+const settledByAsk = new Map();
+const settleAsked = async ($, agent, ask, said) => {
+    let isOnCard = false;
+    await changeTodos($, list => list.map(card => {
+        if (card.id !== agent || !card.waits?.length)
+            return card;
+        const index = likest(card.waits.map(waitOf), ask.text);
+        if (index < 0)
+            return card;
+        isOnCard = true;
+        const waits = card.waits.filter((_, n) => n !== index);
+        return { ...card, waits: waits.length ? waits : undefined };
+    }));
+    if (isOnCard)
+        return;
+    const r = newestOfWork(await loadReports($), agent);
+    const index = r ? likest(waitsOf(r), ask.text) : -1;
+    if (!r || index < 0)
+        return;
+    if (await settleWaits($, r, (_, n) => (n === index ? said : undefined)))
+        settledByAsk.set(`${agent}:${ask.at}`, { report: r.id, index });
+};
+// The answer taken back opens the item it answered again
+const unsettleAsked = async ($, agent, at) => {
+    const was = settledByAsk.get(`${agent}:${at}`);
+    settledByAsk.delete(`${agent}:${at}`);
+    const r = was ? (await read($, reports)).find(one => one.id === was.report) : undefined;
+    if (!r || !was)
+        return;
+    await markReport($, r, stored => ({ waiting: waitsOf(stored).map((one, n) => (n === was.index ? { text: one.text, ...(one.choices ? { choices: one.choices } : {}) } : one)) }));
+};
+// The person's message that names a result and quotes what in it waits, as the box "Answer in words" filled starts, answers it
+const answeredInMessage = async ($, text) => {
+    const list = (await read($, reports)).filter(r => !r.archived && isOpenQuestion(r) && text.includes(`${reportPath(r)}/`));
+    for (const r of list)
+        await settleWaits($, r, one => (text.includes(`"${one.text}"`) ? IN_WORDS : undefined));
 };
 const gists = new Map();
 // A file a report names is a path inside its own folder: never absolute, never one that climbs out with .., whoever wrote it (a
@@ -165,7 +253,7 @@ const saveReport = async ($, card, text) => {
         agent: one.id,
         mark: marked,
         // What waits on the person is what the work recorded with the `waits` tool, wherever in the report it is
-        ...(one.waits?.length ? { waiting: one.waits.map(wait => ({ text: wait })) } : {}),
+        ...(one.waits?.length ? { waiting: one.waits.map(waitOf).map(wait => ({ text: wait.text, ...(wait.choices ? { choices: wait.choices } : {}) })) } : {}),
         ...(one.from ? { from: one.from } : {}),
     };
     await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`);
@@ -204,7 +292,7 @@ const thumbOf = async ($, path) => {
         const sized = (await $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', path])).stdout;
         const width = Number(/pixelWidth:\s*(\d+)/.exec(sized)?.[1] ?? 0);
         const height = Number(/pixelHeight:\s*(\d+)/.exec(sized)?.[1] ?? 0);
-        if (width && height && read.base64.length < 50000) {
+        if (width && height && read.base64.length < 50_000) {
             one = {
                 source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="data:image/jpeg;base64,${read.base64}" width="${width}" height="${height}"/></svg>`,
                 width,
@@ -240,7 +328,7 @@ const reportsTold = (all, now, list = all.filter(r => !r.archived), newest = new
         ? `Results saved (what finished tasks left for ${who()} to read or act on), newest first (title · topic · when · its file${list.some(waits) ? ' · what in it is waiting on them' : ''}):\n${list
             .slice(0, REPORTS_TOLD)
             .map(r => `- ${[cut(r.title, 70), cut(r.subject, 40), `${dated(r.at, now)} (${ago(r.at, now)})`, `${reportPath(r)}/report.md`, waits(r) ? `waiting on: ${openWaits(r).map(one => cut(one.text, 120)).join(' / ')}` : ''].filter(Boolean).join(' · ')}`)
-            .join('\n')}`
+            .join('\n')}${list.slice(0, REPORTS_TOLD).some(waits) ? `\nOnce ${who()}'s own words have answered what one waits on, call \`waits\` with its report.md path as \`result\` and what of it still waits as \`items\` ([] for nothing).` : ''}`
         : '';
 };
 // Sends the chat a message from the panel about what the person pressed or replied there: it starts work as a message of

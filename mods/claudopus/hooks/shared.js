@@ -7,11 +7,11 @@ export const ANSWERS = 'answers';
 export const MACS = 'macs';
 // Every open chat writes its file again at least this often, work or none, so a file not written for STALE has lost its chat: it
 // was closed, it crashed, or its Mac is asleep or gone. It then shows nowhere, and its work never as running for ever
-export const BEAT = 20000;
-export const STALE = 90000;
+export const BEAT = 20_000;
+export const STALE = 90_000;
 // Other chats' files are read this often; the other Macs' fetched this often, by whichever chat on this Mac comes first
-export const LOOK_EVERY = 5000;
-export const FETCH_EVERY = 10000;
+export const LOOK_EVERY = 5_000;
+export const FETCH_EVERY = 10_000;
 // What one card carries to other chats: enough for its small card and its Details, not its whole log
 const ITEMS_SHARED = 30;
 const WORDS_SHARED = 1200;
@@ -25,7 +25,7 @@ const upTo = (text, most) => (text.length > most ? `${text.slice(0, most - 1).tr
 // Work that ended is shown in other chats' panels too, where it turns happy and folds into Finished as in its own: the newest few
 // that ended in the last hours, while its chat is open
 export const ENDED_SHARED = 10;
-export const ENDED_FOR = 12 * 3600000;
+export const ENDED_FOR = 12 * 3_600_000;
 // The work of this chat that other chats show: running work, ended work that still waits on an answer from its buttons, and the
 // work that ended lately
 export const shareable = (list, now = 0) => list
@@ -134,7 +134,7 @@ export const fetchedOpen = (text, host) => {
 // The cards of other chats as this panel lists them: each names its chat, and its id is kept apart from this chat's own
 export const REMOTE = 'r-';
 // The chat and its Mac in a few letters, so the id stays short enough to name a Details tab whole
-const short = (text) => [...text].reduce((sum, ch) => (sum * 31 + ch.charCodeAt(0)) % 2147483647, 7).toString(36);
+const short = (text) => [...text].reduce((sum, ch) => (sum * 31 + ch.charCodeAt(0)) % 2_147_483_647, 7).toString(36);
 export const remoteId = (s, id) => `${REMOTE}${short(`${s.host}/${s.chat}`)}-${id}`;
 export const cardsOf = (list) => list.flatMap(s => s.cards.map(one => ({ ...one, id: remoteId(s, one.id), chat: { id: s.chat, title: s.title, folder: s.folder, host: s.host, agent: one.id } })));
 // Their helpers the same way, each under its work's id here: listed only in a Details tab, never as cards of their own
@@ -157,7 +157,7 @@ export const chatSide = (c, self = '') => {
     return [folder === chatName(c) ? '' : folder, c.host ? `on ${macName(c.host)}` : self ? `on ${self}` : ''].filter(Boolean).join(' · ');
 };
 // An answer that waited longer than this, as for a chat that was closed and opened again much later, is dropped, not acted on
-export const ANSWER_KEPT = 10 * 60000;
+export const ANSWER_KEPT = 10 * 60_000;
 export const answerOf = (text) => {
     try {
         const one = JSON.parse(text);
@@ -266,8 +266,8 @@ export const tripOf = (text) => {
 // ---- A press on a chat's name in a chat another Mac's Claude app runs here over SSH: that app, and the screen the person looks
 // at, are on the other Mac, so the press is left in live/outbox/<that Mac>/ as o-<time>-<id>.json, which that Mac takes within
 // OPEN_EVERY and opens there with what its own app holds. One pressed more than OPEN_KEPT before it is taken is dropped, not opened late ----
-export const OPEN_EVERY = 2000;
-export const OPEN_KEPT = 30000;
+export const OPEN_EVERY = 2_000;
+export const OPEN_KEPT = 30_000;
 export const OPEN_MARK = '---claudopus-open---';
 // The command that takes them there, run by sh: its clock in seconds, then each press, every file moved aside before it is read so
 // two chats taking at once never take one twice

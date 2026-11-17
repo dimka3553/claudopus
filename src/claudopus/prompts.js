@@ -114,9 +114,9 @@ const tellWaiting = async ($) => {
         await aloud($, 'prompt', `${one.title ?? chat} needs your OK`, one.text, `prompt-${one.id}`).catch(err => log($, `prompt not told: ${String(err)}`));
 };
 let answeredPrompts = [];
-const PROMPT_SHOWN = 15000;
+const PROMPT_SHOWN = 15_000;
 // An allowed call whose end is never seen is taken as over this long after it was seen running, so nothing stays purple for good
-const RUNNING_LONGEST = 15 * 60000;
+const RUNNING_LONGEST = 15 * 60_000;
 const answeredShown = (at) => answeredPrompts.filter(one => (one.endedAt ? at - one.endedAt < PROMPT_SHOWN : at - one.at < RUNNING_LONGEST));
 const settle = ($, id, agent, tool, outcome, args) => {
     const byTool = (one) => one.id.startsWith('pr-') && one.tool === tool && one.agent === (agent ?? '');
@@ -221,7 +221,7 @@ const promptSaid = new Map();
 const promptHeld = new Set();
 const pressedNo = new Set();
 // The longest a prompt waits for a press: past it the hook hands the prompt back to whatever else answers it
-const HOLD_LONGEST = 10 * 60000;
+const HOLD_LONGEST = 10 * 60_000;
 const PRESSED_NO = "The person said no to this on its card in the Claudopus panel. It didn't run. Wait for what they say next.";
 const PRESSED_NO_WORK = "The person said no to this on its card in the Claudopus panel. It didn't run: don't try it another way; continue without it.";
 const markHeld = ($, id, isHeld) => {
@@ -247,7 +247,7 @@ const holdPrompt = async ($, next, id) => {
                 break;
             if ((await $.clock.now()) - since > HOLD_LONGEST)
                 break;
-            await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10000 }).catch(() => undefined);
+            await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined);
         }
     }
     finally {

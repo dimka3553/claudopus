@@ -58,7 +58,7 @@ const shareMine = async ($) => {
     };
     const cards = shareable(list, now).map(withSeen);
     const helpers = shareableHelpers(list, cards).map(withSeen);
-    const jobsSign = [...cards, ...helpers].map(one => Object.values(one.seenJobs ?? {}).map(s => `${s.latest}:${s.tail?.at(-1) ?? ''}:${Math.floor((s.wroteAt ?? 0) / 30000)}:${s.target ?? ''}`).join('|')).join(' ');
+    const jobsSign = [...cards, ...helpers].map(one => Object.values(one.seenJobs ?? {}).map(s => `${s.latest}:${s.tail?.at(-1) ?? ''}:${Math.floor((s.wroteAt ?? 0) / 30_000)}:${s.target ?? ''}`).join('|')).join(' ');
     const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, input: _input, ...p }) => p;
     const prompts = waiting.map(shareOf);
     // Answered prompts go apart, so a chat of an older version, which reads only `prompts`, never shows one as still open
@@ -102,7 +102,7 @@ const isMulti = () => macs.length > 0 || pushedFrom.size > 0;
 const selfName = () => (isMulti() ? pushedYou || localName : '');
 // When this panel saw each of another chat's pieces of work end, by its id here; 0 for one that had ended well before
 const endSeen = new Map();
-const SEEN_ENDING = 60000;
+const SEEN_ENDING = 60_000;
 // Whether ended work is in its pause after ending: this chat's from its end, another chat's from when this panel saw it end
 const lingers = (one, at) => {
     if (!one.chat)
@@ -306,7 +306,7 @@ let appIdsAt = 0;
 const heldApp = (c) => (c.link?.app && appIds.has(c.link.app) ? c.link.app : (appOfChat.get(c.chat) ?? ''));
 // Answers whether what it holds changed, so the names it opens are drawn again
 const readAppIds = async ($, now) => {
-    if (now - appIdsAt < 30000)
+    if (now - appIdsAt < 30_000)
         return false;
     appIdsAt = now;
     const root = `${(await $.env.get('HOME')) ?? ''}/Library/Application Support/Claude/claude-code-sessions`;
@@ -398,7 +398,7 @@ const takeOpens = async ($) => {
             if (now - (f.fetchedAt ?? 0) > STALE)
                 continue;
             await $.fs.write(stamp, String(now));
-            const r = await $.process.run(ssh(mac, openTake(from)), { timeoutMs: 8000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }));
+            const r = await $.process.run(ssh(mac, openTake(from)), { timeoutMs: 8_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }));
             if (r.exitCode !== 0)
                 continue;
             for (const chat of opensOf(r.stdout))

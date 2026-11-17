@@ -10,19 +10,19 @@ test('work that is ready plays one sound and raises one notification; helpers, a
     // Its helper ends first: nothing
     await $.agent.spawn({ ...spawn, description: 'Measure the nose', prompt: 'measure', parentAgentId: 'a1' });
     await end('a2', 'h1');
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(played).toEqual([]);
     expect(notified).toEqual([]);
     // The work finishes: one sound, one line with its title and the first words of its answer
     await end('a1', 't1', '**The nose is fixed.** Both nostrils now match, and the tests pass.\n\nMore below.');
     expect(played).toEqual([]);
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(played).toEqual(['sounds/ready.wav']);
     expect(notified).toEqual(['Fix the nose | The nose is fixed.']);
     // Sent on and ending again within seconds: no second sound or notification
     await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'One more look.' });
     await end('a1', 't2');
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(played).toHaveLength(1);
     expect(notified).toHaveLength(1);
     // Two that finish together: one sound and one notification naming both; what waits on the person comes first
@@ -32,41 +32,41 @@ test('work that is ready plays one sound and raises one notification; helpers, a
     await end('a3', 't3');
     await clock.advance(300);
     await end('a4', 't4');
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(played).toHaveLength(2);
     expect(notified.at(-1)).toBe('2 tasks are done | Check the ears: done · Draw the eyes: done');
     await $.agent.spawn({ ...spawn, description: 'Check the chin', prompt: 'check the chin' });
     await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w2', agentId: 'a5', items: ['Do you want the chin rounder?'] });
     await end('a5', 't5');
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(notified.at(-1)).toBe('Check the chin | Waiting for the person: Do you want the chin rounder?');
     // Failed work: a notification that says so, and no sound
     await $.agent.spawn({ ...spawn, description: 'Paint the hair', prompt: 'paint the hair' });
     await end('a6', 't6', '', { reason: 'error' });
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(played).toHaveLength(3);
     expect(notified.at(-1)).toBe('Paint the hair | Failed with an error.');
     // Work the person stops with its Stop button: nothing
     await $.agent.spawn({ ...spawn, description: 'Draw the mouth', prompt: 'draw the mouth' });
     const pane = await $.ui.mount({ ...LIST, surface: 'desktop' });
     await pane.press({ key: 'stop-a7' });
-    await clock.advance(1000);
+    await clock.advance(1_000);
     await pane.unmount();
     expect(notified).toHaveLength(4);
     // A reload announces nothing that ended before it, and goes on announcing what ends after it
     await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'draw the ears' });
     await $.session.start(start);
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(notified).toHaveLength(4);
     await end('a8', 't8', 'The ears are drawn.');
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(notified.at(-1)).toBe('Draw the ears | The ears are drawn.');
     expect(played).toHaveLength(4);
     // Where the app takes no notification from a mod, Claudopus.app raises it, and a click opens this chat in the Claude app
     app.noSurface = true;
     await $.agent.spawn({ ...spawn, description: 'Draw the cheeks', prompt: 'draw the cheeks' });
     await end('a9', 't11', 'The cheeks are drawn.');
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(own.at(-1)?.slice(1)).toEqual(['--title', 'Draw the cheeks', '--text', 'The cheeks are drawn.', '--open', 'claude://code/continue?session=local_ab12-cd34', '--key', 'ready-a9']);
     expect(own.at(-1)?.[0]).toMatch(/\/bin\/notify$/);
     expect(osa).toEqual([]);
@@ -74,7 +74,7 @@ test('work that is ready plays one sound and raises one notification; helpers, a
     app.claudopus = 2;
     await $.agent.spawn({ ...spawn, description: 'Draw the chin', prompt: 'draw the chin' });
     await end('a10', 't12', 'The chin is drawn.');
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(own).toHaveLength(2);
     expect(osa.at(-1)).toEqual(['osascript', '-e', 'on run argv', '-e', 'display notification (item 2 of argv) with title (item 1 of argv)', '-e', 'end run', 'Draw the chin', 'The chin is drawn.']);
     app.noSurface = false;
@@ -82,13 +82,13 @@ test('work that is ready plays one sound and raises one notification; helpers, a
     ownSet(files, 'config.json', JSON.stringify({ sound: false }));
     await $.agent.spawn({ ...spawn, description: 'Draw the brows', prompt: 'draw the brows' });
     await end('a11', 't9');
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(played).toHaveLength(6);
     expect(notified).toHaveLength(6);
     ownSet(files, 'config.json', JSON.stringify({ notifications: false }));
     await $.agent.spawn({ ...spawn, description: 'Draw the lips', prompt: 'draw the lips' });
     await end('a12', 't10');
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(played).toHaveLength(7);
     expect(notified).toHaveLength(6);
     expect(osa).toHaveLength(1);
@@ -99,7 +99,7 @@ test('outside the Claude app a click on a notification brings forward the app th
     await $.session.start(start);
     await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' });
     await $.turn.complete({ answer: 'The eyes are drawn.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' });
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(own.at(-1)?.slice(1)).toEqual(['--title', 'Draw the eyes', '--text', 'The eyes are drawn.', '--activate', 'com.googlecode.iterm2', '--key', 'ready-a1']);
 });
 test('with neither a chat in the Claude app nor an app to bring forward, a notification names nothing for a click to open', async ($, on) => {
@@ -107,7 +107,7 @@ test('with neither a chat in the Claude app nor an app to bring forward, a notif
     await $.session.start(start);
     await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' });
     await $.turn.complete({ answer: 'The eyes are drawn.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' });
-    await clock.advance(1000);
+    await clock.advance(1_000);
     expect(own.at(-1)?.slice(1)).toEqual(['--title', 'Draw the eyes', '--text', 'The eyes are drawn.', '--key', 'ready-a1']);
 });
 test('work that needs the person is heard once: its notification comes as the amber Claudopus Asks carrying the sound, silent when sound is off', async ($, on) => {
@@ -146,7 +146,7 @@ test('work that needs the person is heard once: its notification comes as the am
     expect(played).toHaveLength(1);
     // The first ask on a Mac waits for macOS's allow question without its sound, so the mod's chime is heard at once instead
     app.asks = 5;
-    await clock.advance(6000);
+    await clock.advance(6_000);
     await ask('k4c', 'Allow it.');
     expect(lead(own.at(-1))).toEqual(['--asks', '--chime']);
     expect(played).toHaveLength(2);
@@ -154,12 +154,12 @@ test('work that needs the person is heard once: its notification comes as the am
     // Notifications off in Config: only the chime; both off: nothing
     ownSet(files, 'config.json', JSON.stringify({ notifications: false }));
     const before = own.length;
-    await clock.advance(6000);
+    await clock.advance(6_000);
     await ask('k5', 'Pick a name.');
     expect(own).toHaveLength(before);
     expect(played).toHaveLength(3);
     ownSet(files, 'config.json', JSON.stringify({ notifications: false, sound: false }));
-    await clock.advance(6000);
+    await clock.advance(6_000);
     await ask('k6', 'Pick a colour.');
     expect(own).toHaveLength(before);
     expect(played).toHaveLength(3);
