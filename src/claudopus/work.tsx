@@ -347,8 +347,8 @@ const workHooks = (on: On) => {
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
       const shown = await hideKept($, call, r)
       // What it wrote is kept as it ends, and what crossed another task's is told then
-      const broke = r.deny || (r.isError && e.tool !== 'Bash') ? '' : await crossEnded($, e, crossed, r.result).catch(() => '')
-      const crossing = r.deny ? [] : [crossed.context ?? '', broke].filter(Boolean)
+      const broke = r.deny ? '' : await crossEnded($, e as never, crossed, r.result, Boolean(r.isError)).catch(() => '')
+      const crossing = r.deny ? [] : [r.isError && e.tool !== 'Bash' ? '' : (crossed.context ?? ''), broke].filter(Boolean)
       const told = crossing.length && !shown.deny ? ({ ...shown, context: [...((shown as { context?: string[] }).context ?? []), ...crossing] } as typeof shown) : shown
       return isMovedBack && !told.deny && !told.isError ? ({ ...told, context: [...((told as { context?: string[] }).context ?? []), MOVED_BACK(who())] } as typeof told) : told
     }
@@ -674,7 +674,7 @@ const workHooks = (on: On) => {
     // and where the runner is that does an admin command with a Mac's kept password
     const rules = isTold ? await workRules($) : ''
     // and a scratch folder of its own in the chat's scratchpad, which every task of the chat shares
-    const scratch = isTold ? scratchName(await read($, todos), e.description ?? '') : ''
+    const scratch = isTold ? scratchName(await read($, todos), e.description ?? '', await $.clock.now()) : ''
     const isBackground = isHelperSpawn(e)
     const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}\n${SCRATCH_LINE(scratch)}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
