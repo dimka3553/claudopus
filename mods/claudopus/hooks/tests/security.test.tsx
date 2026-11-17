@@ -580,6 +580,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { text: e.text, context: e.context }
   })
   on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
   // The sounds played and the notifications raised, each as "title | text"
   on('audio.play', (_, e) => {
     played.push(String((e.clip as { asset?: string }).asset))

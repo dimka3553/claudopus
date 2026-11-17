@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.178 · 17 November 2026
+- The chat no longer shows a red "A hook blocked your prompt" card each time Claude Code tells it that a task is still at work or that a report already came. Such a notice now goes into the chat and ends its own turn at once with Claude Code's own "No response requested." line, without asking Claude and at no cost; one that comes while the chat is busy joins the turn already running.
+
 ## 0.2.177 · 17 November 2026
 - A program a task's command left running is named on its card by what that command does, in the words Claude gave it, never by the program's own name: no more rows of "Run Google Chrome" for a test's hidden browser
 - Everything one command left running is one row, with how many programs it is and their memory added up; Stop on it ends them all, and only once the last of them ends does the card say the command has ended, as one line under Commands ended, with its task told once

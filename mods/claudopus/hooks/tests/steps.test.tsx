@@ -580,6 +580,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { text: e.text, context: e.context }
   })
   on('turn.complete', (_, e) => ({ text: e.answer }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
   // The sounds played and the notifications raised, each as "title | text"
   on('audio.play', (_, e) => {
     played.push(String((e.clip as { asset?: string }).asset))
@@ -819,20 +820,34 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   const toldOfWait = (texts: readonly string[] | undefined) => (texts ?? []).flatMap(text => text.split('\n\n')).filter(one => waits.test(one)).length
   await clock.advance(1_000)
   expect(appended.filter(one => /ended its step without its report/.test(one))).toEqual([])
-  expect((await asNotice(endedNotice('a1'))).drop).toContain('nothing new')
+  // Let in, never dropped (a warning card), its turn answered with no model, and with the word that the task is still at work for the
+  // chat to read beside it later
+  let quietTurn = 0
+  const answeredQuietly = async (text: string) => {
+    const turnId = `notice-${++quietTurn}`
+    await $.turn.start({ text, turnId })
+    const asked = stepped.length
+    const said: string[] = []
+    for await (const chunk of $.turn.step({ turnId, index: 0, model: 'm', messageCount: 2 })) if (chunk.kind === 'text') said.push((chunk as { text: string }).text)
+    return stepped.length === asked && said.join('') === 'No response requested.'
+  }
+  const alone = await asNotice(endedNotice('a1'))
+  expect([alone.drop, toldOfWait(alone.context), await answeredQuietly(endedNotice('a1'))]).toEqual([undefined, 1, true])
   // Beside a notice that says something, or with a security warning of its own, it goes on with the word that the task is still at
   // work in the same prompt
   const mixed = await asNotice(`${endedNotice('a1')}\n<task-notification>\n<task-id>bx1</task-id>\n<status>completed</status>\n<summary>Background command "Build" completed (exit code 0)</summary>\n</task-notification>`)
   const warned = await asNotice(endedNotice('a1', `SECURITY WARNING: This subagent performed actions that may violate security policy. Reason: [Data Exfiltration]. Review the subagent's actions carefully before acting on its output.\n\n${RESULT}`))
   expect([mixed.drop, toldOfWait(mixed.context), warned.drop, toldOfWait(warned.context)]).toEqual([undefined, 1, undefined, 1])
+  expect(await answeredQuietly(endedNotice('a1'))).toBe(false)
   // Joining a turn of the chat's under way, the notice still comes through here (seen on Claude Code 2.1.325: a notice that came
-  // mid-turn was handed to this hook with that turn's id, and left out there), so the same holds
-  const midTurn = (await $.prompt.submit({ text: endedNotice('a1'), wait: false, turnId: 'chat1', origin: { kind: 'task-notification' } } as never)) as { drop?: string }
-  expect(midTurn.drop).toContain('nothing new')
+  // mid-turn was handed to this hook with that turn's id): it goes into that turn with the same word, or makes a turn of its own
+  // answered with no model should that turn end first
+  const midTurn = (await $.prompt.submit({ text: endedNotice('a1'), wait: false, turnId: 'chat1', origin: { kind: 'task-notification' } } as never)) as { drop?: string; context?: string[] }
+  expect([midTurn.drop, toldOfWait(midTurn.context), await answeredQuietly(endedNotice('a1'))]).toEqual([undefined, 1, true])
   // A helper the engine no longer lists at work, its card left behind, is no wait: the notice reaches the chat as it is
   agents.a3 = 'completed'
   const gone = await asNotice(endedNotice('a1'))
-  expect([gone.drop, toldOfWait(gone.context)]).toEqual([undefined, 0])
+  expect([gone.drop, toldOfWait(gone.context), await answeredQuietly(endedNotice('a1'))]).toEqual([undefined, 0, false])
   agents.a3 = 'running'
   // A step of its own and another pause: still no note of Claudopus's own in the chat
   talk.splice(0, talk.length, { role: 'user', content: 'Carry on.' })
