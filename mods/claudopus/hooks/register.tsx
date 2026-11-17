@@ -13310,7 +13310,7 @@ const panelHooks = (on: On) => {
               {e.surface === 'terminal' ? null : (
                 <Box flexDirection="row" alignItems="center" gap={2}>
                   <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                    <Text dimColor wrap="truncate-end">{BOX_KEYS}</Text>
+                    <Text dimColor wrap="truncate-end">Shift+Enter: new line</Text>
                   </Box>
                   <Button key={`${key}-send-${presses}`} label="Send" variant="primary" onPress={() => sendCard(drafts.get(draftOf(one.id, ask)) ?? '')} />
                 </Box>
