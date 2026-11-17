@@ -773,9 +773,9 @@ const recorderHooks = (on: On) => {
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
 const BRIEF =
-  'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
+  'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
 const REFUSED =
-  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
+  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
   `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
 // A command that would print a password or key the keychain keeps (on Linux, the files bin/keyring keeps). Work uses a kept key only through `bin/secret`, which reads it itself
@@ -954,119 +954,10 @@ const writesMemory = (text: string, names: readonly string[]): boolean => {
     .join('\n')
   return namesMemory(kept, names) || (names === MEMORY_PERSON && /\brelease\.local\b/.test(kept))
 }
-// A command that is only Python or Node handed code that reads (`python3 -c "print(json.load(open(p)))"`, `node -e`), at most with its
-// errors sent to /dev/null and its output piped into a reader (head, tail, wc, grep, jq, cut, tr): nothing else joined to it and
-// nothing sent into a file. Its code passes only when every name it calls or reaches into is one of a short list of plain reads
-// (open of one path, json, a text's own ways, printing, Path's read_text, fs.readFileSync), its modules are json, sys, os and pathlib
-// (fs, path and os in Node), and no call is reached by a computed name. Anything else is read as a write; a command that changes the
-// files anyway is undone as it ends
-const CODE_NAMES = new Set(
-  (
-    'print open len str int float bool list dict set tuple sorted reversed enumerate range zip map filter min max sum any all abs round repr type isinstance next iter ' +
-    'load loads dumps read read_text read_bytes readline readlines keys values items get Path home expanduser expandvars join exists isfile isdir basename dirname ' +
-    'abspath realpath getenv listdir is_file is_dir iterdir glob stat getsize getmtime splitlines split rsplit strip lstrip rstrip lower upper startswith endswith ' +
-    'replace format count find index decode encode path environ argv stdout stderr stdin st_size st_mtime name stem suffix parent parts ' +
-    'if elif else for while not and or in is return lambda typeof catch ' +
-    'console log error JSON parse stringify require readFileSync existsSync statSync readdirSync toString trim includes slice sort push entries length env process homedir resolve String Number Object Array'
-  ).split(' '),
-)
-const CODE_MODULES = ['json', 'sys', 'os', 'os.path', 'pathlib']
-const CODE_REQUIRES = /^(['"])(?:node:)?(?:fs|path|os)\1$/
-const CODE_RUNNERS: Record<string, { flags: RegExp; code: readonly string[] }> = {
-  python: { flags: /^-[IBSEusq]+$/, code: ['-c'] },
-  python3: { flags: /^-[IBSEusq]+$/, code: ['-c'] },
-  node: { flags: /^$/, code: ['-e', '-p', '-pe', '--eval', '--print'] },
-}
-const PIPE_READERS = ['head', 'tail', 'wc', 'grep', 'jq', 'cut', 'tr']
-// The command cut at each | outside quotes, with what lies outside quotes in each piece
-const pipedParts = (command: string) => {
-  const parts: { text: string; bare: string }[] = [{ text: '', bare: '' }]
-  let quote = ''
-  for (const c of command) {
-    const part = parts[parts.length - 1]!
-    if (quote) quote = c === quote ? '' : quote
-    else if (c === "'" || c === '"') quote = c
-    else if (c === '|') {
-      parts.push({ text: '', bare: '' })
-      continue
-    } else part.bare += c
-    part.text += c
-  }
-  return quote ? [] : parts
-}
-// The arguments of the call that starts at `open`, split at its own commas, or undefined when they cannot be read plainly
-const callArgs = (code: string, open: number): string[] | undefined => {
-  const args: string[] = []
-  let depth = 0
-  let quote = ''
-  let arg = ''
-  for (let i = open + 1; i < code.length; i++) {
-    const c = code[i]!
-    if (quote) {
-      if (c === '\\') arg += c + (code[++i] ?? '')
-      else (quote = c === quote ? '' : quote), (arg += c)
-      continue
-    }
-    if (c === "'" || c === '"') (quote = c), (arg += c)
-    else if ('([{'.includes(c)) depth++, (arg += c)
-    else if (')]}'.includes(c)) {
-      if (depth === 0) return arg.trim() ? [...args, arg.trim()] : args
-      depth--
-      arg += c
-    } else if (c === ',' && depth === 0) args.push(arg.trim()), (arg = '')
-    else arg += c
-  }
-  return undefined
-}
-const codeOnlyReads = (command: string): boolean => {
-  if (/\n|\$\(|`/.test(command)) return false
-  const parts = pipedParts(command.trim())
-  if (!parts.length || parts.some(one => !one.text.trim())) return false
-  // after the code, only the reader each pipe goes into, and no file sent into or read from but errors sent to /dev/null
-  for (const one of parts.slice(1)) {
-    const words = shellWords(one.text)
-    if (words.length !== 1 || !PIPE_READERS.includes(words[0]![0] ?? '') || /[;&<>]/.test(one.bare)) return false
-  }
-  if (/[;&<]/.test(parts[0]!.bare) || /[<>]/.test(parts[0]!.bare.replace(/(?:^|\s)2>\/dev\/null(?=\s|$)/g, ' '))) return false
-  const words = (shellWords(parts[0]!.text)[0] ?? []).filter(one => one !== '2>/dev/null')
-  const name = (words[0] ?? '').split('/').pop() ?? ''
-  const runner = CODE_RUNNERS[/^python3\.\d+$/.test(name) ? 'python3' : name]
-  if (!runner || !Object.hasOwn(CODE_RUNNERS, /^python3\.\d+$/.test(name) ? 'python3' : name)) return false
-  // the program's own flags (no module, no import hook) and then its code
-  let at = 1
-  while (at < words.length && runner.flags.test(words[at]!) && !runner.code.includes(words[at]!)) at++
-  if (!runner.code.includes(words[at] ?? '') || at + 1 >= words.length) return false
-  const code = words[at + 1]!
-  // a string that runs what it holds (Python's f-strings) is not plain
-  if (/(?:^|[^\w'"])[rRbBuU]?[fF][rRbB]?['"]/.test(code)) return false
-  // modules and what Node requires
-  for (const m of code.matchAll(/\bfrom\s+([\w.]+)\s+import\s+([\w\s,]+)/g)) if (!CODE_MODULES.includes(m[1]!) || m[2]!.split(',').some(one => !CODE_NAMES.has(one.trim().split(/\s+/)[0]!))) return false
-  for (const m of code.replace(/\bfrom\s+[\w.]+\s+import\s+[\w\s,]+/g, '').matchAll(/(?:^|[;\s])import\s+([\w.\s,]+)/g)) if (m[1]!.split(',').some(one => !CODE_MODULES.includes(one.trim().split(/\s+/)[0]!))) return false
-  if (/\bimport\b/.test(code.replace(/\bfrom\s+[\w.]+\s+import\b|(?:^|[;\s])import\s+[\w.]/g, ''))) return false
-  for (const m of code.matchAll(/\brequire\s*\(/g)) {
-    const args = callArgs(code, m.index! + m[0].length - 1)
-    if (args?.length !== 1 || !CODE_REQUIRES.test(args[0]!)) return false
-  }
-  // printing is not writing; then, with the texts in quotes left out, every name called or reached into is a plain read, and nothing
-  // is called that is not named (a call on what an index or a call gave back)
-  const bare = code.replace(/\bstd(?:out|err)\s*\.\s*write\s*\(/g, 'print(').replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''")
-  if (/[\])]\s*\(/.test(bare) || /['"]/.test(bare.replace(/''/g, ''))) return false
-  // (open itself never handed on, as to map(open, paths, modes), only called)
-  if (/\bopen\b(?!\s*\()/.test(bare)) return false
-  for (const m of bare.matchAll(/(\.\s*)?\b([A-Za-z_]\w*)\s*(\()?/g)) if ((m[1] || m[3]) && !CODE_NAMES.has(m[2]!)) return false
-  // a replace of text names what to replace and with what; one with a single argument is a path's move (pathlib's replace)
-  for (const m of code.matchAll(/\breplace\s*\(/g)) if ((callArgs(code, m.index! + m[0].length - 1)?.length ?? 0) < 2) return false
-  // every open: one argument, or a literal mode that reads, or a literal encoding beside it
-  for (const m of code.matchAll(/\bopen\s*\(/g)) {
-    const args = callArgs(code, m.index! + m[0].length - 1)
-    if (!args || !args.length || args.slice(1).some(one => !/^(?:mode\s*=\s*)?(['"])r[bt]?\1$|^(?:encoding|errors|newline)\s*=\s*(['"])[\w-]*\2$/.test(one))) return false
-  }
-  return true
-}
 const NO_MEMORY =
   "Only Claudopus writes the files chats share and answer one another through, and the update's own files: Claude never writes them with any tool."
 const NO_MEMORY_BASH = () =>
-  named("Claude changes {name}'s own settings and texts (config.json, the rules and roles in the memory folder, a repo's release.local) only with the Edit or Write tool, never with a command, so the change shows on the task's card and waits for {name} to press.")
+  named("Claude changes {name}'s own settings and texts (config.json, the rules and roles in the memory folder, a repo's release.local) only with the Edit or Write tool, never with a command, so the change shows on the task's card and waits for {name} to press. To read one, use the Read tool, or cat or jq.")
 const NO_BOXES =
   'Only the password and key runners use their boxes: Claude never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner, and for a key only through the secret runner the task rules name.'
 const NO_PUSH = 'Claude never pushes or merges to main itself, so two tasks never release at once: commit on your own branch and run the release runner the task rules name, from your worktree.'
@@ -8932,9 +8823,12 @@ const isOneCommand = (command: string) => {
 const CHAT_GIT = ['push', 'fetch', 'status', 'log', 'diff', 'show', 'branch', 'remote', 'rev-parse', 'ls-remote', 'describe', 'shortlog', 'blame']
 const CHAT_GH = ['view', 'list', 'status', 'checks', 'diff']
 const CHAT_LOOKS = ['ls', 'pwd', 'date', 'uptime', 'whoami', 'hostname', 'df', 'sw_vers', 'uname', 'which']
-// It shows a file or a page: macOS's open of a web page, or of a file of a kind that is only looked at (a picture, a PDF, a page, a
-// text, a video), in its own app or one named from a short list of browsers, viewers and editors; -R only shows a file in the Finder
-const OPEN_VIEWS = /\.(?:png|jpe?g|gif|webp|avif|heic|tiff?|bmp|svg|ico|pdf|html?|txt|md|markdown|csv|tsv|json|log|mp4|mov|m4v|webm|mp3|m4a|wav)$/i
+// It shows a file or a page: macOS's open of a page of a local server, a folder, or a file of a kind that is only looked at (a picture,
+// a PDF, a page, a text, a video), in its own app or one named from a short list of browsers, viewers and editors; -R only shows a
+// file in the Finder. A path may start at the home folder (~ or $HOME)
+const OPEN_VIEWS = /\.(?:png|jpe?g|gif|webp|avif|heic|tiff?|bmp|svg|ico|pdf|html?|txt|md|markdown|csv|tsv|json|log|mp4|mov|m4v|webm)$/i
+// a folder: the current one, the home folder, or a path ending in / whose last name has no dot (Foo.app/ is an app)
+const OPEN_FOLDER = /^(?:\.|~|\$HOME|(?:.*\/)?[^/.]+\/)$/
 const OPEN_APPS = ['safari', 'google chrome', 'chrome', 'chromium', 'vivaldi', 'firefox', 'arc', 'brave browser', 'microsoft edge', 'opera', 'orion', 'preview', 'quicktime player', 'photos', 'textedit', 'visual studio code', 'cursor', 'zed', 'sublime text', 'iina', 'vlc']
 const isChatOpen = (args: string[]) => {
   let shown = 0
@@ -8945,20 +8839,22 @@ const isChatOpen = (args: string[]) => {
       if (!OPEN_APPS.includes((args[++i] ?? '').toLowerCase())) return false
     } else if (/^-[gnRet]+$/.test(one)) continue
     else if (one.startsWith('-')) return false
-    else if (/^https?:\/\/[^\s]+$/i.test(one)) shown++
-    // a path: never a link of another kind, and for anything but -R one of the kinds above
-    else if (/^[a-z][\w+.-]*:/i.test(one) || !(isReveal || OPEN_VIEWS.test(one))) return false
+    else if (/^https?:\/\//i.test(one) && CURL_LOCAL.test(one)) shown++
+    // a path: never a link of another kind or a page elsewhere, and for anything but -R a folder or one of the kinds above
+    else if (/^[a-z][\w+.-]*:/i.test(one) || !(isReveal || OPEN_FOLDER.test(one) || OPEN_VIEWS.test(one))) return false
     else shown++
   }
   return shown > 0
 }
-// It asks how a server on this Mac stands: curl's plain GET or HEAD of a local address, its body sent nowhere but /dev/null; none of
-// curl's ways to send data, change the method or headers, follow a redirect elsewhere, write a file or read settings from one
+// It asks how a server on this Mac stands: curl's plain GET or HEAD of a local address, -q first so it reads no curlrc (which could
+// send its output into a file), its body printed or sent to /dev/null; none of curl's ways to send data, change the method or
+// headers, follow a redirect elsewhere, write a file or read settings from one
 const CURL_LOCAL = /^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|[\w-]+\.localhost)(?::\d+)?(?:[/?#]|$)/i
 const CURL_FLAGS = ['--silent', '--show-error', '--fail', '--fail-with-body', '--head', '--include', '--insecure', '--compressed', '--verbose', '-4', '-6']
 const isChatCurl = (args: string[]) => {
   let asked = 0
-  for (let i = 0; i < args.length; i++) {
+  if (args[0] !== '-q') return false
+  for (let i = 1; i < args.length; i++) {
     let flag = args[i]!
     let joined: string | undefined
     // --name=value, and a value joined to a short flag or to a run of them (-so /dev/null, -m5)
@@ -8968,8 +8864,7 @@ const isChatCurl = (args: string[]) => {
       ;[flag, joined] = [`-${m[1]}`, m[2] || undefined]
     }
     const value = () => joined ?? args[++i] ?? ''
-    // -q only first, where it keeps curl from reading a .curlrc
-    if (/^-[sSfIikv]+$/.test(flag) || CURL_FLAGS.includes(flag) || (flag === '-q' && i === 0)) continue
+    if (/^-[sSfIikv]+$/.test(flag) || CURL_FLAGS.includes(flag)) continue
     if (flag === '-o' || flag === '--output') {
       if (value() !== '/dev/null') return false
     } else if (flag === '-w' || flag === '--write-out') {
@@ -8987,8 +8882,8 @@ const isChatCurl = (args: string[]) => {
 }
 // The shape each of these passes in, told with a refusal of one that does not
 const CHAT_SHAPES: Record<string, string> = {
-  open: 'An `open` the chat runs itself shows a web page (http or https) or a file that is only looked at (a picture, a PDF, a page, a text, a video), optionally in a named browser or viewer (`-a Vivaldi`), or shows a file in the Finder with `-R`.',
-  curl: 'A `curl` the chat runs itself is a plain GET or HEAD of a local address (localhost, 127.0.0.1, [::1]) with its body sent only to /dev/null: flags -s -S -f -I -i -k -v, -o /dev/null, -w with a format, -m; no -L, -X, -H, -d, -F, -T or -O. Where a .curlrc is in the home folder, -q comes first.',
+  open: 'An `open` the chat runs itself shows a page of a local server (http://localhost:3000), a folder, or a file that is only looked at (a picture, a PDF, a page, a text, a video), optionally in a named browser or viewer (`-a Vivaldi`), or shows a file in the Finder with `-R`.',
+  curl: 'A `curl` the chat runs itself starts with -q (so it reads no curlrc) and is a plain GET or HEAD of a local address (localhost, 127.0.0.1, [::1]), its body printed or sent to /dev/null, never to a file: flags -s -S -f -I -i -k -v, -o /dev/null, -w with a format, -m; no -L, -X, -H, -d, -F, -T or -O.',
   preview_start: "The browser pane's `preview_start` runs in the chat only with a `url` of a local address (http://localhost:3000); one that starts a server by its name is a task's.",
 }
 // The browser pane's preview of a page of a local server, its list, its server's log and its tabs: shown, never a server started
@@ -9004,9 +8899,11 @@ const isChatRunnable = (command: string, branch = '') => {
   // nothing the shell fills in or spreads out: no variables, braces, globs, escapes, home or history, outside quotes; inside double
   // quotes no variable or escape (single quotes hold anything as written)
   // (a backslash there that the shell keeps as written, as in "%{http_code}\n", is as written; the address [::1] is curl's own)
-  if (/[$\\{}*?[\]~!]/.test(command.replace(/'[^']*'|"(?:[^"$`\\]|\\[^$`"\\\n])*"/g, '""').replace(/\[::1\]/g, ''))) return false
+  // (and an open's path may start at the home folder: ~ or $HOME, alone or before a /)
   const words = shellWords(command)[0] ?? []
   const head = words[0] ?? ''
+  const homed = head === 'open' ? command.replace(/(^|\s)~(?=\/|\s|$)/g, '$1').replace(/\$HOME(?=[/\s"]|$)/g, '') : command
+  if (/[$\\{}*?[\]~!]/.test(homed.replace(/'[^']*'|"(?:[^"$`\\]|\\[^$`"\\\n])*"/g, '""').replace(/\[::1\]/g, ''))) return false
   const rest = words.slice(2)
   if (head === 'open') return isChatOpen(words.slice(1))
   if (head === 'curl') return isChatCurl(words.slice(1))
@@ -11528,20 +11425,15 @@ const scriptsRun = async ($: EngineInterface, command: string) => {
 // A command, or a script it runs, that would print a kept key or password: read as written and with its quotes taken out
 const readsKept = async ($: EngineInterface, command: string) =>
   [command, unquoted(command)].some(one => KEYCHAIN_READ.test(one)) || (await scriptsRun($, command)).some(text => KEYCHAIN_READ.test(text) || KEYCHAIN_READ.test(unquoted(text)))
-// A .curlrc curl reads by itself, from the home folder or its config folder
-const curlrcIn = async ($: EngineInterface) => {
-  const home = dir.replace(/\/\.claude\/claudopus$/, '')
-  return Boolean(home) && (await Promise.all([`${home}/.curlrc`, `${home}/.config/.curlrc`].map(path => readOr($, path)))).some(Boolean)
-}
 // A tool call that writes a file of the memory folder only the mod writes (refused outright), or the person's own settings and texts
 // by a command (refused: work changes those with Edit or Write, which wait for the person's press)
 const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
   if (!dir) return ''
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
   if (e.tool === 'Bash') {
-    // The command as written and unquoted, and each script it runs; a program handed code that only reads names a file to read it
+    // The command as written and unquoted, and each script it runs
     const command = String(input.command ?? '')
-    const texts = [...(codeOnlyReads(command) ? [] : [command]), ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
+    const texts = [command, ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
     if (texts.some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
     if (texts.some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
     return ''
@@ -11722,8 +11614,6 @@ const workHooks = (on: On) => {
     // The branch a push would go from, which is never main
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-      // a curl that would read a .curlrc of the home folder, which may send its output into a file, runs only with -q first
-      && !(/^\s*curl\s/.test(chatCommand) && shellWords(chatCommand)[0]?.[1] !== '-q' && (await curlrcIn($)))
     const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)

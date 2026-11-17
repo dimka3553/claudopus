@@ -85,9 +85,12 @@ const isOneCommand = (command: string) => {
 const CHAT_GIT = ['push', 'fetch', 'status', 'log', 'diff', 'show', 'branch', 'remote', 'rev-parse', 'ls-remote', 'describe', 'shortlog', 'blame']
 const CHAT_GH = ['view', 'list', 'status', 'checks', 'diff']
 const CHAT_LOOKS = ['ls', 'pwd', 'date', 'uptime', 'whoami', 'hostname', 'df', 'sw_vers', 'uname', 'which']
-// It shows a file or a page: macOS's open of a web page, or of a file of a kind that is only looked at (a picture, a PDF, a page, a
-// text, a video), in its own app or one named from a short list of browsers, viewers and editors; -R only shows a file in the Finder
-const OPEN_VIEWS = /\.(?:png|jpe?g|gif|webp|avif|heic|tiff?|bmp|svg|ico|pdf|html?|txt|md|markdown|csv|tsv|json|log|mp4|mov|m4v|webm|mp3|m4a|wav)$/i
+// It shows a file or a page: macOS's open of a page of a local server, a folder, or a file of a kind that is only looked at (a picture,
+// a PDF, a page, a text, a video), in its own app or one named from a short list of browsers, viewers and editors; -R only shows a
+// file in the Finder. A path may start at the home folder (~ or $HOME)
+const OPEN_VIEWS = /\.(?:png|jpe?g|gif|webp|avif|heic|tiff?|bmp|svg|ico|pdf|html?|txt|md|markdown|csv|tsv|json|log|mp4|mov|m4v|webm)$/i
+// a folder: the current one, the home folder, or a path ending in / whose last name has no dot (Foo.app/ is an app)
+const OPEN_FOLDER = /^(?:\.|~|\$HOME|(?:.*\/)?[^/.]+\/)$/
 const OPEN_APPS = ['safari', 'google chrome', 'chrome', 'chromium', 'vivaldi', 'firefox', 'arc', 'brave browser', 'microsoft edge', 'opera', 'orion', 'preview', 'quicktime player', 'photos', 'textedit', 'visual studio code', 'cursor', 'zed', 'sublime text', 'iina', 'vlc']
 const isChatOpen = (args: string[]) => {
   let shown = 0
@@ -98,20 +101,22 @@ const isChatOpen = (args: string[]) => {
       if (!OPEN_APPS.includes((args[++i] ?? '').toLowerCase())) return false
     } else if (/^-[gnRet]+$/.test(one)) continue
     else if (one.startsWith('-')) return false
-    else if (/^https?:\/\/[^\s]+$/i.test(one)) shown++
-    // a path: never a link of another kind, and for anything but -R one of the kinds above
-    else if (/^[a-z][\w+.-]*:/i.test(one) || !(isReveal || OPEN_VIEWS.test(one))) return false
+    else if (/^https?:\/\//i.test(one) && CURL_LOCAL.test(one)) shown++
+    // a path: never a link of another kind or a page elsewhere, and for anything but -R a folder or one of the kinds above
+    else if (/^[a-z][\w+.-]*:/i.test(one) || !(isReveal || OPEN_FOLDER.test(one) || OPEN_VIEWS.test(one))) return false
     else shown++
   }
   return shown > 0
 }
-// It asks how a server on this Mac stands: curl's plain GET or HEAD of a local address, its body sent nowhere but /dev/null; none of
-// curl's ways to send data, change the method or headers, follow a redirect elsewhere, write a file or read settings from one
+// It asks how a server on this Mac stands: curl's plain GET or HEAD of a local address, -q first so it reads no curlrc (which could
+// send its output into a file), its body printed or sent to /dev/null; none of curl's ways to send data, change the method or
+// headers, follow a redirect elsewhere, write a file or read settings from one
 const CURL_LOCAL = /^(?:https?:\/\/)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]|[\w-]+\.localhost)(?::\d+)?(?:[/?#]|$)/i
 const CURL_FLAGS = ['--silent', '--show-error', '--fail', '--fail-with-body', '--head', '--include', '--insecure', '--compressed', '--verbose', '-4', '-6']
 const isChatCurl = (args: string[]) => {
   let asked = 0
-  for (let i = 0; i < args.length; i++) {
+  if (args[0] !== '-q') return false
+  for (let i = 1; i < args.length; i++) {
     let flag = args[i]!
     let joined: string | undefined
     // --name=value, and a value joined to a short flag or to a run of them (-so /dev/null, -m5)
@@ -121,8 +126,7 @@ const isChatCurl = (args: string[]) => {
       ;[flag, joined] = [`-${m[1]}`, m[2] || undefined]
     }
     const value = () => joined ?? args[++i] ?? ''
-    // -q only first, where it keeps curl from reading a .curlrc
-    if (/^-[sSfIikv]+$/.test(flag) || CURL_FLAGS.includes(flag) || (flag === '-q' && i === 0)) continue
+    if (/^-[sSfIikv]+$/.test(flag) || CURL_FLAGS.includes(flag)) continue
     if (flag === '-o' || flag === '--output') {
       if (value() !== '/dev/null') return false
     } else if (flag === '-w' || flag === '--write-out') {
@@ -140,8 +144,8 @@ const isChatCurl = (args: string[]) => {
 }
 // The shape each of these passes in, told with a refusal of one that does not
 const CHAT_SHAPES: Record<string, string> = {
-  open: 'An `open` the chat runs itself shows a web page (http or https) or a file that is only looked at (a picture, a PDF, a page, a text, a video), optionally in a named browser or viewer (`-a Vivaldi`), or shows a file in the Finder with `-R`.',
-  curl: 'A `curl` the chat runs itself is a plain GET or HEAD of a local address (localhost, 127.0.0.1, [::1]) with its body sent only to /dev/null: flags -s -S -f -I -i -k -v, -o /dev/null, -w with a format, -m; no -L, -X, -H, -d, -F, -T or -O. Where a .curlrc is in the home folder, -q comes first.',
+  open: 'An `open` the chat runs itself shows a page of a local server (http://localhost:3000), a folder, or a file that is only looked at (a picture, a PDF, a page, a text, a video), optionally in a named browser or viewer (`-a Vivaldi`), or shows a file in the Finder with `-R`.',
+  curl: 'A `curl` the chat runs itself starts with -q (so it reads no curlrc) and is a plain GET or HEAD of a local address (localhost, 127.0.0.1, [::1]), its body printed or sent to /dev/null, never to a file: flags -s -S -f -I -i -k -v, -o /dev/null, -w with a format, -m; no -L, -X, -H, -d, -F, -T or -O.',
   preview_start: "The browser pane's `preview_start` runs in the chat only with a `url` of a local address (http://localhost:3000); one that starts a server by its name is a task's.",
 }
 // The browser pane's preview of a page of a local server, its list, its server's log and its tabs: shown, never a server started
@@ -157,9 +161,11 @@ const isChatRunnable = (command: string, branch = '') => {
   // nothing the shell fills in or spreads out: no variables, braces, globs, escapes, home or history, outside quotes; inside double
   // quotes no variable or escape (single quotes hold anything as written)
   // (a backslash there that the shell keeps as written, as in "%{http_code}\n", is as written; the address [::1] is curl's own)
-  if (/[$\\{}*?[\]~!]/.test(command.replace(/'[^']*'|"(?:[^"$`\\]|\\[^$`"\\\n])*"/g, '""').replace(/\[::1\]/g, ''))) return false
+  // (and an open's path may start at the home folder: ~ or $HOME, alone or before a /)
   const words = shellWords(command)[0] ?? []
   const head = words[0] ?? ''
+  const homed = head === 'open' ? command.replace(/(^|\s)~(?=\/|\s|$)/g, '$1').replace(/\$HOME(?=[/\s"]|$)/g, '') : command
+  if (/[$\\{}*?[\]~!]/.test(homed.replace(/'[^']*'|"(?:[^"$`\\]|\\[^$`"\\\n])*"/g, '""').replace(/\[::1\]/g, ''))) return false
   const rest = words.slice(2)
   if (head === 'open') return isChatOpen(words.slice(1))
   if (head === 'curl') return isChatCurl(words.slice(1))
