@@ -44,5 +44,26 @@ within '! "$run" alive "$g" "$out"' 10 && ok "stop ends the run" || no "stop end
 within '! pgrep -g "$g" > /dev/null' 10 && ok "stop ends what the run started too" || no "stop ends what the run started too"
 [ "$(tail -n 1 "$out")" = 'claudopus-exit 143 stopped' ] && ok "a stopped run says it was stopped" || no "a stopped run says it was stopped: $(tail -n 1 "$out")"
 
+# The person's zsh, as on a Mac, reads its start files; stopped, nothing more of the command line runs (an interactive zsh ignores
+# TERM and would go on to the next command)
+if [ -x /bin/zsh ]; then
+  printf 'export FROM_RC=yes\n' > "$tmp/home/.zshrc"
+  out=$tmp/d.log
+  g=$(SHELL=/bin/zsh ZDOTDIR=$tmp/home "$run" start 'echo "rc=${FROM_RC-}"; sleep 40 | cat; echo after' "$out" "$tmp/folder")
+  within 'grep -q "^rc=" "$out"' 10
+  grep -qx 'rc=yes' "$out" && ok "zsh reads the person's .zshrc" || no "zsh reads the person's .zshrc: $(cat "$out")"
+  "$run" stop "$g" "$out"
+  within '! "$run" alive "$g" "$out"' 10 && ok "a stopped zsh run ends" || no "a stopped zsh run ends"
+  perl -e 'select(undef, undef, undef, 1.5)'
+  ! grep -qx after "$out" && [ "$(tail -n 1 "$out")" = 'claudopus-exit 143 stopped' ] && ok "stopped, nothing more of its command line runs" || no "stopped, nothing more of its command line runs: $(cat "$out")"
+fi
+
+# A stop that comes after the run ended on its own leaves its own end
+out=$tmp/e.log
+g=$("$run" start 'exit 0' "$out" "$tmp/folder")
+within 'grep -q "^claudopus-exit" "$out"' 10
+"$run" stop "$g" "$out"
+[ "$(tail -n 1 "$out")" = 'claudopus-exit 0' ] && ok "a late stop leaves the run's own end" || no "a late stop leaves the run's own end: $(tail -n 1 "$out")"
+
 [ $fails = 0 ] && echo "all run-it tests passed" || echo "$fails run-it tests FAILED"
 exit $fails

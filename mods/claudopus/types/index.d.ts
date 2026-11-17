@@ -251,8 +251,9 @@ export type Report = {
 // again. `choices`: its answers when it is not yes or no
 // A command Claude Code refused a task, offered on its card's notice (`askAt`) to run on the person's press: the agent whose call
 // it was (`from`), the command whole, the folder it runs in, what the task called it, and the longest it may run. Once pressed:
-// when it started, its output file and the process group it runs as; once ended: when, how, and its exit
-export type PressRun = { card: string; from: string; askAt: number; command: string; cwd: string; description: string; limitMs: number; startedAt?: number; log?: string; pid?: string; endedAt?: number; end?: 'exited' | 'limit' | 'stopped' | 'lost'; exit?: number }
+// when it started, its output file and the process group it runs as; once ended: when, how, and its exit, and while what it
+// printed waits to start its ended task again, the task and the message (kept, so a reload sends it still)
+export type PressRun = { card: string; from: string; askAt: number; command: string; cwd: string; description: string; limitMs: number; startedAt?: number; log?: string; pid?: string; endedAt?: number; end?: 'exited' | 'limit' | 'stopped' | 'lost'; exit?: number; waiting?: { target: string; text: string } }
 
 export type Wait = { text: string; answer?: string; choices?: string[]; ask?: number; isAsked?: boolean; byAsk?: number }
 

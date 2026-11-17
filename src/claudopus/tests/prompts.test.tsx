@@ -363,6 +363,11 @@ test("a command Claude Code refuses a task is shown whole on its card with where
   const pressed = async (label: string) => list.press({ key: (await button(label))?.key ?? '' })
   const buttons = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => /without it|Run it|Stop it|Open in Terminal|Send it to Claude/.test(label))
   const stops = () => pressRuns.filter(argv => argv[1] === 'stop').length
+  // Carry on without it runs nothing, and says nothing of words
+  await refuse('b00', { command: 'dig +short NS example.net', description: 'Look up the name servers' })
+  await pressed('Carry on without it')
+  expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('do not do it, nor reach its result by other means')))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: "Your answer didn't run the command: only its Run it button runs it" })).toBeUndefined()
   // Words never run it, even "Run it" typed in its reply box: the card says only the button does
   await refuse('b0', { command: 'dig +short NS example.org', description: 'Look up the name servers' })
   const box = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? '')))
