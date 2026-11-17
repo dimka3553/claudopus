@@ -288,7 +288,7 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} 
 const WAITS_ON = (work: string, helpers: number, wake: string) =>
   `From Claudopus: the task "${work}" ended its step without its report because it waits ${helpers ? `for ${plural(helpers, 'a helper', 'helpers')} it started` : `to be started again once this is there: ${wake}`}. Claude Code may say it ended without delivering a report, but it is still at work: ${
     helpers ? `${helpers === 1 ? "the helper's result starts" : "each helper's result starts"} it again` : 'Claudopus starts it again then'
-  }, and its report comes after that. Claudopus starts it again if that wait runs out or its helpers go quiet; do not tell {name} it stopped.`
+  }, and its report comes after that. It cannot give its report while it waits, so do not message it for one: Claudopus starts it again if that wait runs out or its helpers go quiet, and tells you if it is stuck. Do not tell {name} it stopped.`
 // The top work at work, its report not given, that waits on what the engine does not count as its own: a helper the engine still
 // lists at work, or a wake_me still due. A helper's card left at work after the helper is gone, or a wake long past, is not waiting:
 // the engine's word that the work ended then reaches the chat as it is

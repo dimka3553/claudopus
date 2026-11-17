@@ -7458,6 +7458,8 @@ const ENGINE_NOTES = [
 const isBareNotice = (body: string) => {
   const note = /<note>([\s\S]*?)<\/note>/.exec(body)?.[1]
   if (note !== undefined && !ENGINE_NOTES.includes(note.trim())) return false
+  const summary = /<summary>([\s\S]*?)<\/summary>/.exec(body)?.[1]
+  if (summary !== undefined && !/^Agent "[^"]*" (?:finished|is waiting on its own background work)$/.test(summary.trim())) return false
   const left = body.replace(/<(task-id|tool-use-id|output-file|status|summary|note|usage)>[\s\S]*?<\/\1>/g, '').replace(/<result>([\s\S]*?)<\/result>/g, (_, result: string) => ENGINE_FILLER.reduce((one, sentence) => one.replace(sentence, ''), result))
   return ENGINE_FILLER.reduce((one, sentence) => one.replace(sentence, ''), left).trim() === ''
 }
@@ -9104,7 +9106,7 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} 
 const WAITS_ON = (work: string, helpers: number, wake: string) =>
   `From Claudopus: the task "${work}" ended its step without its report because it waits ${helpers ? `for ${plural(helpers, 'a helper', 'helpers')} it started` : `to be started again once this is there: ${wake}`}. Claude Code may say it ended without delivering a report, but it is still at work: ${
     helpers ? `${helpers === 1 ? "the helper's result starts" : "each helper's result starts"} it again` : 'Claudopus starts it again then'
-  }, and its report comes after that. Claudopus starts it again if that wait runs out or its helpers go quiet; do not tell {name} it stopped.`
+  }, and its report comes after that. It cannot give its report while it waits, so do not message it for one: Claudopus starts it again if that wait runs out or its helpers go quiet, and tells you if it is stuck. Do not tell {name} it stopped.`
 const waitingNow = async ($: EngineInterface) => {
   const list = await read($, todos)
   const listed = new Map((await $.agent.list().catch(() => [])).map(one => [one.id, one.status] as const))
@@ -11535,7 +11537,7 @@ const panelHooks = (on: On) => {
             {/* Nothing new has come back under it for a while: said in the colour of what needs the person */}
             {one.stuckAt && one.status === 'working' && !one.chat ? (
               <Box key={`stuck-${one.id}`} paddingLeft={lead}>
-                <Text color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
+                {runningKids(all, one.id).some(kid => isBusy(all, kid, at)) ? <Text dimColor wrap="wrap">{stuckLine(all, one, at)}</Text> : <Text color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>}
               </Box>
             ) : null}
             {/* Cut off as the chat's process ended: when, and since when it goes on again; amber when it could not be started again */}

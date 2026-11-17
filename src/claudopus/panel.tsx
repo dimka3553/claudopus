@@ -499,7 +499,7 @@ const panelHooks = (on: On) => {
             {/* Nothing new has come back under it for a while: said in the colour of what needs the person */}
             {one.stuckAt && one.status === 'working' && !one.chat ? (
               <Box key={`stuck-${one.id}`} paddingLeft={lead}>
-                <Text color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
+                {runningKids(all, one.id).some(kid => isBusy(all, kid, at)) ? <Text dimColor wrap="wrap">{stuckLine(all, one, at)}</Text> : <Text color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>}
               </Box>
             ) : null}
             {/* Cut off as the chat's process ended: when, and since when it goes on again; amber when it could not be started again */}
