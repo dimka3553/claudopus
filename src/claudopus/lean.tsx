@@ -299,6 +299,30 @@ const stepLine = async ($: EngineInterface, id: string, text: string) => {
   await changeTodos($, list => list.map(card => (card.id === id ? { ...card, entries: [...card.entries, { at, kind: 'note' as const, text }].slice(-ENTRIES_KEPT) } : card)))
   redraw($)
 }
+// A go-ahead pressed while its work was still in the turn that asked (stepOnEnd) is done once its card has ended, looked for at
+// each turn's end (from that hook, so a small fresh task starts in a hook), each sync of the engine's list and right after the press
+// itself, should the turn have ended meanwhile; a release then takes the branch as the task left it. Taken off the card in the same
+// write that finds it, so it is done once. No step when the card asks something else by then, nor when you stopped it; a turn that
+// was stopped or failed puts the question back, to be pressed again
+const stepsAtEnd = async ($: EngineInterface) => {
+  if (!(await read($, todos)).some(one => one.stepOnEnd && one.status !== 'working')) return
+  let due: Todo[] = []
+  await changeTodos($, list => ((due = list.filter(one => one.stepOnEnd && one.status !== 'working')), due.length ? list.map(one => (due.includes(one) ? { ...one, stepOnEnd: undefined, ...(one.status !== 'done' && !one.byYou && !one.ask ? { ask: one.stepOnEnd?.ask } : {}) } : one)) : list))
+  for (const card of due) {
+    const held = card.stepOnEnd
+    if (!held) continue
+    const id = card.id
+    if (card.byYou) await stepLine($, id, `Nothing was done on your "${held.said}": you stopped it first`)
+    else if (card.ask && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) await stepLine($, id, `Nothing was done on your "${held.said}": Claude asked something else first`)
+    else if (card.status !== 'done') {
+      // pressed again as a fresh answer, as when an answer could not be sent (answerNow)
+      answeredAsks.delete(`${id}:${held.ask.at}:${held.ask.text}`)
+      if (answeredAt.get(id) === held.ask.at) answeredAt.delete(id)
+      sentReplies.delete(id)
+      await stepLine($, id, `Nothing was done on your "${held.said}": Claude's turn ${card.status === 'stopped' ? 'was stopped' : 'failed'} first, so the question is back`)
+    } else await lastStep($, card, held.ask, held.said).catch(err => log($, `last step of ${id} not done: ${String(err)}`))
+  }
+}
 const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string) => {
   const folder = ask.folder ?? ''
   const step = ask.lastStep ?? ''

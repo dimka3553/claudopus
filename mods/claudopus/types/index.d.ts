@@ -91,6 +91,8 @@ export type Todo = {
   answeredAt?: number
   // When its turn last ended by handing back its report: it has finished for good, so nothing it left running wakes it again
   handedBackAt?: number
+  // A go-ahead to finish pressed while the work was still in the turn that asked: its last step, done as that turn ends
+  stepOnEnd?: { ask: NonNullable<Todo['ask']>; said: string }
   // The call it has been running longest, while one runs: what it is in a few words, since when, and for a command, the command
   // and its own words for it
   running?: { what: string; at: number; cmd?: string; label?: string }

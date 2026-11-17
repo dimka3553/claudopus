@@ -1214,6 +1214,7 @@ const sync = async ($: EngineInterface) => {
     return isChanged ? capped([...cards.values()]) : list
   })
   if (listed) await endUnheard($, live, now).catch(err => log($, `work that ended unheard not looked for: ${String(err)}`))
+  await stepsAtEnd($).catch(err => log($, `last step not done: ${String(err)}`))
   await keepStoppedReports($, now)
   await lookEnds($)
   await saveKeep($).catch(err => log($, `work at work not kept for the keeper: ${String(err)}`))
@@ -4978,10 +4979,17 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   redraw($)
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
-  if (!working && !isReply && ask.lastStep && ask.folder && ask.choices?.[0] === said) {
+  if (!isReply && ask.lastStep && ask.folder && ask.choices?.[0] === said) {
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line, isCard: true, askAt: ask.at })
     redraw($)
-    await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
+    if (!working) await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
+    else {
+      await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, stepOnEnd: { ask, said } } : card)))
+      await tell($, one.id, `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\nClaudopus does that step (${cut(ask.lastStep, 160)}) once you end this turn: do not do it or start it yourself. Commit anything left on the branch now, change nothing on it after that, and end with your report.`)
+      const held = (err: unknown) => log($, `last step of ${one.id} not held: ${String(err)}`)
+      await stepLine($, one.id, `On your "${said}", Claudopus does the last step once Claude finishes`).catch(held)
+      await stepsAtEnd($).catch(held)
+    }
     return void askGone($, one, said)
   }
   if (ask.refused) {
@@ -7525,6 +7533,24 @@ const stepLine = async ($: EngineInterface, id: string, text: string) => {
   await changeTodos($, list => list.map(card => (card.id === id ? { ...card, entries: [...card.entries, { at, kind: 'note' as const, text }].slice(-ENTRIES_KEPT) } : card)))
   redraw($)
 }
+const stepsAtEnd = async ($: EngineInterface) => {
+  if (!(await read($, todos)).some(one => one.stepOnEnd && one.status !== 'working')) return
+  let due: Todo[] = []
+  await changeTodos($, list => ((due = list.filter(one => one.stepOnEnd && one.status !== 'working')), due.length ? list.map(one => (due.includes(one) ? { ...one, stepOnEnd: undefined, ...(one.status !== 'done' && !one.byYou && !one.ask ? { ask: one.stepOnEnd?.ask } : {}) } : one)) : list))
+  for (const card of due) {
+    const held = card.stepOnEnd
+    if (!held) continue
+    const id = card.id
+    if (card.byYou) await stepLine($, id, `Nothing was done on your "${held.said}": you stopped it first`)
+    else if (card.ask && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) await stepLine($, id, `Nothing was done on your "${held.said}": Claude asked something else first`)
+    else if (card.status !== 'done') {
+      answeredAsks.delete(`${id}:${held.ask.at}:${held.ask.text}`)
+      if (answeredAt.get(id) === held.ask.at) answeredAt.delete(id)
+      sentReplies.delete(id)
+      await stepLine($, id, `Nothing was done on your "${held.said}": Claude's turn ${card.status === 'stopped' ? 'was stopped' : 'failed'} first, so the question is back`)
+    } else await lastStep($, card, held.ask, held.said).catch(err => log($, `last step of ${id} not done: ${String(err)}`))
+  }
+}
 const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string) => {
   const folder = ask.folder ?? ''
   const step = ask.lastStep ?? ''
@@ -8025,6 +8051,7 @@ const chatHooks = (on: On) => {
       if (how === 'stopped') await keepStoppedReports($, now)
       await lookEnds($)
       if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
+      await stepsAtEnd($).catch(err => log($, `last step not done: ${String(err)}`))
       if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
       const card = (await read($, todos)).find(one => one.id === id)
       const report = (e.answer ?? '').trim() || answer

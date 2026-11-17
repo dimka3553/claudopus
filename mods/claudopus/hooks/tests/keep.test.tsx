@@ -517,7 +517,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // Claude Code's auto mode refuses this tool outright, as it does a background task's call, with no prompt to the person
     if (files.get('auto-refuse') === e.tool) return { result: "Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Unauthorized Access]. If you have other tasks that don't depend on this action, continue working on those.", isError: true } as never
     // What the chat had been told when a hand-back reached the engine, which hands it on at once
-    if (e.tool === 'SubagentHandback') atHandback.push(appended.length)
+    if (String(e.tool) === 'SubagentHandback') atHandback.push(appended.length)
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,

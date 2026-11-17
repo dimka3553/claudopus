@@ -496,7 +496,7 @@ test('a press on one ended work\'s ask leaves the other asks\' buttons where the
 })
 
 test('a go-ahead to finish on ended work does its last step without waking it: a release in a repo with .release is held on the card for the allow, any other step goes to a small fresh task; a reply in words or the other choice still goes to the work', async ($, on) => {
-  const { files, resumed, clock, wake, asked } = world(on)
+  const { files, resumed, appended, clock, wake, asked } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'four fixes', wait: false, origin: composer })
   for (const description of ['Fix the nose', 'Fix the ear', 'Fix the chin', 'Fix the brow']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
@@ -549,6 +549,43 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   const box = await until(async () => ((await list.findAll({ type: 'Input' } as never)) as { key?: string }[]).find(one => /-reply-/.test(one.key ?? '') && String(one.key).includes('a4')))
   await list.input({ key: box?.key ?? '', text: 'Release it after lunch' })
   expect(await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('Release it after lunch')))).toBeDefined()
+
+  // Release it pressed while the work is still in the turn that asked (writing its waits and report, as on 16 Nov 19:49 and 17 Nov
+  // 07:49): the work is told the step is Claudopus's, not left it, and the step is done once its card has ended: the release's allow
+  // box, a small fresh task for any other step. A turn that was stopped first does no step, and the question is back on the card
+  for (const description of ['Fix the jaw', 'Fix the cheek', 'Fix the lip', 'Fix the neck']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
+  const working = async (id: string, last_step: string, folder: string) => {
+    await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${id}`, agentId: id, text: `Release ${id}?`, choices: ['Release it', 'Not now'], last_step, folder } as never)
+    await press(id, 'Release it')
+    expect(await until(async () => appended.find(line => line.startsWith(`${id}: `) && line.includes('pressed "Release it"')))).toContain('do not do it or start it yourself')
+  }
+  const gate5 = async () => (await list.findAll({ type: 'Button' })).find(b => /^gate-step-a5-.*once/.test(String(b.key ?? '')))
+  await working('a5', 'release', '/repo/wt')
+  expect(await until(async () => list.find({ type: 'Text', text: 'On your "Release it", Claudopus does the last step once Claude finishes' }))).toBeDefined()
+  await clock.advance(60_000)
+  expect(await gate5()).toBeUndefined()
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h-a5', agentId: 'a5', message: 'Claudopus releases it.' } as never)
+  await $.turn.complete({ answer: 'Claudopus releases it.', durationMs: 1, isAborted: false, turnId: 'turn-a5', reason: 'answer', agentId: 'a5' } as never)
+  expect(await until(gate5)).toBeDefined()
+  expect(files.get(`${MEMORY}/log.md`)).toContain('last step of a5 on')
+  // (denied, as the kit's held box looks again at once and would hold the file open)
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => /^gate-step-a5-.*deny/.test(String(b.key ?? '')))?.key ?? '' })
+  expect(await until(async () => (wake(), (files.get(`${MEMORY}/log.md`) ?? '').match(/release of wt: denied/g)?.length === 2 ? true : undefined))).toBe(true)
+  await working('a6', 'Merge the PR and look at the build', '/repo/plain')
+  await $.turn.complete({ answer: 'Claudopus merges it.', durationMs: 1, isAborted: false, turnId: 'turn-a6', reason: 'answer', agentId: 'a6' } as never)
+  // (found by its question: the small task a2's step started took the next number)
+  expect(await until(async () => prompts.find(one => one.startsWith('Do the last step of the task') && one.includes('(to: Release a6?)')))).toContain('Merge the PR and look at the build')
+  await working('a7', 'release', '/repo/wt')
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 'turn-a7', reason: 'answer', agentId: 'a7' } as never)
+  expect(await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it' && String(b.key ?? '').startsWith('ask-a7-')))).toBeDefined()
+  expect(files.get(`${MEMORY}/log.md`)).not.toContain('last step of a7 on')
+  // nor when it asks something else before its turn ends
+  await working('a8', 'release', '/repo/wt')
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k-a8b', agentId: 'a8', text: 'A check failed: may I fix it first?', choices: ['Fix it', 'Not now'] } as never)
+  await $.turn.complete({ answer: 'May I fix it first?', durationMs: 1, isAborted: false, turnId: 'turn-a8', reason: 'answer', agentId: 'a8' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Nothing was done on your "Release it": Claude asked something else first' }))).toBeDefined()
+  expect(files.get(`${MEMORY}/log.md`)).not.toContain('last step of a8 on')
+  expect(resumed.filter(line => /^a[5678]: /.test(line))).toEqual([])
   await list.unmount()
 })
 
