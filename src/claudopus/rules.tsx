@@ -3,9 +3,9 @@
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
 const BRIEF =
-  'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command, a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
+  'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
 const REFUSED =
-  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow, if any; it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
+  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
   `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
 // A command that would print a password or key the keychain keeps (on Linux, the files bin/keyring keeps). Work uses a kept key only through `bin/secret`, which reads it itself
@@ -184,30 +184,114 @@ const writesMemory = (text: string, names: readonly string[]): boolean => {
     .join('\n')
   return namesMemory(kept, names) || (names === MEMORY_PERSON && /\brelease\.local\b/.test(kept))
 }
-// A command that is only Python or Node handed code that reads (`python3 -c "print(json.load(open(p)))"`, `node -e`): nothing joined
-// to it, nothing sent into a file, and in its code no open for writing and nothing that writes, moves, removes or runs anything. Read
-// as plainly as the guard above, so a trick in the code still counts as a write; a command that changes a file anyway is undone as it ends
-const CODE_WRITES =
-  /write|append|dump(?!s)|rename|replace|remove|delete|unlink|\brm\w*\s*\(|\bcp\w*\s*\(|copy|move|mkd|makedirs|link|truncate|chmod|chown|utime|touch|system|popen|spawn|exec|eval|compile|subprocess|child_process|shutil|pathlib|fileutils|__import__|import\s*\(|importlib|getattr|setattr|globals|\bvm\b|\bFunction\s*\(|mmap|ctypes|\bpty\b|\bsocket|`/i
-const CODE_RUNNERS: Record<string, readonly string[]> = { python: ['-c'], python3: ['-c'], node: ['-e', '-p', '--eval', '--print'] }
+// A command that is only Python or Node handed code that reads (`python3 -c "print(json.load(open(p)))"`, `node -e`), at most with its
+// errors sent to /dev/null and its output piped into a reader (head, tail, wc, grep, jq, cut, tr): nothing else joined to it and
+// nothing sent into a file. Its code passes only when every name it calls or reaches into is one of a short list of plain reads
+// (open of one path, json, a text's own ways, printing, Path's read_text, fs.readFileSync), its modules are json, sys, os and pathlib
+// (fs, path and os in Node), and no call is reached by a computed name. Anything else is read as a write; a command that changes the
+// files anyway is undone as it ends
+const CODE_NAMES = new Set(
+  (
+    'print open len str int float bool list dict set tuple sorted reversed enumerate range zip map filter min max sum any all abs round repr type isinstance next iter ' +
+    'load loads dumps read read_text read_bytes readline readlines keys values items get Path home expanduser expandvars join exists isfile isdir basename dirname ' +
+    'abspath realpath getenv listdir is_file is_dir iterdir glob stat getsize getmtime splitlines split rsplit strip lstrip rstrip lower upper startswith endswith ' +
+    'replace format count find index decode encode path environ argv stdout stderr stdin st_size st_mtime name stem suffix parent parts ' +
+    'if elif else for while not and or in is return lambda typeof catch ' +
+    'console log error JSON parse stringify require readFileSync existsSync statSync readdirSync toString trim includes slice sort push entries length env process homedir resolve String Number Object Array'
+  ).split(' '),
+)
+const CODE_MODULES = ['json', 'sys', 'os', 'os.path', 'pathlib']
+const CODE_REQUIRES = /^(['"])(?:node:)?(?:fs|path|os)\1$/
+const CODE_RUNNERS: Record<string, { flags: RegExp; code: readonly string[] }> = {
+  python: { flags: /^-[IBSEusq]+$/, code: ['-c'] },
+  python3: { flags: /^-[IBSEusq]+$/, code: ['-c'] },
+  node: { flags: /^$/, code: ['-e', '-p', '-pe', '--eval', '--print'] },
+}
+const PIPE_READERS = ['head', 'tail', 'wc', 'grep', 'jq', 'cut', 'tr']
+// The command cut at each | outside quotes, with what lies outside quotes in each piece
+const pipedParts = (command: string) => {
+  const parts: { text: string; bare: string }[] = [{ text: '', bare: '' }]
+  let quote = ''
+  for (const c of command) {
+    const part = parts[parts.length - 1]!
+    if (quote) quote = c === quote ? '' : quote
+    else if (c === "'" || c === '"') quote = c
+    else if (c === '|') {
+      parts.push({ text: '', bare: '' })
+      continue
+    } else part.bare += c
+    part.text += c
+  }
+  return quote ? [] : parts
+}
+// The arguments of the call that starts at `open`, split at its own commas, or undefined when they cannot be read plainly
+const callArgs = (code: string, open: number): string[] | undefined => {
+  const args: string[] = []
+  let depth = 0
+  let quote = ''
+  let arg = ''
+  for (let i = open + 1; i < code.length; i++) {
+    const c = code[i]!
+    if (quote) {
+      if (c === '\\') arg += c + (code[++i] ?? '')
+      else (quote = c === quote ? '' : quote), (arg += c)
+      continue
+    }
+    if (c === "'" || c === '"') (quote = c), (arg += c)
+    else if ('([{'.includes(c)) depth++, (arg += c)
+    else if (')]}'.includes(c)) {
+      if (depth === 0) return arg.trim() ? [...args, arg.trim()] : args
+      depth--
+      arg += c
+    } else if (c === ',' && depth === 0) args.push(arg.trim()), (arg = '')
+    else arg += c
+  }
+  return undefined
+}
 const codeOnlyReads = (command: string): boolean => {
   if (/\n|\$\(|`/.test(command)) return false
-  const parts = shellWords(command)
-  if (parts.length !== 1) return false
-  const words = parts[0]!
+  const parts = pipedParts(command.trim())
+  if (!parts.length || parts.some(one => !one.text.trim())) return false
+  // after the code, only the reader each pipe goes into, and no file sent into or read from but errors sent to /dev/null
+  for (const one of parts.slice(1)) {
+    const words = shellWords(one.text)
+    if (words.length !== 1 || !PIPE_READERS.includes(words[0]![0] ?? '') || /[;&<>]/.test(one.bare)) return false
+  }
+  if (/[;&<]/.test(parts[0]!.bare) || /[<>]/.test(parts[0]!.bare.replace(/(?:^|\s)2>\/dev\/null(?=\s|$)/g, ' '))) return false
+  const words = (shellWords(parts[0]!.text)[0] ?? []).filter(one => one !== '2>/dev/null')
   const name = (words[0] ?? '').split('/').pop() ?? ''
-  const flags = CODE_RUNNERS[/^python3\.\d+$/.test(name) ? 'python3' : name]
-  // its code straight after the program: nothing set before it, no other flag (a module, an import hook, perl's -i) beside it
-  if (!flags || !flags.includes(words[1] ?? '') || words.length < 3) return false
-  const code = words[2]!
-  // what follows the code is its arguments, never a file it is sent into
-  if (words.slice(3).some(one => /[<>]/.test(one))) return false
-  // (printing is not writing)
-  if (CODE_WRITES.test(code.replace(/\bstd(?:out|err)\.write\b/g, ''))) return false
-  // an open whose arguments name no mode that writes ('w', 'a', 'x', '+') and no flag of os.open's or Node's; an open whose
-  // arguments cannot be read plainly counts as one that writes
-  const opens = code.replace(/\bopen\w*\s*\(((?:[^()]|\([^()]*\))*)\)/gi, (all, args: string) => (/(['"])[rwabxtU+]*[wax+][rwabxtU+]*\1|\bO_|\bflags?\b/.test(args) ? all : ''))
-  return !/\bopen\w*\s*\(/i.test(opens)
+  const runner = CODE_RUNNERS[/^python3\.\d+$/.test(name) ? 'python3' : name]
+  if (!runner || !Object.hasOwn(CODE_RUNNERS, /^python3\.\d+$/.test(name) ? 'python3' : name)) return false
+  // the program's own flags (no module, no import hook) and then its code
+  let at = 1
+  while (at < words.length && runner.flags.test(words[at]!) && !runner.code.includes(words[at]!)) at++
+  if (!runner.code.includes(words[at] ?? '') || at + 1 >= words.length) return false
+  const code = words[at + 1]!
+  // a string that runs what it holds (Python's f-strings) is not plain
+  if (/(?:^|[^\w'"])[rRbBuU]?[fF][rRbB]?['"]/.test(code)) return false
+  // modules and what Node requires
+  for (const m of code.matchAll(/\bfrom\s+([\w.]+)\s+import\s+([\w\s,]+)/g)) if (!CODE_MODULES.includes(m[1]!) || m[2]!.split(',').some(one => !CODE_NAMES.has(one.trim().split(/\s+/)[0]!))) return false
+  for (const m of code.replace(/\bfrom\s+[\w.]+\s+import\s+[\w\s,]+/g, '').matchAll(/(?:^|[;\s])import\s+([\w.\s,]+)/g)) if (m[1]!.split(',').some(one => !CODE_MODULES.includes(one.trim().split(/\s+/)[0]!))) return false
+  if (/\bimport\b/.test(code.replace(/\bfrom\s+[\w.]+\s+import\b|(?:^|[;\s])import\s+[\w.]/g, ''))) return false
+  for (const m of code.matchAll(/\brequire\s*\(/g)) {
+    const args = callArgs(code, m.index! + m[0].length - 1)
+    if (args?.length !== 1 || !CODE_REQUIRES.test(args[0]!)) return false
+  }
+  // printing is not writing; then, with the texts in quotes left out, every name called or reached into is a plain read, and nothing
+  // is called that is not named (a call on what an index or a call gave back)
+  const bare = code.replace(/\bstd(?:out|err)\s*\.\s*write\s*\(/g, 'print(').replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"/g, "''")
+  if (/[\])]\s*\(/.test(bare) || /['"]/.test(bare.replace(/''/g, ''))) return false
+  // (open itself never handed on, as to map(open, paths, modes), only called)
+  if (/\bopen\b(?!\s*\()/.test(bare)) return false
+  for (const m of bare.matchAll(/(\.\s*)?\b([A-Za-z_]\w*)\s*(\()?/g)) if ((m[1] || m[3]) && !CODE_NAMES.has(m[2]!)) return false
+  // a replace of text names what to replace and with what; one with a single argument is a path's move (pathlib's replace)
+  for (const m of code.matchAll(/\breplace\s*\(/g)) if ((callArgs(code, m.index! + m[0].length - 1)?.length ?? 0) < 2) return false
+  // every open: one argument, or a literal mode that reads, or a literal encoding beside it
+  for (const m of code.matchAll(/\bopen\s*\(/g)) {
+    const args = callArgs(code, m.index! + m[0].length - 1)
+    if (!args || !args.length || args.slice(1).some(one => !/^(?:mode\s*=\s*)?(['"])r[bt]?\1$|^(?:encoding|errors|newline)\s*=\s*(['"])[\w-]*\2$/.test(one))) return false
+  }
+  return true
 }
 const NO_MEMORY =
   "Only Claudopus writes the files chats share and answer one another through, and the update's own files: Claude never writes them with any tool."

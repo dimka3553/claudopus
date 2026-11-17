@@ -834,13 +834,38 @@ test("F-007 F-014 F-021 · work's change to config.json, the rules or the roles 
     `python3 -c "import os;os.remove('/home/sam/.claude/claudopus/config.json')"`,
     `python3 -c "print(open('/home/sam/.claude/claudopus/config.json').read())" > /home/sam/.claude/claudopus/rules/CLAUDE.md`,
     `python3 -c "exec('x=1');print(open('/home/sam/.claude/claudopus/config.json').read())"`,
-    `node -e "require('fs').writeFileSync('/home/sam/.claude/claudopus/config.json','{}')"`])
+    `node -e "require('fs').writeFileSync('/home/sam/.claude/claudopus/config.json','{}')"`,
+    // sent into a file with no space before >, or by tee
+    `python3 -c "print(open('/home/sam/.claude/claudopus/config.json').read())"> /home/sam/.claude/claudopus/rules/CLAUDE.md`,
+    `python3 -c 'print(1)'>/home/sam/.claude/claudopus/config.json`,
+    `python3 -c "print(1)" | tee /home/sam/.claude/claudopus/config.json`,
+    // a mode or a flag the check cannot read, and code run from elsewhere
+    `python3 -c "open('/home/sam/.claude/claudopus/config.json',chr(119))"`,
+    `python3 -c "m='w';open('/home/sam/.claude/claudopus/config.json',m)"`,
+    `python3 -c "import os;os.open('/home/sam/.claude/claudopus/config.json',1025)"`,
+    `node -e "require('fs').openSync('/home/sam/.claude/claudopus/config.json',1537)"`,
+    `python3 -c "import runpy;runpy.run_path('/tmp/w.py')" /home/sam/.claude/claudopus/config.json`,
+    `python3 -c "list(map(open,['/home/sam/.claude/claudopus/config.json'],['w']))"`,
+    `python3 -c "print(f'{open(chr(47)).name}')" /home/sam/.claude/claudopus/config.json`,
+    // the standard library's own writers
+    `python3 -c "import zipfile;zipfile.ZipFile('/home/sam/.claude/claudopus/config.json','w')"`,
+    `python3 -c "import io;io.FileIO('/home/sam/.claude/claudopus/config.json','w')"`,
+    `python3 -c "import urllib.request as u;u.urlretrieve('http://x','/home/sam/.claude/claudopus/config.json')"`,
+    `python3 -c "import logging;logging.basicConfig(filename='/home/sam/.claude/claudopus/config.json')"`,
+    `python3 -c "import shelve;shelve.open('/home/sam/.claude/claudopus/config.json')"`,
+    `python3 -c "import os;os.chflags('/home/sam/.claude/claudopus/config.json',2)"`,
+    `python3 -c "import pathlib;pathlib.Path('/home/sam/.claude/claudopus/config.json').replace('/tmp/x')"`,
+    `python3 -c "import os;os.__dict__['sys'+'tem']('true')" /home/sam/.claude/claudopus/config.json`])
     expect(((await $.tool.call({ tool: 'Bash', tool_use_id: `b${command.length}`, agentId: 'a1', command } as never)) as { deny?: string }).deny).toContain('only with the Edit or Write tool')
   for (const [i, command] of [
     'cat ~/.claude/claudopus/config.json',
     `python3 -c "import json;print(json.load(open('/home/sam/.claude/claudopus/config.json'))['macs'][0])"`,
     `python3 -c "import sys;sys.stdout.write(open('/home/sam/.claude/claudopus/rules/CLAUDE.md', encoding='utf-8').read())"`,
     `node -e "console.log(JSON.parse(require('fs').readFileSync('/home/sam/.claude/claudopus/config.json','utf8')).name)"`,
+    `python3 -c "import json,os;print(json.load(open(os.path.join(os.path.expanduser('~'),'.claude/claudopus/config.json'))).get('name'))" 2>/dev/null`,
+    `python3 -c "print(open('/home/sam/.claude/claudopus/rules/CLAUDE.md').read().replace('a','b'))" | head -5`,
+    `python3 -I -c "from pathlib import Path;print(Path('/home/sam/.claude/claudopus/config.json').read_text())"`,
+    `node -pe "require('fs').readFileSync('/home/sam/.claude/claudopus/config.json','utf8')"`,
   ].entries())
     expect([command, ((await $.tool.call({ tool: 'Bash', tool_use_id: `r${i}`, agentId: 'a1', command } as never)) as { result?: unknown }).result]).toEqual([command, 'ran'])
   void files

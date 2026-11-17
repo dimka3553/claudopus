@@ -97,6 +97,11 @@ const scriptsRun = async ($: EngineInterface, command: string) => {
 // A command, or a script it runs, that would print a kept key or password: read as written and with its quotes taken out
 const readsKept = async ($: EngineInterface, command: string) =>
   [command, unquoted(command)].some(one => KEYCHAIN_READ.test(one)) || (await scriptsRun($, command)).some(text => KEYCHAIN_READ.test(text) || KEYCHAIN_READ.test(unquoted(text)))
+// A .curlrc curl reads by itself, from the home folder or its config folder
+const curlrcIn = async ($: EngineInterface) => {
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  return Boolean(home) && (await Promise.all([`${home}/.curlrc`, `${home}/.config/.curlrc`].map(path => readOr($, path)))).some(Boolean)
+}
 // A tool call that writes a file of the memory folder only the mod writes (refused outright), or the person's own settings and texts
 // by a command (refused: work changes those with Edit or Write, which wait for the person's press)
 const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
@@ -294,7 +299,9 @@ const workHooks = (on: On) => {
     // The branch a push would go from, which is never main
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !PANE_SERVERS.test(e.tool)
+      // a curl that would read a .curlrc of the home folder, which may send its output into a file, runs only with -q first
+      && !(/^\s*curl\s/.test(chatCommand) && shellWords(chatCommand)[0]?.[1] !== '-q' && (await curlrcIn($)))
+    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
       // A call refused after a press (another of its commands denied, a grant not sealed) ends here: its note goes with it
@@ -522,7 +529,7 @@ const workHooks = (on: On) => {
       }
       return r
     }
-    if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) || PANE_SERVERS.test(e.tool)) return next(e)
+    if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) || isPaneShow(e)) return next(e)
     // The chat's single command always runs in the background, so no command holds the chat; Claudopus stops it at its limit
     if (isChatCommand) {
       const r = await next({ ...e, run_in_background: true } as typeof e)
@@ -536,8 +543,10 @@ const workHooks = (on: On) => {
     if (READS.includes(e.tool) && !isPaste) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
     if (grants.length) await dropGrants($, grants).catch(() => undefined)
-
-    return { deny: REFUSED }
+    // An open, a curl or a preview not in the shape the chat runs is told that shape, so it can be run that way or go to a task
+    const kind = e.tool === 'Bash' ? (shellWords(chatCommand)[0]?.[0] ?? '') : (/__(preview_start)$/.exec(e.tool)?.[1] ?? '')
+    const shape = Object.hasOwn(CHAT_SHAPES, kind) ? CHAT_SHAPES[kind] : ''
+    return { deny: shape ? `${REFUSED} ${shape}` : REFUSED }
   })
 
   // How full this chat's context is, as the app counts it, each time it moves
