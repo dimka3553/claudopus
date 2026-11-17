@@ -5,7 +5,7 @@
 // The page that says which version is current: site/version.json, made by build.mjs from plugin.json and served from main
 export const VERSION_PAGE = 'https://www.claudopus.ai/version.json';
 // How long the page may take to answer before the look counts it as not read
-export const VERSION_WAIT = 30_000;
+export const VERSION_WAIT = 30000;
 // How often the Mac looks at the version page, and how long a look may hold the lock before another chat takes over
 export const UPDATE_EVERY = 60 * 60 * 1000;
 export const UPDATE_LOOK = 15 * 60 * 1000;
@@ -72,7 +72,7 @@ export const copyOf = (installed, id, root, cwd = '') => {
 };
 // How often an open chat looks whether a newer copy is installed, and how long before a chat asks again for a reload to the same
 // version (one that brought back the old copy, or was refused)
-export const RELOAD_EVERY = 20_000;
+export const RELOAD_EVERY = 20000;
 export const RELOAD_AGAIN = 10 * 60 * 1000;
 // Whether a chat running `loaded` reloads to the installed copy: a newer one, whole on disk (its manifest names that version), and
 // not already asked for in this chat within RELOAD_AGAIN
@@ -164,7 +164,7 @@ export const missedOn = (page, loaded) => {
 };
 // A size as people read it
 export const sizeText = (bytes) => (bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : bytes >= 1e3 ? `${Math.round(bytes / 1e3)} KB` : `${bytes} bytes`);
-const gitIn = (io, folder) => (args, timeoutMs = 20_000) => io
+const gitIn = (io, folder) => (args, timeoutMs = 20000) => io
     .run(['env', 'GIT_TERMINAL_PROMPT=0', 'GIT_ASKPASS=true', 'GIT_SSH_COMMAND=ssh -o BatchMode=yes', 'git', '-C', folder, ...args], timeoutMs)
     .catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }));
 const lastLine = (out) => `${out.stderr || out.stdout}`.trim().split(/[\r\n]/).at(-1)?.trim().replace(/^(fatal|error): /, '').slice(0, 140) ?? '';
@@ -230,7 +230,7 @@ export const stepsOf = (text) => {
     }
 };
 // A step under way that has said nothing for this long has stopped: its chat closed or reloaded mid-way
-export const STEP_STALE = 90_000;
+export const STEP_STALE = 90000;
 // git's own progress as a download comes: the percent of what it receives and how much so far, then of resolving what came
 export const fetchProgress = (said) => {
     const lines = said.split(/[\r\n]+/).filter(Boolean);
@@ -255,7 +255,7 @@ export const TREE_OF_FOLDER = 'd=$(mktemp -d) || exit 1; trap \'rm -rf "$d"\' EX
     'GIT_DIR="$d/g" GIT_INDEX_FILE="$d/i" GIT_WORK_TREE="$1" git -C "$1" -c core.excludesFile=/dev/null add -A -f -- . ":(exclude).in_use" ":(exclude).orphaned_at" ":(exclude).claude-plugin/types" >/dev/null 2>&1 || exit 1; ' +
     'GIT_DIR="$d/g" GIT_INDEX_FILE="$d/i" GIT_WORK_TREE="$1" git -C "$1" write-tree';
 export const treeOfFolder = async (io, folder) => {
-    const out = await io.run(['sh', '-c', TREE_OF_FOLDER, 'sh', folder], 60_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }));
+    const out = await io.run(['sh', '-c', TREE_OF_FOLDER, 'sh', folder], 60000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }));
     const tree = out.exitCode === 0 ? out.stdout.trim() : '';
     return isTree(tree) ? tree : '';
 };
@@ -265,7 +265,7 @@ export const download = async (io, src, page, progressFile, onProgress) => {
     const git = gitIn(io, src.repo);
     const tag = `v${page.version}`;
     const fetching = io
-        .run(['sh', '-c', '"$@" 2>"$0"', progressFile, 'env', 'GIT_TERMINAL_PROMPT=0', 'GIT_ASKPASS=true', 'GIT_SSH_COMMAND=ssh -o BatchMode=yes', 'git', '-C', src.repo, 'fetch', '--progress', '--no-tags', '--no-write-fetch-head', 'origin', `+refs/tags/${tag}:${DOWNLOAD_REF}`], 600_000)
+        .run(['sh', '-c', '"$@" 2>"$0"', progressFile, 'env', 'GIT_TERMINAL_PROMPT=0', 'GIT_ASKPASS=true', 'GIT_SSH_COMMAND=ssh -o BatchMode=yes', 'git', '-C', src.repo, 'fetch', '--progress', '--no-tags', '--no-write-fetch-head', 'origin', `+refs/tags/${tag}:${DOWNLOAD_REF}`], 600000)
         .catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }));
     let isDone = false;
     void fetching.then(() => (isDone = true));
@@ -305,7 +305,7 @@ export const install = async (io, src, page, commit, engine) => {
         return { ok: false, fail: 'gone', detail: '' };
     if (tree !== page.tree)
         return { ok: false, fail: 'mismatch', detail: '' };
-    const tagged = (await git(['ls-remote', 'origin', `refs/tags/v${page.version}^{}`, `refs/tags/v${page.version}`], 60_000)).stdout;
+    const tagged = (await git(['ls-remote', 'origin', `refs/tags/v${page.version}^{}`, `refs/tags/v${page.version}`], 60000)).stdout;
     const tagCommit = (tagged.split('\n').find(one => one.endsWith('^{}')) ?? tagged.split('\n')[0] ?? '').split(/\s/)[0] ?? '';
     if (!tagCommit)
         return { ok: false, fail: 'fetch', detail: 'GitHub did not answer' };
@@ -318,7 +318,7 @@ export const install = async (io, src, page, commit, engine) => {
         const before = await io.read(path).catch(() => '');
         const id = `${rec.plugin}@${rec.marketplace}`;
         for (const step of updateSteps(engine, rec, rec.scope)) {
-            const out = await io.run(step, 300_000).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }));
+            const out = await io.run(step, 300000).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }));
             if (out.exitCode !== 0)
                 return { ok: false, fail: 'install', detail: lastLine(out) };
         }
@@ -344,7 +344,7 @@ export const install = async (io, src, page, commit, engine) => {
     };
     if (src.kind === 'clone') {
         // Claude Code's refresh takes whatever is newest online: only when that is still this release are its steps run
-        const online = (await git(['ls-remote', 'origin', 'HEAD'], 60_000)).stdout.trim().split(/\s/)[0] ?? '';
+        const online = (await git(['ls-remote', 'origin', 'HEAD'], 60000)).stdout.trim().split(/\s/)[0] ?? '';
         if (!online)
             return { ok: false, fail: 'fetch', detail: 'GitHub did not answer' };
         if (online !== commit)
@@ -357,7 +357,7 @@ export const install = async (io, src, page, commit, engine) => {
         return { ok: false, fail: 'moved', detail: ready.why };
     if ((await git(['merge-base', '--is-ancestor', 'HEAD', commit])).exitCode !== 0)
         return { ok: false, fail: 'own-commits', detail: '' };
-    const merged = await git(['merge', '--ff-only', '--quiet', commit], 120_000);
+    const merged = await git(['merge', '--ff-only', '--quiet', commit], 120000);
     if (merged.exitCode !== 0) {
         const said = `${merged.stderr}\n${merged.stdout}`;
         return /would be overwritten/.test(said) ? { ok: false, fail: 'overwrite', detail: '' } : { ok: false, fail: 'moved', detail: lastLine(merged) };
@@ -426,7 +426,7 @@ export const noticeOf = (at) => {
 };
 // How often the look may run, as Config offers it, in hours; anything else is the hour as shipped
 export const LOOK_EVERY_HOURS = [1, 6, 24, 168];
-export const lookEveryOf = (hours) => (LOOK_EVERY_HOURS.includes(Number(hours)) ? Number(hours) : 1) * 3_600_000;
+export const lookEveryOf = (hours) => (LOOK_EVERY_HOURS.includes(Number(hours)) ? Number(hours) : 1) * 3600000;
 // Whether a look is due: none yet, or the last one is older than `every` (a clock moved back counts as due)
 export const isUpdateDue = (stamp, now, every = UPDATE_EVERY) => !stamp || now - stamp.at >= every || now < stamp.at;
 // Whether version a is newer than b, by its dotted numbers

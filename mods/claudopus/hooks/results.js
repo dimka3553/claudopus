@@ -3,7 +3,7 @@
 // brought back, answered) both ways. A result is never rewritten, deleted or kept twice: only what is missing is copied, by its
 // folder's name, and only the marks beside it change. Paths inside it name that Mac's home, so they are moved onto the other's ----
 // How often, at most, by whichever chat on this Mac comes first
-export const RESULTS_EVERY = 120_000;
+export const RESULTS_EVERY = 120000;
 // The most results one trip brings over each way, so a long gap is closed over a few trips
 export const RESULTS_A_TRIP = 30;
 // A folder under reports/ another Mac may be asked for or handed: no slash, no dot first, nothing the shell reads

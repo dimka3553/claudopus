@@ -13,13 +13,13 @@ let localName = '';
 const knowLocalName = async ($) => {
     if (localName)
         return localName;
-    const r = await $.process.run(isLinux ? ['hostname', '-s'] : ['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }));
+    const r = await $.process.run(isLinux ? ['hostname', '-s'] : ['scutil', '--get', 'LocalHostName'], { timeoutMs: 5000 }).catch(() => ({ exitCode: -1, stdout: '' }));
     localName = keyOf(r.exitCode === 0 ? r.stdout.trim() : '') || 'mac';
     return localName;
 };
 // This Mac's own chats' files, as handed to the other Macs: those written in the last three minutes, never another Mac's copies
 const ownFiles = async ($, now) => {
-    const listed = (await $.fs.list(liveDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && !(entry.mtimeMs && now - entry.mtimeMs > 180_000));
+    const listed = (await $.fs.list(liveDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && !(entry.mtimeMs && now - entry.mtimeMs > 180000));
     return (await Promise.all(listed.map(entry => readOr($, `${liveDir()}/${entry.name}`)))).filter(text => text.trim().startsWith('{')).map(forOtherMac);
 };
 // What leaves this Mac for another: a chat's file less every command and text that work runs or sends. Gone are the text an ask
@@ -92,7 +92,7 @@ const fetchMacs = async ($) => {
             const kept = { mac, text: was.text ?? '', fetchedAt: was.fetchedAt ?? 0, acks: was.acks ?? [], seen: was.seen ?? [] };
             await $.fs.write(macPath(mac), JSON.stringify({ ...kept, triedAt: now }));
             const push = pushOf(from, keyOf(macName(mac)), now, await ownFiles($, now));
-            const r = await $.process.run(ssh(mac, trip(from, kept.acks)), { stdin: push, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }));
+            const r = await $.process.run(ssh(mac, trip(from, kept.acks)), { stdin: push, timeoutMs: 15000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }));
             if (r.exitCode !== 0 || !r.stdout.includes('\n')) {
                 // Said once when the Mac stops answering, not at every try
                 if ((was.fetchedAt ?? 0) >= (was.triedAt ?? 0))
@@ -152,7 +152,7 @@ const syncResults = async ($) => {
 const aTrip = (ids, tried = {}) => ids.map((id, i) => ({ id, i, at: tried[id] ?? 0 })).sort((a, b) => a.at - b.at || a.i - b.i).slice(0, RESULTS_A_TRIP).map(one => one.id);
 const syncWith = async ($, mac, was, now, staging) => {
     const home = dir.slice(0, -'/.claude/claudopus'.length);
-    const looked = await $.process.run(ssh(mac, RESULTS_LOOK), { timeoutMs: 60_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err), isStdoutTruncated: false }));
+    const looked = await $.process.run(ssh(mac, RESULTS_LOOK), { timeoutMs: 60000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err), isStdoutTruncated: false }));
     // A list cut short is no list: what it leaves out would look missing there
     const theirs = looked.exitCode === 0 && !looked.isStdoutTruncated ? resultsOf(looked.stdout) : undefined;
     if (!theirs) {
@@ -178,7 +178,7 @@ const syncWith = async ($, mac, was, now, staging) => {
     for (const id of wanted) {
         const into = `${staging}/${id}`;
         await $.process.run(['mkdir', '-p', into]);
-        const r = await $.process.run(['bash', '-c', PULL, 'bash', into, mac, pullThere([id])], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }));
+        const r = await $.process.run(['bash', '-c', PULL, 'bash', into, mac, pullThere([id])], { timeoutMs: 300000 }).catch(err => ({ exitCode: -1, stderr: String(err) }));
         // Its stream ends with an empty _end, so one cut between two files is known as cut
         const isWhole = r.exitCode === 0 && (await $.fs.exists(`${into}/_end`).catch(() => false));
         if (!isWhole || parsedMeta(await readOr($, `${into}/${id}/meta.json`)).id !== id) {
@@ -211,7 +211,7 @@ const syncWith = async ($, mac, was, now, staging) => {
             }
             ready.push(id);
         }
-        const r = ready.length ? await $.process.run(['bash', '-c', PUSH, 'bash', out, mac, PUSH_THERE, ...ready], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) })) : { exitCode: 0, stderr: '' };
+        const r = ready.length ? await $.process.run(['bash', '-c', PUSH, 'bash', out, mac, PUSH_THERE, ...ready], { timeoutMs: 300000 }).catch(err => ({ exitCode: -1, stderr: String(err) })) : { exitCode: 0, stderr: '' };
         if (r.exitCode !== 0)
             await log($, `results not handed to ${mac}: ${r.stderr.trim().slice(0, 160)}`);
     }
@@ -236,7 +236,7 @@ const syncWith = async ($, mac, was, now, staging) => {
             }
             const theirsNext = merged(there.text, mineNow, wasArchived);
             if (theirsNext) {
-                const r = await $.process.run(ssh(mac, markThere(id, there.sum)), { stdin: theirsNext, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }));
+                const r = await $.process.run(ssh(mac, markThere(id, there.sum)), { stdin: theirsNext, timeoutMs: 15000 }).catch(err => ({ exitCode: -1, stderr: String(err) }));
                 if (r.exitCode !== 0)
                     await log($, `result ${id} not marked on ${mac}: ${r.exitCode === 3 ? 'changed there since' : r.stderr.trim().slice(0, 160)}`);
                 (isSame &&= r.exitCode === 0), (marked += 1);

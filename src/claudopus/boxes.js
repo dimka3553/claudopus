@@ -19,7 +19,7 @@ const runnerEnded = (id, isBackground, at) => {
 };
 // The command that asked: the one of this chat's running runners begun last before the request
 const runnerOf = (at, now) => [...runnerCalls].map(([call, one]) => ({ ...one, call })).filter(one => one.until >= now && one.at <= at + BOX_SKEW).sort((a, b) => b.at - a.at)[0];
-const BOX_SKEW = 60_000;
+const BOX_SKEW = 60000;
 // What the runners take as a Mac (an ssh host or alias, perhaps with a user) and as a key's name
 const BOX_HOST = /^(?:here|[A-Za-z0-9_][A-Za-z0-9._:@-]{0,199})$/;
 const BOX_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,199}$/;
@@ -32,7 +32,7 @@ const boxKeys = new Map();
 // on openssl's stdin, the key on a pipe of its own, so neither is ever in a file or a command line but the key, which is public
 const SEAL_FOR = 'PATH=/usr/bin:/bin; openssl pkeyutl -encrypt -pubin -keyform DER -inkey <(printf %s "$1" | openssl base64 -d -A) -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | openssl base64 -A';
 const sealedFor = async ($, key, value) => {
-    const r = await $.process.run(['/bin/bash', '-c', SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15_000 }).catch(() => undefined);
+    const r = await $.process.run(['/bin/bash', '-c', SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15000 }).catch(() => undefined);
     const out = r?.exitCode === 0 ? r.stdout.trim() : '';
     return /^[A-Za-z0-9+/]{300,}={0,2}$/.test(out) ? out : '';
 };
@@ -66,9 +66,9 @@ const boxWording = (one) => {
 };
 let boxes = [];
 let doneNotes = [];
-const DONE_SHOWN = 60_000;
-const DONE_LEAST = 15_000;
-const DONE_LONGEST = 30 * 60_000;
+const DONE_SHOWN = 60000;
+const DONE_LEAST = 15000;
+const DONE_LONGEST = 30 * 60000;
 const isNoteShown = (one, at) => !one.call ? at - one.at < DONE_SHOWN : one.endedAt === undefined ? at - one.at < DONE_LONGEST : at < Math.max(one.endedAt, one.at + DONE_LEAST);
 // The calls that have ended, so a note made after its call ended (a runner sent to the background) is over from the start
 const callsEnded = new Set();
@@ -130,16 +130,13 @@ const boxHead = (text) => {
 const boxTries = new Map();
 // The boxes something is typed in, unsent, so an ask's reply box does not take the keys from them
 const boxTyped = new Set();
-// What is typed in the bar's key box while it is open, only so its Send button can send it: never written anywhere, and gone once
-// it is sent, closed or the box moves
-const barKeyTyped = new Map();
 // A line under a box: what went wrong with what was sent
 const boxSaid = new Map();
 // Sent from here: the box goes at once, before the runner removes its request
 const boxSent = new Set();
 let boxPresses = 0;
 // A request older than the runner's own wait there (590 s, under the longest a Bash call may run) is one whose runner is gone
-const BOX_OLD = 11 * 60_000;
+const BOX_OLD = 11 * 60000;
 // What security reads as one line (it cuts a line at about 4095, seen), and gives back as typed: plain printable characters (others it
 // prints as hex). The longest value, escaped, leaves room for the rest of the line
 const BOX_LONGEST = 3800;
@@ -227,7 +224,7 @@ const lookBoxes = async ($) => {
             boxKeys.delete(id);
     for (const id of [...boxTries.keys(), ...boxSaid.keys(), ...boxTyped, ...boxModes.keys(), ...boxHeldReply.keys()])
         if (!found.some(one => one.id === id))
-            (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id), barKeyTyped.delete(id), boxModes.delete(id), boxHeldReply.delete(id));
+            (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id), boxModes.delete(id), boxHeldReply.delete(id));
     if (JSON.stringify(found) === JSON.stringify(boxes))
         return;
     boxes = found;
@@ -235,13 +232,11 @@ const lookBoxes = async ($) => {
 };
 // A box's entry in the keychain: on Linux bin/keyring, which keeps it in a file only this user reads; on a Mac security itself,
 // which sendBox calls as before for set and has, so only delete goes through here
-const boxKeyring = async ($, what, id, stdin) => !(await hasKeychain($))
-    ? { exitCode: -1 }
-    : isLinux
-        ? $.process.run([`${$.plugin.root}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
-        : what === 'delete'
-            ? $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
-            : Promise.resolve({ exitCode: -1 });
+const boxKeyring = ($, what, id, stdin) => isLinux
+    ? $.process.run([`${$.plugin.root}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15000 }).catch(() => ({ exitCode: -1 }))
+    : what === 'delete'
+        ? $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15000 }).catch(() => ({ exitCode: -1 }))
+        : Promise.resolve({ exitCode: -1 });
 // Into the keychain under the box's id, on security's stdin as bin/secret keeps a value, so it is never in a command line
 const sendBox = async ($, id, value) => {
     if (!value)
@@ -267,15 +262,13 @@ const sendBox = async ($, id, value) => {
         return void drawAgain($);
     }
     const escaped = sent.replace(/[\\"]/g, '\\$&');
-    const r = !(await hasKeychain($))
-        ? { exitCode: -1 }
-        : isLinux
-            ? await boxKeyring($, 'set', id, `${sent}\n`)
-            : await $.process
-                .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
-                .catch(() => ({ exitCode: -1 }));
+    const r = isLinux
+        ? await boxKeyring($, 'set', id, `${sent}\n`)
+        : await $.process
+            .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15000 })
+            .catch(() => ({ exitCode: -1 }));
     // security -i can end well when the add failed: the entry is looked for by its attributes, never its value
-    const isKept = r.exitCode === 0 && (isLinux ? await boxKeyring($, 'has', id) : await $.process.run(['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0;
+    const isKept = r.exitCode === 0 && (isLinux ? await boxKeyring($, 'has', id) : await $.process.run(['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0;
     // and one whose runner stopped meanwhile is taken out again
     if (isKept && !(await $.fs.exists(request).catch(() => false)))
         await boxKeyring($, 'delete', id);
@@ -302,7 +295,6 @@ const sendBox = async ($, id, value) => {
 // Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
 const cancelBox = async ($, id, said = 'You cancelled · nothing was saved, and what asked for it stops without it') => {
     boxSent.add(id);
-    barKeyTyped.delete(id);
     const one = boxes.find(other => other.id === id);
     boxes = boxes.filter(other => other.id !== id);
     if (boxOpen?.id === id)
@@ -323,7 +315,7 @@ const boxModes = new Map();
 const boxHeldReply = new Map();
 // When a response was left for its runner, which takes it within a second or two: until BOX_REPLY_TAKEN after, it is never removed
 const boxRepliedAt = new Map();
-const BOX_REPLY_TAKEN = 60_000;
+const BOX_REPLY_TAKEN = 60000;
 // The name a key box asks for, none for the box that asks a key's name
 const boxNameOf = (one) => one.text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1];
 const isNameBox = (one) => one.text.startsWith('Name of the key to save');
@@ -352,7 +344,6 @@ const openBox = ($, id, mode, surface) => {
     if (id && replyTo)
         (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''));
     boxOpen = id ? { id, mode } : undefined;
-    barKeyTyped.clear();
     if (id)
         (boxHeldReply.delete(id), boxSaid.delete(id));
     barBoxAt = 0;
@@ -411,7 +402,6 @@ const sendBoxReply = async ($, id, text, isSure = false) => {
 // What is typed in a key's field goes by its mode: the key to the keychain, a response to the command that asked
 const submitBox = ($, id, mode, value) => {
     boxTyped.delete(id);
-    barKeyTyped.delete(id);
     freeTimes($);
     barBoxAt = 0;
     const run = mode === 'reply' ? sendBoxReply($, id, value) : sendBox($, id, value);
@@ -436,7 +426,7 @@ const heldReplyButtons = ($, ui, id, where) => boxHeldReply.has(id) ? (<ui.Box k
       <ui.Button key={`${where}-${id}-askey-${boxPresses}`} label="Keep it as the key" onPress={press => keepHeldAsKey($, id, press.surface)}/>
       <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send it as a response" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)}/>
     </ui.Box>) : null;
-// The row in the bar above the prompt for the key box opened there: what goes where, the field, Send, the big one, and Close, small
+// The row in the bar above the prompt for the key box opened there: what goes where, the field, and Close
 const barKeyRow = ($, ui, one, mode) => {
     const name = boxNameOf(one);
     const head = mode === 'reply' ? `↳ Instead of ${name ?? (isNameBox(one) ? 'the name' : 'the key')}` : name ? `↳ ${name}` : `↳ The key's name`;
@@ -446,11 +436,10 @@ const barKeyRow = ($, ui, one, mode) => {
           <ui.Text color={NEEDS} bold wrap="truncate-end">{head}</ui.Text>
         </ui.Box>
         {'Input' in ui ? (<ui.Box flexShrink={0}>
-            <ui.Input key={barKeyBoxKey(one.id, mode)} placeholder={mode === 'reply' ? 'Type your response' : isNameBox(one) ? 'Type the name' : 'Paste the key'} submitLabel="send" autoFocus onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))} onSubmit={value => submitBox($, one.id, mode, value)}/>
+            <ui.Input key={barKeyBoxKey(one.id, mode)} placeholder={mode === 'reply' ? 'Type your response' : isNameBox(one) ? 'Type the name' : 'Paste the key'} submitLabel="send" autoFocus onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))} onSubmit={value => submitBox($, one.id, mode, value)}/>
           </ui.Box>) : null}
-        <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-          <ui.Button key={`band-key-send-${boxPresses}`} label="Send" variant="primary" onPress={() => void (barKeyTyped.get(one.id) && submitBox($, one.id, mode, barKeyTyped.get(one.id) ?? ''))}/>
-          <ui.Button key={`band-key-close-${boxPresses}`} label="Close" plain dimColor onPress={press => openBox($, undefined, mode, press.surface)}/>
+        <ui.Box flexShrink={0}>
+          <ui.Button key={`band-key-close-${boxPresses}`} label="Close" onPress={press => openBox($, undefined, mode, press.surface)}/>
         </ui.Box>
       </ui.Box>
       {boxSaid.get(one.id) ? <ui.Text key="band-key-said" color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}

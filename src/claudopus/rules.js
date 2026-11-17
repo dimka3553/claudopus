@@ -3,8 +3,10 @@
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
 const BRIEF = 'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command, a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.';
-const REFUSED = 'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow, if any; it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.';
-const NO_COPY = () => `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`;
+const REFUSED = 'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow, if any; it changes no file. Start a fresh agent for this: the Agent tool with subagent_type "claudopus:task", the model named, and the task\'s instructions as the prompt.';
+const NO_COPY = () => lean.small === 'copy'
+    ? `A fresh task needs the model named (${modelsShort(models)}): the Agent tool with subagent_type "claudopus:task" and the task's instructions as the prompt. Only a small job that builds on this talk goes to a copy of this chat, subagent_type "fork".`
+    : `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:task", the model named (${modelsShort(models)}), and the task's instructions as the prompt.`;
 // A command that would print a password or key the keychain keeps (on Linux, the files bin/keyring keeps). Work uses a kept key only through `bin/secret`, which reads it itself
 // or that would point the runner at another store or another box
 const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus\/keyring\b/;
@@ -228,7 +230,7 @@ const NO_MEMORY_BASH = () => named("Claude changes {name}'s own settings and tex
 const NO_BOXES = 'Only the password and key runners use their boxes: Claude never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner, and for a key only through the secret runner the task rules name.';
 const NO_PUSH = 'Claude never pushes or merges to main itself, so two tasks never release at once: commit on your own branch and run the release runner the task rules name, from your worktree.';
 // How long the names of kept keys are trusted before they are asked again
-const SECRETS_MS = 60_000;
+const SECRETS_MS = 60000;
 // The first line of what the mod adds to every brief: the work's own rules and where the chat's words are. The panel leaves it out
 const workHead = () => `What follows is what Claudopus tells Claude in every task started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`;
 const PASTED = 'The middle of this message is in the file it names. Do not read that file into this chat: the agent that needs it reads it from that path.';
@@ -259,7 +261,7 @@ const ASK_ANSWERED = (title, said, isYou = false) => isYou ? `✓ You answered "
 // What the chat is told when it sends work an answer of the person's that reached it from the card a moment ago
 const ANSWER_ALREADY_SENT = (said) => `Not sent: "${said}" is the answer {name} gave on that task's card. Claude already has it from there and has asked nothing since, so a second copy would only start it again. If {name} means those words for something new, send them with what they are for.`;
 // How long an answer given on the card counts as the one the chat would send again
-const ANSWER_ECHO = 60 * 60_000;
+const ANSWER_ECHO = 60 * 60000;
 // What the chat is told when the person replies on the card in words that do not settle the ask: it stays open
 const ASK_REPLIED = (title, said, isYou = false) => isYou
     ? `✓ You replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs you.`

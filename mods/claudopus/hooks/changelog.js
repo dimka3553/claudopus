@@ -27,8 +27,8 @@ const newer = (a, b) => {
 const ELEMENT = 220;
 const costOf = (v) => v.version.length + v.date.length + 4 * ELEMENT + v.changes.reduce((n, one) => n + one.length + 2 * ELEMENT, 0);
 // What a tab of versions may hold, well under the app's limit: the update screen and the changelog tab
-export const SCREEN_BUDGET = 60_000;
-export const TAB_BUDGET = 150_000;
+export const SCREEN_BUDGET = 60000;
+export const TAB_BUDGET = 150000;
 // The versions newest first that fit `budget`, always the newest one; and how many older ones were left out
 export const fitted = (versions, budget) => {
     const shown = [];

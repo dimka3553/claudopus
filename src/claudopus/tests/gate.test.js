@@ -312,8 +312,8 @@ test("the chat's own thread, doing its own work, is asked at the top of the pane
 test("another chat's panel shows an admin command that waits, with no button: only the chat that holds the call allows it", async ($, on) => {
     const { files, clock } = world(on);
     await $.session.start(start);
-    const at = 1_700_000_000_000;
-    files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ chat: 'chat-b', title: 'Billing page', folder: '/repo/billing', host: '', at, cards: [{ id: 'b1', parentId: '', isFork: false, tokens: 0, title: 'Update the server', words: 'update it', items: [], entries: [], answer: '', admins: [{ id: 'x-0', host: 'here', command: 'softwareupdate -i -a', at }], startedAt: at - 60_000, endedAt: 0, status: 'working' }] }));
+    const at = 1700000000000;
+    files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ chat: 'chat-b', title: 'Billing page', folder: '/repo/billing', host: '', at, cards: [{ id: 'b1', parentId: '', isFork: false, tokens: 0, title: 'Update the server', words: 'update it', items: [], entries: [], answer: '', admins: [{ id: 'x-0', host: 'here', command: 'softwareupdate -i -a', at }], startedAt: at - 60000, endedAt: 0, status: 'working' }] }));
     await clock.advance(5000);
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
     expect(await until(async () => list.find({ type: 'Text', text: 'softwareupdate -i -a' }))).toBeDefined();
@@ -352,7 +352,7 @@ test('a press is answered by a line, not a card: an ask is an outlined box, what
     const edges = async () => (await boxes()).filter(one => one.props.backgroundColor === '#8A63F0' || one.props.backgroundColor === '#80808024').length;
     const withNote = await edges();
     // Its call has ended: once it could be read, it goes, well before a minute
-    await clock.advance(16_000);
+    await clock.advance(16000);
     expect(await until(async () => ((await list.find({ type: 'Text', text: 'You allowed it once · it runs now' })) ? undefined : true))).toBe(true);
     // It had no fill or purple edge of its own, as a piece of work has
     expect(await edges()).toBe(withNote);
@@ -362,7 +362,7 @@ test('a press is answered by a line, not a card: an ask is an outlined box, what
 const longList = (at, gates, asks = {}) => JSON.stringify({
     chat: 'chat-b', title: 'Billing page', folder: '/repo/billing', host: '', at,
     cards: ['one', 'two', 'three', 'four', 'five', 'six'].map((name, n) => ({
-        id: `w${n + 1}`, parentId: '', isFork: false, tokens: 0, title: `Card ${name}`, words: name, items: [], entries: [], answer: '', startedAt: at - 600_000 + n * 60_000, endedAt: 0, status: 'working',
+        id: `w${n + 1}`, parentId: '', isFork: false, tokens: 0, title: `Card ${name}`, words: name, items: [], entries: [], answer: '', startedAt: at - 600000 + n * 60000, endedAt: 0, status: 'working',
         ...(gates[`w${n + 1}`] ? { admins: [{ id: `g${n + 1}`, host: 'here', command: `run step ${name}`, at: gates[`w${n + 1}`] }] } : {}),
         ...(asks[`w${n + 1}`] ? { ask: { text: `Which way for ${name}?`, at: asks[`w${n + 1}`], choices: ['Left', 'Right'] } } : {}),
     })),
@@ -371,7 +371,7 @@ const textOrder = async (pane) => (await pane.findAll({ type: 'Text' })).map(one
 test('a work that waits for a press comes to the top whole, its amber box in it, the newest first with the cards that asked; answered, it goes back and nothing else moves', async ($, on) => {
     const { files, clock } = world(on);
     await $.session.start(start);
-    const at = 1_700_000_000_000;
+    const at = 1700000000000;
     files.set(`${MEMORY}/live/chat-b.json`, longList(at, { w5: at - 2000, w6: at - 1000 }, { w4: at - 1500 }));
     await clock.advance(5000);
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
@@ -421,7 +421,7 @@ test('a gate answered on its card says what was allowed in that same card, outli
 test('scrolled down a long list, the line above the prompt says how many wait at the top, and pressed takes the list there; at the top it says nothing', async ($, on) => {
     const { files, clock } = world(on, { panes: ['claudopus'] });
     await $.session.start(start);
-    const at = 1_700_000_000_000;
+    const at = 1700000000000;
     files.set(`${MEMORY}/live/chat-b.json`, longList(at, { w5: at - 2000, w6: at - 1000 }));
     await clock.advance(5000);
     const MARK = '↑ 2 things are waiting for you at the top of the panel';
@@ -460,7 +460,7 @@ test("in the terminal, an ask that comes in above the one being typed in never t
 test('the line above the prompt never points into a list that is not open', async ($, on) => {
     const { files, clock } = world(on);
     await $.session.start(start);
-    const at = 1_700_000_000_000;
+    const at = 1700000000000;
     files.set(`${MEMORY}/live/chat-b.json`, longList(at, { w5: at - 2000, w6: at - 1000 }));
     await clock.advance(5000);
     const down = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 40, bodyRows: 20 } }, surface: 'desktop' });
@@ -481,7 +481,7 @@ test('in the terminal, a password box that comes while a reply is being typed le
     await list.input({ key: reply?.key ?? '', text: 'Not y', kind: 'change' });
     void w.keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold /plug/claudopus/bin/admin m4 'id -u'` }));
     const id = '9f1e2d3c-4b5a-4987-a654-3210fedcba98';
-    w.files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'admin', host: 'm4', key: BOX_PUBLIC, chat: 'engine-id', at: 1_700_000_000_000 }));
+    w.files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'admin', host: 'm4', key: BOX_PUBLIC, chat: 'engine-id', at: 1700000000000 }));
     await w.clock.advance(1000);
     expect(await until(async () => ((await inputs()).some(one => one.key.startsWith('box-')) ? true : undefined))).toBe(true);
     expect((await inputs()).filter(one => one.focus).map(one => one.key)).toEqual([reply?.key]);
@@ -495,7 +495,7 @@ test('in the terminal, an ask that comes while a password is being typed leaves 
     const list = await $.ui.mount({ ...LIST, surface: 'terminal' });
     void w.keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold /plug/claudopus/bin/admin m4 'id -u'` }));
     const id = '9f1e2d3c-4b5a-4987-a654-3210fedcba98';
-    w.files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'admin', host: 'm4', key: BOX_PUBLIC, chat: 'engine-id', at: 1_700_000_000_000 }));
+    w.files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'admin', host: 'm4', key: BOX_PUBLIC, chat: 'engine-id', at: 1700000000000 }));
     await w.clock.advance(1000);
     const inputs = async () => (await list.findAll({ type: 'Input' })).map(one => ({ key: one.key ?? '', focus: Boolean(one.props.autoFocus) }));
     const box = await until(async () => (await inputs()).find(one => one.key.startsWith('box-')));
@@ -530,7 +530,7 @@ test('Release it on an ended ask leaves its card where it was, saying the answer
     expect(await until(async () => list.find({ type: 'Text', text: /You answered “Release it”/ }))).toBeDefined();
     expect(await order()).toEqual(['Piece 4', 'Piece 1', 'Piece 2', 'Piece 3', 'Piece 5']);
     // A minute on, it takes its own place among the others: where it began, not after them
-    await clock.advance(65_000);
+    await clock.advance(65000);
     expect(await until(async () => ((await order())[0] === 'Piece 1' ? true : undefined))).toBe(true);
     expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5']);
 });
@@ -542,10 +542,10 @@ const answeredStays = async ($, on, how) => {
         await list.input({ key: (await list.findAll({ type: 'Input' })).find(one => /-reply-/.test(one.key ?? ''))?.key ?? '', text: 'It is pasted' });
     expect(await until(async () => list.find({ type: 'Text', text: /You answered/ }))).toBeDefined();
     expect(await order()).toEqual(['Piece 4', 'Piece 1', 'Piece 2', 'Piece 3', 'Piece 5']);
-    await clock.advance(30_000);
+    await clock.advance(30000);
     expect((await order())[0]).toBe('Piece 4');
     // A minute on, it takes its own place among the others
-    await clock.advance(35_000);
+    await clock.advance(35000);
     expect(await until(async () => ((await order())[0] === 'Piece 1' ? true : undefined))).toBe(true);
     expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5']);
 };

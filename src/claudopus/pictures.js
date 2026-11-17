@@ -9,7 +9,7 @@ const CHAT_THUMB_SIZES = ['360', '280'];
 // How tall an upright small copy is drawn at most, in the panel's pixels: a tall screenshot is drawn narrower, not longer
 const PIC_TALL = 200;
 // The most characters a picture drawn as it is, an SVG of the work's own, may have
-const SVG_CHARS = 100_000;
+const SVG_CHARS = 100000;
 // A press opens the picture whole in the Mac's own viewer (Preview for a photo or screenshot), a window of its own as large as the
 // screen allows, which can go full screen and closes as any window does: the panel is only a sidebar wide. A chat the app runs on
 // another Mac over ssh has its engine, and so `open`, on this Mac, where nobody looks: Preview opened on its screen (seen on the
@@ -45,14 +45,14 @@ const sendPicture = async ($, path) => {
         return say(`It is at ${path} on ${thisMac()}`);
     say('Sending it to your device…');
     for (const bin of TAILSCALES) {
-        const targets = await $.process.run([bin, 'file', 'cp', '--targets'], { timeoutMs: 8_000 }).catch(() => undefined);
+        const targets = await $.process.run([bin, 'file', 'cp', '--targets'], { timeoutMs: 8000 }).catch(() => undefined);
         if (!targets || targets.exitCode !== 0)
             continue;
         // Each line a device: its address, its name, and a word when it is not reachable now
         const [, name = '', ...state] = targets.stdout.split('\n').map(line => line.trim().split(/\s+/)).find(parts => parts[0] === termFrom) ?? [];
         if (!name || state.join(' ').startsWith('offline'))
             break;
-        const sent = await $.process.run([bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 60_000 }).catch(err => ({ exitCode: 1, stderr: String(err) }));
+        const sent = await $.process.run([bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 60000 }).catch(err => ({ exitCode: 1, stderr: String(err) }));
         if (sent.exitCode === 0)
             return say(`✓ Sent to ${name} by Tailscale, which keeps what it is sent in Downloads`);
         await log($, `picture ${path} not sent to ${termFrom}: ${sent.stderr}`);
@@ -120,8 +120,8 @@ const LARGE_SIZES = [
     [800, 60],
     [600, 60],
 ];
-const LARGE_CHARS = 130_000;
-const LARGE_TOTAL = 200_000;
+const LARGE_CHARS = 130000;
+const LARGE_TOTAL = 200000;
 const larges = new Map();
 const making = new Map();
 let largeMade = 0;
@@ -344,7 +344,7 @@ const picturesIn = async ($, lines, one, kept, canDraw) => {
 // looked for again when its chat or the reports change. One read of a work runs at a time; the next drawing reads what came since
 const loading = new Set();
 // A chat the app would not give is asked for again after this long, at the tab's next drawing, never sooner
-const RETRY_READ = 15_000;
+const RETRY_READ = 15000;
 const loadWork = async ($, id) => {
     if (loading.has(id))
         return;
@@ -360,7 +360,6 @@ const loadWork = async ($, id) => {
         const now = await $.clock.now();
         const was = talks.get(id);
         if (was?.key !== key || (!was.lines && now - (was.at ?? 0) >= RETRY_READ)) {
-            during('read a task for its Details');
             const rows = await $.session.messages({ agentId: id }).catch(() => undefined);
             talks.set(id, { key, lines: Array.isArray(rows) ? withSteers(talkOf(rows), one.entries) : undefined, at: now });
             isChanged = true;
@@ -387,7 +386,7 @@ const loadWork = async ($, id) => {
 };
 // Another chat's work keeps its chat in that chat's transcript on this Mac, which the engine gives this chat no rows of: it is read
 // from its file, the end of it, in the same rows. A chat on another Mac is not read: its Details says where it is
-const THEIR_TAIL = 800_000;
+const THEIR_TAIL = 800000;
 const SAFE_ID = /^[A-Za-z0-9_-]{1,80}$/;
 // A transcript's lines as the engine's rows: what the work was told, what it wrote, each tool step with what came back
 const rowsOfTranscript = (text) => {
@@ -449,7 +448,6 @@ const loadTheirs = async ($, one) => {
         // Its folder named as the engine names its projects, and failing that any project that holds that chat
         const slug = c.folder.replace(/[^A-Za-z0-9]/g, '-');
         const name = `${c.id}/subagents/agent-${c.agent}.jsonl`;
-        during("read another chat's task");
         const r = await $.process
             .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', `${home}/.claude/projects`, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
             .catch(() => undefined);
@@ -480,7 +478,7 @@ const ASK_THUMB_SIZES = [
     ['480', '40'],
     ['360', '40'],
 ];
-const ASK_THUMB_BYTES = 25_000;
+const ASK_THUMB_BYTES = 25000;
 // How wide an ask's small picture is drawn at most, and how tall, in the panel's pixels
 const ASK_PIC_WIDE = 300;
 const ASK_PIC_TALL = 240;
@@ -489,7 +487,7 @@ const sizedAskPic = (width, height) => {
     return { width: Math.round(width * scale), height: Math.round(height * scale) };
 };
 // The most characters every ask's small pictures together take in one drawing; one past that is a row that opens it
-const ASK_PICS_CHARS = 140_000;
+const ASK_PICS_CHARS = 140000;
 // Each ask's pictures as last made, by the work, its ask and its pictures; made out of the drawing, which is drawn again once they are
 const askPics = new Map();
 const askLoading = new Set();

@@ -5,9 +5,9 @@
 // every drawing of the panel and what asked for it, where its window stood, which element holds the focus, the cards in their
 // order, scrolls and who asked for them, presses, and the person's typing as a count by box. Never a value typed into a box:
 // an input's text, a reply's, a key's, is not read, and an element's key is kept only in the mod's own shape of keys
-const RECORD_FOR = 180_000;
+const RECORD_FOR = 180000;
 const RECORD_SWITCH = 'record-panel.on';
-const RECORD_FRESH = 60_000;
+const RECORD_FRESH = 60000;
 let recording;
 let recordLooked = 0;
 let typedCount = new Map();

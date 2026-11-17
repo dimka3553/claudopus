@@ -51,7 +51,7 @@ test('three single lookups in a row are told to go together or to a helper; two 
     // A long test run, then another of its kind, each alone in its step
     const run = async (id, command) => {
         const call = $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command: `hold ${id}` });
-        await clock.advance(90_000);
+        await clock.advance(90000);
         held.get(id)?.('ok');
         await call;
         return toldOf(batch($, 'a1', [{ tool: 'Bash', input: { command }, id }]));
@@ -59,125 +59,55 @@ test('three single lookups in a row are told to go together or to a helper; two 
     expect(await run('t1', 'npm test -- nose')).toBe('');
     expect(await run('t2', 'npm test -- ears')).toContain('Two long commands of one kind (npm test)');
 });
-test("work never waits for its helpers: it is told it may end its step, it is let go when it does, and a helper's result that the engine hands the chat is passed on to it, which starts it again; a report handed back while helpers run is still held", async ($, on) => {
+test('the work waits for its helpers with a command of its own: a file it waits on names the helpers running and how each is doing, and changes the moment one ends', async ($, on) => {
     const agents = {};
-    const talk = [];
-    const { stopped, resumed, appended, clock, stepped } = world(on, { agents, talk });
-    on('classic.SubagentStop', () => ({}));
+    const { clock, files } = world(on, { agents });
     await $.session.start(start);
     await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer });
     await $.agent.spawn({ ...spawn, prompt: 'fix it' });
     await $.agent.spawn({ ...spawn, description: 'Read the nose code', prompt: 'read', parentAgentId: 'a1' });
     await $.agent.spawn({ ...spawn, description: 'Draw the nose', prompt: 'draw', parentAgentId: 'a1' });
-    agents.a1 = 'running';
-    agents.a2 = 'running';
-    agents.a3 = 'running';
-    // Told once, as it starts them, that their results come even after its step ends, and never to wait for them
+    const roll = () => files.get(`${MEMORY}/helpers/a1.txt`) ?? '';
+    expect(roll().split('\n')[0]).toBe('running: a2,a3');
+    expect(roll()).toContain('"Read the nose code" (a2): running');
+    // Told once, as it starts them, that they run beside it and how it waits for them
     const told = await toldOf(batch($, 'a1', [{ tool: 'Agent', input: { description: 'Read the nose code' } }, { tool: 'Agent', input: { description: 'Draw the nose' } }]));
-    expect(told).toContain('each result comes to you as a message when it ends, even after you end your step');
-    expect(told).not.toMatch(/bin\/helpers/);
+    expect(told).toContain('Your helpers run in the background');
+    expect(told).toMatch(/bin\/helpers' '\/home\/sam\/\.claude\/claudopus\/helpers\/a1\.txt'/);
     expect(await toldOf(batch($, 'a1', [{ tool: 'Agent', input: { description: 'A third' } }, { tool: 'Read' }]))).toBe('');
-    // It ends its step while both work: let go, not held
-    const stop = () => $.classic.SubagentStop({ hook_event_name: 'SubagentStop', agent_id: 'a1', background_tasks: [] });
-    expect((await stop()).block).toBeUndefined();
-    // Its report would leave their results to the chat: held, with no command to wait with
-    const handback = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: 'Fixed.' }));
-    expect(handback.deny).toContain("Don't hand back your report yet");
-    expect(handback.deny).not.toMatch(/bin\/helpers|Bash command|TaskStop/);
-    // While it is at a step of its own the engine hands it the result itself: nothing is passed on
+    // Five minutes with nothing new from either: the line names them as quiet, so a wait on it comes back
+    await clock.advance(5 * 60000);
+    expect(roll().split('\n')[0]).toBe('running: a2,a3 quiet: a2,a3');
     agents.a2 = 'completed';
     await $.turn.complete({ answer: 'nose.ts', durationMs: 1, isAborted: false, turnId: 'h2', reason: 'answer', agentId: 'a2' });
-    expect(resumed.filter(one => one.startsWith('a1:'))).toEqual([]);
-    // Its step ended, the engine lists it as done; the second helper's result is passed on and starts it again, and the chat is told
-    agents.a1 = 'completed';
-    // The engine, which does not count its helpers as its own at work, presses it for its report as it ends its step: answered with no
-    // model, it ends its step again (16 Nov: five tasks, pressed and refused at their report, were told to the chat as ended)
-    talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text: 'Waiting for the drawing.' }] }, { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' });
-    const before = stepped.length;
-    const said = [];
-    for await (const chunk of $.turn.step({ turnId: 'h1p', index: 1, model: 'm', messageCount: 2, agentId: 'a1' }))
-        if (chunk.kind === 'text')
-            said.push(chunk.text);
-    expect([stepped.length - before, said]).toEqual([0, ['My own work is still going; I am started again when it is done, and give my report then.']]);
-    await $.turn.complete({ answer: 'Waiting for the drawing.', durationMs: 1, isAborted: false, turnId: 'h1', reason: 'answer', agentId: 'a1' });
-    // and the chat, which the engine tells it ended without its report, is told once it waits for its helper and is not to be asked
-    const waits = /^undefined: From Claudopus: the task ".*" ended its step without its report because it waits for a helper it started\..*Do not send it a message asking for its report/;
-    expect(await until(async () => appended.find(one => waits.test(one)))).toBeDefined();
-    await $.turn.complete({ answer: 'Still waiting.', durationMs: 1, isAborted: false, turnId: 'h1b', reason: 'answer', agentId: 'a1' });
-    expect(appended.filter(one => waits.test(one))).toHaveLength(1);
-    // A step of its own, and it ends its step to wait again: told again. Held by the engine on a command it sees, it is not: the
-    // engine tells the chat it waits
-    const step = async (turnId) => {
-        talk.splice(0, talk.length, { role: 'user', content: 'Carry on.' });
-        for await (const _ of $.turn.step({ turnId, index: 1, model: 'm', messageCount: 1, agentId: 'a1' }))
-            void _;
-    };
-    await step('h1c');
-    await $.turn.complete({ answer: 'Waiting again.', durationMs: 1, isAborted: false, turnId: 'h1c', reason: 'answer', agentId: 'a1' });
-    expect(await until(async () => (appended.filter(one => waits.test(one)).length === 2) || undefined)).toBe(true);
-    await step('h1d');
-    agents.a1 = 'waiting';
-    await $.turn.complete({ answer: 'Waiting on the build too.', durationMs: 1, isAborted: false, turnId: 'h1d', reason: 'answer', agentId: 'a1' });
-    await clock.advance(1_000);
-    expect(appended.filter(one => waits.test(one))).toHaveLength(2);
-    agents.a1 = 'completed';
-    // and its card stays at work with its helper under it, though the engine lists it as completed (16 Nov it vanished meanwhile)
-    await clock.advance(25_000);
-    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' });
-    const texts = (await list.findAll({ type: 'Text' })).map(one => one.text);
-    await list.unmount();
-    expect(texts).toContain('Working on 1 thing');
-    expect(texts).toContain('Fix the nose');
-    agents.a3 = 'completed';
-    await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a3', message: 'The nose is drawn at every size.' });
-    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h3', reason: 'answer', agentId: 'a3' });
-    expect(await until(async () => resumed.find(one => one.startsWith('a1: From Claudopus: your helper "Draw the nose" has finished') && one.endsWith('The nose is drawn at every size.')))).toBeDefined();
-    expect(await until(async () => appended.find(one => /^undefined: From Claudopus: the result of the helper "Draw the nose" reached this chat because the task ".*" had ended its step/.test(one)))).toBeDefined();
+    // at once, with no look round between, so the wait on it lets go the moment the helper ends
+    expect(roll().split('\n')[0]).toBe('running: a3 quiet: a3');
+    expect(roll()).toContain('"Read the nose code" (a2): ended');
+});
+test('work that tries to end while a helper of its runs is held back, and lets go once it has ended; a helper that already answered holds nothing, and work stopped takes its running helpers with it', async ($, on) => {
+    const agents = {};
+    const { clock, stopped } = world(on, { agents });
+    on('classic.SubagentStop', () => ({}));
+    await $.session.start(start);
+    await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer });
+    await $.agent.spawn({ ...spawn, prompt: 'fix it' });
+    await $.agent.spawn({ ...spawn, description: 'Read the nose code', prompt: 'read', parentAgentId: 'a1' });
+    await $.agent.spawn({ ...spawn, description: 'Serve the page', prompt: 'serve', parentAgentId: 'a1' });
+    const stop = () => $.classic.SubagentStop({ hook_event_name: 'SubagentStop', agent_id: 'a1', background_tasks: [] });
+    // The server helper answered and left its server running: it still works, but holds nothing; the reading one still does
+    agents.a3 = 'waiting';
+    await $.turn.complete({ answer: `The page is served on port 3100, and it keeps running for you to look at. ${'It shows the nose as drawn, at every size. '.repeat(14)}`, durationMs: 1, isAborted: false, turnId: 'h3', reason: 'answer', agentId: 'a3' });
+    expect((await stop()).block).toContain('a helper still running in the background');
+    const handback = await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: 'Fixed.' });
+    expect(String(handback.deny)).toContain('Do not finish yet');
+    agents.a2 = 'completed';
+    await $.turn.complete({ answer: 'nose.ts', durationMs: 1, isAborted: false, turnId: 'h2', reason: 'answer', agentId: 'a2' });
+    await clock.advance(20000);
+    expect((await stop()).block).toBeUndefined();
     // Stopped from its card or by the chat, the work's running helpers are stopped with it
-    await $.agent.spawn({ ...spawn, description: 'Draw the ear', prompt: 'draw', parentAgentId: 'a1' });
+    await $.agent.spawn({ ...spawn, description: 'Draw the nose', prompt: 'draw', parentAgentId: 'a1' });
     await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' });
     expect(stopped).toEqual(expect.arrayContaining(['a1', 'a4']));
-});
-test("what nothing of the work's own makes, a file, a line in it, a page or a time, Claudopus looks for when asked and starts the work again once it is there, or once the longest look runs out, though the engine lists it as ended; the card says so in place of a command that would wait; a helper hands back instead", SLOW, async ($, on) => {
-    const agents = {};
-    const { clock, files, resumed } = world(on, { agents });
-    await $.session.start(start);
-    await $.prompt.submit({ text: 'wait for the deploy', wait: false, origin: composer });
-    await $.agent.spawn({ ...spawn, description: 'Check the deploy', prompt: 'check' });
-    await $.agent.spawn({ ...spawn, description: 'Read the build log', prompt: 'read', parentAgentId: 'a1' });
-    agents.a1 = 'completed';
-    agents.a2 = 'running';
-    const r = (await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w1', agentId: 'a1', what: 'the deploy marker', file: '/w/deployed.flag' }));
-    expect(r.result).toContain('End your step now');
-    const lines = async () => {
-        const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' });
-        const texts = (await list.findAll({ type: 'Text' })).map(one => one.text);
-        await list.unmount();
-        return texts;
-    };
-    expect(await until(async () => (await lines()).find(text => text === 'Claudopus starts Claude again when this is there: the deploy marker'))).toBeDefined();
-    // A helper that ended its step would have ended: it hands back what it waits for, and its task asks
-    expect((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w2', agentId: 'a2', what: 'the build to finish', file: '/w/build.log', text: 'BUILD DONE' })).result).toContain('hand back your result now');
-    await clock.advance(40_000);
-    expect(resumed.filter(one => /^a[12]: /.test(one))).toEqual([]);
-    // There: the work its step had ended, which the engine lists as ended, is started again
-    files.set('/w/deployed.flag', '');
-    await clock.advance(40_000);
-    expect(await until(async () => resumed.find(one => one === 'a1: From Claudopus: what you asked to be started again for is there: the deploy marker. Carry on from it.'))).toBeDefined();
-    expect(await until(async () => !(await lines()).some(text => text.startsWith('Claudopus starts Claude again')) || undefined)).toBe(true);
-    // A time only, and a file that never comes: started when the time comes, or told it never came
-    agents.a1 = 'completed';
-    await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w3', agentId: 'a1', what: 'a look at the queue again', minutes: 2 });
-    await clock.advance(60_000);
-    expect(resumed.filter(one => one.includes('a look at the queue again'))).toEqual([]);
-    await clock.advance(100_000);
-    expect(await until(async () => resumed.find(one => one === 'a1: From Claudopus: the time you asked for has come: a look at the queue again. Carry on.'))).toBeDefined();
-    await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w4', agentId: 'a1', what: 'the results file', file: '/w/never.json', minutes: 1 });
-    await clock.advance(100_000);
-    expect(await until(async () => resumed.find(one => one === 'a1: From Claudopus: the results file was still not there after 1 min of looking. Find out why before you look again.'))).toBeDefined();
-    // Nothing to look for is said back, and the chat has no card to be started from
-    expect((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w5', agentId: 'a1', what: 'something' })).result).toContain('Name a file, a page, or the minutes');
-    expect((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w6', what: 'x', minutes: 1 })).result).toContain('Only a background task');
 });
 test('a helper quiet for five minutes is named to its work once, and the card says so only then: a helper at work is a row of its own', SLOW, async ($, on) => {
     const { clock, appended } = world(on);
@@ -186,12 +116,12 @@ test('a helper quiet for five minutes is named to its work once, and the card sa
     await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer });
     await $.agent.spawn({ ...spawn, prompt: 'fix it' });
     await $.agent.spawn({ ...spawn, description: 'Read the nose code', prompt: 'read', parentAgentId: 'a1' });
-    await clock.advance(70_000);
+    await clock.advance(70000);
     expect(await pane.find({ type: 'Text', text: /looked in on|helper running/ })).toBeUndefined();
-    await clock.advance(5 * 60_000);
+    await clock.advance(5 * 60000);
     expect(appended.filter(line => line.startsWith('a1: Your helper "Read the nose code" (a2) has shown nothing new'))).toHaveLength(1);
     expect((await pane.find({ type: 'Text', text: /^1 helper quiet for 5\+ min, Claudopus told Claude$/ }))?.text).toBeDefined();
-    await clock.advance(3 * 60_000);
+    await clock.advance(3 * 60000);
     expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1);
 });
 test('work whose context was compacted is handed its rules again at its next step, once; work started before the rules changed is handed the new ones', async ($, on) => {

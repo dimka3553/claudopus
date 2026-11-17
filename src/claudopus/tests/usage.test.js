@@ -22,7 +22,7 @@ const lookAt = (n, anon = 1583261, extra = '') => [
     '    KB/t xfrs   MB ',
     `   19.03 42547108 ${1000 + n * 300} `,
     '@@NET@@',
-    `en0        1500  <Link#15>   02:00:00:00:00:01 1     0 ${n * 5_000_000} 2     0 0     0`,
+    `en0        1500  <Link#15>   02:00:00:00:00:01 1     0 ${n * 5000000} 2     0 0     0`,
     extra,
     '@@TOP@@',
     'PID    MEM',
@@ -63,7 +63,7 @@ test('while work runs, the line above the prompt shows memory, the processor, th
     expect(line?.props.wrap).toBe('truncate-end');
     await term.unmount();
     // Memory past nine tenths of the whole turns amber
-    anon = 3_600_000;
+    anon = 3600000;
     await clock.advance(6000);
     await clock.advance(1000);
     const high = await $.ui.mount({ ...BAND, surface: 'desktop' });

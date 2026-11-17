@@ -6,7 +6,7 @@
 const KEYS_FILE = 'keys.md';
 const KEYS_STATE = 'keys.json';
 // How long the local stores' names are trusted before they are read again, for an ask checked against them
-const KEYS_MS = 60_000;
+const KEYS_MS = 60000;
 const STORE_NAMES = {
     claudopus: "Claudopus's keychain",
     keychain: "this Mac's keychain",
@@ -279,8 +279,8 @@ const keysLearn = async ($, e, r) => {
         await refreshKeys($);
 };
 // As a chat starts, a list that is missing or a day old is made again a little later, so work that reads it finds one
-const KEYS_DAY = 24 * 60 * 60_000;
-const keysOnStart = ($) => $.clock.after(10_000, () => void (async () => {
+const KEYS_DAY = 24 * 60 * 60000;
+const keysOnStart = ($) => $.clock.after(10000, () => void (async () => {
     const kept = await keysRead($);
     if ((await $.clock.now()) - kept.at >= KEYS_DAY || !(await readOr($, `${dir}/${KEYS_FILE}`)))
         await refreshKeys($);

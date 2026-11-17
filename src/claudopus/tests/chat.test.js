@@ -17,25 +17,20 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
     const words = files.get(`${MEMORY}/words/engine-id.md`) ?? '';
     expect(words).toContain('fix the upload page');
     expect(words).toContain('and the nose');
-    // Words of a long chat, over the 4 MB the engine gives whole, are added to, never written again as only the newest
-    const long = `## 2026-11-12T07:00:00.000Z\nthe first message\n\n${'x'.repeat(4_300_000)}\n\n`;
-    files.set(`${MEMORY}/words/engine-id.md`, long);
-    await $.prompt.submit({ text: 'and the chin', wait: false, origin: composer });
-    const kept = files.get(`${MEMORY}/words/engine-id.md`) ?? '';
-    expect(kept.startsWith(long)).toBe(true);
-    expect(kept.slice(long.length)).toContain('and the chin');
 });
-test('work starts as a fresh agent from written instructions, never as a copy of the chat: a clearly stated job on Sonnet, the rest as a task, a fork or an agent with no model refused whatever an old config.json chose, and a brief gets the rules for the work', async ($, on) => {
-    const { files } = world(on, { tokens: 400_000, chatRole: 'CHAT ROLE {lanes}' });
-    // A choice of 0.2.152's that sent small jobs to a copy of the chat counts for nothing now
-    ownSet(files, 'config.json', JSON.stringify({ lean: { small: 'copy', quick: 'work' } }));
+test('work starts as a copy of the chat only for a small job and as the settings allow: else a fork or an agent with no model is refused, and a brief gets the rules for the work', async ($, on) => {
+    const { files } = world(on, { tokens: 400000, chatRole: 'CHAT ROLE {lanes}' });
     await $.session.start(start);
-    const told = (await $.prompt.submit({ text: 'push it', wait: false, origin: composer })).context?.join('\n') ?? '';
-    expect(told).toContain('`subagent_type: "claudopus:quick"` and `model: "sonnet"`');
-    expect(told).toContain('`subagent_type: "claudopus:task"`');
-    expect(told).toContain('Never start a copy of this chat');
-    expect(told).not.toContain('start a copy of this chat, the Agent tool');
-    expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'a1', prompt: 'push it', subagent_type: 'fork' })).deny).toContain('never starts a task as a copy');
+    // As shipped, a small job goes to a copy of the chat, which is told it is a task now and how long it may go
+    const shipped = await $.prompt.submit({ text: 'push it', wait: false, origin: composer });
+    expect(shipped.context?.join('\n')).toContain('subagent_type: "fork"');
+    expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'a0', prompt: 'push it', subagent_type: 'fork' })).deny).toBeUndefined();
+    // With everything as a full task, never a copy
+    ownSet(files, 'config.json', JSON.stringify({ lean: { small: 'full' } }));
+    await $.session.start(start);
+    const r = await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer });
+    expect(r.context?.join('\n')).not.toContain('subagent_type: "fork"');
+    expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'a1', prompt: 'fix the nose', subagent_type: 'fork' })).deny).toContain('never starts a task as a copy');
     expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'a2', prompt: 'fix the nose', subagent_type: 'general-purpose' })).deny).toContain('the model named');
     expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'a3', prompt: 'fix the nose', subagent_type: 'general-purpose', model: 'opus' })).deny).toBeUndefined();
     expect(files.get(`${MEMORY}/log.md`)).toContain('refused an Agent call that copies the chat');
@@ -44,6 +39,34 @@ test('work starts as a fresh agent from written instructions, never as a copy of
     expect(prompts[0]?.startsWith('BRIEF')).toBe(true);
     expect(prompts[0]).toContain('WORK ROLE');
     expect(prompts[0]).toContain(`${MEMORY}/words/engine-id.md`);
+});
+test('a copy of the chat for a small job is told it is a task now, and past its 10 steps may only hand what is left on and end', async ($, on) => {
+    const { files } = world(on, { model: 'claude-opus-5-5' });
+    await $.session.start(start);
+    await $.prompt.submit({ text: 'push it', wait: false, origin: composer });
+    const r = (await $.agent.spawn({ ...spawn, fork: true, subagentType: undefined, description: 'Push it', prompt: 'push it', parentModel: 'claude-opus-5-5' }));
+    expect(prompts.at(-1)?.startsWith('You are a copy of the chat')).toBe(true);
+    const id = r.agentId ?? '';
+    // It does the job itself: no helper and no other task to do it past its count
+    expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'fa', prompt: 'push it', subagent_type: 'general-purpose', model: 'opus', agentId: id })).deny).toContain('does its small job itself');
+    expect((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'fb', to: 'a7', message: 'push it', agentId: id })).deny).toContain('does its small job itself');
+    for (let n = 0; n < 10; n++)
+        expect((await $.tool.call({ tool: 'Bash', tool_use_id: `f${n}`, command: 'git status', agentId: id })).deny).toBeUndefined();
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'f10', command: 'git push', agentId: id })).deny).toContain('this copy of the chat has taken its 10 steps. Hand what is left to a fresh task');
+    // The note gives it the message for the chat, which it sends to the chat; past its steps it may send nothing else
+    const handing = await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'f11', text: 'Handing the rest on', task: 'push the branch in /repo', agentId: id });
+    expect(JSON.stringify(handing.result)).toContain('The copy of this chat that did');
+    expect((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'f11b', to: 'main', message: 'Start it as its own background task: push the branch in /repo', agentId: id })).deny).toBeUndefined();
+    expect((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'f11c', to: 'a7', message: 'do it', agentId: id })).deny).toBeDefined();
+    // A release past its steps is refused before its allow box is shown
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'f11d', command: 'cd /repo && /plug/claudopus/bin/release', agentId: id })).deny).toContain('taken its 10 steps');
+    expect((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'f12', message: 'done', agentId: id })).deny).toBeUndefined();
+    expect(files.get(`${MEMORY}/log.md`)).toContain(`refused a step of copy ${id} past its 10 steps`);
+    // A fresh task is not held to a copy's steps
+    const fresh = (await $.agent.spawn({ ...spawn, model: 'opus', description: 'Fix the nose', prompt: 'fix the nose' }));
+    expect(prompts.at(-1)?.startsWith('fix the nose')).toBe(true);
+    for (let n = 0; n < 11; n++)
+        expect((await $.tool.call({ tool: 'Bash', tool_use_id: `g${n}`, command: 'git status', agentId: fresh.agentId })).deny).toBeUndefined();
 });
 test('no agent is started on an older model or on Haiku, by the chat or by a piece of work: one named so starts on its family\'s newest; the aliases and their newest versions pass as named', async ($, on) => {
     const { files, agentModels } = world(on);
@@ -103,13 +126,11 @@ test('every start is held to a current model: an older id, a parent on an older 
     expect((await go({ fork: true, parentAgentId: 'a0' })).deny).toBeUndefined();
     expect(files.get(`${MEMORY}/log.md`)).toContain('a workflow agent asked to run on Sonnet 4.5 starts on Sonnet 5.5');
 });
-test("the mod's own kinds start the cheapest measured way: a reader and a quick task on the legwork model, a check never weaker than its parent and at least Opus, each with only its own tools, whatever an old config.json chose", async ($, on) => {
-    const { asked, types, files, registered, kindTools } = world(on, { model: 'claude-opus-5-5' });
+test("the mod's own kinds start as the settings say: a reader on the legwork model or its parent's, a check never weaker than its parent and at least Opus or always Fable, a quick task on its model, and every kind with everything when chosen", async ($, on) => {
+    const { asked, types, files, registered } = world(on, { model: 'claude-opus-5-5' });
     await $.session.start(start);
     // The kinds are the engine's own from the session's start
     expect(await until(async () => (registered.length >= 5 ? [...registered].sort() : undefined))).toEqual(['check', 'helper', 'quick', 'reader', 'task']);
-    // Each kind told to call wake_me rather than wait has it (16 Nov: a task had none, and had the chat start it again by hand)
-    expect(Object.keys(kindTools).filter(kind => kindTools[kind]?.includes('mcp__claudopus__wake_me')).sort()).toEqual(['helper', 'quick', 'task']);
     await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer });
     const go = async (subagentType, e = {}) => {
         await $.agent.spawn({ ...spawn, subagentType, prompt: 'p', description: 'The nose', parentModel: 'claude-opus-5-5', parentAgentId: 'a0', ...e });
@@ -121,35 +142,26 @@ test("the mod's own kinds start the cheapest measured way: a reader and a quick 
         ['claudopus:check', { model: 'sonnet', parentModel: 'claude-sonnet-5-5' }, ['claude-opus-5-5', 'claudopus:check']],
         ['claudopus:check', { model: 'opus', parentModel: 'claude-fable-5-2' }, ['claude-fable-5-2', 'claudopus:check']],
         ['claudopus:check', { model: 'fable' }, ['fable', 'claudopus:check']],
-        ['claudopus:quick', {}, ['sonnet', 'claudopus:quick']],
-        ['claudopus:quick', { model: 'inherit', parentModel: 'claude-fable-5-2' }, ['sonnet', 'claudopus:quick']],
-        ['claudopus:quick', { model: 'opus' }, ['sonnet', 'claudopus:quick']],
-        // a title that reads like a check (16 Nov second look: "Push and check the build" went to the parent's Fable)
-        ['claudopus:quick', { model: 'fable', description: 'Push and check the build', parentModel: 'claude-fable-5-2', parentAgentId: undefined }, ['sonnet', 'claudopus:quick']],
+        ['claudopus:quick', {}, ['opus', 'claudopus:quick']],
         ['claudopus:quick', { model: 'sonnet' }, ['sonnet', 'claudopus:quick']],
         ['claudopus:task', { model: 'opus' }, ['opus', 'claudopus:task']],
     ];
     for (const [type, e, want] of shipped)
         expect([type, e, await go(type, e)]).toEqual([type, e, want]);
-    // 0.2.152's choices of a reader on its parent's model, a check always on Fable and every kind with everything count for nothing now
-    ownSet(files, 'config.json', JSON.stringify({ lean: { readers: 'own', checker: 'strongest', start: 'all', quick: 'work' } }));
+    // A reader on its parent's model, a check always on Fable, and every kind started with everything
+    ownSet(files, 'config.json', JSON.stringify({ lean: { readers: 'own', checker: 'strongest', start: 'all' } }));
     await $.session.start(start);
-    const old = [
-        ['claudopus:reader', {}, ['sonnet', 'claudopus:reader']],
-        ['claudopus:check', { model: 'sonnet' }, ['claude-opus-5-5', 'claudopus:check']],
-        ['claudopus:quick', {}, ['sonnet', 'claudopus:quick']],
-        ['claudopus:task', { model: 'opus' }, ['opus', 'claudopus:task']],
-        ['claudopus:helper', { model: 'opus' }, ['opus', 'claudopus:helper']],
+    const chosen = [
+        ['claudopus:reader', {}, ['claude-opus-5-5', 'general-purpose']],
+        ['claudopus:check', { model: 'sonnet' }, ['claude-fable-5-2', 'general-purpose']],
+        ['claudopus:quick', {}, ['opus', 'general-purpose']],
+        ['claudopus:task', { model: 'opus' }, ['opus', 'general-purpose']],
+        ['claudopus:helper', { model: 'opus' }, ['opus', 'general-purpose']],
         ['general-purpose', { model: 'sonnet' }, ['sonnet', 'general-purpose']],
         ['Explore', {}, [undefined, 'Explore']],
     ];
-    for (const [type, e, want] of old)
+    for (const [type, e, want] of chosen)
         expect([type, e, await go(type, e)]).toEqual([type, e, want]);
-    // A quick task a task starts as a check is held to the check rule; with Fable for every task a clear job runs on Fable
-    expect(await go('claudopus:quick', { description: 'Review the fix', parentModel: 'claude-fable-5-2' })).toEqual(['claude-fable-5-2', 'claudopus:quick']);
-    ownSet(files, 'config.json', JSON.stringify({ lean: { fable: 'all' } }));
-    await $.session.start(start);
-    expect(await go('claudopus:quick', { model: 'sonnet', parentAgentId: undefined })).toEqual(['fable', 'claudopus:quick']);
 });
 test('what counts as current follows the newest model the engine offers, never a version written into the mod', async ($, on) => {
     const { asked, agentModels } = world(on, { model: 'claude-opus-5-5' });
@@ -348,7 +360,7 @@ test('work reaches main only through the release runner: its rules name it, and 
 test('a large paste is saved to a file and left out of the chat', async ($, on) => {
     const { files } = world(on);
     await $.session.start(start);
-    const paste = `start ${'x'.repeat(20_000)} end`;
+    const paste = `start ${'x'.repeat(20000)} end`;
     const r = await $.prompt.submit({ text: paste, wait: false, origin: composer });
     expect(r.text?.length ?? 0).toBeLessThan(2000);
     expect(r.text).toContain('were saved to');
@@ -404,8 +416,6 @@ test("a chat's own thread may only read, run a single command in the background,
     // Only a look or a push: one that changes or reads files, a script, a pull, a branch or remote changed, a paste or a shell is a task's
     for (const [i, command] of ['rm -rf build', 'git pull', 'git checkout .', 'git branch -D old', 'git remote add x y', './deploy.sh', 'cp -r ~/.claude/claudopus/p?stes /tmp/p', 'npm install', 'GIT_DIR=x git status', "bash -c 'git add -A'"].entries())
         expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1f${i}`, command })).deny).toContain('Start a fresh agent');
-    // and it names the quick task for a clearly stated job
-    expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1f-q', command: 'git pull' })).deny).toContain('"claudopus:quick" for a clearly stated job');
     for (const [i, command] of ['git status', 'git log --oneline -5', 'gh pr checks 12', 'git branch -a', 'git remote -v'].entries())
         expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1g${i}`, command })).deny).toBeUndefined();
     // A push only of the branch it is on, never from main and never to it by another spelling, nor anything git is set to run
@@ -442,13 +452,12 @@ test("a chat's own thread may only read, run a single command in the background,
     for (const [i, call] of [{ tool: 'Edit', file_path: '/repo/src/nose.ts', old_string: 'a', new_string: 'b' }, { tool: 'Write', file_path: '/repo/x', content: 'x' }, { tool: 'Grep', pattern: 'nose' }, { tool: 'Bash', command: 'npm test' }].entries())
         for (const agentId of ['w1', 'helper-1'])
             expect((await $.tool.call({ ...call, tool_use_id: `w${i}${agentId}`, agentId })).deny).toBeUndefined();
-    // An old config.json's everything-as-a-full-task no longer stops the chat running its own single command
+    // With everything as a full task, the chat runs no command of its own
     ownSet(files, 'config.json', JSON.stringify({ lean: { small: 'full' } }));
     await $.session.start(start);
     await $.prompt.submit({ text: 'push it', wait: false, origin: composer });
-    files.set('git:branch', 'fix-nose');
-    expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't9', command: 'git push' })).deny).toBeUndefined();
-    files.delete('git:branch');
+    const full = await $.tool.call({ tool: 'Bash', tool_use_id: 't9', command: 'git push' });
+    expect(full.deny).toContain('Start a fresh agent');
 });
 test('a session the person has not typed into does its own work', async ($, on) => {
     world(on);

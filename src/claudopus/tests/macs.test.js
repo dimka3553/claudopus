@@ -8,7 +8,7 @@ test("F-014 · a Mac that reaches another hands it this Mac's chats in the same 
     const pressed = JSON.stringify({ card: 'b1', choice: 'Send', isReply: false, ask: 'May I send 12 invoices?', askAt: NOW, at: NOW, chat: 'chat-b' });
     files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-answer---\n${NOW}-abc.json\n${pressed}\n---claudopus-answer---\nbad name\n${pressed}\n`);
     await $.session.start(start);
-    await clock.advance(10_000);
+    await clock.advance(10000);
     const first = await until(async () => sshed.find(([command]) => command?.startsWith("sh -c 'L=")));
     // What it hands over says who this Mac is, what it calls the M4, and carries this Mac's chats only
     const [head = '', ...rest] = (first?.[1] ?? '').split('\n');
@@ -19,7 +19,7 @@ test("F-014 · a Mac that reaches another hands it this Mac's chats in the same 
     // The answer is left for no chat here, though it names the ask that stands
     expect([...files.keys()].filter(path => path.includes('/live/answers/chat-b/'))).toEqual([]);
     // The next trip puts it away there, and carried again it is not left either
-    await clock.advance(10_000);
+    await clock.advance(10000);
     const second = sshed.filter(([command]) => command?.startsWith("sh -c 'L=")).at(-1);
     expect(second?.[0]).toContain(`rm -f ${NOW}-abc.json`);
     expect(files.has(`${MEMORY}/live/answers/chat-b/${NOW}-abc.json`)).toBe(false);
@@ -39,7 +39,7 @@ test("with another Mac named, the results become the same on both: what each lac
     files.set('remote:theirs/meta.json', theirs);
     files.set('remote:theirs/report.md', 'See /Users/sam/repo/a.png\n');
     await $.session.start(start);
-    await clock.advance(10_000);
+    await clock.advance(10000);
     // "theirs" is brought, whole, its paths on this Mac's home
     await until(async () => files.get(`${MEMORY}/reports/theirs/meta.json`));
     expect(files.get(`${MEMORY}/reports/theirs/meta.json`)).toContain(`"folder":"${HOME}/repo"`);
@@ -56,7 +56,7 @@ test("with another Mac named, the results become the same on both: what each lac
     expect(marked?.[0]).toContain('= "111 222" ] || exit 3');
     expect(JSON.parse(marked?.[1] ?? '{}')).toMatchObject({ archived: NOW, folder: '/Users/sam/repo', waiting: [{ text: 'Ship it?', answer: 'Yes' }] });
     // Within the next two minutes it is not looked at again; nothing here was deleted
-    await clock.advance(60_000);
+    await clock.advance(60000);
     expect(sshed.filter(([command]) => command?.startsWith("sh -c 'echo $HOME;")).length).toBe(1);
     expect(files.get(`${MEMORY}/reports/mine/report.md`)).toBe('Mine.\n');
 });
@@ -70,22 +70,22 @@ test("a result cut short on its way is never put in place, and a list cut short 
     files.set('pull:cut', '1');
     files.set(`${MEMORY}/reports/mine/meta.json`, JSON.stringify({ ...JSON.parse(theirs), id: 'mine' }));
     await $.session.start(start);
-    await clock.advance(10_000);
+    await clock.advance(10000);
     await until(async () => sshed.find(([script]) => script?.includes('tar xf - -C "$S"')));
-    await clock.advance(1_000);
+    await clock.advance(1000);
     expect(files.has(`${MEMORY}/reports/theirs/meta.json`)).toBe(false);
     // Cut between its two files with tar ending well: no _end came, so it is not put in place either
     files.set('pull:cut', 'between');
     const pulls = sshed.filter(([script]) => script?.includes('tar xf - -C "$S"')).length;
-    await clock.advance(120_000);
+    await clock.advance(120000);
     await until(async () => sshed.filter(([script]) => script?.includes('tar xf - -C "$S"')).length > pulls);
-    await clock.advance(1_000);
+    await clock.advance(1000);
     expect(files.has(`${MEMORY}/reports/theirs/meta.json`)).toBe(false);
     // Two minutes on, with the list cut short: nothing is brought, handed or marked
     files.delete('pull:cut');
     files.set('ssh:cut', '1');
     const before = sshed.length;
-    await clock.advance(120_000);
+    await clock.advance(120000);
     expect(sshed.slice(before).filter(([script]) => !script?.startsWith("sh -c 'L=") && !script?.startsWith("sh -c 'echo $HOME;") && !script?.startsWith('find'))).toEqual([]);
     expect(files.has(`${MEMORY}/reports/theirs/meta.json`)).toBe(false);
 });
@@ -98,7 +98,7 @@ test('a result put away here and brought back on the other Mac by an older versi
     files.set(`${MEMORY}/live/macs/sam-m4.local.results.json`, JSON.stringify({ syncedAt: 1, triedAt: 1, archived: { r: NOW - 1000 } }));
     files.set('ssh:results', `/Users/sam\n---claudopus-result---\nr\n1 2\n${JSON.stringify(r)}\n`);
     await $.session.start(start);
-    await clock.advance(10_000);
+    await clock.advance(10000);
     const here = await until(async () => {
         const one = JSON.parse(files.get(`${MEMORY}/reports/r/meta.json`) ?? '{}');
         return one.broughtBack ? one : undefined;
@@ -114,7 +114,7 @@ test('a result brought back after it was put away on the other Mac stays out of 
     files.set(`${MEMORY}/reports/r/meta.json`, JSON.stringify({ ...r, archived: NOW - 1000 }));
     files.set('ssh:results', `/Users/sam\n---claudopus-result---\nr\n1 2\n${JSON.stringify({ ...r, broughtBack: NOW })}\n`);
     await $.session.start(start);
-    await clock.advance(10_000);
+    await clock.advance(10000);
     const here = await until(async () => {
         const one = JSON.parse(files.get(`${MEMORY}/reports/r/meta.json`) ?? '{}');
         return one.broughtBack ? one : undefined;
@@ -124,7 +124,7 @@ test('a result brought back after it was put away on the other Mac stays out of 
 test("a Mac handed another Mac's chats lists them by name and Mac with its own, with their asks answered only there, and drops them once that Mac stops handing them over", async ($, on) => {
     const { files, clock } = world(on);
     // No macs here: this is the Mac that cannot reach the other one. Its clock is an hour behind the other Mac's
-    const ahead = NOW + 3_600_000;
+    const ahead = NOW + 3600000;
     const push = `${JSON.stringify({ from: 'sams-m5', you: 'sams-m4' })}\n${ahead / 1000}\n---claudopus-live---\n${otherChat(ahead, 'chat-m5', 'Robot arm')}\n---claudopus-live---\n${JSON.stringify({ chat: 'chat-idle', title: 'Quiet one', folder: '/x', host: '', at: ahead, cards: [] })}\n`;
     files.set(`${MEMORY}/live/pushed/sams-m5.json`, push);
     files.set(`mtime:${MEMORY}/live/pushed/sams-m5.json`, String(NOW));
@@ -148,8 +148,8 @@ test("a Mac handed another Mac's chats lists them by name and Mac with its own, 
     expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Send')).toBe(false);
     expect([...files.keys()].filter(path => path.startsWith(`${MEMORY}/live/outbox/sams-m5/`) && path.endsWith('.json'))).toEqual([]);
     // That Mac goes to sleep: its copy is not handed over again and goes stale, and its chats leave, as does the naming of this one
-    await clock.advance(100_000);
-    files.set(`${MEMORY}/live/chat-own.json`, JSON.stringify({ chat: 'chat-own', title: 'Own quiet', folder: '/y', host: '', at: NOW + 100_000, cards: [] }));
+    await clock.advance(100000);
+    files.set(`${MEMORY}/live/chat-own.json`, JSON.stringify({ chat: 'chat-own', title: 'Own quiet', folder: '/y', host: '', at: NOW + 100000, cards: [] }));
     await clock.advance(5000);
     expect(await until(async () => ((await list.find({ type: 'Text', text: 'Robot arm' })) ? undefined : true))).toBe(true);
     await list.unmount();
@@ -161,13 +161,13 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
     const running = (at) => JSON.stringify({ ...JSON.parse(otherChat(at, 'chat-old', 'Remote connector')), cards: [JSON.parse(otherChat(at)).cards[1]] });
     files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${running(NOW)}\n`);
     await $.session.start(start);
-    await clock.advance(10_000);
+    await clock.advance(10000);
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
     expect(await until(async () => list.find({ type: 'Text', text: 'Check the totals' }))).toBeDefined();
     expect(await list.find({ type: 'Text', text: 'Working on 1 thing in another chat' })).toBeDefined();
     // The work ends: that chat, still open, writes its file with no card at all
-    const quiet = JSON.stringify({ chat: 'chat-old', title: 'Remote connector', folder: '/repo/billing', host: '', at: NOW + 11_000, cards: [] });
-    files.set('ssh:fetch', `${(NOW + 11_000) / 1000}\n---claudopus-live---\n${quiet}\n`);
+    const quiet = JSON.stringify({ chat: 'chat-old', title: 'Remote connector', folder: '/repo/billing', host: '', at: NOW + 11000, cards: [] });
+    files.set('ssh:fetch', `${(NOW + 11000) / 1000}\n---claudopus-live---\n${quiet}\n`);
     // It is seen at the next fetch, a second at a time so its pause is not passed over
     let seen;
     for (let n = 0; n < 20 && !seen; n += 1)
@@ -183,12 +183,12 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
     expect(await drawn(list)).toEqual(['mark']);
     expect((await list.findAll({ type: 'Button' })).some(b => /Finished/.test(String(b.props.label)))).toBe(false);
     // A chat that closes with its work running shows nothing finished: its work just leaves
-    files.set('ssh:fetch', `${(NOW + 40_000) / 1000}\n---claudopus-live---\n${running(NOW + 40_000)}\n`);
+    files.set('ssh:fetch', `${(NOW + 40000) / 1000}\n---claudopus-live---\n${running(NOW + 40000)}\n`);
     let back;
     for (let n = 0; n < 20 && !back; n += 1)
         (await clock.advance(1000), (back = await list.find({ type: 'Text', text: 'Check the totals' })));
     expect(back).toBeDefined();
-    files.set('ssh:fetch', `${(NOW + 60_000) / 1000}\n`);
+    files.set('ssh:fetch', `${(NOW + 60000) / 1000}\n`);
     let finished;
     for (let n = 0; n < 20; n += 1)
         (await clock.advance(1000), (finished ||= await list.find({ type: 'Text', text: '✓ Finished' })));
@@ -199,10 +199,10 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
 test("Details of work in a chat the app runs on another Mac shows what that chat shares, and one press opens that chat", async ($, on) => {
     const { files, clock, shown } = world(on);
     files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }));
-    const chat = { chat: 'chat-m4', title: 'Video', folder: '/Users/sam/GitHub', host: '', at: NOW, link: { bridge: 'session_01Video', app: '' }, cards: [{ id: 'v1', parentId: '', isFork: false, tokens: 242_001, title: 'Improve the video', words: 'Can you improve the video?', items: [{ text: 'Find the cuts', state: 'done' }, { text: 'Have it checked', state: 'doing' }, { text: 'Show you', state: 'open' }], entries: [{ at: NOW - 1000, kind: 'note', text: 'Rendering again for a second look.' }], answer: '', startedAt: NOW - 60_000, endedAt: 0, status: 'working', model: 'claude-fable-5-2' }] };
+    const chat = { chat: 'chat-m4', title: 'Video', folder: '/Users/sam/GitHub', host: '', at: NOW, link: { bridge: 'session_01Video', app: '' }, cards: [{ id: 'v1', parentId: '', isFork: false, tokens: 242001, title: 'Improve the video', words: 'Can you improve the video?', items: [{ text: 'Find the cuts', state: 'done' }, { text: 'Have it checked', state: 'doing' }, { text: 'Show you', state: 'open' }], entries: [{ at: NOW - 1000, kind: 'note', text: 'Rendering again for a second look.' }], answer: '', startedAt: NOW - 60000, endedAt: 0, status: 'working', model: 'claude-fable-5-2' }] };
     files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${JSON.stringify(chat)}\n`);
     await $.session.start(start);
-    await clock.advance(10_000);
+    await clock.advance(10000);
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
     expect(await until(async () => list.find({ type: 'Text', text: 'Improve the video' }))).toBeDefined();
     const id = (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith('open-r-'))?.key?.replace(/^open-/, '').replace(/-\d+$/, '') ?? '';
@@ -373,22 +373,22 @@ test('a name pressed on another Mac for this Mac is opened here, by what this Ma
     // A chat of this Mac with nothing going on still opens by the link its file shares
     files.set(`${MEMORY}/live/chat-idle.json`, JSON.stringify({ chat: 'chat-idle', title: 'Quiet', folder: '/q', host: '', at: NOW, cards: [], link: { bridge: '', app: 'local_idle-1' } }));
     await $.session.start(start);
-    await clock.advance(12_000);
-    const now = NOW + 12_000;
+    await clock.advance(12000);
+    const now = NOW + 12000;
     const press = (chat, at) => `---claudopus-open---\n${JSON.stringify({ chat, at })}\n`;
-    files.set('ssh:opens', `${now / 1000}\n${press('chat-b', now - 1000)}${press('engine-id', now - 1000)}${press('chat-idle', now)}${press('chat-old', now - 60_000)}${press('bad id; rm', now)}`);
+    files.set('ssh:opens', `${now / 1000}\n${press('chat-b', now - 1000)}${press('engine-id', now - 1000)}${press('chat-idle', now)}${press('chat-old', now - 60000)}${press('bad id; rm', now)}`);
     await clock.advance(4000);
     const opened = () => shown.filter(one => one[0] === 'open').map(one => one[1]);
     expect(await until(async () => (opened().length >= 3 ? true : undefined))).toBe(true);
     expect(opened().sort()).toEqual(['claude://code/continue?session=local_here-1', 'claude://code/continue?session=local_idle-1', 'claude://code/continue?session=local_self-1']);
     // Taken over the kept connection, from this Mac's own folder there
     expect(sshed.some(([command]) => command?.startsWith("sh -c 'cd $HOME/.claude/claudopus/live/outbox/sams-macbook-air"))).toBe(true);
-    await clock.advance(10_000);
+    await clock.advance(10000);
     expect(opened()).toHaveLength(3);
 });
 test('presses left on another Mac are read with their clock, each chat once, the stale and malformed dropped', () => {
-    const now = 1_700_000_000;
-    const text = `banner\n${now}\n---claudopus-open---\n{"chat":"a","at":${now * 1000 - 5000}}\n---claudopus-open---\n{"chat":"a","at":${now * 1000}}\n---claudopus-open---\n{"chat":"b","at":${now * 1000 - 31_000}}\n---claudopus-open---\nnot json\n---claudopus-open---\n{"chat":"$(x)","at":${now * 1000}}\n`;
+    const now = 1700000000;
+    const text = `banner\n${now}\n---claudopus-open---\n{"chat":"a","at":${now * 1000 - 5000}}\n---claudopus-open---\n{"chat":"a","at":${now * 1000}}\n---claudopus-open---\n{"chat":"b","at":${now * 1000 - 31000}}\n---claudopus-open---\nnot json\n---claudopus-open---\n{"chat":"$(x)","at":${now * 1000}}\n`;
     expect(opensOf(text)).toEqual(['a']);
     expect(opensOf('')).toEqual([]);
     expect(openTake('sams-m5')).toContain('live/outbox/sams-m5 ');
@@ -410,7 +410,7 @@ test("a chat on the other Mac running without Claudopus, and this Mac's app havi
     files.set('ssh:fetch', `${NOW / 1000}\noff 0bcc28d2-aaaa {"customTitle":"FaceIQ email plan"}\noff bad;id\n`);
     files.set('sh:applog', "2026-11-12 13:57:59 [warn] [CCD] SSH local_x: 1 plugin(s) left to the host's own install did not load there; their copies are handed over from the next start on\n");
     await $.session.start(start);
-    await clock.advance(40_000);
+    await clock.advance(40000);
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
     expect(await until(async () => list.find({ type: 'Text', text: 'Claudopus is off in some chats' }))).toBeDefined();
     expect(await list.find({ type: 'Text', text: /^New chats on m4 start without Claudopus\. .* at 2026-11-12 13:57 .*quit and opened again\.$/ })).toBeDefined();
@@ -419,7 +419,7 @@ test("a chat on the other Mac running without Claudopus, and this Mac's app havi
     // The app is quit and opened again, and the chat there has gone: the warning goes
     files.set('sh:applog', '2026-11-13 09:00:00 [info] Starting app {\n');
     files.set('ssh:fetch', `${NOW / 1000}\n`);
-    await clock.advance(40_000);
+    await clock.advance(40000);
     expect(await until(async () => ((await list.find({ type: 'Text', text: /^Claudopus is off/ })) ? undefined : true))).toBe(true);
     await list.unmount();
 });
@@ -428,30 +428,30 @@ test("the other Mac's asks and finishes are told here as a notification once, op
     files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }));
     const chat = (at, more = {}) => JSON.stringify({ ...JSON.parse(otherChat(at, 'chat-m4', 'Robot arm')), link: { bridge: 'cse_robot1', app: '' }, ...more });
     // An ask from long ago is not told
-    files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${chat(NOW - 3_600_000, { at: NOW })}\n`);
+    files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${chat(NOW - 3600000, { at: NOW })}\n`);
     await $.session.start(start);
-    await clock.advance(15_000);
+    await clock.advance(15000);
     expect(own.filter(one => one.includes('--asks'))).toEqual([]);
     // A fresh one is, once, however many looks see it
-    const later = NOW + 15_000;
+    const later = NOW + 15000;
     files.set('ssh:fetch', `${later / 1000}\n---claudopus-live---\n${chat(later)}\n`);
-    await clock.advance(30_000);
+    await clock.advance(30000);
     const asked = () => own.filter(one => one.includes('--asks') && one.includes('Send the invoices has a question for you'));
     expect(await until(async () => (asked().length ? true : undefined))).toBe(true);
-    await clock.advance(20_000);
+    await clock.advance(20000);
     expect(asked()).toHaveLength(1);
     const one = asked()[0] ?? [];
     expect(one[one.indexOf('--text') + 1]).toBe('May I send 12 invoices? · Robot arm on m4');
     expect(one[one.indexOf('--open') + 1]).toBe('claude://code/cse_robot1');
     // Its work finishes there: told as ready, once
-    const ended = later + 50_000;
+    const ended = later + 50000;
     const done = JSON.parse(chat(later));
     done.cards = done.cards.map(c => ({ ...c, status: 'done', endedAt: ended, ask: undefined }));
     files.set('ssh:fetch', `${ended / 1000}\n---claudopus-live---\n${JSON.stringify({ ...done, at: ended })}\n`);
-    await clock.advance(30_000);
+    await clock.advance(30000);
     const readyOnes = () => own.filter(one => !one.includes('--asks') && one.includes('Check the totals'));
     expect(await until(async () => (readyOnes().length ? true : undefined))).toBe(true);
-    await clock.advance(20_000);
+    await clock.advance(20000);
     expect(readyOnes()).toHaveLength(1);
 });
 test('the look for chats without Claudopus is read whole, each chat once, and what the app last logged says whether its decision holds', () => {
@@ -478,9 +478,9 @@ test("in a chat over ssh the panel's text stays the same from second to second w
     const first = await texts();
     expect(first).toContain('<1m');
     expect(first).toMatch(/context \d*[05]% \(310k\)|context 310k/);
-    await clock.advance(20_000);
+    await clock.advance(20000);
     expect(await texts()).toBe(first);
-    await clock.advance(41_000);
+    await clock.advance(41000);
     expect(await texts()).toContain('1m');
     await pane.unmount();
 });
