@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { leftoversOf, leftName, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, waitingOf, watcherOf, isWaiterTree, PLAIN_MOST } from './jobs'
+import { heavyOf, leftoversOf, leftName, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, waitingOf, watcherOf, isWaiterTree, PLAIN_MOST } from './jobs'
 import type { WaitKind } from './jobs'
 import type { Job } from './jobs'
 
@@ -513,4 +513,28 @@ test('what a command left running is told by its group and by when it started: o
   // A call still open past the wrap holds back what it may have started
   expect(leftoversOf(ps(['20 1 20 S 00:05 1000 /u/bin/python daemon.py']), [{ ...span, from: 99_990, to: 40 }], new Set(), [{ from: 99_995, at: now - 8_000 }]).length).toBe(0)
   expect(leftName('/opt/homebrew/Cellar/python/Python.app/Contents/MacOS/Python fig4.py page 3')).toBe('Run python fig4.py page 3')
+})
+
+test("a heavy command is one whose own program drives a browser, builds or renders, or runs a script that drives a browser; never a server, a word another program reads, or the mod's own release and tests (16 Nov: ten tasks shot pages with Playwright and headless Chrome at once)", async () => {
+  const cases: [string, string[], string][] = [
+    ['cd /w && node shoot.mjs http://localhost:3517 out.png', ["import { chromium } from '/w/node_modules/playwright/index.mjs'"], 'browser'],
+    ['CHROME="/Users/x/Library/Caches/ms-playwright/chromium-1255/chrome-mac/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing" node .design/live/public.mjs', ['const browser = await chromium.launch({ executablePath: process.env.CHROME })'], 'browser'],
+    ['"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --screenshot=/w/l.png file:///w/lower-third.html', [], 'browser'],
+    ['python3 shot.py', ['from playwright.sync_api import sync_playwright'], 'browser'],
+    ['npx playwright test', [], 'browser'],
+    ['npx playwright install chromium', [], ''],
+    ['grep -n playwright package.json', [], ''],
+    ['ls ~/Library/Caches/ms-playwright', [], ''],
+    ['cat > shot.mjs <<X\nimport { chromium } from "playwright"\nX', [], ''],
+    ['node build-index.mjs', ['console.log(1)'], ''],
+    ['ffmpeg -i a.mp4 -filter_complex tile=4x4 sheet.png', [], 'render'],
+    ['npx remotion render src/index.ts Main out.mp4', [], 'render'],
+    ['blender -b scene.blend -a', [], 'render'],
+    ['cd app && npm run build', [], 'build'],
+    ['npm run dev -- -p 3517', [], ''],
+    ['next dev -p 3517', [], ''],
+    ['/Users/x/.claude/plugins/cache/claudopus/claudopus/0.2.1/bin/release', [], ''],
+    ['"$ENGINE" plugin test mods/claudopus && npm run build', [], ''],
+  ]
+  for (const [cmd, scripts, kind] of cases) expect([cmd, heavyOf(cmd, scripts)]).toEqual([cmd, kind])
 })

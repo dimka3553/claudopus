@@ -1,0 +1,3 @@
+- A task's heavy command (a browser it drives for screenshots, a build, a video or 3D render) now waits its turn while the Mac is busy and another one runs, so ten tasks no longer load one Mac at once. Its card says it waits its turn and its place in line; the waiting ones start in the order they came once the load falls, at the latest after 15 minutes, and the task is told how long it waited.
+- A heavy command still starts at once when nothing else heavy of the chat's runs, and Claudopus's own release and tests never wait.
+- Config's Tasks band has a new choice, "Heavy commands wait their turn": when the Mac is busy (as shipped), only when it is overloaded, or never.

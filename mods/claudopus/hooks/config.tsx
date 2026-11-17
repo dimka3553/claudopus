@@ -29,7 +29,7 @@ export const MODEL_NAMES: Record<string, string> = { opus: 'Opus 5.5', sonnet: '
 // otherwise; `skipVersion` a version the person skipped, kept quiet with every older one. None of them installs anything: Download
 // and Install are presses in the panel, and nothing here can make them run by themselves
 // `adminPassword` is read no more: no admin password is kept
-export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; updateEvery?: number; skipVersion?: string; models?: Partial<Models>; lean?: Partial<Lean>; admin?: string; adminSealed?: string; adminPassword?: string }
+export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; updateEvery?: number; skipVersion?: string; models?: Partial<Models>; lean?: Partial<Lean>; heavy?: string; admin?: string; adminSealed?: string; adminPassword?: string }
 
 // When Fable runs and when a second agent checks, each a choice in Config's Tasks band, the shipped one first. `lean` in config.json
 // holds only the ones changed; a key of a choice that was taken out (small, quick, start, checker, readers) is read as nothing. How a job
@@ -55,6 +55,16 @@ export const ADMIN_MODES = [
   { value: 'never', label: 'Never ask' },
 ] as const
 export type AdminMode = (typeof ADMIN_MODES)[number]['value']
+// `heavy`: when a task's new heavy command (a browser it drives, a build, a render) waits its turn: past each mark the Mac counts as
+// busy, by its load average for each core and its memory in use; "never" runs every one at once, as before. A command is held only
+// while a heavy command of the chat's work runs, so it waits on something that ends
+export const HEAVY_MODES = [
+  { value: 'busy', label: 'When the Mac is busy', load: 1.5, memory: 0.9 },
+  { value: 'overloaded', label: 'Only when overloaded', load: 3, memory: 0.95 },
+  { value: 'never', label: 'Never', load: Infinity, memory: Infinity },
+] as const
+export type HeavyMode = (typeof HEAVY_MODES)[number]
+export const heavyModeOf = (config: Config): HeavyMode => HEAVY_MODES.find(one => one.value === config.heavy) ?? HEAVY_MODES[0]
 
 export const parse = (text: string): Config => {
   try {
@@ -315,6 +325,14 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
               lean[one.key] !== LEAN_SHIPPED[one.key],
               () => acts.set('lean', undefined, one.key),
             ),
+          )}
+          {item(
+            'config-heavy',
+            'Heavy commands wait their turn',
+            "A task's browser, build or render waits while the Mac is busy and another one runs, and starts in order once there is room, at the latest after 15 minutes. Its card says it waits its turn. Claudopus's own release and tests never wait.",
+            <Select key="config-heavy-pick" options={HEAVY_MODES.map(one => ({ value: one.value, label: one.label }))} value={heavyModeOf(config).value} onSelect={value => acts.set('heavy', value === HEAVY_MODES[0].value ? undefined : value)} />,
+            heavyModeOf(config).value !== HEAVY_MODES[0].value,
+            () => acts.set('heavy', undefined),
           )}
         </Box>,
       )}

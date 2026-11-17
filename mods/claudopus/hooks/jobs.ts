@@ -115,6 +115,31 @@ const stepsOf = (cmd: string) =>
     .map(step => step.trim().replace(/^\(+\s*/, '').replace(/^(do|then|else)\s+/, '').replace(SETUP, '').trim())
     .filter(Boolean)
 
+// A command that loads the Mac hard: a browser it drives (Playwright, Puppeteer, headless Chrome), a build, or a render of video or
+// 3D. Told by each step's own program, and by what a script it runs imports, never by a word another program only reads
+// (`grep playwright package.json`); a server is none, as it never ends to make room. The mod's own release and test kit are none
+// either: they are never held. On 16 Nov ten tasks each drove headless browsers for screenshots on one Mac at once, and on 15 Nov
+// its load average reached 204 on 18 cores
+export type HeavyKind = 'browser' | 'build' | 'render'
+const BROWSER_STEP = /^(?:(?:npx|pnpm(?: exec| dlx)?|yarn|bunx|uvx)\s+)?(?:playwright\b(?!\s+install\b)|puppeteer\b|shot-scraper\b|capture-website\b|pageres\b|wkhtmltoimage\b|chrome-headless-shell\b|(?:chromium(?:-browser)?|google-chrome(?:-stable)?|Google Chrome(?: for Testing| Canary)?|Chromium|Microsoft Edge|Brave Browser)\s.*--(?:headless|screenshot|print-to-pdf|dump-dom)\b)/
+const BROWSER_SCRIPT = /\bfrom\s+['"](?:playwright|@playwright\/test|puppeteer(?:-core)?)['"]|\brequire\(\s*['"](?:playwright|puppeteer(?:-core)?)['"]\s*\)|\bimport\s*\{[^}]*\b(?:chromium|firefox|webkit)\b[^}]*\}\s*from\s*['"][^'"]*playwright[^'"]*['"]|\bfrom\s+playwright\.(?:sync|async)_api\s+import\b|\b(?:chromium|puppeteer)\.launch\(|\bpyppeteer\b|\bselenium\.webdriver\b/
+const BUILD_STEP = /^(?:(?:npx|bunx)\s+)?(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?build\b|next\s+build\b|vite\s+build\b|astro\s+build\b|nuxt\s+build\b|remix\s+build\b|webpack\b|rollup\b|turbo\s+(?:run\s+)?build\b|cargo\s+build\b|xcodebuild\b|swift\s+build\b|go\s+build\b|docker\s+(?:buildx\s+)?build\b|gradlew?\s|mvn\s|make\b(?=.*\s-j)|cmake\s+--build\b|bazel\s+build\b|expo\s+export\b)/
+const RENDER_STEP = /^(?:(?:npx|pnpm(?: exec| dlx)?|bunx)\s+)?(?:ffmpeg\b|remotion\s+render\b|hyperframes\s+render\b|blender\b.*\s(?:-b|--background)\b|manim\b|povray\b)/
+// A script a step runs with an interpreter, for the browser it may drive
+const INTERPRETED = /^(?:node|bun|deno(?:\s+run)?|tsx|ts-node|python3?|uv\s+run(?:\s+python3?)?)\b/
+const MOD_OWN = /(?:^|\/)bin\/release\b|\bguard\.mjs\b|\bplugin\s+(?:test|validate)\b|\bsrc\/claudopus\/build\.mjs\b/
+export const heavyOf = (cmd: string, scripts: string[] = []): HeavyKind | '' => {
+  // Each step by its own program's name, its folder taken off, quoted or not: "/Applications/Google Chrome.app/.../Google Chrome" --headless
+  const steps = stepsOf(cmd).map(step => step.replace(/^"[^"]*\/([^"/]+)"/, '$1').replace(/^'[^']*\/([^'/]+)'/, '$1').replace(/^[^\s"']*\//, ''))
+  if (steps.some(step => MOD_OWN.test(step))) return ''
+  if (steps.some(step => SERVER_CMD.test(step) && !BUILD_STEP.test(step)) && !steps.some(step => BROWSER_STEP.test(step) || RENDER_STEP.test(step))) return ''
+  if (steps.some(step => BROWSER_STEP.test(step))) return 'browser'
+  if (steps.some(step => INTERPRETED.test(step)) && scripts.some(text => BROWSER_SCRIPT.test(text))) return 'browser'
+  if (steps.some(step => RENDER_STEP.test(step))) return 'render'
+  if (steps.some(step => BUILD_STEP.test(step))) return 'build'
+  return ''
+}
+
 // The port a server listens on, from its command or what it wrote
 export const portOf = (text: string) =>
   text.match(/(?:--port[= ]|-p |localhost:|127\.0\.0\.1:|0\.0\.0\.0:|\[::\]:|\bport )(\d{2,5})\b/i)?.[1] ?? text.match(/http\.server (\d{2,5})\b/)?.[1]

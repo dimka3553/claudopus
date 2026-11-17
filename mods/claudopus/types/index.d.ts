@@ -116,6 +116,9 @@ export type Todo = {
   rulesSent?: string
   rulesDue?: boolean
   detached?: { id: string; what: string; at: number; cmd: string; log: string; pid?: string; isLeft?: boolean; from?: string }[]
+  // Its heavy commands (a browser it drives, a build, a render) that wait their turn while the Mac is busy: the call, its own words,
+  // the command, since when, and its place in the line of every piece of work's held commands
+  heldCalls?: { id: string; what: string; cmd: string; at: number; place: number }[]
   // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
   // so. It is still at work, and its card says what it waits for
   waitsSince?: number
