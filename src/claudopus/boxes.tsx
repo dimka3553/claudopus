@@ -351,6 +351,7 @@ const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surf
   barKeyTyped.clear()
   if (id) (boxHeldReply.delete(id), boxSaid.delete(id))
   barBoxAt = 0
+  lastGrow = ''
   boxPresses += 1
   drawAgain($)
   const bar = barIds.get(surface)

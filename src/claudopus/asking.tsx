@@ -442,6 +442,8 @@ const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) =
   if (one?.ask) boxOpen = undefined
   replyMark = one?.ask ? askMark(one.ask) : ''
   barBoxAt = 0
+  // a box opened is drawn at the height of what it holds: the next height it needs is asked for afresh
+  lastGrow = ''
   presses += 1
   redraw($)
   const ask = one?.ask
