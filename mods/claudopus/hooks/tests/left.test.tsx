@@ -57,7 +57,7 @@ const prompts: string[] = []
 // own, or uncommitted changes the move would overwrite
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -272,6 +272,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (options.jobs?.pid && tool === 'sh' && String(rest[1]).includes('# pid now')) return ok(`${options.jobs.pid()}\n`)
     if (options.jobs?.ps && tool === 'sh' && String(rest[1]).includes('@@LEFT@@')) return ok(`@@LEFT@@\n${options.jobs.ps()}\n`)
     if (options.jobs?.fd && tool === 'sh' && String(rest[1]).includes('/proc/$p/fd/1')) return ok(options.jobs.fd())
+    // Whose each process is by its environment, as the test says (this chat's where it says nothing)
+    if (options.jobs && tool === 'sh' && String(rest[1]).includes('# whose runs')) return ok(rest.slice(4).map(p => `${p} ${options.jobs?.owner?.(String(p)) ?? 'mine'}\n`).join(''))
     // The engine's tasks folder, where the test reads jobs
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('"$1"/tasks')) return ok('/tmp/claude-501/x/s1/tasks\n')
     // What sips says of a picture, where the test gives it
@@ -708,7 +710,7 @@ const psLine = (pid: number, ppid: number, pgid: number, command: string, rssKb 
 
 // A world where the work's command is handed process numbers from 5000 to 5100 (the probe before it gets 5000, the one after 5100),
 // and the test lays the processes on this Mac, which of them still run, and where each writes
-const leftWorld = (on: On, procs: { list: string[]; logs: Record<string, string>; outputs?: Record<string, string> }) => {
+const leftWorld = (on: On, procs: { list: string[]; logs: Record<string, string>; outputs?: Record<string, string>; owners?: Record<string, 'mine' | 'other' | 'hidden'> }) => {
   let pid = 4900
   const now = { at: 1_700_000_000_000 }
   const w = world(on, {
@@ -719,6 +721,7 @@ const leftWorld = (on: On, procs: { list: string[]; logs: Record<string, string>
       fd: () => Object.entries(procs.logs).map(([p, f]) => `${p} ${f}`).join('\n'),
       pid: () => String((pid += 100)),
       alive: p => procs.list.some(line => line.trim().startsWith(`${p} `)),
+      owner: p => procs.owners?.[p] ?? 'mine',
     },
   })
   on('session.cwd', () => ({ value: '/repo' }) as never)
@@ -758,9 +761,10 @@ const leftStart = async ($: Parameters<NonNullable<Parameters<typeof test>[2]>>[
   await $.agent.spawn({ ...spawn, description: 'Draw the pages', prompt: 'draw the pages' } as never)
 }
 
-test('a launcher that starts 8 drawings and exits leaves 8 runs under its card, each with its progress and memory, and each leaves as it ends', SLOW, async ($, on) => {
+test('a launcher that starts 8 drawings and exits leaves one run under its card in its own words, with how many programs, their progress and memory added up, and it leaves as they end (17 Nov: "Run Google Chrome ×4" named the program, not what the command was doing)', SLOW, async ($, on) => {
   const procs = { list: [] as string[], logs: {} as Record<string, string>, outputs: {} as Record<string, string> }
-  const { advance } = leftWorld(on, procs)
+  const leftCalls = leftWorld(on, procs)
+  const { advance } = leftCalls
   await leftStart($)
   // The launcher's shell was 5050: its 8 children run on in its group once it has gone
   for (let k = 0; k < 8; k++) {
@@ -773,22 +777,35 @@ test('a launcher that starts 8 drawings and exits leaves 8 runs under its card, 
   await advance(20_000)
   const shown = await until(async () => {
     const all = await leftTexts($)
-    return all.some(text => text.includes('python fig4.py page PMC')) ? all : undefined
+    return all.some(text => text.startsWith('Run the drawing of all 25 pages')) ? all : undefined
   })
-  expect(shown?.some(text => /^Run python fig4\.py page PMC closed \d/.test(text))).toBe(true)
+  expect(shown?.filter(text => text.startsWith('Run the drawing of all 25 pages, eight at a time')).length).toBe(1)
+  expect(shown?.some(text => text.includes('fig4.py'))).toBe(false)
+  expect(shown?.some(text => /8 programs/.test(text))).toBe(true)
+  expect(shown?.some(text => /\b8 commands\b/.test(text))).toBe(false)
   expect(shown?.some(text => /\d of 16 eyes/.test(text))).toBe(true)
-  expect(shown?.some(text => text.includes('6.7 GB'))).toBe(true)
-  // As they end, they leave, and the card counts them as ended
+  expect(shown?.some(text => text.includes('53.4 GB'))).toBe(true)
+  // Half of them end first: nothing says the command has ended while the rest work, and its work is not woken
+  const { appended } = leftCalls
+  procs.list = procs.list.slice(4)
+  await advance(20_000)
+  expect(await until(async () => ((await leftTexts($)).some(text => /4 programs/.test(text)) || undefined))).toBe(true)
+  expect((await leftTexts($)).some(text => /has ended|commands? ended/.test(text))).toBe(false)
+  expect(appended.some(one => /has ended/.test(one))).toBe(false)
+  // As the rest end, they leave, and the card counts them as the one command they were, its work told once
   procs.list = []
   await advance(20_000)
-  // (the card's own line may name the commands of it that ended, until the work writes again)
-  expect(await until(async () => ((await leftTexts($)).every(text => !text.includes('fig4.py page') || / (has|more) ended$/.test(text)) || undefined))).toBe(true)
-  expect((await leftTexts($)).some(text => /8 commands ended/.test(text))).toBe(true)
+  // (the card's own line may name the command that ended, once, until the work writes again)
+  expect(await until(async () => ((await leftTexts($)).every(text => !/8 programs/.test(text)) || undefined))).toBe(true)
+  expect((await leftTexts($)).some(text => /1 command ended/.test(text))).toBe(true)
+  expect((await leftTexts($)).some(text => /has ended, .* has ended|has ended and/.test(text))).toBe(false)
+  expect(await until(async () => (appended.some(one => one.startsWith('a1: Your command "Run the drawing of all 25 pages, eight at a time" has ended')) || undefined))).toBe(true)
+  expect(appended.filter(one => /has ended/.test(one)).length).toBe(1)
 })
 
-test('a shell loop that sends scripts off with & leaves its runs under the card', SLOW, async ($, on) => {
+test('a shell loop that sends scripts off with & leaves them under the card as one run in its own words, which one Stop ends whole', SLOW, async ($, on) => {
   const procs = { list: [] as string[], logs: {} as Record<string, string>, outputs: {} as Record<string, string> }
-  const { advance } = leftWorld(on, procs)
+  const { advance, killed, appended } = leftWorld(on, procs)
   await leftStart($)
   for (let i = 0; i < 4; i++) {
     procs.list.push(psLine(5060 + i, 1, 5050, `/u/bin/python batch.py ${i} 12 /s/batch_${i}.json`))
@@ -799,9 +816,22 @@ test('a shell loop that sends scripts off with & leaves its runs under the card'
   await advance(20_000)
   const shown = await until(async () => {
     const all = await leftTexts($)
-    return all.some(text => text.includes('python batch.py')) ? all : undefined
+    return all.some(text => text.startsWith('Run the new mesh on a third of the eyes')) ? all : undefined
   })
   expect(shown?.some(text => /81 of 91 eyes/.test(text))).toBe(true)
+  expect(shown?.some(text => /4 programs/.test(text))).toBe(true)
+  expect(shown?.some(text => text.includes('python batch.py'))).toBe(false)
+  // Stop on its one row ends all four, and the card keeps them as the one command, stopped, its work told once
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
+  const stop = (await list.findAll({ type: 'Button' })).filter(b => b.props.label === 'Stop' && String(b.key ?? '').startsWith('stop-list-job-'))
+  expect(stop.length).toBe(1)
+  await list.press({ key: stop[0]?.key ?? '' })
+  await list.unmount()
+  expect(await until(async () => ([0, 1, 2, 3].every(i => killed.includes(String(5060 + i))) || undefined))).toBe(true)
+  procs.list = []
+  await advance(20_000)
+  expect(await until(async () => ((await leftTexts($)).some(text => /1 command ended/.test(text)) || undefined))).toBe(true)
+  expect(appended.filter(one => one.startsWith('a1: ') && /Run the new mesh/.test(one)).length).toBe(1)
 })
 
 test('a launcher started with nohup but no echo $! is a run under the card in the work\'s own words, read from its log', SLOW, async ($, on) => {
@@ -915,22 +945,25 @@ test('a background command whose shell ends leaving its scripts running hands th
   isLaunched = true
   for (const k of [0, 1]) ((procs.logs[String(5460 + k)] = `/w/r${k}.log`), (procs.outputs[`/w/r${k}.log`] = 'progress: 2/9 frames\n'))
   await advance(20_000)
-  expect(await until(async () => ((await leftTexts($)).some(text => /^Run python render\.py [01]/.test(text)) || undefined))).toBe(true)
+  expect(await until(async () => ((await leftTexts($)).some(text => /2 programs/.test(text)) || undefined))).toBe(true)
+  expect((await leftTexts($)).some(text => text.startsWith('Run the renders'))).toBe(true)
   // The launcher ends too (its card counts it with the two), but its renders still work: the card's line names the two that
   // really ended, how each ended, and never counts the launcher among them
   await advance(80_000)
   expect(await until(async () => ((await leftTexts($)).some(text => /3 commands ended/.test(text)) || undefined))).toBe(true)
   const shown = await leftTexts($)
-  expect(shown.some(text => /^Run python render\.py [01]/.test(text))).toBe(true)
+  expect(shown.some(text => /2 programs/.test(text))).toBe(true)
   expect(shown).toContain('Run a build of the scene has ended and Run a check of the scene has ended')
   expect(shown.some(text => /commands have ended|Run the renders (has|have) /.test(text))).toBe(false)
 })
 
-test('a script that starts a session of its own while its command runs is still that command\'s run; the system\'s own programs never are', SLOW, async ($, on) => {
-  const procs = { list: [] as string[], logs: {} as Record<string, string> }
+test('a script that starts a session of its own while its command runs is still that command\'s run, even where its environment cannot be read; the system\'s own programs, and what another chat or app started at that moment, never are (17 Nov: a git push and a dig took headless Chrome\'s crash reporters as runs they left, "Run Google Chrome")', SLOW, async ($, on) => {
+  // (another chat's headless browser: its crash reporter forks away from it, its group's leader gone, its number within the command's)
+  const crashpad = '/u/.cache/puppeteer/chrome/mac_arm-148/chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/Google Chrome for Testing Framework.framework/Helpers/chrome_crashpad_handler --monitor-self'
+  const procs = { list: [] as string[], logs: {} as Record<string, string>, owners: { '5060': 'hidden', '5080': 'other' } as Record<string, 'mine' | 'other' | 'hidden'> }
   const { advance } = leftWorld(on, procs)
   await leftStart($)
-  procs.list.push(psLine(5060, 1, 5060, '/u/bin/python daemon.py --serve-tiles'), psLine(5070, 1, 5070, '/System/Library/CoreServices/mdworker_shared'))
+  procs.list.push(psLine(5060, 1, 5060, '/u/bin/python daemon.py --serve-tiles'), psLine(5070, 1, 5070, '/System/Library/CoreServices/mdworker_shared'), psLine(5080, 1, 5077, crashpad))
   await $.tool.call({ tool: 'Bash', tool_use_id: 'l7', agentId: 'a1', command: 'python daemon.py --serve-tiles', description: 'Run the tile daemon' } as never)
   await advance(20_000)
   const shown = await until(async () => {
@@ -938,4 +971,28 @@ test('a script that starts a session of its own while its command runs is still 
     return all.some(text => text.startsWith('Run the tile daemon')) ? all : undefined
   })
   expect(shown?.some(text => text.includes('mdworker'))).toBe(false)
+  expect(shown?.some(text => /Chrome|crashpad|programs/.test(text))).toBe(false)
+})
+
+test('what another task of the same chat starts while its command runs in the background is never taken by a short command of another task beside it (17 Nov: a screenshot script sent to the background started headless Chrome while a git push ran, and the push\'s card showed its crash reporters)', SLOW, async ($, on) => {
+  const crashpad = '/u/.cache/puppeteer/chrome/mac_arm-148/chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/Google Chrome for Testing Framework.framework/Helpers/chrome_crashpad_handler --monitor-self'
+  const procs = { list: [] as string[], logs: {} as Record<string, string> }
+  const { advance } = leftWorld(on, procs)
+  await leftStart($)
+  await $.agent.spawn({ ...spawn, description: 'Shoot the pictures', prompt: 'shoot the pictures' } as never)
+  // The other task's script, sent to the background, is handed 5000 to 5100 as it goes there and runs on
+  procs.list.push(psLine(5050, 900, 5050, "/bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh && eval './run.sh old & ./run.sh new; wait; node shoot.mjs' < /dev/null"))
+  await $.tool.call({ tool: 'Bash', tool_use_id: 's1', agentId: 'a2', command: './run.sh old & ./run.sh new; wait; node shoot.mjs', description: 'Run the screenshots of both sides (about 3 min)', run_in_background: true } as never)
+  // Its headless browser's crash reporters fork away while this task's git push is handed 5200 to 5300, and carry this chat's session
+  procs.list.push(psLine(5260, 1, 5250, crashpad, 30_000), psLine(5262, 1, 5251, crashpad, 30_000))
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'p1', agentId: 'a1', command: 'git push -q origin fix', description: 'Upload the fix' } as never)
+  await advance(20_000)
+  const shown = await until(async () => {
+    const all = await leftTexts($)
+    return all.some(text => text.startsWith('Run the screenshots of both sides')) ? all : undefined
+  })
+  // (they are the other task's, whose command started them, a row named as what it started while it runs; never the push's)
+  expect(shown?.some(text => /^Upload the fix|Chrome/.test(text))).toBe(false)
+  expect(shown?.filter(text => text.startsWith('Run the screenshots of both sides')).length).toBe(1)
+  expect(shown?.some(text => text.startsWith('What “Run the screenshots of both sides” started'))).toBe(true)
 })

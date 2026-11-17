@@ -247,8 +247,9 @@ declare global {
   export import treeOf = M10.treeOf
   export import waitOf = M10.waitOf
   export import leftoversOf = M10.leftoversOf
+  export import leftCommandOf = M10.leftCommandOf
+  export import isNamedBy = M10.isNamedBy
   export import memOf = M10.memOf
-  export import leftName = M10.leftName
   export import PS_COLUMNS = M10.PS_COLUMNS
   export import plainOf = M10.plainOf
   export import reportsOf = M10.reportsOf
