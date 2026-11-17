@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.175 · 17 November 2026
+- The reply box above the chat is as wide as the bar and grows taller as you type, up to eight lines, like the chat's own box: Enter sends, Shift+Enter starts a new line, and Send and Close sit under it.
+- The reply box no longer blinks while you type: it used to be drawn anew each time any task wrote its progress, which put the cursor back into a fresh box and replayed its outline.
+- A key box's response and a card's own reply box are boxes of lines that grow the same way; a key is still pasted in one line.
+
 ## 0.2.174 · 17 November 2026
 - When you press Release it seconds after a task asks, while it is still finishing, Claudopus now releases it after your allow box once the task has ended, as it does when you press later. Before, such a press reached only the task, which left the release to Claudopus, so nothing went out.
 

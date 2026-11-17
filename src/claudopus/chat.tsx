@@ -269,6 +269,8 @@ const chatHooks = (on: On) => {
       // The hidden boxes of the admin and secret runners, drawn in the panel in every chat
       await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
       await watchFront($).catch(err => log($, `tab in front not watched: ${String(err)}`))
+      // A bar with a box open reads no cards while it is drawn: what it shows of them is looked at here
+      await lookBar($).catch(err => log($, `bar not looked at: ${String(err)}`))
       // While a command has a row, its output is read every few seconds (lookJobs keeps to JOB_LOOK), not only as the list is followed
       // every 20: a download rewriting its percent each second sat still for 20 seconds and read "nothing printed for 15s" (16 Nov)
       if (jobLog.size) void lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))

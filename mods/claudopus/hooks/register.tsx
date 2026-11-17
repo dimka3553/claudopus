@@ -5601,6 +5601,19 @@ const drafts = new Map<string, string>()
 const draftOf = (id: string, ask: NonNullable<Todo['ask']>) => `${id}|${askMark(ask)}`
 // Whether the person has typed something not sent into a work's reply box
 const hasDraft = (id: string) => [...drafts].some(([key, value]) => key.startsWith(`${id}|`) && Boolean(value))
+// How many lines tall a box for words is drawn, for what it holds: as the chat's own box it grows with the text, from BOX_LEAST
+// lines up to BOX_MOST, then scrolls within (the bar above the prompt is at most 11 lines and 40px tall, its title, buttons and
+// the panel's marker included). The app draws a box of `rows` that tall whatever it holds and never grows one by itself
+// (its renderer: a textarea of fixed rows), so the mod draws it again with more rows as the text needs them; the text is the box's
+// own then, as the drawing keeps the value it was last drawn with (17 Nov, the person: "it doesn't extend taller").
+// A line is counted as wrapping at the columns the box has, less a margin, so it grows a little before the text reaches its edge
+const BOX_LEAST = 2
+const BOX_MOST = 6
+const boxLines = (text: string, columns: number) => {
+  const wide = Math.max(12, columns - 6)
+  const lines = text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil([...line].length / wide)), 0)
+  return Math.min(BOX_MOST, Math.max(BOX_LEAST, lines))
+}
 // While the person types into a reply box or a key box the panel and every Details tab hold their drawing whole. The app builds a
 // pane afresh at each drawing, the box in it too: a pane drawn every few seconds under the person's typing flickered the box's ring,
 // put older letters over newer ones, and, as Markdown came or went above, threw the panel to its bottom, out of the person's reach
@@ -5633,7 +5646,7 @@ const draftDrawn = (key: string) => {
   drawnDrafts.set(key, value)
   return value
 }
-// What a pane shows, as far as it moves while the person types: work that starts, finishes, asks, waits on an admin command, is cut
+// What a pane shows, as far as it moves while the person types: a box that grows a line too (growths); work that starts, finishes, asks, waits on an admin command, is cut
 // or stuck, or leaves after its pause, here or in another chat; workflows; boxes, gates and prompts that come or go; a Details
 // tab's own to-dos
 const paneShape = async ($: EngineInterface, paneId: string) => {
@@ -5644,7 +5657,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], replyTo, replyMark])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], replyTo, replyMark, growths])
 }
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
@@ -5949,6 +5962,8 @@ const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) =
   if (one?.ask) boxOpen = undefined
   replyMark = one?.ask ? askMark(one.ask) : ''
   barBoxAt = 0
+  // a box opened is drawn at the height of what it holds: the next height it needs is asked for afresh
+  lastGrow = ''
   presses += 1
   redraw($)
   const ask = one?.ask
@@ -7431,6 +7446,7 @@ const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surf
   barKeyTyped.clear()
   if (id) (boxHeldReply.delete(id), boxSaid.delete(id))
   barBoxAt = 0
+  lastGrow = ''
   boxPresses += 1
   drawAgain($)
   const bar = barIds.get(surface)
@@ -7506,38 +7522,40 @@ const heldReplyButtons = ($: EngineInterface, ui: Ui, id: string, where: string)
       <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send it as a response" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)} />
     </ui.Box>
   ) : null
-// The row in the bar above the prompt for the key box opened there: what goes where, the field, Send, the big one, and Close, small
-const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
+// The box in the bar above the prompt for the key box opened there: what goes where on a line of its own, the field under it as wide
+// as the bar, and Send, the big one, and Close, small, under that, as the reply box is (band.tsx, barReply). A key is one line; a
+// response grows with its text as the chat's own box does. No submitLabel: the app draws one as a second, small send button, and
+// with one a box of several lines sends only on Cmd+Enter
+const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode, columns: number) => {
   const name = boxNameOf(one)
   const head = mode === 'reply' ? `↳ Instead of ${name ?? (isNameBox(one) ? 'the name' : 'the key')}` : name ? `↳ ${name}` : `↳ The key's name`
+  const key = barKeyBoxKey(one.id, mode)
+  const rows = barKeyRows(one.id, mode, columns)
   return (
-    <ui.Box key="band-key" flexDirection="column" flexShrink={0}>
-      <ui.Box flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
-        <ui.Box flexShrink={1} minWidth={0}>
-          <ui.Text color={NEEDS} bold wrap="truncate-end">{head}</ui.Text>
-        </ui.Box>
-        {'Input' in ui ? (
-          <ui.Box flexShrink={0}>
-            <ui.Input
-              key={barKeyBoxKey(one.id, mode)}
-              placeholder={mode === 'reply' ? 'Type your response' : isNameBox(one) ? 'Type the name' : 'Paste the key'}
-              submitLabel="send"
-              autoFocus
-              onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
-              onSubmit={value => submitBox($, one.id, mode, value)}
-            />
-          </ui.Box>
-        ) : null}
-        <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-          <ui.Button key={`band-key-send-${boxPresses}`} label="Send" variant="primary" onPress={() => void (barKeyTyped.get(one.id) && submitBox($, one.id, mode, barKeyTyped.get(one.id) ?? ''))} />
-          <ui.Button key={`band-key-close-${boxPresses}`} label="Close" plain dimColor onPress={press => openBox($, undefined, mode, press.surface)} />
-        </ui.Box>
+    <ui.Box key="band-key" flexDirection="column" flexShrink={0} width="100%">
+      <ui.Box flexDirection="row" height={1} overflow="hidden">
+        <ui.Text color={NEEDS} bold wrap="truncate-end">{head}</ui.Text>
       </ui.Box>
+      {'Input' in ui ? (
+        <ui.Box flexDirection="column" width="100%" flexShrink={0}>
+          <ui.Input
+            key={key}
+            placeholder={mode === 'reply' ? 'Type your response' : isNameBox(one) ? 'Type the name' : 'Paste the key'}
+            rows={rows}
+            autoFocus
+            onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)), mode === 'reply' ? growBox($, key, rows ?? 1, boxLines(value, columns)) : undefined)}
+            onSubmit={value => submitBox($, one.id, mode, value)}
+          />
+        </ui.Box>
+      ) : null}
       {boxSaid.get(one.id) ? <ui.Text key="band-key-said" color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
       {heldReplyButtons($, ui, one.id, 'band-key')}
+      {barFoot($, ui, 'band-key', boxPresses, () => void (barKeyTyped.get(one.id) && submitBox($, one.id, mode, barKeyTyped.get(one.id) ?? '')), press => openBox($, undefined, mode, press.surface), mode === 'reply')}
     </ui.Box>
   )
 }
+// How many lines the bar's key box is drawn: a key or a name one, a response as many as its text needs
+const barKeyRows = (id: string, mode: BoxMode, columns: number) => (mode === 'reply' ? boxLines(barKeyTyped.get(id) ?? '', columns) : undefined)
 // The key box open in the bar on a surface that takes one, none once it is answered, cancelled or gone
 const barKeyTarget = () => (boxOpen ? boxes.find(one => one.id === boxOpen?.id && !one.key) : undefined)
 
@@ -9327,6 +9345,8 @@ const chatHooks = (on: On) => {
       // The hidden boxes of the admin and secret runners, drawn in the panel in every chat
       await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
       await watchFront($).catch(err => log($, `tab in front not watched: ${String(err)}`))
+      // A bar with a box open reads no cards while it is drawn: what it shows of them is looked at here
+      await lookBar($).catch(err => log($, `bar not looked at: ${String(err)}`))
       // While a command has a row, its output is read every few seconds (lookJobs keeps to JOB_LOOK), not only as the list is followed
       // every 20: a download rewriting its percent each second sat still for 20 seconds and read "nothing printed for 15s" (16 Nov)
       if (jobLog.size) void lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))
@@ -12545,8 +12565,13 @@ const BAND_PICK = 6000
 // Above the prompt, which never scrolls: once the list is scrolled away from its top, how many things wait there for the person.
 // Pressed, it takes the list back to its top; nothing else moves the list
 // Work that just finished, in its moment at the top, is pointed at the same way, in green, under what waits
+const isMarkerShown = async ($: EngineInterface, surface: string) =>
+  (waitsAtTop > 0 || finishedAtTop.length > 0) && (listOffsets.get(surface) ?? 0) > 0 && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
+// What the marker says, empty when it is not drawn: a bar held with a box in it is drawn again when this moves, but not while the
+// box is typed in or holds the cursor
+const markerSign = async ($: EngineInterface, surface: string) => ((await isMarkerShown($, surface)) ? `${waitsAtTop}|${finishedAtTop.join('|')}` : '')
 const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
-  (waitsAtTop > 0 || finishedAtTop.length > 0) && (listOffsets.get(surface) ?? 0) > 0 && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced) ? (
+  (await isMarkerShown($, surface)) ? (
     <ui.Box key="band-waits" flexDirection="row" flexShrink={0} height={1} overflow="hidden">
       <ui.Button
         key={`band-waits-${presses}`}
@@ -12562,42 +12587,101 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
       </ui.Button>
     </ui.Box>
   ) : null
-// The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: one row, the work the reply goes
-// to, the box, Send, the big one, and Close, small, which takes the row away again with what was typed kept for its card. The box
-// names no submitLabel: the desktop app draws one as a second, small send button beside it, and Enter sends without it. Nothing in the row follows the
-// panel's scrolling. The box is the card's own: the same answer, and the same box through a new question of its work, until the
-// person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
-const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
+// The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: the work the reply goes to on a
+// line of its own, the box under it as wide as the bar and as tall as its text, as the chat's own box is (boxLines), and under it
+// what Enter does beside Send, the big one, and Close, small, which takes the box away again with what was typed kept for its card
+// (17 Nov, the person: the box was "very small" and "doesn't extend taller"; one row of a field drawn as narrow as the app makes
+// one, beside the title and buttons). The box names no submitLabel: the desktop app draws one as a second, small send button
+// beside it, and with one a box of several lines sends only on Cmd+Enter; without it Enter sends and Shift+Enter makes a new line.
+// Nothing in it follows the panel's scrolling. The box is the card's own: the same answer, and the same box through a new question
+// of its work, until the person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
+const barReply = ($: EngineInterface, ui: Ui, one: Todo, columns: number) => {
   const draft = barDraft(one.id)
+  const rows = boxLines(drafts.get(draft) ?? '', columns)
   const send = (value: string) => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
   return (
-    <ui.Box key="band-reply" flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
-      <ui.Box flexShrink={1} minWidth={0}>
-        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↳ Your reply to “${cut(titleOf(one), 40)}”`}</ui.Text>
+    <ui.Box key="band-reply" flexDirection="column" flexShrink={0} width="100%">
+      <ui.Box flexDirection="row" height={1} overflow="hidden">
+        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↳ Your reply to “${cut(titleOf(one), 60)}”`}</ui.Text>
       </ui.Box>
       {'Input' in ui ? (
-        <ui.Box flexShrink={0}>
+        <ui.Box flexDirection="column" width="100%" flexShrink={0}>
           <ui.Input
             key={barBoxKey(one.id)}
             placeholder="Type your reply"
             value={draftDrawn(draft)}
+            rows={rows}
             autoFocus
-            onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
+            onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)), growBox($, barBoxKey(one.id), rows, boxLines(value, columns)))}
             onSubmit={send}
           />
         </ui.Box>
       ) : null}
-      <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-        <ui.Button key={`band-reply-send-${presses}`} label="Send" variant="primary" onPress={() => void ((drafts.get(draft) ?? '').trim() && send(drafts.get(draft) ?? ''))} />
-        <ui.Button key={`band-reply-close-${presses}`} label="Close" plain dimColor onPress={press => openReply($, undefined, press.surface)} />
-      </ui.Box>
+      {barFoot($, ui, 'band-reply', presses, () => void ((drafts.get(draft) ?? '').trim() && send(drafts.get(draft) ?? '')), press => openReply($, undefined, press.surface))}
     </ui.Box>
   )
+}
+// Under a box in the bar: what Enter does, and Send, the big one, then Close, small
+const BOX_KEYS = 'Enter sends · Shift+Enter for a new line'
+const barFoot = ($: EngineInterface, ui: Ui, where: string, mark: number, onSend: () => void, onClose: (press: { surface: string }) => void, isLines = true) => (
+  <ui.Box key={`${where}-foot`} flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
+    <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
+      <ui.Text dimColor wrap="truncate-end">{isLines ? BOX_KEYS : 'Enter sends'}</ui.Text>
+    </ui.Box>
+    <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
+      <ui.Button key={`${where}-send-${mark}`} label="Send" variant="primary" onPress={onSend} />
+      <ui.Button key={`${where}-close-${mark}`} label="Close" plain dimColor onPress={onClose} />
+    </ui.Box>
+  </ui.Box>
+)
+// A box whose text now needs another number of lines is drawn again at that height, once for each height asked: a box of `rows`
+// stays that tall whatever it holds. Drawn with the text it was last drawn with, the box keeps what is typed in it (draftDrawn)
+// A box drawn anew (sent, closed and opened, a new question) is drawn at its own height, so an ask is skipped only when it is the same
+// as the last one from the same drawn height. growths counts the asks: the panel, held while its card's box is typed in, is drawn
+// again for one (paneShape)
+let lastGrow = ''
+let growths = 0
+const growBox = ($: EngineInterface, key: string, drawn: number, wanted: number) => {
+  const ask = `${key}|${drawn}|${wanted}`
+  if (wanted === drawn || ask === lastGrow) return
+  lastGrow = ask
+  growths += 1
+  drawAgain($)
 }
 // The bar as last drawn on each surface while a reply box was in it: while the person types, and for as long as the box holds the
 // cursor (barBoxAt), it is drawn as it was, whole, but for a change in what it holds, as a pane is (heldDrawings): each drawing is
 // a new box under the cursor, its ring drawn again and a selection or a half-composed letter lost
-const barHeld = new Map<string, { shape: string; drawing: unknown }>()
+// (17 Nov: the bar was drawn anew, and the box with it, each time any work wrote its cards, several times a second, as the bar
+// read them while drawing; each drawing is a new box, and the app gives it the cursor again, its ring fading in again: the box
+// blinked as the person typed). So a bar with a box open is given again as it was drawn, from the moment the box opens, for as
+// long as what the box is and how tall it is drawn stay the same (barShape) and, while the box is not typed in and has no cursor,
+// what the marker says (markerSign), reading none of the cards: a drawing that reads nothing is not drawn again as they are
+// written. The cards are looked at once a second instead (lookBar), and the bar is drawn again when what it shows of them moved
+const barHeld = new Map<string, { shape: string; mark: string; drawing: unknown }>()
+// The width the bar was last drawn at on each surface, in columns: what a box in it wraps at (boxLines)
+const barColumns = new Map<string, number>()
+// What a bar with a box open is drawn for, from the mod's own memory alone: which box, and how many lines tall
+const barShape = (surface: string) => {
+  const columns = barColumns.get(surface) ?? 80
+  const keyBox = barKeyTarget()
+  if (boxOpen && keyBox) return `key|${barKeyBoxKey(keyBox.id, boxOpen.mode)}|${boxSaid.get(keyBox.id) ?? ''}|${boxHeldReply.has(keyBox.id)}|${barKeyRows(keyBox.id, boxOpen.mode, columns) ?? 1}`
+  return replyTo ? `reply|${barBoxKey(replyTo)}|${boxLines(drafts.get(barDraft(replyTo)) ?? '', columns)}|${barCardsDrawn}` : ''
+}
+// What the cards say of the box open in the bar as last looked at: its card, still asking, under its title. Part of the held shape,
+// so a card that stops asking (answered elsewhere, its question withdrawn, the work stopped) takes its box away within a second
+let barCardsDrawn = ''
+const barCardsSign = (cards: Todo[]) => {
+  const target = barTarget(cards)
+  return target?.ask ? `${target.id}|${titleOf(target)}` : ''
+}
+// Once a second while a bar holds a box (chat.tsx): the cards it shows moved, so it is drawn again, once for each change
+const lookBar = async ($: EngineInterface) => {
+  if (!barHeld.size || !replyTo) return
+  const sign = barCardsSign(await read($, todos))
+  if (sign === barCardsDrawn) return
+  barCardsDrawn = sign
+  drawAgain($)
+}
 // When this surface's bar last asked for the cards to be drawn again as its box came or went: at most once a second, so two
 // windows of one chat that differ never ask in turn without end
 let barFlipAt = 0
@@ -12608,7 +12692,7 @@ const bandHooks = (on: On) => {
   // The bar on the desktop is redrawn as often as the panel and has buttons too, so it is given again as it was while its drawings or
   // the panel's are slow (isFreshTooSoon) and from the start of a click on one of its buttons until the click lands (isPressHeld), as the panel is:
   // a newer drawing retires the buttons on screen, and a click on one already gone runs nothing. Never while its reply box is typed
-  // into or holds the cursor, which keeps a drawing of its own (barHeld)
+  // into or holds the cursor: a bar with a box open keeps a drawing of its own (barHeld)
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const drawBar = () => drawBarNow()
     if (e.surface !== 'desktop' || e.props.hasSurvey) return drawBar()
@@ -12638,8 +12722,15 @@ const bandHooks = (on: On) => {
     // Folded by the person, nothing of the bar is on screen: the card has its own box then too
     const canBox = e.surface === 'desktop' && 'Input' in uiOf($, e) && !e.props.hasSurvey && !e.props.isCollapsed
     if (e.requestId) barIds.set(e.surface, e.requestId)
-    const cards = await read($, todos)
     const flipAt = await $.clock.now()
+    if (canBox) barColumns.set(e.surface, e.props.bodyColumns)
+    // A box open and drawn as it is: given again as it was, reading no cards (barHeld)
+    const kept = barHeld.get(e.surface)
+    if (kept && canBox && barBoxes.has(e.surface) && (replyTo || boxOpen) && kept.shape === barShape(e.surface)) {
+      const isHeldNow = isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)
+      if (isHeldNow || kept.mark === (await markerSign($, e.surface))) return kept.drawing as Awaited<ReturnType<typeof next>>
+    }
+    const cards = await read($, todos)
     if (canBox !== barBoxes.has(e.surface)) {
       if (canBox) barBoxes.add(e.surface)
       else barBoxes.delete(e.surface)
@@ -12721,11 +12812,9 @@ const bandHooks = (on: On) => {
     const keyBox = canBox ? barKeyTarget() : undefined
     if (boxOpen && canBox && !keyBox) boxOpen = undefined
     if (keyBox && boxOpen) {
-      const shape = `${barKeyBoxKey(keyBox.id, boxOpen.mode)}|${boxSaid.get(keyBox.id) ?? ''}|${boxHeldReply.has(keyBox.id)}`
-      const held = barHeld.get(e.surface)
-      if ((isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)) && held?.shape === shape) return held.drawing as Awaited<ReturnType<typeof next>>
+      const shape = barShape(e.surface)
       const marker = await waitMarker($, ui, e.surface)
-      const row = barKeyRow($, ui, keyBox, boxOpen.mode)
+      const row = barKeyRow($, ui, keyBox, boxOpen.mode, e.props.bodyColumns)
       const drawing = marker ? (
         <Box flexDirection="column">
           {marker}
@@ -12734,7 +12823,7 @@ const bandHooks = (on: On) => {
       ) : (
         row
       )
-      barHeld.set(e.surface, { shape, drawing })
+      barHeld.set(e.surface, { shape, mark: await markerSign($, e.surface), drawing })
       return drawing
     }
     // The reply box the person opened from a card, while that card still asks; its ask answered or gone, the box goes with it
@@ -12744,12 +12833,11 @@ const bandHooks = (on: On) => {
       // Drawn as it was while the box is typed in or holds the cursor: only the card it is for draws it anew, so neither the panel
       // scrolled under the cursor nor work starting or ending puts a new box under it. The row takes the place of the figures
       // while it is open: figures drawn under a held box would stand still, and a row that came and went would move the box
-      const shape = barBoxKey(target.id)
-      const held = barHeld.get(e.surface)
-      if ((isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)) && held?.shape === shape) return held.drawing as Awaited<ReturnType<typeof next>>
+      barCardsDrawn = barCardsSign(cards)
+      const shape = barShape(e.surface)
       // What waits at the top of a panel scrolled away is still pointed at, as the bar is drawn; not while the box is held
       const marker = await waitMarker($, ui, e.surface)
-      const reply = barReply($, ui, target)
+      const reply = barReply($, ui, target, e.props.bodyColumns)
       const drawing = marker ? (
         <Box flexDirection="column">
           {marker}
@@ -12758,7 +12846,7 @@ const bandHooks = (on: On) => {
       ) : (
         reply
       )
-      barHeld.set(e.surface, { shape, drawing })
+      barHeld.set(e.surface, { shape, mark: await markerSign($, e.surface), drawing })
       return drawing
     }
     barHeld.delete(e.surface)
@@ -13149,6 +13237,12 @@ const panelHooks = (on: On) => {
     const askBlock = (one: Todo, key: string, isWhole = false) => {
       const ask = one.ask
       if (!ask) return null
+      // The card's own box: the columns it wraps at, how many lines tall it is drawn for what is typed in it, and its send
+      const columns = e.props.bodyColumns - 9
+      // (the terminal keeps its one line, Enter sending: how a terminal draws a box of rows is not known here)
+      const rows = e.surface === 'terminal' ? undefined : boxLines(drafts.get(draftOf(one.id, ask)) ?? '', columns)
+      const sendCard = (value: string) =>
+        void (value.trim() && (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`))))
       const answers = ask.choices?.length ? ask.choices : DEFAULT_ANSWERS
       const lost = sentLine(one, at)
       // Answered in the person's own words and acted on: its question, with their reply under it, and nothing to press or type
@@ -13211,16 +13305,28 @@ const panelHooks = (on: On) => {
               <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Type it in the box above the chat</Text>
             ) : null
           ) : 'Input' in table && !one.chat ? (
+            // The card's own box, where the bar takes none (the terminal, a folded bar, a survey): as wide as the card and as tall as
+            // its text, as the chat's own box is (boxLines); on the desktop with Send under it and no submitLabel, which the app draws
+            // as a small send button and with which a box of several lines sends only on Cmd+Enter
             <Box width="100%" flexDirection="column">
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
                 autoFocus={e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
                 placeholder="Or reply in your own words"
                 value={draftShown(one.id, ask)}
-                submitLabel="send"
-                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($))}
-                onSubmit={value => void (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
+                rows={rows}
+                submitLabel={e.surface === 'terminal' ? 'send' : undefined}
+                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($), rows ? growBox($, `${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`, rows, boxLines(value, columns)) : undefined)}
+                onSubmit={value => sendCard(value)}
               />
+              {e.surface === 'terminal' ? null : (
+                <Box flexDirection="row" alignItems="center" gap={2}>
+                  <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                    <Text dimColor wrap="truncate-end">Shift+Enter: new line</Text>
+                  </Box>
+                  <Button key={`${key}-send-${presses}`} label="Send" variant="primary" onPress={() => sendCard(drafts.get(draftOf(one.id, ask)) ?? '')} />
+                </Box>
+              )}
             </Box>
           ) : null}
           {/* An answer that could not be left for another Mac says so, under the ask that is back */}
