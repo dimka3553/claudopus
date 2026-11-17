@@ -21,9 +21,9 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
         onPress={() => ((presses += 1), void (recordEvent($, 'scroll-call', { to: 'start' }), $.ui.scroll({ in: LIST, to: 'start', block: 'start' })).catch(() => undefined))}
       >
         {waitsAtTop > 0 ? (
-          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 thing is' : `${waitsAtTop} things are`} waiting for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} just finished` : ''}`}</ui.Text>
+          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 card is' : `${waitsAtTop} cards are`} waiting for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} done` : ''}`}</ui.Text>
         ) : (
-          <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} finished` : `${finishedAtTop.length} just finished`}, at the top of the panel`}</ui.Text>
+          <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} is done` : `${finishedAtTop.length} tasks are done`}, at the top of the panel`}</ui.Text>
         )}
       </ui.Button>
     </ui.Box>
@@ -218,7 +218,7 @@ const bandHooks = (on: On) => {
           <Box flexDirection="column">
             {await waitMarker($, ui, e.surface)}
             <Box flexDirection="row" gap={1}>
-              {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, something needs you' : 'Claudopus is working on your reply', $, { surface: e.surface, requestId: e.requestId })}
+              {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, waiting for you' : 'Claudopus, Claude is working on your reply', $, { surface: e.surface, requestId: e.requestId })}
               <Box flexShrink={1} minWidth={0}>
                 <Text wrap="wrap">
                   <Text dimColor>{`${titleOf(first)}: `}</Text>
@@ -239,7 +239,7 @@ const bandHooks = (on: On) => {
                     <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => press(n, choice)} />
                   ))}
                   <Text dimColor={picked < 0} color={picked < 0 ? undefined : needsPerson(first) ? NEEDS : LIVE}>
-                    {picked >= 0 ? `Press ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `press its number twice in the empty prompt${asking.filter(needsPerson).length > Number(needsPerson(first)) ? ` · ${asking.filter(needsPerson).length - Number(needsPerson(first))} more waiting` : ''} · /claudopus to reply in words`}
+                    {picked >= 0 ? `Type ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `Type its number twice in an empty box${asking.filter(needsPerson).length > Number(needsPerson(first)) ? ` · ${asking.filter(needsPerson).length - Number(needsPerson(first))} more waiting` : ''} · /claudopus to answer in words`}
                   </Text>
                 </Box>
               </Box>
@@ -306,7 +306,7 @@ const bandHooks = (on: On) => {
     const drawing = (spacers: JSX.Element | null) => {
       const row = (
         <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
-          {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, task finished' : 'Claudopus, working', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
+          {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, a task is done' : 'Claudopus, Claude is working', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
           {spacers}
           {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
           {/* The figures fill a phone's terminal: the hint shows until they come */}

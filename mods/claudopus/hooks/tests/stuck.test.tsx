@@ -716,7 +716,7 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
     await pane.unmount()
     return r
   }
-  const stuck = () => look(pane => pane.find({ type: 'Text', text: /^No progress for / }))
+  const stuck = () => look(pane => pane.find({ type: 'Text', text: /^Nothing new for / }))
 
   // The work waits on its helpers, and they each wait on a start signal only it could give: nothing comes back to any of them
   await bash('a1', 'git log', 'p1')
@@ -726,7 +726,7 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   expect(await stuck()).toBeUndefined()
   await clock.advance(2 * 60_000)
   expect((await stuck())?.props.color).toBe('#E5A50A')
-  expect((await stuck())?.text).toMatch(/^No progress for 1[23] min\.$/)
+  expect((await stuck())?.text).toMatch(/^Nothing new for 1[23]m\.$/)
   expect(logged.filter(line => line.includes(`"One merger for all pushes" hasn't made progress`))).toHaveLength(1)
   // The chat alone reads that it may ask the task what it waits on, as nothing of Claudopus's will
   expect(appended.filter(line => line.includes(`"One merger for all pushes" hasn't made progress`) && line.includes('you may send it a message asking what it waits on'))).toHaveLength(1)
@@ -820,12 +820,12 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const texts = (await pane.findAll({ type: 'Text' })).map(one => (one as { text?: string }).text ?? '')
   await pane.unmount()
-  expect(texts.filter(text => text.startsWith('No progress for') && text.endsWith('and told the chat it is stuck.'))).toHaveLength(1)
+  expect(texts.filter(text => text.startsWith('Nothing new for') && text.endsWith('and told the chat it may be stuck.'))).toHaveLength(1)
   // Helpers at work are never taken for silent: their tasks are not started again, and its card says it waits on its helpers' work;
   // with nothing new coming back, the chat is told once that its helpers still run something
   expect([nudges('a4'), nudges('a6')]).toEqual([[], []])
   expect(logged.filter(line => line.startsWith('"Film the town"'))).toEqual([expect.stringMatching(/^"Film the town" hasn't made progress for 3\d minutes: nothing new has come back to Claude, though its helpers still run something\./)])
-  expect(texts.filter(text => text === "Waits on its helpers' work.").length).toBeGreaterThanOrEqual(1)
+  expect(texts.filter(text => text === 'Waiting for its helpers').length).toBeGreaterThanOrEqual(1)
   // Its report goes through while its helpers run: the silent one is stopped with it, those at work never are
   expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-late', agentId: 'a2', message: 'Lids drawn; rendering never ended.' } as never)) as { deny?: string }).deny).toBeUndefined()
   expect(stopped).toContain('a3')
@@ -1012,7 +1012,7 @@ test('work sent a message after a long rest, and work only held by what it left 
   await clock.advance(25_000)
   const look = async () => {
     const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-    const r = await pane.find({ type: 'Text', text: /^No progress for / })
+    const r = await pane.find({ type: 'Text', text: /^Nothing new for / })
     await pane.unmount()
     return r
   }
@@ -1035,7 +1035,7 @@ test('work asking the person something waits on them and is never flagged', SLOW
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release it?', choices: ['Approve', 'Not now'] } as never)
   await clock.advance(30 * 60_000)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await pane.find({ type: 'Text', text: /^No progress for / })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Nothing new for / })).toBeUndefined()
   expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(0)
   await pane.unmount()
 })

@@ -872,13 +872,13 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
   await clock.advance(10_000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Check the totals' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Working on 1 thing in another chat' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: '1 task working in another chat' })).toBeDefined()
   // The work ends: that chat, still open, writes its file with no card at all
   const quiet = JSON.stringify({ chat: 'chat-old', title: 'Remote connector', folder: '/repo/billing', host: '', at: NOW + 11_000, cards: [] })
   files.set('ssh:fetch', `${(NOW + 11_000) / 1000}\n---claudopus-live---\n${quiet}\n`)
   // It is seen at the next fetch, a second at a time so its pause is not passed over
   let seen
-  for (let n = 0; n < 20 && !seen; n += 1) (await clock.advance(1000), (seen = await list.find({ type: 'Text', text: '✓ Finished' })))
+  for (let n = 0; n < 20 && !seen; n += 1) (await clock.advance(1000), (seen = await list.find({ type: 'Text', text: '✓ Done' })))
   expect(seen).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Check the totals' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Just finished' })).toBeDefined()
@@ -886,7 +886,7 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
   // After its pause it is gone, and not kept under Finished, since its chat said nothing of how it ended
   await clock.advance(3000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'Check the totals' })) ? undefined : true))).toBe(true)
-  expect(await list.find({ type: 'Text', text: 'Nothing is running' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Nothing running' })).toBeDefined()
   expect(await drawn(list)).toEqual(['mark'])
   expect((await list.findAll({ type: 'Button' })).some(b => /Finished/.test(String(b.props.label)))).toBe(false)
   // A chat that closes with its work running shows nothing finished: its work just leaves
@@ -896,7 +896,7 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
   expect(back).toBeDefined()
   files.set('ssh:fetch', `${(NOW + 60_000) / 1000}\n`)
   let finished
-  for (let n = 0; n < 20; n += 1) (await clock.advance(1000), (finished ||= await list.find({ type: 'Text', text: '✓ Finished' })))
+  for (let n = 0; n < 20; n += 1) (await clock.advance(1000), (finished ||= await list.find({ type: 'Text', text: '✓ Done' })))
   expect(finished).toBeUndefined()
   expect(await list.find({ type: 'Text', text: 'Check the totals' })).toBeUndefined()
   await list.unmount()
@@ -1199,7 +1199,7 @@ test("in a chat over ssh the panel's text stays the same from second to second w
   const texts = async () => (await pane.findAll({ type: 'Text' })).map(t => t.text).join('|')
   const first = await texts()
   expect(first).toContain('<1m')
-  expect(first).toMatch(/context \d*[05]% \(310k\)|context 310k/)
+  expect(first).toMatch(/\d*[05]% full/)
   await clock.advance(20_000)
   expect(await texts()).toBe(first)
   await clock.advance(41_000)

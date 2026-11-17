@@ -843,7 +843,7 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
   const texts = (await list.findAll({ type: 'Text' })).map(one => one.text)
   await list.unmount()
-  expect(texts).toContain('Working on 1 thing')
+  expect(texts).toContain('1 task working')
   expect(texts).toContain('Fix the nose')
   agents.a3 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a3', message: 'The nose is drawn at every size.' } as never)
@@ -1000,7 +1000,7 @@ test('a helper quiet for five minutes is named to its work once, and the card sa
   expect(await pane.find({ type: 'Text', text: /looked in on|helper running/ })).toBeUndefined()
   await clock.advance(5 * 60_000)
   expect(appended.filter(line => line.startsWith('a1: Your helper "Read the nose code" (a2) has shown nothing new'))).toHaveLength(1)
-  expect((await pane.find({ type: 'Text', text: /^1 helper quiet for 5\+ min, Claudopus told Claude$/ }))?.text).toBeDefined()
+  expect((await pane.find({ type: 'Text', text: /^1 helper has shown nothing new for 5m · Claude was told to check$/ }))?.text).toBeDefined()
   await clock.advance(3 * 60_000)
   expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1)
 })

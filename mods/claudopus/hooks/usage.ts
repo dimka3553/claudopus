@@ -448,8 +448,8 @@ export const rateText = (perSecond: number): [string, string] => {
   return [mb.toFixed(1).replace(/\.0$/, '').replace(/^0\.0$/, '0'), 'MB/s']
 }
 export const pctText = (part: number) => `${Math.round(part * 100)}`
-// Time left as the system says it, hours:minutes
-export const leftText = (minutes: number) => `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}`
+// Time left as the system says it, in Claudopus's time form: 41m, 1h 05m
+export const leftText = (minutes: number) => (minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`)
 // A battery on its own power at a fifth or less turns amber
 export const BATTERY_LOW = 20
 export const isBatteryLow = (b: UsageBattery) => b.state === 'battery' && b.pct <= BATTERY_LOW

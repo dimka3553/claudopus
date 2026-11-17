@@ -1536,7 +1536,7 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
   expect([isPurple(held.desk), isPurple(held.term), isPurple(held.band), held.heading]).toEqual([true, true, true, 'acting'])
   agents.a1 = 'completed'
   // The header counts it as running, not as needing the person
-  expect(await desk.find({ type: 'Text', text: 'Working on 1 thing' })).toBeDefined()
+  expect(await desk.find({ type: 'Text', text: '1 task working' })).toBeDefined()
   // It stops again with the ask still open, the engine listing it as running for a moment as its turn ends: amber again a moment
   // later, once the engine lists its run as over
   agents.a1 = 'running'
@@ -1550,7 +1550,7 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
   })
   expect(after ?? (await look())).toMatchObject({ desk: AMBER, term: AMBER, band: AMBER, heading: 'needs' })
   for (const labels of (await look()).buttons) expect(labels).toEqual(expect.arrayContaining(['Release it', 'Not now']))
-  expect(await desk.find({ type: 'Text', text: '1 thing needs you' })).toBeDefined()
+  expect(await desk.find({ type: 'Text', text: '1 task waiting for you' })).toBeDefined()
   // Release it pressed goes back to the work and the ask goes; the card is at work on it, purple, until the work is done
   await desk.press({ key: (await desk.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it')?.key ?? '' })
   expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it"')))).toBeDefined()
@@ -2435,7 +2435,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   expect((await labelled(list, CLOSE)).length).toBe(1)
   expect((await labelled(list, OPEN)).length).toBe(0)
   // The panel scrolled away from its top with the box open: the bar still points at what waits there
-  const MARK = '↑ 1 thing is waiting for you at the top of the panel'
+  const MARK = '↑ 1 card is waiting for you at the top of the panel'
   const scrolled = async (offset: number) => (await list.unmount(), (list = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset, bodyRows: 20 } }, surface: 'desktop' } as never)))
   await scrolled(40)
   expect(await until(async () => bar.find({ type: 'Text', text: MARK }))).toBeDefined()
