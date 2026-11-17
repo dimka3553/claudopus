@@ -723,7 +723,9 @@ const psLine = (pid: number, ppid: number, pgid: number, command: string, rssKb 
 const leftWorld = (on: On, procs: { list: string[]; logs: Record<string, string>; outputs?: Record<string, string>; owners?: Record<string, 'mine' | 'other' | 'hidden'> }) => {
   let pid = 4900
   const now = { at: 1_700_000_000_000 }
+  // (the work is at a step of its own throughout, as the engine lists it: an ended run's word goes into its run)
   const w = world(on, {
+    agents: { a1: 'running' },
     jobs: {
       output: file => procs.outputs?.[file] ?? '',
       wroteAt: () => now.at - 2_000,

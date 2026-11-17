@@ -304,16 +304,21 @@ const waitingNow = async ($: EngineInterface) => {
   const list = await read($, todos)
   const listed = new Map((await $.agent.list().catch(() => [])).map(one => [one.id, one.status] as const))
   const now = await $.clock.now()
-  const waiting = new Map<string, { title: string; helpers: number; wake: string; stuck?: string }>()
+  const waiting = new Map<string, { title: string; helpers: number; wake: string; stuck?: string; isCarried?: boolean }>()
   for (const card of list) {
     if (card.parentId || card.status !== 'working' || card.handedBackAt !== undefined) continue
+    // (one left stopped partway that Claudopus starts again to carry on: Claude Code's word that it ended needs nothing of the chat)
+    if (card.carryOn && !card.carryOn.gaveUp && card.endedStepAt === card.carryOn.at && now - card.carryOn.at < CARRY_SHOWN) {
+      waiting.set(card.id, { title: titleOf(card), helpers: 0, wake: '', isCarried: true })
+      continue
+    }
     const helpers = runningHelpers(list, card.id).filter(one => listed.get(one.id) === 'running' || listed.get(one.id) === 'waiting').length
     const wake = card.wakeWhen && card.wakeWhen.until > now ? card.wakeWhen.what : ''
     if (helpers || wake) waiting.set(card.id, { title: titleOf(card), helpers, wake, ...(card.stuckTold !== undefined ? { stuck: card.id } : {}) })
   }
   return waiting
 }
-const waitsText = (work: { title: string; helpers: number; wake: string; stuck?: string }) => named(WAITS_ON(work.title, work.helpers, work.wake, work.stuck))
+const waitsText = (work: { title: string; helpers: number; wake: string; stuck?: string; isCarried?: boolean }) => named(work.isCarried ? CARRIED_IN_CHAT(work.title) : WAITS_ON(work.title, work.helpers, work.wake, work.stuck))
 
 // A helper that ends while the work that started it has ended its step: the engine hands its result to the chat (seen live on 16
 // Nov), so Claudopus passes it on to that work and starts it again with it. The work never holds itself open to wait for helpers

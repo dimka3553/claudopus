@@ -198,7 +198,9 @@ const sync = async ($: EngineInterface) => {
   )
   // The chat is read once for each such work, not at every look
   if (isUnseen) for (const one of live) if (!one.parentId) helpersChecked.add(one.id)
+  const unheardEnds = new Set<string>()
   await changeTodos($, list => {
+    unheardEnds.clear()
     const cards = new Map(list.map(one => [one.id, one] as const))
     let isChanged = false
     for (const one of live) {
@@ -213,6 +215,12 @@ const sync = async ($: EngineInterface) => {
           // lists it as completed, but a helper's result or the thing it waits for starts it again (16 Nov its card vanished meanwhile)
           card.status === 'working' && one.status === 'completed' && !handedBack.has(card.id) && card.handedBackAt === undefined && (card.wakeWhen !== undefined || isTurnWaited(list, card.id) || list.some(kid => kid.parentId === card.id && kid.status === 'working'))
           ? undefined
+        : // A task Claudopus starts again to carry on is left to that
+          card.status === 'working' && card.carryOn && !card.carryOn.gaveUp && card.endedStepAt === card.carryOn.at && (one.status === 'completed' || one.status === 'failed' || one.status === 'idle')
+          ? undefined
+        : // A task whose end the mod did not hear may have stopped partway: its last words are read first (below)
+          card.status === 'working' && one.status !== 'killed' && (one.status === 'completed' || one.status === 'failed') && !turnEnding.has(card.id) && isStoppedShort(card, '') && !carryTaken.has(carryKey(card)) && ownsNothing(list, card.id)
+          ? ((unheardEnds.add(card.id)), undefined)
         : card.status === 'working' && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed')
           ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? stoppedAs(card) : 'done', now)
           : // A card listed from the engine alone, for work that is only held and has made no step since: its turn had ended
@@ -234,6 +242,7 @@ const sync = async ($: EngineInterface) => {
     for (const card of cards.values()) if (listed && card.leftSince && !live.some(one => one.id === card.id)) ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined }))
     return isChanged ? capped([...cards.values()]) : list
   })
+  if (unheardEnds.size) await endedUnheardShort($, unheardEnds, live, now).catch(err => log($, `ends not heard not looked at: ${String(err)}`))
   if (listed) await endUnheard($, live, now).catch(err => log($, `work that ended unheard not looked for: ${String(err)}`))
   // A go-ahead pressed during a turn whose end only the engine's list showed does its last step now
   await stepsAtEnd($).catch(err => log($, `last step not done: ${String(err)}`))
@@ -244,11 +253,52 @@ const sync = async ($: EngineInterface) => {
   await saveKeep($).catch(err => log($, `work at work not kept for the keeper: ${String(err)}`))
 }
 
+// Tasks the engine lists as ended whose end the mod did not hear (it was reloading): one whose last words are no result is started
+// again to carry on, any other ends as the engine says, with its last words
+const endedUnheardShort = async ($: EngineInterface, ids: Set<string>, live: { id: string; status: string }[], now: number) => {
+  const { id: chat } = await read($, me)
+  const folder = chat ? await agentsFolder($, chat) : ''
+  for (const id of ids) {
+    const card = (await read($, todos)).find(one => one.id === id)
+    if (!card || card.status !== 'working' || carryTaken.has(carryKey(card))) continue
+    const f = folder ? await lastWordsOf($, folder, id, now) : { at: now, answer: '', isReport: false, isPressed: false }
+    if (!f.isReport && f.isPressed && isStoppedShort(card, f.answer)) {
+      await goOn($, id, 'its step ended while Claudopus was away')
+      continue
+    }
+    const how = live.find(one => one.id === id)?.status === 'failed' ? 'failed' : 'done'
+    await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? { ...ended(one, how, now), answer: f.answer || one.answer, ...(f.isReport ? { answeredAt: one.answeredAt ?? now } : {}) } : one)))
+  }
+}
+
 // Work, or a helper, that ended while the mod was unloaded is never heard to end, and the engine drops it from its list a while
 // later: its card would be drawn at work, and warned about as stuck, for good (16 Nov a second look that handed back its report at
 // 17:25, while the mod was out from 17:24 to 17:26, was drawn at work for 47 minutes and held its task open). A card at work that
 // the engine no longer lists at all and whose saved record says it finished has ended: helpers first, then work with no helper at
 // work left and nothing it asked to be started again for. Looked at once a minute for each
+// The folder the engine keeps this chat's agents' records in
+const agentsFolder = async ($: EngineInterface, chat: string) => `${(await $.env.get('HOME')) ?? ''}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${chat}/subagents`
+// An agent's last words from the end of its record: what it handed back, or the text of its last reply, whether that is a report,
+// and when the record was last written
+const lastWordsOf = async ($: EngineInterface, folder: string, agent: string, now: number) => {
+  const path = `${folder}/agent-${agent}.jsonl`
+  const stat = await $.fs.stat(path).catch(() => undefined)
+  const at = stat?.mtimeMs || now
+  const size = stat?.size ?? 0
+  const tail = (size > 0 && size < 2_000_000 ? await readOr($, path) : ((await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '')).split('\n')
+  let answer = ''
+  let isHandback = false
+  const isPressed = isPressedAtEnd(tail.map(row => parsedOr<unknown>(row, {})))
+  for (const row of tail.reverse()) {
+    const o = parsedOr<{ type?: string; message?: { content?: unknown } }>(row, {})
+    if (o.type !== 'assistant' || !Array.isArray(o.message?.content)) continue
+    const blocks = o.message.content as { type?: string; name?: string; text?: string; input?: { message?: unknown } }[]
+    isHandback = blocks.some(b => b.type === 'tool_use' && b.name === 'SubagentHandback')
+    answer = blocks.map(b => (b.type === 'tool_use' && b.name === 'SubagentHandback' && typeof b.input?.message === 'string' ? b.input.message : b.type === 'text' ? (b.text ?? '') : '')).join('').trim()
+    if (answer) break
+  }
+  return { at, answer: answer.slice(0, ANSWER_CHARS), isReport: isHandback || answer.length >= REPORT_LEAST, isPressed }
+}
 const UNHEARD_LOOK = 60_000
 const UNHEARD_QUIET = 60_000
 const unheardLooked = new Map<string, number>()
@@ -260,37 +310,22 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
   const list = await read($, todos)
   const due = list.filter(one => isUnlisted(one) && now - (unheardLooked.get(one.id) ?? -Infinity) >= UNHEARD_LOOK)
   if (!due.length) return
-  const home = (await $.env.get('HOME')) ?? ''
-  const folder = `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}/subagents`
-  const finished = new Map<string, { at: number; answer: string; isReport: boolean }>()
+  const folder = await agentsFolder($, id)
+  const finished = new Map<string, { at: number; answer: string; isReport: boolean; isPressed: boolean }>()
   for (const one of due) {
     unheardLooked.set(one.id, now)
     const meta = parsedOr<{ finished?: boolean }>(await readOr($, `${folder}/agent-${one.id}.meta.json`), {})
     if (meta.finished !== true) continue
-    const path = `${folder}/agent-${one.id}.jsonl`
-    const stat = await $.fs.stat(path).catch(() => undefined)
-    const at = stat?.mtimeMs || now
-    // Its report: what it handed back, or its last words, from the end of its record
-    const size = stat?.size ?? 0
-    const tail = (size > 0 && size < 2_000_000 ? await readOr($, path) : ((await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '')).split('\n')
-    let answer = ''
-    let isHandback = false
-    for (const row of tail.reverse()) {
-      const o = parsedOr<{ type?: string; message?: { content?: unknown } }>(row, {})
-      if (o.type !== 'assistant' || !Array.isArray(o.message?.content)) continue
-      const blocks = o.message.content as { type?: string; name?: string; text?: string; input?: { message?: unknown } }[]
-      isHandback = blocks.some(b => b.type === 'tool_use' && b.name === 'SubagentHandback')
-      answer = blocks.map(b => (b.type === 'tool_use' && b.name === 'SubagentHandback' && typeof b.input?.message === 'string' ? b.input.message : b.type === 'text' ? (b.text ?? '') : '')).join('').trim()
-      if (answer) break
-    }
-    finished.set(one.id, { at, answer: answer.slice(0, ANSWER_CHARS), isReport: isHandback || answer.length >= REPORT_LEAST })
+    finished.set(one.id, await lastWordsOf($, folder, one.id, now))
   }
   if (!finished.size) return
   // The deepest first: a card with a helper still at work, or one that ends now, or with something it asked to be started again for,
   // waits; one whose helper ends now is passed that helper's result below, which starts it again, as passOnHelper does when heard.
   // Work the chat started ends now, so the chat is told and a report it gave is kept; a helper keeps the time it really ended
   let endedNow: string[] = []
+  const short = new Set<string>()
   await changeTodos($, all => {
+    short.clear()
     const gone = new Set<string>()
     let list = all
     for (let isMoved = true; isMoved; ) {
@@ -298,6 +333,8 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
       list = list.map(one => {
         const f = finished.get(one.id)
         if (!f || one.status !== 'working' || one.wakeWhen || isTurnWaited(list, one.id) || list.some(kid => kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id)))) return one
+        // (a task left stopped partway is started again to carry on, below)
+        if (!one.parentId && !f.isReport && f.isPressed && isStoppedShort(one, f.answer)) return (short.add(one.id), one)
         gone.add(one.id)
         isMoved = true
         // (its words count as a report only when it handed one back or wrote one as long, as at a heard end)
@@ -309,6 +346,7 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
     endedNow = [...gone]
     return gone.size ? list : all
   })
+  for (const one of short) await goOn($, one, 'its step ended while Claudopus was away')
   if (!endedNow.length) return
   await log($, `work that ended while the mod was out ended on its card: ${endedNow.join(', ')}`)
   for (const one of endedNow) {

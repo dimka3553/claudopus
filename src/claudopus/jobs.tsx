@@ -644,7 +644,10 @@ const wakeForRun = async ($: EngineInterface, one: Todo | undefined, runs: NonNu
   // (a program's own log is the command's only where it was the command's one program)
   const isAlone = runs.length === 1 && (!leftCommandOf(first.id) || (one.endedRuns?.find(r => leftCommandOf(r.id) === leftCommandOf(first.id))?.count ?? 1) === 1)
   const text = words.length === 1 ? RUN_ENDED(words[0] ?? '', isAlone ? first.log : '') : RUNS_ENDED(words)
-  if (one.status === 'working' && !one.waitsSince) {
+  // (at a step of its own only as the engine lists it running: a card at work whose step has ended, waiting on its helpers, has no
+  // run to read a line in, and on 17 Nov the word that its build had ended was refused there and lost, the task left stopped)
+  const isAtStep = one.status === 'working' && !one.waitsSince && (await $.agent.list().catch(() => [])).find(agent => agent.id === one.id)?.status === 'running'
+  if (isAtStep) {
     await tell($, one.id, text)
     return void (await log($, `work ${one.id} told ${runs.length} run(s) of it ended`))
   }

@@ -1063,3 +1063,53 @@ test('the log is added to, never rewritten whole, and the empty bytes earlier ve
   expect(text.startsWith('2026-01-01T00:00:00.000Z start one2026-01-01T00:00:01.000Z start two\n')).toBe(true)
   expect(text).toMatch(/Z start engine-id in \/repo\n$/)
 })
+
+test('a task Claude Code pressed for its report that ended its step with none, asking nothing and with nothing that starts it again, is started again to carry on and its card stays at work saying so; stopped so again and again with little done between, it is left stopped with one line on its card; a task asking you something, one stopped, one with a result, and one never pressed for a report end as before', SLOW, async ($, on) => {
+  const agents: Record<string, string> = {}
+  const PRESS = { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' }
+  const pressed = [{ role: 'assistant', content: [{ type: 'text', text: 'Waiting for the build.' }] }, PRESS, { role: 'assistant', content: [{ type: 'text', text: "My command is still running. Claudopus starts me again when it's done, and I'll send my result then." }] }]
+  const talk: unknown[] = [...pressed]
+  const { clock, resumed, appended } = world(on, { agents, talk })
+  await $.session.start(start)
+  for (const title of ['Paint the skin', 'Ask about the logo', 'Draw the banner', 'Write the notes', 'Sort the frames']) await $.agent.spawn({ ...spawn, description: title, prompt: title } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Which logo?', choices: ['Round', 'Square'] } as never)
+  const ends = async (id: string, answer: string, n: number, isAborted = false) => {
+    agents[id] = 'completed'
+    await $.turn.complete({ answer, durationMs: 1, isAborted, turnId: `t-${id}-${n}`, reason: 'answer', agentId: id } as never)
+  }
+  const lines = async () => {
+    const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+    const found = (await pane.findAll({ type: 'Text', text: /^Stopped partway / })).map(one => ({ text: one.text?.replace(/\d\d:\d\d/g, 'hh:mm'), color: one.props.color }))
+    await pane.unmount()
+    return found
+  }
+  const carried = (id: string) => resumed.filter(line => line.startsWith(`${id}: From Claudopus, not `) && line.includes('left stopped partway. Carry on from where you were'))
+  await $.tool.call({ tool: 'Bash', tool_use_id: 's1', agentId: 'a1', command: 'git status' } as never)
+  await ends('a1', 'Waiting for the build.', 1)
+  for (const id of ['a2', 'a4']) await ends(id, 'Waiting for my answer.', 1)
+  await ends('a3', 'Waiting for the build.', 1, true)
+  await ends('a4', `Done. ${'Every banner is drawn and checked. '.repeat(20)}`, 2)
+  // Started again a moment later, not at once: the engine closes the run first
+  expect(carried('a1')).toHaveLength(0)
+  await clock.advance(6000)
+  expect(carried('a1')).toHaveLength(1)
+  expect(resumed.filter(line => /^a[234]: /.test(line))).toEqual([])
+  expect(await lines()).toEqual([{ text: 'Stopped partway at hh:mm without a result · Claudopus started it again', color: undefined }])
+  // The chat's model is told only once Claudopus gives up; a run that ended with its words as its result, never pressed, ends as before
+  talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text: 'Sorted.' }] })
+  await ends('a5', 'Sorted.', 1)
+  await clock.advance(6000)
+  expect(resumed.filter(line => line.startsWith('a5: '))).toEqual([])
+  talk.splice(0, talk.length, ...pressed)
+  // It stops so again with nothing done: started again twice more, then left stopped, with one line on its card, in amber
+  for (const n of [2, 3, 4]) {
+    await ends('a1', 'Waiting for the build.', n)
+    await clock.advance(6000)
+  }
+  expect(carried('a1')).toHaveLength(3)
+  expect(await lines()).toEqual([{ text: 'Stopped partway 4 times without a result · Claudopus stopped starting it again · send it a message to carry on', color: '#E5A50A' }])
+  expect(appended.filter(line => line.includes('"Paint the skin" (a1) keeps stopping partway'))).toHaveLength(1)
+  await ends('a1', 'Waiting for the build.', 5)
+  await clock.advance(6000)
+  expect(carried('a1')).toHaveLength(3)
+})

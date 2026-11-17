@@ -54,7 +54,11 @@ const heldLook = async ($: EngineInterface, id: string) => {
   const listed = (await $.agent.list().catch(() => undefined))?.find(one => one.id === id)?.status
   if (listed === 'idle' || listed === undefined) {
     const now = await $.clock.now()
-    await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
+    // (a task left stopped partway is started again to carry on, not ended)
+    const one = (await read($, todos)).find(card => card.id === id)
+    const isShort = one?.status === 'working' && isStoppedShort(one, '') && ownsNothing(await read($, todos), id) && !one.wakeWhen && (await pressedAtEnd($, id))
+    if (isShort) await goOn($, id, 'its step ended', true)
+    else await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
   }
   const card = (await read($, todos)).find(one => one.id === id)
   if (card?.status === 'working') return
@@ -68,6 +72,90 @@ const heldLook = async ($: EngineInterface, id: string) => {
 // The notices with nothing new let in since the chat's last turn started, each whole; the turns to answer with no model
 const quietHeld = new Set<string>()
 const quietTurns = new Set<string>()
+// A turn of a task or helper ends: its card follows what it ended with (chatHooks' turn.complete)
+const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAborted: boolean; reason: string }, id: string, done: T): Promise<T> => {
+  const now = await $.clock.now()
+  // A turn that handed back its report with SubagentHandback and says nothing after has that report as its answer
+  const answer = ((e.answer ?? '').trim() || handedBack.get(id) || '').slice(0, ANSWER_CHARS)
+  // Held: the engine keeps it for what it left running, and lists it as waiting. As a turn ends the engine may still list it as
+  // running for a moment, held or not: taken as held then, and looked at again shortly (heldLook)
+  const listed = (await $.agent.list().catch(() => [])).find(one => one.id === id)?.status
+  const isHeld = listed === 'waiting' || listed === 'running'
+  if (listed === 'running') $.clock.after(HELD_LOOK, () => void heldLook($, id).catch(err => log($, `work ${id} not looked at again: ${String(err)}`)))
+  const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
+  // Held only by its own background work, a turn that ends with its report has finished the work: by SubagentHandback, or a
+  // reply as long as a report. A short line such as "started it in the background" has not, nor work that waits on its helpers
+  // Held on a command or watch of its own that wakes it as it ends, with a to-do of its still being done, it has not finished:
+  // what it hands back on the way (an answer to a question while it waits) is no report, and its card stays at work
+  const isGoingOn = how === 'done' && isHeld && goesOn(await read($, todos), id)
+  const isReport = how === 'done' && isHeld && !isGoingOn && (handedBack.has(id) || answer.length >= REPORT_LEAST)
+  // A report in words, with nothing of its own running, has finished the work as a handback does: the engine may hold it on what
+  // no tool shows open, and the chat need not stop it. Its card ends with its clock, and an ask it leaves stays to be answered
+  const isIdleReport = isReport && ownsNothing(await read($, todos), id)
+  // SubagentHandback ends the work's run: its card ends done with its report, though what it left running in the background (a
+  // server, a watch, a helper) goes on and is not stopped. Should that wake the work, its next step brings the card back
+  const isHandedBack = how === 'done' && (handedBack.has(id) || isIdleReport) && !isGoingOn
+  if (isHandedBack) (ownsNothing(await read($, todos), id) ? leftNothing.add(id) : leftNothing.delete(id))
+  handedBack.delete(id)
+  if (isHandedBack) endedByHandback.add(id)
+  if (isHandedBack) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now, wakeWhen: undefined } : one)))
+  // Work nothing holds any more has nothing of its own left running in the background
+  if (!isHeld) await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
+  // A task of this chat's whose step ended with no result, no question and nothing of its own that starts it again is not
+  // finished: it stays at work, and Claudopus starts it again to carry on (carryOn). Not one that was stopped, nor one refused
+  const isShortHow = how === 'done' || (how === 'failed' && e.reason === 'error')
+  const mayBeShort = isShortHow && !isHandedBack && isStoppedShort((await read($, todos)).find(one => one.id === id), answer) && (await pressedAtEnd($, id))
+  let isCarried = false
+  await changeTodos($, list => {
+    isCarried = false
+    // (or for what it asked Claudopus to start it again for)
+    const isWaiting = how === 'done' && !isHandedBack && (isHeld || isTurnWaited(list, id) || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)))
+    // What it waits on of its own, since when: the card says so, and a long wait for it is not taken for being stuck
+    // Work that gave its report waits on nothing it means to finish
+    const waitsSince = (one: Todo) => (isHeld && !isReport && one.bg?.some(b => !b.isWatch) ? (one.waitsSince ?? now) : undefined)
+    // An aborted turn's own text is not kept over the report the work gave before it was stopped
+    return list.map(one =>
+      one.id !== id
+        ? one
+        : // Work that had ended, woken by what it left running, that ends a turn of words alone has not worked again: it stays
+          // as it ended, with its report, and is not announced a second time
+          one.status !== 'working' && how === 'done' && !isHandedBack && endedByHandback.has(id)
+          ? one
+          : isWaiting
+          ? { ...one, answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt, waitsSince: waitsSince(one), endedStepAt: now }
+          : how === 'stopped'
+            ? one.status === 'working'
+              ? ended(one, stoppedAs(one), now)
+              : one
+            : mayBeShort && one.status === 'working' && isStoppedShort(one, answer)
+              ? ((isCarried = true), { ...one, answer: answer || one.answer })
+              : { ...ended(one, how, now), answer: answer || one.answer },
+    )
+  })
+  if (isCarried) await goOn($, id, e.reason === 'error' ? 'its step failed' : 'its step ended', true)
+  if (how === 'stopped') await keepStoppedReports($, now)
+  await lookEnds($)
+  // A reply it never read goes to the chat; work that waits for its helpers reads it at its next step
+  if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
+  // A go-ahead pressed during this turn does its last step now, before the wakes go, so its small task starts from this hook
+  await stepsAtEnd($).catch(err => log($, `last step not done: ${String(err)}`))
+  if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
+  // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
+  // held on its own background work leaves it once it ends (keepStoppedReports)
+  const card = (await read($, todos)).find(one => one.id === id)
+  const report = (e.answer ?? '').trim() || answer
+  // A helper that has ended while its work had ended its step: its result is passed on to that work, which starts again with it
+  if (card?.parentId && card.status !== 'working') await passOnHelper($, id, report, card.status).catch(err => log($, `helper's result not passed on: ${String(err)}`))
+  // One that handed back while a command or helper of its own still runs stays at work on its card, but its hand-back reached the
+  // chat, which was told it is passed on: it is passed on now
+  else if (card?.parentId && notedAtHandback.has(id)) await passOnHelper($, id, report, 'done').catch(err => log($, `helper's result not passed on: ${String(err)}`))
+  if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
+    $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
+  }
+  return done
+}
+// The tasks and helpers whose turn's end is being taken up now: the list's look leaves them to it
+const turnEnding = new Set<string>()
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
     await knowSystem($).catch(() => undefined)
@@ -508,76 +596,12 @@ const chatHooks = (on: On) => {
     await lapsedSignIn($, e).catch(err => log($, `lapsed sign-in not handed over: ${String(err)}`))
     if (e.agentId !== undefined) {
       const id = e.agentId
-      const now = await $.clock.now()
-      // A turn that handed back its report with SubagentHandback and says nothing after has that report as its answer
-      const answer = ((e.answer ?? '').trim() || handedBack.get(id) || '').slice(0, ANSWER_CHARS)
-      // Held: the engine keeps it for what it left running, and lists it as waiting. As a turn ends the engine may still list it as
-      // running for a moment, held or not: taken as held then, and looked at again shortly (heldLook)
-      const listed = (await $.agent.list().catch(() => [])).find(one => one.id === id)?.status
-      const isHeld = listed === 'waiting' || listed === 'running'
-      if (listed === 'running') $.clock.after(HELD_LOOK, () => void heldLook($, id).catch(err => log($, `work ${id} not looked at again: ${String(err)}`)))
-      const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
-      // Held only by its own background work, a turn that ends with its report has finished the work: by SubagentHandback, or a
-      // reply as long as a report. A short line such as "started it in the background" has not, nor work that waits on its helpers
-      // Held on a command or watch of its own that wakes it as it ends, with a to-do of its still being done, it has not finished:
-      // what it hands back on the way (an answer to a question while it waits) is no report, and its card stays at work
-      const isGoingOn = how === 'done' && isHeld && goesOn(await read($, todos), id)
-      const isReport = how === 'done' && isHeld && !isGoingOn && (handedBack.has(id) || answer.length >= REPORT_LEAST)
-      // A report in words, with nothing of its own running, has finished the work as a handback does: the engine may hold it on what
-      // no tool shows open, and the chat need not stop it. Its card ends with its clock, and an ask it leaves stays to be answered
-      const isIdleReport = isReport && ownsNothing(await read($, todos), id)
-      // SubagentHandback ends the work's run: its card ends done with its report, though what it left running in the background (a
-      // server, a watch, a helper) goes on and is not stopped. Should that wake the work, its next step brings the card back
-      const isHandedBack = how === 'done' && (handedBack.has(id) || isIdleReport) && !isGoingOn
-      if (isHandedBack) (ownsNothing(await read($, todos), id) ? leftNothing.add(id) : leftNothing.delete(id))
-      handedBack.delete(id)
-      if (isHandedBack) endedByHandback.add(id)
-      if (isHandedBack) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now, wakeWhen: undefined } : one)))
-      // Work nothing holds any more has nothing of its own left running in the background
-      if (!isHeld) await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
-      await changeTodos($, list => {
-        // (or for what it asked Claudopus to start it again for)
-        const isWaiting = how === 'done' && !isHandedBack && (isHeld || isTurnWaited(list, id) || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)))
-        // What it waits on of its own, since when: the card says so, and a long wait for it is not taken for being stuck
-        // Work that gave its report waits on nothing it means to finish
-        const waitsSince = (one: Todo) => (isHeld && !isReport && one.bg?.some(b => !b.isWatch) ? (one.waitsSince ?? now) : undefined)
-        // An aborted turn's own text is not kept over the report the work gave before it was stopped
-        return list.map(one =>
-          one.id !== id
-            ? one
-            : // Work that had ended, woken by what it left running, that ends a turn of words alone has not worked again: it stays
-              // as it ended, with its report, and is not announced a second time
-              one.status !== 'working' && how === 'done' && !isHandedBack && endedByHandback.has(id)
-              ? one
-              : isWaiting
-              ? { ...one, answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt, waitsSince: waitsSince(one), endedStepAt: now }
-              : how === 'stopped'
-                ? one.status === 'working'
-                  ? ended(one, stoppedAs(one), now)
-                  : one
-                : { ...ended(one, how, now), answer: answer || one.answer },
-        )
-      })
-      if (how === 'stopped') await keepStoppedReports($, now)
-      await lookEnds($)
-      // A reply it never read goes to the chat; work that waits for its helpers reads it at its next step
-      if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
-      // A go-ahead pressed during this turn does its last step now, before the wakes go, so its small task starts from this hook
-      await stepsAtEnd($).catch(err => log($, `last step not done: ${String(err)}`))
-      if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
-      // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
-      // held on its own background work leaves it once it ends (keepStoppedReports)
-      const card = (await read($, todos)).find(one => one.id === id)
-      const report = (e.answer ?? '').trim() || answer
-      // A helper that has ended while its work had ended its step: its result is passed on to that work, which starts again with it
-      if (card?.parentId && card.status !== 'working') await passOnHelper($, id, report, card.status).catch(err => log($, `helper's result not passed on: ${String(err)}`))
-      // One that handed back while a command or helper of its own still runs stays at work on its card, but its hand-back reached the
-      // chat, which was told it is passed on: it is passed on now
-      else if (card?.parentId && notedAtHandback.has(id)) await passOnHelper($, id, report, 'done').catch(err => log($, `helper's result not passed on: ${String(err)}`))
-      if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
-        $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
+      turnEnding.add(id)
+      try {
+        return await agentTurnEnded($, e, id, done)
+      } finally {
+        turnEnding.delete(id)
       }
-      return done
     }
     // A turn answered with no model is no reply: nothing is saved or logged for it
     if (quietTurns.delete(e.turnId)) return done
