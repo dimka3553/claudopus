@@ -127,7 +127,7 @@ export type Todo = {
   // holds its run for it (leftSince) the card is shown waiting for its command, not Done
   leftOwn?: boolean
   // Only on a card as it is shown, never kept (shownAs): when a card kept as done ended, while something of its own still runs and
-  // it is shown at work; and how many to-dos a card kept as done left, shown as stopped
+  // it is shown at work; and how many to-dos a card kept as done left, shown as not done
   wasDone?: number
   leftOpen?: number
   // What it started in the background itself that wakes it when it ends (a command, a watch): the engine's task id, what it is

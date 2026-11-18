@@ -385,9 +385,10 @@ const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: n
 const isDismissed = (one: Todo) => one.status !== 'working' && Boolean(one.closedAt)
 const dismiss = async ($: EngineInterface, id: string) => {
   const at = await $.clock.now()
-  await changeTodos($, list => list.map(one => (one.id === id && one.status !== 'working' && !one.closedAt ? { ...one, closedAt: at } : one)))
-  await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
+  // (dismissed, it is done with: a question of its own on the card goes with it, and it is drawn at once, before it is kept)
+  await changeTodos($, list => list.map(one => (one.id === id && one.status !== 'working' && !one.closedAt ? { ...one, closedAt: at, ask: undefined } : one)))
   redraw($)
+  await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
 }
 // Writes a line into a piece of work's own chat, which it reads at its next step
 const tell = ($: EngineInterface, id: string, text: string) =>

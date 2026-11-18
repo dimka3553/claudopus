@@ -77,9 +77,8 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
         : fewWords(one.answer) || fewWords(said) || 'Done.'
       : one.status === 'failed'
         ? 'Failed.'
-        : one.leftOpen
-          ? `Stopped with ${one.leftOpen === 1 ? 'a to-do' : `${one.leftOpen} to-dos`} not done.`
-          : 'Stopped.'
+        : 'Stopped.'
+  if (one.leftOpen) return { title: one.title || 'Task', isDone: false, what: `Not done: ${one.leftOpen === 1 ? 'a to-do is' : `${one.leftOpen} to-dos are`} left.` }
   return { title: one.title || 'Task', isDone: one.status === 'done', isWaiting: one.status === 'done' && waits.length > 0, what }
 }
 

@@ -20,6 +20,8 @@ const answerWait = ($: EngineInterface, r: Report, index: number, said: string, 
   if (!wait || wait.answer || answering.has(`${r.id}:${index}`)) return Promise.resolve()
   if (said === ANSWER_IN_WORDS) return answerInWords($, r, index, now)
   answering.add(`${r.id}:${index}`)
+  // (drawn as answered from the press itself, before the answer is kept: openResultWaits)
+  redraw($)
   // The press's own hook waits for it, and starts the task again from inside itself (sendWakes)
   const run = answerWaitNow($, r, index, wait, said, now)
   answersOnWay.add(run)

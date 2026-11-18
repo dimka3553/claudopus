@@ -1472,9 +1472,9 @@ const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: n
 const isDismissed = (one: Todo) => one.status !== 'working' && Boolean(one.closedAt)
 const dismiss = async ($: EngineInterface, id: string) => {
   const at = await $.clock.now()
-  await changeTodos($, list => list.map(one => (one.id === id && one.status !== 'working' && !one.closedAt ? { ...one, closedAt: at } : one)))
-  await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
+  await changeTodos($, list => list.map(one => (one.id === id && one.status !== 'working' && !one.closedAt ? { ...one, closedAt: at, ask: undefined } : one)))
   redraw($)
+  await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
 }
 const tell = ($: EngineInterface, id: string, text: string) =>
   $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] }, agentId: id }).catch(async err => void (await log($, `work ${id} not told: ${String(err)}`)))
@@ -1734,13 +1734,13 @@ const stateOf = (list: Todo[], one: Todo): TaskState => {
   if (needsPerson(one)) return 'waiting-you'
   return one.endedStepAt !== undefined && wakesOf(list, one).isAny ? 'waiting-own' : 'working'
 }
-const shownAs = (list: Todo[], asks: (one: Todo) => boolean = () => false): Todo[] =>
+const shownAs = (list: Todo[], _asks?: (one: Todo) => boolean): Todo[] =>
   list.map(one => {
     if (isOff || one.parentId || one.chat || one.status !== 'done' || one.closedAt) return one
-    if (one.ask || asks(one)) return one
+    if (one.ask) return one
     const { runs, helpers } = wakesOf(list, one)
     if (runs.length || helpers || (one.leftSince && one.leftOwn)) return { ...one, status: 'working' as const, wasDone: one.endedAt, endedAt: 0, endedStepAt: one.endedStepAt ?? one.endedAt }
-    if (openItems(one).length) return { ...one, status: 'stopped' as const, leftOpen: openItems(one).length }
+    if (openItems(one).length) return { ...one, leftOpen: openItems(one).length }
     return one
   })
 const shownOne = (list: Todo[], id: string, asks?: (one: Todo) => boolean) => shownAs(list, asks).find(one => one.id === id)
@@ -2290,7 +2290,7 @@ const unrecordedAtHandback = async ($: EngineInterface, id: string, message: str
 const CARD_WAITS_SHOWN = 60_000
 const openResultWaits = (one: Todo, kept: Report[], at: number): { r?: Report; wait: Wait; index: number }[] => {
   if (one.status !== 'done' || one.parentId || one.chat || one.closedAt) return []
-  const fromResults = resultsOfWork(kept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer ? [] : [{ r, wait, index }])))
+  const fromResults = resultsOfWork(kept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer || answering.has(`${r.id}:${index}`) ? [] : [{ r, wait, index }])))
   const fromCard = fromResults.length || at - one.endedAt > CARD_WAITS_SHOWN ? [] : (one.waits ?? []).map(askedWait).flatMap((wait, index) => (wait.answer ? [] : [{ wait, index }]))
   return [...fromResults, ...fromCard].filter(({ wait }) => !one.ask || wait.ask !== one.ask.at)
 }
@@ -2474,6 +2474,7 @@ const answerWait = ($: EngineInterface, r: Report, index: number, said: string, 
   if (!wait || wait.answer || answering.has(`${r.id}:${index}`)) return Promise.resolve()
   if (said === ANSWER_IN_WORDS) return answerInWords($, r, index, now)
   answering.add(`${r.id}:${index}`)
+  redraw($)
   const run = answerWaitNow($, r, index, wait, said, now)
   answersOnWay.add(run)
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
@@ -4568,9 +4569,8 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
         : fewWords(one.answer) || fewWords(said) || 'Done.'
       : one.status === 'failed'
         ? 'Failed.'
-        : one.leftOpen
-          ? `Stopped with ${one.leftOpen === 1 ? 'a to-do' : `${one.leftOpen} to-dos`} not done.`
-          : 'Stopped.'
+        : 'Stopped.'
+  if (one.leftOpen) return { title: one.title || 'Task', isDone: false, what: `Not done: ${one.leftOpen === 1 ? 'a to-do is' : `${one.leftOpen} to-dos are`} left.` }
   return { title: one.title || 'Task', isDone: one.status === 'done', isWaiting: one.status === 'done' && waits.length > 0, what }
 }
 
@@ -13083,7 +13083,7 @@ const bandHooks = (on: On) => {
     const bandKept = await read($, reports)
     const shown = shownAs(cards, one => openResultWaits(one, bandKept, bandAt).length > 0)
     const working = shown.filter(one => !one.parentId && one.status === 'working')
-    const happy = isHappy(shown.filter(one => !openResultWaits(one, bandKept, bandAt).length), bandAt)
+    const happy = isHappy(shown.filter(one => !one.leftOpen && !openResultWaits(one, bandKept, bandAt).length), bandAt)
     if (happy) await read($, tick)
     const ui = uiOf($, e)
     const { Box, Button, Text } = ui
@@ -13369,12 +13369,12 @@ const panelHooks = (on: On) => {
     const ours = modelName(await $.session.model().catch(() => ''))
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
     const isAbovePrompt = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
-    const isFinishMoment = (one: Todo) => one.status === 'done' && !one.ask && !resultWaits(one).length && lingers(one, at)
+    const isFinishMoment = (one: Todo) => one.status === 'done' && !one.leftOpen && !one.ask && !resultWaits(one).length && lingers(one, at)
     const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
     const stood: Record<Todo['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
     const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `Claude Code moved it to ${one.moved}` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
     const glance = (one: Todo, count = '') =>
-      [(one.ask && one.status === 'done' && !isActingOnReply(one)) || resultWaits(one).length ? 'Waiting for you' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one, at), modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.leftOpen ? 'Not done' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one, at), modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     const { picking = '' } = await read($, view)
     const lead = e.surface === 'terminal' ? 0 : 'xs'
     const facts = (one: Todo, isWhole: boolean, count = '') => {
@@ -13587,7 +13587,7 @@ const panelHooks = (on: On) => {
       const { r, wait, index } = first
       return (
         <Box key={key} flexDirection="column" gap={1}>
-          <Text wrap="wrap" color={NEEDS} bold>{`Result ready · ${cut(wait.text, Math.round(room * 1.6))}`}</Text>
+          <Text wrap="wrap" color={one.leftOpen ? NEEDS : undefined} bold>{`Result ready · ${cut(wait.text, Math.round(room * 1.6))}`}</Text>
           {r ? (
             <Box flexDirection="row" flexWrap="wrap" gap={1}>
               {answersOf(wait).map((said, n) => (
@@ -13765,7 +13765,7 @@ const panelHooks = (on: On) => {
                 {/* In its pause after ending, the line says in a word how it ended: green when it finished, plain when it was stopped */}
                 {(!one.ask && lingers(one, at)) || leftLine(one, at) ? (
                   <Text wrap="truncate-end" color={one.status === 'done' ? DONE : one.status === 'failed' ? 'error' : undefined} dimColor={one.status !== 'done' && one.status !== 'failed'}>
-                    {one.status === 'done' ? '✓ Done' : one.status === 'failed' ? '✕ Failed' : one.byYou ? 'Stopped by you' : 'Stopped'}
+                    {one.leftOpen ? 'Not done' : one.status === 'done' ? '✓ Done' : one.status === 'failed' ? '✕ Failed' : one.byYou ? 'Stopped by you' : 'Stopped'}
                   </Text>
                 ) : (
                   <Box flexDirection="column" minWidth={0}>
@@ -13801,7 +13801,7 @@ const panelHooks = (on: On) => {
     const edge = (one: Todo, count: number, done: number, isDoing: boolean) => {
       if (one.status === 'failed') return <Box width={1} flexShrink={0} backgroundColor="error" />
       if (one.status !== 'working' && one.status !== 'done') return <Box width={1} flexShrink={0} />
-      const isNeeded = needsPerson(one) || (onCards.get(one.id)?.length ?? 0) > 0 || resultWaits(one).length > 0
+      const isNeeded = needsPerson(one) || (onCards.get(one.id)?.length ?? 0) > 0 || Boolean(one.leftOpen)
       if (isNeeded || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={isNeeded ? NEEDS : one.status === 'working' || isActingOnReply(one) ? LIVE : DONE} />
       const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
       return count > EDGE_PARTS ? (

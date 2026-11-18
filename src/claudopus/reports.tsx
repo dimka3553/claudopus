@@ -267,7 +267,7 @@ const unrecordedAtHandback = async ($: EngineInterface, id: string, message: str
 const CARD_WAITS_SHOWN = 60_000
 const openResultWaits = (one: Todo, kept: Report[], at: number): { r?: Report; wait: Wait; index: number }[] => {
   if (one.status !== 'done' || one.parentId || one.chat || one.closedAt) return []
-  const fromResults = resultsOfWork(kept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer ? [] : [{ r, wait, index }])))
+  const fromResults = resultsOfWork(kept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer || answering.has(`${r.id}:${index}`) ? [] : [{ r, wait, index }])))
   const fromCard = fromResults.length || at - one.endedAt > CARD_WAITS_SHOWN ? [] : (one.waits ?? []).map(askedWait).flatMap((wait, index) => (wait.answer ? [] : [{ wait, index }]))
   return [...fromResults, ...fromCard].filter(({ wait }) => !one.ask || wait.ask !== one.ask.at)
 }

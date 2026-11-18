@@ -50,20 +50,23 @@ const stateOf = (list: Todo[], one: Todo): TaskState => {
 // - a command of its own that ends by itself still runs, or a helper of its is at work: it waits for its own work, in purple
 //   (a command it sent to the background, which Claude Code still holds its run for after its report, counts by `leftOwn`, kept as
 //   the card ended, its rows being gone by then; a server never ends by itself, so a card that left only a server is done)
-// - to-dos it never ticked or dropped, with no question for the person open: it stopped short, and says how many are done
+// - to-dos it never ticked or dropped: it is not done, in amber, and says how many are done
 // (18 Nov, the person: "Why is it done after four to-dos? Why does it have a command running when it's finished?" A task that
 // ran where Claudopus could not see it handed back past every check, its to-dos and its line left as they were; another card
 // kept a command for 47 minutes after its report)
-// `asks`: whether its result still asks the person something, which is Waiting for you whatever its to-dos say
-const shownAs = (list: Todo[], asks: (one: Todo) => boolean = () => false): Todo[] =>
+// (`_asks` is no longer read: a result's question changes nothing of this)
+const shownAs = (list: Todo[], _asks?: (one: Todo) => boolean): Todo[] =>
   list.map(one => {
     // (nor one the person dismissed: it is under Finished as it ended, until its task works again)
     if (isOff || one.parentId || one.chat || one.status !== 'done' || one.closedAt) return one
-    // (a question of its own for the person comes first: it is Waiting for you, its command's row under it)
-    if (one.ask || asks(one)) return one
+    // (a question of its own on its card comes first: it is Waiting for you, its command's row under it)
+    if (one.ask) return one
     const { runs, helpers } = wakesOf(list, one)
     if (runs.length || helpers || (one.leftSince && one.leftOwn)) return { ...one, status: 'working' as const, wasDone: one.endedAt, endedAt: 0, endedStepAt: one.endedStepAt ?? one.endedAt }
-    if (openItems(one).length) return { ...one, status: 'stopped' as const, leftOpen: openItems(one).length }
+    // (to-dos left: not done, in amber, whatever its result asks; with every to-do done it is Done and green, though its result
+    // still asks the person something: the person, 18 Nov, "the ones that are not done should be yellow, the ones that are done
+    // should be green")
+    if (openItems(one).length) return { ...one, leftOpen: openItems(one).length }
     return one
   })
 // One card read so

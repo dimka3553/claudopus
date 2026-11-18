@@ -1482,8 +1482,9 @@ test("a task ending its step with to-dos still to do and nothing of its own runn
   if (fold) await pane.press({ key: String(fold.key) })
   const line = await until(async () => (await pane.find({ type: 'Text', text: /^Not done · / })) ?? undefined)
   expect([line?.text, line?.props.color]).toEqual(['Not done · Second look', '#E5A50A'])
-  // With a to-do left it stopped short: its card never says Done
-  expect((await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(text => text === '✓ Done' || text === 'Stopped')).toEqual(['Stopped'])
+  // With a to-do left it is not done: its card never says Done
+  expect((await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(text => text === '✓ Done' || text === 'Not done' || /^Done · /.test(text))).toEqual([])
+  expect((await pane.findAll({ type: 'Text' })).some(one => /^Not done · \d/.test(String(one.text ?? '')))).toBe(true)
   await pane.unmount()
   // A task waiting on your answer with to-dos still to do is no task left undone
   await $.agent.spawn({ ...spawn, description: 'Pick the skin tone', prompt: 'pick' } as never)
