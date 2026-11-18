@@ -1962,7 +1962,7 @@ test('a question nobody answers on its card is said again at 15 minutes and an h
   await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 't1', agentId: 'a1', item: 'Fix the scroll', state: 'done' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 't2', agentId: 'a1', item: 'Push it', state: 'doing' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Sign in to GitHub in the browser pane.' } as never)
-  const reminders = () => notified.filter(line => line.startsWith('Push the fix still waits for you | Asked '))
+  const reminders = () => notified.filter(line => line.startsWith('Push the fix still waits for you | Waiting '))
   const minutes = async (n: number) => {
     for (let at = 0; at < n; at += 1) await clock.advance(60_000)
   }
@@ -1971,16 +1971,17 @@ test('a question nobody answers on its card is said again at 15 minutes and an h
   expect(reminders()).toEqual([])
   await minutes(2)
   expect(reminders()).toHaveLength(1)
-  expect(reminders()[0]).toMatch(/^Push the fix still waits for you \| Asked 1[56]m ago: Sign in to GitHub in the browser pane\.$/)
+  expect(reminders()[0]).toMatch(/^Push the fix still waits for you \| Waiting 1[56]m · Sign in to GitHub in the browser pane\.$/)
   await minutes(30)
   expect(reminders()).toHaveLength(1)
   // The person types in the chat: the chat reads every card as it is, and is asked to name the question in its reply, once an hour
   const said = async (text: string) => ((await $.prompt.submit({ text, wait: false, origin: composer })) as { context?: string[] }).context?.join('\n') ?? ''
   const first = await said('how is it going?')
-  expect(first).toContain("What each task's card shows now, for when the person asks how things stand")
+  expect(first).toContain('What the latest task cards show now, for when the person asks how things stand')
   expect(first).toMatch(/- "Push the fix" \(a1\): waiting for the person for 4\dm: Sign in to GitHub in the browser pane\./)
   expect(first).toContain('Waiting on the person on a card, unanswered: "Push the fix". Unless your reply is about it, end it with one short line')
-  expect(await said('and the other one?')).not.toContain('Waiting on the person on a card')
+  // Within the hour, with nothing on the cards changed, the chat is not told again
+  expect(await said('and the other one?')).not.toContain('What the latest task cards show')
   await minutes(16)
   expect(reminders()).toHaveLength(2)
   // Answered, it is said no more, and the card reads as at work with its to-dos
@@ -1988,4 +1989,14 @@ test('a question nobody answers on its card is said again at 15 minutes and an h
   expect(await said('ok')).toMatch(/- "Push the fix" \(a1\): working, 1 of 2 to-dos done, doing "Push it"/)
   await minutes(200)
   expect(reminders()).toHaveLength(2)
+  // A reply in words that does not settle a new question starts its wait afresh: no reminder of the time before the reply
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'Push to main or to a branch?', choices: ['Main', 'A branch'] } as never)
+  await minutes(10)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  await list.input({ key: box?.key ?? '', text: 'What is the difference?' })
+  await list.unmount()
+  await $.turn.complete({ answer: 'Asked again.', durationMs: 1, isAborted: false, turnId: 'r1', reason: 'answer', agentId: 'a1' } as never)
+  await minutes(8)
+  expect(notified.filter(line => line.includes('Push to main or to a branch?') && line.includes('still waits'))).toEqual([])
 })

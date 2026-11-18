@@ -312,7 +312,9 @@ test('the word that the chat was told a task is stuck lasts only until it or its
 
 test('a task whose step ended to wait on its own command, with nothing starting it again, is started to look at it after the command\'s own time, then after an hour, two and every four; its card and the chat say so, and a command that ends counts afresh', SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
-  const { keep, clock, held, appended, resumed } = world(on, { agents, kinds: { a1: 'general-purpose' } })
+  const { clock, held, appended, resumed } = world(on, { agents, kinds: { a1: 'general-purpose' } })
+  // (Claude Code's own answer to its stop hook)
+  on('classic.SubagentStop', () => ({}) as never)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Rebuild the head model', prompt: 'rebuild' } as never)
   agents.a1 = 'running'
@@ -359,14 +361,28 @@ test('a task whose step ended to wait on its own command, with nothing starting 
   expect(looks()).toHaveLength(2)
   await minutes(12)
   expect(looks()).toHaveLength(3)
-  // Its command ends and it waits on another: the count starts over, at half an hour
-  held.get('jobs')?.('jobs done')
+  // It stops its wait and starts it again: that is no news, and the next look keeps its four hours
   agents.a1 = 'running'
-  await ($.tool.call({ tool: 'Bash', tool_use_id: 'w2-a1', agentId: 'a1', command: 'hold more', description: 'Wait for the second jobs', run_in_background: true } as never))
+  await $.tool.call({ tool: 'TaskStop', tool_use_id: 'x-a1', agentId: 'a1', task_id: 'bg-w-a1' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'w2-a1', agentId: 'a1', command: 'hold jobs', description: 'Wait for the cloud jobs again', run_in_background: true } as never)
   await ends('e3')
+  await minutes(40)
+  expect(looks()).toHaveLength(3)
+  // Its command ends of itself, as Claude Code says at its next step's end: the count starts over, at half an hour
+  agents.a1 = 'running'
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'w3-a1', agentId: 'a1', command: 'hold more', description: 'Wait for the second jobs', run_in_background: true } as never)
+  await ($ as unknown as { classic: { SubagentStop: (e: object) => Promise<unknown> } }).classic.SubagentStop({ hook_event_name: 'SubagentStop', agent_id: 'a1', background_tasks: [{ id: 'bg-w3-a1' }] })
+  await ends('e4')
   await minutes(29)
   expect(looks()).toHaveLength(3)
   await minutes(3)
+  expect(looks()).toHaveLength(4)
+  // Waiting on the person, it is never looked in on
+  agents.a1 = 'running'
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'The share is full. May I raise its size?', choices: ['Raise it', 'Not now'] } as never)
+  await ends('e5')
+  // (past the hour after which its next look would have come)
+  await minutes(70)
   expect(looks()).toHaveLength(4)
   held.get('more')?.('done')
 })

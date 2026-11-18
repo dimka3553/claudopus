@@ -311,7 +311,9 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
       // The chat already told it is stuck is not told again
       if (one.stuckTold !== undefined) continue
       await log($, `work ${id} still stuck ${mins} min on silent helpers after Claudopus asked it to hand back: the chat is told`)
-      await sayInChat($, named(`${GAVE_UP_IN_CHAT(titleOf(one), mins)} ${STUCK_ASK_LOOKS}`), named(GAVE_UP_IN_CHAT(titleOf(one), mins)))
+      const fresh = await read($, todos)
+      const card = fresh.find(c => c.id === id) ?? one
+      await sayInChat($, named(`${GAVE_UP_IN_CHAT(titleOf(one), mins)} ${isOwnWaiting(fresh, card, now) ? STUCK_ASK_LOOKS : STUCK_ASK}`), named(GAVE_UP_IN_CHAT(titleOf(one), mins)))
       continue
     }
     const line = (step === 2 ? HELPERS_STILL_SILENT : HELPERS_SILENT)(mins, silentHelpers(list, id, now))
@@ -373,19 +375,21 @@ const helpersRecord = async ($: EngineInterface, list: Todo[], id: string) => {
 // never looked at, until the person asked
 const OWN_WAIT_GAPS = [30 * 60_000, 60 * 60_000, 2 * 3_600_000, 4 * 3_600_000]
 const ownWaitGap = (done: number) => OWN_WAIT_GAPS[Math.min(done, OWN_WAIT_GAPS.length - 1)]!
-// What it waits on, so a wait that moved starts the count over
+// What it has got done, so a wait that moved starts the count over: a to-do ticked, or a command that ended of itself. Not a command
+// it stopped or started, as a task that starts its wait afresh at each look would be looked in on every half hour for good
 const ownWaitKey = (one: Todo) =>
-  `${one.items.filter(item => item.state === 'done').length}:${(one.endedRuns ?? []).length}:${[...(one.bg ?? []).map(b => b.id), ...(one.detached ?? []).map(d => d.id)].sort().join(',')}`
+  `${one.items.filter(item => item.state === 'done').length}:${(one.endedRuns ?? []).filter(run => run.how === 'finished' || run.how === 'failed' || run.how === 'ended').reduce((sum, run) => sum + (run.count ?? 1), 0)}`
 // What it waits on, in words for its look-in: its commands, each with how long it has run
-const ownWaitWhat = (one: Todo, at: number) => {
+const ownWaitWhat = (list: Todo[], one: Todo, at: number) => {
+  const helpers = runningKids(list, one.id).length ? `your helpers, which have shown nothing new: ${silentHelpers(list, one.id, at)}` : ''
   const commands = [...(one.bg ?? []).map(b => ({ what: b.what, at: b.at, isWatch: b.isWatch })), ...(one.detached ?? []).filter(d => !d.isLeft).map(d => ({ what: d.what, at: d.at, isWatch: false }))]
-  if (!commands.length) return 'something Claudopus can see nothing of (no command or helper of yours runs)'
-  return commands.map(c => `${c.isWatch ? 'your watch' : 'your command'} "${cut(oneLine(c.what || 'with no description'), 80)}", running ${minutesSaid(Math.round((at - c.at) / 60_000))}`).join('; ')
+  if (!commands.length) return helpers || 'something Claudopus can see nothing of (no command or helper of yours runs)'
+  return [helpers, ...commands.map(c => `${c.isWatch ? 'your watch' : 'your command'} "${cut(oneLine(c.what || 'with no description'), 80)}", running ${minutesSaid(Math.round((at - c.at) / 60_000))}`)].filter(Boolean).join('; ')
 }
 const isOwnWaiting = (list: Todo[], one: Todo, at: number) =>
-  !one.parentId && !one.chat && one.status === 'working' && one.endedStepAt !== undefined && one.handedBackAt === undefined && one.answeredAt === undefined && (!runningKids(list, one.id).length || (one.helperWait?.done ?? 0) >= 3) && !isWakeDue(one, at) && !(one.ask && !one.ask.replied) && !one.admins?.length && !one.heldCalls?.length && !isHeld(one)
+  !one.parentId && !one.chat && one.status === 'working' && one.endedStepAt !== undefined && one.handedBackAt === undefined && one.answeredAt === undefined && (!runningKids(list, one.id).length || ((one.helperWait?.done ?? 0) >= 3 && runningKids(list, one.id).every(kid => isSilent(list, kid, at)))) && !isWakeDue(one, at) && !(one.ask && !one.ask.replied) && !one.admins?.length && !one.heldCalls?.length && !isHeld(one)
 const lookOwnWaits = async ($: EngineInterface, now: number) => {
-  const due: { id: string; mins: number }[] = []
+  const due: { id: string; mins: number; done: number }[] = []
   await changeTodos($, list => {
     due.length = 0
     let isChanged = false
@@ -399,20 +403,27 @@ const lookOwnWaits = async ($: EngineInterface, now: number) => {
       const newest = (one.bg ?? []).filter(b => !b.isWatch).at(-1)
       const isPastOwnTime = wait.done > 0 || !newest || now - newest.at >= (describedOf(newest.what).expect ?? 0) + 10 * 60_000
       const gap = ownWaitGap(wait.done)
-      if (isPastOwnTime && now - (one.endedStepAt ?? now) >= gap && now - wait.at >= gap) due.push({ id: one.id, mins: Math.round((now - (one.endedStepAt ?? now)) / 60_000) })
+      if (isPastOwnTime && now - (one.endedStepAt ?? now) >= gap && now - wait.at >= gap) due.push({ id: one.id, mins: Math.round((now - (one.endedStepAt ?? now)) / 60_000), done: wait.done })
       return one
     })
     return isChanged ? next : list
   })
-  for (const { id, mins } of due) {
-    const one = (await read($, todos)).find(card => card.id === id)
-    if (!one || stoppedHere.has(id) || pressed.has(id) || (await isReplaced($))) continue
-    // (not while it is at a step of its own)
+  for (const { id, mins, done } of due) {
+    // (not a task cut off as the chat's process ended, which Claudopus brings back itself and tells of the cut; nor one at a step of its own)
+    if (cutPending.has(id) || stoppedHere.has(id) || pressed.has(id) || (await isReplaced($))) continue
     const status = String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status)
     if (status === 'running' || status === 'pending') continue
-    await changeTodos($, all => all.map(card => (card.id === id && card.ownWait ? { ...card, ownWait: { ...card.ownWait, done: card.ownWait.done + 1, at: now } } : card)))
-    const r = await sendOwn($, { to: { agentId: id }, text: named(OWN_WAIT_LOOK(mins, ownWaitWhat(one, now))) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
-    await log($, `work ${id} waited ${mins} min with nothing to start it again: ${r.isDelivered ? 'started again' : `not reached (${r.reason})`} to look at what it waits on`)
+    // Taken once, on the card as it is now: still waiting, and not looked in on meanwhile by a follow that ran beside this one
+    let one: Todo | undefined
+    await changeTodos($, all => {
+      one = all.find(card => card.id === id && card.ownWait?.done === done && isOwnWaiting(all, card, now))
+      return one ? all.map(card => (card.id === id && card.ownWait ? { ...card, ownWait: { ...card.ownWait, at: now } } : card)) : all
+    })
+    if (!one) continue
+    const r = await sendOwn($, { to: { agentId: id }, text: named(OWN_WAIT_LOOK(mins, ownWaitWhat(await read($, todos), one, now))) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    await log($, `work ${id} waited ${mins} min with nothing to start it again: ${r.isDelivered ? 'started again' : `not reached (${r.reason}), tried again after the same gap`} to look at what it waits on`)
+    if (!r.isDelivered) continue
+    await changeTodos($, all => all.map(card => (card.id === id && card.ownWait ? { ...card, ownWait: { ...card.ownWait, done: card.ownWait.done + 1 } } : card)))
     await tellChat($, named(OWN_WAIT_IN_CHAT(titleOf(one), mins)))
   }
 }

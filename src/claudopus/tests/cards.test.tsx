@@ -321,7 +321,7 @@ test('a steer is sent as written and the work is told it is one, the work is rem
   // parts of a message the chat had already seen to elsewhere: what the chat sends is done here, and only an unrelated request goes back
   expect(appended[0]).toContain('do it here, as the chat sent it to you to be done')
   expect(appended[0]).toContain('only a request this task has nothing to do with')
-  expect(appended[0]).toContain('Words of theirs the chat did not pass on to you in its message, the chat has seen to: neither do them nor hand them back')
+  expect(appended[0]).toContain("Do only what the chat's message asks of you: the chat has seen to the rest of what the person said.")
 
   // The work goes on without saying what it decided: after two steps it is told so, once
   await step('Bash')
