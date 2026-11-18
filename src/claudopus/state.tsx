@@ -110,11 +110,11 @@ const doneHeld = async ($: EngineInterface, ids: string[]) => {
     const list = await read($, todos)
     const one = list.find(card => card.id === id)
     if (!one || one.status !== 'working') continue
-    // (only a task the chat started as one, which keeps to-dos and hands back: a reader's or a planner's last words are its
+    // (only a task, which keeps to-dos and hands back, its kind unknown on a card from before kinds were kept: a reader's or a planner's last words are its
     // result; and one that cannot be started as stopped partway ends as before)
     // (never with to-dos still to do: a run Claudopus could not see hands back past every check, its to-dos as they were, so it is
     // started again where Claudopus sees it, to do them or drop them and hand back, as any task stopped partway is)
-    if (!(openItems(one).length && WAITS_KINDS.has(one.kind ?? '') && isStoppedShort(one, '')) && (await isUnpressed($, id))) {
+    if (!(openItems(one).length && (!one.kind || WAITS_KINDS.has(one.kind)) && isStoppedShort(one, '')) && (await isUnpressed($, id))) {
       const now = await $.clock.now()
       await changeTodos($, cards => cards.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'done', now), reportAt: now } : card)))
       await lookEnds($)
