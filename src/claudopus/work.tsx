@@ -511,6 +511,9 @@ const workHooks = (on: On) => {
     if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
       const hold = await holdAtHandback($, e.agentId).catch(() => '')
       if (hold) return { deny: hold }
+      // Its report with to-dos still to do: refused once, so it does them or names them as not done
+      const unticked = await untickedAtHandback($, e.agentId, String((e as { message?: unknown }).message ?? '')).catch(() => '')
+      if (unticked) return { deny: unticked }
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       // The engine hands the hand-back on as it goes through: the chat may be given it from now (isQuietHandback)
       handingBack.add(e.agentId)
@@ -523,6 +526,12 @@ const workHooks = (on: On) => {
       if (isNotSent && wokenFor.delete(e.agentId)) await handbackRefused($, e.agentId).catch(err => log($, `task not told its helper's hand-back was refused: ${String(err)}`))
       if (r.deny || r.isError) handingBack.delete(e.agentId)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
+      // What it still had to do shows as not done on its card and in its result, and the chat says so as it passes the result on
+      if (!r.deny && !r.isError) {
+        await keepNotDone($, e.agentId).catch(err => log($, `to-dos not done of ${e.agentId} not kept: ${String(err)}`))
+        const card = (await read($, todos)).find(one => one.id === e.agentId)
+        if (card?.notDone?.length) await tellChat($, named(NOT_DONE_IN_CHAT(titleOf(card), card.notDone)))
+      }
       // A helper whose work has ended its step hands its result to the chat: the chat is told once the hand-back went through, before
       // the helper's turn ends, so its turn starts knowing; a refused hand-back leaves no note
       if (!r.deny && !r.isError) await noteHandback($, e.agentId).catch(err => log($, `chat not told of a helper's hand-back: ${String(err)}`))
@@ -682,7 +691,9 @@ const workHooks = (on: On) => {
       const gone = ((await read($, todos)).find(one => one.id === e.agent_id)?.bg ?? []).filter(b => !ids.has(b.id)).map(b => b.id)
       if (gone.length) await dropBackground($, gone).catch(err => log($, `ended background work not let go: ${String(err)}`))
     }
-    return r
+    // A task with to-dos still to do and nothing of its own running goes on in the same run, told why (keepGoing)
+    const why = dir && !r.block ? await keepGoing($, e.agent_id).catch(() => '') : ''
+    return why ? { ...r, block: why } : r
   })
 
   on('agent.spawn', async ($, asked, next) => {

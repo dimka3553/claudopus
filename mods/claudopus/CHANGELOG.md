@@ -2,6 +2,13 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.191 · 18 November 2026
+- A task no longer stops while its to-dos aren't done. When Claude tries to end with nothing of its own running that would start it again, Claudopus keeps it going right away and tells it what is still to do, so it carries on by itself instead of being started again later.
+- Claude can't send a task's result while to-dos are left: Claudopus tells it which are left, so it does them or ticks them. What only you can do stays on the list, and Claude names it in the result.
+- A task that ends with to-dos not done says which on its card, in amber, adds them to its result under "Not done", and the chat tells you they aren't done.
+- A long message from Claude about how far it has got is no longer kept as the task's result while its to-dos aren't done.
+- The rules tell Claude that ending a step only pauses a task, and to check that something of its own really runs before it does.
+
 ## 0.2.190 · 18 November 2026
 - A task that's waiting on its helpers no longer writes "My command is still running…" three times in its chat every time it pauses. Claude Code still asks it for its result at each pause, and Claudopus now answers for it with a line the app doesn't show, without starting Claude.
 - A task is no longer started again to check on its helpers while they are still working. Claudopus now also reads each helper's own record to see whether its commands bring back anything new. Helpers that really go quiet are still checked on, and the chat is still told.
