@@ -38,12 +38,19 @@ const drawWaking = ($: EngineInterface, card: Todo, now: number) => {
   $.clock.after(WAKE_WAIT + HOOK_WAIT + 5000, () => void (resultWaking.get(card.id) === now && resultWaking.delete(card.id) && redraw($)))
 }
 const answerWaitNow = async ($: EngineInterface, r: Report, index: number, wait: Wait, said: string, now: number) => {
-  const card = said === 'Not now' ? undefined : taskOfResult(await read($, todos), r)
+  // (an answer that could not even be sent on can be pressed again: its question comes back on the card)
+  const again = (err: unknown) => {
+    answering.delete(`${r.id}:${index}`)
+    redraw($)
+    throw err
+  }
+  const card = said === 'Not now' ? undefined : taskOfResult(await read($, todos).catch(again), r)
   if (card) drawWaking($, card, now)
-  else if (said !== 'Not now') await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "${said}" to answer the question in the result "${r.title}" (${dated(r.at, now)}): ${wait.text}\nThe result: ${reportPath(r)}/report.md`)
+  else if (said !== 'Not now') await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "${said}" to answer the question in the result "${r.title}" (${dated(r.at, now)}): ${wait.text}\nThe result: ${reportPath(r)}/report.md`).catch(again)
   // Not now kept nowhere can be pressed again, and so can an answer its task was not sent; one already sent to the chat is not sent twice
   await markReport($, r, stored => ({ waiting: waitsOf(stored).map((one, at) => (at === index ? { ...one, answer: said } : one)) })).catch(err => {
     if (said === 'Not now' || card) answering.delete(`${r.id}:${index}`)
+    redraw($)
     if (card && resultWaking.delete(card.id)) redraw($)
     throw err
   })

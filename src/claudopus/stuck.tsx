@@ -781,7 +781,7 @@ const notDoneLines = (one: Todo, text: string) => {
 }
 // A task Claudopus stopped starting again stays in its place, its line in sight, as a task cut off that could not be started again does
 const isLeftStopped = (one: Todo, at: number) => Boolean(one.carryOn?.gaveUp && one.status !== 'working' && at - one.carryOn.gaveUp < CUT_OLD)
-// And so does a task that sent its result with to-dos left, shown stopped (shownAs): never folded away under Finished at once
+// And so does a task that sent its result with to-dos left, shown not done (shownAs): never folded away under Finished at once
 const isLeftOpen = (one: Todo, at: number) => Boolean(one.leftOpen && !one.chat && at - one.endedAt < CUT_OLD)
 // The line on its card: dim while Claudopus has just started it again, amber once it was left stopped
 const carryLine = (one: Todo, at: number) => {
