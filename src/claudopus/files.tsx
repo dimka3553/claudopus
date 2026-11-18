@@ -402,7 +402,7 @@ const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, k
           return (
             <Box key={row} flexDirection="column" alignItems="flex-start" width={canDraw ? TILE_COLUMNS : undefined} flexShrink={0}>
               {canDraw && table.Svg ? <table.Svg key={`${row}-svg`} source={thing.files.length > 1 ? pileTile(thing.files[0]!, faceOf(thing.files[0])) : oneTile(thing.files[0]!, faceOf(thing.files[0]))} alt={thing.label} width={TILE_SHOWN_W} height={TILE_SHOWN_H} /> : null}
-              <Button key={`${row}-open-${presses}${gen}`} label={canDraw ? middleCut(thing.label, 13) : cut(thing.label, 60)} plain onPress={press(thing, row)} />
+              <Button key={`${row}-open-${presses}${gen}`} label={canDraw ? middleCut(thing.label, TILE_COLUMNS) : cut(thing.label, 60)} plain onPress={press(thing, row)} />
             </Box>
           )
         })}
