@@ -61,6 +61,25 @@ test('as shipped the chat does a short request itself: it is told so with each m
   expect((await $.tool.call({ tool: 'Read', tool_use_id: 'own-p', file_path: saved?.[0] } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'own-f', prompt: 'push it', subagent_type: 'fork' } as never)).deny).toContain('never starts a task as a copy')
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'own-t', prompt: 'build the page', subagent_type: 'claudopus:task', model: 'opus' } as never)).deny).toBeUndefined()
+  const copy = (await $.tool.call({ tool: 'Agent', tool_use_id: 'own-f2', prompt: 'push it', subagent_type: 'fork' } as never)).deny ?? ''
+  expect(copy).not.toContain('claudopus:quick')
+  // What holds a task's commands holds the chat's: main is never pushed, by name or by a bare push from main; Claudopus's own
+  // checkout is never changed; a command that may take minutes is not held open; one left in the background is stopped at its limit
+  for (const [i, command] of ['git push origin main', 'git commit -qam x && git push origin HEAD:main', 'gh pr merge 12 --squash'].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-m${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never pushes or merges to main itself')])
+  files.set('git:branch', 'main')
+  for (const [i, command] of ['git push', 'git add -A && git commit -qm x && git push -q', 'git -C /repo push -u origin'].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-b${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never pushes or merges to main itself')])
+  files.set('git:branch', 'fix-nose')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-b9', command: 'git push -u origin fix-nose' } as never)).deny).toBeUndefined()
+  files.delete('git:branch')
+  files.set('git:top', '/code')
+  files.set('checkout:/code', 'main')
+  for (const [i, command] of ['git -C /code checkout feature', 'cd /code; git reset --hard v0.2.191', 'cd /code && git commit -qam x'].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-c${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never changes what is checked out there')])
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l1', command: 'npm run build', description: 'Run the build (about 5 min)' } as never)).deny).toContain('run_in_background: true')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l2', command: 'npm run build', description: 'Run the build (about 5 min)', run_in_background: true } as never)
+  expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain("the chat's command not followed")
   expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain("in a chat's own thread")
 })
 
@@ -812,7 +831,7 @@ test("a chat's own thread may only read, run a single command in the background,
   for (const [i, call] of [{ tool: 'Edit', file_path: '/repo/src/nose.ts', old_string: 'a', new_string: 'b' }, { tool: 'Write', file_path: '/repo/x', content: 'x' }, { tool: 'Grep', pattern: 'nose' }, { tool: 'Bash', command: 'npm test' }].entries())
     for (const agentId of ['w1', 'helper-1']) expect((await $.tool.call({ ...call, tool_use_id: `w${i}${agentId}`, agentId } as never)).deny).toBeUndefined()
   // An old config.json's everything-as-a-full-task no longer stops the chat running its own single command
-  ownSet(files, 'config.json', JSON.stringify({ lean: { small: 'full' } }))
+  ownSet(files, 'config.json', JSON.stringify({ lean: { chat: 'tasks', small: 'full' } }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'push it', wait: false, origin: composer })
   files.set('git:branch', 'fix-nose')

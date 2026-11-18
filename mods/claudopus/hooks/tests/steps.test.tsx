@@ -786,8 +786,17 @@ test("a helper a piece of work starts runs in the background, while the chat's o
   expect(backgrounds).toEqual([false, true, true])
 })
 
-test('a step is told when it started a helper alone, held only to-dos, or made a commit with no second look started; one that sends calls together is told nothing', async ($, on) => {
+test('with no second check called for, as Claudopus starts, a commit is told nothing', async ($, on) => {
   world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the chin', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix the chin' } as never)
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Bash', input: { command: 'git commit -m "Chin"' } }]))).toBe('')
+})
+
+test('a step is told when it started a helper alone, held only to-dos, or, where a second check is set, made a commit with no second look started; one that sends calls together is told nothing', async ($, on) => {
+  const { files } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { second: 'beyond' } }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, prompt: 'fix it' } as never)

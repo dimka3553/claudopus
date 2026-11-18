@@ -319,18 +319,29 @@ const workHooks = (on: On) => {
         return { deny: silent === 'wait' ? NO_PROGRESS_WAIT : NO_PROGRESS_SCRIPT }
       }
     }
+    // A chat that does short requests itself meets the guards a task's commands meet
+    const itselfHere = e.agentId === undefined && !isOff && Boolean(dir) && lean.chat === 'itself' && (await read($, me)).isChat
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
+    // (the chat works where it is, which may be main: a push there that names no branch would push main)
+    const pushed = itselfHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
+    const onMain = /\bgit\b[^;&|]*\bpush\b/.test(pushed)
+      ? /^(?:main|master)$/.test(await $.process.run(['git', '-C', /\bgit\s+-C\s+(\S+)/.exec(pushed)?.[1] ?? (cwd || '.'), 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => ''))
+      : false
+    if (onMain) {
+      await log($, "refused the chat's push from main")
+      return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
+    }
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }
     // The Claudopus code chats run stays as it is: work reads other versions with git show and changes code in worktrees of its own.
     // Claudopus refuses it before Claude Code sees it, so no card offers it to be run on a press either
-    if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash') {
+    if (dir && !isOff && (e.agentId !== undefined || itselfHere) && e.tool === 'Bash') {
       const command = String((e as { command?: unknown }).command ?? '')
       const changed = /\bgit\b/.test(command) ? await ownCheckoutChanged($, [command], cwd || '.') : ''
       if (changed) {
-        await log($, `refused work ${e.agentId}'s command that changes Claudopus's own checkout`)
+        await log($, `refused ${e.agentId === undefined ? "the chat's" : `work ${e.agentId}'s`} command that changes Claudopus's own checkout`)
         return { deny: NO_SWITCH(changed) }
       }
     }
@@ -362,8 +373,8 @@ const workHooks = (on: On) => {
     const isRefusedHere = isChatHere && !isItself && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
     // A call is never changed on its way: auto mode reviews it as written and refuses one a hook has changed since, so one that must
     // run in the background is refused with the same call to send that way, and the call sent again is reviewed as it runs
-    if (dir && !isOff && e.agentId !== undefined && isLongHeld(e as never)) {
-      await log($, `refused work ${e.agentId}'s long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
+    if (dir && !isOff && (e.agentId !== undefined || isItself) && isLongHeld(e as never)) {
+      await log($, `refused ${e.agentId === undefined ? "the chat's" : `work ${e.agentId}'s`} long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
       return { deny: SEND_BACKGROUND(who()) }
     }
     if (isChatCommand && !(e as { run_in_background?: unknown }).run_in_background) {
@@ -641,7 +652,11 @@ const workHooks = (on: On) => {
     const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
     const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
     if (READS.includes(e.tool) && !isPaste) return next(e)
-    if (isItself) return next(e)
+    if (isItself) {
+      const r = await next(e)
+      if (e.tool === 'Bash' && (e as { run_in_background?: unknown }).run_in_background && !r.deny && !r.isError) await chatCommandStarted($, e as never, r.result).catch(err => log($, `the chat's command not followed: ${String(err)}`))
+      return r
+    }
     await log($, `refused ${e.tool} in a chat's own thread`)
     if (grants.length) await dropGrants($, grants).catch(() => undefined)
     // An open, a curl or a preview not in the shape the chat runs is told that shape, so it can be run that way or go to a task

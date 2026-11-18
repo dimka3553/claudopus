@@ -2,9 +2,10 @@ import { expect, test } from 'claude-code/testing'
 
 import { fillModels, leanOf, modelsOf, modelsShort, parse, sectionsOf } from './config'
 
-test('as shipped, the models rule says what the chat was told before Config existed, with clearly stated jobs on Sonnet', async () => {
+test('the models rule names each model: clearly stated jobs on Sonnet when every request goes to a task, and only long legwork there when the chat does short requests itself', async () => {
   const m = modelsOf({})
-  expect(fillModels('- {models}', m)).toBe(
+  expect(fillModels('- {models}', m)).toContain('`model: "opus"`. Long legwork such as indexing runs on Sonnet 5.5, `model: "sonnet"`. Fable 5.2')
+  expect(fillModels('- {models}', m, leanOf({ lean: { chat: 'tasks' } }))).toBe(
     '- Most work runs on Opus 5.5, `model: "opus"`. A clearly stated job, and long legwork such as indexing, runs on Sonnet 5.5, `model: "sonnet"`. Fable 5.2, `model: "fable"`, is only for heavy or really complicated work. Work that checks or verifies what was built runs on Opus 5.5, `model: "opus"`, or Fable 5.2, `model: "fable"`, when what it checks was built on Fable 5.2: never on a model weaker than the one that built it, so never on Sonnet 5.5. Never Haiku. A model is named by these aliases, never by an older version: an agent named an older model starts on its newest.',
   )
   expect(fillModels('Helpers run on {helpers}.', m)).toBe('Helpers run on Sonnet 5.5, `model: "sonnet"`, never Haiku, and never on an older model.')
@@ -40,6 +41,17 @@ test('as shipped the chat does a short request itself in few steps and starts on
   expect(itself).not.toContain('claudopus:quick')
   expect(itself).not.toContain('A clearly stated job')
   expect(itself).not.toContain('changes no file in its own thread')
+  expect(modelsShort(m, leanOf({ lean: { chat: 'tasks' } }))).toContain('"sonnet" for a clearly stated job (subagent_type "claudopus:quick")')
+  expect(modelsShort(m)).not.toContain('claudopus:quick')
+  // A person's own copy of the chat's rules from before this choice is told one way, not both
+  const before = 'This chat changes no file in its own thread, and runs a command only as the rules below allow: every task runs in a background agent, and this thread talks with {name} and reads.\n\n- My own line.\n{lanes}\n- A request that can be done on its own gets its own agent right away, so it never waits behind another task; several unrelated requests in one message get one agent each, started together. A fault, a question or a new request is not part of a running task just because it shares a topic, code or card with it, or may have been caused by it. When in doubt, give it its own agent.\n- {models}'
+  const mine = fillModels(before, m)
+  expect(mine).toContain('This chat does a job of a few minutes itself')
+  expect(mine).toContain('- My own line.')
+  expect(mine).not.toContain('changes no file in its own thread')
+  expect(mine).not.toContain('gets its own agent right away')
+  expect(fillModels('My rules, rewritten.\n{lanes}', m).startsWith('This chat does a job of a few minutes itself')).toBe(true)
+  expect(fillModels(before, m, leanOf({ lean: { chat: 'tasks' } })).match(/gets its own agent right away/g)?.length).toBe(1)
   const shipped = fillModels('{way}\n{lanes}\n{models}', m, leanOf({ lean: { chat: 'tasks' } }))
   expect(shipped).toContain('This chat changes no file in its own thread')
   expect(shipped).toContain('gets its own agent right away')
@@ -48,8 +60,7 @@ test('as shipped the chat does a short request itself in few steps and starts on
   const all = fillModels('{lanes}\n{models}', m, leanOf({ lean: { chat: 'tasks', fable: 'all' } }))
   expect(all).toContain('`subagent_type: "claudopus:quick"` and `model: "fable"`')
   expect(all).not.toContain('A clearly stated job, and long legwork such as indexing, runs on Sonnet')
-  expect(modelsShort(m)).toContain('"sonnet" for a clearly stated job (subagent_type "claudopus:quick")')
-  expect(modelsShort(m, leanOf({ lean: { fable: 'all' } }))).toContain('"fable" for a clearly stated job')
+  expect(modelsShort(m, leanOf({ lean: { chat: 'tasks', fable: 'all' } }))).toContain('"fable" for a clearly stated job')
   expect(shipped).toContain('when {name} names a model for the job, start it as a full task on that model')
 })
 

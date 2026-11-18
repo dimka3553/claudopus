@@ -136,7 +136,8 @@ const lanesItself = (m: Models, lean: Lean) =>
     '- Do what the request plainly needs to be of use where {name} will meet it, and say that you did. When what you built would not work or could not be reached somewhere it should (a page, a theme, a phone), fix that as part of the job instead of reporting it. Build nothing else.',
     '- Look at a picture of the result only when its look cannot be judged from the code, and then once. No second agent looks unless {name} asks.',
     '- Reply in a few plain lines: what changed, where to look, and what you did not check. A file {name} asked for: its full path on a line of its own.',
-    '- In a git repo that says how its work reaches main (a `.release` file, or its `CLAUDE.md`), or where a task is at work, change files in a worktree of your own on your own branch from its newest main; elsewhere change them in place. Never commit, push or merge unless {name} asks or the repo\'s own files say to, and never to main.',
+    '- In a git repo that says how its work reaches main (a `.release` file, or its `CLAUDE.md`), or where a task is at work, change files in a worktree of your own on your own branch from its newest main; elsewhere change them in place. Commit or push only when {name} asks or the repo\'s own files say to, on a branch of your own: main is reached only through Claudopus\'s release, which its refusal of a push names.',
+    '- A command that may take minutes (a build, a test run, a server, a download) is sent with `run_in_background: true`: Claudopus stops it at 10 minutes and tells you how it ended. One that takes longer is a task\'s.',
     '- An admin (sudo) command, a release and a command that needs a key go through Claudopus\'s runners, as its refusal of one says.',
     `- A bigger job (several parts that build on each other, a new page or feature, more than about ten steps), work that runs long with nothing for you to do (a training, a long build or download, a search across many sources), and a task {name} asks for: read nothing first. Write one line saying you are on it, and in the same turn start one task: the Agent tool with \`subagent_type: "claudopus:task"\`, the task's instructions as the prompt, and \`model\` as the next rule says. A task that needs a connector, a skill or the browser is started with \`subagent_type: "general-purpose"\` instead. Then stop; do not wait for it. Its instructions set no limit {name} did not set.`,
     '- A new request that comes while a task runs is done here or gets a task of its own, as above: it is not part of the running task just because it shares a topic, code or card with it.',
@@ -160,9 +161,13 @@ const secondRule = (lean: Lean) =>
       ? '- No second agent looks unless {name} asks for one; the report says nobody else checked it.'
       : '- A lookup, or a small fix in one area that changes nothing beyond the fault and has a test that fails without it and passes with it, needs no second agent; the report says nobody else checked it.'
 // The same said short, as the chat is reminded when it tried to copy itself or named no model
-export const modelsShort = (m: Models, lean: Lean = LEAN_SHIPPED) => `"${m.work}" for most work, "${clearModel(m, lean)}" for a clearly stated job (subagent_type "claudopus:quick"), "${m.legwork}" for long legwork, "${m.heavy}" only for heavy or really complicated work, ${checkHeavy(m) ? `"${checkWork(m)}" or "${m.heavy}"` : `"${checkWork(m)}"`} for checking what was built, never weaker than what built it`
-export const fillModels = (text: string, m: Models, lean: Lean = LEAN_SHIPPED) => {
+export const modelsShort = (m: Models, lean: Lean = LEAN_SHIPPED) => `"${m.work}" for most work, ${lean.chat === 'itself' ? '' : `"${clearModel(m, lean)}" for a clearly stated job (subagent_type "claudopus:quick"), `}"${m.legwork}" for long legwork, "${m.heavy}" only for heavy or really complicated work, ${checkHeavy(m) ? `"${checkWork(m)}" or "${m.heavy}"` : `"${checkWork(m)}"`} for checking what was built, never weaker than what built it`
+const WAY_BEFORE = 'This chat changes no file in its own thread, and runs a command only as the rules below allow: every task runs in a background agent, and this thread talks with {name} and reads.'
+export const fillModels = (given: string, m: Models, lean: Lean = LEAN_SHIPPED) => {
   const n = modelsIn(m, lean)
+  const isBefore = given.includes('{lanes}') && !given.includes('{way}')
+  const moved = isBefore ? given.replace(WAY_BEFORE, '{way}').replace(`${OWN_AGENT}\n`, '') : given
+  const text = isBefore && !moved.includes('{way}') ? `{way}\n\n${moved}` : moved
   return text
     .replace(/\{models\}/g, modelsRule(m, lean))
     .replace(/\{lanes\}/g, lanesRule(m, lean))

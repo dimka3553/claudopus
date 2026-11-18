@@ -44,7 +44,7 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 - When Claude starts helpers for a task, they hang inside its card as a tree joined by lines. Each helper is one slim row. The row shows a dot (purple while the helper works, green once it's done), its name, its model, its context and its time. Press a row to open that helper's own Details. Helpers that have ended fold into one row, and the task's Details lists every one.
 - A task's helpers run in the background, like the chat's own tasks. Claude keeps going while they run. It waits for them only when it has nothing else to do. It waits with a command that comes back within about 20 seconds of a helper ending (or starting), or after two minutes. Claudopus holds Claude back from finishing while a helper still runs, with at most six tries so it can never get stuck. If you stop a task, its helpers stop too.
 - While a task has helpers running, its card says how many, and when Claudopus last looked in on them. That line turns amber when a helper has shown nothing new for five minutes, and Claudopus tells Claude.
-- After each step, Claudopus tells Claude when it could have sent its calls together. That happens when Claude started a helper alone, made three single lookups in a row, ran two long commands of one kind one after the other, took a step of only to-dos, or made a commit with no second look started yet.
+- After each step, Claudopus tells Claude when it could have sent its calls together. That happens when Claude started a helper alone, made three single lookups in a row, ran two long commands of one kind one after the other, took a step of only to-dos, or, when Config's Second check is set to check changes, made a commit with no second look started yet.
 - Once the panel is open in one chat, it opens in every chat on this Mac, including chats that start later. If you close it in one chat, it closes in all of them, and new tasks don't bring it back until you type `/claudopus`.
 - Right after you install, the panel opens once by itself with a welcome that offers to index your old chats.
 
@@ -195,7 +195,7 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 
 Claudopus also adds a short set of working principles ([rules/CLAUDE.md](../rules/CLAUDE.md)) to every chat. They shape how Claude answers. They leave out what is one person's own call, such as when Claude may raise a concern or what counts as done. Add yours, or change any of them, in the Config tab, and your chats carry your copy.
 
-The chat picks a model for each task: Opus for most, Sonnet for long searching and reading, Fable only for heavy tasks. A check of finished work runs on Opus, or on Fable for work built on Fable, never on Sonnet. Your account needs access to the model it picks.
+The chat picks a model for each task it starts: Opus for most, Sonnet for long searching and reading, Fable only for heavy tasks. A check of finished work runs on Opus, or on Fable for work built on Fable, never on Sonnet. Your account needs access to the model it picks.
 
 No task runs on an older model or on Haiku (unless you name Haiku in `models`). Claudopus refuses an agent started on one, whether the chat or a task starts it.
 
@@ -262,6 +262,7 @@ The settings are in `~/.claude/claudopus/config.json`. Every key is optional:
 | `notifications` | `false` stops the notification that names a task when it's done, stopped or failed. |
 | `admin` | When you're asked before an admin command runs: `each` time, once for a task (`work`) and its helpers until it ends, or `never`. `work` and `never` count only when chosen in Config, which seals them (`adminSealed`). Written by hand, every command still asks. |
 | `models` | Which model runs most tasks, long searching and reading and helpers, and heavy tasks (`opus`, `sonnet`, `fable` or `haiku`). Checks of finished work run on the most-tasks or heavy-tasks model, never on the long-searching one. |
+| `lean` | Who does a short request (`chat`: `itself`, the chat, or `tasks`, a task each), which tasks run on Fable (`fable`: `heavy`, `all` or `named`) and when a second helper checks (`second`: `asked`, `beyond` or `every`). Only what you changed is kept. |
 | `macs` | Up to four other Macs, as `user@host` or a `Host` of `~/.ssh/config`, that this Mac's panel lists the chats of. It uses your own SSH, which must log in without asking. Each Mac needs Claudopus of this version or newer. That Mac's panels list this Mac's chats in turn, with nothing to set there: each visit hands it this Mac's chats, without the commands and texts their tasks run or send. Their questions are answered in their own chats. Results are saved the same on both, about every two minutes: each Mac gets the results it lacks, with paths moved onto its own home, and what you did to a result (archived, brought back, answered) reaches the other. Nothing is deleted or overwritten. Saved chats stay on the Mac they ran on. |
 
 `name`, `agents` and `macs` are read when a chat starts. `sound` and `notifications` are read each time a task ends or needs you.

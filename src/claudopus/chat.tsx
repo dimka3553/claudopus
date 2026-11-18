@@ -593,7 +593,7 @@ const chatHooks = (on: On) => {
         const path = `${dir}/pastes/${stamp}.md`
         await $.fs.write(`${dir}/pastes/${stamp}.md`, hideKeys(text))
         text = `${text.slice(0, 600)}\n\n[${text.length - 1200} characters pasted here were saved to ${path} and left out of this chat]\n\n${text.slice(-600)}`
-        context.push(PASTED)
+        context.push(pastedNow())
       }
     }
 
