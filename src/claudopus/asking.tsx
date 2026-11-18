@@ -712,7 +712,7 @@ const toEnded = async ($: EngineInterface, one: Todo, target: string, text: stri
     const at = wakes.indexOf(wake)
     if (at < 0) return
     wakes.splice(at, 1)
-    void log($, `work ${target} started again from a timer: no hook of the mod ran within ${WAKE_WAIT / 1000} s, so its panel tools will not answer`)
+    void log($, `work ${target}'s answer was taken by no hook of the mod within ${WAKE_WAIT / 1000} s: it goes from the next one (sendOwn)`)
     void sendWake($, wake, false)
   })
 }

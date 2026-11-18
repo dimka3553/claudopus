@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.198 · 18 November 2026
+- A task that Claudopus starts again by itself now stays where Claudopus can see it. This covers a task that stopped partway, one cut off when the chat stopped, one started to look at its helpers or commands, and one started with your answer. Before, a task started again a moment after it stopped could run unseen: its to-dos, notes and questions never reached its card, nothing kept it going, and its card could say Done with nothing built and no result.
+
 ## 0.2.197 · 18 November 2026
 - A task's card now shows what the task made, right under its title: an icon and a word or two for each file, side by side. Press a file to open it. It shows while the task still works.
 - A task's Details and its result start with a Files part: a tile for each thing the task made, with a small preview. Three or more of a kind are one tile, such as "7 pictures", that opens out on a press.

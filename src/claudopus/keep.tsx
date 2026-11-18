@@ -158,7 +158,7 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   for (const one of ids.filter(one => !stoppedHere.has(one) && !isHeld(heldNow.find(card => card.id === one)) && !isFinished(one))) {
     const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
     const hasHelpers = Object.keys(helpers).some(kid => rootOf(kid) === one)
-    const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy, hasHelpers)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    const r = isLive ? { isDelivered: true as const } : await sendOwn($, { to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy, hasHelpers)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     ;(r.isDelivered ? back : lost).push(one)
     if (!r.isDelivered) await log($, `cut-off work ${one} not started again: ${r.reason}`)
   }
@@ -171,7 +171,7 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
     for (let at = parent, hops = 0; isKept && at !== rootOf(one) && hops < 10; at = helpers[at] ?? rootOf(one), hops += 1) isKept = at in helpers && !stoppedHere.has(at) && !isHeld(heldNow.find(card => card.id === at))
     if (!isKept || stoppedHere.has(one) || isHeld(heldNow.find(card => card.id === one))) continue
     const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
-    const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    const r = isLive ? { isDelivered: true as const } : await sendOwn($, { to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     ;(r.isDelivered ? helpersBack : helpersLost).push(one)
     if (!r.isDelivered) await log($, `cut-off helper ${one} not started again: ${r.reason}`)
   }

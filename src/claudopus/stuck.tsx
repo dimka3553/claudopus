@@ -676,17 +676,25 @@ const goOnNow = async ($: EngineInterface, id: string, how: string, isHeard: boo
   $.clock.after(CARRY_AFTER, () => void carryNow($, id, next.at).catch(err => log($, `work ${id} not started again: ${String(err)}`)))
 }
 const carryNow = async ($: EngineInterface, id: string, at: number) => {
-  const one = (await read($, todos)).find(card => card.id === id)
   // (moved on meanwhile: its result, a message, a helper's result or the person's stop came first)
-  if (!one || one.status !== 'working' || one.carryOn?.at !== at || !isStoppedShort(one, '') || (await isReplaced($))) return
+  const stillStopped = async () => {
+    const card = (await read($, todos)).find(c => c.id === id)
+    return card && card.status === 'working' && card.carryOn?.at === at && isStoppedShort(card, '') && !(await isReplaced($)) ? card : undefined
+  }
+  const one = await stillStopped()
+  if (!one) return
   const status = (await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status
   if (WORKING.includes(String(status))) return void (await log($, `work ${id} was at work again before Claudopus started it: no note sent`))
   // (one ended from outside Claudopus meanwhile, as the app's own stop, is left as it was ended)
   if (status === 'killed') return void (await log($, `work ${id} was stopped before Claudopus started it: no note sent`))
   if (carrySent.has(`${id}:${at}`)) return
   carrySent.add(`${id}:${at}`)
-  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  // (sent from a hook, where the task it starts keeps the mod's hooks; from this timer it waits for one, and is looked at again as it goes)
+  const isStill = async () => Boolean(await stillStopped()) && !WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))
+  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (r.isDelivered) return void (await log($, `work ${id} started again to carry on`))
+  // (no longer wanted as it went: it had moved on by itself)
+  if (!(await isStill())) return void (await log($, `work ${id} moved on before Claudopus started it: no note sent`))
   const now = await $.clock.now()
   await changeTodos($, list => list.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'stopped', now), carryOn: { ...(card.carryOn ?? nextCarry(card, now)), gaveUp: now, isLost: true } } : card)))
   redraw($)
