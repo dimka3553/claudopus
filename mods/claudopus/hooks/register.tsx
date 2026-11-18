@@ -16,7 +16,7 @@ import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUD
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
 import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isKindSaid, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
-import { leftoversOf, leftCommandOf, isNamedBy, memOf, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
+import { groupsOf, leftoversOf, leftCommandOf, isNamedBy, memOf, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
 import { heavyOf, isWaiterTree, waiterLeavesOf, waitingOf, watcherOf } from './jobs'
 import type { HeavyKind, OpenCall, Proc, Span, WaitKind } from './jobs'
 import type { Job, JobKind } from './jobs'
@@ -9993,7 +9993,7 @@ const lookJobs = async ($: EngineInterface) => {
     }
   }
   await pruneSpans($, now)
-  if (!owned.length && !unfound.length && !spans.length) return
+  if (!owned.length && !unfound.length && !spans.length && !openCalls.size) return
   const sid = await $.session.id().catch(() => '')
   if (sid !== tasksOf) ((tasksOf = sid), (tasksDir = ''), (tasksMissedAt = 0))
   if (owned.some(o => !o.file) && !tasksDir && now - tasksMissedAt >= JOB_NEWS) {
@@ -10018,7 +10018,7 @@ const lookJobs = async ($: EngineInterface) => {
   if (!r) return
   const [body = '', tail = ''] = r.stdout.split('\n@@ALIVE@@')
   const [aliveText = '', psText] = tail.split('@@PS@@\n')
-  if (psText !== undefined) ((jobProcs = procsOf(psText, await $.clock.now())), (jobProcsAt = now))
+  if (psText !== undefined) ((jobProcs = procsOf(psText, await $.clock.now())), (jobProcsAt = now), seeGroups(jobProcs))
   if (psText !== undefined && spans.length) await adoptLeft($, jobProcs, now).catch(err => log($, `left runs not followed: ${String(err)}`))
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
   const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]))
@@ -10137,8 +10137,39 @@ type KeptSpan = Span & { agent: string; what: string; bgId?: string }
 let spans: KeptSpan[] = []
 const SPANS_KEPT = 300
 const SPAN_KEPT_FOR = 2 * 60_000
-const openCalls = new Map<string, OpenCall>()
+const openCalls = new Map<string, OpenCall & { looking?: Promise<unknown> }>()
 const adopted = new Set<string>()
+const isOpenSpan = (s: KeptSpan) => Boolean(s.bgId) && s.until === undefined
+const seeGroups = (procs: Proc[]) => {
+  const shells = () => new Set([...openCalls.values(), ...spans].flatMap(one => (one.groups?.[0] ? [one.groups[0]] : [])))
+  for (const call of openCalls.values()) {
+    const groups = call.cmd ? groupsOf(procs, { cmd: call.cmd, at: call.at, from: call.from, groups: call.groups }, call.groups ? undefined : shells()) : undefined
+    if (groups) call.groups = groups
+  }
+  for (const span of spans.filter(isOpenSpan)) {
+    const groups = groupsOf(procs, span, span.groups ? undefined : shells())
+    if (groups && groups.length !== span.groups?.length) spans = spans.map(s => (s.id === span.id ? { ...s, groups } : s))
+  }
+}
+const SHELL_LOOKS = [0, 60, 200, 600, 2_000, 5_000, ...Array.from({ length: 8 }, () => JOB_PS)]
+const isOpenCall = (id: string) => openCalls.has(id) || spans.some(s => s.id === id && isOpenSpan(s))
+const groupsSeen = (id: string) => openCalls.get(id)?.groups ?? spans.find(s => s.id === id)?.groups
+const seeShell = ($: EngineInterface, id: string, n = 0) => {
+  const look = async () => {
+    if (!isOpenCall(id) || groupsSeen(id)) return
+    const r = await $.process.run(['sh', '-c', `printf '@@SHELLS@@\\n'; ps -axww -o ${PS_COLUMNS}`], { timeoutMs: 5000 }).catch(() => undefined)
+    if (r?.exitCode === 0 && r.stdout.includes('@@SHELLS@@')) seeGroups(procsOf(r.stdout.split('@@SHELLS@@\n')[1] ?? '', await $.clock.now()))
+    if (isOpenCall(id) && !groupsSeen(id) && n + 1 < SHELL_LOOKS.length) seeShell($, id, n + 1)
+  }
+  const go = () => {
+    const call = openCalls.get(id)
+    const looking = look().catch(err => log($, `a command's shell not looked for: ${String(err)}`))
+    if (call) call.looking = looking
+  }
+  const wait = SHELL_LOOKS[n] ?? 0
+  if (wait) $.clock.after(wait, go)
+  else go()
+}
 const pruneSpans = async ($: EngineInterface, now: number) => {
   const list = spans.some(s => s.bgId && s.until === undefined) ? await read($, todos) : []
   spans = spans.map(s => (s.bgId && s.until === undefined && !list.some(one => one.bg?.some(b => b.id === s.bgId)) ? { ...s, until: now } : s))
@@ -10149,17 +10180,18 @@ const pidNow = async ($: EngineInterface) => {
   const n = Number(r?.stdout.trim())
   return Number.isInteger(n) && n > 1 ? n : 0
 }
-const keepSpan = async ($: EngineInterface, agent: string, call: { tool: string; command?: unknown; description?: unknown; tool_use_id?: unknown; run_in_background?: unknown }, from: number, at: number, result?: unknown) => {
+const keepSpan = async ($: EngineInterface, agent: string, call: { tool: string; command?: unknown; description?: unknown; tool_use_id?: unknown; run_in_background?: unknown }, from: number, at: number, result?: unknown, held?: OpenCall & { looking?: Promise<unknown> }) => {
   if (call.tool !== 'Bash' || !from) return
   const to = await pidNow($)
   openCalls.delete(String(call.tool_use_id ?? ''))
+  await held?.looking
   if (!to) return
   const now = await $.clock.now()
   const command = String(call.command ?? '')
   if (/^\s*(\S*\/)?ssh\b/.test(command)) return
   const bgId = (result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId
   const isBackground = Boolean(call.run_in_background) && typeof bgId === 'string'
-  const span: KeptSpan = { id: String(call.tool_use_id ?? now), agent, what: oneLine(String(call.description ?? '')).slice(0, 160), cmd: oneLine(command).slice(0, 4000), from, to, at, endAt: now, ...(isBackground ? { bgId: String(bgId) } : { until: now }) }
+  const span: KeptSpan = { id: String(call.tool_use_id ?? now), agent, what: oneLine(String(call.description ?? '')).slice(0, 160), cmd: oneLine(command).slice(0, 4000), from, to, at, endAt: now, ...(held?.groups ? { groups: held.groups } : {}), ...(isBackground ? { bgId: String(bgId) } : { until: now }) }
   const rest = [...spans.filter(s => s.id !== span.id), span]
   const open = rest.filter(s => s.bgId && s.until === undefined)
   spans = [...open, ...rest.filter(s => !(s.bgId && s.until === undefined)).slice(-Math.max(0, SPANS_KEPT - open.length))].sort((a, b) => a.at - b.at)
@@ -12006,13 +12038,14 @@ const workHooks = (on: On) => {
       const isSpanned = Boolean(dir) && !isOff && e.agentId !== undefined && call.tool === 'Bash'
       const spanAt = isSpanned ? await $.clock.now() : 0
       const from = isSpanned ? await pidNow($) : 0
-      if (from) openCalls.set(String(call.tool_use_id ?? ''), { from, at: spanAt })
+      const open: OpenCall | undefined = from ? { from, at: spanAt, cmd: oneLine(String((call as { command?: unknown }).command ?? '')).slice(0, 4000) } : undefined
+      if (open) (openCalls.set(String(call.tool_use_id ?? ''), open), seeShell($, String(call.tool_use_id ?? '')))
       const r = await run(call).finally(() => openCalls.delete(String(call.tool_use_id ?? '')))
       if (woken && !r.deny && !r.isError) await changeTodos($, list => list.map(one => (one.id === woken && one.answeredAt ? { ...one, answeredAt: undefined } : one)))
       if (woken && !r.deny && !r.isError) await wakeCard($, woken)
       if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
       if (dir && e.agentId !== undefined && !r.deny && !r.isError && !(call as { run_in_background?: unknown }).run_in_background) await keepDetached($, e.agentId, call as never, r.result).catch(err => log($, `detached work not followed: ${String(err)}`))
-      if (from && e.agentId !== undefined && !r.deny) await keepSpan($, e.agentId, call as never, from, spanAt, r.result).catch(err => log($, `left runs not looked for: ${String(err)}`))
+      if (from && e.agentId !== undefined && !r.deny) await keepSpan($, e.agentId, call as never, from, spanAt, r.result, open).catch(err => log($, `left runs not looked for: ${String(err)}`))
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
       const shown = await hideKept($, call, r)
       const broke = r.deny ? '' : await crossEnded($, e as never, crossed, r.result, Boolean(r.isError)).catch(() => '')

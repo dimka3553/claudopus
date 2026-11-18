@@ -408,7 +408,8 @@ const workHooks = (on: On) => {
       const isSpanned = Boolean(dir) && !isOff && e.agentId !== undefined && call.tool === 'Bash'
       const spanAt = isSpanned ? await $.clock.now() : 0
       const from = isSpanned ? await pidNow($) : 0
-      if (from) openCalls.set(String(call.tool_use_id ?? ''), { from, at: spanAt })
+      const open: OpenCall | undefined = from ? { from, at: spanAt, cmd: oneLine(String((call as { command?: unknown }).command ?? '')).slice(0, 4000) } : undefined
+      if (open) (openCalls.set(String(call.tool_use_id ?? ''), open), seeShell($, String(call.tool_use_id ?? '')))
       const r = await run(call).finally(() => openCalls.delete(String(call.tool_use_id ?? '')))
       if (woken && !r.deny && !r.isError) await changeTodos($, list => list.map(one => (one.id === woken && one.answeredAt ? { ...one, answeredAt: undefined } : one)))
       // Ended work a message starts again is at work from now: its card leaves Finished while it acts on the message
@@ -416,7 +417,7 @@ const workHooks = (on: On) => {
       if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
       if (dir && e.agentId !== undefined && !r.deny && !r.isError && !(call as { run_in_background?: unknown }).run_in_background) await keepDetached($, e.agentId, call as never, r.result).catch(err => log($, `detached work not followed: ${String(err)}`))
       // (one that failed may still have left something going)
-      if (from && e.agentId !== undefined && !r.deny) await keepSpan($, e.agentId, call as never, from, spanAt, r.result).catch(err => log($, `left runs not looked for: ${String(err)}`))
+      if (from && e.agentId !== undefined && !r.deny) await keepSpan($, e.agentId, call as never, from, spanAt, r.result, open).catch(err => log($, `left runs not looked for: ${String(err)}`))
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
       const shown = await hideKept($, call, r)
       // What it wrote is kept as it ends, and what crossed another task's is told then
