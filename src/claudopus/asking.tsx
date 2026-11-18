@@ -385,7 +385,12 @@ const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) 
 // gone in the press's own drawing, before the answer is written; the mark goes once the card's file no longer carries the ask
 const askPressed = new Map<string, string>()
 // A card as the panel draws it: an ask or a gate already pressed is not drawn as still waiting
-const asPressed = (one: Todo): Todo => {
+// A task whose result's question was just answered is drawn at work from the press, never done in between, until the answer has
+// started it again or could not (resultWaking, by card: when it was pressed). A card the person dismissed is drawn asking nothing
+const resultWaking = new Map<string, number>()
+const asPressed = (given: Todo): Todo => {
+  const wakingAt = given.status === 'working' ? undefined : resultWaking.get(given.id)
+  const one: Todo = wakingAt !== undefined ? { ...given, status: 'working', startedAt: given.endedAt ? wakingAt - (given.endedAt - given.startedAt) : given.startedAt, endedAt: 0 } : given.closedAt && given.ask ? { ...given, ask: undefined } : given
   const isAnswered = Boolean(one.ask && askPressed.get(one.id) === `${one.ask.at}:${one.ask.text}`)
   const admins = one.admins?.filter(gate => !gatePressed.has(gate.id))
   if (!isAnswered && admins?.length === one.admins?.length) return one
@@ -725,6 +730,14 @@ const sendWakes = async ($: EngineInterface, isAnswering = false) => {
   }
 }
 const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number], isInHook = true) => {
+  // (a card drawn at work since its result's question was answered is drawn as it is from here: started again, or not)
+  try {
+    await sendWakeNow($, wake, isInHook)
+  } finally {
+    if (resultWaking.delete(wake.target)) redraw($)
+  }
+}
+const sendWakeNow = async ($: EngineInterface, wake: (typeof wakes)[number], isInHook = true) => {
   // Work the person stopped is not woken by an answer that was on its way
   if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`), await runsSent($, wake, 'held'))
   // A small fresh task for a last step, started from inside a hook so it keeps the mod's own tools and guards; from the timer, where
@@ -733,7 +746,7 @@ const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number], isInHo
     const r = await $.agent.spawn(wake.spawn).catch(err => ({ deny: String(err) }) as { deny: string })
     if (!r.deny) return void (await log($, `a small task ${(r as { agentId?: string }).agentId ?? ''} does the last step of ${wake.target}`))
     await log($, `the last step's small task not started (${r.deny}): its work is started again instead`)
-    return sendWake($, { ...wake, spawn: undefined })
+    return sendWakeNow($, { ...wake, spawn: undefined })
   }
   // Work the person stopped is not woken by an answer that was on its way
   if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`))

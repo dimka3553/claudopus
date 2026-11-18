@@ -309,6 +309,11 @@ const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to "${t
 // What the work is told with a reply that does not settle its ask: the ask stays open on its card until it clears or replaces it
 const REPLY_HOLDS = `That reply does not settle your question by itself: act on it. Their card shows your question with their reply under it, and nothing more to press or type while you work on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still needs them after you have done what they said, ask it again, which brings back its answers.`
 // What work that had ended is told when the person answers its ask on the card: the answer starts it again
+// What a task is told of an answer to a question its result asks, pressed or typed on the panel, and what the chat is told of it
+const RESULT_ANSWER = (title: string, path: string, asked: string, said: string, isWords: boolean, left: number) =>
+  `${who(true)} ${isWords ? 'answered, in their own words, a question' : `pressed "${said}" to answer a question`} in your result "${title}" (${path}): ${asked}${isWords ? `\nTheir answer: ${said}` : ''}${left ? `\n${left} other ${left === 1 ? 'question' : 'questions'} of that result still ${left === 1 ? 'waits' : 'wait'} for them: each answer comes to you as a message of its own, so carry on with what you have.` : ''}`
+const RESULT_ANSWERED = (title: string, asked: string, said: string) => `✓ {Name} answered a question in the result "${title}" on the panel (${asked}): ${said}. Its task has the answer and carries on with it itself: start nothing for it.`
+const RESULT_WORDS_SENT = (title: string) => `Claudopus sent this answer of {name}'s to the task that asked ("${title}"), which carries on with it itself: start nothing for it and send it nothing, only say so in a line.`
 const RESUMED_BY_ANSWER = `You had finished; this answer starts you again. Continue the task with it, then end with your report as before.`
 // What the chat's model reads, and the person sees as a notice (isYou), when that work could not be started again with the answer
 const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = false) =>

@@ -57,7 +57,8 @@ const stateOf = (list: Todo[], one: Todo): TaskState => {
 // `asks`: whether its result still asks the person something, which is Waiting for you whatever its to-dos say
 const shownAs = (list: Todo[], asks: (one: Todo) => boolean = () => false): Todo[] =>
   list.map(one => {
-    if (isOff || one.parentId || one.chat || one.status !== 'done') return one
+    // (nor one the person dismissed: it is under Finished as it ended, until its task works again)
+    if (isOff || one.parentId || one.chat || one.status !== 'done' || one.closedAt) return one
     // (a question of its own for the person comes first: it is Waiting for you, its command's row under it)
     if (one.ask || asks(one)) return one
     const { runs, helpers } = wakesOf(list, one)

@@ -8,22 +8,58 @@ const carryOn = async ($: EngineInterface, r: Report, now: number) => {
   const filled = await $.prompt.fill(typed.trim() ? { text: `\n${text}`, mode: 'append' } : { text, mode: 'replace' }).catch(() => ({ isFilled: false }))
   if (!filled.isFilled) await log($, 'the chat box was not filled from a report')
 }
-// The person's answer to one thing a report waits on them for: Yes, No or one of its own answers goes to the chat as their message;
-// Not now sets it aside. It clears that one alone. One only words answer puts a line naming it in the chat's box, for them to finish:
-// their message, sent, answers it (answeredInMessage)
+// The person's answer to one thing a report waits on them for: Yes, No or one of its own answers goes to the task that asked, which
+// is started again to carry on with it (18 Nov: "A" pressed on a result's card went only to the chat, which had to hand the job to
+// another task by hand); Not now sets it aside. It clears that one alone. One only words answer puts a line naming it in the chat's
+// box, for them to finish: their message, sent, answers it (answeredInMessage). Only a result whose task this chat no longer keeps,
+// or one the person stopped, has its answer sent to the chat as their message
 const answering = new Set<string>()
-const answerWait = async ($: EngineInterface, r: Report, index: number, said: string, now: number) => {
+const answerWait = ($: EngineInterface, r: Report, index: number, said: string, now: number) => {
   const wait = waitsOf(r)[index]
   // A second press before the answer is kept sends nothing more
-  if (!wait || wait.answer || answering.has(`${r.id}:${index}`)) return
+  if (!wait || wait.answer || answering.has(`${r.id}:${index}`)) return Promise.resolve()
   if (said === ANSWER_IN_WORDS) return answerInWords($, r, index, now)
   answering.add(`${r.id}:${index}`)
-  if (said !== 'Not now') await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "${said}" to answer the question in the result "${r.title}" (${dated(r.at, now)}): ${wait.text}\nThe result: ${reportPath(r)}/report.md`)
-  // Not now kept nowhere can be pressed again; a Yes or No already sent is not sent twice
+  // The press's own hook waits for it, and starts the task again from inside itself (sendWakes)
+  const run = answerWaitNow($, r, index, wait, said, now)
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
+  return run
+}
+// The task a result's answer goes to: the one that left it, while this chat keeps its card and the person has not stopped it
+const taskOfResult = (list: Todo[], r: Report) => list.find(one => one.id === r.agent && !one.parentId && !one.chat && !isHeld(one) && !one.flagged)
+// Drawn at work from now, while the answer is on its way to start it again (asPressed); let go should nothing ever send it
+const drawWaking = ($: EngineInterface, card: Todo, now: number) => {
+  if (card.status === 'working') return
+  resultWaking.set(card.id, now)
+  redraw($)
+  $.clock.after(WAKE_WAIT + HOOK_WAIT + 5000, () => void (resultWaking.get(card.id) === now && resultWaking.delete(card.id) && redraw($)))
+}
+const answerWaitNow = async ($: EngineInterface, r: Report, index: number, wait: Wait, said: string, now: number) => {
+  const card = said === 'Not now' ? undefined : taskOfResult(await read($, todos), r)
+  if (card) drawWaking($, card, now)
+  else if (said !== 'Not now') await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "${said}" to answer the question in the result "${r.title}" (${dated(r.at, now)}): ${wait.text}\nThe result: ${reportPath(r)}/report.md`)
+  // Not now kept nowhere can be pressed again, and so can an answer its task was not sent; one already sent to the chat is not sent twice
   await markReport($, r, stored => ({ waiting: waitsOf(stored).map((one, at) => (at === index ? { ...one, answer: said } : one)) })).catch(err => {
-    if (said === 'Not now') answering.delete(`${r.id}:${index}`)
+    if (said === 'Not now' || card) answering.delete(`${r.id}:${index}`)
+    if (card && resultWaking.delete(card.id)) redraw($)
     throw err
   })
+  if (card) await answerToTask($, card, r, wait, said, false)
+}
+// An answer to a result's question, to the task that asked: written into it while it works, else it is started again with it, from
+// inside a hook (toEnded). Each answer goes as it is given, so the task carries on with what it has; the chat is only told, with
+// no turn of its own, that the task has it
+const answerToTask = async ($: EngineInterface, card: Todo, r: Report, wait: Wait, said: string, isWords: boolean) => {
+  const at = await $.clock.now()
+  const left = waitsOf((await read($, reports)).find(one => one.id === r.id) ?? r).filter(one => !one.answer && one.text !== wait.text).length
+  const text = RESULT_ANSWER(r.title, `${reportPath(r)}/report.md`, wait.text, said, isWords, left)
+  await changeTodos($, list => list.map(one => (one.id === card.id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: `${said} — to: ${wait.text}` }].slice(-ENTRIES_KEPT) } : one)))
+  const sent = { text: said, ask: wait.text, at, line: lineOf(card), isCard: true }
+  const told = (await read($, todos)).find(one => one.id === card.id)?.status === 'working' ? await tell($, card.id, text) : undefined
+  if (told && !told.deny) (writtenIn($, card.id, card.id), sentReplies.set(card.id, { ...sent, to: 'work' }), redraw($))
+  else await toEnded($, card, card.id, `${text}\n${RESUMED_BY_ANSWER}`, sent)
+  await tellChat($, named(RESULT_ANSWERED(r.title, wait.text, `“${cut(said, 120)}”`)))
 }
 const answerInWords = async ($: EngineInterface, r: Report, index: number, now: number) => {
   const text = wordsLine(r, index + 1, now)
