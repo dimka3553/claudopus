@@ -787,21 +787,14 @@ const askInChat = async ($: EngineInterface, one: Todo) => {
   if (!ask || isOff || !dir || inChat.get(one.id) === askKey(ask)) return
   inChat.set(one.id, askKey(ask))
   const answers = ask.choices?.length ? ask.choices : DEFAULT_ANSWERS
-  // The person sees the ask as the mod's notice in the chat: a prompt the mod submitted would be drawn by the desktop app as the
-  // person's own message, and a chat cannot send itself a message from another session. Its model reads the ask in a row of its
-  // own, with how to pass an answer on; neither starts a turn
-  // The terminal draws a notice as one line and a line break in it as a broken character: there each line is a notice of its own
-  $.ui.log(named(ASK_IN_CHAT(titleOf(one), ask)))
+  // The person sees the ask on its card, and is told by the panel's notification; the chat's model reads it in a row of its own,
+  // with how to pass an answer on, which starts no turn and shows nothing in the chat
   await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(ASK_RELAY(one.id, titleOf(one), ask, answers)) }] } }).catch(err => (inChat.get(one.id) === askKey(ask) && inChat.delete(one.id), log($, `chat not told of an ask: ${String(err)}`)))
 }
-// A line in the chat the person sees (the mod's notice, which the model never reads) and its model reads (a row the person does not
-// see), sent with no turn of its own. The notice is the mod's log line: the desktop app leaves out a system row the mod appends
-const sayInChat = async ($: EngineInterface, text: string, shown = text) => {
-  $.ui.log(shown)
-  await tellChat($, text)
-}
-// A row only the chat's model reads, with no turn of its own: an answer the person gave on a card themselves, which the card already
-// shows them (17 Nov: "✓ You replied to … on its card" in the chat was among the updates they called pointless)
+// A row only the chat's model reads, with no turn of its own: what a task's card already shows the person, such as an answer they
+// gave there themselves. Nothing of a task's shows in the chat but what the chat itself writes (17 Nov: "✓ You replied to … on its
+// card" was among the updates they called pointless; 18 Nov: "What are all of these fucking shits within the chat?"), and the chat
+// says it in its next reply only where it matters to what the person asks
 const tellChat = async ($: EngineInterface, text: string) => {
   await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } }).catch(err => log($, `chat not told: ${String(err)}`))
 }

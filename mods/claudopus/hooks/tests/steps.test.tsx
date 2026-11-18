@@ -1033,7 +1033,7 @@ test("work never waits for its helpers: it is told it may end its step, it is le
 test("what nothing of the work's own makes, a file, a line in it, a page or a time, Claudopus looks for when asked and starts the work again once it is there, or once the longest look (15 min unless given, at most an hour, always) runs out, though the engine lists it as ended; a look that ran out has it hand back what it has, which goes through while a helper runs, and the same file, line or page is not looked for again; a helper's result that comes after is told to the chat as late; work never reached is told to the chat; the card says so, with by when, in place of a command that would wait; a helper hands back instead", SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const unresumable = new Set<string>()
-  const { clock, files, resumed, logged, appended, submitted } = world(on, { agents, unresumable })
+  const { clock, files, resumed, logged, appended, submitted, notified } = world(on, { agents, unresumable })
   await $.session.start(start)
   await $.prompt.submit({ text: 'wait for the deploy', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Check the deploy', prompt: 'check' } as never)
@@ -1109,7 +1109,10 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
   unresumable.add('a4')
   await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w7', agentId: 'a4', what: 'the queue to drain', minutes: 1 } as never)
   await clock.advance(120_000)
-  expect(await until(async () => logged.find(line => line === 'Claudopus could not start "Watch the queue" again for what it waited on: the queue to drain.'))).toBeDefined()
+  expect(await until(async () => appended.find(line => line.startsWith('undefined: Claudopus could not start "Watch the queue" again for what it waited on: the queue to drain.')))).toBeDefined()
+  expect(logged.filter(line => line.includes('Watch the queue'))).toEqual([])
+  // Only the person can send it a message: its card says so, and they hear it as a notification
+  expect(notified.some(line => line.startsWith('Watch the queue needs you | Claudopus could not start'))).toBe(true)
   // Nothing to look for is said back, and the chat has no card to be started from
   expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w5', agentId: 'a1', what: 'something' } as never)) as { result?: string }).result).toContain('Name a file, a page, or the minutes')
   expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w6', what: 'x', minutes: 1 } as never)) as { result?: string }).result).toContain('Only a background task')

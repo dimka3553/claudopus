@@ -763,7 +763,7 @@ test('an admin command is held however the runner is reached, and nothing else i
 })
 
 test('asked each time: the call is held, its card shows the exact command and the Mac with three buttons, and Allow once lets that one command run', async ($, on) => {
-  const { press, list, bash, labels, held, grants, admins, logged, notified, files } = await gated($, on)
+  const { press, list, bash, labels, held, grants, admins, logged, appended, notified, files } = await gated($, on)
   let done = false
   const call = bash('b1', `${ADMIN} here 'chmod 644 /etc/hosts'`).then(r => ((done = true), r))
   expect(await held('b1')).toBeDefined()
@@ -775,8 +775,10 @@ test('asked each time: the call is held, its card shows the exact command and th
   expect((await list.find({ type: 'Text', text: 'chmod 644 /etc/hosts' }))?.props.mono).toBe(true)
   expect(await list.find({ type: 'Text', text: "Allow once: it runs as admin. Deny: it doesn't run, and Claudopus tells Claude." })).toBeDefined()
   expect((await labels()).filter(one => ['Allow once', 'Always allow this command', 'Deny'].includes(one))).toEqual(['Allow once', 'Always allow this command', 'Deny'])
-  // Said in the chat and as a notification; its Details tab has it at the top
-  expect(logged.some(line => line === '"Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts. Allow it on its card in the Claudopus panel (/claudopus opens it). Typing here doesn\'t allow it.')).toBe(true)
+  // Said as a notification, and to the chat's model alone: the chat shows nothing of it (18 Nov: "garbage I don't need to read");
+  // its Details tab has it at the top
+  expect(logged.some(line => line.includes('chmod 644 /etc/hosts'))).toBe(false)
+  expect(appended.some(line => line.startsWith('undefined: From Claudopus: the task "Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts.'))).toBe(true)
   expect(notified).toContain('Fix the hosts file has a question for you | Run an admin command on this Mac: chmod 644 /etc/hosts')
   const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   expect(await details.find({ type: 'Text', text: 'Waiting for you' })).toBeDefined()

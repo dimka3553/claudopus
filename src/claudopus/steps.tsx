@@ -223,7 +223,7 @@ const lookWakes = async ($: EngineInterface) => {
     isChanged = true
     if (r.isDelivered && !isAtStep) await wakeCard($, one.id)
     // Not reached at all, it would wait for good: the chat is told, and may send it a message
-    if (!r.isDelivered) await sayInChat($, `${WAKE_LOST_IN_CHAT(titleOf(one), w.what)} ${WAKE_LOST_ASK}`, WAKE_LOST_IN_CHAT(titleOf(one), w.what))
+    if (!r.isDelivered) await lostToPerson($, one, WAKE_LOST_IN_CHAT(titleOf(one), w.what), WAKE_LOST_ASK)
     await log($, `work ${one.id} ${r.isDelivered ? 'started again' : 'not started again'}: ${isMissed ? 'not there' : 'there'}: ${w.what}`)
   }
   if (isChanged) redraw($)
