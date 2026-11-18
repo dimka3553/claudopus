@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.204 · 18 November 2026
+- A find in your Downloads folder no longer shows on the card as a download.
+
 ## 0.2.203 · 18 November 2026
 - A task's card shows only its stage, the to-do it is on and its own last note: lines such as "Next to-do 6 of 10", "Waiting for a command to finish", "Interrupted at 16:08 when the chat stopped · running again since 16:09" and "Claudopus starts Claude again at 18:02" are gone
 

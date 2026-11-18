@@ -435,6 +435,12 @@ test('a wait or check that reads pages with curl is no download: the 15 Nov "Dow
   expect(jobKindOf('curl -LO https://example.com/a.zip', 'Get the archive')).toBe('download')
   expect(jobKindOf('wget https://example.com/a.zip', 'Get the archive')).toBe('download')
   expect(jobKindOf('python3 check.py', 'Check the download finished')).toBe('script')
+  // A folder named Downloads makes no download: the 18 Nov row "Download · find Downloads" was a find
+  for (const cmd of ['find /Users/dima/Downloads -name "*.zip" -mtime -1', 'grep -ril budget ~/Downloads', 'ls ~/Downloads', 'open ~/Downloads/report.pdf', 'cd ~/Downloads && ls -la'])
+    for (const label of [labelOf('', cmd), 'find Downloads', 'Look in Downloads']) expect(jobKindOf(cmd, label)).toBe('script')
+  expect(jobKindOf('find /Users/dima/Downloads -name "*.zip"', 'Downloading the files')).toBe('script')
+  expect(jobKindOf('curl -L -o ~/Downloads/a.zip https://e.com/a.zip', 'find Downloads')).toBe('download')
+  expect(jobKindOf('gh release download v1 -D ~/Downloads', 'Get the release')).toBe('download')
 })
 
 test('the work names each run in one form, its kind first and how long it should take in brackets, and the card reads that as it is', async () => {
