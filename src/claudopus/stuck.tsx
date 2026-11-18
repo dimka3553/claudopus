@@ -691,16 +691,15 @@ const carryNow = async ($: EngineInterface, id: string, at: number) => {
   carrySent.add(`${id}:${at}`)
   // (sent from a hook, where the task it starts keeps the mod's hooks; from this timer it waits for one, and is looked at again as it goes)
   const isStill = async () => Boolean(await stillStopped()) && !WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))
-  const lost = async (reason: string) => {
-    const now = await $.clock.now()
-    await changeTodos($, list => list.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'stopped', now), carryOn: { ...(card.carryOn ?? nextCarry(card, now)), gaveUp: now, isLost: true } } : card)))
-    redraw($)
-    await log($, `work ${id} could not be started again to carry on: ${reason}`)
-    await tellChat($, named(CARRY_LOST_IN_CHAT(titleOf(one), id)))
-  }
-  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }, isStill, lost).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (r.isDelivered) return void (await log($, `work ${id} started again to carry on`))
-  await lost(r.reason)
+  // (no longer wanted as it went: it had moved on by itself)
+  if (!(await stillStopped())) return void (await log($, `work ${id} moved on before Claudopus started it: no note sent`))
+  const now = await $.clock.now()
+  await changeTodos($, list => list.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'stopped', now), carryOn: { ...(card.carryOn ?? nextCarry(card, now)), gaveUp: now, isLost: true } } : card)))
+  redraw($)
+  await log($, `work ${id} could not be started again to carry on: ${r.reason}`)
+  await tellChat($, named(CARRY_LOST_IN_CHAT(titleOf(one), id)))
 }
 // ---- A task goes on until its to-dos are done ----
 
