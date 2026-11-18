@@ -16,6 +16,8 @@ use File::Basename qw(basename dirname);
 use File::Path qw(make_path remove_tree);
 use File::Temp qw(tempdir);
 use Digest::MD5 qw(md5_hex);
+use POSIX qw(strftime);
+use Time::Local qw(timegm);
 
 my ($now, $hideExisting) = (0, 0);
 while (@ARGV && $ARGV[0] =~ /^--/) {
@@ -69,9 +71,9 @@ sub hide {
   $t =~ s/(--password[ =]|\bcurl\b[^\n]*?\s-u[ \t]*[^\s:]+:)(?!\[(?:key )?hidden\])[^\s"'`]{4,}/$1\[hidden\]/g;
   $t =~ s{(\bhooks\.slack\.com/(?:services|workflows|triggers)/)[A-Za-z0-9/_-]+}{$1\[hidden\]}g;
   $t =~ s{(\b[a-z][a-z0-9+.-]*://[^/\s:@]+:)[^/\s@]+@}{$1\[hidden\]@}gi;
-  $t =~ s/(\b(?i:[A-Za-z0-9_]*(?:api[_-]?key|account[_-]?key|access[_-]?key|private[_-]?key|secret|token|password|passwd))\\*["']?[ \t]*[=:][ \t]*\\*["']?)(?!\[(?:key )?hidden\])(?!(?:true|false|null|none|undefined)\b)(?!\d{1,7}\b)[^\s"'`,;\\]{4,}/$1\[hidden\]/g;
+  $t =~ s/(\b(?i:[A-Za-z0-9_]*(?:api[_-]?key|account[_-]?key|access[_-]?key|private[_-]?key|secret|token|password|passwd))\\*["']?[ \t]*[=:][ \t]*\\*["']?)(?!\[(?:key )?hidden\])(?!(?i:true|false|null|none|undefined)\b)(?!\d{1,7}\b)[^\s"'`,;\\]{4,}/$1\[hidden\]/g;
   $t =~ s/(\b[A-Z0-9_]*(?:_KEY|_PWD|_PASS)\\*["']?[ \t]*[=:][ \t]*\\*["']?)(?!\[(?:key )?hidden\])(?![\/~.])[^\s"'`,;\\]{4,}/$1\[hidden\]/g;
-  $t =~ s/([?&](?:Policy|Signature|X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token|sig|token|access_token|api_key|apikey|key)=)[^&\s"'<>),]+/$1\[hidden\]/gi;
+  $t =~ s/([?&](?:Policy|Signature|X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token|sig|token|access_token|api_key|apikey|key)=)(?!\[(?:key )?hidden\])[^&\s"'<>),]+/$1\[hidden\]/gi;
   $t =~ s/(\bBearer[ \t]+)[A-Za-z0-9._~+\/=-]{16,}/$1\[hidden\]/g;
   return $t;
 }
@@ -283,7 +285,11 @@ for my $path (@records) {
     # Claudopus saved only Claude's answers): what came before the file's first line goes beside it
     if ($first && $mode eq 'live' && !-e "$mem/words/$chat.before.md") {
       my ($t0) = do { open my $w, '<', $words; my $l = ''; while (<$w>) { if (/^#{2,3} (?:Claude )?(\d{4}-\d\d-\d\dT\S+)/) { $l = $1; last } } close $w; ($l) };
-      append("$mem/words/$chat.before.md", jq($JQ_WORDS, $tmp, '--arg', 'sid', $chat, '--arg', 'before', $t0)) if $t0;
+      # (the file's first line is written moments after the record's own, so only what came a minute before it counts)
+      if ($t0 =~ /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)/) {
+        my $cut = strftime('%Y-%m-%dT%H:%M:%S', gmtime(timegm($6, $5, $4, $3, $2 - 1, $1) - 60));
+        append("$mem/words/$chat.before.md", jq($JQ_WORDS, $tmp, '--arg', 'sid', $chat, '--arg', 'before', $cut));
+      }
     }
     $mode = 'live' if $mode eq 'caught' && -e $words && size_of($words) != $wbytes;
     if ($mode eq 'caught') {
