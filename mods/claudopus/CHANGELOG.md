@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.199 · 18 November 2026
+- A task's card now shows an icon beside each thing the task made, as designed: the app had been leaving every icon out
+
 ## 0.2.198 · 18 November 2026
 - A task that Claudopus starts again by itself now stays where Claudopus can see it. This covers a task that stopped partway, one cut off when the chat stopped, one started to look at its helpers or commands, and one started with your answer. Before, a task started again a moment after it stopped could run unseen: its to-dos, notes and questions never reached its card, nothing kept it going, and its card could say Done with nothing built and no result.
 
