@@ -517,7 +517,7 @@ test("a task ending its step with to-dos still to do and nothing of its own runn
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't3', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(1000)
   expect(await until(async () => reports().length || undefined)).toBe(1)
-  expect(files.get(reports()[0])).toBe(`${REPORT}\n\nNot done:\n- Second look\n`)
+  expect(files.get(reports()[0] ?? '')).toBe(`${REPORT}\n\nNot done:\n- Second look\n`)
   // Its card, under Finished, says what is not done, in amber
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const fold = await until(async () => (await pane.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label))))
