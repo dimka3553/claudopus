@@ -70,7 +70,7 @@ export const JOB_UNREAD = 60_000
 export const SERVER_CMD =
   /\b(http\.server|http-server|uvicorn|gunicorn|hypercorn|flask run|runserver|vite( dev| preview)?|next (dev|start)|(npm|pnpm|yarn|bun) (run )?(dev|start|serve|preview)|rails s(erver)?|jupyter (lab|notebook)|ollama serve|tensorboard|serve -[sl]|python3? -m (http\.server|uvicorn))\b/i
 export const DOWNLOAD_CMD =
-  /\b(curl|wget|aria2c|huggingface-cli download|hf download|git clone|git lfs (pull|fetch)|rsync|scp|gsutil (-m )?cp|aws s3 (cp|sync)|pip3? install|uv (pip )?(install|sync)|npm (i|install|ci)|pnpm (i|install)|yarn install|brew install|docker pull|yt-dlp|azcopy (copy|cp|sync)|az storage (blob|file) (download|upload)(-batch)?|python3? -m pip install)\b/i
+  /\b(curl|wget|aria2c|huggingface-cli download|hf download|git clone|git lfs (pull|fetch)|rsync|scp|gsutil (-m )?cp|aws s3 (cp|sync)|pip3? install|uv (pip )?(install|sync)|npm (i|install|ci)|pnpm (i|install)|yarn install|brew install|docker pull|yt-dlp|azcopy (copy|cp|sync)|gh release download|gh run download|az storage (blob|file) (download|upload)(-batch)?|python3? -m pip install)\b/i
 
 // What kind a job is, from its command, or else its own words for itself
 // A download is one whose own program fetches (curl, wget, rsync...), not one that names such a tool as a word to another
@@ -105,9 +105,12 @@ export const describedOf = (what: string) => {
 }
 // Words that lead a run's own name and say its kind already, so its row does not say it twice
 export const isKindSaid = (label: string) => KIND_WORDS.some(([re]) => re.test(label.trim()))
+// A program that only looks at or opens what is on this Mac is never a download, whatever folder it names (find Downloads)
+const LOCAL_TOOL = /^(?:\/\S*\/)?(?:find|fd|grep|egrep|rg|ag|ls|cat|head|tail|less|open|mdfind|stat|file|du|wc|sed|awk|sort|tree|cp|mv|rm|mkdir|touch|cd|echo|printf|test|pwd|code|unzip|tar|shasum)\b/
+const isLocalTool = (step: string) => LOCAL_TOOL.test(step)
 // Else, for words written another way or none, its kind is told from its command
 export const jobKindOf = (cmd: string, label: string): JobKind =>
-  describedOf(label).kind ?? (SERVER_CMD.test(cmd) || /\bserver\b/i.test(label) ? 'server' : !CHECKS.test(label.trim()) && (stepsOf(cmd).some(isFetching) || /\bdownload/i.test(label)) ? 'download' : 'script')
+  describedOf(label).kind ?? (SERVER_CMD.test(cmd) || /\bserver\b/i.test(label) ? 'server' : !CHECKS.test(label.trim()) && (stepsOf(cmd).some(isFetching) || (/\bdownload(?:ing|ed)?\b/i.test(label) && !stepsOf(cmd).every(isLocalTool))) ? 'download' : 'script')
 // Each step of a shell line with what only sets it up taken off its head (a variable, env, nohup, time, sudo, exec), never a `cd`
 const SETUP = /^(?:(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)|env|nohup|setsid|exec|sudo|command|(?:\/usr\/bin\/)?time(?:\s+-\w+)*|timeout\s+\S+|caffeinate(?:\s+-\w+)*)\s+)+/
 const stepsOf = (cmd: string) =>
