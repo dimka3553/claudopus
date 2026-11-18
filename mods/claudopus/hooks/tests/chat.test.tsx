@@ -55,8 +55,9 @@ const prompts: string[] = []
 // A release on GitHub as the test world gives it: its version, commit and the tree it published; `got` a different tree that came
 // down instead, `manifest` a different version in it, `online` a newer commit online, and a fetch that fails, a folder with commits of its
 // own, or uncommitted changes the move would overwrite; a checkout on no branch, at a commit its online main holds (`detached`) or
-// one it doesn't (`noBranch`, a test copy)
-type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean }
+// one it doesn't (`noBranch`, a test copy); with a bisect or rebase under way, a main with commits online main lacks, or a main past
+// the release
+type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
 const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
@@ -319,6 +320,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       return ok()
     }
     if (release && tool === 'git' && rest.includes('--show-toplevel')) return ok('/plugins-src\n')
+    // No bisect or rebase under way in it, unless the test says one is
+    if (release && tool === 'sh' && String(rest[1]).includes('BISECT_LOG')) return ok(release.midWay ? '' : 'clear\n')
     if (release && tool === 'sh' && String(rest[1]).includes('write-tree')) return ok(`${files.get('tree:installed') ?? release.tree}\n`)
     if (release && tool === 'env' && rest.includes('git')) {
       const args = rest.slice(rest.indexOf('-C') + 2).map(String)
@@ -338,7 +341,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       }
       if (args[0] === 'show') return ok(JSON.stringify({ name: 'claudopus', version: release.manifest ?? release.version }))
       if (args[0] === 'update-ref' && args[1] === '-d') return (files.delete('git:ref'), ok())
-      if (args[0] === 'merge-base') return ok('', release.ownCommits || (release.noBranch && args.includes('origin/main')) ? 1 : 0)
+      if (args[0] === 'merge-base') {
+        const isMain = args.includes('refs/heads/main')
+        const isOwn = release.ownCommits || (release.noBranch && args.includes('origin/main')) || (release.mainAhead && isMain) || (release.mainPast && isMain && !args.includes('origin/main'))
+        return ok('', isOwn ? 1 : 0)
+      }
       if (args[0] === 'merge') {
         if (release.overwrite) return { value: { exitCode: 1, stdout: '', stderr: 'error: Your local changes to the following files would be overwritten by merge', isStdoutTruncated: false, isStderrTruncated: false } }
         files.set('manifest', JSON.stringify({ name: 'claudopus', version: release.version }))
@@ -437,16 +444,14 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       if (rest[0] === 'entries') return ok([...files.keys()].flatMap(one => (one.startsWith('secret:') && one !== 'secret:refused' ? [`claudopus-secret\t${one.slice(7)}\n`] : one.startsWith('keychain-entry:') ? [`${one.slice(15)}\n`] : [])).join(''))
       return ok('', 2)
     }
-    // git, asked what a folder is as a command would move it: a main checkout on the branch the test lays as checkout:<folder>
-    // (HEAD when on no branch), a worktree where it lays worktree, else no repo; and a name is a commit unless laid as file:<name>
-    if (tool === 'git' && rest.includes('--is-bare-repository')) {
+    // git, asked what a folder is as a command would change it: a main checkout where the test lays checkout:<folder>, a worktree
+    // of it where that says worktree, else no repo
+    if (tool === 'git' && rest.includes('--path-format=absolute') && rest.includes('--git-common-dir') && rest.includes('--show-toplevel')) {
       const folder = String(rest[rest.indexOf('-C') + 1])
       const on = files.get(`checkout:${folder}`)
       if (on === undefined) return ok('', 128)
-      const git = on === 'worktree' ? `${folder}/../.git/worktrees/x` : `${folder}/.git`
-      return ok(`${git}\n${folder}/.git\nfalse\n${folder}\n${on === 'worktree' ? 'fix' : on}\n`)
+      return ok(`${on === 'worktree' ? `${folder}/../.git/worktrees/x` : `${folder}/.git`}\n${folder}/.git\n${folder}\n`)
     }
-    if (tool === 'git' && rest.includes('--verify') && String(rest.at(-1)).endsWith('^{commit}')) return ok('', files.has(`file:${String(rest.at(-1)).replace(/\^\{commit\}$/, '')}`) ? 1 : 0)
     // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(files.has('git:top') ? `${files.get('git:top')}\n` : '', files.has('git:top') ? 0 : 128)
     // and where the repo a worktree belongs to keeps its git folder, as git:common lays it
@@ -1058,7 +1063,7 @@ test('work never writes into the boxes folder or reads the boxes\' keychain serv
   expect((await $.tool.call({ tool: 'Write', tool_use_id: `b${n++}`, agentId: 'w1', file_path: '/home/sam/.claude/claudopus/streams/x.md', content: 'boxes' } as never)).deny).toBeUndefined()
 })
 
-test("work reaches main only through the release runner: its rules name it, and a push or merge to main by hand, or a main checkout moved off its branch, is refused", async ($, on) => {
+test("work reaches main only through the release runner: its rules name it, and a push or merge to main by hand, or a change to the Claudopus code chats run, is refused", async ($, on) => {
   const { files } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'ship it', wait: false, origin: composer })
@@ -1089,29 +1094,41 @@ test("work reaches main only through the release runner: its rules name it, and 
     expect(r.deny).toContain('never pushes or merges to main itself')
     expect(r.deny).toMatch(/bin\/release\.$/)
   }
-  // A repo's main checkout stays where it is: moving it to another branch or commit is refused before Claude Code sees it (on 18 Nov
-  // a helper's detach in Claudopus's own checkout, run on a press, left every chat on that commit); a worktree, a file checked out,
-  // the branch it is on, or a folder that is no repo run
-  files.set('checkout:/repo', 'main')
-  files.set(`checkout:${HOME}/code/app`, 'main')
-  files.set('checkout:/repo/wt', 'worktree')
-  files.set('file:README.md', '')
-  const moves = [
-    'cd /repo && git checkout -q --detach origin/main 2>&1 | head -2; git log --oneline -1',
-    'git -C /repo checkout v0.2.191',
-    'git -C /repo switch fix-bar',
-    'cd /repo; git switch -c try',
-    "bash -c 'cd /repo && git checkout -b try'",
-    'cd ~/code/app && git checkout 2852d45c',
-    'cd /repo/wt && git -C .. checkout other',
+  // The Claudopus code chats run stays as it is: a command that changes what is checked out in its own checkout (the repo this chat
+  // runs from) is refused before Claude Code sees it (on 18 Nov a helper's detach there, run on a press, left every chat on that
+  // commit). Going back to main, a fast-forward, reading, a worktree of it and any other repo, the chat's own among them, run
+  files.set('git:top', '/code')
+  for (const folder of ['/code', '/other']) files.set(`checkout:${folder}`, 'main')
+  files.set('checkout:/code/wt', 'worktree')
+  const changes = [
+    'cd /code && git checkout -q --detach origin/main 2>&1 | head -2; git log --oneline -1',
+    'git -C /code checkout feature',
+    'git -C /code checkout -qb try',
+    'git -C /code switch fix-bar',
+    'cd /code; git reset --hard v0.2.191',
+    "bash -lc 'cd /code && git checkout -'",
+    'env -C /code git stash',
+    'cd /code/wt && git -C .. commit -qam x',
+    'cd /code && git checkout v1 -- mods',
+    'cd / && cd code && git restore .',
   ]
-  for (const [i, command] of moves.entries()) {
+  for (const [i, command] of changes.entries()) {
     const r = await $.tool.call({ tool: 'Bash', tool_use_id: `m${i}`, command, agentId: 'w1' } as never)
-    expect(r.deny, command).toMatch(/^Not run: \/\S+ is a repo's main checkout/)
+    expect(r.deny, command).toMatch(/^Not run: \/code holds the Claudopus code/)
   }
-  for (const [i, command] of ['cd /repo/wt && git checkout -q main', 'cd /repo && git checkout main', 'git -C /repo checkout README.md', 'git -C /repo checkout v1 -- mods', 'git -C /repo show origin/main:README.md', 'cd /tmp/x && git checkout -q --detach origin/main'].entries())
+  const kept = [
+    'cd /code && git checkout main',
+    'git -C /code switch -q main',
+    'git -C /code merge --ff-only origin/main',
+    'git -C /code stash list',
+    'git -C /code show origin/main:README.md',
+    'cd /code/wt && git checkout -qb fix && git commit -qam fix',
+    'cd /other && git checkout -q --detach v1',
+    'cd /tmp/x && git checkout -q --detach origin/main',
+  ]
+  for (const [i, command] of kept.entries())
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `k${i}`, command, agentId: 'w1' } as never)).deny, command).toBeUndefined()
-  const allowed = ['git push origin work/one', 'git push -u origin main-menu-fix', 'git pull origin main', 'git merge origin/main', 'git log origin/main', 'git checkout main','git commit -qam "git push of main across Macs, merges onto main"', 'echo "never git push origin main"', 'git push', 'grep -n RELEASE_PUSH= bin/release']
+  const allowed = ['git push origin work/one', 'git push -u origin main-menu-fix', 'git pull origin main', 'git merge origin/main', 'git log origin/main', 'git checkout main', 'git commit -qam "git push of main across Macs, merges onto main"', 'echo "never git push origin main"', 'git push', 'grep -n RELEASE_PUSH= bin/release']
   for (const [i, command] of allowed.entries()) {
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `a${i}`, command, agentId: 'w1' } as never)).deny).toBeUndefined()
   }

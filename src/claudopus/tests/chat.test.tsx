@@ -333,7 +333,7 @@ test('work never writes into the boxes folder or reads the boxes\' keychain serv
   expect((await $.tool.call({ tool: 'Write', tool_use_id: `b${n++}`, agentId: 'w1', file_path: '/home/sam/.claude/claudopus/streams/x.md', content: 'boxes' } as never)).deny).toBeUndefined()
 })
 
-test("work reaches main only through the release runner: its rules name it, and a push or merge to main by hand, or a main checkout moved off its branch, is refused", async ($, on) => {
+test("work reaches main only through the release runner: its rules name it, and a push or merge to main by hand, or a change to the Claudopus code chats run, is refused", async ($, on) => {
   const { files } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'ship it', wait: false, origin: composer })
@@ -364,29 +364,41 @@ test("work reaches main only through the release runner: its rules name it, and 
     expect(r.deny).toContain('never pushes or merges to main itself')
     expect(r.deny).toMatch(/bin\/release\.$/)
   }
-  // A repo's main checkout stays where it is: moving it to another branch or commit is refused before Claude Code sees it (on 18 Nov
-  // a helper's detach in Claudopus's own checkout, run on a press, left every chat on that commit); a worktree, a file checked out,
-  // the branch it is on, or a folder that is no repo run
-  files.set('checkout:/repo', 'main')
-  files.set(`checkout:${HOME}/code/app`, 'main')
-  files.set('checkout:/repo/wt', 'worktree')
-  files.set('file:README.md', '')
-  const moves = [
-    'cd /repo && git checkout -q --detach origin/main 2>&1 | head -2; git log --oneline -1',
-    'git -C /repo checkout v0.2.191',
-    'git -C /repo switch fix-bar',
-    'cd /repo; git switch -c try',
-    "bash -c 'cd /repo && git checkout -b try'",
-    'cd ~/code/app && git checkout 2852d45c',
-    'cd /repo/wt && git -C .. checkout other',
+  // The Claudopus code chats run stays as it is: a command that changes what is checked out in its own checkout (the repo this chat
+  // runs from) is refused before Claude Code sees it (on 18 Nov a helper's detach there, run on a press, left every chat on that
+  // commit). Going back to main, a fast-forward, reading, a worktree of it and any other repo, the chat's own among them, run
+  files.set('git:top', '/code')
+  for (const folder of ['/code', '/other']) files.set(`checkout:${folder}`, 'main')
+  files.set('checkout:/code/wt', 'worktree')
+  const changes = [
+    'cd /code && git checkout -q --detach origin/main 2>&1 | head -2; git log --oneline -1',
+    'git -C /code checkout feature',
+    'git -C /code checkout -qb try',
+    'git -C /code switch fix-bar',
+    'cd /code; git reset --hard v0.2.191',
+    "bash -lc 'cd /code && git checkout -'",
+    'env -C /code git stash',
+    'cd /code/wt && git -C .. commit -qam x',
+    'cd /code && git checkout v1 -- mods',
+    'cd / && cd code && git restore .',
   ]
-  for (const [i, command] of moves.entries()) {
+  for (const [i, command] of changes.entries()) {
     const r = await $.tool.call({ tool: 'Bash', tool_use_id: `m${i}`, command, agentId: 'w1' } as never)
-    expect(r.deny, command).toMatch(/^Not run: \/\S+ is a repo's main checkout/)
+    expect(r.deny, command).toMatch(/^Not run: \/code holds the Claudopus code/)
   }
-  for (const [i, command] of ['cd /repo/wt && git checkout -q main', 'cd /repo && git checkout main', 'git -C /repo checkout README.md', 'git -C /repo checkout v1 -- mods', 'git -C /repo show origin/main:README.md', 'cd /tmp/x && git checkout -q --detach origin/main'].entries())
+  const kept = [
+    'cd /code && git checkout main',
+    'git -C /code switch -q main',
+    'git -C /code merge --ff-only origin/main',
+    'git -C /code stash list',
+    'git -C /code show origin/main:README.md',
+    'cd /code/wt && git checkout -qb fix && git commit -qam fix',
+    'cd /other && git checkout -q --detach v1',
+    'cd /tmp/x && git checkout -q --detach origin/main',
+  ]
+  for (const [i, command] of kept.entries())
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `k${i}`, command, agentId: 'w1' } as never)).deny, command).toBeUndefined()
-  const allowed = ['git push origin work/one', 'git push -u origin main-menu-fix', 'git pull origin main', 'git merge origin/main', 'git log origin/main', 'git checkout main','git commit -qam "git push of main across Macs, merges onto main"', 'echo "never git push origin main"', 'git push', 'grep -n RELEASE_PUSH= bin/release']
+  const allowed = ['git push origin work/one', 'git push -u origin main-menu-fix', 'git pull origin main', 'git merge origin/main', 'git log origin/main', 'git checkout main', 'git commit -qam "git push of main across Macs, merges onto main"', 'echo "never git push origin main"', 'git push', 'grep -n RELEASE_PUSH= bin/release']
   for (const [i, command] of allowed.entries()) {
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `a${i}`, command, agentId: 'w1' } as never)).deny).toBeUndefined()
   }

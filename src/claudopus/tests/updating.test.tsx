@@ -159,6 +159,7 @@ const STAYS: { name: string; release: Release; said: string; isNewerAfterFetch?:
   { name: 'uncommitted changes the move would overwrite', release: { ...RELEASE, overwrite: true }, said: 'Your copy of Claudopus has changes in files this version changes. Ask a chat to set them aside, then press Try again. Nothing changed: this chat still runs v0.1.0.' },
   { name: 'a newer version out between its fetch and its move', release: RELEASE, isNewerAfterFetch: true, title: 'Claudopus v0.1.3 is out', said: 'The bar shows the battery · and 3 more changes' },
   { name: 'a main with commits of its own', release: { ...RELEASE, ownCommits: true }, said: "Your copy of Claudopus has changes this version doesn't have, so Update leaves it alone. Nothing changed: this chat still runs v0.1.0." },
+  { name: 'a checkout left on a released commit, its main past this release', release: { ...RELEASE, detached: true, mainPast: true }, said: "Your copy of Claudopus has changes this version doesn't have, so Update leaves it alone. Nothing changed: this chat still runs v0.1.0." },
 ]
 for (const one of STAYS)
   test(`Update with ${one.name}: it says why it could not move forward, and nothing is overwritten or moved`, SLOW, async ($, on) => {
@@ -257,6 +258,8 @@ test('Not now keeps a version quiet for a day, Skip this version until a newer o
 const LEFT_ALONE: { name: string; release: Release; said: string }[] = [
   { name: 'a build a piece of work is changing', release: { ...RELEASE, worktree: true }, said: 'This chat runs a copy of Claudopus that a task is changing: Update leaves it alone. It gets the newest version when that task is merged.' },
   { name: 'a test build', release: { ...RELEASE, noBranch: true }, said: 'This chat runs a test copy of Claudopus: Update leaves it alone.' },
+  { name: 'a released commit whose main has commits of its own', release: { ...RELEASE, detached: true, mainAhead: true }, said: 'This chat runs a test copy of Claudopus: Update leaves it alone.' },
+  { name: 'a released commit in the middle of a bisect', release: { ...RELEASE, detached: true, midWay: true }, said: 'This chat runs a test copy of Claudopus: Update leaves it alone.' },
 ]
 for (const one of LEFT_ALONE)
   test(`a chat run from ${one.name} is told Update leaves it alone, and offered no download`, SLOW, async ($, on) => {

@@ -225,6 +225,8 @@ const lastLine = (out: { stdout: string; stderr: string }) => `${out.stderr || o
 // A main checkout left on a commit its online main already holds, with main itself behind that, is no test copy: something only
 // looked at a released commit there (a task did on 18 Nov), so Install moves it forward and puts it back on main (`detached`)
 export type FolderReady = { ok: true; branch: string; upstream: string; detached?: boolean } | { ok: false; why: string; what: string }
+// Says clear when the git folder it is handed holds no bisect or rebase under way
+export const MID_WAY = 'for f in BISECT_LOG rebase-merge rebase-apply; do [ -e "$1/$f" ] && exit 0; done; echo clear'
 export const folderReady = async (io: Pick<LookIo, 'run'>, folder: string): Promise<FolderReady> => {
   const git = gitIn(io, folder)
   if ((await git(['rev-parse', '--show-toplevel'])).exitCode !== 0) return { ok: false, what: "Claudopus code that Update can't change", why: "it isn't Claudopus's released code" }
@@ -238,7 +240,11 @@ export const folderReady = async (io: Pick<LookIo, 'run'>, folder: string): Prom
     return { ok: false, what: 'a copy of Claudopus that a task is changing', why: 'Update leaves it alone. It gets the newest version when that task is merged' }
   if (!branch) {
     const upstream = named((await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', 'main@{u}'])).stdout.trim())
+    // Never in the middle of a bisect or a rebase, which keep their place on no branch
+    const clear = await io.run(['sh', '-c', MID_WAY, 'sh', gitDir.trim()], 20_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))
+    const isMidWay = clear.stdout.trim() !== 'clear'
     const isReleased =
+      !isMidWay &&
       /^[^/]+\/main$/.test(upstream) &&
       (await git(['merge-base', '--is-ancestor', 'HEAD', upstream])).exitCode === 0 &&
       (await git(['merge-base', '--is-ancestor', 'refs/heads/main', upstream])).exitCode === 0
