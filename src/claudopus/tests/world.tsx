@@ -7,10 +7,10 @@ const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url)
 // (about twice as slow as a Mac) the longest scenarios, 4 to 8 seconds alone, passed or failed by the machine's load, not by the mod.
 // SLOW is that limit, kept for the tests that name it
 const SLOW = { timeoutMs: 60_000 }
-function test(name: string, body: TestBody): void
-function test(name: string, options: { timeoutMs?: number }, body: TestBody): void
 // The test now running, for the world's clock (below): the tests of a file run one after another
 let driver: Parameters<TestBody>[0] | undefined
+function test(name: string, body: TestBody): void
+function test(name: string, options: { timeoutMs?: number }, body: TestBody): void
 function test(name: string, options: TestBody | { timeoutMs?: number }, body?: TestBody) {
   const run = (typeof options === 'function' ? options : body) as TestBody
   const kept: TestBody = ($, on) => ((driver = $), run($, on))
