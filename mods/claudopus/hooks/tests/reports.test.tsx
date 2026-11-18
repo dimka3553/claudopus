@@ -835,7 +835,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   const asking = await pane.find({ type: 'Text', text: 'Result ready · Shall I send it to the team?' })
   expect([asking?.props.color, asking?.props.bold]).toEqual([undefined, true])
   expect(await pane.find({ type: 'Text', text: /^Waiting for you · / })).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: /^Done · / })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeDefined()
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === '#E5A50A').length).toBe(0)
   expect((await pane.findAll({ type: 'Button' })).filter(b => /^result-ask-a1-say-/.test(b.key ?? '')).map(b => b.props.label)).toEqual(['Yes', 'No', 'Not now', 'Answer in words'])
   expect((await pane.findAll({ type: 'Button' })).find(b => /^result-ask-a1-more-/.test(b.key ?? ''))?.props.label).toBe('Result')
@@ -875,7 +875,6 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   // clock has not moved), and the chat is asked nothing: it is only told the task has it (18 Nov: "A" pressed on a result went to
   // the chat alone, which had to hand the job to another task)
   const answers = () => resumed.filter(line => line.includes('to answer a question in your result'))
-  const doneCards = (await pane.findAll({ type: 'Text' })).filter(text => /^Done · /.test(text.text ?? '')).length
   await pressed(one, 'report-say-0-Yes')
   expect(answers()).toHaveLength(1)
   expect(answers()[0]).toMatch(/^a1: The person pressed "Yes" to answer a question in your result "Weekly revenue" \(.*\/report\.md\): Shall I send it to the team\?\n1 other question of that result still waits for them/)
@@ -883,11 +882,10 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(answers()[0]).not.toMatch(/\b(me|my)\b/)
   expect(submitted).toHaveLength(0)
   expect(appended.filter(line => line.includes('answered a question in the result "Weekly revenue"'))).toEqual([expect.stringContaining('Its task has the answer and carries on with it itself')])
-  // Its card is at work at once: Stop, no question, no longer Done
+  // Its card is at work at once: Stop, no question, counted as working
   expect(await until(async () => (await pane.find({ type: 'Button', key: 'stop-a1' })) ?? undefined)).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /^1 task working/ })).toBeDefined()
-  expect((await pane.findAll({ type: 'Text' })).filter(text => /^Done · /.test(text.text ?? ''))).toHaveLength(doneCards - 1)
   expect(await keyed(pane, 'dismiss-a1')).toBeUndefined()
   await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[0]?.answer ? true : undefined))
   // It ends again with the other question still open: it waits for the person again
@@ -912,7 +910,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   // Nothing open, the card waits on nothing: the header and its line say so, and it is done
   expect(await until(async () => ((await pane.find({ type: 'Text', text: /^Result ready/ })) ? undefined : true))).toBe(true)
   expect(await pane.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: /^Done · / })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeDefined()
 
   // The chat is told of the reports with each message, and reads one itself to answer from it
   const next = await $.prompt.submit({ text: 'what was revenue again', wait: false, origin: composer })

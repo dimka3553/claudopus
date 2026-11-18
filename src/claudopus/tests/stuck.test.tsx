@@ -719,7 +719,7 @@ test("a task ending its step with to-dos still to do and nothing of its own runn
   expect([line?.text, line?.props.color]).toEqual(['Not done · Second look', '#E5A50A'])
   // With a to-do left it is not done: its card never says Done
   expect((await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(text => text === '✓ Done' || /^Done · /.test(text))).toEqual([])
-  expect((await pane.findAll({ type: 'Text' })).some(one => /^Not done · \d/.test(String(one.text ?? '')))).toBe(true)
+  expect([...new Set((await pane.findAll({ type: 'Text', text: 'Not done' })).map(one => one.props.color))]).toEqual(['#E5A50A'])
   await pane.unmount()
   // A task waiting on your answer with to-dos still to do is no task left undone
   await $.agent.spawn({ ...spawn, description: 'Pick the skin tone', prompt: 'pick' } as never)
@@ -746,7 +746,8 @@ test("a task ending its step with to-dos still to do and nothing of its own runn
   expect(await back.find({ type: 'Text', text: /^Fix the two tests|^Clear task clutter/ })).toBeUndefined()
   if (folded) await back.press({ key: String(folded.key) })
   const lines = (await back.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
-  expect(lines.filter(text => /^Done · .*(2 of 5|1 of 2) to-dos done/.test(text))).toHaveLength(2)
+  expect(lines.filter(text => /(2 of 5|1 of 2) to-dos done/.test(text))).toHaveLength(2)
+  expect(lines.filter(text => text === '✓ Done')).toHaveLength(2)
   expect(lines.filter(text => text === 'Not done · Release it on your press')).toEqual([])
   await back.unmount()
 })

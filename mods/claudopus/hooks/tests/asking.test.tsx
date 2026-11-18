@@ -1402,8 +1402,14 @@ test('a release Claudopus runs on the go-ahead is Releasing, in purple, from the
     await $.turn.complete({ answer: 'Waits for your Release it.', durationMs: 1, isAborted: false, turnId: `turn-${id}`, reason: 'answer', agentId: id } as never)
   }
   await clock.advance(60_000)
-  // Each card's stage, as its line begins
-  const stages = async () => (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(text => /^(Releasing|Done|Not done|Waiting for you)\b|^✓ Done$/.test(text)).map(text => text.split(' · ')[0])
+  // Each card's stage: Releasing on its line while it releases, how it ended under its top row once it has
+  const stages = async () =>
+    (await list.findAll({ type: 'Text' }))
+      .map(one => String(one.text ?? ''))
+      .flatMap(text => {
+        const releasing = /^Claudopus is releasing (\S+)$/.exec(text) ?? /^You pressed “Release it” · Claudopus releases (\S+) once you allow it below$/.exec(text)
+        return releasing ? [`Releasing ${releasing[1]}`] : text === '✓ Done' || text === 'Not done' ? [text] : []
+      })
   const button = async (pattern: RegExp) => until(async () => (await list.findAll({ type: 'Button' })).find(b => pattern.test(String(b.key ?? '')))?.key)
   const logged = (text: string) => until(async () => ((files.get(`${MEMORY}/log.md`) ?? '').includes(text) ? true : undefined))
   const releaseLog = (id: string) => [...files.keys()].find(path => path.startsWith(`${MEMORY}/releases/step-${id}-`)) ?? ''
@@ -1414,14 +1420,14 @@ test('a release Claudopus runs on the go-ahead is Releasing, in purple, from the
   expect(await logged('started by Claudopus for a1')).toBe(true)
   for (let i = 0; i < 3; i++) {
     await clock.advance(10_000)
-    expect(await stages()).toEqual(expect.arrayContaining(['Releasing fix-nose', 'Waiting for you']))
+    expect(await stages()).toContain('Releasing fix-nose')
     expect((await stages()).filter(stage => stage === 'Done' || stage === '✓ Done' || stage === 'Not done')).toEqual([])
     expect(await list.find({ type: 'Text', text: 'You allowed it. Claudopus is releasing it now.' })).toBeDefined()
   }
   // Released: Done, green, once, with the to-do the release was ticked
   files.set(releaseLog('a1'), 'release: pushed\nClaudopus 0.2.300 is out\nclaudopus-exit 0\n')
   await clock.advance(10_000)
-  expect(await until(async () => ((await list.findAll({ type: 'Text' })).some(one => /^Done · .*2 of 2 to-dos done/.test(String(one.text ?? ''))) ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await list.findAll({ type: 'Text' })).some(one => /2 of 2 to-dos done/.test(String(one.text ?? ''))) ? true : undefined))).toBe(true)
   expect((await list.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
   expect(await stages()).not.toContain('Releasing fix-nose')
   expect(await stages()).not.toContain('Not done')

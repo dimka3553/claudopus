@@ -436,6 +436,7 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
     return stepLine($, one.id, "Nothing was released · Claudopus couldn't start the release")
   }
   await log($, `release of ${branch} in ${name} started by Claudopus for ${one.id}`)
+  await stepLine($, one.id, `Claudopus is releasing ${branch}`)
   const timer = everyLoad($, STEP_LOOK, () => {
     void (async () => {
       // Its end only: a release's whole log can be over the 4 MB the engine gives whole, and then its last line was never seen

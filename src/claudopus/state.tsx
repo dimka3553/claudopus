@@ -89,18 +89,6 @@ const isReleaseRun = (cmd: string | undefined) => /\bbin\/release\b/.test(cmd ??
 // One card read so
 const shownOne = (list: Todo[], id: string, asks?: (one: Todo) => boolean) => shownAs(list, asks).find(one => one.id === id)
 
-// What a task's card says while it waits on its own work, by what it waits for; '' in any other state
-const ownWorkWords = (list: Todo[], one: Todo) => {
-  // (a card that handed back its result while a release or a command of its own still runs waits for it too: shownAs)
-  if (one.releasing && one.wasDone !== undefined) return ['Releasing', one.releasing.branch].filter(Boolean).join(' ')
-  if ((stateOf(list, one) !== 'waiting-own' && one.wasDone === undefined)) return ''
-  const { runs, helpers } = wakesOf(list, one)
-  if (runs.some(run => isReleaseRun(run.cmd)) && !helpers) return 'Releasing'
-  if (one.wasDone !== undefined && !runs.length && !helpers) return 'Waiting for its command'
-  const what = [runs.length ? (runs.length === 1 ? 'its command' : 'its commands') : '', helpers ? (helpers === 1 ? 'its helper' : 'its helpers') : ''].filter(Boolean).join(' and ')
-  return what ? `Waiting for ${what}` : 'Waiting to be started again'
-}
-
 // Every change to the cards goes through here: a task's card that would end done without its report stays at work, as it was before
 // the change, its step ended. Any path that ends a card (the end of its turn, the engine's list, a look after a reload) is held to it
 // The ids held so, for Claudopus to start each again that nothing of its own starts (doneHeld)

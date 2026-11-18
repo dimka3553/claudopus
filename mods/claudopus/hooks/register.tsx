@@ -1799,16 +1799,6 @@ const isLeftUndone = (one: Todo) => one.doneSeen !== undefined && !isReleased(on
 const isReleaseRun = (cmd: string | undefined) => /\bbin\/release\b/.test(cmd ?? '') && !/\s--status\b/.test(cmd ?? '')
 const shownOne = (list: Todo[], id: string, asks?: (one: Todo) => boolean) => shownAs(list, asks).find(one => one.id === id)
 
-const ownWorkWords = (list: Todo[], one: Todo) => {
-  if (one.releasing && one.wasDone !== undefined) return ['Releasing', one.releasing.branch].filter(Boolean).join(' ')
-  if ((stateOf(list, one) !== 'waiting-own' && one.wasDone === undefined)) return ''
-  const { runs, helpers } = wakesOf(list, one)
-  if (runs.some(run => isReleaseRun(run.cmd)) && !helpers) return 'Releasing'
-  if (one.wasDone !== undefined && !runs.length && !helpers) return 'Waiting for its command'
-  const what = [runs.length ? (runs.length === 1 ? 'its command' : 'its commands') : '', helpers ? (helpers === 1 ? 'its helper' : 'its helpers') : ''].filter(Boolean).join(' and ')
-  return what ? `Waiting for ${what}` : 'Waiting to be started again'
-}
-
 const holdDone = (before: Todo[], next: Todo[], now: number) => {
   const held: string[] = []
   if (isOff) return { list: next, held }
@@ -8917,6 +8907,7 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
     return stepLine($, one.id, "Nothing was released · Claudopus couldn't start the release")
   }
   await log($, `release of ${branch} in ${name} started by Claudopus for ${one.id}`)
+  await stepLine($, one.id, `Claudopus is releasing ${branch}`)
   const timer = everyLoad($, STEP_LOOK, () => {
     void (async () => {
       during('look at a release')
@@ -13490,8 +13481,8 @@ const panelHooks = (on: On) => {
     const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
     const stood: Record<Todo['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
     const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `Claude Code moved it to ${one.moved}` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
-    const glance = (one: Todo, count = '') =>
-      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.leftOpen ? 'Not done' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one), modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+    const glance = (one: Todo, count = '', isWhole = false) =>
+      [isWhole ? (one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.leftOpen ? 'Not done' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status]) : '', modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     const { picking = '' } = await read($, view)
     const lead = e.surface === 'terminal' ? 0 : 'xs'
     const facts = (one: Todo, isWhole: boolean, count = '') => {
@@ -13499,7 +13490,7 @@ const panelHooks = (on: On) => {
       if (one.status !== 'working' || !name || one.chat)
         return (
           <Box paddingLeft={isWhole ? 0 : lead}>
-            <Text dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{glance(one, count)}</Text>
+            <Text dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{glance(one, count, isWhole)}</Text>
           </Box>
         )
       const scope = `model-${one.id}`
@@ -13518,7 +13509,7 @@ const panelHooks = (on: On) => {
             ))}
           </Box>
         )
-      const rest = [ownWorkWords(all, one), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
+      const rest = [offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
       return (
         <Box flexDirection="row" alignItems="flex-start">
           <Button
@@ -13856,11 +13847,15 @@ const panelHooks = (on: On) => {
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden" paddingLeft={lead}>
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                {/* In its pause after ending, the line says in a word how it ended: green when it finished, plain when it was stopped */}
-                {(!one.ask && lingers(one, at)) || leftLine(one, at) ? (
-                  <Text wrap="truncate-end" color={one.leftOpen ? NEEDS : one.status === 'done' ? DONE : one.status === 'failed' ? 'error' : undefined} dimColor={one.status !== 'done' && one.status !== 'failed'}>
-                    {one.leftOpen ? 'Not done' : one.status === 'done' ? '✓ Done' : one.status === 'failed' ? '✕ Failed' : one.byYou ? 'Stopped by you' : 'Stopped'}
-                  </Text>
+                {/* Ended, the line begins with how it ended, in a word: green when it finished, amber when not done, plain when
+                    it was stopped; then what it last said */}
+                {!one.ask && one.status !== 'working' && !isActingOnReply(one) ? (
+                  <Box flexDirection="row" minWidth={0}>
+                    <Text wrap="truncate-end" color={one.leftOpen ? NEEDS : one.status === 'done' ? DONE : one.status === 'failed' ? 'error' : undefined} dimColor={one.status !== 'done' && one.status !== 'failed' && !one.leftOpen}>
+                      {one.leftOpen ? 'Not done' : one.status === 'done' ? '✓ Done' : one.status === 'failed' ? '✕ Failed' : one.byYou ? 'Stopped by you' : 'Stopped'}
+                    </Text>
+                    {!leftLine(one, at) && noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}
+                  </Box>
                 ) : (
                   <Box flexDirection="column" minWidth={0}>
                     <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(noteOf(one), room) || (one.status === 'working' ? (one.ask ? 'Waiting for you' : at - one.startedAt < 60_000 ? 'Starting' : 'Working') : "Claude hasn't said what it's doing")}</Text>
