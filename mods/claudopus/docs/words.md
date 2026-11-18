@@ -28,6 +28,7 @@ Every word Claudopus shows you (panel, cards, the bar, questions, notices, resul
 ## Standard forms
 - **States**, one word each, one colour each: Starting, Working (purple), Waiting for you (amber), Done (green), Failed (amber), Stopped, Stopped by you (grey). Done means one thing only: the task handed back its result, every to-do is ticked or dropped, and no command or helper of its own still runs. With a command or helper of its own running it is still purple; with to-dos left it is Not done, in amber. A Done card whose result asks something more stays green, at the top with the question, until it is answered or dismissed.
 - A working task whose step ended while its own commands or helpers run says what it waits for on its line, in Working's purple: `Waiting for its command`, `Waiting for its helpers`, `Waiting for its command and helper`.
+- A task being released says `Releasing <branch>` in Working's purple, from the press on Release it until the release has finished; only then is it Done.
 - **Time running** `29m 40s`, over an hour `1h 05m`. **Expected** `of about 5m`. **Past it** `29m 40s · 24m over` (amber). **Ago** `2m ago`. **Left** `1m left`. **Dates** `11 Nov, 14:20`.
 - **Counts** `<n> of <total> <what>`: `2 of 6 stills`, `2 of 5 to-dos`.
 - **Buttons** are a verb of one to three words, the same word for the same act: Stop, Details, Result, Release it, Not now, Send, Open chat, Answer in words, Allow once, Deny.

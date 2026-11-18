@@ -54,30 +54,48 @@ const stateOf = (list: Todo[], one: Todo): TaskState => {
 // (18 Nov, the person: "Why is it done after four to-dos? Why does it have a command running when it's finished?" A task that
 // ran where Claudopus could not see it handed back past every check, its to-dos and its line left as they were; another card
 // kept a command for 47 minutes after its report)
+// - a release under way for it, Claudopus's on the person's press or its own runner in its background: Releasing, in purple, and
+//   Done once only, when that has finished (18 Nov, the person: "Until it's done releasing, it's not done. Why does it turn from
+//   purple to green to purple to green to purple?")
+// A command left in its background counts from the moment it hands back (`leftOwn`), not only once the engine's list says it holds
+// the run for it (`leftSince`), which came seconds later: green came in between
 // (`_asks` is no longer read: a result's question changes nothing of this)
 const shownAs = (list: Todo[], _asks?: (one: Todo) => boolean): Todo[] =>
   list.map(one => {
     if (isOff || one.parentId || one.chat || one.status !== 'done') return one
     // (one the person dismissed is under Finished and waits for nothing more, but with to-dos left it still never reads Done)
-    if (one.closedAt) return openItems(one).length ? { ...one, leftOpen: openItems(one).length } : one
+    if (one.closedAt) return isLeftUndone(one) ? { ...one, leftOpen: openItems(one).length } : one
+    const atWork = { ...one, status: 'working' as const, wasDone: one.endedAt, endedAt: 0, endedStepAt: one.endedStepAt ?? one.endedAt }
+    if (one.releasing) return atWork
     // (a question of its own on its card comes first: it is Waiting for you, its command's row under it)
     if (one.ask) return one
     const { runs, helpers } = wakesOf(list, one)
-    if (runs.length || helpers || (one.leftSince && one.leftOwn)) return { ...one, status: 'working' as const, wasDone: one.endedAt, endedAt: 0, endedStepAt: one.endedStepAt ?? one.endedAt }
+    if (runs.length || helpers || one.leftOwn) return atWork
     // (to-dos left: not done, in amber, whatever its result asks; with every to-do done it is Done and green, though its result
     // still asks the person something: the person, 18 Nov, "the ones that are not done should be yellow, the ones that are done
     // should be green")
-    if (openItems(one).length) return { ...one, leftOpen: openItems(one).length }
+    if (isLeftUndone(one)) return { ...one, leftOpen: openItems(one).length }
     return one
   })
+// Released on the person's press: whatever to-do it left was that release, and it is done (a card from before `released` was
+// kept says so on its line)
+const isReleased = (one: Todo) => one.released !== undefined || one.entries.some(entry => entry.kind === 'note' && entry.text.startsWith('Released · '))
+// To-dos left on a card Claudopus saw end done under that rule, never released: it is not done. A card that ended before it, or
+// long ago, reads as it did then, and never comes back up as not done (18 Nov, the person: two tasks of the morning, one of them
+// released, came back to the top in amber after the update)
+const isLeftUndone = (one: Todo) => one.doneSeen !== undefined && !isReleased(one) && openItems(one).length > 0
+// The release runner, run by a task's own command (its status look asks nothing and releases nothing)
+const isReleaseRun = (cmd: string | undefined) => /\bbin\/release\b/.test(cmd ?? '') && !/\s--status\b/.test(cmd ?? '')
 // One card read so
 const shownOne = (list: Todo[], id: string, asks?: (one: Todo) => boolean) => shownAs(list, asks).find(one => one.id === id)
 
 // What a task's card says while it waits on its own work, by what it waits for; '' in any other state
 const ownWorkWords = (list: Todo[], one: Todo) => {
-  // (a card that handed back its result while a command of its own still runs waits for it too: shownAs)
+  // (a card that handed back its result while a release or a command of its own still runs waits for it too: shownAs)
+  if (one.releasing && one.wasDone !== undefined) return ['Releasing', one.releasing.branch].filter(Boolean).join(' ')
   if ((stateOf(list, one) !== 'waiting-own' && one.wasDone === undefined)) return ''
   const { runs, helpers } = wakesOf(list, one)
+  if (runs.some(run => isReleaseRun(run.cmd)) && !helpers) return 'Releasing'
   if (one.wasDone !== undefined && !runs.length && !helpers) return 'Waiting for its command'
   const what = [runs.length ? (runs.length === 1 ? 'its command' : 'its commands') : '', helpers ? (helpers === 1 ? 'its helper' : 'its helpers') : ''].filter(Boolean).join(' and ')
   return what ? `Waiting for ${what}` : 'Waiting to be started again'
@@ -101,7 +119,9 @@ const holdDone = (before: Todo[], next: Todo[], now: number) => {
     const base = old
     return { ...base, status: 'working' as const, endedAt: 0, answer: one.answer || base.answer, answeredAt: undefined, endedStepAt: base.endedStepAt ?? now }
   })
-  return { list, held }
+  // A task's card Claudopus sees end done is kept so (isLeftUndone): one done already, or only now read back, is not
+  const seen = list.map(one => (one.status === 'done' && !one.parentId && !one.chat && one.doneSeen === undefined && was.has(one.id) && was.get(one.id)?.status !== 'done' ? { ...one, doneSeen: now } : one))
+  return { list: seen, held }
 }
 // Cards held from ending done without their report, each taken up once per stop (by its steps and the times it was carried on): one
 // whose run Claude Code never pressed ends done with its last words as its result, as at a heard end; one that waits on its own work

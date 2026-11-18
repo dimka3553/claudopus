@@ -199,9 +199,14 @@ const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
 const personSign = async ($: EngineInterface) => {
   const chats = await read($, others)
   // (only the cards that ask or wait on a gate: a card that merely starts or ends waits)
-  const asks = [...(await read($, todos)), ...cardsOf(chats), ...helpersOf(chats)].filter(one => one.ask || one.admins?.length).map(one => [one.id, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, (one.admins ?? []).map(gate => gate.id)])
+  const cards = await read($, todos)
+  const asks = [...cards, ...cardsOf(chats), ...helpersOf(chats)].filter(one => one.ask || one.admins?.length).map(one => [one.id, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, (one.admins ?? []).map(gate => gate.id)])
+  // (and what the person's own presses change once their write lands: a card dismissed, a result's question answered or set aside,
+  // a task their answer starts again. Without them, a drawing made between the press and its write was kept while they used the
+  // panel, and the card stayed at the top with its buttons for 15 seconds after each move)
+  const own = [cards.filter(one => one.closedAt).map(one => one.id), [...dismissedNow], [...answering], [...resultWaking.keys()]]
   return JSON.stringify([
-    presses, asks, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool, one.isPressedNo ?? false]), asked.length, [...promptSaid], [...promptHeld],
+    presses, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool, one.isPressedNo ?? false]), asked.length, [...promptSaid], [...promptHeld],
     [...gateHeld], [...gateSaid.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
     [...pictureIn.keys()], isUpdating, loadMark,
     // and what their presses change that shows later: a Stop's card, a note a box left, the update's steps, a copy made
@@ -390,7 +395,8 @@ const askPressed = new Map<string, string>()
 const resultWaking = new Map<string, number>()
 const asPressed = (given: Todo): Todo => {
   const wakingAt = given.status === 'working' ? undefined : resultWaking.get(given.id)
-  const one: Todo = wakingAt !== undefined ? { ...given, status: 'working', startedAt: given.endedAt ? wakingAt - (given.endedAt - given.startedAt) : given.startedAt, endedAt: 0 } : given.closedAt && given.ask ? { ...given, ask: undefined } : given
+  const closed = given.status !== 'working' && !given.closedAt && dismissedNow.has(given.id) ? { ...given, closedAt: given.endedAt || 1 } : given
+  const one: Todo = wakingAt !== undefined ? { ...closed, status: 'working', startedAt: closed.endedAt ? wakingAt - (closed.endedAt - closed.startedAt) : closed.startedAt, endedAt: 0 } : closed.closedAt && closed.ask ? { ...closed, ask: undefined } : closed
   const isAnswered = Boolean(one.ask && askPressed.get(one.id) === `${one.ask.at}:${one.ask.text}`)
   const admins = one.admins?.filter(gate => !gatePressed.has(gate.id))
   if (!isAnswered && admins?.length === one.admins?.length) return one
@@ -591,6 +597,9 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   // rules say, for Claudopus's to do, so nobody released
   if (!isReply && ask.lastStep && ask.folder && ask.choices?.[0] === said) {
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line, isCard: true, askAt: ask.at })
+    // A release is under way from the press on: Releasing, never Done, until it has finished (releaseOver), and never Done in
+    // between should the task still be ending its turn
+    if (RELEASE_STEP.test(ask.lastStep)) await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, releasing: { at, branch: '', by: 'claudopus' as const } } : card))).catch(err => log($, `release of ${one.id} not shown: ${String(err)}`))
     redraw($)
     if (!working) await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
     else {

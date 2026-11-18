@@ -731,4 +731,22 @@ test("a task ending its step with to-dos still to do and nothing of its own runn
   expect(await until(async () => (JSON.stringify(await shown.drawn()).includes('Which tone?') ? true : undefined))).toBe(true)
   expect((await shown.findAll({ type: 'Text', text: /^Not done · Second/ })).map(one => one.text)).toEqual(['Not done · Second look'])
   await shown.unmount()
+  // Two cards of the morning, read back as the chat loads: one that ended before Claudopus held to-dos to Done, one released on
+  // the person's press with its release to-do never ticked. Neither comes back up as not done, and no line says not done (18 Nov,
+  // the person's screenshot after the update: both at the top in amber, "Not done · Release it on your press" over "Released")
+  const morning = 1_700_000_000_000 - 8 * 3600_000
+  const old = (id: string, title: string, items: [string, string][], more: object) => ({ id, parentId: '', title, words: title, items: items.map(([text, state]) => ({ text, state })), entries: [], answer: '', tokens: 1, startedAt: morning - 1800_000, endedAt: morning, status: 'done', model: 'claude-opus-5-5', ...more })
+  files.set(`${MEMORY}/finished/engine-id.json`, JSON.stringify([
+    old('b1', 'Fix the two tests failing on main', [['See both tests fail', 'done'], ['Fix each at its cause', 'done'], ['Run every test', 'doing'], ['Ask you to release', 'open'], ['Fix the other failures', 'open']], {}),
+    old('b2', 'Clear task clutter out of the chat', [['Find each line', 'done'], ['Release it on your press', 'open']], { notDone: ['Release it on your press'], entries: [{ at: morning, kind: 'note', text: 'Released · Claudopus 0.2.192 is out' }] }),
+  ]))
+  await $.session.start(start)
+  const back = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const folded = await until(async () => (await back.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label))))
+  expect(await back.find({ type: 'Text', text: /^Fix the two tests|^Clear task clutter/ })).toBeUndefined()
+  if (folded) await back.press({ key: String(folded.key) })
+  const lines = (await back.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  expect(lines.filter(text => /^Done · .*(2 of 5|1 of 2) to-dos done/.test(text))).toHaveLength(2)
+  expect(lines.filter(text => text === 'Not done · Release it on your press')).toEqual([])
+  await back.unmount()
 })

@@ -130,6 +130,14 @@ export type Todo = {
   // it is shown at work; and how many to-dos a card kept as done left, shown as not done
   wasDone?: number
   leftOpen?: number
+  // When Claudopus saw it end done, under the rule that a card with to-dos left is not done: a card that ended before that rule
+  // was kept, or ended where Claudopus never saw it, reads as it did then. Absent once it works again
+  doneSeen?: number
+  // A release under way for it: since the press on its go-ahead (by Claudopus, its branch once known) or since it handed back with
+  // the release runner still running in its background (by the task). It is Releasing, in purple, never Done, until that ends
+  releasing?: { at: number; branch: string; by: 'claudopus' | 'task' }
+  // When the release Claudopus ran on the person's press finished: every to-do it left counts as done
+  released?: number
   // What it started in the background itself that wakes it when it ends (a command, a watch): the engine's task id, what it is
   // in its own words, and since when, with the command itself. Dropped as it ends or is stopped
   bg?: { id: string; what: string; at: number; isWatch?: boolean; cmd?: string; expiresAt?: number }[]

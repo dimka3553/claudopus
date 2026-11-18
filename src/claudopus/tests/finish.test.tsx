@@ -398,12 +398,19 @@ test('work that reports with everything it set out to do done, leaving a server 
   await train('SubagentHandback', 'h2', { message: 'The training is started and takes two hours.' })
   agents.a2 = 'waiting'
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w2', reason: 'answer', agentId: 'a2' } as never)
-  await clock.advance(20_000)
   const texts = async () => (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  // From its hand-back on, every second: purple, never green in between, before as after the engine's list says it holds the run
+  // (18 Nov, the person: "Why does it turn from purple to green to purple to green to purple?")
+  for (let i = 0; i < 20; i++) {
+    expect((await texts()).filter(text => /^Waiting for its command|^Done · /.test(text)).map(text => text.split(' · ')[0])).toEqual(['Done', 'Waiting for its command'])
+    await clock.advance(1000)
+  }
   expect((await texts()).filter(text => /^Waiting for its command|^Done · |^✓ Done$/.test(text)).map(text => text.split(' · ')[0])).toEqual(['Done', '✓ Done', 'Waiting for its command'])
   agents.a2 = 'completed'
-  await clock.advance(30_000)
+  // and once its command has ended it is Done, with its green moment then
+  for (let i = 0; i < 30 && (await texts()).some(text => /^Waiting for its command/.test(text)); i++) await clock.advance(1000)
   expect((await texts()).filter(text => /^Waiting for its command/.test(text)).length).toBe(0)
+  expect((await texts()).filter(text => text === '✓ Done').length).toBe(2)
   await pane.unmount()
 })
 

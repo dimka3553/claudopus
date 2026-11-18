@@ -1,15 +1,71 @@
-"use strict";
 // Pictures a piece of work made, drawn in its chat where it made them
+var __assign = (this && this.__assign) || function () {
+    __assign = Object.assign || function(t) {
+        for (var s, i = 1, n = arguments.length; i < n; i++) {
+            s = arguments[i];
+            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
+                t[p] = s[p];
+        }
+        return t;
+    };
+    return __assign.apply(this, arguments);
+};
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+var __generator = (this && this.__generator) || function (thisArg, body) {
+    var _ = { label: 0, sent: function() { if (t[0] & 1) throw t[1]; return t[1]; }, trys: [], ops: [] }, f, y, t, g = Object.create((typeof Iterator === "function" ? Iterator : Object).prototype);
+    return g.next = verb(0), g["throw"] = verb(1), g["return"] = verb(2), typeof Symbol === "function" && (g[Symbol.iterator] = function() { return this; }), g;
+    function verb(n) { return function (v) { return step([n, v]); }; }
+    function step(op) {
+        if (f) throw new TypeError("Generator is already executing.");
+        while (g && (g = 0, op[0] && (_ = 0)), _) try {
+            if (f = 1, y && (t = op[0] & 2 ? y["return"] : op[0] ? y["throw"] || ((t = y["return"]) && t.call(y), 0) : y.next) && !(t = t.call(y, op[1])).done) return t;
+            if (y = 0, t) op = [op[0] & 2, t.value];
+            switch (op[0]) {
+                case 0: case 1: t = op; break;
+                case 4: _.label++; return { value: op[1], done: false };
+                case 5: _.label++; y = op[1]; op = [0]; continue;
+                case 7: op = _.ops.pop(); _.trys.pop(); continue;
+                default:
+                    if (!(t = _.trys, t = t.length > 0 && t[t.length - 1]) && (op[0] === 6 || op[0] === 2)) { _ = 0; continue; }
+                    if (op[0] === 3 && (!t || (op[1] > t[0] && op[1] < t[3]))) { _.label = op[1]; break; }
+                    if (op[0] === 6 && _.label < t[1]) { _.label = t[1]; t = op; break; }
+                    if (t && _.label < t[2]) { _.label = t[2]; _.ops.push(op); break; }
+                    if (t[2]) _.ops.pop();
+                    _.trys.pop(); continue;
+            }
+            op = body.call(thisArg, _);
+        } catch (e) { op = [6, e]; y = 0; } finally { f = t = 0; }
+        if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
+    }
+};
+var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
+    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
+        if (ar || !(i in from)) {
+            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
+            ar[i] = from[i];
+        }
+    }
+    return to.concat(ar || Array.prototype.slice.call(from));
+};
+var _this = this;
 // ---- Pictures a piece of work made, drawn in its chat where it made them ----
 // How many of a chat's newest pictures are drawn small; older ones are a row that opens them. The small copy's widest side
-const CHAT_THUMBS = 6;
+var CHAT_THUMBS = 6;
 // The most pictures one chat shows
-const PICS_LISTED = 40;
-const CHAT_THUMB_SIZES = ['360', '280'];
+var PICS_LISTED = 40;
+var CHAT_THUMB_SIZES = ['360', '280'];
 // How tall an upright small copy is drawn at most, in the panel's pixels: a tall screenshot is drawn narrower, not longer
-const PIC_TALL = 200;
+var PIC_TALL = 200;
 // The most characters a picture drawn as it is, an SVG of the work's own, may have
-const SVG_CHARS = 100000;
+var SVG_CHARS = 100000;
 // A press opens the picture whole in the Mac's own viewer (Preview for a photo or screenshot), a window of its own as large as the
 // screen allows, which can go full screen and closes as any window does: the panel is only a sidebar wide. A chat the app runs on
 // another Mac over ssh has its engine, and so `open`, on this Mac, where nobody looks: Preview opened on its screen (seen on the
@@ -17,93 +73,149 @@ const SVG_CHARS = 100000;
 // over its Details, with a row back to them: no tab is opened, closed or opened again. 0.2.46 to 0.2.50 opened a picture tab of its
 // own, which from a Details tab closed the tab pressed in and opened it again so it let go of the keyboard: that tab came back drawn
 // afresh, its chat at its end and slow to scroll, and the picture's tab stayed behind it (seen on 0.2.49 in a helper's Details)
-const showPicture = async ($, path, pane, row, surface) => {
-    if (surface === 'terminal' && (termFrom || isRunFromAfar || !hasDesktop))
-        return sendPicture($, path);
-    if (isRunFromAfar)
-        return showPictureIn($, path, pane, row);
-    const opened = await openOn($, path);
-    if (opened.exitCode !== 0)
-        await log($, `picture ${path} not opened: ${opened.stderr}`);
-};
+var showPicture = function ($, path, pane, row, surface) { return __awaiter(_this, void 0, void 0, function () {
+    var opened;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0:
+                if (surface === 'terminal' && (termFrom || isRunFromAfar || !hasDesktop))
+                    return [2 /*return*/, sendPicture($, path)];
+                if (isRunFromAfar)
+                    return [2 /*return*/, showPictureIn($, path, pane, row)];
+                return [4 /*yield*/, openOn($, path)];
+            case 1:
+                opened = _a.sent();
+                if (!(opened.exitCode !== 0)) return [3 /*break*/, 3];
+                return [4 /*yield*/, log($, "picture ".concat(path, " not opened: ").concat(opened.stderr))];
+            case 2:
+                _a.sent();
+                _a.label = 3;
+            case 3: return [2 /*return*/];
+        }
+    });
+}); };
 // A terminal draws no picture worth looking at (a few blurred pixels a cell), so there a picture is a row that is pressed: on the
 // Mac the person is at it opens in the Mac's own viewer, as above. In a terminal reached over ssh the person is at another
 // device, where nothing here can open a window: the picture is sent to that device, by Tailscale's file sending when both are on
 // one tailnet (it lands in its Downloads), else the row gives the one command that fetches and opens it there. Set as the chat
 // starts from SSH_CONNECTION: the device the terminal is watched from, and this Mac as that device reaches it
-let termFrom = '';
-let termHere = '';
-let termPort = '';
+var termFrom = '';
+var termHere = '';
+var termPort = '';
 // What the last press on a picture came to, by its path, said under its row
-const pictureSaid = new Map();
-const TAILSCALES = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale'];
-const shQuoted = (text) => `'${text.replaceAll("'", "'\\''")}'`;
-const sendPicture = async ($, path) => {
-    const say = (text, copy) => (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text, copy }), drawAgain($));
-    // A terminal with no word of where it is watched from: where the picture is, and no more
-    if (!termFrom)
-        return say(`It is at ${path} on ${thisMac()}`);
-    say('Sending it to your device…');
-    for (const bin of TAILSCALES) {
-        const targets = await $.process.run([bin, 'file', 'cp', '--targets'], { timeoutMs: 8000 }).catch(() => undefined);
-        if (!targets || targets.exitCode !== 0)
-            continue;
-        // Each line a device: its address, its name, and a word when it is not reachable now
-        const [, name = '', ...state] = targets.stdout.split('\n').map(line => line.trim().split(/\s+/)).find(parts => parts[0] === termFrom) ?? [];
-        if (!name || state.join(' ').startsWith('offline'))
-            break;
-        const sent = await $.process.run([bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 60000 }).catch(err => ({ exitCode: 1, stderr: String(err) }));
-        if (sent.exitCode === 0)
-            return say(`✓ Sent to ${name} by Tailscale, which keeps what it is sent in Downloads`);
-        await log($, `picture ${path} not sent to ${termFrom}: ${sent.stderr}`);
-        break;
-    }
-    const user = (await $.env.get('USER')) ?? '';
-    const port = termPort && termPort !== '22' ? `-P ${termPort} ` : '';
-    const command = `scp ${port}${shQuoted(`${user ? `${user}@` : ''}${termHere.includes(':') ? `[${termHere}]` : termHere}:${path}`)} ~/Downloads/ && open ~/Downloads/${shQuoted(fileName(path))}`;
-    say('Run this on your own device (a Mac), and it opens there:', command);
-};
+var pictureSaid = new Map();
+var TAILSCALES = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale'];
+var shQuoted = function (text) { return "'".concat(text.replaceAll("'", "'\\''"), "'"); };
+var sendPicture = function ($, path) { return __awaiter(_this, void 0, void 0, function () {
+    var say, _i, TAILSCALES_1, bin, targets, _a, _b, name_1, state, sent, user, port, command;
+    var _c, _d;
+    return __generator(this, function (_e) {
+        switch (_e.label) {
+            case 0:
+                say = function (text, copy) { return (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text: text, copy: copy }), drawAgain($)); };
+                // A terminal with no word of where it is watched from: where the picture is, and no more
+                if (!termFrom)
+                    return [2 /*return*/, say("It\u2019s at ".concat(path, " on ").concat(thisMac(), "."))];
+                say('Sending it to your device…');
+                _i = 0, TAILSCALES_1 = TAILSCALES;
+                _e.label = 1;
+            case 1:
+                if (!(_i < TAILSCALES_1.length)) return [3 /*break*/, 6];
+                bin = TAILSCALES_1[_i];
+                return [4 /*yield*/, $.process.run([bin, 'file', 'cp', '--targets'], { timeoutMs: 8000 }).catch(function () { return undefined; })];
+            case 2:
+                targets = _e.sent();
+                if (!targets || targets.exitCode !== 0)
+                    return [3 /*break*/, 5];
+                _a = (_c = targets.stdout.split('\n').map(function (line) { return line.trim().split(/\s+/); }).find(function (parts) { return parts[0] === termFrom; })) !== null && _c !== void 0 ? _c : [], _b = _a[1], name_1 = _b === void 0 ? '' : _b, state = _a.slice(2);
+                if (!name_1 || state.join(' ').startsWith('offline'))
+                    return [3 /*break*/, 6];
+                return [4 /*yield*/, $.process.run([bin, 'file', 'cp', path, "".concat(termFrom, ":")], { timeoutMs: 60000 }).catch(function (err) { return ({ exitCode: 1, stderr: String(err) }); })];
+            case 3:
+                sent = _e.sent();
+                if (sent.exitCode === 0)
+                    return [2 /*return*/, say("\u2713 Claudopus sent it to ".concat(name_1, " with Tailscale. It\u2019s in Downloads there."))];
+                return [4 /*yield*/, log($, "picture ".concat(path, " not sent to ").concat(termFrom, ": ").concat(sent.stderr))];
+            case 4:
+                _e.sent();
+                return [3 /*break*/, 6];
+            case 5:
+                _i++;
+                return [3 /*break*/, 1];
+            case 6: return [4 /*yield*/, $.env.get('USER')];
+            case 7:
+                user = (_d = (_e.sent())) !== null && _d !== void 0 ? _d : '';
+                port = termPort && termPort !== '22' ? "-P ".concat(termPort, " ") : '';
+                command = "scp ".concat(port).concat(shQuoted("".concat(user ? "".concat(user, "@") : '').concat(termHere.includes(':') ? "[".concat(termHere, "]") : termHere, ":").concat(path)), " ~/Downloads/ && open ~/Downloads/").concat(shQuoted(fileName(path)));
+                say('Run this on your Mac to open it there:', command);
+                return [2 /*return*/];
+        }
+    });
+}); };
 // Under a picture's row in the terminal: what its press came to, with the command to copy when there is one
-const pictureSaidRow = ($, ui, key, path) => {
-    const said = pictureSaid.get(path);
+var pictureSaidRow = function ($, ui, key, path) {
+    var said = pictureSaid.get(path);
     if (!said)
         return null;
     return (<ui.Box key={key} flexDirection="column" paddingLeft={3}>
       <ui.Text dimColor wrap="wrap">{said.text}</ui.Text>
       {said.copy ? <ui.Text wrap="wrap">{said.copy}</ui.Text> : null}
-      {said.copy ? <ui.Button key={`${key}-copy`} label="Copy the command" plain onPress={press => void $.ui.copy({ text: said.copy ?? '', surface: press.surface }).catch(err => log($, `copy not made: ${String(err)}`))}/> : null}
+      {said.copy ? <ui.Button key={"".concat(key, "-copy")} label="Copy the command" plain onPress={function (press) { var _a; return void $.ui.copy({ text: (_a = said.copy) !== null && _a !== void 0 ? _a : '', surface: press.surface }).catch(function (err) { return log($, "copy not made: ".concat(String(err))); }); }}/> : null}
     </ui.Box>);
 };
 // The picture tab of 0.2.46 to 0.2.50: one still open after an update says that pictures open in Details now
-const PICTURE_PANE = 'picture';
-const pictureShown = '';
+var PICTURE_PANE = 'picture';
+var pictureShown = '';
 // The picture each Details tab draws large over its Details, by the tab, and the row it was pressed on, which Back brings into view
-const pictureIn = new Map();
-const showPictureIn = async ($, path, pane, row) => {
-    pictureIn.set(pane, { path, row });
-    // One that could not be made is tried again on a new press
-    for (const [id, one] of larges)
-        if (!one && id.startsWith(`${path}:`))
-            larges.delete(id);
-    drawAgain($);
-    // To its top, now and again once the picture is likely drawn in place of the Details
-    await $.ui.scroll({ in: pane, to: 'start', block: 'start' }).catch(() => undefined);
-    $.clock.after(150, () => void $.ui.scroll({ in: pane, to: 'start', block: 'start' }).catch(() => undefined));
-};
+var pictureIn = new Map();
+var showPictureIn = function ($, path, pane, row) { return __awaiter(_this, void 0, void 0, function () {
+    var _i, larges_1, _a, id, one;
+    return __generator(this, function (_b) {
+        switch (_b.label) {
+            case 0:
+                pictureIn.set(pane, { path: path, row: row });
+                // One that could not be made is tried again on a new press
+                for (_i = 0, larges_1 = larges; _i < larges_1.length; _i++) {
+                    _a = larges_1[_i], id = _a[0], one = _a[1];
+                    if (!one && id.startsWith("".concat(path, ":")))
+                        larges.delete(id);
+                }
+                drawAgain($);
+                // To its top, now and again once the picture is likely drawn in place of the Details
+                return [4 /*yield*/, $.ui.scroll({ in: pane, to: 'start', block: 'start' }).catch(function () { return undefined; })];
+            case 1:
+                // To its top, now and again once the picture is likely drawn in place of the Details
+                _b.sent();
+                $.clock.after(150, function () { return void $.ui.scroll({ in: pane, to: 'start', block: 'start' }).catch(function () { return undefined; }); });
+                return [2 /*return*/];
+        }
+    });
+}); };
 // Brings a row into view once it is drawn: a redraw over ssh can take a while to reach the app, so a row not drawn yet is tried again
-const scrollTo = ($, pane, key, tries) => $.clock.after(150, async () => {
-    if (pictureIn.has(pane))
-        return;
-    const moved = await $.ui.scroll({ in: pane, to: { key }, block: 'center' }).catch(err => ({ deny: String(err) }));
-    if (moved && 'deny' in moved && moved.deny && tries > 1)
-        scrollTo($, pane, key, tries - 1);
-});
-const pictureBack = ($, pane) => {
-    const was = pictureIn.get(pane);
+var scrollTo = function ($, pane, key, tries) {
+    return $.clock.after(150, function () { return __awaiter(_this, void 0, void 0, function () {
+        var moved;
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0:
+                    if (pictureIn.has(pane))
+                        return [2 /*return*/];
+                    return [4 /*yield*/, $.ui.scroll({ in: pane, to: { key: key }, block: 'center' }).catch(function (err) { return ({ deny: String(err) }); })];
+                case 1:
+                    moved = _a.sent();
+                    if (moved && 'deny' in moved && moved.deny && tries > 1)
+                        scrollTo($, pane, key, tries - 1);
+                    return [2 /*return*/];
+            }
+        });
+    }); });
+};
+var pictureBack = function ($, pane) {
+    var was = pictureIn.get(pane);
     pictureIn.delete(pane);
     drawAgain($);
     // Once the Details are drawn again, the picture's row is brought into view, where the person was
-    if (was?.row)
+    if (was === null || was === void 0 ? void 0 : was.row)
         scrollTo($, pane, was.row, 6);
 };
 // The large copy the tab draws, as wide as a wide sidebar on a sharp screen. An Svg carries at most 131072 characters, too few for
@@ -111,7 +223,7 @@ const pictureBack = ($, pane) => {
 // The whole copy fits in one drawing the app accepts (262144 characters): a size that needs more gives way to a lower JPEG quality,
 // then a narrower one. 0.2.46 to 0.2.55 let it reach 600000, which the app threw away, so the tab stayed on "Making a large copy"
 // and went blank once left and come back to. A picture with see-through parts keeps them as PNG, else JPEG
-const LARGE_SIZES = [
+var LARGE_SIZES = [
     [2000, 70],
     [1400, 70],
     [1400, 55],
@@ -120,101 +232,168 @@ const LARGE_SIZES = [
     [800, 60],
     [600, 60],
 ];
-const LARGE_CHARS = 130000;
-const LARGE_TOTAL = 200000;
-const larges = new Map();
-const making = new Map();
-let largeMade = 0;
-const makeLarge = async ($, path, size) => {
-    if (/\.svg$/i.test(path)) {
-        if (size > LARGE_CHARS * 2)
-            return null;
-        const text = await readOr($, path);
-        const from = text.indexOf('<svg');
-        return from >= 0 && text.length - from <= LARGE_CHARS ? { bands: [text.slice(from)], width: 0, height: 0 } : null;
-    }
-    if (!RASTER.test(path))
-        return null;
-    const got = await $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', '-g', 'hasAlpha', path]).catch(() => ({ exitCode: 1, stdout: '' }));
-    const width = Number(/pixelWidth:\s*(\d+)/.exec(got.stdout)?.[1] ?? 0);
-    const height = Number(/pixelHeight:\s*(\d+)/.exec(got.stdout)?.[1] ?? 0);
-    if (!width || !height)
-        return null;
-    // A picture with see-through parts is tried as PNG first, which keeps them, then as JPEG, which a window screenshot's shadow
-    // edges need to fit
-    const formats = /hasAlpha:\s*yes/.test(got.stdout) ? ['png', 'jpeg'] : ['jpeg'];
-    largeMade += 1;
-    const base = `${dir}/thumbs/large-${Math.round(await $.clock.now())}-${largeMade}`;
-    await $.process.run(['mkdir', '-p', `${dir}/thumbs`]);
-    try {
-        // Each size once: a picture narrower than a width is taken at its own width
-        const sizes = [...new Map(LARGE_SIZES.map(([w, quality]) => [`${Math.min(w, width)}:${quality}`, [Math.min(w, width), quality]])).values()];
-        for (const format of formats)
-            for (const [most, quality] of format === 'png' ? [...new Map(sizes.map(([w]) => [w, [w, 0]])).values()] : sizes) {
-                // The picture at this width, then cut into bands down it, each as tall as fits
-                const wide = `${base}-${most}.png`;
-                const sized = await $.process.run([sips($), '--resampleWidth', String(most), '-s', 'format', 'png', path, '--out', wide]).catch(() => ({ exitCode: 1 }));
+var LARGE_CHARS = 130000;
+var LARGE_TOTAL = 200000;
+var larges = new Map();
+var making = new Map();
+var largeMade = 0;
+var makeLarge = function ($, path, size) { return __awaiter(_this, void 0, void 0, function () {
+    var text, from, got, width, height, formats, base, _a, _b, _c, _d, sizes, _i, formats_1, format, _e, _f, _g, most, quality, wide, sized, tall, _h, _j, _k, padded, bands, band_1, total, isTooMany, y, rows_1, out, cutTo, _l, _m, _o, read_1, _p, source, whole_1;
+    var _q, _r, _s, _t, _u, _v, _w, _x;
+    return __generator(this, function (_y) {
+        switch (_y.label) {
+            case 0:
+                if (!/\.svg$/i.test(path)) return [3 /*break*/, 2];
+                if (size > LARGE_CHARS * 2)
+                    return [2 /*return*/, null];
+                return [4 /*yield*/, readOr($, path)];
+            case 1:
+                text = _y.sent();
+                from = text.indexOf('<svg');
+                return [2 /*return*/, from >= 0 && text.length - from <= LARGE_CHARS ? { bands: [text.slice(from)], width: 0, height: 0 } : null];
+            case 2:
+                if (!RASTER.test(path))
+                    return [2 /*return*/, null];
+                return [4 /*yield*/, $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', '-g', 'hasAlpha', path]).catch(function () { return ({ exitCode: 1, stdout: '' }); })];
+            case 3:
+                got = _y.sent();
+                width = Number((_r = (_q = /pixelWidth:\s*(\d+)/.exec(got.stdout)) === null || _q === void 0 ? void 0 : _q[1]) !== null && _r !== void 0 ? _r : 0);
+                height = Number((_t = (_s = /pixelHeight:\s*(\d+)/.exec(got.stdout)) === null || _s === void 0 ? void 0 : _s[1]) !== null && _t !== void 0 ? _t : 0);
+                if (!width || !height)
+                    return [2 /*return*/, null
+                        // A picture with see-through parts is tried as PNG first, which keeps them, then as JPEG, which a window screenshot's shadow
+                        // edges need to fit
+                    ];
+                formats = /hasAlpha:\s*yes/.test(got.stdout) ? ['png', 'jpeg'] : ['jpeg'];
+                largeMade += 1;
+                _b = (_a = "".concat(dir, "/thumbs/large-")).concat;
+                _d = (_c = Math).round;
+                return [4 /*yield*/, $.clock.now()];
+            case 4:
+                base = _b.apply(_a, [_d.apply(_c, [_y.sent()]), "-"]).concat(largeMade);
+                return [4 /*yield*/, $.process.run(['mkdir', '-p', "".concat(dir, "/thumbs")])];
+            case 5:
+                _y.sent();
+                _y.label = 6;
+            case 6:
+                _y.trys.push([6, , 23, 25]);
+                sizes = __spreadArray([], new Map(LARGE_SIZES.map(function (_a) {
+                    var w = _a[0], quality = _a[1];
+                    return ["".concat(Math.min(w, width), ":").concat(quality), [Math.min(w, width), quality]];
+                })).values(), true);
+                _i = 0, formats_1 = formats;
+                _y.label = 7;
+            case 7:
+                if (!(_i < formats_1.length)) return [3 /*break*/, 22];
+                format = formats_1[_i];
+                _e = 0, _f = format === 'png' ? __spreadArray([], new Map(sizes.map(function (_a) {
+                    var w = _a[0];
+                    return [w, [w, 0]];
+                })).values(), true) : sizes;
+                _y.label = 8;
+            case 8:
+                if (!(_e < _f.length)) return [3 /*break*/, 21];
+                _g = _f[_e], most = _g[0], quality = _g[1];
+                wide = "".concat(base, "-").concat(most, ".png");
+                return [4 /*yield*/, $.process.run([sips($), '--resampleWidth', String(most), '-s', 'format', 'png', path, '--out', wide]).catch(function () { return ({ exitCode: 1 }); })];
+            case 9:
+                sized = _y.sent();
                 if (sized.exitCode !== 0)
-                    continue;
-                const tall = Number(/pixelHeight:\s*(\d+)/.exec((await $.process.run([sips($), '-g', 'pixelHeight', wide]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0);
+                    return [3 /*break*/, 20];
+                _h = Number;
+                _k = (_j = /pixelHeight:\s*(\d+)/).exec;
+                return [4 /*yield*/, $.process.run([sips($), '-g', 'pixelHeight', wide]).catch(function () { return ({ stdout: '' }); })];
+            case 10:
+                tall = _h.apply(void 0, [(_v = (_u = _k.apply(_j, [(_y.sent()).stdout])) === null || _u === void 0 ? void 0 : _u[1]) !== null && _v !== void 0 ? _v : 0]);
                 if (!tall)
-                    continue;
-                // sips crops only a band that neither starts at the top nor reaches the bottom (one that does comes out centred, or whole),
-                // so the picture is given a row above and below first, and each band is cut one row down
-                const padded = await $.process.run([sips($), '--padToHeightWidth', String(tall + 2), String(most), wide]).catch(() => ({ exitCode: 1 }));
+                    return [3 /*break*/, 20];
+                return [4 /*yield*/, $.process.run([sips($), '--padToHeightWidth', String(tall + 2), String(most), wide]).catch(function () { return ({ exitCode: 1 }); })];
+            case 11:
+                padded = _y.sent();
                 if (padded.exitCode !== 0)
-                    continue;
-                const bands = [];
-                let band = Math.min(tall, 400);
-                let total = 0;
-                let isTooMany = false;
-                for (let y = 0; y < tall;) {
-                    const rows = Math.min(band, tall - y);
-                    const out = `${base}-band.${format === 'png' ? 'png' : 'jpg'}`;
-                    await $.process.run([sips($), '-c', String(rows), String(most), '--cropOffset', String(y + 1), '0', '-s', 'format', format, ...(format === 'jpeg' ? ['-s', 'formatOptions', String(quality)] : []), wide, '--out', out]);
-                    const cutTo = Number(/pixelHeight:\s*(\d+)/.exec((await $.process.run([sips($), '-g', 'pixelHeight', out]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0);
-                    const read = cutTo === rows ? (await $.fs.read(out, { as: 'bytes' }).catch(() => undefined)) : undefined;
-                    const source = read ? `<svg xmlns="http://www.w3.org/2000/svg" width="${most}" height="${rows}" viewBox="0 0 ${most} ${rows}"><image href="data:image/${format};base64,${read.base64}" width="${most}" height="${rows}"/></svg>` : '';
-                    if (!source)
-                        break;
-                    if (source.length > LARGE_CHARS) {
-                        if (rows <= 16)
-                            break;
-                        band = Math.max(16, Math.floor((rows * LARGE_CHARS * 0.9) / source.length));
-                        continue;
-                    }
-                    // The whole copy, this band too, fits in one drawing, else this size is too large
-                    total += source.length;
-                    if (total > LARGE_TOTAL) {
-                        isTooMany = true;
-                        break;
-                    }
-                    bands.push(source);
-                    y += rows;
+                    return [3 /*break*/, 20];
+                bands = [];
+                band_1 = Math.min(tall, 400);
+                total = 0;
+                isTooMany = false;
+                y = 0;
+                _y.label = 12;
+            case 12:
+                if (!(y < tall)) return [3 /*break*/, 19];
+                rows_1 = Math.min(band_1, tall - y);
+                out = "".concat(base, "-band.").concat(format === 'png' ? 'png' : 'jpg');
+                return [4 /*yield*/, $.process.run(__spreadArray(__spreadArray([sips($), '-c', String(rows_1), String(most), '--cropOffset', String(y + 1), '0', '-s', 'format', format], (format === 'jpeg' ? ['-s', 'formatOptions', String(quality)] : []), true), [wide, '--out', out], false))];
+            case 13:
+                _y.sent();
+                _l = Number;
+                _o = (_m = /pixelHeight:\s*(\d+)/).exec;
+                return [4 /*yield*/, $.process.run([sips($), '-g', 'pixelHeight', out]).catch(function () { return ({ stdout: '' }); })];
+            case 14:
+                cutTo = _l.apply(void 0, [(_x = (_w = _o.apply(_m, [(_y.sent()).stdout])) === null || _w === void 0 ? void 0 : _w[1]) !== null && _x !== void 0 ? _x : 0]);
+                if (!(cutTo === rows_1)) return [3 /*break*/, 16];
+                return [4 /*yield*/, $.fs.read(out, { as: 'bytes' }).catch(function () { return undefined; })];
+            case 15:
+                _p = (_y.sent());
+                return [3 /*break*/, 17];
+            case 16:
+                _p = undefined;
+                _y.label = 17;
+            case 17:
+                read_1 = _p;
+                source = read_1 ? "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"".concat(most, "\" height=\"").concat(rows_1, "\" viewBox=\"0 0 ").concat(most, " ").concat(rows_1, "\"><image href=\"data:image/").concat(format, ";base64,").concat(read_1.base64, "\" width=\"").concat(most, "\" height=\"").concat(rows_1, "\"/></svg>") : '';
+                if (!source)
+                    return [3 /*break*/, 19];
+                if (source.length > LARGE_CHARS) {
+                    if (rows_1 <= 16)
+                        return [3 /*break*/, 19];
+                    band_1 = Math.max(16, Math.floor((rows_1 * LARGE_CHARS * 0.9) / source.length));
+                    return [3 /*break*/, 18];
                 }
+                // The whole copy, this band too, fits in one drawing, else this size is too large
+                total += source.length;
+                if (total > LARGE_TOTAL) {
+                    isTooMany = true;
+                    return [3 /*break*/, 19];
+                }
+                bands.push(source);
+                y += rows_1;
+                _y.label = 18;
+            case 18: return [3 /*break*/, 12];
+            case 19:
                 if (!isTooMany && bands.length) {
-                    const whole = bands.reduce((sum, one) => sum + Number(/height="(\d+)"/.exec(one)?.[1] ?? 0), 0);
-                    if (whole >= tall)
-                        return { bands, width, height };
+                    whole_1 = bands.reduce(function (sum, one) { var _a, _b; return sum + Number((_b = (_a = /height="(\d+)"/.exec(one)) === null || _a === void 0 ? void 0 : _a[1]) !== null && _b !== void 0 ? _b : 0); }, 0);
+                    if (whole_1 >= tall)
+                        return [2 /*return*/, { bands: bands, width: width, height: height }];
                 }
-            }
-        return null;
-    }
-    finally {
-        await $.process.run(['sh', '-c', 'rm -f "$1"-*', 'sh', base]).catch(() => undefined);
-    }
-};
+                _y.label = 20;
+            case 20:
+                _e++;
+                return [3 /*break*/, 8];
+            case 21:
+                _i++;
+                return [3 /*break*/, 7];
+            case 22: return [2 /*return*/, null];
+            case 23: return [4 /*yield*/, $.process.run(['sh', '-c', 'rm -f "$1"-*', 'sh', base]).catch(function () { return undefined; })];
+            case 24:
+                _y.sent();
+                return [7 /*endfinally*/];
+            case 25: return [2 /*return*/];
+        }
+    });
+}); };
 // The large copy as made, else nothing yet: it is made once, out of the drawing, which is drawn again when it is ready. One that
 // cannot be made is kept as such, so it is not tried again at every drawing, only at the next press of its row
-const largeOf = ($, path, id) => {
+var largeOf = function ($, path, id) {
+    var _a;
     if (larges.has(id))
-        return larges.get(id) ?? null;
+        return (_a = larges.get(id)) !== null && _a !== void 0 ? _a : null;
     if (!making.has(id))
         making.set(id, makeLarge($, path, Number(id.split(':').pop()) || 0)
-            .catch(err => (void log($, `large copy of ${path} not made: ${String(err)}`), null))
-            .then(one => {
+            .catch(function (err) { return (void log($, "large copy of ".concat(path, " not made: ").concat(String(err))), null); })
+            .then(function (one) {
+            var _a;
             if (larges.size >= 6)
-                larges.delete(larges.keys().next().value ?? '');
+                larges.delete((_a = larges.keys().next().value) !== null && _a !== void 0 ? _a : '');
             larges.set(id, one);
             making.delete(id);
             drawAgain($);
@@ -223,331 +402,508 @@ const largeOf = ($, path, id) => {
     return undefined;
 };
 // What the tab draws: the picture as wide as the tab, its name and size, and how to see it larger
-const pictureView = async ($, e, path = pictureShown) => {
-    const ui = uiOf($, e);
-    if (!path)
-        return <ui.Text dimColor>Pictures now open large in the Details tab they are pressed in. This tab can be closed.</ui.Text>;
-    const name = fileName(path);
-    const stat = await $.fs.stat(path).catch(() => undefined);
-    const said = (text) => (<ui.Box flexDirection="column" gap={1} width="100%">
+var pictureView = function ($_1, e_1) {
+    var args_1 = [];
+    for (var _i = 2; _i < arguments.length; _i++) {
+        args_1[_i - 2] = arguments[_i];
+    }
+    return __awaiter(_this, __spreadArray([$_1, e_1], args_1, true), void 0, function ($, e, path) {
+        var ui, name, stat, said, large;
+        if (path === void 0) { path = pictureShown; }
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0:
+                    ui = uiOf($, e);
+                    if (!path)
+                        return [2 /*return*/, <ui.Text dimColor>Pictures now open in the Details tab where you press them. You can close this tab.</ui.Text>];
+                    name = fileName(path);
+                    return [4 /*yield*/, $.fs.stat(path).catch(function () { return undefined; })];
+                case 1:
+                    stat = _a.sent();
+                    said = function (text) { return (<ui.Box flexDirection="column" gap={1} width="100%">
       <ui.Text bold wrap="wrap">{name}</ui.Text>
       <ui.Text dimColor wrap="wrap">{text}</ui.Text>
-    </ui.Box>);
-    if (!stat || stat.kind !== 'file')
-        return said('This picture is no longer available.');
-    if (e.surface === 'terminal') {
-        // The terminal draws no picture: a row that opens it where the person is, and what that came to
-        return (<ui.Box flexDirection="column" width="100%">
-        <ui.Button key={`large-open-${path}`} label={`Open ${name}`} plain hotkey="o" onPress={press => void showPicture($, path, '', '', press.surface)}/>
+    </ui.Box>); };
+                    if (!stat || stat.kind !== 'file')
+                        return [2 /*return*/, said('This picture is no longer available.')];
+                    if (e.surface === 'terminal') {
+                        // The terminal draws no picture: a row that opens it where the person is, and what that came to
+                        return [2 /*return*/, (<ui.Box flexDirection="column" width="100%">
+        <ui.Button key={"large-open-".concat(path)} label={"Open ".concat(name)} plain hotkey="o" onPress={function (press) { return void showPicture($, path, '', '', press.surface); }}/>
         {pictureSaidRow($, ui, 'large-said', path)}
-      </ui.Box>);
-    }
-    if (!('Svg' in ui))
-        return said(`This screen cannot draw pictures. It is at ${path}`);
-    const large = largeOf($, path, `${path}:${stat.mtimeMs}:${stat.size}`);
-    if (large === undefined)
-        return said('Making a large copy…');
-    if (!large)
-        return said(`This picture could not be drawn here. Press its row again to try again. It is at ${path}`);
-    return (<ui.Box flexDirection="column" gap={1} width="100%">
+      </ui.Box>)];
+                    }
+                    if (!('Svg' in ui))
+                        return [2 /*return*/, said("This screen can\u2019t show pictures. It\u2019s at ".concat(path, "."))];
+                    large = largeOf($, path, "".concat(path, ":").concat(stat.mtimeMs, ":").concat(stat.size));
+                    if (large === undefined)
+                        return [2 /*return*/, said('Making a large copy…')];
+                    if (!large)
+                        return [2 /*return*/, said("Claudopus couldn\u2019t show this picture. Press its row to try again. It\u2019s at ".concat(path, "."))];
+                    return [2 /*return*/, (<ui.Box flexDirection="column" gap={1} width="100%">
       <ui.Text bold wrap="wrap">{name}</ui.Text>
       <ui.Box flexDirection="column" width="100%">
-        {large.bands.map((band, n) => (<ui.Svg key={`large-${n}`} source={band} alt={`Picture: ${name}${large.bands.length > 1 ? `, part ${n + 1} of ${large.bands.length}` : ''}`}/>))}
+        {large.bands.map(function (band, n) { return (<ui.Svg key={"large-".concat(n)} source={band} alt={"Picture: ".concat(name).concat(large.bands.length > 1 ? ", part ".concat(n + 1, " of ").concat(large.bands.length) : '')}/>); })}
       </ui.Box>
-      <ui.Text dimColor wrap="wrap">{`${large.width ? `${large.width} × ${large.height} · ` : ''}drag the sidebar's edge to make it wider`}</ui.Text>
-    </ui.Box>);
+      <ui.Text dimColor wrap="wrap">{"".concat(large.width ? "".concat(large.width, " \u00D7 ").concat(large.height, " \u00B7 ") : '', "drag the sidebar's edge to make it wider")}</ui.Text>
+    </ui.Box>)];
+            }
+        });
+    });
 };
-const pics = new Map();
-const PICS_HELD = 60;
-let isThumbsCleared = false;
+var pics = new Map();
+var PICS_HELD = 60;
+var isThumbsCleared = false;
 // Each Details tab's pictures by step number, as last looked for, by the work
-const shots = new Map();
+var shots = new Map();
 // One picture as the chat shows it: where it is now (the copy a report kept, once the temporary file is gone) and its small copy.
 // Nothing for a file a command only named that was there before the work began
-const picOf = async ($, given, one, isSeen, kept, isDrawn) => {
-    const asked = given.startsWith('/') ? given : `${cwd}/${given}`;
-    const stat = await $.fs.stat(asked).catch(() => undefined);
-    const copy = kept.filter(r => r.agent === one.id).flatMap(r => r.files.filter(file => fileName(file) === fileName(asked)).map(file => `${reportPath(r)}/${file}`))[0];
-    if (!stat || stat.kind !== 'file')
-        return copy && !isSeen ? picOf($, copy, one, false, [], isDrawn) : isSeen ? null : { name: fileName(asked), path: '', thumb: null, isGone: true };
-    if (isSeen && stat.mtimeMs < one.startedAt - 5000)
-        return null;
-    const id = `${asked}:${stat.mtimeMs}:${isDrawn}`;
-    if (pics.has(id))
-        return pics.get(id) ?? null;
-    let thumb = null;
-    if (isDrawn && /\.svg$/i.test(asked) && stat.size <= SVG_CHARS) {
-        const text = await readOr($, asked);
-        const from = text.indexOf('<svg');
-        if (from >= 0)
-            thumb = { source: text.slice(from), width: 0, height: 0 };
-    }
-    else if (isDrawn && RASTER.test(asked)) {
-        const to = `${dir}/thumbs/${slug(asked).slice(-60)}-${mark(asked).replace(':', '-')}-${Math.round(stat.mtimeMs)}.jpg`;
-        if (!(await $.fs.exists(to))) {
-            await $.process.run(['mkdir', '-p', `${dir}/thumbs`]);
-            for (const size of CHAT_THUMB_SIZES) {
-                await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '60', asked, '--out', to]);
-                if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= THUMB_BYTES)
-                    break;
-            }
+var picOf = function ($, given, one, isSeen, kept, isDrawn) { return __awaiter(_this, void 0, void 0, function () {
+    var asked, stat, copy, id, thumb, text, from, to, _i, CHAT_THUMB_SIZES_1, size, pic;
+    var _a, _b, _c, _d;
+    return __generator(this, function (_e) {
+        switch (_e.label) {
+            case 0:
+                asked = given.startsWith('/') ? given : "".concat(cwd, "/").concat(given);
+                return [4 /*yield*/, $.fs.stat(asked).catch(function () { return undefined; })];
+            case 1:
+                stat = _e.sent();
+                copy = kept.filter(function (r) { return r.agent === one.id; }).flatMap(function (r) { return r.files.filter(function (file) { return fileName(file) === fileName(asked); }).map(function (file) { return "".concat(reportPath(r), "/").concat(file); }); })[0];
+                if (!stat || stat.kind !== 'file')
+                    return [2 /*return*/, copy && !isSeen ? picOf($, copy, one, false, [], isDrawn) : isSeen ? null : { name: fileName(asked), path: '', thumb: null, isGone: true }];
+                if (isSeen && stat.mtimeMs < one.startedAt - 5000)
+                    return [2 /*return*/, null];
+                id = "".concat(asked, ":").concat(stat.mtimeMs, ":").concat(isDrawn);
+                if (pics.has(id))
+                    return [2 /*return*/, (_a = pics.get(id)) !== null && _a !== void 0 ? _a : null];
+                thumb = null;
+                if (!(isDrawn && /\.svg$/i.test(asked) && stat.size <= SVG_CHARS)) return [3 /*break*/, 3];
+                return [4 /*yield*/, readOr($, asked)];
+            case 2:
+                text = _e.sent();
+                from = text.indexOf('<svg');
+                if (from >= 0)
+                    thumb = { source: text.slice(from), width: 0, height: 0 };
+                return [3 /*break*/, 12];
+            case 3:
+                if (!(isDrawn && RASTER.test(asked))) return [3 /*break*/, 12];
+                to = "".concat(dir, "/thumbs/").concat(slug(asked).slice(-60), "-").concat(mark(asked).replace(':', '-'), "-").concat(Math.round(stat.mtimeMs), ".jpg");
+                return [4 /*yield*/, $.fs.exists(to)];
+            case 4:
+                if (!!(_e.sent())) return [3 /*break*/, 10];
+                return [4 /*yield*/, $.process.run(['mkdir', '-p', "".concat(dir, "/thumbs")])];
+            case 5:
+                _e.sent();
+                _i = 0, CHAT_THUMB_SIZES_1 = CHAT_THUMB_SIZES;
+                _e.label = 6;
+            case 6:
+                if (!(_i < CHAT_THUMB_SIZES_1.length)) return [3 /*break*/, 10];
+                size = CHAT_THUMB_SIZES_1[_i];
+                return [4 /*yield*/, $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '60', asked, '--out', to])];
+            case 7:
+                _e.sent();
+                return [4 /*yield*/, $.fs.stat(to).catch(function () { return undefined; })];
+            case 8:
+                if (((_c = (_b = (_e.sent())) === null || _b === void 0 ? void 0 : _b.size) !== null && _c !== void 0 ? _c : Infinity) <= THUMB_BYTES)
+                    return [3 /*break*/, 10];
+                _e.label = 9;
+            case 9:
+                _i++;
+                return [3 /*break*/, 6];
+            case 10: return [4 /*yield*/, thumbOf($, to)];
+            case 11:
+                thumb = _e.sent();
+                _e.label = 12;
+            case 12:
+                pic = { name: fileName(asked), path: asked, thumb: thumb };
+                // Only the pictures looked at lately are held
+                if (pics.size >= PICS_HELD)
+                    pics.delete((_d = pics.keys().next().value) !== null && _d !== void 0 ? _d : '');
+                pics.set(id, pic);
+                return [2 /*return*/, pic];
         }
-        thumb = await thumbOf($, to);
-    }
-    const pic = { name: fileName(asked), path: asked, thumb };
-    // Only the pictures looked at lately are held
-    if (pics.size >= PICS_HELD)
-        pics.delete(pics.keys().next().value ?? '');
-    pics.set(id, pic);
-    return pic;
-};
+    });
+}); };
 // The pictures of a chat's shown lines, each at the last step that made it, by that step's number; the newest few drawn small
-const picturesIn = async ($, lines, one, kept, canDraw) => {
-    // Small copies not looked at for two weeks are cleared, once a load
-    if (!isThumbsCleared) {
-        isThumbsCleared = true;
-        await $.process.run(['find', `${dir}/thumbs`, '-name', '*.jpg', '-mtime', '+14', '-delete']).catch(() => undefined);
-    }
-    const last = new Map();
-    // Steps are numbered as the chat numbers them, and only the lines it shows count
-    let uses = 0;
-    for (const line of newest(lines.map(one => ({ ...one, at: one.isUse ? (uses += 1) : uses }))))
-        for (const [list, isSeen] of [
-            [line.pictures ?? [], false],
-            [line.seen ?? [], true],
-        ])
-            for (const path of list) {
-                // A picture made again is placed at its newest step
-                const was = last.get(path);
-                last.delete(path);
-                last.set(path, { at: line.at ?? 0, isSeen: isSeen && was?.isSeen !== false });
-            }
-    // The newest pictures alone are looked at: a chat that made very many keeps its last ones
-    const order = [...last.entries()].slice(-PICS_LISTED);
-    const byStep = new Map();
-    let drawnCount = 0;
-    // The small copies together keep the tab's drawing under what the app accepts; one past that is a row that opens it
-    let drawnChars = 0;
-    for (const [path, { at, isSeen }] of order.reverse()) {
-        const found = await picOf($, path, one, isSeen, kept, canDraw && drawnCount < CHAT_THUMBS).catch(() => null);
-        if (!found)
-            continue;
-        const pic = found.thumb && drawnChars + found.thumb.source.length > PICTURES_CHARS ? { ...found, thumb: null } : found;
-        if (pic.thumb)
-            (drawnCount += 1), (drawnChars += pic.thumb.source.length);
-        byStep.set(at, [pic, ...(byStep.get(at) ?? [])]);
-    }
-    return byStep;
-};
+var picturesIn = function ($, lines, one, kept, canDraw) { return __awaiter(_this, void 0, void 0, function () {
+    var last, uses, _i, _a, line, _b, _c, _d, list, isSeen, _e, list_1, path, was, order, byStep, drawnCount, drawnChars, _f, _g, _h, path, _j, at, isSeen, found, pic;
+    var _k, _l, _m, _o;
+    return __generator(this, function (_p) {
+        switch (_p.label) {
+            case 0:
+                if (!!isThumbsCleared) return [3 /*break*/, 2];
+                isThumbsCleared = true;
+                return [4 /*yield*/, $.process.run(['find', "".concat(dir, "/thumbs"), '-name', '*.jpg', '-mtime', '+14', '-delete']).catch(function () { return undefined; })];
+            case 1:
+                _p.sent();
+                _p.label = 2;
+            case 2:
+                last = new Map();
+                uses = 0;
+                for (_i = 0, _a = newest(lines.map(function (one) { return (__assign(__assign({}, one), { at: one.isUse ? (uses += 1) : uses })); })); _i < _a.length; _i++) {
+                    line = _a[_i];
+                    for (_b = 0, _c = [
+                        [(_k = line.pictures) !== null && _k !== void 0 ? _k : [], false],
+                        [(_l = line.seen) !== null && _l !== void 0 ? _l : [], true],
+                    ]; _b < _c.length; _b++) {
+                        _d = _c[_b], list = _d[0], isSeen = _d[1];
+                        for (_e = 0, list_1 = list; _e < list_1.length; _e++) {
+                            path = list_1[_e];
+                            was = last.get(path);
+                            last.delete(path);
+                            last.set(path, { at: (_m = line.at) !== null && _m !== void 0 ? _m : 0, isSeen: isSeen && (was === null || was === void 0 ? void 0 : was.isSeen) !== false });
+                        }
+                    }
+                }
+                order = __spreadArray([], last.entries(), true).slice(-PICS_LISTED);
+                byStep = new Map();
+                drawnCount = 0;
+                drawnChars = 0;
+                _f = 0, _g = order.reverse();
+                _p.label = 3;
+            case 3:
+                if (!(_f < _g.length)) return [3 /*break*/, 6];
+                _h = _g[_f], path = _h[0], _j = _h[1], at = _j.at, isSeen = _j.isSeen;
+                return [4 /*yield*/, picOf($, path, one, isSeen, kept, canDraw && drawnCount < CHAT_THUMBS).catch(function () { return null; })];
+            case 4:
+                found = _p.sent();
+                if (!found)
+                    return [3 /*break*/, 5];
+                pic = found.thumb && drawnChars + found.thumb.source.length > PICTURES_CHARS ? __assign(__assign({}, found), { thumb: null }) : found;
+                if (pic.thumb)
+                    (drawnCount += 1), (drawnChars += pic.thumb.source.length);
+                byStep.set(at, __spreadArray([pic], ((_o = byStep.get(at)) !== null && _o !== void 0 ? _o : []), true));
+                _p.label = 5;
+            case 5:
+                _f++;
+                return [3 /*break*/, 3];
+            case 6: return [2 /*return*/, byStep];
+        }
+    });
+}); };
 // Reads a work's chat, and finds the pictures it made, for its Details tab, then draws the tab again. Called from the drawing, it
 // runs after it: the chat is read again when the work has made a step, ended a response, been steered or ended, and its pictures
 // looked for again when its chat or the reports change. One read of a work runs at a time; the next drawing reads what came since
-const loading = new Set();
+var loading = new Set();
 // A chat the app would not give is asked for again after this long, at the tab's next drawing, never sooner
-const RETRY_READ = 15000;
-const loadWork = async ($, id) => {
-    if (loading.has(id))
-        return;
-    loading.add(id);
-    let isChanged = false;
-    try {
-        const one = (await read($, todos)).find(card => card.id === id);
-        if (!one)
-            return;
-        const key = [one.id, one.steps, one.tokens, one.entries.length, one.status].join(':');
-        const kept = await read($, reports);
-        const shotsKey = `${key}:${kept.length}`;
-        const now = await $.clock.now();
-        const was = talks.get(id);
-        if (was?.key !== key || (!was.lines && now - (was.at ?? 0) >= RETRY_READ)) {
-            const rows = await $.session.messages({ agentId: id }).catch(() => undefined);
-            talks.set(id, { key, lines: Array.isArray(rows) ? withSteers(talkOf(rows), one.entries) : undefined, at: now });
-            isChanged = true;
+var RETRY_READ = 15000;
+var loadWork = function ($, id) { return __awaiter(_this, void 0, void 0, function () {
+    var isChanged, one, key, kept, shotsKey, now, was, rows_2, lines, _a, _b, _c, err_1, _d, _e, _f;
+    var _g, _h;
+    var _j, _k, _l;
+    return __generator(this, function (_m) {
+        switch (_m.label) {
+            case 0:
+                if (loading.has(id))
+                    return [2 /*return*/];
+                loading.add(id);
+                isChanged = false;
+                _m.label = 1;
+            case 1:
+                _m.trys.push([1, 9, 13, 14]);
+                return [4 /*yield*/, read($, todos)];
+            case 2:
+                one = (_m.sent()).find(function (card) { return card.id === id; });
+                if (!one)
+                    return [2 /*return*/];
+                key = [one.id, one.steps, one.tokens, one.entries.length, one.status].join(':');
+                return [4 /*yield*/, read($, reports)];
+            case 3:
+                kept = _m.sent();
+                shotsKey = "".concat(key, ":").concat(kept.length);
+                return [4 /*yield*/, $.clock.now()];
+            case 4:
+                now = _m.sent();
+                was = talks.get(id);
+                if (!((was === null || was === void 0 ? void 0 : was.key) !== key || (!was.lines && now - ((_j = was.at) !== null && _j !== void 0 ? _j : 0) >= RETRY_READ))) return [3 /*break*/, 6];
+                during('read a task for its Details');
+                return [4 /*yield*/, $.session.messages({ agentId: id }).catch(function () { return undefined; })];
+            case 5:
+                rows_2 = _m.sent();
+                talks.set(id, { key: key, lines: Array.isArray(rows_2) ? withSteers(talkOf(rows_2), one.entries) : undefined, at: now });
+                isChanged = true;
+                _m.label = 6;
+            case 6:
+                lines = (_k = talks.get(id)) === null || _k === void 0 ? void 0 : _k.lines;
+                if (!(lines && ((_l = shots.get(id)) === null || _l === void 0 ? void 0 : _l.key) !== shotsKey)) return [3 /*break*/, 8];
+                _b = (_a = shots).set;
+                _c = [id];
+                _g = { key: shotsKey };
+                return [4 /*yield*/, picturesIn($, lines, one, kept, true).catch(function () { return new Map(); })];
+            case 7:
+                _b.apply(_a, _c.concat([(_g.shots = _m.sent(), _g)]));
+                isChanged = true;
+                _m.label = 8;
+            case 8: return [3 /*break*/, 14];
+            case 9:
+                err_1 = _m.sent();
+                if (!!talks.has(id)) return [3 /*break*/, 11];
+                _e = (_d = talks).set;
+                _f = [id];
+                _h = { key: '', lines: undefined };
+                return [4 /*yield*/, $.clock.now().catch(function () { return 0; })];
+            case 10:
+                _e.apply(_d, _f.concat([(_h.at = _m.sent(), _h)]));
+                _m.label = 11;
+            case 11:
+                isChanged = true;
+                return [4 /*yield*/, log($, "chat of ".concat(id, " not read: ").concat(String(err_1))).catch(function () { return undefined; })];
+            case 12:
+                _m.sent();
+                return [3 /*break*/, 14];
+            case 13:
+                loading.delete(id);
+                return [7 /*endfinally*/];
+            case 14:
+                // Drawn again only when something new was read, so a drawing that finds nothing new ends there
+                if (isChanged)
+                    redraw($);
+                return [2 /*return*/];
         }
-        const lines = talks.get(id)?.lines;
-        if (lines && shots.get(id)?.key !== shotsKey) {
-            shots.set(id, { key: shotsKey, shots: await picturesIn($, lines, one, kept, true).catch(() => new Map()) });
-            isChanged = true;
-        }
-    }
-    catch (err) {
-        // Whatever went wrong, the tab stops saying it is reading, and says the chat is not to be had
-        if (!talks.has(id))
-            talks.set(id, { key: '', lines: undefined, at: await $.clock.now().catch(() => 0) });
-        isChanged = true;
-        await log($, `chat of ${id} not read: ${String(err)}`).catch(() => undefined);
-    }
-    finally {
-        loading.delete(id);
-    }
-    // Drawn again only when something new was read, so a drawing that finds nothing new ends there
-    if (isChanged)
-        redraw($);
-};
+    });
+}); };
 // Another chat's work keeps its chat in that chat's transcript on this Mac, which the engine gives this chat no rows of: it is read
 // from its file, the end of it, in the same rows. A chat on another Mac is not read: its Details says where it is
-const THEIR_TAIL = 800000;
-const SAFE_ID = /^[A-Za-z0-9_-]{1,80}$/;
+var THEIR_TAIL = 800000;
+var SAFE_ID = /^[A-Za-z0-9_-]{1,80}$/;
 // A transcript's lines as the engine's rows: what the work was told, what it wrote, each tool step with what came back
-const rowsOfTranscript = (text) => {
-    const rows = [];
-    const uses = new Map();
-    const textOf = (content) => typeof content === 'string' ? content : Array.isArray(content) ? content.flatMap(block => (block && typeof block === 'object' && block.type === 'text' && typeof block.text === 'string' ? [block.text] : [])).join('\n') : '';
-    for (const line of text.split('\n')) {
+var rowsOfTranscript = function (text) {
+    var _a;
+    var rows = [];
+    var uses = new Map();
+    var textOf = function (content) {
+        return typeof content === 'string' ? content : Array.isArray(content) ? content.flatMap(function (block) { return (block && typeof block === 'object' && block.type === 'text' && typeof block.text === 'string' ? [block.text] : []); }).join('\n') : '';
+    };
+    for (var _i = 0, _b = text.split('\n'); _i < _b.length; _i++) {
+        var line = _b[_i];
         if (!line.startsWith('{'))
             continue;
-        let entry;
+        var entry = void 0;
         try {
             entry = JSON.parse(line);
         }
-        catch {
+        catch (_c) {
             continue;
         }
-        const content = entry.message?.content;
+        var content = (_a = entry.message) === null || _a === void 0 ? void 0 : _a.content;
         if (entry.type === 'assistant') {
-            const toolUses = (Array.isArray(content) ? content : []).flatMap((block) => {
-                const b = block;
-                if (b?.type !== 'tool_use' || typeof b.id !== 'string' || typeof b.name !== 'string')
+            var toolUses = (Array.isArray(content) ? content : []).flatMap(function (block) {
+                var b = block;
+                if ((b === null || b === void 0 ? void 0 : b.type) !== 'tool_use' || typeof b.id !== 'string' || typeof b.name !== 'string')
                     return [];
-                const use = { tool_use_id: b.id, tool: b.name, input: b.input && typeof b.input === 'object' ? b.input : {} };
+                var use = { tool_use_id: b.id, tool: b.name, input: b.input && typeof b.input === 'object' ? b.input : {} };
                 uses.set(b.id, use);
                 return [use];
             });
-            rows.push({ role: 'assistant', text: textOf(content), toolUses });
+            rows.push({ role: 'assistant', text: textOf(content), toolUses: toolUses });
         }
         else if (entry.type === 'user' && entry.isMeta !== true) {
             // What came back to a tool step goes with that step; the rest is what the work was told
-            for (const block of Array.isArray(content) ? content : []) {
-                const b = block;
-                const use = b?.type === 'tool_result' && typeof b.tool_use_id === 'string' ? uses.get(b.tool_use_id) : undefined;
+            for (var _d = 0, _e = Array.isArray(content) ? content : []; _d < _e.length; _d++) {
+                var block = _e[_d];
+                var b = block;
+                var use = (b === null || b === void 0 ? void 0 : b.type) === 'tool_result' && typeof b.tool_use_id === 'string' ? uses.get(b.tool_use_id) : undefined;
                 if (use)
-                    Object.assign(use, { text: textOf(b.content), ...(b.is_error === true ? { isError: true } : {}) });
+                    Object.assign(use, __assign({ text: textOf(b.content) }, (b.is_error === true ? { isError: true } : {})));
             }
-            const said = textOf(content);
-            if (said)
-                rows.push({ role: 'user', text: said, toolUses: [] });
+            var said_1 = textOf(content);
+            if (said_1)
+                rows.push({ role: 'user', text: said_1, toolUses: [] });
         }
     }
     return rows;
 };
-const loadTheirs = async ($, one) => {
-    const c = one.chat;
-    const id = one.id;
-    if (!c || c.host || !SAFE_ID.test(c.id) || !SAFE_ID.test(c.agent ?? '') || loading.has(id))
-        return;
-    loading.add(id);
-    let isChanged = false;
-    try {
-        // Read again when it has made a step, said where it is, or ended: not as its context grows
-        const key = [one.steps ?? 0, one.entries.at(-1)?.text ?? '', one.status, one.items.length, one.endedAt].join(':');
-        const now = await $.clock.now();
-        const was = talks.get(id);
-        if (was?.key === key && (was.lines || now - (was.at ?? 0) < RETRY_READ))
-            return;
-        const home = (await $.env.get('HOME')) ?? '';
-        // Its folder named as the engine names its projects, and failing that any project that holds that chat
-        const slug = c.folder.replace(/[^A-Za-z0-9]/g, '-');
-        const name = `${c.id}/subagents/agent-${c.agent}.jsonl`;
-        const r = await $.process
-            .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', `${home}/.claude/projects`, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
-            .catch(() => undefined);
-        const rows = r?.exitCode === 0 ? rowsOfTranscript(r.stdout) : undefined;
-        talks.set(id, { key, lines: rows?.length ? withSteers(talkOf(rows), one.entries) : undefined, at: now });
-        isChanged = true;
-    }
-    catch (err) {
-        if (!talks.has(id))
-            talks.set(id, { key: '', lines: undefined, at: await $.clock.now().catch(() => 0) });
-        isChanged = true;
-        await log($, `chat of ${id} not read: ${String(err)}`).catch(() => undefined);
-    }
-    finally {
-        loading.delete(id);
-    }
-    if (isChanged)
-        redraw($);
-};
+var loadTheirs = function ($, one) { return __awaiter(_this, void 0, void 0, function () {
+    var c, id, isChanged, key, now, was, home, slug_1, name_2, r, rows_3, err_2, _a, _b, _c;
+    var _d;
+    var _e, _f, _g, _h, _j, _k;
+    return __generator(this, function (_l) {
+        switch (_l.label) {
+            case 0:
+                c = one.chat;
+                id = one.id;
+                if (!c || c.host || !SAFE_ID.test(c.id) || !SAFE_ID.test((_e = c.agent) !== null && _e !== void 0 ? _e : '') || loading.has(id))
+                    return [2 /*return*/];
+                loading.add(id);
+                isChanged = false;
+                _l.label = 1;
+            case 1:
+                _l.trys.push([1, 5, 9, 10]);
+                key = [(_f = one.steps) !== null && _f !== void 0 ? _f : 0, (_h = (_g = one.entries.at(-1)) === null || _g === void 0 ? void 0 : _g.text) !== null && _h !== void 0 ? _h : '', one.status, one.items.length, one.endedAt].join(':');
+                return [4 /*yield*/, $.clock.now()];
+            case 2:
+                now = _l.sent();
+                was = talks.get(id);
+                if ((was === null || was === void 0 ? void 0 : was.key) === key && (was.lines || now - ((_j = was.at) !== null && _j !== void 0 ? _j : 0) < RETRY_READ))
+                    return [2 /*return*/];
+                return [4 /*yield*/, $.env.get('HOME')];
+            case 3:
+                home = (_k = (_l.sent())) !== null && _k !== void 0 ? _k : '';
+                slug_1 = c.folder.replace(/[^A-Za-z0-9]/g, '-');
+                name_2 = "".concat(c.id, "/subagents/agent-").concat(c.agent, ".jsonl");
+                during("read another chat's task");
+                return [4 /*yield*/, $.process
+                        .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', "".concat(home, "/.claude/projects"), slug_1, name_2, String(THEIR_TAIL)], { timeoutMs: 5000 })
+                        .catch(function () { return undefined; })];
+            case 4:
+                r = _l.sent();
+                rows_3 = (r === null || r === void 0 ? void 0 : r.exitCode) === 0 ? rowsOfTranscript(r.stdout) : undefined;
+                talks.set(id, { key: key, lines: (rows_3 === null || rows_3 === void 0 ? void 0 : rows_3.length) ? withSteers(talkOf(rows_3), one.entries) : undefined, at: now });
+                isChanged = true;
+                return [3 /*break*/, 10];
+            case 5:
+                err_2 = _l.sent();
+                if (!!talks.has(id)) return [3 /*break*/, 7];
+                _b = (_a = talks).set;
+                _c = [id];
+                _d = { key: '', lines: undefined };
+                return [4 /*yield*/, $.clock.now().catch(function () { return 0; })];
+            case 6:
+                _b.apply(_a, _c.concat([(_d.at = _l.sent(), _d)]));
+                _l.label = 7;
+            case 7:
+                isChanged = true;
+                return [4 /*yield*/, log($, "chat of ".concat(id, " not read: ").concat(String(err_2))).catch(function () { return undefined; })];
+            case 8:
+                _l.sent();
+                return [3 /*break*/, 10];
+            case 9:
+                loading.delete(id);
+                return [7 /*endfinally*/];
+            case 10:
+                if (isChanged)
+                    redraw($);
+                return [2 /*return*/];
+        }
+    });
+}); };
 // The pictures an ask is about, drawn small on its card under what it is about, so the person decides there without waiting for
 // the chat to send them (14 Nov: a card asked to pick one of four designs, and the designs came only later, in the chat). Each
 // small copy is smaller than a chat's: a card's pictures are drawn in the list, beside every other card, and the list is one drawing
 // Each is made twice as wide as it is drawn, so its words stay readable on a sharp screen: smaller files first by a lower quality,
 // then by a narrower copy
-const ASK_THUMB_SIZES = [
+var ASK_THUMB_SIZES = [
     ['600', '45'],
     ['600', '35'],
     ['480', '40'],
     ['360', '40'],
 ];
-const ASK_THUMB_BYTES = 25000;
+var ASK_THUMB_BYTES = 25000;
 // How wide an ask's small picture is drawn at most, and how tall, in the panel's pixels
-const ASK_PIC_WIDE = 300;
-const ASK_PIC_TALL = 240;
-const sizedAskPic = (width, height) => {
-    const scale = Math.min(1, ASK_PIC_WIDE / width, ASK_PIC_TALL / height);
+var ASK_PIC_WIDE = 300;
+var ASK_PIC_TALL = 240;
+var sizedAskPic = function (width, height) {
+    var scale = Math.min(1, ASK_PIC_WIDE / width, ASK_PIC_TALL / height);
     return { width: Math.round(width * scale), height: Math.round(height * scale) };
 };
 // The most characters every ask's small pictures together take in one drawing; one past that is a row that opens it
-const ASK_PICS_CHARS = 140000;
+var ASK_PICS_CHARS = 140000;
 // Each ask's pictures as last made, by the work, its ask and its pictures; made out of the drawing, which is drawn again once they are
-const askPics = new Map();
-const askLoading = new Set();
-const askPicsKey = (one) => `${one.id}:${one.ask?.at ?? 0}:${(one.ask?.pictures ?? []).join('|')}`;
-const askPicOf = async ($, path) => {
-    const stat = await $.fs.stat(path).catch(() => undefined);
-    // A picture not on this Mac (an ask of a chat on another Mac names its own files) is left out
-    if (!stat || stat.kind !== 'file')
-        return null;
-    let thumb = null;
-    if (/\.svg$/i.test(path) && stat.size <= SVG_CHARS) {
-        const text = await readOr($, path);
-        const from = text.indexOf('<svg');
-        if (from >= 0) {
-            // Its own size, from its width and height or its viewBox, so it is drawn within the card like any other
-            const head = /<svg[^>]*>/i.exec(text.slice(from))?.[0] ?? '';
-            const box = /viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(head);
-            // Both from its width and height, else both from its viewBox: one of each could be in different units
-            const given = [/\swidth="([\d.]+)(px)?"/i.exec(head)?.[1], /\sheight="([\d.]+)(px)?"/i.exec(head)?.[1]];
-            const [width, height] = (given[0] && given[1] ? given : [box?.[1], box?.[2]]).map(one => Number(one ?? 0));
-            thumb = { source: text.slice(from), width: width && height ? width : 0, height: width && height ? height : 0 };
+var askPics = new Map();
+var askLoading = new Set();
+var askPicsKey = function (one) { var _a, _b, _c, _d; return "".concat(one.id, ":").concat((_b = (_a = one.ask) === null || _a === void 0 ? void 0 : _a.at) !== null && _b !== void 0 ? _b : 0, ":").concat(((_d = (_c = one.ask) === null || _c === void 0 ? void 0 : _c.pictures) !== null && _d !== void 0 ? _d : []).join('|')); };
+var askPicOf = function ($, path) { return __awaiter(_this, void 0, void 0, function () {
+    var stat, thumb, text, from, head, box, given, _a, width, height, to, _i, ASK_THUMB_SIZES_1, _b, size, quality;
+    var _c, _d, _e, _f, _g, _h;
+    return __generator(this, function (_j) {
+        switch (_j.label) {
+            case 0: return [4 /*yield*/, $.fs.stat(path).catch(function () { return undefined; })
+                // A picture not on this Mac (an ask of a chat on another Mac names its own files) is left out
+            ];
+            case 1:
+                stat = _j.sent();
+                // A picture not on this Mac (an ask of a chat on another Mac names its own files) is left out
+                if (!stat || stat.kind !== 'file')
+                    return [2 /*return*/, null];
+                thumb = null;
+                if (!(/\.svg$/i.test(path) && stat.size <= SVG_CHARS)) return [3 /*break*/, 3];
+                return [4 /*yield*/, readOr($, path)];
+            case 2:
+                text = _j.sent();
+                from = text.indexOf('<svg');
+                if (from >= 0) {
+                    head = (_d = (_c = /<svg[^>]*>/i.exec(text.slice(from))) === null || _c === void 0 ? void 0 : _c[0]) !== null && _d !== void 0 ? _d : '';
+                    box = /viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(head);
+                    given = [(_e = /\swidth="([\d.]+)(px)?"/i.exec(head)) === null || _e === void 0 ? void 0 : _e[1], (_f = /\sheight="([\d.]+)(px)?"/i.exec(head)) === null || _f === void 0 ? void 0 : _f[1]];
+                    _a = (given[0] && given[1] ? given : [box === null || box === void 0 ? void 0 : box[1], box === null || box === void 0 ? void 0 : box[2]]).map(function (one) { return Number(one !== null && one !== void 0 ? one : 0); }), width = _a[0], height = _a[1];
+                    thumb = { source: text.slice(from), width: width && height ? width : 0, height: width && height ? height : 0 };
+                }
+                return [3 /*break*/, 12];
+            case 3:
+                if (!RASTER.test(path)) return [3 /*break*/, 12];
+                to = "".concat(dir, "/thumbs/ask-").concat(slug(path).slice(-60), "-").concat(mark(path).replace(':', '-'), "-").concat(Math.round(stat.mtimeMs), ".jpg");
+                return [4 /*yield*/, $.fs.exists(to)];
+            case 4:
+                if (!!(_j.sent())) return [3 /*break*/, 10];
+                return [4 /*yield*/, $.process.run(['mkdir', '-p', "".concat(dir, "/thumbs")])];
+            case 5:
+                _j.sent();
+                _i = 0, ASK_THUMB_SIZES_1 = ASK_THUMB_SIZES;
+                _j.label = 6;
+            case 6:
+                if (!(_i < ASK_THUMB_SIZES_1.length)) return [3 /*break*/, 10];
+                _b = ASK_THUMB_SIZES_1[_i], size = _b[0], quality = _b[1];
+                return [4 /*yield*/, $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, path, '--out', to])];
+            case 7:
+                _j.sent();
+                return [4 /*yield*/, $.fs.stat(to).catch(function () { return undefined; })];
+            case 8:
+                if (((_h = (_g = (_j.sent())) === null || _g === void 0 ? void 0 : _g.size) !== null && _h !== void 0 ? _h : Infinity) <= ASK_THUMB_BYTES)
+                    return [3 /*break*/, 10];
+                _j.label = 9;
+            case 9:
+                _i++;
+                return [3 /*break*/, 6];
+            case 10: return [4 /*yield*/, thumbOf($, to)];
+            case 11:
+                thumb = _j.sent();
+                _j.label = 12;
+            case 12: return [2 /*return*/, { name: fileName(path), path: path, thumb: thumb }];
         }
-    }
-    else if (RASTER.test(path)) {
-        const to = `${dir}/thumbs/ask-${slug(path).slice(-60)}-${mark(path).replace(':', '-')}-${Math.round(stat.mtimeMs)}.jpg`;
-        if (!(await $.fs.exists(to))) {
-            await $.process.run(['mkdir', '-p', `${dir}/thumbs`]);
-            for (const [size, quality] of ASK_THUMB_SIZES) {
-                await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, path, '--out', to]);
-                if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= ASK_THUMB_BYTES)
-                    break;
-            }
-        }
-        thumb = await thumbOf($, to);
-    }
-    return { name: fileName(path), path, thumb };
-};
+    });
+}); };
 // What a card draws: its ask's pictures as made, or nothing yet while they are made
-const askPicturesOf = ($, one) => {
-    if (!one.ask?.pictures?.length)
+var askPicturesOf = function ($, one) {
+    var _a, _b;
+    if (!((_b = (_a = one.ask) === null || _a === void 0 ? void 0 : _a.pictures) === null || _b === void 0 ? void 0 : _b.length))
         return [];
-    const key = askPicsKey(one);
+    var key = askPicsKey(one);
     if (askPics.has(key))
         return askPics.get(key);
     if (!askLoading.has(key)) {
         askLoading.add(key);
-        const paths = [...one.ask.pictures];
-        void (async () => {
-            const made = [];
-            for (const path of paths) {
-                const pic = await askPicOf($, path).catch(() => null);
-                if (pic)
-                    made.push(pic);
-            }
-            if (askPics.size >= 60)
-                askPics.delete(askPics.keys().next().value ?? '');
-            askPics.set(key, made);
-        })()
-            .catch(err => log($, `pictures of an ask not made: ${String(err)}`))
-            .finally(() => (askLoading.delete(key), redraw($)));
+        var paths_1 = __spreadArray([], one.ask.pictures, true);
+        void (function () { return __awaiter(_this, void 0, void 0, function () {
+            var made, _i, paths_2, path, pic;
+            var _a;
+            return __generator(this, function (_b) {
+                switch (_b.label) {
+                    case 0:
+                        made = [];
+                        _i = 0, paths_2 = paths_1;
+                        _b.label = 1;
+                    case 1:
+                        if (!(_i < paths_2.length)) return [3 /*break*/, 4];
+                        path = paths_2[_i];
+                        return [4 /*yield*/, askPicOf($, path).catch(function () { return null; })];
+                    case 2:
+                        pic = _b.sent();
+                        if (pic)
+                            made.push(pic);
+                        _b.label = 3;
+                    case 3:
+                        _i++;
+                        return [3 /*break*/, 1];
+                    case 4:
+                        if (askPics.size >= 60)
+                            askPics.delete((_a = askPics.keys().next().value) !== null && _a !== void 0 ? _a : '');
+                        askPics.set(key, made);
+                        return [2 /*return*/];
+                }
+            });
+        }); })()
+            .catch(function (err) { return log($, "pictures of an ask not made: ".concat(String(err))); })
+            .finally(function () { return (askLoading.delete(key), redraw($)); });
     }
     return undefined;
 };

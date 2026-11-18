@@ -349,6 +349,7 @@ const stepsAtEnd = async ($: EngineInterface) => {
     const id = card.id
     const isDone = !card.byYou && !(card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) && card.status === 'done'
     if (!isDone) await unsettleAsked($, id, held.ask.at).catch(err => log($, `result's question not opened again for ${id}: ${String(err)}`))
+    if (!isDone) await releaseOver($, id).catch(err => log($, `release of ${id} not cleared: ${String(err)}`))
     if (card.byYou) await stepLine($, id, `Claudopus didn't do “${held.said}” · you stopped the task first`)
     else if (card.ask && !card.ask.refused && (card.ask.at !== held.ask.at || card.ask.text !== held.ask.text)) await stepLine($, id, `Claudopus didn't do “${held.said}” · Claude asked something else first`)
     else if (card.status !== 'done') {
@@ -364,6 +365,25 @@ const stepsAtEnd = async ($: EngineInterface) => {
     } else await lastStep($, card, held.ask, held.said).catch(err => log($, `last step of ${id} not done: ${String(err)}`))
   }
 }
+// A release under way for a card ends. Finished, every to-do it left counts as done, and it is Done from now, its green moment
+// with it, once; any other way (not allowed, not started, failed, or no release after all) it is as before the press, and a task
+// started again to look at a failure is at work
+const releaseOver = async ($: EngineInterface, id: string, isDone = false) => {
+  const at = await $.clock.now()
+  await changeTodos($, list =>
+    list.map(card =>
+      card.id !== id || (!card.releasing && !isDone)
+        ? card
+        : isDone
+          ? { ...card, releasing: undefined, released: at, notDone: undefined, items: card.items.map(item => (item.state === 'open' || item.state === 'doing' ? { ...item, state: 'done' as const } : item)), ...(card.status === 'done' ? { endedAt: at } : {}) }
+          : { ...card, releasing: undefined },
+    ),
+  )
+  // (and the allow box's line that it is being released goes with it: green Done under "Claudopus is releasing it now" read as
+  // done while it released)
+  for (const note of doneNotes) if (note.call?.startsWith(`step-${id}-`)) await noteCallEnded($, note.call)
+  redraw($)
+}
 const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string) => {
   const folder = ask.folder ?? ''
   const step = ask.lastStep ?? ''
@@ -373,6 +393,8 @@ const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['as
   const wakeText = `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\n${RESUMED_BY_ANSWER}`
   const isFixed = Boolean(repo && branch && branch !== 'HEAD' && RELEASE_STEP.test(step) && (await $.fs.stat(`${repo}/.release`).catch(() => undefined))?.kind === 'file')
   await log($, `last step of ${one.id} on ${who()}'s go-ahead: ${isFixed ? 'the release, run by Claudopus' : 'a small fresh task'}`)
+  // (a fresh task's release is on that task's own card)
+  if (!isFixed) await releaseOver($, one.id).catch(err => log($, `release of ${one.id} not cleared: ${String(err)}`))
   // held for the person's allow, so never awaited in the press's own hook
   if (isFixed) return void releaseItself($, one, ask, said, repo, branch, wakeText).catch(err => log($, `release of ${one.id} not done: ${String(err)}`))
   const prompt = named(
@@ -395,20 +417,22 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   const name = (/\/\.git$/.test(common) ? common.replace(/\/\.git$/, '') : repo).split('/').pop() || repo
   const id = `step-${one.id}-${at}`
   const gate: Gate = { id, call: id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at, from: one.id }
+  await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, releasing: { at: card.releasing?.at ?? at, branch, by: 'claudopus' as const } } : card)))
   await stepLine($, one.id, `You pressed “${said}” · Claudopus releases ${branch} once you allow it below`)
   const allowed = await holdGate($, {}, gate, one.id)
-  if (allowed !== 'once') return stepLine($, one.id, `Nothing was released · ${allowed === 'deny' ? 'you denied it' : "it wasn't allowed"}`)
+  if (allowed !== 'once') return (await releaseOver($, one.id), stepLine($, one.id, `Nothing was released · ${allowed === 'deny' ? 'you denied it' : "it wasn't allowed"}`))
   const logFile = `${dir}/releases/${id}.log`
   const isLogged = await $.fs.write(logFile, '').then(() => true).catch(() => false)
-  if (!isLogged) return stepLine($, one.id, "Nothing was released · Claudopus couldn't start the release")
+  if (!isLogged) return (await releaseOver($, one.id), stepLine($, one.id, "Nothing was released · Claudopus couldn't start the release"))
   const grant = await issueGrant($, id, { host: 'release', command: `${repo}\n${branch}` }, 'release-grant')
-  if (!grant) return stepLine($, one.id, "Nothing was released · Claudopus couldn't use its keychain key")
+  if (!grant) return (await releaseOver($, one.id), stepLine($, one.id, "Nothing was released · Claudopus couldn't use its keychain key"))
   // Detached, so it outlives the ten minutes a call of the mod may take; its exit is written as its last line
   const run = await $.process
     .run(['/bin/sh', '-c', 'nohup /bin/sh -c \'"$1" > "$2" 2>&1; echo "claudopus-exit $?" >> "$2"\' sh "$1" "$2" > /dev/null 2>&1 &', 'sh', `${$.plugin.root}/bin/release`, logFile], { cwd: repo, env: { CLAUDECODE: '1' }, timeoutMs: 15_000 })
     .catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (run.exitCode !== 0) {
     await dropGrants($, [grant])
+    await releaseOver($, one.id)
     return stepLine($, one.id, "Nothing was released · Claudopus couldn't start the release")
   }
   await log($, `release of ${branch} in ${name} started by Claudopus for ${one.id}`)
@@ -424,10 +448,12 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       const tail = text.replace(/claudopus-exit \d+\s*$/, '').replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n')
       if (exit === '0') {
         await stepLine($, one.id, `Released · ${cut(oneLine(tail.split('\n').at(-1) ?? ''), 160)}`)
+        await releaseOver($, one.id, true)
         await tellChat($, named(`Claudopus released "${titleOf(one)}" on {name}'s go-ahead. Its last lines:\n${tail}`))
         return
       }
       await stepLine($, one.id, `The release ${isLate ? 'is still running after 1h 30m' : 'failed'} · Claudopus started Claude again to look at it`)
+      await releaseOver($, one.id)
 
       await toEnded($, one, one.id, isLate ? `${wakeText}\nClaudopus started the release itself after the go-ahead, and it has run 90 minutes without ending. It may still be running: look at its log, ${logFile}, and at what is running, before anything else; do not start a second release while it runs. Its last lines:\n${tail}` : `${wakeText}\nClaudopus ran the release itself after the go-ahead, and it failed with exit ${exit}. Its log is ${logFile}; its last lines:\n${tail}\nSort out what it needs (exit 2: merge main and keep what both sides meant; exit 3: a build or check failed), then run the release as your rules say.`, { text: said, ask: ask.text, at, line: '', isCard: true, askAt: ask.at })
     })().catch(err => log($, `release of ${one.id} not followed: ${String(err)}`))
