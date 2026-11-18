@@ -427,10 +427,6 @@ const lookOwnWaits = async ($: EngineInterface, now: number) => {
     await tellChat($, named(OWN_WAIT_IN_CHAT(titleOf(one), mins)))
   }
 }
-// What its card says once Claudopus started it to look: while it still waits
-const ownWaitLine = (list: Todo[], one: Todo, at: number) =>
-  one.ownWait?.done && one.ownWait.at && isOwnWaiting(list, one, at) ? `Claudopus asked Claude to check on what it waits for · ${minutesSaid(Math.round((at - one.ownWait.at) / 60_000))} ago` : ''
-
 // The helpers a piece of work waits on, each by its title and id with what it runs and for how long, for its nudge
 const silentHelpers = (list: Todo[], id: string, at: number) =>
   list
@@ -438,25 +434,19 @@ const silentHelpers = (list: Todo[], id: string, at: number) =>
     .map(kid => `"${titleOf(kid)}" (${kid.id})${kid.running ? `, ${kid.running.what} for ${took(at - kid.running.at)}` : ''}`)
     .join('; ')
 
-// What a stuck card says above its line: how long nothing new has come back, and whether its helpers, or it, sit in a long call
+// What a stuck card says above its line: how long nothing new has come back, and whether its helpers, or it, sit in a long call;
+// nothing while a helper of its is at work. What Claudopus did about it is told to Claude and the chat, never said on the card
 const stuckLine = (list: Todo[], one: Todo, at: number) => {
   if (!one.stuckAt) return ''
   const mins = Math.max(1, Math.round((at - one.stuckAt) / 60_000))
   // A helper at work (a render in the background, a long call, output that changes) is no sign that nothing moves
-  if (runningKids(list, one.id).some(kid => isBusy(list, kid, at))) return "Waiting for its helpers"
+  if (runningKids(list, one.id).some(kid => isBusy(list, kid, at))) return ''
   const isLong = (kid: Todo) => Boolean(kid.running && at - kid.running.at >= RUNNING_SHOWN)
   const helpers = underOf(list, one.id).filter(kid => kid.status === 'working')
   const tail = helpers.length
     ? helpers.every(isLong) ? ` ${helpers.length === 1 ? 'Its helper is still' : helpers.length === 2 ? 'Both helpers are still' : `All ${helpers.length} helpers are still`} waiting.` : ''
     : isLong(one) ? ` One action has been running for ${took(at - (one.running?.at ?? at))}.` : ''
-  // and what Claudopus did about it
-  const done = one.helperWait?.done ?? 0
-  const nudge = !done
-    ? ''
-    : done >= 3
-      ? ' Claudopus asked Claude to check on its helpers, then to finish with what it has, and told the chat it may be stuck.'
-      : ` Claudopus asked Claude ${done >= 2 ? 'to finish with what it has' : 'to check on its helpers'}.`
-  return `Nothing new for ${mins}m.${tail}${nudge}`
+  return `Nothing new for ${mins}m.${tail}`
 }
 
 
@@ -546,18 +536,6 @@ const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Re
       return { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.some(b => !b.isWatch) ? one.waitsSince : undefined, ...keepEnded(one, runs) }
     })
   })
-}
-
-// What work still at work says on its card while it waits for a command of its own: which, and how long it has run; only that it
-// waits when the command has its own row on the card's tree
-const waitLine = (one: Todo, at: number, isShort = false) => {
-  const commands = (one.bg ?? []).filter(b => !b.isWatch)
-  // The newest command it started, the one it is most likely on now
-  const first = commands.at(-1)
-  if (one.status !== 'working' || !one.waitsSince || one.answeredAt || !first) return ''
-  const more = commands.length > 1 ? ` and ${commands.length - 1} more` : ''
-  if (isShort) return `Waiting for a command${more} to finish`
-  return `Waiting for a command${more} to finish · ${took(at - first.at)}${first.what ? ` · ${cut(first.what, 90)}` : ''}`
 }
 
 // What finished work left running says on its card
@@ -781,10 +759,9 @@ const notDoneLines = (one: Todo, text: string) => {
 }
 // A task Claudopus stopped starting again stays in its place, its line in sight, as a task cut off that could not be started again does
 const isLeftStopped = (one: Todo, at: number) => Boolean(one.carryOn?.gaveUp && one.status !== 'working' && at - one.carryOn.gaveUp < CUT_OLD)
-// The line on its card: dim while Claudopus has just started it again, amber once it was left stopped
-const carryLine = (one: Todo, at: number) => {
+// The line on its card once it was left stopped, in amber; while Claudopus starts it again its card says nothing of it
+const carryLine = (one: Todo) => {
   const c = one.carryOn
-  if (!c) return ''
-  if (c.gaveUp && one.status !== 'working') return c.isLost ? `Stopped partway at ${hhmm(c.gaveUp)} · Claudopus couldn't start it again · send it a message to carry on` : `Stopped partway ${c.tries > CARRY_TRIES ? c.tries : c.total} times without a result · Claudopus stopped starting it again · send it a message to carry on`
-  return one.status === 'working' && !c.gaveUp && at - c.at < CARRY_SHOWN ? `Stopped partway at ${hhmm(c.at)} without a result · Claudopus started it again` : ''
+  if (!c?.gaveUp || one.status === 'working') return ''
+  return c.isLost ? `Stopped partway at ${hhmm(c.gaveUp)} · Claudopus couldn't start it again · send it a message to carry on` : `Stopped partway ${c.tries > CARRY_TRIES ? c.tries : c.total} times without a result · Claudopus stopped starting it again · send it a message to carry on`
 }

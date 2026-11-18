@@ -54,7 +54,7 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   await settle()
 })
 
-test('stuck work the engine no longer runs had stopped partway through: the mod starts it again at once and tells the chat; work whose step ended while all its helpers sit silent is, on a fixed schedule, started again to check on them at 12 minutes and to hand back what it has at 24, and the chat is told plainly at 36; its report then goes through, the silent helpers stopped; helpers at work, rendering in the background or printing a moving frame count, are left alone and their card says so', SLOW, async ($, on) => {
+test('stuck work the engine no longer runs had stopped partway through: the mod starts it again at once and tells the chat; work whose step ended while all its helpers sit silent is, on a fixed schedule, started again to check on them at 12 minutes and to hand back what it has at 24, and the chat is told plainly at 36; its report then goes through, the silent helpers stopped; helpers at work, rendering in the background or printing a moving frame count, are left alone', SLOW, async ($, on) => {
   const all = { a1: 'idle', a2: 'running', a3: 'running', a4: 'running', a5: 'running', a6: 'running', a7: 'running' }
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = Object.fromEntries(Object.keys(all).map(id => [id, 'general-purpose']))
@@ -124,12 +124,14 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const texts = (await pane.findAll({ type: 'Text' })).map(one => (one as { text?: string }).text ?? '')
   await pane.unmount()
-  expect(texts.filter(text => text.startsWith('Nothing new for') && text.endsWith('and told the chat it may be stuck.'))).toHaveLength(1)
-  // Helpers at work are never taken for silent: their tasks are not started again, and its card says it waits on its helpers' work;
+  // The card says it is stuck, in amber, and nothing of what Claudopus did about it (18 Nov)
+  expect(texts.some(text => /^Nothing new for \d+m\./.test(text))).toBe(true)
+  expect(texts.some(text => /Claudopus asked|told the chat/.test(text))).toBe(false)
+  // Helpers at work are never taken for silent: their tasks are not started again, and its card says nothing of their work;
   // with nothing new coming back, the chat is told once that its helpers still run something
   expect([nudges('a4'), nudges('a6')]).toEqual([[], []])
   expect(appended.filter(line => line.startsWith('undefined: ')).map(line => line.slice(11)).filter(line => line.includes('"Film the town"'))).toEqual([expect.stringMatching(/^Nothing new from "Film the town" for 3\dm, though its helpers are still running something\./)])
-  expect(texts.filter(text => text === 'Waiting for its helpers').length).toBeGreaterThanOrEqual(1)
+  expect(texts.filter(text => text === 'Waiting for its helpers')).toEqual([])
   // Its report goes through while its helpers run: the silent one is stopped with it, those at work never are
   expect(((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb-late', agentId: 'a2', message: 'Lids drawn; rendering never ended.' } as never)) as { deny?: string }).deny).toBeUndefined()
   expect(stopped).toContain('a3')
@@ -313,7 +315,7 @@ test('the word that the chat was told a task is stuck lasts only until it or its
   expect(after[0]).not.toContain('Claudopus told you it is stuck')
 })
 
-test('a task whose step ended to wait on its own command, with nothing starting it again, is started to look at it after the command\'s own time, then after an hour, two and every four; its card and the chat say so, and a command that ends counts afresh', SLOW, async ($, on) => {
+test('a task whose step ended to wait on its own command, with nothing starting it again, is started to look at it after the command\'s own time, then after an hour, two and every four; the chat says so and its card does not, and a command that ends counts afresh', SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const { clock, held, appended, resumed } = world(on, { agents, kinds: { a1: 'general-purpose' } })
   // (Claude Code's own answer to its stop hook)
@@ -346,7 +348,7 @@ test('a task whose step ended to wait on its own command, with nothing starting 
   expect(appended.filter(line => line.includes('Nothing new from "Rebuild the head model" for 5') && line.endsWith('Claudopus started Claude again to check on what it waits for.'))).toHaveLength(1)
   const line = async () => {
     const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 90 }, surface: 'desktop' } as never)
-    const r = (await pane.find({ type: 'Text', text: /^Claudopus asked Claude to check on what it waits for/ }))?.text
+    const r = (await pane.find({ type: 'Text', text: /asked Claude to check/ }))?.text
     await pane.unmount()
     return r
   }
@@ -355,7 +357,8 @@ test('a task whose step ended to wait on its own command, with nothing starting 
   await $.tool.call({ tool: 'Bash', tool_use_id: 'l-a1', agentId: 'a1', command: 'git log' } as never)
   await ends('e2')
   await minutes(2)
-  expect(await line()).toMatch(/· [23]m ago$/)
+  // Its card says nothing of the look (18 Nov)
+  expect(await line()).toBeUndefined()
   await minutes(57)
   expect(looks()).toHaveLength(1)
   await minutes(2)
@@ -473,7 +476,7 @@ test('the log is added to, never rewritten whole, and the empty bytes earlier ve
   expect(text).toMatch(/Z start engine-id in \/repo\n$/)
 })
 
-test('a task Claude Code pressed for its report that ended its step with none, asking nothing and with nothing that starts it again, is started again to carry on and its card stays at work saying so; stopped so again and again with little done between, it is left stopped with one line on its card; a task asking you something, one stopped, and one never pressed for a report end as before, and long words after the press are no result', SLOW, async ($, on) => {
+test('a task Claude Code pressed for its report that ended its step with none, asking nothing and with nothing that starts it again, is started again to carry on and its card stays at work, saying nothing of it; stopped so again and again with little done between, it is left stopped with one line on its card; a task asking you something, one stopped, and one never pressed for a report end as before, and long words after the press are no result', SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const PRESS = { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' }
   const pressed = [{ role: 'assistant', content: [{ type: 'text', text: 'Waiting for the build.' }] }, PRESS, { role: 'assistant', content: [{ type: 'text', text: '<system-reminder>Waiting on my own work, which starts me again.</system-reminder>' }] }]
@@ -505,10 +508,10 @@ test('a task Claude Code pressed for its report that ended its step with none, a
   expect(resumed.filter(line => /^a[23]: /.test(line))).toEqual([])
   // Long words after Claude Code's press are no result either, as Claude Code itself says it ended without one: it is started again
   expect(carried('a4')).toHaveLength(1)
-  // It hands back its result: done, its line gone
+  // It hands back its result: done. While Claudopus starts a task again its card says nothing of it (18 Nov)
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h4', agentId: 'a4', message: `Done. ${'Every banner is drawn and checked. '.repeat(20)}` } as never)
   await ends('a4', '', 3)
-  expect(await lines()).toEqual([{ text: 'Stopped partway at hh:mm without a result · Claudopus started it again', color: undefined }])
+  expect(await lines()).toEqual([])
   // The chat's model is told only once Claudopus gives up; a run that ended with its words as its result, never pressed, ends as before
   talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text: 'Sorted.' }] })
   await ends('a5', 'Sorted.', 1)

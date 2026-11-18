@@ -319,8 +319,9 @@ test('work that answers a question while a copy of its own still runs, with that
   agents.a1 = 'waiting'
   await $.turn.complete({ answer: 'Sending the 14.5 GB now; it takes about four hours.', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
   expect(await drawn(pane)).toEqual(['working'])
-  const wait = () => pane.find({ type: 'Text', text: /^Waiting for a command to finish/ })
-  expect((await wait())?.text).toBe('Waiting for a command to finish')
+  // Its stage, in the facts row; no line of its own under it (18 Nov "Waiting for a command to finish")
+  expect(await pane.find({ type: 'Text', text: /Waiting for its command\b/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /Waiting for a command/ })).toBeUndefined()
   // The copy itself is a row on its tree: what it is in its own words, and how long it has run
   const job = async () => (await pane.find({ type: 'Text', text: /^Command · Send the four/ })) ?? (await pane.findAll({ type: 'Button' })).find(b => /^Command · Send the four/.test(String(b.props.label)))
   expect(await job()).toBeDefined()

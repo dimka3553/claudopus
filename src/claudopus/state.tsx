@@ -42,10 +42,9 @@ const stateOf = (list: Todo[], one: Todo): TaskState => {
   if (needsPerson(one)) return 'waiting-you'
   return one.endedStepAt !== undefined && wakesOf(list, one).isAny ? 'waiting-own' : 'working'
 }
-// What a task's card line says while it waits on its own work, by what it waits for; '' in any other state, and where the card's
-// own line already says it waits for a command it started in the background (waitLine)
-const ownWorkWords = (list: Todo[], one: Todo, at: number) => {
-  if (stateOf(list, one) !== 'waiting-own' || waitLine(one, at)) return ''
+// What a task's card says while it waits on its own work, by what it waits for; '' in any other state
+const ownWorkWords = (list: Todo[], one: Todo) => {
+  if (stateOf(list, one) !== 'waiting-own') return ''
   const { runs, helpers } = wakesOf(list, one)
   const what = [runs.length ? (runs.length === 1 ? 'its command' : 'its commands') : '', helpers ? (helpers === 1 ? 'its helper' : 'its helpers') : ''].filter(Boolean).join(' and ')
   return what ? `Waiting for ${what}` : 'Waiting to be started again'

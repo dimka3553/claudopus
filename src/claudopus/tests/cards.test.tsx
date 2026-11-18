@@ -99,10 +99,11 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect(await pane.find({ type: 'Text', text: /^I am fitting/ })).toBeUndefined()
   expect((await pane.find({ type: 'Text', text: /^The nostril is closed/ }))?.text).toBe('The nostril is closed; I am comparing the head with your scan.')
   expect((await pane.find({ type: 'Text', text: /of \d+ to-dos done/ }))?.text).toContain('1 of 2 to-dos done')
-  // The done to-do's part of the edge is bright, and with none being done the other is dim, named dim as the next
+  // The done to-do's part of the edge is bright, and with none being done the other is dim; with none marked doing the card names
+  // no to-do: no "Next to-do 2 of 2" beside "1 of 2 to-dos done" (18 Nov)
   expect(await edgeOf(pane)).toEqual(['#8A63F0', '#8A63F05C'])
-  expect((await pane.find({ type: 'Text', text: /^Next to-do / }))?.text).toBe('Next to-do 2 of 2 ·')
-  expect((await pane.find({ type: 'Text', text: /^Compare the head/ }))?.props.dimColor).toBe(true)
+  expect(await pane.find({ type: 'Text', text: /to-do \d+ of \d+/i })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Compare the head/ })).toBeUndefined()
   expect(await pane.findAll({ type: 'Svg' })).toHaveLength(1)
   expect(await pane.find({ type: 'Text', text: /^To do/ })).toBeUndefined()
 
@@ -221,14 +222,15 @@ test('past the parts the edge has, it is one bar in three shades, and the step b
   expect((await pane.find({ type: 'Text', text: /^To-do / }))?.text).toBe('To-do 13 of 16 ·')
   expect(await pane.find({ type: 'Text', text: /^Round step 13$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^Round step 14$/ })).toBeUndefined()
-  // With nothing being done, the bar has no lighter part and the next is named dim
+  // With nothing being done, the bar has no lighter part and no to-do is named, nor once every one is ticked: the facts row counts them
   await call('todo', { item: 'Round step 13', state: 'done' })
   const after = (await pane.findAll({ type: 'Box' })).filter(b => String(b.props.backgroundColor).startsWith('#8A63F0'))
   expect(after.map(b => [b.props.backgroundColor, b.props.flexGrow])).toEqual([['#8A63F0', 13], ['#8A63F05C', 3]])
-  expect((await pane.find({ type: 'Text', text: /^Next to-do / }))?.text).toBe('Next to-do 14 of 16 ·')
-  // Every step ticked while it still runs: the row stays and says so
+  expect(await pane.find({ type: 'Text', text: /to-do \d+ of \d+/i })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Round step 14$/ })).toBeUndefined()
   for (let n = 14; n <= 16; n += 1) await call('todo', { item: `Round step ${n}`, state: 'done' })
-  expect((await pane.find({ type: 'Text', text: /^All \d+ to-dos done$/ }))?.text).toBe('All 16 to-dos done')
+  expect(await pane.find({ type: 'Text', text: /^All \d+ to-dos done$/ })).toBeUndefined()
+  expect((await pane.find({ type: 'Text', text: /of \d+ to-dos done/ }))?.text).toContain('16 of 16 to-dos done')
 })
 
 test("a pressed card shows the work's own chat: what it was told, what it wrote, and each tool step in order", async ($, on) => {

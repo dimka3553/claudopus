@@ -222,9 +222,8 @@ const tellDevice = async ($: EngineInterface, text: string) => {
   await alertPerson($, 'cut', 'Task interrupted', text, `cut-${Math.round((await $.clock.now()) / 60_000)}`)
 }
 
-// The line on a card of cut-off work: when, and whether it goes on again
-const cutLine = (one: Todo) =>
-  one.cutAt ? (one.backAt ? `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · running again since ${hhmm(one.backAt)}` : `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · Claudopus couldn't start it again`) : ''
+// The line on a card of cut-off work Claudopus could not start again, which needs the person; one started again says nothing of it
+const cutLine = (one: Todo) => (one.cutAt && !one.backAt ? `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · Claudopus couldn't start it again` : '')
 
 
 // ---- Back by itself after Claude switches it off ----

@@ -1104,7 +1104,8 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
     await list.unmount()
     return texts
   }
-  expect(await until(async () => (await lines()).find(text => /^Waiting for the deploy marker · Claudopus starts Claude again when it comes, or at \d\d:\d\d$/.test(text)))).toBeDefined()
+  // Its card says nothing of when Claudopus starts it again (18 Nov)
+  expect((await lines()).some(text => /starts Claude again|the deploy marker/.test(text ?? ''))).toBe(false)
   // A helper that ended its step would have ended: it hands back what it waits for, and its task asks
   expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w2', agentId: 'a2', what: 'the build to finish', file: '/w/build.log', text: 'BUILD DONE' } as never)) as { result?: string }).result).toContain('hand back your result now')
   await clock.advance(40_000)
@@ -1171,7 +1172,7 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
   expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w6', what: 'x', minutes: 1 } as never)) as { result?: string }).result).toContain('Only a background task')
 })
 
-test('a helper quiet for five minutes is named to its work once, and the card says so only then: a helper at work is a row of its own', SLOW, async ($, on) => {
+test('a helper quiet for five minutes is named to its work once, and its card never says so: a helper at work is a row of its own', SLOW, async ($, on) => {
   const { clock, appended } = world(on)
   await $.session.start(start)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -1182,7 +1183,7 @@ test('a helper quiet for five minutes is named to its work once, and the card sa
   expect(await pane.find({ type: 'Text', text: /looked in on|helper running/ })).toBeUndefined()
   await clock.advance(5 * 60_000)
   expect(appended.filter(line => line.startsWith('a1: Your helper "Read the nose code" (a2) has shown nothing new'))).toHaveLength(1)
-  expect((await pane.find({ type: 'Text', text: /^1 helper has shown nothing new for over 5m · Claude was told to check it$/ }))?.text).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /shown nothing new|told to check/ })).toBeUndefined()
   await clock.advance(3 * 60_000)
   expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1)
 })
