@@ -27,7 +27,7 @@ const lookEnds = async ($: EngineInterface) => {
   const mine = await sessionName($)
   // (each as its card shows it: one that handed back while a command or helper of its own still runs has not ended yet, and is
   // announced once that has ended, however long ago its report came)
-  const cards = shownAs(await read($, todos)).filter(one => !one.parentId)
+  const cards = shownAs(await read($, todos), one => (one.waits ?? []).some(wait => !askedWait(wait).answer)).filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
   const all = [...cards.map(one => ({ id: one.id, status: one.status, endedAt: one.endedAt, waits: one.waits })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt, waits: undefined as Todo['waits'] }))]

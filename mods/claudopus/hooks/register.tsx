@@ -1726,9 +1726,10 @@ const stateOf = (list: Todo[], one: Todo): TaskState => {
 const shownAs = (list: Todo[], asks: (one: Todo) => boolean = () => false): Todo[] =>
   list.map(one => {
     if (isOff || one.parentId || one.chat || one.status !== 'done') return one
+    if (one.ask || asks(one)) return one
     const { runs, helpers } = wakesOf(list, one)
     if (runs.length || helpers || (one.leftSince && one.leftOwn)) return { ...one, status: 'working' as const, wasDone: one.endedAt, endedAt: 0, endedStepAt: one.endedStepAt ?? one.endedAt }
-    if (openItems(one).length && !one.ask && !asks(one)) return { ...one, status: 'stopped' as const, leftOpen: openItems(one).length }
+    if (openItems(one).length) return { ...one, status: 'stopped' as const, leftOpen: openItems(one).length }
     return one
   })
 const shownOne = (list: Todo[], id: string, asks?: (one: Todo) => boolean) => shownAs(list, asks).find(one => one.id === id)
@@ -1762,7 +1763,7 @@ const doneHeld = async ($: EngineInterface, ids: string[]) => {
     const list = await read($, todos)
     const one = list.find(card => card.id === id)
     if (!one || one.status !== 'working') continue
-    if (!openItems(one).length && (await isUnpressed($, id))) {
+    if (!(openItems(one).length && WAITS_KINDS.has(one.kind ?? '') && isStoppedShort(one, '')) && (await isUnpressed($, id))) {
       const now = await $.clock.now()
       await changeTodos($, cards => cards.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'done', now), reportAt: now } : card)))
       await lookEnds($)
@@ -4471,7 +4472,7 @@ const standing = (status: string, endedAt: number) => (status === 'working' ? 'w
 
 const lookEnds = async ($: EngineInterface) => {
   const mine = await sessionName($)
-  const cards = shownAs(await read($, todos)).filter(one => !one.parentId)
+  const cards = shownAs(await read($, todos), one => (one.waits ?? []).some(wait => !askedWait(wait).answer)).filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
   const all = [...cards.map(one => ({ id: one.id, status: one.status, endedAt: one.endedAt, waits: one.waits })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt, waits: undefined as Todo['waits'] }))]
@@ -6063,7 +6064,8 @@ const shareMine = async ($: EngineInterface) => {
     )
     return Object.keys(seen).length ? { ...one, seenJobs: seen } : one
   }
-  const cards = shareable(list, now).map(withSeen)
+  const sharedKept = await read($, reports)
+  const cards = shareable(shownAs(list, one => openResultWaits(one, sharedKept, now).length > 0), now).map(withSeen)
   const helpers = shareableHelpers(list, cards).map(withSeen)
   const jobsSign = [...cards, ...helpers].map(one => Object.values(one.seenJobs ?? {}).map(s => `${s.latest}:${s.tail?.at(-1) ?? ''}:${Math.floor((s.wroteAt ?? 0) / 30_000)}:${s.target ?? ''}`).join('|')).join(' ')
   const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, input: _input, ...p }: Waiting): Prompt => p
@@ -9895,6 +9897,7 @@ const notDoneLines = (one: Todo, text: string) => {
   return left.length ? `\n\nNot done:\n${left.map(item => `- ${item}`).join('\n')}` : ''
 }
 const isLeftStopped = (one: Todo, at: number) => Boolean(one.carryOn?.gaveUp && one.status !== 'working' && at - one.carryOn.gaveUp < CUT_OLD)
+const isLeftOpen = (one: Todo, at: number) => Boolean(one.leftOpen && !one.chat && at - one.endedAt < CUT_OLD)
 const carryLine = (one: Todo, at: number) => {
   const c = one.carryOn
   if (!c) return ''
@@ -13266,7 +13269,7 @@ const panelHooks = (on: On) => {
     const answeredOf = (list: Prompt[] | undefined) => (list ?? []).filter(p => !p.endedAt || at - p.endedAt < PROMPT_SHOWN)
     const promptsAnswered = answeredShown(at)
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
-    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || resultWaits(one).length > 0 || one.admins?.length || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD) || isLeftStopped(one, at))
+    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || resultWaits(one).length > 0 || one.admins?.length || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD) || isLeftStopped(one, at) || isLeftOpen(one, at))
     let onCards = new Map<string, { at: number; key: string; what: string; node: JSX.Element }[]>()
     let doneOnCards = new Map<string, { at: number; key: string; node: JSX.Element }[]>()
     let promptsLoose = promptsAnswered
@@ -13560,7 +13563,7 @@ const panelHooks = (on: On) => {
                   </Button>
                 </Box>
                 <Box flexGrow={1} />
-                {one.status === 'working' && !one.chat && !one.wasDone ? (
+                {one.status === 'working' && !one.chat && (!one.wasDone || one.leftSince) ? (
                   <Box flexShrink={0}>
                     <Button key={`stop-${one.id}`} label="Stop" plain dimColor hover={{ scope: `stop-${one.id}`, underline: true }} onPress={() => void stop($, one.id)} />
                   </Box>
@@ -14587,7 +14590,7 @@ const panelHooks = (on: On) => {
     const endedElsewhere = elsewhere.filter(one => one.status !== 'working' && !one.ask && !lingers(one, at) && !isVanished(one.id))
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length || answeredOf(c.answeredPrompts).length)
-    const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at) && !one.ask && !resultWaits(one).length && !isLeftStopped(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
+    const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at) && !one.ask && !resultWaits(one).length && !isLeftStopped(one, at) && !isLeftOpen(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
         <Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
