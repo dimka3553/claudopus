@@ -86,9 +86,21 @@ let finishedAtTop: string[] = []
 const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
   const now = await read($, todos)
   const before = JSON.stringify(now)
-  const next = fn(now)
+  const at = await $.clock.now()
+  let held: string[] = []
+  const hold = (list: Todo[]) => {
+    const r = holdDone(list, fn(list), at)
+    held = r.held
+    return r.list
+  }
+  const next = hold(now)
   if (JSON.stringify(next) === before) return now
-  return update($, todos, list => (JSON.stringify(list) === before ? next : fn(list)))
+  const r = await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))
+  if (held.length) {
+    const ids = held
+    $.clock.after(0, () => void doneHeld($, ids).catch(err => log($, `work held from ending done not taken up: ${String(err)}`)))
+  }
+  return r
 }
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
 const draftsKept = atom({ plugin: 'claudopus', key: 'drafts' } as const, {}, { shape: 'drafts-1' })
@@ -1141,13 +1153,13 @@ const started = (id: string, parentId: string, title: string, words: string, at:
   status: 'working',
 })
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
-const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, ownWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, reportAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, ownWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, newAt: at })
 const goesOn = (list: Todo[], id: string) => {
   const one = list.find(card => card.id === id)
   const isRunning = Boolean(one?.bg?.some(b => !b.isWatch)) || list.some(kid => kid.parentId === id && kid.status === 'working')
   return Boolean(one && isRunning && one.items.some(item => item.state === 'doing'))
 }
-const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'stopped')
+const stoppedAs = (one: Todo): Todo['status'] => (hasReport(one) ? 'done' : 'stopped')
 const handedBack = new Map<string, string>()
 const endedByHandback = new Set<string>()
 const stoppedHere = new Set<string>()
@@ -1332,7 +1344,7 @@ const endedUnheardShort = async ($: EngineInterface, ids: Set<string>, live: { i
       continue
     }
     const how = live.find(one => one.id === id)?.status === 'failed' ? 'failed' : 'done'
-    await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? { ...ended(one, how, now), answer: f.answer || one.answer, ...(isReport ? { answeredAt: one.answeredAt ?? now } : {}) } : one)))
+    await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? { ...ended(one, how, now), answer: f.answer || one.answer, ...(isReport ? { answeredAt: one.answeredAt ?? now } : {}), ...(f.isHandback || (isReport && !f.isPressed) ? { reportAt: one.reportAt ?? now } : {}) } : one)))
   }
 }
 
@@ -1393,7 +1405,7 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
         isMoved = true
         const isTop = !one.parentId
         const answer = f.answer || one.answer
-        return { ...ended(one, 'done', isTop ? now : Math.min(f.at, now)), answer, ...(isTop && isWordsReport(one, f.answer, f.isHandback) ? { answeredAt: one.answeredAt ?? now } : {}), stuckAt: undefined }
+        return { ...ended(one, 'done', isTop ? now : Math.min(f.at, now)), answer, ...(isTop && isWordsReport(one, f.answer, f.isHandback) ? { answeredAt: one.answeredAt ?? now } : {}), ...(isTop && (f.isHandback || (isWordsReport(one, f.answer) && !f.isPressed)) ? { reportAt: one.reportAt ?? now } : {}), stuckAt: undefined }
       })
     }
     endedNow = [...gone]
@@ -1655,6 +1667,71 @@ const withLinks = (Link: ElementTable['Link'], text: string, key: string, whole 
   }
   parts.push(text.slice(at))
   return parts.filter(part => part !== '')
+}
+
+
+type TaskState = 'working' | 'waiting-you' | 'waiting-own' | 'done' | 'stopped' | 'failed'
+
+const isServerRun = (cmd: string | undefined, what: string) => SERVER_CMD.test(cmd ?? '') || describedOf(what).kind === 'server'
+const wakesOf = (list: Todo[], card: Todo) => {
+  const runs = [...(card.bg ?? []).filter(b => !isServerRun(b.cmd, b.what)), ...(card.detached ?? []).filter(d => !isServerRun(d.cmd, d.what))]
+  const helpers = runningHelpers(list, card.id).length
+  const isWoken = card.wakeWhen !== undefined || isTurnWaited(list, card.id)
+  return { runs, helpers, isWoken, isAny: runs.length > 0 || helpers > 0 || isWoken }
+}
+const isUnpressed = async ($: EngineInterface, id: string) => {
+  const rows = await $.session.messages({ as: 'api', agentId: id }).catch(() => undefined)
+  return Array.isArray(rows) && !isPressedAtEnd(rows) && !isLetEnd((await read($, todos)).find(one => one.id === id))
+}
+const hasReport = (one: Todo | undefined) => one?.reportAt !== undefined
+const stateOf = (list: Todo[], one: Todo): TaskState => {
+  if (one.status === 'done' || one.status === 'stopped' || one.status === 'failed') return one.status
+  if (needsPerson(one)) return 'waiting-you'
+  return one.endedStepAt !== undefined && wakesOf(list, one).isAny ? 'waiting-own' : 'working'
+}
+const ownWorkWords = (list: Todo[], one: Todo) => {
+  if (stateOf(list, one) !== 'waiting-own') return ''
+  const { runs, helpers } = wakesOf(list, one)
+  const what = [runs.length ? (runs.length === 1 ? 'its command' : 'its commands') : '', helpers ? (helpers === 1 ? 'its helper' : 'its helpers') : ''].filter(Boolean).join(' and ')
+  return what ? `Waiting for ${what}` : 'Waiting to be started again'
+}
+
+const holdDone = (before: Todo[], next: Todo[], now: number) => {
+  const held: string[] = []
+  if (isOff) return { list: next, held }
+  const was = new Map(before.map(one => [one.id, one]))
+  const list = next.map(one => {
+    if (one.parentId || one.chat || one.status !== 'done' || hasReport(one)) return one
+    const old = was.get(one.id)
+    if (old?.status !== 'working') return one
+    held.push(one.id)
+    const base = old
+    return { ...base, status: 'working' as const, endedAt: 0, answer: one.answer || base.answer, answeredAt: undefined, endedStepAt: base.endedStepAt ?? now }
+  })
+  return { list, held }
+}
+const doneHeld = async ($: EngineInterface, ids: string[]) => {
+  for (const id of ids) {
+    const list = await read($, todos)
+    const one = list.find(card => card.id === id)
+    if (!one || one.status !== 'working') continue
+    if (await isUnpressed($, id)) {
+      const now = await $.clock.now()
+      await changeTodos($, cards => cards.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'done', now), reportAt: now } : card)))
+      await lookEnds($)
+      continue
+    }
+    if (wakesOf(list, one).isAny) {
+      await log($, `work ${id} would have ended done without its report: it waits on its own work`)
+      continue
+    }
+    if (!isStoppedShort(one, '')) {
+      await log($, `work ${id} would have ended done without its report: kept at work`)
+      continue
+    }
+    await log($, `work ${id} would have ended done without its report: started again to carry on`)
+    await goOn($, id, 'its card would have ended done without its report')
+  }
 }
 
 
@@ -8217,21 +8294,24 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   const isHeld = listed === 'waiting' || listed === 'running'
   if (listed === 'running') $.clock.after(HELD_LOOK, () => void heldLook($, id).catch(err => log($, `work ${id} not looked at again: ${String(err)}`)))
   const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
+  const isOwnResult = how === 'done' && (await isUnpressed($, id))
   const isGoingOn = how === 'done' && isHeld && goesOn(await read($, todos), id)
   const isReport = how === 'done' && isHeld && !isGoingOn && (handedBack.has(id) || isWordsReport((await read($, todos)).find(one => one.id === id), answer))
   const isIdleReport = isReport && ownsNothing(await read($, todos), id)
   const isHandedBack = how === 'done' && (handedBack.has(id) || isIdleReport) && !isGoingOn
   if (isHandedBack) (ownsNothing(await read($, todos), id) ? leftNothing.add(id) : leftNothing.delete(id))
+  const isReceived = isHandedBack && (handedBack.has(id) || isOwnResult)
   handedBack.delete(id)
   if (isHandedBack) endedByHandback.add(id)
-  if (isHandedBack) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now, wakeWhen: undefined } : one)))
+  if (isHandedBack) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now, wakeWhen: undefined, ...(isReceived ? { reportAt: now } : {}) } : one)))
   if (!isHeld) await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
   const isShortHow = how === 'done' || (how === 'failed' && e.reason === 'error')
   const mayBeShort = isShortHow && !isHandedBack && isStoppedShort((await read($, todos)).find(one => one.id === id), answer) && (await pressedAtEnd($, id))
   let isCarried = false
   await changeTodos($, list => {
     isCarried = false
-    const isWaiting = how === 'done' && !isHandedBack && (isHeld || isTurnWaited(list, id) || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)))
+    const self = list.find(one => one.id === id)
+    const isWaiting = how === 'done' && !isHandedBack && (isHeld || isTurnWaited(list, id) || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)) || Boolean(self && !self.parentId && wakesOf(list, self).isAny))
     const waitsSince = (one: Todo) => (isHeld && !isReport && one.bg?.some(b => !b.isWatch) ? (one.waitsSince ?? now) : undefined)
     return list.map(one =>
       one.id !== id
@@ -8240,14 +8320,14 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
           one.status !== 'working' && how === 'done' && !isHandedBack && endedByHandback.has(id)
           ? one
           : isWaiting
-          ? { ...one, answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt, waitsSince: waitsSince(one), endedStepAt: now }
+          ? { ...one, answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt, ...(isReport && isOwnResult && !one.parentId ? { reportAt: one.reportAt ?? now } : {}), waitsSince: waitsSince(one), endedStepAt: now }
           : how === 'stopped'
             ? one.status === 'working'
               ? ended(one, stoppedAs(one), now)
               : one
             : mayBeShort && one.status === 'working' && isStoppedShort(one, answer)
               ? ((isCarried = true), { ...one, answer: answer || one.answer })
-              : { ...ended(one, how, now), answer: answer || one.answer },
+              : { ...ended(one, how, now), answer: answer || one.answer, ...(isOwnResult && !one.parentId ? { reportAt: one.reportAt ?? now } : {}) },
     )
   })
   if (isCarried) await goOn($, id, e.reason === 'error' ? 'its step failed' : 'its step ended', true)
@@ -9153,7 +9233,7 @@ const isStoppedShort = (one: Todo | undefined, answer: string) =>
       !pressed.has(one.id) &&
       !one.flagged &&
       !one.carryOn?.gaveUp &&
-      !one.detached?.length,
+      !one.detached?.some(d => !isServerRun(d.cmd, d.what)),
   )
 const isPressedAtEnd = (rows: unknown) => {
   if (!Array.isArray(rows)) return false
@@ -9229,7 +9309,7 @@ const keepGoingWhy = (list: Todo[], id: string) => {
   const one = list.find(card => card.id === id)
   const open = openItems(one)
   if (!one || isOff || !dir || one.status !== 'working' || !open.length || handedBack.has(id) || one.mayHandBack !== undefined) return ''
-  if (!isStoppedShort(one, '') || !ownsNothing(list, id) || one.wakeWhen !== undefined || isTurnWaited(list, id)) return ''
+  if (!isStoppedShort(one, '') || wakesOf(list, one).isAny) return ''
   return named(KEEP_GOING(open.map(item => item.text)))
 }
 const keepGoing = async ($: EngineInterface, id: string): Promise<string> => {
@@ -10207,7 +10287,8 @@ const waitingNow = async ($: EngineInterface) => {
       continue
     }
     const helpers = runningHelpers(list, card.id).filter(one => listed.get(one.id) === 'running' || listed.get(one.id) === 'waiting').length
-    const wake = card.wakeWhen && card.wakeWhen.until > now ? card.wakeWhen.what : ''
+    const run = (card.detached ?? []).find(d => !isServerRun(d.cmd, d.what))
+    const wake = card.wakeWhen && card.wakeWhen.until > now ? card.wakeWhen.what : run ? `the end of its command "${runWords(run.what, run.cmd)}"` : ''
     if (helpers || wake) waiting.set(card.id, { title: titleOf(card), helpers, wake, ...(card.stuckTold !== undefined ? { stuck: card.id } : {}) })
   }
   return waiting
@@ -11150,8 +11231,9 @@ const isAfterTaken = async ($: EngineInterface, id: string, call: string) => {
   return blocks.length > 0 && blocks.every(b => (b?.type === 'tool_result' && b.tool_use_id === call) || (b?.type === 'text' && String(b.text ?? '').includes(HANDBACK_PRESS)))
 }
 const waitsOnOwn = (list: Todo[], card: Todo) => {
-  const helpers = runningHelpers(list, card.id).length
-  const what = card.detached?.length ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : card.wakeWhen || isTurnWaited(list, card.id) ? 'it waits to be woken' : ''
+  const { helpers, isWoken } = wakesOf(list, card)
+  const isDetached = Boolean(card.detached?.some(d => !isServerRun(d.cmd, d.what)))
+  const what = isDetached ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : isWoken ? 'it waits to be woken' : ''
   return { what, helpers }
 }
 const NO_WAIT = (kind: WaitKind, isHelper = false) =>
@@ -12673,7 +12755,7 @@ const panelHooks = (on: On) => {
             ))}
           </Box>
         )
-      const rest = [offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
+      const rest = [ownWorkWords(all, one), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
       return (
         <Box flexDirection="row" alignItems="flex-start">
           <Button

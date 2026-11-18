@@ -119,9 +119,22 @@ let finishedAtTop: string[] = []
 const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
   const now = await read($, todos)
   const before = JSON.stringify(now)
-  const next = fn(now)
+  // (a task's card ends done only with its report: holdDone)
+  const at = await $.clock.now()
+  let held: string[] = []
+  const hold = (list: Todo[]) => {
+    const r = holdDone(list, fn(list), at)
+    held = r.held
+    return r.list
+  }
+  const next = hold(now)
   if (JSON.stringify(next) === before) return now
-  return update($, todos, list => (JSON.stringify(list) === before ? next : fn(list)))
+  const r = await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))
+  if (held.length) {
+    const ids = held
+    $.clock.after(0, () => void doneHeld($, ids).catch(err => log($, `work held from ending done not taken up: ${String(err)}`)))
+  }
+  return r
 }
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
 // What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as

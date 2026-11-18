@@ -92,9 +92,11 @@ const isAfterTaken = async ($: EngineInterface, id: string, call: string) => {
 // started detached; what it asked Claudopus to wake it for; a command Claudopus holds for its turn; or a helper of its own still at
 // work (its end, or its result, starts the work). A command it sent to the background the engine sees, and presses nothing while
 // it runs
+// A server it left going never ends, so never starts it again (wakesOf)
 const waitsOnOwn = (list: Todo[], card: Todo) => {
-  const helpers = runningHelpers(list, card.id).length
-  const what = card.detached?.length ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : card.wakeWhen || isTurnWaited(list, card.id) ? 'it waits to be woken' : ''
+  const { helpers, isWoken } = wakesOf(list, card)
+  const isDetached = Boolean(card.detached?.some(d => !isServerRun(d.cmd, d.what)))
+  const what = isDetached ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : isWoken ? 'it waits to be woken' : ''
   return { what, helpers }
 }
 // What a command that only waits is told instead, by what it waits for

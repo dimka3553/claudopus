@@ -473,7 +473,7 @@ test('the log is added to, never rewritten whole, and the empty bytes earlier ve
   expect(text).toMatch(/Z start engine-id in \/repo\n$/)
 })
 
-test('a task Claude Code pressed for its report that ended its step with none, asking nothing and with nothing that starts it again, is started again to carry on and its card stays at work saying so; stopped so again and again with little done between, it is left stopped with one line on its card; a task asking you something, one stopped, one with a result, and one never pressed for a report end as before', SLOW, async ($, on) => {
+test('a task Claude Code pressed for its report that ended its step with none, asking nothing and with nothing that starts it again, is started again to carry on and its card stays at work saying so; stopped so again and again with little done between, it is left stopped with one line on its card; a task asking you something, one stopped, and one never pressed for a report end as before, and long words after the press are no result', SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const PRESS = { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' }
   const pressed = [{ role: 'assistant', content: [{ type: 'text', text: 'Waiting for the build.' }] }, PRESS, { role: 'assistant', content: [{ type: 'text', text: '<system-reminder>Waiting on my own work, which starts me again.</system-reminder>' }] }]
@@ -502,7 +502,9 @@ test('a task Claude Code pressed for its report that ended its step with none, a
   expect(carried('a1')).toHaveLength(0)
   await clock.advance(6000)
   expect(carried('a1')).toHaveLength(1)
-  expect(resumed.filter(line => /^a[234]: /.test(line))).toEqual([])
+  expect(resumed.filter(line => /^a[23]: /.test(line))).toEqual([])
+  // Long words after Claude Code's press are no result either, as Claude Code itself says it ended without one: it is started again
+  expect(carried('a4')).toHaveLength(1)
   expect(await lines()).toEqual([{ text: 'Stopped partway at hh:mm without a result · Claudopus started it again', color: undefined }])
   // The chat's model is told only once Claudopus gives up; a run that ended with its words as its result, never pressed, ends as before
   talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text: 'Sorted.' }] })

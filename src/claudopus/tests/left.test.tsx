@@ -295,3 +295,84 @@ test('what another task of the same chat starts while its command runs in the ba
   expect(shown?.filter(text => text.startsWith('Run the screenshots of both sides')).length).toBe(1)
   expect(shown?.some(text => text.startsWith('What “Run the screenshots of both sides” started'))).toBe(true)
 })
+
+test('a task whose step ends while only a preview server it left going runs, its helper\'s result just passed on and to-dos still to do, is not done: it stays at work and is started again, and it is done only once it hands back its result (18 Nov: a site task\'s card showed done for half an hour, no result ever came)', SLOW, async ($, on) => {
+  const procs = { list: [] as string[], logs: {} as Record<string, string> }
+  let pid = 4900
+  const now = { at: 1_700_000_000_000 }
+  const agents: Record<string, string> = { a1: 'running' }
+  const kinds: Record<string, string> = {}
+  const PRESS = { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' }
+  const QUIET = { role: 'assistant', content: [{ type: 'text', text: '<system-reminder>Waiting on my own work, which starts me again.</system-reminder>' }] }
+  const talk: unknown[] = []
+  const pressedAfter = (words: string) => talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text: words }] }, PRESS, QUIET, PRESS, QUIET, PRESS, QUIET)
+  const w = world(on, {
+    agents,
+    talk,
+    kinds,
+    jobs: {
+      output: () => '',
+      wroteAt: () => now.at - 2_000,
+      ps: () => procs.list.join('\n'),
+      fd: () => '',
+      pid: () => String((pid += 100)),
+      alive: p => procs.list.some(line => line.trim().startsWith(`${p} `)),
+      owner: () => 'mine',
+    },
+  })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  const advance = async (ms: number) => ((now.at += ms), await w.clock.advance(ms))
+  const { resumed, notified } = w
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'build and deploy the site', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Build and deploy the site', prompt: 'build it' } as never)
+  kinds.a1 = 'general-purpose'
+  const call = (tool: string, id: string, input: Record<string, unknown> = {}) => $.tool.call({ tool, tool_use_id: id, agentId: 'a1', ...input } as never)
+  const ends = async (id: string, answer: string, turn: string) => $.turn.complete({ answer, durationMs: 1, isAborted: false, turnId: turn, reason: 'answer', agentId: id } as never)
+  const card = async () => {
+    const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+    const texts = (await pane.findAll({ type: 'Text' })).map(one => one.text ?? '')
+    await pane.unmount()
+    return texts
+  }
+  for (const [n, item] of ['Find where the site is hosted', 'Say whether its domain takes email', 'Put a first page live', 'Build the full page'].entries()) await call('mcp__claudopus__todo', `t${n}`, { item, state: 'done' })
+  await call('mcp__claudopus__todo', 't5', { item: 'Have a second Claude check the page, then put it live', state: 'doing' })
+  // Its command builds the page, leaves a preview server going in its group, and takes pictures of it
+  procs.list.push(psLine(5060, 1, 5050, 'node /repo/node_modules/.bin/vite preview --port 4174'))
+  await call('Bash', 'b1', { command: 'npm run build && (npx vite preview --port 4174 >/dev/null 2>&1 &) && node shot.mjs http://localhost:4174 desktop.png', description: 'Run build of the full page and capture desktop and phone pictures' })
+  await advance(20_000)
+  expect(await until(async () => ((await leftTexts($)).some(text => text.startsWith('Run build of the full page')) || undefined))).toBe(true)
+  // It starts a second look and ends its step to wait for it, pressed for its report
+  await $.agent.spawn({ ...spawn, description: 'Check the page', prompt: 'check it', parentAgentId: 'a1' } as never)
+  kinds.a2 = 'general-purpose'
+  agents.a2 = 'running'
+  agents.a1 = 'completed'
+  pressedAfter("Waiting for the second Claude's findings.")
+  await ends('a1', "Waiting for the second Claude's findings.", 'w1')
+  await advance(6_000)
+  // The helper hands back and ends: Claudopus passes its result on to the task, which takes it in a step of its own, misreads it as
+  // still to come and ends its step again, pressed for its report three times, with only the server running
+  agents.a2 = 'completed'
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'a2', message: 'I found 1 serious fault: the 3D covers the headline at tablet width.' } as never)
+  await ends('a2', '', 'h1')
+  expect(await until(async () => resumed.find(line => line.startsWith('a1: From Claudopus: your helper "Check the page"')))).toBeDefined()
+  agents.a1 = 'running'
+  for await (const _ of $.turn.step({ turnId: 'w2', index: 0, model: 'm', messageCount: 1, agentId: 'a1' })) void _
+  agents.a1 = 'completed'
+  pressedAfter("Waiting for the checker's report, which is due in the next message.")
+  await ends('a1', "Waiting for the checker's report, which is due in the next message.", 'w2')
+  await advance(6_000)
+  // Not done, no ready note, no result: its card stays at work, and Claudopus starts it again to carry on
+  expect((await card()).some(text => text === '✓ Done' || /^Done · /.test(text))).toBe(false)
+  expect(notified).toEqual([])
+  expect(resumed.filter(line => line.startsWith('a1: From Claudopus, not ') && line.includes('Carry on from where you were'))).toHaveLength(1)
+  // It does the rest and hands back its result: only now is it done
+  agents.a1 = 'running'
+  await call('mcp__claudopus__todo', 't6', { item: 'Have a second Claude check the page, then put it live', state: 'done' })
+  await call('SubagentHandback', 'hb1', { message: 'The full page is live, checked by a second Claude.' })
+  agents.a1 = 'completed'
+  await ends('a1', '', 'w3')
+  expect(await until(async () => ((await card()).includes('✓ Done') || undefined))).toBe(true)
+  await advance(2_000)
+  expect(notified.map(line => line.split(' | ')[1])).toEqual(['The full page is live, checked by a second Claude.'])
+})
