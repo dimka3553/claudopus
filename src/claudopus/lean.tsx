@@ -162,7 +162,11 @@ const isChatRunnable = (command: string, branch = '') => {
   // quotes no variable or escape (single quotes hold anything as written)
   // (a backslash there that the shell keeps as written, as in "%{http_code}\n", is as written; the address [::1] is curl's own)
   // (and an open's path may start at the home folder: ~ or $HOME, alone or before a /)
-  const words = shellWords(command)[0] ?? []
+  const said = shellWords(command)[0] ?? []
+  // A look into a repo other than the chat's folder: git -C and a plain path first, for a look only, never a push or fetch (whose
+  // branch is read in the chat's folder). 17 Nov: a chat opened above its repos had every git log refused, and guessed at status
+  const isElsewhere = said[0] === 'git' && said[1] === '-C' && /^[^-]/.test(said[2] ?? '') && !['push', 'fetch'].includes(said[3] ?? '')
+  const words = isElsewhere ? ['git', ...said.slice(3)] : said
   const head = words[0] ?? ''
   const homed = head === 'open' ? command.replace(/(^|\s)~(?=\/|\s|$)/g, '$1').replace(/\$HOME(?=[/\s"]|$)/g, '') : command
   if (/[$\\{}*?[\]~!]/.test(homed.replace(/'[^']*'|"(?:[^"$`\\]|\\[^$`"\\\n])*"/g, '""').replace(/\[::1\]/g, ''))) return false
@@ -187,7 +191,7 @@ const isChatRunnable = (command: string, branch = '') => {
   return CHAT_LOOKS.includes(head)
 }
 const NOT_ONE_COMMAND =
-  'Not run: the chat runs only a single command with nothing joined to it (no `&&`, `;`, `|`, `>`, `$( )` or backticks), and only one that changes no file: a push, a fetch, a look with git or gh, an `open` of a file or page, or a `curl` status check of a local server, sent with `run_in_background: true`. Start a task for anything else.'
+  'Not run: the chat runs only a single command with nothing joined to it (no `&&`, `;`, `|`, `>`, `$( )` or backticks), and only one that changes no file: a push, a fetch, a look with git or gh (`git -C <folder> log` for a repo other than the chat\'s folder), an `open` of a file or page, or a `curl` status check of a local server, sent with `run_in_background: true`. Start a task for anything else.'
 // The chat's own commands under way, by their background id: when each started and what it was
 const chatCommands = new Map<string, { at: number; command: string; description: string }>()
 // The background id a command sent to the background answers with, as the engine writes it

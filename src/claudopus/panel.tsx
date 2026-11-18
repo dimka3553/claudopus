@@ -598,6 +598,12 @@ const panelHooks = (on: On) => {
                 <Text dimColor wrap="wrap">{waitLine(one, at, jobsOf(one, at).length > 0)}</Text>
               </Box>
             ) : null}
+            {/* Waiting with nothing that started it again for long: Claudopus started it to look at what it waits for */}
+            {ownWaitLine(all, one, at) ? (
+              <Box key={`own-wait-${one.id}`} paddingLeft={lead}>
+                <Text dimColor wrap="wrap">{ownWaitLine(all, one, at)}</Text>
+              </Box>
+            ) : null}
             {/* Its helpers gone quiet, in amber: those at work are rows on its tree */}
             {lookedInLine(one, at) && !one.chat ? (
               <Box key={`looked-${one.id}`} paddingLeft={lead}>

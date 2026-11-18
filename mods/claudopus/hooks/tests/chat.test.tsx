@@ -1311,7 +1311,7 @@ test("a chat's own thread may only read, run a single command in the background,
   for (const [i, command] of ['echo "$(git add -A)"', 'git log "`rm -rf x`"', 'git log <(ls)'].entries())
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1e${i}`, command } as never)).deny).toContain('only a single command')
   // Only a look or a push: one that changes or reads files, a script, a pull, a branch or remote changed, a paste or a shell is a task's
-  for (const [i, command] of ['rm -rf build', 'git pull', 'git checkout .', 'git branch -D old', 'git remote add x y', './deploy.sh', 'cp -r ~/.claude/claudopus/p?stes /tmp/p', 'npm install', 'GIT_DIR=x git status', "bash -c 'git add -A'"].entries())
+  for (const [i, command] of ['rm -rf build', 'git pull', 'git checkout .', 'git branch -D old', 'git remote add x y', './deploy.sh', 'cp -r ~/.claude/claudopus/p?stes /tmp/p', 'npm install', 'GIT_DIR=x git status', "bash -c 'git add -A'", 'git -C /repo checkout --detach origin/main', 'git -C /repo -c core.pager=x log', 'git -C /repo push origin work', 'git -C -c log'].entries())
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1f${i}`, command } as never)).deny).toContain('Start a fresh agent')
   // and it names the quick task for a clearly stated job
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1f-q', command: 'git pull' } as never)).deny).toContain('"claudopus:quick" for a clearly stated job')
@@ -1319,6 +1319,9 @@ test("a chat's own thread may only read, run a single command in the background,
   for (const [i, command] of [
     'git status',
     'git log --oneline -5',
+    // a look into a repo below the chat's folder (17 Nov: refused three times, and the chat guessed at status)
+    'git -C /Users/sam/code/app log --oneline -12 origin/main',
+    'git -C /Users/sam/code/app status --short --branch',
     'gh pr checks 12',
     'git branch -a',
     'git remote -v',

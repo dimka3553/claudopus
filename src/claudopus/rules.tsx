@@ -5,7 +5,7 @@
 const BRIEF =
   'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
 const REFUSED =
-  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, sent with `run_in_background: true`; a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
+  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a push, a fetch or a look with git or gh, `git -C <folder>` for a look into another repo, an open of a file or page, a local curl status check, sent with `run_in_background: true`; a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
   `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
 // A command that would print a password or key the keychain keeps (on Linux, the files bin/keyring keeps). Work uses a kept key only through `bin/secret`, which reads it itself
@@ -240,7 +240,7 @@ const ANSWERED_IN_CHAT = (asked: string, words: string, isHeld = false, isWhole 
 // What the work is told as a steer reaches it: it stops, decides what the steer is, and says so. The mod writes it into the work's
 // own chat: the call that sent the steer is left as it was made, since auto mode refuses a call a hook has changed
 const STEER = (words: string, isWhole = true) =>
-  `${theirsAre(words, isWhole)} Stop: take no other step until you have thought about it. Decide which of three it is. More for this task: add it to your to-do list. A new task of its own: do not do it; hand it back with the \`note\` tool, with its \`task\` set to the request in one line, and the chat starts it. A change in how you are working: change your to-dos to match. Then say with the \`note\` tool, in one plain line, what you did with their message, such as that you added it to your to-do list, and continue. Call it {name}'s message, by no other name.`
+  `${theirsAre(words, isWhole)} Stop: take no other step until you have thought about it. Decide which of three it is. More for this task, or anything it asks that you can do with what this task already has (its folder, files, sign-ins, pages or what you have learned): add it to your to-do list and do it here, as the chat sent it to you to be done. A new task of its own: only a request this task has nothing to do with, such as another project; do not do it; hand it back with the \`note\` tool, with its \`task\` set to the request in one line, and the chat starts it.${isWhole ? '' : ' Words of theirs the chat did not pass on to you in its message, the chat has seen to: neither do them nor hand them back.'} A change in how you are working: change your to-dos to match. Then say with the \`note\` tool, in one plain line, what you did with their message, such as that you added it to your to-do list, and continue. Call it {name}'s message, by no other name.`
 // Whose a message is that carries the person's words: the whole of it theirs only when it is their words and nothing more; else only
 // the words quoted are theirs, and the rest is the chat's own, which carries none of their say
 const theirsAre = (words: string, isWhole: boolean) =>
@@ -290,6 +290,8 @@ const STUCK_IN_CHAT = (title: string, mins: number, isHelpersAtWork = false) =>
   `Nothing new from "${title}" for ${minutesSaid(mins)}${isHelpersAtWork ? ', though its helpers are still running something' : ''}. Claude may be stuck waiting for something. Its card shows how far it got.`
 // What the chat alone reads with it: it may ask the task what it waits on, as nothing of Claudopus's will
 const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to finish with what it has if nothing is coming.'
+// The same for a task waiting with its step ended, which Claudopus looks in on (lookOwnWaits)
+const STUCK_ASK_LOOKS = 'Claudopus starts it again from time to time to check on what it waits for while nothing moves, and you may send it a message asking what it waits on, and to finish with what it has if nothing is coming.'
 // A task that ended its step to wait for its helpers, from which nothing new has come back: Claudopus starts it again with a nudge,
 // first to ask them, then to hand back what it has. What it is told, and what the chat is told
 const HELPERS_SILENT = (mins: number, helpers: string) =>
@@ -298,6 +300,13 @@ const HELPERS_STILL_SILENT = (mins: number, helpers: string) =>
   `From Claudopus: nothing new has come back from your helpers for ${mins} min, nor since you were asked to check on them: ${helpers}. Unless one told you it is still making progress and when it ends, hand back your report now with what you have, saying what each was still doing: Claudopus lets you hand it back while they run, and stops those that sit silent as you do.`
 const GAVE_UP_IN_CHAT = (title: string, mins: number) =>
   `"${title}" is stuck: nothing new from its helpers for ${minutesSaid(mins)}, and Claude hasn't sent what it has, though Claudopus asked it to.`
+// A task whose step ended to wait on its own command, a watch or nothing at all, with no helper at work, that nothing started again
+// (18 Nov: three tasks sat from about 02:00 to 06:23, cloud jobs that never started, until the person asked): what Claude is told,
+// and what the chat's model reads
+const OWN_WAIT_LOOK = (mins: number, what: string) =>
+  `From Claudopus, not {name}: you ended your step ${minutesSaid(mins)} ago to wait for ${what}, and nothing has started you again since. Look at it now. If it is still getting somewhere, say how far with the \`note\` tool and end your step again. If it is stuck, or waits on something that won't come (a full disk, a machine that won't start, a limit, a question nobody has answered), stop it and fix what you can, or hand back your report with what you have and what is left.`
+const OWN_WAIT_IN_CHAT = (title: string, mins: number) =>
+  `Nothing new from "${title}" for ${minutesSaid(mins)} while it waits. Claudopus started Claude again to check on what it waits for.`
 const NUDGED_IN_CHAT = (title: string, mins: number, isLast: boolean) =>
   `Nothing new from the helpers of "${title}" for ${minutesSaid(mins)}. Claudopus started Claude again and asked it ${isLast ? 'to send what it has now' : 'to check on them'}.`
 // A task that had stopped partway through a step without a report, restarted by Claudopus: what Claude is told, and what the chat is told

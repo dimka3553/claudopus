@@ -242,6 +242,7 @@ const lookStuck = async ($: EngineInterface) => {
     await tellStuck($, one, Math.round((now - movedAt(list, one)) / 60_000), now)
   }
   await lookHelperWaits($, now)
+  await lookOwnWaits($, now)
   // What agents that have ended had seen come back is let go
   const list = await read($, todos)
   for (const agent of seenLines.keys()) if (!list.some(one => one.id === agent && one.status === 'working')) seenLines.delete(agent)
@@ -255,7 +256,8 @@ const tellStuck = async ($: EngineInterface, one: Todo, mins: number, now: numbe
   await changeTodos($, all => all.map(card => (card.id === one.id ? { ...card, stuckTold: now } : card)))
   const list = await read($, todos)
   const said = STUCK_IN_CHAT(titleOf(one), mins, runningKids(list, one.id).some(kid => isBusy(list, kid, now)))
-  await sayInChat($, named(`${said} ${STUCK_ASK}`), named(said))
+  const card = list.find(card => card.id === one.id) ?? one
+  await sayInChat($, named(`${said} ${isOwnWaiting(list, card, now) ? STUCK_ASK_LOOKS : STUCK_ASK}`), named(said))
 }
 
 // Work whose step ended while all its helpers sit silent follows a fixed schedule from then: at HELPER_WAIT_STEP it is started again
@@ -309,7 +311,7 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
       // The chat already told it is stuck is not told again
       if (one.stuckTold !== undefined) continue
       await log($, `work ${id} still stuck ${mins} min on silent helpers after Claudopus asked it to hand back: the chat is told`)
-      await sayInChat($, named(`${GAVE_UP_IN_CHAT(titleOf(one), mins)} ${STUCK_ASK}`), named(GAVE_UP_IN_CHAT(titleOf(one), mins)))
+      await sayInChat($, named(`${GAVE_UP_IN_CHAT(titleOf(one), mins)} ${STUCK_ASK_LOOKS}`), named(GAVE_UP_IN_CHAT(titleOf(one), mins)))
       continue
     }
     const line = (step === 2 ? HELPERS_STILL_SILENT : HELPERS_SILENT)(mins, silentHelpers(list, id, now))
@@ -364,6 +366,60 @@ const helpersRecord = async ($: EngineInterface, list: Todo[], id: string) => {
   }
   return seen
 }
+// Work whose step ended to wait with no helper at work, on a command of its own, a watch, or nothing Claudopus can see, is started
+// again to look at what it waits on when nothing started it for this long: the first look no sooner than its newest command's own
+// expected time and ten minutes more, then each after twice the last gap, and from four hours on every four hours. It counts afresh
+// once a to-do is ticked or a command ends. 18 Nov: three tasks sat four to five hours on cloud jobs that never started, flagged and
+// never looked at, until the person asked
+const OWN_WAIT_GAPS = [30 * 60_000, 60 * 60_000, 2 * 3_600_000, 4 * 3_600_000]
+const ownWaitGap = (done: number) => OWN_WAIT_GAPS[Math.min(done, OWN_WAIT_GAPS.length - 1)]!
+// What it waits on, so a wait that moved starts the count over
+const ownWaitKey = (one: Todo) =>
+  `${one.items.filter(item => item.state === 'done').length}:${(one.endedRuns ?? []).length}:${[...(one.bg ?? []).map(b => b.id), ...(one.detached ?? []).map(d => d.id)].sort().join(',')}`
+// What it waits on, in words for its look-in: its commands, each with how long it has run
+const ownWaitWhat = (one: Todo, at: number) => {
+  const commands = [...(one.bg ?? []).map(b => ({ what: b.what, at: b.at, isWatch: b.isWatch })), ...(one.detached ?? []).filter(d => !d.isLeft).map(d => ({ what: d.what, at: d.at, isWatch: false }))]
+  if (!commands.length) return 'something Claudopus can see nothing of (no command or helper of yours runs)'
+  return commands.map(c => `${c.isWatch ? 'your watch' : 'your command'} "${cut(oneLine(c.what || 'with no description'), 80)}", running ${minutesSaid(Math.round((at - c.at) / 60_000))}`).join('; ')
+}
+const isOwnWaiting = (list: Todo[], one: Todo, at: number) =>
+  !one.parentId && !one.chat && one.status === 'working' && one.endedStepAt !== undefined && one.handedBackAt === undefined && one.answeredAt === undefined && (!runningKids(list, one.id).length || (one.helperWait?.done ?? 0) >= 3) && !isWakeDue(one, at) && !(one.ask && !one.ask.replied) && !one.admins?.length && !one.heldCalls?.length && !isHeld(one)
+const lookOwnWaits = async ($: EngineInterface, now: number) => {
+  const due: { id: string; mins: number }[] = []
+  await changeTodos($, list => {
+    due.length = 0
+    let isChanged = false
+    const next = list.map(one => {
+      if (!isOwnWaiting(list, one, now)) return one
+      const key = ownWaitKey(one)
+      // (after the helpers' schedule ran out, counted from its last step)
+      const wait = one.ownWait?.key === key ? one.ownWait : { key, done: 0, at: one.helperWait?.at ?? 0 }
+      if (wait !== one.ownWait) ((isChanged = true), (one = { ...one, ownWait: wait }))
+      // (the first look waits out the newest command's own expected time)
+      const newest = (one.bg ?? []).filter(b => !b.isWatch).at(-1)
+      const isPastOwnTime = wait.done > 0 || !newest || now - newest.at >= (describedOf(newest.what).expect ?? 0) + 10 * 60_000
+      const gap = ownWaitGap(wait.done)
+      if (isPastOwnTime && now - (one.endedStepAt ?? now) >= gap && now - wait.at >= gap) due.push({ id: one.id, mins: Math.round((now - (one.endedStepAt ?? now)) / 60_000) })
+      return one
+    })
+    return isChanged ? next : list
+  })
+  for (const { id, mins } of due) {
+    const one = (await read($, todos)).find(card => card.id === id)
+    if (!one || stoppedHere.has(id) || pressed.has(id) || (await isReplaced($))) continue
+    // (not while it is at a step of its own)
+    const status = String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status)
+    if (status === 'running' || status === 'pending') continue
+    await changeTodos($, all => all.map(card => (card.id === id && card.ownWait ? { ...card, ownWait: { ...card.ownWait, done: card.ownWait.done + 1, at: now } } : card)))
+    const r = await sendOwn($, { to: { agentId: id }, text: named(OWN_WAIT_LOOK(mins, ownWaitWhat(one, now))) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    await log($, `work ${id} waited ${mins} min with nothing to start it again: ${r.isDelivered ? 'started again' : `not reached (${r.reason})`} to look at what it waits on`)
+    await tellChat($, named(OWN_WAIT_IN_CHAT(titleOf(one), mins)))
+  }
+}
+// What its card says once Claudopus started it to look: while it still waits
+const ownWaitLine = (list: Todo[], one: Todo, at: number) =>
+  one.ownWait?.done && one.ownWait.at && isOwnWaiting(list, one, at) ? `Claudopus asked Claude to check on what it waits for · ${minutesSaid(Math.round((at - one.ownWait.at) / 60_000))} ago` : ''
+
 // The helpers a piece of work waits on, each by its title and id with what it runs and for how long, for its nudge
 const silentHelpers = (list: Todo[], id: string, at: number) =>
   list
