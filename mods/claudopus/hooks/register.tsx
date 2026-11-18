@@ -9034,7 +9034,7 @@ const keepNotDone = async ($: EngineInterface, id: string) => {
 }
 const notDoneLine = (one: Todo) => {
   const open = one.status === 'working' ? [] : openItems(one).map(item => item.text)
-  return open.length ? `${plural(open.length, 'a to-do', 'to-dos')} not done · ${open.join(' · ')}` : ''
+  return open.length ? `Not done · ${open.join(' · ')}` : ''
 }
 const notDoneLines = (one: Todo, text: string) => {
   const left = (one.notDone ?? []).filter(item => !text.includes(item))

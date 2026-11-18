@@ -680,7 +680,7 @@ const keepNotDone = async ($: EngineInterface, id: string) => {
 // The card's line for a task that ended with to-dos not done
 const notDoneLine = (one: Todo) => {
   const open = one.status === 'working' ? [] : openItems(one).map(item => item.text)
-  return open.length ? `${plural(open.length, 'a to-do', 'to-dos')} not done · ${open.join(' · ')}` : ''
+  return open.length ? `Not done · ${open.join(' · ')}` : ''
 }
 // A result's lines for the to-dos its task left not done that it does not name itself
 const notDoneLines = (one: Todo, text: string) => {
