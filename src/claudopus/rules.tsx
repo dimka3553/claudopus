@@ -61,16 +61,17 @@ const pushesMain = (command: string): boolean =>
     return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
   })
 // What a command would change in the code chats run: a git command that moves what is checked out or changes its files (checkout,
-// switch, restore, reset, rebase, bisect, stash, merge, pull, cherry-pick, revert, am, apply, clean, commit, update-ref, and a
-// branch renamed, forced or deleted), with the folder it runs in: git's -C or --work-tree, else env's -C or --chdir, else the last
+// switch, restore, reset, rebase, bisect, stash, merge, pull, cherry-pick, revert, am, apply, clean, commit, rm, mv, update-ref,
+// symbolic-ref setting HEAD, and a branch renamed, forced, copied over or deleted), with the folder it runs in: git's -C, then its
+// --work-tree or else its --git-dir, else env's -C or --chdir, else the last
 // cd or pushd before it (a bare cd is home, $HOME and ~ are home, cd - the folder before), else where the command starts. Left
 // out, as they only read or are how the folder gets back on track: going back to main (`git checkout main`, `git switch main`), a
-// fast-forward to main online (`merge --ff-only` with no name or */main or @{u}, `pull --ff-only` with no name or `<remote> main`),
-// an --abort or --quit, bisect's reset, log and view, a stash's list and show, apply's --check and --stat, clean's dry run.
-// Redirections are no names. This stops slips, not someone set on it: names in variables, a script it runs and git's --git-dir
-// alone get past it. On 18 Nov a helper's `git checkout -q --detach origin/main` in Claudopus's own checkout left every chat on
+// fast-forward to main online (`merge --ff-only` with no name, origin/main or @{u}, `pull --ff-only` with no name or `<remote>
+// main`), an --abort or --quit, a bare bisect reset, bisect's log and view, a stash's list and show, apply's --check and --stat, clean's dry run.
+// Redirections are no names. This stops slips, not someone set on it: names in variables, quotes round a redirection's sign and
+// a script it runs get past it. On 18 Nov a helper's `git checkout -q --detach origin/main` in Claudopus's own checkout left every chat on
 // that commit, and Update called it a test copy
-const CHANGING_GIT = ['checkout', 'switch', 'restore', 'reset', 'rebase', 'bisect', 'stash', 'merge', 'pull', 'cherry-pick', 'revert', 'am', 'apply', 'clean', 'commit', 'update-ref', 'branch']
+const CHANGING_GIT = ['checkout', 'switch', 'restore', 'reset', 'rebase', 'bisect', 'stash', 'merge', 'pull', 'cherry-pick', 'revert', 'am', 'apply', 'clean', 'commit', 'update-ref', 'branch', 'rm', 'mv', 'symbolic-ref']
 const changesOf = (command: string, start: string, home: string): string[] => {
   const at = (here: string, path: string) =>
     (path.replace(/^(\$HOME|\$\{HOME\}|~)(?=\/|$)/, home).startsWith('/') ? path.replace(/^(\$HOME|\$\{HOME\}|~)(?=\/|$)/, home) : `${here}/${path}`)
@@ -79,14 +80,19 @@ const changesOf = (command: string, start: string, home: string): string[] => {
       .join('/') || '/'
   let here = start
   let before = start
-  return shellWords(command).flatMap((all): string[] => {
-    // A redirection and the file it names are no words of the command (`2>&1` is split at its & into `2>` and `1`)
-    const words = all.filter((one, k) => !/^\d*[<>]/.test(one) && !/^\d*[<>]+&?$/.test(all[k - 1] ?? 'x') && !(one === '1' && /^\d*>$/.test(all[k - 1] ?? '')))
+  // A copy of one output onto another (2>&1, >&2) is taken out first, and &> made a plain >, as the shell splits at their &
+  return shellWords(command.replace(/\d*>&(\d+|-)/g, ' ').replace(/&>>?/g, ' >')).flatMap((all): string[] => {
+    // A redirection and the file it names are no words of the command, written apart or joined to a word (main>/dev/null)
+    const words = all
+      .filter((one, k) => !/^\d*[<>]\S*$/.test(one) && !/^\d*[<>]+$/.test(all[k - 1] ?? 'x'))
+      // (a word with a space is a quoted whole, such as the command a shell's -c runs, and is kept as it is)
+      .map(one => (/\s/.test(one) ? one : one.replace(/\d*[<>].*$/, '')))
+      .filter(Boolean)
     let i = commandAt(words)
     // env -C <folder> or --chdir=<folder>: commandAt stops at -C's folder, as it takes no value for env's flags
     const isEnv = words.slice(0, i).some(one => one.split('/').pop() === 'env')
     let envFolder = isEnv ? words.slice(0, i).find(one => one.startsWith('--chdir='))?.slice(8) : undefined
-    if (isEnv && words[i - 1] === '-C') (envFolder = words[i]), (i += 1 + commandAt(words.slice(i + 1)))
+    if (isEnv && (words[i - 1] === '-C' || words[i - 1] === '--chdir')) (envFolder = words[i]), (i += 1 + commandAt(words.slice(i + 1)))
     const tool = (words[i] ?? '').split('/').pop()
     if (tool === 'cd' || tool === 'pushd') {
       const to = words.slice(i + 1).find(one => !one.startsWith('-') || one === '-')
@@ -95,18 +101,28 @@ const changesOf = (command: string, start: string, home: string): string[] => {
       return []
     }
     if (tool === 'bash' || tool === 'sh' || tool === 'zsh') {
-      const c = words.slice(i + 1).findIndex(one => /^-[a-z]*c[a-z]*$/.test(one))
-      return c >= 0 && words.slice(i + 1, i + 1 + c).every(one => one.startsWith('-')) ? changesOf(words[i + 2 + c] ?? '', here, home) : []
+      // Its flags, -o and +o taking a value, up to the one with c: the next word is the command it runs
+      for (let k = i + 1; k < words.length && /^[-+]/.test(words[k]!); k += /^[-+]o$/.test(words[k]!) ? 2 : 1)
+        if (/^-[a-z]*c[a-z]*$/.test(words[k]!)) return changesOf(words[k + 1] ?? '', here, home)
+      return []
     }
     if (tool !== 'git') return []
     let folder = envFolder ? at(here, envFolder) : here
     let j = i + 1
+    // git's own options, those that take a value written apart taking the next word; a work tree, else a git folder, names the folder
+    let tree = ''
+    let gitDir = ''
     while (j < words.length && words[j]!.startsWith('-')) {
-      if (words[j] === '-C' && words[j + 1]) folder = at(folder, words[j + 1]!)
-      if (words[j]!.startsWith('--work-tree=')) folder = at(folder, words[j]!.slice(12))
-      if (words[j] === '--work-tree' && words[j + 1]) folder = at(folder, words[++j]!)
-      j += /^-[Cc]$/.test(words[j]!) ? 2 : 1
+      const [opt = '', value] = words[j]!.startsWith('--') && words[j]!.includes('=') ? [words[j]!.slice(0, words[j]!.indexOf('=')), words[j]!.slice(words[j]!.indexOf('=') + 1)] : [words[j]!, undefined]
+      const isApart = value === undefined && /^(-[Cc]|--(git-dir|work-tree|namespace|super-prefix|exec-path|config-env|attr-source|list-cmds))$/.test(opt) && !(opt === '--exec-path' && !words[j + 1])
+      const given = value ?? (isApart ? words[j + 1] ?? '' : '')
+      if (opt === '-C' && given) folder = at(folder, given)
+      if (opt === '--work-tree' && given) tree = at(folder, given)
+      if (opt === '--git-dir' && given) gitDir = at(folder, given)
+      j += isApart ? 2 : 1
     }
+    if (tree) folder = tree
+    else if (gitDir) folder = gitDir.replace(/\/\.git$/, '')
     const sub = words[j] ?? ''
     if (!CHANGING_GIT.includes(sub)) return []
     const args = words.slice(j + 1)
@@ -115,13 +131,16 @@ const changesOf = (command: string, start: string, home: string): string[] => {
     const has = (...some: string[]) => flags.some(one => some.includes(one))
     if (has('-h', '--help', '--abort', '--quit')) return []
     if ((sub === 'checkout' || sub === 'switch') && names.length === 1 && names[0] === 'main' && flags.every(one => one === '-q' || one === '--quiet')) return []
-    if (sub === 'merge' && has('--ff-only') && (names.length === 0 || (names.length === 1 && /^([\w.-]+\/main|@\{u(pstream)?\})$/.test(names[0]!)))) return []
-    if (sub === 'pull' && has('--ff-only') && (names.length === 0 || (names.length === 2 && names[1] === 'main'))) return []
-    if (sub === 'bisect' && ['reset', 'log', 'view', 'visualize'].includes(names[0] ?? '')) return []
+    if (sub === 'merge' && has('--ff-only') && (names.length === 0 || (names.length === 1 && /^(origin\/main|@\{u(pstream)?\})$/.test(names[0]!)))) return []
+    if (sub === 'pull' && has('--ff-only') && (names.length === 0 || (names.length === 2 && /^[\w-]+$/.test(names[0]!) && names[1] === 'main'))) return []
+    if (sub === 'bisect' && (['log', 'view', 'visualize'].includes(names[0] ?? '') || (names[0] === 'reset' && names.length === 1))) return []
     if (sub === 'stash' && ['list', 'show'].includes(names[0] ?? '')) return []
     if (sub === 'apply' && has('--check', '--stat', '--numstat', '--summary') && !has('--apply', '--index', '--cached')) return []
-    if (sub === 'clean' && has('-n', '--dry-run')) return []
-    if (sub === 'branch' && !has('-m', '-M', '--move', '-f', '--force', '-d', '-D', '--delete')) return []
+    // Short flags written together count each (-fdn is -f, -d and -n)
+    const hasShort = (letters: RegExp) => flags.some(one => /^-[a-zA-Z]+$/.test(one) && letters.test(one.slice(1)))
+    if (sub === 'clean' && (has('--dry-run') || hasShort(/n/))) return []
+    if (sub === 'branch' && !hasShort(/[mMfdDC]/) && !has('--move', '--force', '--delete', '--copy')) return []
+    if (sub === 'symbolic-ref' && names.length < 2 && !has('-d', '--delete')) return []
     return [folder]
   })
 }
