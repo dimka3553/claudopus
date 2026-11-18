@@ -103,7 +103,7 @@ const SERIAL_STEPS = 20
 const SERIAL_SHARE = 0.85
 
 // Looked at every LOOK_IN_EVERY while work runs: each running helper that has shown nothing new for HELPER_QUIET, and each that
-// works in order, is named to the work that started it, once each stretch, and its card says when it was looked at and what of
+// works in order, is named to the work that started it, once each stretch (its card says nothing of it)
 const lookInOnHelpers = async ($: EngineInterface) => {
   const now = await $.clock.now()
   const list = await read($, todos)

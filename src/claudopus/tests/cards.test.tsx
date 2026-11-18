@@ -1245,7 +1245,7 @@ test('a run whose output cannot be found says so after three minutes, so a blank
   await list.unmount()
 })
 
-test('a run of a work\'s own wakes it the moment it ends: any command that only waits, the work\'s or its helper\'s, is refused in one sentence, the work is told it ended, and its card no longer says how far it was (16 Nov an upload read 100% beside "about 40% done"; a helper polled for a file its own script wrote)', SLOW, async ($, on) => {
+test('a run of a work\'s own wakes it the moment it ends: any command that only waits, the work\'s or its helper\'s, is refused in one sentence, the work is told it ended, and its card\'s line stays the work\'s own words until it writes again, never a line of commands that ended (16 Nov an upload read 100% beside "about 40% done"; 18 Nov "Run: …: ended" stood in place of the task\'s note; a helper polled for a file its own script wrote)', SLOW, async ($, on) => {
   let isAlive = true
   const talk: unknown[] = []
   // (at a step of its own, as the engine lists it, until it ends its step below)
@@ -1280,12 +1280,14 @@ test('a run of a work\'s own wakes it the moment it ends: any command that only 
     return texts
   }
   expect((await line()).some(text => /about 40% done/.test(text))).toBe(true)
-  // It ends: the work is told at once, and the card says so in place of the line written while it ran
+  // It ends: the work is told at once, so it writes its next line; until then the card keeps its own words, never "…: ended"
   isAlive = false
   await clock.advance(20_000)
   expect(await until(async () => appended.find(one => one === 'a1: Your command "Upload both zips to the folder" has ended. Look at how it ended in its log, /w/upload.log, and carry on with the next step now.'))).toBeDefined()
-  expect(await until(async () => ((await line()).some(text => text === 'Upload both zips to the folder: ended') || undefined))).toBe(true)
-  expect((await line()).some(text => /about 40% done/.test(text))).toBe(false)
+  expect((await line()).some(text => /: ended$/.test(text ?? ''))).toBe(false)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n2', agentId: 'a1', text: 'Both zips are in the folder; I am checking them.' } as never)
+  expect(await until(async () => ((await line()).some(text => text === 'Both zips are in the folder; I am checking them.') || undefined))).toBe(true)
+  expect((await line()).some(text => /about 40% done/.test(text ?? ''))).toBe(false)
   // The sifter outlived what it watched: stopped a minute on, and the work told why
   await clock.advance(60_000)
   expect(await until(async () => stopped.includes('bg-g1') || undefined)).toBe(true)
@@ -1476,8 +1478,8 @@ test('only runs really running are listed: a watch the engine killed at its time
   // The watches the engine killed at their limit, the failed and the finished command are gone from the tree, and no clock runs for them
   expect(shown.some(text => /\[killed\]/.test(text))).toBe(false)
   expect(shown.some(text => /^(Wait for first screening pass ×2|Run the fetch of the list|Run the tidy up)\b(?!: (failed|done))/.test(text))).toBe(false)
-  // (the card's own line names the two that ended since its last line, with how each ended)
-  expect(shown).toContain('Run the tidy up: done · Run the fetch of the list: failed')
+  // (the card's own line never names the commands that ended: how each ended is in Details, 18 Nov)
+  expect(shown.some(text => /^Run the (tidy up|fetch of the list): (done|failed)/.test(text))).toBe(false)
   // The closing row counts them and says, in words, how many did not finish well
   expect(shown).toContain('4 commands ended · 1 failed, 2 ran out of time')
   // The wait still running stays, within its time

@@ -42,7 +42,7 @@ A running command or helper is two lines:
 - Once Claudopus has told Claude about the quiet, the line says so: `· Claude was told to check it`.
 - A server: `Serving`. A watch: `Watching · last: series arrived`.
 - A helper's line 2 is what it is doing now, in plain words: `Reading files`, `Rendering the song stills · 4m`, `Searching the web`, `Waiting for its commands`, or its own last note. Quiet for three minutes, it is `Last: Reading files · nothing new for 29m`.
-- A task's card says only its stage, the to-do marked doing (`To-do 5 of 7 · Mend the nose`), and its own last note as its line, plus in amber what needs you. What Claudopus did on the way (started it again after the chat stopped, the command it waits for, when it starts it again, which commands ended) is never on the card.
+- A task's card says only its stage, the to-do marked doing (`To-do 5 of 7 · Mend the nose`), and its own last note as its line, plus in amber what needs you. What Claudopus did on the way (started it again after the chat stopped or partway, the command it waits for, when it starts it again, which helpers it was told to check on) is never on the card, and a command that ended never takes the place of the task's own line.
 - Ended: `Done in 2m 05s`, `Failed after 2m 05s`, `Stopped after 1m`.
 
 ## Questions, notices, errors

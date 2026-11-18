@@ -501,8 +501,8 @@ const panelHooks = (on: On) => {
       )
     }
     // The small card: its title, which opens its Details, with Stop at the far end of that row; where it stands and how many
-    // to-dos are done; the line the work last wrote beside the three dots; its helpers. Each part has a fixed number of rows
-    // and is clipped to them, so a card never changes height as the work goes
+    // to-dos are done; the to-do marked doing, while one is; the line the work last wrote beside the three dots; its helpers. Each
+    // part has a fixed number of rows and is clipped to them, so a card changes height only as that to-do row comes and goes
     let cardNo = 0
     let keyed = false
     // One row under the facts while the work runs: the to-do being done, numbered done + 1 of all kept, which is how far along it
@@ -519,7 +519,7 @@ const panelHooks = (on: On) => {
             <Text dimColor>{`To-do ${done + 1} of ${kept.length} ·`}</Text>
           </Box>
           <Box flexShrink={1} minWidth={0}>
-            <Text wrap="truncate-end">{doing.text}</Text>
+            <Text wrap="truncate-end" dimColor={false}>{doing.text}</Text>
           </Box>
         </Box>
       )
@@ -643,7 +643,7 @@ const panelHooks = (on: On) => {
                   </Text>
                 ) : (
                   <Box flexDirection="column" minWidth={0}>
-                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(noteOf(one), room) || (one.status === 'working' ? (one.ask ? 'Waiting for you' : 'Starting') : "Claude hasn't said what it's doing")}</Text>
+                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(noteOf(one), room) || (one.status === 'working' ? (one.ask ? 'Waiting for you' : at - one.startedAt < 60_000 ? 'Starting' : 'Working') : "Claude hasn't said what it's doing")}</Text>
                     {/* Held where it was after an answer, once a newer line of the work's took the answer's place: why it is still up there */}
                     {!one.ask && !sentLine(one, at) && heldAnswer(one, at) && heldAnswer(one, at)?.to !== 'ran' && !heldAnswer(one, at)?.isRun ? <Text key={`held-answer-${one.id}`} dimColor wrap="truncate-end">{`✓ You answered “${cut(heldAnswer(one, at)?.text ?? '', 60)}”`}</Text> : null}
                   </Box>

@@ -1083,7 +1083,7 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   expect(appended.filter(one => one.includes('Claudopus did not pass it on'))).toEqual([])
 })
 
-test("what nothing of the work's own makes, a file, a line in it, a page or a time, Claudopus looks for when asked and starts the work again once it is there, or once the longest look (15 min unless given, at most an hour, always) runs out, though the engine lists it as ended; a look that ran out has it hand back what it has, which goes through while a helper runs, and the same file, line or page is not looked for again; a helper's result that comes after is told to the chat as late; work never reached is told to the chat; the card says so, with by when, in place of a command that would wait; a helper hands back instead", SLOW, async ($, on) => {
+test("what nothing of the work's own makes, a file, a line in it, a page or a time, Claudopus looks for when asked and starts the work again once it is there, or once the longest look (15 min unless given, at most an hour, always) runs out, though the engine lists it as ended; a look that ran out has it hand back what it has, which goes through while a helper runs, and the same file, line or page is not looked for again; a helper's result that comes after is told to the chat as late; work never reached is told to the chat; its card says nothing of when it is started again; a helper hands back instead", SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const unresumable = new Set<string>()
   const { clock, files, resumed, logged, appended, submitted, notified } = world(on, { agents, unresumable })
@@ -1104,12 +1104,12 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
     await list.unmount()
     return texts
   }
-  // Its card says nothing of when Claudopus starts it again (18 Nov)
-  expect((await lines()).some(text => /starts Claude again|the deploy marker/.test(text ?? ''))).toBe(false)
   // A helper that ended its step would have ended: it hands back what it waits for, and its task asks
   expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w2', agentId: 'a2', what: 'the build to finish', file: '/w/build.log', text: 'BUILD DONE' } as never)) as { result?: string }).result).toContain('hand back your result now')
   await clock.advance(40_000)
   expect(resumed.filter(one => /^a[12]: /.test(one))).toEqual([])
+  // Its card says nothing of when Claudopus starts it again (18 Nov)
+  expect((await lines()).some(text => /starts Claude again|the deploy marker/.test(text ?? ''))).toBe(false)
   // There: the work its step had ended, which the engine lists as ended, is started again
   files.set('/w/deployed.flag', '')
   await clock.advance(40_000)
