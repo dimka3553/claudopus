@@ -111,6 +111,8 @@ const NO_FOLLOW =
 const SEND_BACKGROUND = (name: string) =>
   `Not run: this command may run for minutes, and held open it keeps ${name}'s replies from you until it ends. Send the same call again with \`run_in_background: true\` and nothing else changed: Claudopus tells you when it ends, and ${name}'s replies reach you while it runs. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
 // The chat's own command, which runs only in the background
+// A long command of a chat that does short requests itself
+const CHAT_HELD_LONG = 'Not run: this command may run for minutes, and held open it keeps this chat from answering until it ends. Send the same call again with `run_in_background: true` and nothing else changed: you are told when it ends.'
 const CHAT_SEND_BACKGROUND = 'Not run: the chat runs its own command only in the background. Send the same call again with `run_in_background: true` and nothing else changed.'
 
 // The files a command runs, as filesRun finds them, each read (the first megabyte): the mod's own runners (bin/admin, bin/secret,
@@ -324,9 +326,11 @@ const workHooks = (on: On) => {
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
     // (the chat works where it is, which may be main: a push there that names no branch would push main)
     const pushed = itselfHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
-    const onMain = /\bgit\b[^;&|]*\bpush\b/.test(pushed)
-      ? /^(?:main|master)$/.test(await $.process.run(['git', '-C', /\bgit\s+-C\s+(\S+)/.exec(pushed)?.[1] ?? (cwd || '.'), 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => ''))
-      : false
+    let onMain = false
+    for (const push of pushed ? [pushed, ...(await scriptsRun($, pushed))].flatMap(text => barePushes(text, cwd || '.')) : []) {
+      const branch = push.to ?? (await $.process.run(['git', '-C', push.folder, 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => ''))
+      if (/^(?:main|master)$/.test(branch)) onMain = true
+    }
     if (onMain) {
       await log($, "refused the chat's push from main")
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
@@ -375,7 +379,7 @@ const workHooks = (on: On) => {
     // run in the background is refused with the same call to send that way, and the call sent again is reviewed as it runs
     if (dir && !isOff && (e.agentId !== undefined || isItself) && isLongHeld(e as never)) {
       await log($, `refused ${e.agentId === undefined ? "the chat's" : `work ${e.agentId}'s`} long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
-      return { deny: SEND_BACKGROUND(who()) }
+      return { deny: e.agentId === undefined ? CHAT_HELD_LONG : SEND_BACKGROUND(who()) }
     }
     if (isChatCommand && !(e as { run_in_background?: unknown }).run_in_background) {
       await log($, "refused the chat's own command held open")
@@ -652,11 +656,8 @@ const workHooks = (on: On) => {
     const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
     const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
     if (READS.includes(e.tool) && !isPaste) return next(e)
-    if (isItself) {
-      const r = await next(e)
-      if (e.tool === 'Bash' && (e as { run_in_background?: unknown }).run_in_background && !r.deny && !r.isError) await chatCommandStarted($, e as never, r.result).catch(err => log($, `the chat's command not followed: ${String(err)}`))
-      return r
-    }
+    // (what it leaves in the background runs on as in Claude Code, which tells the chat when it ends: a server {name} asked for stays up)
+    if (isItself) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
     if (grants.length) await dropGrants($, grants).catch(() => undefined)
     // An open, a curl or a preview not in the shape the chat runs is told that shape, so it can be run that way or go to a task

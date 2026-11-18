@@ -64,6 +64,42 @@ const pushesMain = (command: string): boolean =>
     if (args.includes('--no-verify')) return true
     return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
   })
+// Each push in a command that names no branch, so pushes whatever is checked out: the folder it runs in (a `cd` before it, git's
+// -C) and, when the same command checks a branch out there first, that branch. Read as the shell splits it, so the word push in a
+// message, a stash or a search never counts; a push that names a branch or only tags is pushesMain's
+const barePushes = (command: string, start: string): { folder: string; to?: string }[] => {
+  const found: { folder: string; to?: string }[] = []
+  const under = (base: string, path: string) => (path.startsWith('/') ? path : `${base}/${path}`)
+  let folder = start
+  let to: string | undefined
+  for (const words of shellWords(command)) {
+    let i = 0
+    while (i < words.length && /^\w+=/.test(words[i]!)) i++
+    const tool = (words[i] ?? '').split('/').pop()
+    if (tool === 'cd' && words[i + 1]) {
+      folder = under(folder, words[i + 1]!)
+      to = undefined
+      continue
+    }
+    if ((tool === 'bash' || tool === 'sh' || tool === 'zsh') && words[i + 1] === '-c') {
+      found.push(...barePushes(words[i + 2] ?? '', folder))
+      continue
+    }
+    if (tool !== 'git') continue
+    i++
+    let at = folder
+    while (i < words.length && words[i]!.startsWith('-')) {
+      if (words[i] === '-C' && words[i + 1]) at = under(at, words[i + 1]!)
+      i += /^-[Cc]$/.test(words[i]!) ? 2 : 1
+    }
+    const verb = words[i]
+    const named = words.slice(i + 1).filter(one => !one.startsWith('-'))
+    if ((verb === 'checkout' || verb === 'switch') && at === folder && named.length) to = named[0]
+    if (verb !== 'push' || words.slice(i + 1).some(one => /^--(?:tags|delete)$|^-d$/.test(one))) continue
+    if (named.length <= 1) found.push({ folder: at, ...(at === folder && to ? { to } : {}) })
+  }
+  return found
+}
 // What a command would change in the code chats run: a git command that moves what is checked out or changes its files (checkout,
 // switch, restore, reset, rebase, bisect, stash, merge, pull, cherry-pick, revert, am, apply, clean, commit, rm, mv, update-ref,
 // symbolic-ref setting HEAD, and a branch renamed, forced, copied over or deleted), with the folder it runs in: git's -C, then its

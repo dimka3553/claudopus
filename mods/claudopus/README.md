@@ -61,7 +61,7 @@ Claudopus never updates by itself. Every hour (or as often as Config says), it c
 
 ### The chat and its tasks
 
-- You send a message. If it takes a few minutes or less (a change, a few fixes, a new part, a file to make, a push), the chat does it itself and tells you what changed and where to look. If it is bigger or runs long, the chat answers in one line and starts a background task for it. Then the chat is free for your next message.
+- You send a message. If it takes a few minutes or less (a change, a few fixes, a new part, a file to make, a push of its branch), the chat does it itself and tells you what changed and where to look. If it is bigger or runs long, the chat answers in one line and starts a background task for it. Then the chat is free for your next message.
 - If your message is about a task that's already running, the chat sends it to that task.
 - The chat works in few steps: it finds every place a change touches first, makes the change in one go, and looks at a picture only when the code can't tell. No second helper checks the work, and Claude makes no picture after picture, unless you ask. Measured on 245 test chats over eight practice requests, each scored by a Claude that didn't know which way made it: this way scored 93.5% where plain Claude Code scored 90.5%, in 6.4 minutes against 8.5 and for $3.73 against $4.56; handing every request to a task with a second check scored 84% and took about five times as long.
 - A task gets your words as you said them, with nothing added, and runs on the model for most tasks (Opus) or, for heavy tasks, on Fable. The chat never hands a request to a copy of itself: measured on 108 requests, a copy cost several times as much as a fresh task and ran no faster.

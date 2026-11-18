@@ -64,22 +64,33 @@ test('as shipped the chat does a short request itself: it is told so with each m
   const copy = (await $.tool.call({ tool: 'Agent', tool_use_id: 'own-f2', prompt: 'push it', subagent_type: 'fork' } as never)).deny ?? ''
   expect(copy).not.toContain('claudopus:quick')
   // What holds a task's commands holds the chat's: main is never pushed, by name or by a bare push from main; Claudopus's own
-  // checkout is never changed; a command that may take minutes is not held open; one left in the background is stopped at its limit
+  // checkout is never changed; a command that may take minutes is not held open
   for (const [i, command] of ['git push origin main', 'git commit -qam x && git push origin HEAD:main', 'gh pr merge 12 --squash'].entries())
     expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-m${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never pushes or merges to main itself')])
-  files.set('git:branch', 'main')
-  for (const [i, command] of ['git push', 'git add -A && git commit -qm x && git push -q', 'git -C /repo push -u origin'].entries())
-    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-b${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never pushes or merges to main itself')])
-  files.set('git:branch', 'fix-nose')
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-b9', command: 'git push -u origin fix-nose' } as never)).deny).toBeUndefined()
-  files.delete('git:branch')
+  // (Claudopus's own checkout is /code, laid before any command that changes a checkout is looked at)
   files.set('git:top', '/code')
   files.set('checkout:/code', 'main')
+  files.set('git:branch', 'main')
+  files.set('git:branch:/wt', 'fix-nose')
+  files.set('git:branch:/My Repo', 'main')
+  for (const [i, command] of ['git push', 'git add -A && git commit -qm x && git push -q', 'git -C "/My Repo" push -u origin', "sh -c 'git push'", 'git checkout -q main && git push'].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-b${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never pushes or merges to main itself')])
+  // With main checked out, what pushes no main runs: the word push in a message, a stash or a search, a named branch, tags, a
+  // branch made in the same command, and a push from a worktree on its own branch
+  for (const [i, command] of ['git commit -qm "fix the push button"', 'git stash push', 'git log --grep=push', 'git push origin fix-nose', 'git push --tags', 'git checkout -qb fix && git commit -qam x && git push -u origin fix', 'git checkout -qb fix && git push -u origin', 'cd /wt && git push -u origin', 'git -C /wt push'].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-n${i}`, command } as never)).deny]).toEqual([command, undefined])
+  // and from a folder on a branch, a push in a checkout of main is still main's
+  files.set('git:branch', 'fix-nose')
+  files.set('git:branch:/repo', 'main')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-b8', command: 'cd /repo && git push' } as never)).deny).toContain('never pushes or merges to main itself')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-b9', command: 'git push -u origin fix-nose' } as never)).deny).toBeUndefined()
+  for (const key of ['git:branch', 'git:branch:/wt', 'git:branch:/My Repo', 'git:branch:/repo']) files.delete(key)
   for (const [i, command] of ['git -C /code checkout feature', 'cd /code; git reset --hard v0.2.191', 'cd /code && git commit -qam x'].entries())
     expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-c${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never changes what is checked out there')])
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l1', command: 'npm run build', description: 'Run the build (about 5 min)' } as never)).deny).toContain('run_in_background: true')
-  await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l2', command: 'npm run build', description: 'Run the build (about 5 min)', run_in_background: true } as never)
-  expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain("the chat's command not followed")
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l1', command: 'npm run build', description: 'Run the build (about 5 min)' } as never)).deny).toContain('keeps this chat from answering')
+  // A server left in the background stays up: nothing of Claudopus's stops it
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l2', command: 'npm run dev', description: 'Serve the site', run_in_background: true } as never)).deny).toBeUndefined()
+  expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain("the chat's own command started in the background")
   expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain("in a chat's own thread")
 })
 

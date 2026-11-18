@@ -646,6 +646,39 @@ const pushesMain = (command: string): boolean =>
     if (args.includes('--no-verify')) return true
     return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
   })
+const barePushes = (command: string, start: string): { folder: string; to?: string }[] => {
+  const found: { folder: string; to?: string }[] = []
+  const under = (base: string, path: string) => (path.startsWith('/') ? path : `${base}/${path}`)
+  let folder = start
+  let to: string | undefined
+  for (const words of shellWords(command)) {
+    let i = 0
+    while (i < words.length && /^\w+=/.test(words[i]!)) i++
+    const tool = (words[i] ?? '').split('/').pop()
+    if (tool === 'cd' && words[i + 1]) {
+      folder = under(folder, words[i + 1]!)
+      to = undefined
+      continue
+    }
+    if ((tool === 'bash' || tool === 'sh' || tool === 'zsh') && words[i + 1] === '-c') {
+      found.push(...barePushes(words[i + 2] ?? '', folder))
+      continue
+    }
+    if (tool !== 'git') continue
+    i++
+    let at = folder
+    while (i < words.length && words[i]!.startsWith('-')) {
+      if (words[i] === '-C' && words[i + 1]) at = under(at, words[i + 1]!)
+      i += /^-[Cc]$/.test(words[i]!) ? 2 : 1
+    }
+    const verb = words[i]
+    const named = words.slice(i + 1).filter(one => !one.startsWith('-'))
+    if ((verb === 'checkout' || verb === 'switch') && at === folder && named.length) to = named[0]
+    if (verb !== 'push' || words.slice(i + 1).some(one => /^--(?:tags|delete)$|^-d$/.test(one))) continue
+    if (named.length <= 1) found.push({ folder: at, ...(at === folder && to ? { to } : {}) })
+  }
+  return found
+}
 const CHANGING_GIT = ['checkout', 'switch', 'restore', 'reset', 'rebase', 'bisect', 'stash', 'merge', 'pull', 'cherry-pick', 'revert', 'am', 'apply', 'clean', 'commit', 'update-ref', 'branch', 'rm', 'mv', 'symbolic-ref']
 const changesOf = (command: string, start: string, home: string): string[] => {
   const at = (here: string, path: string) =>
@@ -11770,6 +11803,7 @@ const NO_FOLLOW =
   'Not run: this only follows a log and would never end, so read the log once when you need it (tail -n 20); you are woken the moment your command ends.'
 const SEND_BACKGROUND = (name: string) =>
   `Not run: this command may run for minutes, and held open it keeps ${name}'s replies from you until it ends. Send the same call again with \`run_in_background: true\` and nothing else changed: Claudopus tells you when it ends, and ${name}'s replies reach you while it runs. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
+const CHAT_HELD_LONG = 'Not run: this command may run for minutes, and held open it keeps this chat from answering until it ends. Send the same call again with `run_in_background: true` and nothing else changed: you are told when it ends.'
 const CHAT_SEND_BACKGROUND = 'Not run: the chat runs its own command only in the background. Send the same call again with `run_in_background: true` and nothing else changed.'
 
 const scriptsRun = async ($: EngineInterface, command: string) => {
@@ -11942,9 +11976,11 @@ const workHooks = (on: On) => {
     }
     const itselfHere = e.agentId === undefined && !isOff && Boolean(dir) && lean.chat === 'itself' && (await read($, me)).isChat
     const pushed = itselfHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
-    const onMain = /\bgit\b[^;&|]*\bpush\b/.test(pushed)
-      ? /^(?:main|master)$/.test(await $.process.run(['git', '-C', /\bgit\s+-C\s+(\S+)/.exec(pushed)?.[1] ?? (cwd || '.'), 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => ''))
-      : false
+    let onMain = false
+    for (const push of pushed ? [pushed, ...(await scriptsRun($, pushed))].flatMap(text => barePushes(text, cwd || '.')) : []) {
+      const branch = push.to ?? (await $.process.run(['git', '-C', push.folder, 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => ''))
+      if (/^(?:main|master)$/.test(branch)) onMain = true
+    }
     if (onMain) {
       await log($, "refused the chat's push from main")
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
@@ -11982,7 +12018,7 @@ const workHooks = (on: On) => {
     const isRefusedHere = isChatHere && !isItself && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
     if (dir && !isOff && (e.agentId !== undefined || isItself) && isLongHeld(e as never)) {
       await log($, `refused ${e.agentId === undefined ? "the chat's" : `work ${e.agentId}'s`} long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
-      return { deny: SEND_BACKGROUND(who()) }
+      return { deny: e.agentId === undefined ? CHAT_HELD_LONG : SEND_BACKGROUND(who()) }
     }
     if (isChatCommand && !(e as { run_in_background?: unknown }).run_in_background) {
       await log($, "refused the chat's own command held open")
@@ -12207,11 +12243,7 @@ const workHooks = (on: On) => {
     const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
     const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
     if (READS.includes(e.tool) && !isPaste) return next(e)
-    if (isItself) {
-      const r = await next(e)
-      if (e.tool === 'Bash' && (e as { run_in_background?: unknown }).run_in_background && !r.deny && !r.isError) await chatCommandStarted($, e as never, r.result).catch(err => log($, `the chat's command not followed: ${String(err)}`))
-      return r
-    }
+    if (isItself) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
     if (grants.length) await dropGrants($, grants).catch(() => undefined)
     const kind = e.tool === 'Bash' ? (shellWords(chatCommand)[0]?.[0] ?? '') : (/__(preview_start)$/.exec(e.tool)?.[1] ?? '')
