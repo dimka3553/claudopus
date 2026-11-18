@@ -135,7 +135,16 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   }
   const clock: typeof kitClock = options.unseen
     ? { ...kitClock, advance: bare as never }
-    : { ...kitClock, advance: async (ms: number) => (await kitClock.advance(ms), void (await driver?.session.measure({ context: {}, rateLimits: [], changed: [] } as never).catch(() => undefined))) as never }
+    : {
+        ...kitClock,
+        // (in moves of half a minute at most, each followed by its hook: a long move with none would be a chat where nothing ran)
+        advance: (async (ms: number) => {
+          for (let left = ms; left > 0; left -= 30_000) {
+            await kitClock.advance(Math.min(left, 30_000))
+            await driver?.session.measure({ context: {}, rateLimits: [], changed: [] } as never).catch(() => undefined)
+          }
+        }) as never,
+      }
   // What the engine draws where the mod draws nothing
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)

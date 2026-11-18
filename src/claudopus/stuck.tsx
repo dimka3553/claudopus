@@ -694,7 +694,7 @@ const carryNow = async ($: EngineInterface, id: string, at: number) => {
   const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (r.isDelivered) return void (await log($, `work ${id} started again to carry on`))
   // (no longer wanted as it went: it had moved on by itself)
-  if (!(await stillStopped())) return void (await log($, `work ${id} moved on before Claudopus started it: no note sent`))
+  if (!(await isStill())) return void (await log($, `work ${id} moved on before Claudopus started it: no note sent`))
   const now = await $.clock.now()
   await changeTodos($, list => list.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'stopped', now), carryOn: { ...(card.carryOn ?? nextCarry(card, now)), gaveUp: now, isLost: true } } : card)))
   redraw($)

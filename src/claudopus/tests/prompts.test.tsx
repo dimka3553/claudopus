@@ -365,7 +365,8 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
 
 test("a command Claude Code refuses a task is shown whole on its card with where it runs and a Run it button; nothing runs but on that press (not words, not a task's own ask, not waiting), and the press changes no permission; the press runs exactly that command once, as the person's, shows only one quiet line while it runs, never the command again nor a drawing of the whole panel at each look at it (17 Nov, the box that flashed), and sends the task its output, an ended task started again only from a hook or the person's press, never a timer; a long one is stopped at its limit, and Stop stops it", async ($, on) => {
   const agents: Record<string, string> = { a1: 'running' }
-  const { files, clock, resumed, appended, pressRuns } = world(on, { agents })
+  // (its clock moves bare, with no hook of the mod after each move: what waits for a hook here waits for the person's press)
+  const { files, clock, resumed, appended, pressRuns } = world(on, { agents, unseen: [] })
   on('tool.check', (_, e, next) => (String((e as { tool_use_id?: unknown }).tool_use_id).startsWith('chk') ? ({ decision: 'ask' } as never) : next(e)))
   const redraws = { count: 0 }
   on('ui.invalidate', (_, e, next) => ((redraws.count += 1), next(e)))

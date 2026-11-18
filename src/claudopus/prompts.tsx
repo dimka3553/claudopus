@@ -199,7 +199,7 @@ const UNSEEN_RUN = `From Claudopus: this message starts you where Claudopus cann
 // Asked of the engine itself: the mod's own hook answers this name (promptHooks), and the engine leaves that hook out exactly
 // where it would leave the mod's hooks out of a task started from here
 const isInHook = async ($: EngineInterface) => (await $.env.get('CLAUDOPUS_IN_HOOK').catch(() => undefined)) === 'hook'
-type HeldSend = { message: OwnMessage; isStill?: () => Promise<boolean>; resolve: (r: SendResult) => void; reject: (err: unknown) => void }
+type HeldSend = { message: OwnMessage; isStill?: () => Promise<boolean>; resolve: (r: SendResult) => void; reject: (err: unknown) => void; result?: Promise<SendResult> }
 const heldSends: HeldSend[] = []
 const sendOwnNow = async ($: EngineInterface, message: OwnMessage) => {
   const since = await $.clock.now()
@@ -211,25 +211,31 @@ const sendOwnNow = async ($: EngineInterface, message: OwnMessage) => {
 }
 const sendOwn = async ($: EngineInterface, message: OwnMessage, isStill?: () => Promise<boolean>): Promise<SendResult> => {
   if (await isInHook($)) return sendOwnNow($, message)
-  await log($, `a message for ${message.to.agentId} waits for a hook of the mod: sent from here, the task would run unseen by Claudopus`)
-  return new Promise<SendResult>((resolve, reject) => {
-    const one: HeldSend = { message, isStill, resolve, reject }
-    heldSends.push(one)
-    redraw($)
-    $.clock.after(HOOK_WAIT, () => {
-      const at = heldSends.indexOf(one)
-      if (at < 0) return
-      heldSends.splice(at, 1)
-      // (a copy of the mod a reload replaced sends nothing: the copy in charge takes its tasks up)
-      void isReplaced($).then(isOld => (isOld ? resolve({ isDelivered: false, reason: 'this copy of the mod was replaced by a reload' } as SendResult) : sendLate()))
-    })
-    const sendLate = () => {
+  // (the same words for the same task wait once: a look that comes round again while they wait joins them)
+  const same = heldSends.find(one => one.message.to.agentId === message.to.agentId && one.message.text === message.text)
+  if (same?.result) return same.result
+  const one: HeldSend = { message, isStill, resolve: () => undefined, reject: () => undefined }
+  one.result = new Promise<SendResult>((resolve, reject) => ((one.resolve = resolve), (one.reject = reject)))
+  heldSends.push(one)
+  redraw($)
+  void log($, `a message for ${message.to.agentId} waits for a hook of the mod: sent from here, the task would run unseen by Claudopus`)
+  $.clock.after(HOOK_WAIT, () => {
+    const at = heldSends.indexOf(one)
+    if (at < 0) return
+    heldSends.splice(at, 1)
+    // (a copy of the mod a reload replaced sends nothing: the copy in charge takes its tasks up)
+    void isReplaced($).then(isOld => {
+      if (isOld) return one.resolve({ isDelivered: false, reason: 'this copy of the mod was replaced by a reload' } as SendResult)
       void log($, `the message for ${message.to.agentId} goes from a timer after all: no hook of the mod came in ${HOOK_WAIT / 1000} s, so its task runs unseen and is told so`)
       void sendOne($, one, `${message.text}\n\n${UNSEEN_RUN}`)
-    }
+    })
   })
+  return one.result
 }
+// (never to a task the person stopped while it waited, nor one no longer wanted)
 const sendOne = async ($: EngineInterface, { message, isStill, resolve, reject }: HeldSend, text = message.text) => {
+  const id = message.to.agentId
+  if (stoppedHere.has(id) || isHeld((await read($, todos)).find(card => card.id === id))) return resolve({ isDelivered: false, reason: 'the person stopped it meanwhile' } as SendResult)
   if (isStill && !(await isStill().catch(() => false))) return resolve({ isDelivered: false, reason: 'no longer wanted by the time it could be sent' } as SendResult)
   await sendOwnNow($, { ...message, text }).then(resolve, reject)
 }
@@ -242,9 +248,15 @@ const sendHeld = async ($: EngineInterface) => {
   isSendingHeld = true
   try {
     if (!(await isInHook($)) || (await isReplaced($))) return
-    for (let one = heldSends.shift(); one; one = heldSends.shift()) {
-      await sendOne($, one)
-      await log($, `the message that waited for ${one.message.to.agentId} went from a hook: its task runs where Claudopus sees it`)
+    // (a sender told how its message went may send its next, as a row of tasks started again one after another: that goes from
+    // this hook too, so the hook stays a moment for it)
+    for (let idle = 0; idle < 4; idle += 1) {
+      for (let one = heldSends.shift(); one; one = heldSends.shift()) {
+        idle = 0
+        await sendOne($, one)
+        await log($, `the message that waited for ${one.message.to.agentId} went from a hook: its task runs where Claudopus sees it`)
+      }
+      await $.clock.now().catch(() => undefined)
     }
   } finally {
     isSendingHeld = false
