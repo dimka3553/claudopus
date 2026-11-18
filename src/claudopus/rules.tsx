@@ -61,12 +61,16 @@ const pushesMain = (command: string): boolean =>
     return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
   })
 // What a command would change in the code chats run: a git command that moves what is checked out or changes its files (checkout,
-// switch, restore, reset, rebase, bisect, stash, merge, pull, cherry-pick, revert, am, apply, clean, commit), with the folder it
-// runs in: git's -C, else env's -C, else the last cd or pushd before it (a bare cd is home, $HOME and ~ are home), else where the
-// command starts. Going back to main (`git checkout main`, `git switch main`) and a fast-forward (`merge --ff-only`, `pull
-// --ff-only`) are left out: they are how the folder gets back on track. A stash's list and show only read. On 18 Nov a helper's
-// `git checkout -q --detach origin/main` in Claudopus's own checkout left every chat on that commit, and Update called it a test copy
-const CHANGING_GIT = ['checkout', 'switch', 'restore', 'reset', 'rebase', 'bisect', 'stash', 'merge', 'pull', 'cherry-pick', 'revert', 'am', 'apply', 'clean', 'commit']
+// switch, restore, reset, rebase, bisect, stash, merge, pull, cherry-pick, revert, am, apply, clean, commit, update-ref, and a
+// branch renamed, forced or deleted), with the folder it runs in: git's -C or --work-tree, else env's -C or --chdir, else the last
+// cd or pushd before it (a bare cd is home, $HOME and ~ are home, cd - the folder before), else where the command starts. Left
+// out, as they only read or are how the folder gets back on track: going back to main (`git checkout main`, `git switch main`), a
+// fast-forward to main online (`merge --ff-only` with no name or */main or @{u}, `pull --ff-only` with no name or `<remote> main`),
+// an --abort or --quit, bisect's reset, log and view, a stash's list and show, apply's --check and --stat, clean's dry run.
+// Redirections are no names. This stops slips, not someone set on it: names in variables, a script it runs and git's --git-dir
+// alone get past it. On 18 Nov a helper's `git checkout -q --detach origin/main` in Claudopus's own checkout left every chat on
+// that commit, and Update called it a test copy
+const CHANGING_GIT = ['checkout', 'switch', 'restore', 'reset', 'rebase', 'bisect', 'stash', 'merge', 'pull', 'cherry-pick', 'revert', 'am', 'apply', 'clean', 'commit', 'update-ref', 'branch']
 const changesOf = (command: string, start: string, home: string): string[] => {
   const at = (here: string, path: string) =>
     (path.replace(/^(\$HOME|\$\{HOME\}|~)(?=\/|$)/, home).startsWith('/') ? path.replace(/^(\$HOME|\$\{HOME\}|~)(?=\/|$)/, home) : `${here}/${path}`)
@@ -74,23 +78,33 @@ const changesOf = (command: string, start: string, home: string): string[] => {
       .reduce<string[]>((kept, part) => (part === '..' ? kept.slice(0, Math.max(1, kept.length - 1)) : part === '.' || (part === '' && kept.length) ? kept : [...kept, part]), [])
       .join('/') || '/'
   let here = start
-  return shellWords(command).flatMap((words): string[] => {
+  let before = start
+  return shellWords(command).flatMap((all): string[] => {
+    // A redirection and the file it names are no words of the command (`2>&1` is split at its & into `2>` and `1`)
+    const words = all.filter((one, k) => !/^\d*[<>]/.test(one) && !/^\d*[<>]+&?$/.test(all[k - 1] ?? 'x') && !(one === '1' && /^\d*>$/.test(all[k - 1] ?? '')))
     let i = commandAt(words)
-    // env -C <folder>: commandAt stops at the folder, as it takes no value for env's flags
-    const envFolder = words[i - 1] === '-C' && words.slice(0, i - 1).some(one => one.split('/').pop() === 'env') ? words[i] : undefined
-    if (envFolder !== undefined) i += 1 + commandAt(words.slice(i + 1))
+    // env -C <folder> or --chdir=<folder>: commandAt stops at -C's folder, as it takes no value for env's flags
+    const isEnv = words.slice(0, i).some(one => one.split('/').pop() === 'env')
+    let envFolder = isEnv ? words.slice(0, i).find(one => one.startsWith('--chdir='))?.slice(8) : undefined
+    if (isEnv && words[i - 1] === '-C') (envFolder = words[i]), (i += 1 + commandAt(words.slice(i + 1)))
     const tool = (words[i] ?? '').split('/').pop()
     if (tool === 'cd' || tool === 'pushd') {
-      const to = words.slice(i + 1).find(one => !one.startsWith('-'))
-      here = to === undefined ? home : at(here, to)
+      const to = words.slice(i + 1).find(one => !one.startsWith('-') || one === '-')
+      const next = to === undefined ? home : to === '-' ? before : at(here, to)
+      ;(before = here), (here = next)
       return []
     }
-    if ((tool === 'bash' || tool === 'sh' || tool === 'zsh') && /^-[a-z]*c$/.test(words[i + 1] ?? '')) return changesOf(words[i + 2] ?? '', here, home)
+    if (tool === 'bash' || tool === 'sh' || tool === 'zsh') {
+      const c = words.slice(i + 1).findIndex(one => /^-[a-z]*c[a-z]*$/.test(one))
+      return c >= 0 && words.slice(i + 1, i + 1 + c).every(one => one.startsWith('-')) ? changesOf(words[i + 2 + c] ?? '', here, home) : []
+    }
     if (tool !== 'git') return []
     let folder = envFolder ? at(here, envFolder) : here
     let j = i + 1
     while (j < words.length && words[j]!.startsWith('-')) {
       if (words[j] === '-C' && words[j + 1]) folder = at(folder, words[j + 1]!)
+      if (words[j]!.startsWith('--work-tree=')) folder = at(folder, words[j]!.slice(12))
+      if (words[j] === '--work-tree' && words[j + 1]) folder = at(folder, words[++j]!)
       j += /^-[Cc]$/.test(words[j]!) ? 2 : 1
     }
     const sub = words[j] ?? ''
@@ -98,15 +112,21 @@ const changesOf = (command: string, start: string, home: string): string[] => {
     const args = words.slice(j + 1)
     const names = args.filter(one => !one.startsWith('-'))
     const flags = args.filter(one => one.startsWith('-'))
-    if (args.some(one => one === '-h' || one === '--help')) return []
+    const has = (...some: string[]) => flags.some(one => some.includes(one))
+    if (has('-h', '--help', '--abort', '--quit')) return []
     if ((sub === 'checkout' || sub === 'switch') && names.length === 1 && names[0] === 'main' && flags.every(one => one === '-q' || one === '--quiet')) return []
-    if ((sub === 'merge' || sub === 'pull') && flags.includes('--ff-only')) return []
-    if (sub === 'stash' && (names[0] === 'list' || names[0] === 'show')) return []
+    if (sub === 'merge' && has('--ff-only') && (names.length === 0 || (names.length === 1 && /^([\w.-]+\/main|@\{u(pstream)?\})$/.test(names[0]!)))) return []
+    if (sub === 'pull' && has('--ff-only') && (names.length === 0 || (names.length === 2 && names[1] === 'main'))) return []
+    if (sub === 'bisect' && ['reset', 'log', 'view', 'visualize'].includes(names[0] ?? '')) return []
+    if (sub === 'stash' && ['list', 'show'].includes(names[0] ?? '')) return []
+    if (sub === 'apply' && has('--check', '--stat', '--numstat', '--summary') && !has('--apply', '--index', '--cached')) return []
+    if (sub === 'clean' && has('-n', '--dry-run')) return []
+    if (sub === 'branch' && !has('-m', '-M', '--move', '-f', '--force', '-d', '-D', '--delete')) return []
     return [folder]
   })
 }
 const NO_SWITCH = (folder: string) =>
-  named(`Not run: ${folder} holds the Claudopus code {name}'s chats run, so Claude never changes what is checked out there: no checkout, switch, reset, merge or commit in it, but going back to main or a fast-forward. To read another version, use git show <commit>:<path>. To change the code, make a worktree of your own.`)
+  named(`Not run: ${folder} holds the Claudopus code {name}'s chats run, so Claude never changes what is checked out there. No checkout, switch, reset, merge or commit runs in it, except going back to main and a fast-forward to main online. To read another version, use git show <commit>:<path>. To change the code, make a worktree of your own.`)
 // The boxes of the password and key runners are theirs alone: work never writes into their folder, ~/.claude/claudopus/boxes, nor
 // reads their keychain service, claudopus-box. A command is read as the shell splits it, in small letters (this Mac's files take any),
 // with each simple {a,b} tried each way, then as words split at any sign a path or a program joins words with; a word counts when it

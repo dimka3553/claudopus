@@ -381,6 +381,8 @@ test("work reaches main only through the release runner: its rules name it, and 
     'cd /code/wt && git -C .. commit -qam x',
     'cd /code && git checkout v1 -- mods',
     'cd / && cd code && git restore .',
+    'git -C /code merge --ff-only my-branch',
+    'git -C /code branch -m main old',
   ]
   for (const [i, command] of changes.entries()) {
     const r = await $.tool.call({ tool: 'Bash', tool_use_id: `m${i}`, command, agentId: 'w1' } as never)
@@ -390,6 +392,8 @@ test("work reaches main only through the release runner: its rules name it, and 
     'cd /code && git checkout main',
     'git -C /code switch -q main',
     'git -C /code merge --ff-only origin/main',
+    'git -C /code checkout -q main 2>&1 | tail -1',
+    'git -C /code rebase --abort',
     'git -C /code stash list',
     'git -C /code show origin/main:README.md',
     'cd /code/wt && git checkout -qb fix && git commit -qam fix',

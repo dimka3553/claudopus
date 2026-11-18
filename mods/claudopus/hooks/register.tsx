@@ -600,7 +600,7 @@ const pushesMain = (command: string): boolean =>
     if (args.includes('--no-verify')) return true
     return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
   })
-const CHANGING_GIT = ['checkout', 'switch', 'restore', 'reset', 'rebase', 'bisect', 'stash', 'merge', 'pull', 'cherry-pick', 'revert', 'am', 'apply', 'clean', 'commit']
+const CHANGING_GIT = ['checkout', 'switch', 'restore', 'reset', 'rebase', 'bisect', 'stash', 'merge', 'pull', 'cherry-pick', 'revert', 'am', 'apply', 'clean', 'commit', 'update-ref', 'branch']
 const changesOf = (command: string, start: string, home: string): string[] => {
   const at = (here: string, path: string) =>
     (path.replace(/^(\$HOME|\$\{HOME\}|~)(?=\/|$)/, home).startsWith('/') ? path.replace(/^(\$HOME|\$\{HOME\}|~)(?=\/|$)/, home) : `${here}/${path}`)
@@ -608,22 +608,31 @@ const changesOf = (command: string, start: string, home: string): string[] => {
       .reduce<string[]>((kept, part) => (part === '..' ? kept.slice(0, Math.max(1, kept.length - 1)) : part === '.' || (part === '' && kept.length) ? kept : [...kept, part]), [])
       .join('/') || '/'
   let here = start
-  return shellWords(command).flatMap((words): string[] => {
+  let before = start
+  return shellWords(command).flatMap((all): string[] => {
+    const words = all.filter((one, k) => !/^\d*[<>]/.test(one) && !/^\d*[<>]+&?$/.test(all[k - 1] ?? 'x') && !(one === '1' && /^\d*>$/.test(all[k - 1] ?? '')))
     let i = commandAt(words)
-    const envFolder = words[i - 1] === '-C' && words.slice(0, i - 1).some(one => one.split('/').pop() === 'env') ? words[i] : undefined
-    if (envFolder !== undefined) i += 1 + commandAt(words.slice(i + 1))
+    const isEnv = words.slice(0, i).some(one => one.split('/').pop() === 'env')
+    let envFolder = isEnv ? words.slice(0, i).find(one => one.startsWith('--chdir='))?.slice(8) : undefined
+    if (isEnv && words[i - 1] === '-C') (envFolder = words[i]), (i += 1 + commandAt(words.slice(i + 1)))
     const tool = (words[i] ?? '').split('/').pop()
     if (tool === 'cd' || tool === 'pushd') {
-      const to = words.slice(i + 1).find(one => !one.startsWith('-'))
-      here = to === undefined ? home : at(here, to)
+      const to = words.slice(i + 1).find(one => !one.startsWith('-') || one === '-')
+      const next = to === undefined ? home : to === '-' ? before : at(here, to)
+      ;(before = here), (here = next)
       return []
     }
-    if ((tool === 'bash' || tool === 'sh' || tool === 'zsh') && /^-[a-z]*c$/.test(words[i + 1] ?? '')) return changesOf(words[i + 2] ?? '', here, home)
+    if (tool === 'bash' || tool === 'sh' || tool === 'zsh') {
+      const c = words.slice(i + 1).findIndex(one => /^-[a-z]*c[a-z]*$/.test(one))
+      return c >= 0 && words.slice(i + 1, i + 1 + c).every(one => one.startsWith('-')) ? changesOf(words[i + 2 + c] ?? '', here, home) : []
+    }
     if (tool !== 'git') return []
     let folder = envFolder ? at(here, envFolder) : here
     let j = i + 1
     while (j < words.length && words[j]!.startsWith('-')) {
       if (words[j] === '-C' && words[j + 1]) folder = at(folder, words[j + 1]!)
+      if (words[j]!.startsWith('--work-tree=')) folder = at(folder, words[j]!.slice(12))
+      if (words[j] === '--work-tree' && words[j + 1]) folder = at(folder, words[++j]!)
       j += /^-[Cc]$/.test(words[j]!) ? 2 : 1
     }
     const sub = words[j] ?? ''
@@ -631,15 +640,21 @@ const changesOf = (command: string, start: string, home: string): string[] => {
     const args = words.slice(j + 1)
     const names = args.filter(one => !one.startsWith('-'))
     const flags = args.filter(one => one.startsWith('-'))
-    if (args.some(one => one === '-h' || one === '--help')) return []
+    const has = (...some: string[]) => flags.some(one => some.includes(one))
+    if (has('-h', '--help', '--abort', '--quit')) return []
     if ((sub === 'checkout' || sub === 'switch') && names.length === 1 && names[0] === 'main' && flags.every(one => one === '-q' || one === '--quiet')) return []
-    if ((sub === 'merge' || sub === 'pull') && flags.includes('--ff-only')) return []
-    if (sub === 'stash' && (names[0] === 'list' || names[0] === 'show')) return []
+    if (sub === 'merge' && has('--ff-only') && (names.length === 0 || (names.length === 1 && /^([\w.-]+\/main|@\{u(pstream)?\})$/.test(names[0]!)))) return []
+    if (sub === 'pull' && has('--ff-only') && (names.length === 0 || (names.length === 2 && names[1] === 'main'))) return []
+    if (sub === 'bisect' && ['reset', 'log', 'view', 'visualize'].includes(names[0] ?? '')) return []
+    if (sub === 'stash' && ['list', 'show'].includes(names[0] ?? '')) return []
+    if (sub === 'apply' && has('--check', '--stat', '--numstat', '--summary') && !has('--apply', '--index', '--cached')) return []
+    if (sub === 'clean' && has('-n', '--dry-run')) return []
+    if (sub === 'branch' && !has('-m', '-M', '--move', '-f', '--force', '-d', '-D', '--delete')) return []
     return [folder]
   })
 }
 const NO_SWITCH = (folder: string) =>
-  named(`Not run: ${folder} holds the Claudopus code {name}'s chats run, so Claude never changes what is checked out there: no checkout, switch, reset, merge or commit in it, but going back to main or a fast-forward. To read another version, use git show <commit>:<path>. To change the code, make a worktree of your own.`)
+  named(`Not run: ${folder} holds the Claudopus code {name}'s chats run, so Claude never changes what is checked out there. No checkout, switch, reset, merge or commit runs in it, except going back to main and a fast-forward to main online. To read another version, use git show <commit>:<path>. To change the code, make a worktree of your own.`)
 const BOX_READERS = ['rg', 'grep', 'egrep', 'fgrep', 'ls', 'du', 'git', 'gh', 'wc', 'head', 'tail', 'less', 'file', 'stat', 'tree']
 const BOX_WRAPPERS = ['env', 'command', 'sudo', 'nohup', 'time', 'exec', 'nice', 'timeout', 'xargs', 'caffeinate']
 const commandAt = (words: string[]) => {
@@ -11210,7 +11225,7 @@ const ownCheckoutChanged = async ($: EngineInterface, texts: string[], start: st
   const home = (await $.env.get('HOME')) ?? ''
   const folders = texts.flatMap(text => changesOf(text, start, home))
   if (!folders.length) return ''
-  const known = await knowSource($, true).catch(() => undefined)
+  const known = await knowSource($).catch(() => undefined)
   const own = known?.src.kind === 'folder' ? known.src.repo.replace(/\/+$/, '') : ''
   if (!own) return ''
   for (const folder of folders) {
@@ -11312,7 +11327,7 @@ const workHooks = (on: On) => {
     }
     if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash') {
       const command = String((e as { command?: unknown }).command ?? '')
-      const changed = /\bgit\b/.test(command) ? await ownCheckoutChanged($, [command, ...(await scriptsRun($, command))], cwd || '.') : ''
+      const changed = /\bgit\b/.test(command) ? await ownCheckoutChanged($, [command], cwd || '.') : ''
       if (changed) {
         await log($, `refused work ${e.agentId}'s command that changes Claudopus's own checkout`)
         return { deny: NO_SWITCH(changed) }

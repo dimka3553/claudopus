@@ -1,2 +1,2 @@
-- When your chats run Claudopus from a copy of its code on your Mac, and a task has switched that copy to a released version, Update works again. Before, every chat said it ran a test copy and showed no Update button. Update now moves that copy to the newest version and puts it back where it belongs.
-- Claudopus no longer lets a task or its helper switch, reset or commit in the copy of Claudopus's code your chats run. Claude reads other versions without switching, and changes the code in a copy of its own.
+- Update works again when your chats run Claudopus from a copy of its code that a task switched to a released version. Update moves that copy to the newest version and back onto main.
+- A task or its helper can no longer switch, reset or commit in the copy of Claudopus's code your chats run. Claude reads other versions without switching, and changes the code in a copy of its own.
