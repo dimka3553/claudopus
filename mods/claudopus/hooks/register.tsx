@@ -3966,7 +3966,7 @@ const madeNow = ($: EngineInterface, one: Todo): FilesMade | undefined => {
   if (isDue && !madeLoading.has(one.id) && ((one.wrote ?? []).length || one.answer)) {
     madeLoading.add(one.id)
     const run = madeTurn.then(() => madeBy($, one.wrote ?? [], one.status === 'working' ? '' : one.answer, one.begunAt ?? one.startedAt))
-    madeTurn = Promise.race([run.catch(() => undefined), new Promise(done => setTimeout(done, MADE_HOLD))])
+    madeTurn = Promise.race([run.catch(() => undefined), $.clock.sleep(MADE_HOLD)])
     let isNew = false
     void run
       .then(files => {
