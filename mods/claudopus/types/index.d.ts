@@ -91,6 +91,13 @@ export type Todo = {
   answeredAt?: number
   // When its turn last ended by handing back its report: it has finished for good, so nothing it left running wakes it again
   handedBackAt?: number
+  // The report Claudopus took from its hand-back, until the chat is given it with Claude Code's notice that the task ended; then
+  // `reportGiven`, so a later notice of the same end repeats nothing, until a message starts it again
+  reportForChat?: string
+  reportGiven?: true
+  // The hand-back call whose report Claudopus took, until the task takes a step of its own: what comes next is that call's result,
+  // or Claude Code's press for a report it did not see delivered, answered with no model
+  tookReport?: string
   // A go-ahead to finish pressed while the work was still in the turn that asked: its last step, done as that turn ends
   stepOnEnd?: { ask: NonNullable<Todo['ask']>; said: string }
   // The call it has been running longest, while one runs: what it is in a few words, since when, and for a command, the command

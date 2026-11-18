@@ -257,7 +257,7 @@ const tellStuck = async ($: EngineInterface, one: Todo, mins: number, now: numbe
   const list = await read($, todos)
   const said = STUCK_IN_CHAT(titleOf(one), mins, runningKids(list, one.id).some(kid => isBusy(list, kid, now)))
   const card = list.find(card => card.id === one.id) ?? one
-  await sayInChat($, named(`${said} ${isOwnWaiting(list, card, now) ? STUCK_ASK_LOOKS : STUCK_ASK}`), named(said))
+  await tellChat($, named(`${said} ${isOwnWaiting(list, card, now) ? STUCK_ASK_LOOKS : STUCK_ASK}`))
 }
 
 // Work whose step ended while all its helpers sit silent follows a fixed schedule from then: at HELPER_WAIT_STEP it is started again
@@ -313,7 +313,7 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
       await log($, `work ${id} still stuck ${mins} min on silent helpers after Claudopus asked it to hand back: the chat is told`)
       const fresh = await read($, todos)
       const card = fresh.find(c => c.id === id) ?? one
-      await sayInChat($, named(`${GAVE_UP_IN_CHAT(titleOf(one), mins)} ${isOwnWaiting(fresh, card, now) ? STUCK_ASK_LOOKS : STUCK_ASK}`), named(GAVE_UP_IN_CHAT(titleOf(one), mins)))
+      await tellChat($, named(`${GAVE_UP_IN_CHAT(titleOf(one), mins)} ${isOwnWaiting(fresh, card, now) ? STUCK_ASK_LOOKS : STUCK_ASK}`))
       continue
     }
     const line = (step === 2 ? HELPERS_STILL_SILENT : HELPERS_SILENT)(mins, silentHelpers(list, id, now))

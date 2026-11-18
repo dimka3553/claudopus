@@ -78,6 +78,16 @@ const isPressedForReport = async ($: EngineInterface, id: string, isAnyWords = f
   const said = [...talk].reverse().find(m => (m as { role?: unknown }).role === 'assistant')
   return isAnyWords || textOf(said).trim().length < REPORT_LEAST
 }
+// A task whose report Claudopus took at its hand-back (its card's `tookReport`, the hand-back's call): what comes to it next is that
+// call's own result, or Claude Code's press for a report it did not see delivered. Anything else, a message among them, is a step of
+// its own
+const isAfterTaken = async ($: EngineInterface, id: string, call: string) => {
+  const talk = await $.session.messages({ as: 'api', agentId: id }).catch(() => [])
+  const last = (Array.isArray(talk) ? talk.at(-1) : undefined) as { role?: unknown; content?: unknown } | undefined
+  if (last?.role !== 'user') return false
+  const blocks = Array.isArray(last.content) ? (last.content as { type?: unknown; text?: unknown; tool_use_id?: unknown }[]) : [{ type: 'text', text: last.content }]
+  return blocks.length > 0 && blocks.every(b => (b?.type === 'tool_result' && b.tool_use_id === call) || (b?.type === 'text' && String(b.text ?? '').includes(HANDBACK_PRESS)))
+}
 // What starts a piece of work again by itself once its step has ended, that the engine does not see: a command of its own it
 // started detached; what it asked Claudopus to wake it for; a command Claudopus holds for its turn; or a helper of its own still at
 // work (its end, or its result, starts the work). A command it sent to the background the engine sees, and presses nothing while
@@ -516,6 +526,21 @@ const workHooks = (on: On) => {
       const unticked = await untickedAtHandback($, e.agentId, String((e as { message?: unknown }).message ?? '')).catch(() => '')
       if (unticked) return { deny: unticked }
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
+      // A task's report goes to the chat as its own reply, not in Claude Code's box (REPORT_TAKEN): Claudopus answers the hand-back
+      // itself, keeps the report as one that went through, and gives it to the chat with Claude Code's notice that the task ended
+      // (chatHooks' prompt.submit). The task's steps after it are answered with no model (turn.step), so it ends at once
+      const taken = (await read($, todos)).find(one => one.id === e.agentId)
+      if (dir && !isOff && taken && !taken.parentId && !flowAgents.has(e.agentId)) {
+        const report = String((e as { message?: unknown }).message ?? '').trim()
+        handedBack.set(e.agentId, report)
+        await changeTodos($, list => list.map(one => (one.id === e.agentId ? { ...one, reportForChat: report, reportGiven: undefined, tookReport: String(e.tool_use_id) } : one)))
+        await keepNotDone($, e.agentId).catch(err => log($, `to-dos not done of ${e.agentId} not kept: ${String(err)}`))
+        const card = (await read($, todos)).find(one => one.id === e.agentId)
+        if (card?.notDone?.length) await tellChat($, named(NOT_DONE_IN_CHAT(titleOf(card), card.notDone)))
+        if (isLetGoNow) (handedBackLetGo.add(e.agentId), await stopHelpers($, e.agentId, true).catch(err => log($, `helpers of ${e.agentId} not stopped: ${String(err)}`)))
+        await log($, `report of ${e.agentId} taken at its hand-back, for the chat to give with the notice of its end`)
+        return { result: { success: true, message: named(REPORT_TAKEN) } } as never
+      }
       // The engine hands the hand-back on as it goes through: the chat may be given it from now (isQuietHandback)
       handingBack.add(e.agentId)
       // A helper's task that has ended its step is started first, so the engine hands the result to it, not to the chat (wakeForHandback)
@@ -611,6 +636,21 @@ const workHooks = (on: On) => {
     // A helper started again ends again with a result of its own, passed on even if its words are the same, or none; a hand-back
     // of its earlier run no prompt of the chat's came for is forgotten
     if (id !== undefined) (passedOn.delete(id), handingBack.delete(id))
+    // A task whose report Claudopus took ends there: its step after the hand-back, and Claude Code's presses for a report that it
+    // does not see delivered, are answered with no model and draw nothing (PRESS_ANSWER). A message that starts it again is a step
+    // of its own, and its next report is taken afresh
+    const took = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.tookReport : undefined
+    if (id !== undefined && took) {
+      if (await isAfterTaken($, id, took)) {
+        // (a reload since the hand-back forgot the report it handed back: its card has it)
+        const card = (await read($, todos)).find(one => one.id === id)
+        if (!handedBack.has(id) && card && card.handedBackAt === undefined) handedBack.set(id, card.reportForChat ?? card.answer)
+        yield { kind: 'text', index: 0, text: PRESS_ANSWER }
+        yield { kind: 'stop', stopReason: 'end_turn', usage: null }
+        return { turnId: e.turnId, index: e.index, answer: PRESS_ANSWER, toolUses: [], stopReason: 'end_turn', usage: null }
+      }
+      await changeTodos($, list => list.map(one => (one.id === id ? { ...one, tookReport: undefined } : one)))
+    }
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined

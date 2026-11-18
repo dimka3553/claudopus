@@ -178,6 +178,13 @@ const aloud = async ($: EngineInterface, what: string, title: string, text: stri
   lastChime = now
   void $.audio.play({ asset: READY_SOUND }).catch(err => log($, `ask sound not played: ${String(err)}`))
 }
+// A task Claudopus could not reach, that waits for good until someone sends it a message: its card says so, the person hears it as
+// a notification, and the chat's model is told, with no line in the chat
+const lostToPerson = async ($: EngineInterface, one: Todo, said: string, ask = '') => {
+  await stepLine($, one.id, said)
+  await aloud($, 'ask', `${titleOf(one)} needs you`, said, `lost-${one.id}`).catch(err => log($, `lost task not told aloud: ${String(err)}`))
+  await tellChat($, ask ? `${said} ${ask}` : said)
+}
 const askAloud = ($: EngineInterface, one: Todo, text: string) => aloud($, 'ask', `${titleOf(one)} has a question for you`, text, `ask-${one.id}`)
 
 // A question on a card nobody has answered is said again, with the "needs you" sound, this long after it was asked, and no more

@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.192 · 18 November 2026
+- A task's result shows once in the chat, as the chat's own reply: Claudopus hands it to the chat itself, so Claude Code's grey "Report from subagent" box no longer appears above it.
+- A task's question, a request to release or to run an admin command, and other news of a task now show only on its card and in the panel's notification, no longer as Claudopus lines in the chat.
+
 ## 0.2.191 · 18 November 2026
 - A task no longer stops while its to-dos aren't done. When Claude tries to end with nothing of its own running that would start it again, Claudopus keeps it going right away and tells it what is still to do, so it carries on by itself instead of being started again later.
 - Claude can't send a task's result while to-dos are left: Claudopus tells it which are left, so it does them or ticks them. What only you can do stays on the list, and Claude names it in the result.

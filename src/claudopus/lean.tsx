@@ -279,13 +279,23 @@ const isBareNotice = (body: string) => {
 // The header the engine may put before notices, its fixed lines only
 const NOTICE_HEADER = /\[SYSTEM NOTIFICATION - NOT USER INPUT\][^\n]*\n(?:(?:This is an automated background-task event|Do NOT interpret this|No human input has been received)[^\n]*\n?)*/
 type Quiet = { isQuiet: boolean; isRepeat: boolean; waits: string[] }
-// `waiting`: the top work that waits on helpers the engine still lists at work, or on a wake_me still due (waitingNow)
-const quietNotices = (text: string, waiting: Set<string>): Quiet => {
+// The reports Claudopus took at a task's hand-back that the chat has not been given, for the tasks a notice names (or all), each
+// once: marked given, so a later notice of the same end repeats nothing (quietNotices)
+const reportsFor = async ($: EngineInterface, ids?: string[]) => {
+  const given = (await read($, todos)).filter(one => one.reportForChat !== undefined && (!ids || ids.includes(one.id)))
+  if (!given.length) return []
+  await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, reportForChat: undefined, reportGiven: true } : one)))
+  await log($, `gave the chat the report${given.length === 1 ? '' : 's'} of ${given.map(one => one.id).join(', ')}${ids ? ' with the notice of the end' : ' with the next message'}`)
+  return given.map(one => named(REPORT_FOR_CHAT(titleOf(one), one.id, one.reportForChat ?? '')))
+}
+// `waiting`: the top work that waits on helpers the engine still lists at work, or on a wake_me still due (waitingNow); `given`: the
+// tasks whose report the chat was given with an earlier notice of their end (REPORT_FOR_CHAT), whose later notices repeat it
+const quietNotices = (text: string, waiting: Set<string>, given: Set<string> = new Set()): Quiet => {
   const notices = [...text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)].map(m => m[1] ?? '')
   const rest = text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').replace(NOTICE_HEADER, '').trim()
   const idOf = (body: string) => /<task-id>([^<]+)<\/task-id>/.exec(body)?.[1] ?? ''
   const isCompleted = (body: string) => /<status>completed<\/status>/.test(body) && isBareNotice(body)
-  const isRepeat = (body: string) => isCompleted(body) && /not repeated here/.test(body)
+  const isRepeat = (body: string) => isCompleted(body) && (/not repeated here/.test(body) || (given.has(idOf(body)) && /ended without delivering a report|has not reported yet/.test(body)))
   const isWaitingOwn = (body: string) => isCompleted(body) && /is waiting on its own background work<\/summary>/.test(body)
   const isEndedWaiting = (body: string) => /<status>completed<\/status>/.test(body) && /ended without delivering a report/.test(body) && waiting.has(idOf(body))
   // Said to be still at work beside it whether or not the notice says more (a security warning stays, and is explained)
@@ -414,7 +424,7 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       const tail = text.replace(/claudopus-exit \d+\s*$/, '').replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n')
       if (exit === '0') {
         await stepLine($, one.id, `Released · ${cut(oneLine(tail.split('\n').at(-1) ?? ''), 160)}`)
-        await sayInChat($, named(`Claudopus released "${titleOf(one)}" on {name}'s go-ahead. Its last lines:\n${tail}`), `Claudopus released "${titleOf(one)}".`)
+        await tellChat($, named(`Claudopus released "${titleOf(one)}" on {name}'s go-ahead. Its last lines:\n${tail}`))
         return
       }
       await stepLine($, one.id, `The release ${isLate ? 'is still running after 1h 30m' : 'failed'} · Claudopus started Claude again to look at it`)
