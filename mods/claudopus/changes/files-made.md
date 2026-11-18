@@ -1,0 +1,4 @@
+- A task's card now shows what the task made, right under its title: an icon and a word or two for each file, side by side. Press a file to open it. It shows while the task still works.
+- A task's Details and its result start with a Files part: a tile for each thing the task made, with a small preview. Three or more of a kind are one tile, such as "7 pictures", that opens out on a press.
+- Code a task changed is one tile: how many files, and how many lines it added and took away. The lines themselves are never shown.
+- A result's pictures are now among its Files tiles, in place of the Pictures part that showed one at a time.

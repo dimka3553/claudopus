@@ -409,6 +409,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       const path = `${rest[3]}/${rest[4]}/${rest[5]}`
       return files.has(path) ? ok(files.get(path)) : ok('', 1)
     }
+    // The lines a task added to and took from its files, as the test lays git:numstat
+    if (tool === 'sh' && String(rest[1]).includes('git diff --numstat')) return ok(files.get('git:numstat') ?? '')
     if (tool === 'sh' || tool === 'bash') {
       sshed.push([String(rest[1]), String(rest.slice(3).join(' '))])
       // A stream cut short lays half of what it carried and fails
@@ -803,11 +805,13 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   await until(async () => opened.includes(id) || undefined)
   const one = await $.ui.mount({ ...LIST, requestId: id, props: { ...LIST.props, title: 'Weekly revenue', bodyColumns: 80 }, surface: 'desktop' } as never)
   const heads = (await one.findAll({ type: 'Text' })).filter(text => text.props.bold).map(text => text.text)
-  expect(heads).toEqual(['Weekly revenue', 'Waiting for you', 'Summary', 'Pictures', 'In full', 'Follow-up'])
+  // What its task made is right under its title, as tiles; its pictures are among them, so no Pictures part repeats them
+  expect(heads).toEqual(['Weekly revenue', 'Files', 'Waiting for you', 'Summary', 'In full', 'Follow-up'])
+  expect((await one.findAll({ type: 'Svg' })).map(svg => String(svg.props.alt))).toContain('revenue')
   expect((await one.find({ type: 'Markdown', text: /Revenue rose 12%/ }))?.props.text).toBe(`${report}\n`)
   // Its picture is shown in the pane, never handed to another app: where it cannot be drawn, its path is given as text
   expect(await keyed(one, 'report-page')).toBeUndefined()
-  expect(await one.find({ type: 'Text', text: `${folder}/revenue.png` })).toBeDefined()
+  expect(await one.find({ type: 'Text', text: `${folder}/revenue.png` })).toBeUndefined()
   await pressed(one, 'report-carry')
   expect(filled[0]).toContain(`${folder}/report.md`)
   // Each waiting item has its own answers; answering one clears that one alone

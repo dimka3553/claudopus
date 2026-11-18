@@ -27,6 +27,11 @@ export type Entry = { at: number; kind: 'note' | 'decision' | 'steer'; text: str
 export type Item = { text: string; state: 'open' | 'doing' | 'done' | 'dropped' }
 
 // One thing the person asked for: a card in the panel, and the one piece of background work that does it
+// What a task made: a file or link of its own, by its kind, and its code as a count of files and lines
+export type MadeKind = 'picture' | 'video' | 'pdf' | 'sheet' | 'doc' | 'file' | 'link'
+export type Made = { path: string; name: string; kind: MadeKind }
+export type CodeMade = { count: number; plus: number; minus: number }
+export type FilesMade = { made: Made[]; code?: CodeMade }
 export type Todo = {
   // The id of the agent that does the work
   id: string
@@ -48,6 +53,8 @@ export type Todo = {
   startedOn?: string
   // How many tool steps it has made
   steps?: number
+  // The files its steps wrote, and the pictures, videos and documents its commands named: what it may have made
+  wrote?: string[]
   // How many of them since it last touched its to-dos or said where it stands
   quiet?: number
   // How many since a steer it has not yet answered with a line saying what it decided; absent when it owes none
@@ -253,6 +260,8 @@ export type Report = {
   // The pictures and pages copied in, relative to its folder
   files: string[]
   // The work that wrote it; empty for one brought in by hand
+  // What its task made, as listed the first time the result was opened
+  made?: FilesMade
   agent: string
   // Tells one text from another, so the same report is not kept twice
   mark?: string

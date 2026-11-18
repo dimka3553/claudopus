@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { ElementTable, EngineInterface, McpToolResult, On, RasterProps, Register, RenderSurface, Timer, ToolCallInput, ToolCallResult, SessionMessage, ToolUseSummary } from 'claude-code'
-import type { Entry, Flow, FlowAgent, Item, Link, Me, PressRun, Prompt, Report, Server, Shared, Stream, Todo, Wait } from '../types'
+import type { CodeMade, Entry, FilesMade, Flow, FlowAgent, Item, Link, Made, MadeKind, Me, PressRun, Prompt, Report, Server, Shared, Stream, Todo, Wait } from '../types'
 import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresBefore, squaresKept, squaresOf, squaresSvg, squaresWidth, stageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'
 import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, svgFits, view as statsShown } from './stats'
@@ -2268,6 +2268,9 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
     folder: [(await readIndex($)).find(s => one.subject && slug(s.name) === slug(one.subject))?.repo ?? ''].find(repo => repo.startsWith('/')) ?? cwd,
     gist: gistOf(text, title),
     files,
+    ...(await madeBy($, one.wrote ?? [], text, one.begunAt ?? one.startedAt)
+      .then(made => (made.made.length || made.code ? { made } : {}))
+      .catch(err => (void log($, `files of report ${id} not listed: ${String(err)}`), {}))),
     agent: one.id,
     mark: marked,
     ...(waiting.length ? { waiting } : {}),
@@ -2678,7 +2681,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
 }
 
 type Thumb = { source: string; width: number; height: number } | null
-const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb, height = 0) => {
+const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb, height = 0, files: FilesMade = { made: [] }) => {
   const { Box, Button, Markdown, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   const rounds = (entriesOf(list.filter(one => Boolean(one.archived) === Boolean(r.archived))).find(entry => entry.some(one => one.id === r.id)) ?? []).filter(one => one.id !== r.id)
@@ -2688,8 +2691,9 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
   const how = (one: Report) =>
     [one.id === r.from ? 'this result came from it' : one.from === r.id ? 'came from this result' : rounds.includes(one) ? (one.at < r.at ? 'earlier result' : 'later result') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
   const pane = paneOf(r)
-  const gen = drawingMark(pane, [presses, height, r, mark(text), at, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
-  const show = (to: number) => void ((presses += 1), pictureAt.set(pane, to), redraw($))
+  const gen = drawingMark(pane, [presses, height, r, mark(text), at, JSON.stringify(files), [...openPiles].join(), faces.size, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
+  const hasTiles = !('isTerminal' in ui) && Boolean(table.Svg) && (files.made.length > 0 || Boolean(files.code))
+  const show = (to: number) => void ((presses += 1), hasTiles ? void showPicture($, pictures[to]?.path ?? '', pane, '') : (pictureAt.set(pane, to), redraw($)))
   return (
     <Box key={`report-${r.id}`} flexDirection="column" gap={1} flexGrow={1}>
       {/* Archive at the head's right: pressed, the tab closes; one archived says so, with Bring back */}
@@ -2700,6 +2704,8 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         </Box>
         <Button key={`report-archive-${gen}`} label={r.archived ? 'Bring back' : 'Archive'} onPress={() => archiveReport($, r, !r.archived)} />
       </Box>
+      {/* What its task made, right under its title: tiles side by side, each a press that opens it */}
+      {hasTiles ? band(ui, 'report-files', 'Files', '', madeTiles($, ui, files, pane, `report-files-${r.id}`) ?? <Box />) : null}
       {isOpenQuestion(r) || (!r.archived && waitsOf(r).some(byPerson))
         ? band(
             ui,
@@ -2733,7 +2739,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
             <Text wrap="wrap">{r.gist}</Text>,
           )
         : null}
-      {pictures.length
+      {pictures.length && !hasTiles
         ? band(
             ui,
             'report-pictures',
@@ -3836,6 +3842,325 @@ const askPicturesOf = ($: EngineInterface, one: Todo): Pic[] | undefined => {
       .finally(() => (askLoading.delete(key), redraw($)))
   }
   return undefined
+}
+
+
+
+const MADE_KINDS: { kind: MadeKind; test: RegExp; one: string; many: string; badge: string; color: string }[] = [
+  { kind: 'picture', test: /\.(png|jpe?g|gif|webp|svg|heic)$/i, one: 'picture', many: 'pictures', badge: 'IMG', color: '#3A78C9' },
+  { kind: 'video', test: /\.(mp4|mov|webm|m4v)$/i, one: 'video', many: 'videos', badge: 'VID', color: '#8B5CF6' },
+  { kind: 'pdf', test: /\.pdf$/i, one: 'PDF', many: 'PDFs', badge: 'PDF', color: '#D0473E' },
+  { kind: 'sheet', test: /\.(xlsx?|csv|numbers)$/i, one: 'spreadsheet', many: 'spreadsheets', badge: 'XLS', color: '#23955A' },
+  { kind: 'doc', test: /\.(docx?|pages|pptx?|key|md|txt|html?)$/i, one: 'document', many: 'documents', badge: 'DOC', color: '#6B6A65' },
+  { kind: 'file', test: /^/, one: 'file', many: 'files', badge: '', color: '#6B6A65' },
+]
+const madeKind = (path: string) => MADE_KINDS.find(one => one.test.test(path)) ?? MADE_KINDS[MADE_KINDS.length - 1]!
+const madeKindOf = (kind: MadeKind) => MADE_KINDS.find(one => one.kind === kind) ?? MADE_KINDS[MADE_KINDS.length - 1]!
+const TEXT_DOC = /\.(md|txt|html?|csv)$/i
+const WROTE_KEPT = 300
+const MADE_LOOKED = 150
+const CHIPS_MOST = 6
+const TILES_MOST = 24
+const FACES_MOST = 12
+const TILE_W = 112
+const TILE_H = 84
+const TILE_CHARS = 60_000
+const TILE_THUMB_BYTES = 9_000
+
+const wroteBy = (e: { tool: string }) => {
+  const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
+  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) return [String(input.file_path ?? input.notebook_path ?? '')].filter(path => path.startsWith('/'))
+  if (e.tool === 'Bash') return namedPaths(String(input.command ?? '')).filter(path => madeKind(path).kind !== 'file' && !TEXT_DOC.test(path))
+  return []
+}
+const withWrote = (one: Todo, e: { tool: string }): Todo => {
+  const paths = wroteBy(e).filter(path => !(one.wrote ?? []).includes(path))
+  return paths.length ? { ...one, wrote: [...(one.wrote ?? []), ...paths].slice(-WROTE_KEPT) } : one
+}
+
+const repoOf = new Map<string, string>()
+const repoTop = async ($: EngineInterface, folder: string) => {
+  if (repoOf.has(folder)) return repoOf.get(folder) ?? ''
+  const r = await $.process.run(['git', '-C', folder, 'rev-parse', '--show-toplevel'], { timeoutMs: 4000 }).catch(() => undefined)
+  const top = r?.exitCode === 0 ? r.stdout.trim() : ''
+  if (repoOf.size > 200) repoOf.clear()
+  repoOf.set(folder, top)
+  return top
+}
+const COUNT_LINES =
+  'cd "$1" || exit 1; since=$2; shift 2; base=$(git rev-list -1 --before="$since" HEAD 2>/dev/null); [ -n "$base" ] || base=$(git rev-parse HEAD 2>/dev/null) || exit 1; for f in "$@"; do if git cat-file -e "$base:$f" 2>/dev/null; then git diff --numstat "$base" -- "$f"; elif [ -f "$f" ]; then printf \'%s\\t0\\t%s\\n\' "$(grep -c \'\' "$f")" "$f"; fi; done'
+const codeOf = async ($: EngineInterface, byTop: Map<string, string[]>, since: number): Promise<CodeMade | undefined> => {
+  let count = 0
+  let plus = 0
+  let minus = 0
+  for (const [top, paths] of byTop) {
+    const r = await $.process.run(['sh', '-c', COUNT_LINES, 'sh', top, String(Math.floor(since / 1000)), ...paths.map(path => path.slice(top.length + 1))], { timeoutMs: 8000 }).catch(() => undefined)
+    if (r?.exitCode !== 0) continue
+    for (const line of rows(r.stdout)) {
+      const [added = '', taken = ''] = line.split('\t')
+      if (!/^(\d+|-)$/.test(added)) continue
+      count += 1
+      plus += Number(added) || 0
+      minus += Number(taken) || 0
+    }
+  }
+  return count ? { count, plus, minus } : undefined
+}
+const linksIn = (text: string) => [...new Set((text.match(/https?:\/\/[^\s`'"()<>[\]{}|,;*]+/g) ?? []).map(link => link.replace(/[.:!?]+$/, '')))].slice(0, 3)
+const linkName = (link: string) => {
+  const [host = '', ...rest] = link.replace(/^https?:\/\//, '').replace(/\/$/, '').split('/')
+  const last = rest.at(-1) ?? ''
+  return last ? `${host.replace(/^www\./, '').split('.')[0]} ${rest.length > 1 ? `${rest.at(-2)} ` : ''}${last}`.slice(0, 40) : host.replace(/^www\./, '')
+}
+const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since: number, isDated = true): Promise<FilesMade> => {
+  const named = namedPaths(answer)
+  const made: Made[] = []
+  const byTop = new Map<string, string[]>()
+  const seen = new Set<string>()
+  for (const given of [...named, ...wrote].slice(0, MADE_LOOKED)) {
+    const path = given.replace(/^\/private(?=\/(tmp|var)\/)/, '')
+    if (seen.has(path)) continue
+    seen.add(path)
+    const isNamed = named.includes(given)
+    const stat = await $.fs.stat(path).catch(() => undefined)
+    if (!stat || stat.kind !== 'file' || (isDated && stat.mtimeMs < since - 5000)) continue
+    const kind = madeKind(path).kind
+    const isOwn = kind !== 'file' && !(TEXT_DOC.test(path) && !isNamed)
+    if (isOwn || isNamed) {
+      if (!isNamed && (TEMP.test(path) || (dir && path.startsWith(`${dir}/`)))) continue
+      made.push({ path, name: fileName(path), kind })
+      continue
+    }
+    const top = await repoTop($, path.slice(0, path.lastIndexOf('/')))
+    if (top && path.startsWith(`${top}/`)) byTop.set(top, [...(byTop.get(top) ?? []), path])
+  }
+  for (const link of linksIn(answer)) made.push({ path: link, name: linkName(link), kind: 'link' })
+  const code = byTop.size ? await codeOf($, byTop, since).catch(() => undefined) : undefined
+  return { made, ...(code ? { code } : {}) }
+}
+const madeOf = new Map<string, { key: string; files: FilesMade }>()
+const madeLoading = new Set<string>()
+const madeNow = ($: EngineInterface, one: Todo): FilesMade | undefined => {
+  if (one.chat) return undefined
+  const key = `${(one.wrote ?? []).length}:${one.answer.length}:${one.status}`
+  const was = madeOf.get(one.id)
+  if (was?.key !== key && !madeLoading.has(one.id) && ((one.wrote ?? []).length || one.answer)) {
+    madeLoading.add(one.id)
+    void madeBy($, one.wrote ?? [], one.status === 'working' ? '' : one.answer, one.begunAt ?? one.startedAt)
+      .then(files => {
+        if (madeOf.size > 200) madeOf.delete(madeOf.keys().next().value ?? '')
+        madeOf.set(one.id, { key, files })
+      })
+      .catch(err => log($, `files of ${one.id} not listed: ${String(err)}`))
+      .finally(() => (madeLoading.delete(one.id), redraw($)))
+  }
+  return was?.files
+}
+const madeOfOld = new Map<string, FilesMade>()
+const madeOfReport = ($: EngineInterface, r: Report, text: string): FilesMade => {
+  const files = r.made ?? madeOfOld.get(r.id)
+  if (!files && !madeLoading.has(r.id)) {
+    madeLoading.add(r.id)
+    void (async () => {
+      const one = (await read($, todos)).find(card => card.id === r.agent)
+      const listed = await madeBy($, one?.wrote ?? [], text, one ? (one.begunAt ?? one.startedAt) : 0, Boolean(one)).catch(() => ({ made: [] }))
+      if (madeOfOld.size > 200) madeOfOld.delete(madeOfOld.keys().next().value ?? '')
+      madeOfOld.set(r.id, listed)
+    })()
+      .catch(err => log($, `files of result ${r.id} not listed: ${String(err)}`))
+      .finally(() => (madeLoading.delete(r.id), redraw($)))
+  }
+  const made = files?.made ?? []
+  const names = new Set(made.map(one => one.name))
+  const copies = r.files.filter(file => isInside(file) && !names.has(fileName(file))).map(file => ({ path: `${reportPath(r)}/${file}`, name: fileName(file), kind: madeKind(file).kind }))
+  return { ...(files ?? {}), made: [...made, ...copies] }
+}
+
+
+type Face = { base64: string } | null
+const faces = new Map<string, Face>()
+const facesLoading = new Set<string>()
+let qlMade = 0
+const makeFace = async ($: EngineInterface, one: Made): Promise<Face> => {
+  if (one.kind === 'link' || one.kind === 'file' || /\.svg$/i.test(one.path)) return null
+  const stat = await $.fs.stat(one.path).catch(() => undefined)
+  if (!stat || stat.kind !== 'file') return null
+  const to = `${dir}/thumbs/tile-${slug(one.path).slice(-60)}-${mark(one.path).replace(':', '-')}-${Math.round(stat.mtimeMs)}.jpg`
+  if (!(await $.fs.exists(to))) {
+    await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
+    let from = one.path
+    let scratch = ''
+    if (one.kind !== 'picture' && one.kind !== 'pdf') {
+      if (isLinux) return null
+      scratch = `${dir}/thumbs/ql-${Math.round(await $.clock.now())}-${(qlMade += 1)}`
+      await $.process.run(['mkdir', '-p', scratch])
+      await $.process.run(['qlmanage', '-t', '-s', '320', '-o', scratch, one.path], { timeoutMs: 15_000 }).catch(() => undefined)
+      from = `${scratch}/${fileName(one.path)}.png`
+      if (!(await $.fs.exists(from))) return (await $.process.run(['rm', '-rf', scratch]).catch(() => undefined), null)
+    }
+    for (const [size, quality] of [['240', '50'], ['240', '35'], ['180', '40']] as const) {
+      await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, from, '--out', to], { timeoutMs: 15_000 }).catch(() => undefined)
+      if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= TILE_THUMB_BYTES) break
+    }
+    if (scratch) await $.process.run(['rm', '-rf', scratch]).catch(() => undefined)
+  }
+  const read = (await $.fs.read(to, { as: 'bytes' }).catch(() => undefined)) as { base64: string } | undefined
+  return read?.base64 && read.base64.length < TILE_THUMB_BYTES * 2 ? { base64: read.base64 } : null
+}
+const facesNow = ($: EngineInterface, list: Made[]) => {
+  const missing = list.filter(one => !faces.has(one.path) && !facesLoading.has(one.path))
+  if (missing.length) {
+    for (const one of missing) facesLoading.add(one.path)
+    void (async () => {
+      for (const one of missing) {
+        const face = await makeFace($, one).catch(() => null)
+        if (faces.size > 300) faces.delete(faces.keys().next().value ?? '')
+        faces.set(one.path, face)
+        facesLoading.delete(one.path)
+      }
+    })()
+      .catch(err => log($, `small copies of files not made: ${String(err)}`))
+      .finally(() => (missing.forEach(one => facesLoading.delete(one.path)), redraw($)))
+  }
+  return faces
+}
+
+
+const SVG_FONT = 'font-family="-apple-system,Helvetica,sans-serif"'
+const pageIcon = (badge: string, color: string) =>
+  `<path d="M4.5 1.5h13l7 7v21a1 1 0 0 1-1 1h-19a1 1 0 0 1-1-1v-27a1 1 0 0 1 1-1z" fill="#3b3b39" stroke="#9a9890" stroke-width="1.2"/><path d="M17.5 1.5v7h7" fill="none" stroke="#9a9890" stroke-width="1.2"/>${badge ? `<rect x="1" y="15" width="${badge.length > 3 ? 22 : 19}" height="10" rx="2" fill="${color}"/><text x="${badge.length > 3 ? 12 : 10.5}" y="22.6" font-size="7" ${SVG_FONT} font-weight="700" fill="#fff" text-anchor="middle">${badge}</text>` : ''}`
+const LINK_ICON = '<rect x="2.5" y="4.5" width="23" height="23" rx="5" fill="#3b3b39" stroke="#9a9890" stroke-width="1.2"/><path d="M11 13.5h-1.5a3.5 3.5 0 0 0 0 7H11M17 13.5h1.5a3.5 3.5 0 0 1 0 7H17M11.5 17h5" fill="none" stroke="#C9A7FF" stroke-width="1.6" stroke-linecap="round"/>'
+const CODE_ICON = '<circle cx="9" cy="8" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="9" cy="24" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="19" cy="12" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><path d="M9 10.6v10.8M19 14.6c0 4-10 3-10 6.8" fill="none" stroke="#9a9890" stroke-width="1.5"/>'
+const iconOf = (kind: MadeKind | 'code') => (kind === 'code' ? CODE_ICON : kind === 'link' ? LINK_ICON : pageIcon(madeKindOf(kind).badge, madeKindOf(kind).color))
+const svgOfIcon = (kind: MadeKind | 'code', width: number, height: number) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 28 32">${iconOf(kind)}</svg>`
+const tileSvg = (inner: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="${TILE_W}" height="${TILE_H}" viewBox="0 0 ${TILE_W} ${TILE_H}">${inner}</svg>`
+const tilePicture = (face: { base64: string }, x: number, y: number, w: number, h: number) =>
+  `<clipPath id="c"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4"/></clipPath><g clip-path="url(#c)"><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#fff"/><image href="data:image/jpeg;base64,${face.base64}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="xMidYMin slice"/></g><rect x="${x + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" rx="4" fill="none" stroke="#ffffff30"/>`
+const tilePlay = (cx: number, cy: number) => `<circle cx="${cx}" cy="${cy}" r="12" fill="#000a"/><path d="M${cx - 4} ${cy - 6}l10 6-10 6z" fill="#fff"/>`
+const tileBadge = (kind: MadeKind) => {
+  const { badge, color } = madeKindOf(kind)
+  return kind === 'pdf' || kind === 'sheet' || kind === 'doc' ? `<rect x="4" y="${TILE_H - 17}" width="${badge.length * 6 + 8}" height="13" rx="3" fill="${color}"/><text x="8" y="${TILE_H - 7.5}" font-size="8.5" ${SVG_FONT} font-weight="700" fill="#fff">${badge}</text>` : ''
+}
+const tileIcon = (kind: MadeKind | 'code') => `<rect width="${TILE_W}" height="${TILE_H}" rx="4" fill="#ffffff12"/><g transform="translate(${TILE_W / 2 - 17.5} ${TILE_H / 2 - 20}) scale(1.25)">${iconOf(kind)}</g>`
+const oneTile = (one: Made, face: Face | undefined) => tileSvg(face ? tilePicture(face, 0, 0, TILE_W, TILE_H) + (one.kind === 'video' ? tilePlay(TILE_W / 2, TILE_H / 2) : '') + tileBadge(one.kind) : tileIcon(one.kind))
+const pileTile = (first: Made, face: Face | undefined) =>
+  tileSvg(
+    `<rect x="8" y="0" width="${TILE_W - 8}" height="${TILE_H - 8}" rx="4" fill="#55554f"/><rect x="4" y="4" width="${TILE_W - 8}" height="${TILE_H - 8}" rx="4" fill="#77766f"/>` +
+      (face ? tilePicture(face, 0, 8, TILE_W - 8, TILE_H - 8) + (first.kind === 'video' ? tilePlay((TILE_W - 8) / 2, 8 + (TILE_H - 8) / 2) : '') : `<rect x="0" y="8" width="${TILE_W - 8}" height="${TILE_H - 8}" rx="4" fill="#3b3b39" stroke="#ffffff30"/><g transform="translate(${(TILE_W - 8) / 2 - 17.5} ${8 + (TILE_H - 8) / 2 - 20}) scale(1.25)">${iconOf(first.kind)}</g>`),
+  )
+const codeTile = (code: CodeMade) =>
+  tileSvg(
+    `<rect width="${TILE_W}" height="${TILE_H}" rx="4" fill="#ffffff12"/><text x="${TILE_W / 2}" y="${TILE_H / 2 - 3}" font-size="15" ${SVG_FONT} font-weight="600" fill="#57AB5A" text-anchor="middle">+${code.plus.toLocaleString('en-US')}</text><text x="${TILE_W / 2}" y="${TILE_H / 2 + 16}" font-size="15" ${SVG_FONT} font-weight="600" fill="#E5534B" text-anchor="middle">−${code.minus.toLocaleString('en-US')}</text>`,
+  )
+
+const sharedStart = (names: string[]) => {
+  if (names.length < 2) return 0
+  let n = 0
+  while (names.every(name => name[n] !== undefined && name[n] === names[0]?.[n])) n += 1
+  const cut = (names[0] ?? '').slice(0, n).search(/[-_ ][^-_ ]*$/)
+  return cut < 0 ? 0 : cut + 1
+}
+const bareName = (name: string) => name.replace(/\.[a-z0-9]+$/i, '')
+type Thing = { key: string; label: string; kind: MadeKind; files: Made[] }
+const thingsOf = (files: FilesMade, opened: (kind: MadeKind) => boolean): Thing[] => {
+  const skip = sharedStart(files.made.filter(one => one.kind !== 'link').map(one => bareName(one.name)))
+  const nameOf = (one: Made) => (one.kind === 'link' ? one.name : bareName(one.name).slice(skip) || bareName(one.name))
+  const kinds: MadeKind[] = [...MADE_KINDS.map(one => one.kind), 'link']
+  return kinds.flatMap(kind => {
+    const list = files.made.filter(one => one.kind === kind)
+    if (kind !== 'link' && list.length >= 3 && !opened(kind)) return [{ key: `pile-${kind}`, label: `${list.length} ${madeKindOf(kind).many}`, kind, files: list }]
+    return list.map((one, n) => ({ key: `${kind}-${n}`, label: nameOf(one), kind, files: [one] }))
+  })
+}
+const countWord = (code: CodeMade) => `${code.count.toLocaleString('en-US')} code ${code.count === 1 ? 'file' : 'files'}`
+const openMade = async ($: EngineInterface, one: Made, pane: string, row: string, surface?: RenderSurface) => {
+  if (one.kind === 'picture') return showPicture($, one.path, pane, row, surface)
+  const opened = await openOn($, one.path)
+  if (opened.exitCode !== 0) await log($, `${one.path} not opened: ${opened.stderr}`)
+}
+const openPiles = new Set<string>()
+
+const madeChips = ($: EngineInterface, ui: Ui, one: Todo, key: string, onOpenWork: () => void) => {
+  const files = madeNow($, one)
+  if (!files || (!files.made.length && !files.code)) return null
+  const { Box, Button, Text } = ui
+  const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
+  const things = thingsOf(files, () => false)
+  const shown = things.slice(0, CHIPS_MOST)
+  const icon = (kind: MadeKind | 'code', at: string) => (table.Svg && !('isTerminal' in ui) ? <table.Svg key={`${at}-icon`} source={svgOfIcon(kind, 18, 20)} alt="" width={18} height={20} /> : null)
+  return (
+    <Box key={key} flexDirection="row" flexWrap="wrap" columnGap={2} rowGap={0}>
+      {shown.map(thing => (
+        <Box key={`${key}-${thing.key}`} flexDirection="row" alignItems="center" flexShrink={0} height={1} overflow="hidden">
+          {icon(thing.kind, `${key}-${thing.key}`)}
+          <Button
+            key={`${key}-${thing.key}-open-${presses}`}
+            label={`${cut(thing.label, 18)}${thing.kind === 'link' ? ' ↗' : ''}`}
+            plain
+            onPress={press => void ((presses += 1), thing.files.length > 1 ? onOpenWork() : thing.files[0] ? openMade($, thing.files[0], '', '', press.surface) : undefined)}
+          />
+        </Box>
+      ))}
+      {things.length > shown.length ? <Text key={`${key}-more`} dimColor>{`and ${things.length - shown.length} more`}</Text> : null}
+      {files.code ? (
+        <Box key={`${key}-code`} flexDirection="row" alignItems="center" gap={1} flexShrink={0} height={1} overflow="hidden">
+          {icon('code', `${key}-code`)}
+          <Text>{countWord(files.code)}</Text>
+          <Text color="success">{`+${files.code.plus.toLocaleString('en-US')}`}</Text>
+          {files.code.minus ? <Text color="error">{`−${files.code.minus.toLocaleString('en-US')}`}</Text> : null}
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
+const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, key: string, surface?: RenderSurface) => {
+  if (!files.made.length && !files.code) return null
+  const { Box, Button, Text } = ui
+  const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
+  const canDraw = Boolean(table.Svg) && surface !== 'terminal' && !('isTerminal' in ui)
+  const things = thingsOf(files, kind => openPiles.has(`${pane}:${kind}`))
+  const shown = things.slice(0, TILES_MOST)
+  const made = canDraw ? facesNow($, shown.slice(0, FACES_MOST).flatMap(thing => thing.files.slice(0, 1))) : faces
+  let chars = 0
+  const faceOf = (one: Made | undefined) => {
+    const face = one ? made.get(one.path) : undefined
+    if (!face || chars + face.base64.length > TILE_CHARS) return undefined
+    chars += face.base64.length
+    return face
+  }
+  const press = (thing: Thing, row: string) => (e: { surface?: RenderSurface }) => {
+    presses += 1
+    if (thing.files.length > 1) return void (openPiles.add(`${pane}:${thing.kind}`), redraw($))
+    if (thing.files[0]) void openMade($, thing.files[0], pane, row, e.surface)
+  }
+  const fewer = [...new Set(files.made.map(one => one.kind))].filter(kind => openPiles.has(`${pane}:${kind}`) && files.made.filter(one => one.kind === kind).length >= 3)
+  return (
+    <Box key={key} flexDirection="column" gap={1}>
+      <Box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={1}>
+        {shown.map(thing => {
+          const row = `${key}-${thing.key}`
+          return (
+            <Box key={row} flexDirection="column" alignItems="flex-start" width={canDraw ? 12 : undefined} flexShrink={0}>
+              {canDraw && table.Svg ? <table.Svg key={`${row}-svg`} source={thing.files.length > 1 ? pileTile(thing.files[0]!, faceOf(thing.files[0])) : oneTile(thing.files[0]!, faceOf(thing.files[0]))} alt={thing.label} width={TILE_W} height={TILE_H} /> : null}
+              <Button key={`${row}-open-${presses}`} label={cut(thing.label, canDraw ? 13 : 60)} plain onPress={press(thing, row)} />
+            </Box>
+          )
+        })}
+        {files.code ? (
+          <Box key={`${key}-code`} flexDirection="column" alignItems="flex-start" width={canDraw ? 12 : undefined} flexShrink={0}>
+            {canDraw && table.Svg ? <table.Svg key={`${key}-code-svg`} source={codeTile(files.code)} alt={countWord(files.code)} width={TILE_W} height={TILE_H} /> : null}
+            <Text dimColor wrap="truncate-end">{canDraw ? countWord(files.code) : `${countWord(files.code)} · +${files.code.plus.toLocaleString('en-US')} −${files.code.minus.toLocaleString('en-US')}`}</Text>
+          </Box>
+        ) : null}
+      </Box>
+      {things.length > shown.length ? <Text dimColor>{`and ${things.length - shown.length} more`}</Text> : null}
+      {fewer.length ? (
+        <Box alignItems="flex-start">
+          <Button key={`${key}-fewer-${presses}`} label="Show fewer" plain dimColor onPress={() => void ((presses += 1), fewer.forEach(kind => openPiles.delete(`${pane}:${kind}`)), redraw($))} />
+        </Box>
+      ) : null}
+    </Box>
+  )
 }
 
 
@@ -11639,18 +11964,19 @@ const workHooks = (on: On) => {
         const now = await $.clock.now()
         const isKeeping = isTool(e.tool, 'todo') || isTool(e.tool, 'note')
         let nudge = ''
-        await changeTodos($, list =>
-          list.map(one => {
-            if (one.id !== id) return one
-            const base = { ...(one.status === 'working' ? one : resumed(one, now)), ...(one.carryOn?.gaveUp ? { carryOn: undefined } : {}), steps: (one.steps ?? 0) + 1, answeredAt: undefined, reportAt: undefined, waitsSince: undefined, endedStepAt: undefined }
+        await changeTodos($, list => {
+          const top = topOf(list, id)
+          return list.map(one => {
+            if (one.id !== id) return one.id === top ? withWrote(one, e) : one
+            const base = withWrote({ ...(one.status === 'working' ? one : resumed(one, now)), ...(one.carryOn?.gaveUp ? { carryOn: undefined } : {}), steps: (one.steps ?? 0) + 1, answeredAt: undefined, reportAt: undefined, waitsSince: undefined, endedStepAt: undefined }, e)
             if (isKeeping) return { ...base, quiet: 0, owes: isTool(e.tool, 'note') ? undefined : one.owes }
             const owes = one.owes === undefined ? undefined : one.owes + 1
             const quiet = (one.quiet ?? 0) + 1
             const isQuiet = !one.parentId && owes === undefined && quiet >= QUIET_STEPS
             nudge = owes === OWED_AFTER ? named(OWED) : isQuiet ? drifted(quiet) : ''
             return { ...base, owes, quiet: isQuiet ? 0 : quiet }
-          }),
-        )
+          })
+        })
         if (nudge) void tell($, id, nudge)
       }
     }
@@ -13053,6 +13379,12 @@ const panelHooks = (on: On) => {
               </Box>
               {facts(one, false, kept.length > 0 ? `${done} of ${kept.length} to-dos done` : '')}
             </Box>
+            {/* What it made so far, right under its title: side by side, each a press that opens it */}
+            {madeNow($, one)?.made.length || madeNow($, one)?.code ? (
+              <Box key={`made-lead-${one.id}`} paddingLeft={lead}>
+                {madeChips($, table, one, `made-${one.id}`, () => openWork($, one.id))}
+              </Box>
+            ) : null}
             {/* The to-do it is on, numbered by how many are done, as the edge's lighter part is, so the edge, the count and the row agree */}
             {stepLine(one, kept, done)}
             {/* Every part under the title starts at the title's own left edge (lead). What the card waits on, each in the order it
@@ -13932,6 +14264,8 @@ const panelHooks = (on: On) => {
               ) : null}
             </Box>
           </Box>
+          {/* What it made, right under its title, while it works and once it is done */}
+          {madeNow($, one)?.made.length || madeNow($, one)?.code ? part('part-files', 'Files', '', madeTiles($, table, madeNow($, one) ?? { made: [] }, paneId, `files-${one.id}`, e.surface) ?? <Box />) : null}
           {one.admins?.length || cardNotesOf(one.id, at).length ? (
             <Box key="part-gates" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
@@ -14495,7 +14829,7 @@ const tabHooks = (on: On) => {
     const picture = e.surface === 'terminal' ? null : RASTER.test(file) ? await thumbOf($, thumbPath(r, file)) : /\.svg$/i.test(file) ? await svgOf($, `${reportPath(r)}/${file}`) : null
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows)}
+        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows, e.surface === 'terminal' ? { made: [] } : madeOfReport($, r, reportText.get(r.id) ?? ''))}
       </Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))

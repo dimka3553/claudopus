@@ -101,7 +101,7 @@ The panel's header has these buttons (Results once there is a result):
 
 | Page | What it holds |
 | --- | --- |
-| **Results** | What finished tasks found, newest first, with what's waiting for you at the top (each with Yes, No and Not now). Each one opens with its finding and pictures. |
+| **Results** | What finished tasks found, newest first, with what's waiting for you at the top (each with Yes, No and Not now). Each one opens with a tile for each file its task made, then its finding. |
 | **Stats** | Tokens, cost at API prices, tasks done and time saved, from Claude Code's own records. |
 | **Memory** | Opens the memory folder `~/.claude/claudopus`: your messages word for word, results, notes on each topic, and a list of the keys you've given by name and where each is saved (never a value). |
 | **Config** | Every setting, and the rules (below). Each shows what is in force, and **Reset** puts it back to what shipped. |

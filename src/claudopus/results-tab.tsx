@@ -358,7 +358,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
 // A report opened in its own pane: what it is and when; the question it waits on, with its answers; what it found; its pictures,
 // with the one press that opens them all; the report itself; then how to carry on from it, and the other rounds of its work
 type Thumb = { source: string; width: number; height: number } | null
-const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb, height = 0) => {
+const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb, height = 0, files: FilesMade = { made: [] }) => {
   const { Box, Button, Markdown, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   // The other rounds of its work first, as the list shows them as one row; then what it started from or started, and the subject's others
@@ -370,8 +370,10 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
     [one.id === r.from ? 'this result came from it' : one.from === r.id ? 'came from this result' : rounds.includes(one) ? (one.at < r.at ? 'earlier result' : 'later result') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
   const pane = paneOf(r)
   // As in the list: each key carries a mark of what this drawing shows, so the app never keeps a button whose handle is gone
-  const gen = drawingMark(pane, [presses, height, r, mark(text), at, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
-  const show = (to: number) => void ((presses += 1), pictureAt.set(pane, to), redraw($))
+  const gen = drawingMark(pane, [presses, height, r, mark(text), at, JSON.stringify(files), [...openPiles].join(), faces.size, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
+  // Where pictures can be drawn, what the task made is tiles under the title, its pictures among them; the terminal keeps its rows
+  const hasTiles = !('isTerminal' in ui) && Boolean(table.Svg) && (files.made.length > 0 || Boolean(files.code))
+  const show = (to: number) => void ((presses += 1), hasTiles ? void showPicture($, pictures[to]?.path ?? '', pane, '') : (pictureAt.set(pane, to), redraw($)))
   return (
     <Box key={`report-${r.id}`} flexDirection="column" gap={1} flexGrow={1}>
       {/* Archive at the head's right: pressed, the tab closes; one archived says so, with Bring back */}
@@ -382,6 +384,8 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         </Box>
         <Button key={`report-archive-${gen}`} label={r.archived ? 'Bring back' : 'Archive'} onPress={() => archiveReport($, r, !r.archived)} />
       </Box>
+      {/* What its task made, right under its title: tiles side by side, each a press that opens it */}
+      {hasTiles ? band(ui, 'report-files', 'Files', '', madeTiles($, ui, files, pane, `report-files-${r.id}`) ?? <Box />) : null}
       {isOpenQuestion(r) || (!r.archived && waitsOf(r).some(byPerson))
         ? band(
             ui,
@@ -416,7 +420,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
             <Text wrap="wrap">{r.gist}</Text>,
           )
         : null}
-      {pictures.length
+      {pictures.length && !hasTiles
         ? band(
             ui,
             'report-pictures',

@@ -270,6 +270,10 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
     folder: [(await readIndex($)).find(s => one.subject && slug(s.name) === slug(one.subject))?.repo ?? ''].find(repo => repo.startsWith('/')) ?? cwd,
     gist: gistOf(text, title),
     files,
+    // What its task made, listed now and kept with it, so its tiles are there once the task's card is gone
+    ...(await madeBy($, one.wrote ?? [], text, one.begunAt ?? one.startedAt)
+      .then(made => (made.made.length || made.code ? { made } : {}))
+      .catch(err => (void log($, `files of report ${id} not listed: ${String(err)}`), {}))),
     agent: one.id,
     mark: marked,
     // What waits on the person is what the work recorded with the `waits` tool, wherever in the report it is

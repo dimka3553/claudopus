@@ -521,18 +521,20 @@ const workHooks = (on: On) => {
         const now = await $.clock.now()
         const isKeeping = isTool(e.tool, 'todo') || isTool(e.tool, 'note')
         let nudge = ''
-        await changeTodos($, list =>
-          list.map(one => {
-            if (one.id !== id) return one
-            const base = { ...(one.status === 'working' ? one : resumed(one, now)), ...(one.carryOn?.gaveUp ? { carryOn: undefined } : {}), steps: (one.steps ?? 0) + 1, answeredAt: undefined, reportAt: undefined, waitsSince: undefined, endedStepAt: undefined }
+        await changeTodos($, list => {
+          // What a helper writes is what its task made too: the task it belongs to keeps it as well
+          const top = topOf(list, id)
+          return list.map(one => {
+            if (one.id !== id) return one.id === top ? withWrote(one, e) : one
+            const base = withWrote({ ...(one.status === 'working' ? one : resumed(one, now)), ...(one.carryOn?.gaveUp ? { carryOn: undefined } : {}), steps: (one.steps ?? 0) + 1, answeredAt: undefined, reportAt: undefined, waitsSince: undefined, endedStepAt: undefined }, e)
             if (isKeeping) return { ...base, quiet: 0, owes: isTool(e.tool, 'note') ? undefined : one.owes }
             const owes = one.owes === undefined ? undefined : one.owes + 1
             const quiet = (one.quiet ?? 0) + 1
             const isQuiet = !one.parentId && owes === undefined && quiet >= QUIET_STEPS
             nudge = owes === OWED_AFTER ? named(OWED) : isQuiet ? drifted(quiet) : ''
             return { ...base, owes, quiet: isQuiet ? 0 : quiet }
-          }),
-        )
+          })
+        })
         if (nudge) void tell($, id, nudge)
       }
     }

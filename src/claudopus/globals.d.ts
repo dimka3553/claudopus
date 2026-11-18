@@ -28,11 +28,15 @@ declare global {
   export import ToolCallResult = M0.ToolCallResult
   export import SessionMessage = M0.SessionMessage
   export import ToolUseSummary = M0.ToolUseSummary
+  export import CodeMade = M1.CodeMade
   export import Entry = M1.Entry
+  export import FilesMade = M1.FilesMade
   export import Flow = M1.Flow
   export import FlowAgent = M1.FlowAgent
   export import Item = M1.Item
   export import Link = M1.Link
+  export import Made = M1.Made
+  export import MadeKind = M1.MadeKind
   export import Me = M1.Me
   export import PressRun = M1.PressRun
   export import Prompt = M1.Prompt
