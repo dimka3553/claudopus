@@ -124,8 +124,6 @@ const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since
     if ((kind !== 'file' && !TEXT_DOC.test(path)) || isNamed) {
       // What a step only wrote into a temporary folder or Claudopus's own memory is its scratch, not what it made
       if (!isNamed && (TEMP.test(path) || (dir && path.startsWith(`${dir}/`)))) continue
-      // Two files of one name are one thing to the person: the one the result names, else the newest, is kept
-      if (made.some(one => one.name === fileName(path))) continue
       made.push({ path, name: fileName(path), kind, at: Math.round(stat.mtimeMs) })
     }
   }
@@ -141,6 +139,9 @@ const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since
 // step writes is there only after the step), at most every MADE_AGAIN while it works, and once it ends. The listings take turns, so a
 // panel opened on many cards lists them one after another
 const MADE_AGAIN = 20_000
+const MADE_HOLD = 15_000
+// What a listing shows: nothing at all is the same as not listed yet
+const shownOf = (files?: FilesMade) => (files && (files.made.length || files.code) ? JSON.stringify(files) : '')
 const madeOf = new Map<string, { key: string; at: number; files: FilesMade }>()
 const madeLoading = new Set<string>()
 let madeTurn: Promise<unknown> = Promise.resolve()
@@ -153,14 +154,18 @@ const madeNow = ($: EngineInterface, one: Todo): FilesMade | undefined => {
   if (isDue && !madeLoading.has(one.id) && ((one.wrote ?? []).length || one.answer)) {
     madeLoading.add(one.id)
     const run = madeTurn.then(() => madeBy($, one.wrote ?? [], one.status === 'working' ? '' : one.answer, one.begunAt ?? one.startedAt))
-    madeTurn = run.catch(() => undefined)
+    // A listing that never ends (a file on a volume that does not answer) holds the others up no longer than MADE_HOLD
+    madeTurn = Promise.race([run.catch(() => undefined), new Promise(done => setTimeout(done, MADE_HOLD))])
+    let isNew = false
     void run
       .then(files => {
         if (madeOf.size > 200) madeOf.delete(madeOf.keys().next().value ?? '')
+        isNew = shownOf(files) !== shownOf(madeOf.get(one.id)?.files)
         madeOf.set(one.id, { key, at: Date.now(), files })
       })
       .catch(err => log($, `files of ${one.id} not listed: ${String(err)}`))
-      .finally(() => (madeLoading.delete(one.id), redraw($)))
+      // The panel is drawn again only when what it shows changed
+      .finally(() => (madeLoading.delete(one.id), isNew ? redraw($) : undefined))
   }
   return was?.files
 }
@@ -318,6 +323,8 @@ const thingsOf = (files: FilesMade, opened: (kind: MadeKind) => boolean): Thing[
     return list.map((one, n) => ({ key: `${kind}-${n}`, label: nameOf(one), kind, files: [one] }))
   })
 }
+// A name too long for its place keeps its start and its end, which is what tells two apart: "vat-li…country", "os re…t 362"
+const middleCut = (text: string, most: number) => (text.length <= most ? text : `${text.slice(0, Math.ceil((most - 1) / 2))}…${text.slice(text.length - Math.floor((most - 1) / 2))}`)
 const countWord = (code: CodeMade) => `${code.count.toLocaleString('en-US')} code ${code.count === 1 ? 'file' : 'files'}`
 // Opens what was pressed where the person is: a picture as the chat's pictures open, any other file or a link as the system opens it
 const openMade = async ($: EngineInterface, one: Made, pane: string, row: string, surface?: RenderSurface) => {
@@ -345,7 +352,7 @@ const madeChips = ($: EngineInterface, ui: Ui, one: Todo, key: string, onOpenWor
           {icon(thing.kind, `${key}-${thing.key}`, thing.files[0]?.path)}
           <Button
             key={`${key}-${thing.key}-open-${presses}`}
-            label={`${cut(thing.label, 18)}${thing.kind === 'link' ? ' ↗' : ''}`}
+            label={`${middleCut(thing.label, 18)}${thing.kind === 'link' ? ' ↗' : ''}`}
             plain
             onPress={press => void ((presses += 1), thing.files.length > 1 ? onOpenWork() : thing.files[0] ? openMade($, thing.files[0], '', '', press.surface) : undefined)}
           />
@@ -395,7 +402,7 @@ const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, k
           return (
             <Box key={row} flexDirection="column" alignItems="flex-start" width={canDraw ? TILE_COLUMNS : undefined} flexShrink={0}>
               {canDraw && table.Svg ? <table.Svg key={`${row}-svg`} source={thing.files.length > 1 ? pileTile(thing.files[0]!, faceOf(thing.files[0])) : oneTile(thing.files[0]!, faceOf(thing.files[0]))} alt={thing.label} width={TILE_SHOWN_W} height={TILE_SHOWN_H} /> : null}
-              <Button key={`${row}-open-${presses}${gen}`} label={cut(thing.label, canDraw ? 12 : 60)} plain onPress={press(thing, row)} />
+              <Button key={`${row}-open-${presses}${gen}`} label={canDraw ? middleCut(thing.label, 13) : cut(thing.label, 60)} plain onPress={press(thing, row)} />
             </Box>
           )
         })}
