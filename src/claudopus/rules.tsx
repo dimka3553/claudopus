@@ -314,6 +314,11 @@ const RESULT_ANSWER = (title: string, path: string, asked: string, said: string,
   `${who(true)} ${isWords ? 'answered, in their own words, a question' : `pressed "${said}" to answer a question`} in your result "${title}" (${path}): ${asked}${isWords ? `\nTheir answer: ${said}` : ''}${left ? `\n${left} other ${left === 1 ? 'question' : 'questions'} of that result still ${left === 1 ? 'waits' : 'wait'} for them: each answer comes to you as a message of its own, so carry on with what you have.` : ''}`
 const RESULT_ANSWERED = (title: string, asked: string, said: string) => `✓ {Name} answered a question in the result "${title}" on the panel (${asked}): ${said}. Its task has the answer and carries on with it itself: start nothing for it.`
 const RESULT_WORDS_SENT = (title: string) => `Claudopus sent this answer of {name}'s to the task that asked ("${title}"), which carries on with it itself: start nothing for it and send it nothing, only say so in a line.`
+// Change something on a Done card: what the box asks, what its task is told with the person's words, and what the chat is told
+const CHANGE_WHAT = 'what should it change?'
+const CHANGE_ASKED = (said: string) =>
+  `${who(true)} pressed "Change something" on the card of your finished task and wrote, in their own words, what to change in your finished work: ${said}\nYou had finished; this starts you again. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
+const CHANGE_TOLD = (title: string, said: string) => `✓ {Name} asked the finished task "${title}" on its card to change something: ${said}. The task has their words and carries on with them itself: start nothing for it.`
 const RESUMED_BY_ANSWER = `You had finished; this answer starts you again. Continue the task with it, then end with your report as before.`
 // What the chat's model reads, and the person sees as a notice (isYou), when that work could not be started again with the answer
 const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = false) =>

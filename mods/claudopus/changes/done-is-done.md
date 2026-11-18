@@ -5,3 +5,4 @@
 - Your answer on a finished task's question goes to that same task, which carries on with it.
 - Dismiss on any finished, stopped or waiting card puts it away as done.
 - A press on an answer or on Not now shows at once.
+- A Done card has Change something beside Dismiss: you type what to change above the chat, and the same task carries on with it and finishes again.

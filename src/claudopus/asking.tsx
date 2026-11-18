@@ -163,7 +163,7 @@ const freeTimes = ($: EngineInterface) => {
 let isRedrawOwed = false
 // Only the bar's box: a box in a pane is drawn again with its pane as before. The hold ends TYPING after the last letter or focus,
 // as the app may say nothing when the cursor leaves; a letter typed after that holds it again at once
-const isBoxHeld = (at: number) => Boolean(replyTo || boxOpen) && barBoxAt > 0 && at - barBoxAt < TYPING
+const isBoxHeld = (at: number) => Boolean(replyTo || boxOpen || changeTo) && barBoxAt > 0 && at - barBoxAt < TYPING
 const drawFresh = async ($: EngineInterface, isThroughTyping = false) => {
   if (!isThroughTyping && isBoxHeld(await $.clock.now())) return void ((isRedrawOwed = true), recordEvent($, 'redraw-owed'))
   isRedrawOwed = false
@@ -459,6 +459,7 @@ const sendFromBar = ($: EngineInterface, id: string, value: string) => {
 // the bar already holds the keys, so where it does not the person clicks the box
 const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) => {
   if (replyTo) barLeft.set(replyTo, barDraft(replyTo))
+  if (one?.ask) changeTo = ''
   if (one) (carryDraft($, one, barLeft.get(one.id)), barLeft.delete(one.id))
   replyTo = one?.ask ? one.id : ''
   if (one?.ask) boxOpen = undefined
@@ -474,6 +475,51 @@ const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) =
     .focus({ requestId: bar, key: barBoxKey(one.id) })
     .then(r => recordEvent($, 'focus-call', { deny: r.deny ?? null }))
     .catch(err => recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }))
+}
+// Change something, on a Done card of this chat's: the same box in the bar, opened for a card that asks nothing (changeTo: its
+// card, none when closed). What is sent from it goes to that task as the person's own words, which starts it again from the
+// submit's or the press's own hook (answersOnWay, toEnded), never from a timer; its card is at work from the press (drawWaking),
+// and the chat is only told, with no turn of its own. Cancel closes the box and keeps nothing of what was typed
+let changeTo = ''
+const changeBoxKey = (id: string) => `band-${id}-reply-change-${replies.get(id) ?? 0}`
+const changeDraft = (id: string) => `${id}|change`
+const canChange = (one: Todo) => !one.chat && !one.parentId && one.status === 'done' && !one.leftOpen && !openItems(one).length && !one.ask && !one.admins?.length
+const openChange = ($: EngineInterface, one: Todo | undefined, surface: string) => {
+  if (one && replyTo) (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''))
+  if (one) boxOpen = undefined
+  // A box closed and opened again is a new one, empty
+  if (changeTo) (dropDrafts($, changeTo), replies.set(changeTo, (replies.get(changeTo) ?? 0) + 1))
+  changeTo = one?.id ?? ''
+  barBoxAt = 0
+  isBarSettling = false
+  presses += 1
+  freeTimes($)
+  redraw($)
+  const bar = barIds.get(surface)
+  if (!one || !bar) return
+  void $.ui
+    .focus({ requestId: bar, key: changeBoxKey(one.id) })
+    .then(r => recordEvent($, 'focus-call', { deny: r.deny ?? null }))
+    .catch(err => recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }))
+}
+const sendChange = ($: EngineInterface, id: string, value: string) => {
+  const run = changeTask($, id, value.trim())
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
+  return run
+}
+const changeTask = async ($: EngineInterface, id: string, said: string) => {
+  const card = (await read($, todos)).find(one => one.id === id)
+  if (!card || !said || card.chat || card.parentId || isHeld(card)) return
+  const at = await $.clock.now()
+  drawWaking($, card, at)
+  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) } : one)))
+  const text = CHANGE_ASKED(said)
+  const sent = { text: said, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true }
+  const told = (await read($, todos)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
+  if (told && !told.deny) (writtenIn($, id, id), sentReplies.set(id, { ...sent, to: 'work' }), redraw($))
+  else await toEnded($, card, id, text, sent)
+  await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(said, 120)}”`)))
 }
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   // Another chat's ask is answered only in that chat: no file carries an answer to it, from this Mac or another
@@ -905,7 +951,7 @@ const sentLine = (one: Todo, now: number) => {
   }[sent.to]
   if (isHeld) return `✓ You answered “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : ' · the question is still open'}`
 
-  return `✓ You answered “${cut(sent.text, 60)}” · ${how}`
+  return `✓ You ${sent.ask === CHANGE_WHAT ? 'asked for' : 'answered'} “${cut(sent.text, 60)}” · ${how}`
 }
 
 
