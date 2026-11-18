@@ -2232,15 +2232,31 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
 }
 
 const asksInText = (text: string) => {
-  const prose = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '').replace(/"[^"\n]*"|“[^”\n]*”/g, '')
-  return /\?(?=[\s*_)]|$)/m.test(prose) || /^[\s#*_>-]*(waiting (on|for) you|waits (on|for) you)\b/im.test(prose)
+  const prose = text
+    .replace(/```[\s\S]*?```/g, '')
+    .split('\n')
+    .filter(line => !/^(\s{4}|\t)/.test(line) && !/^\s*(#|\|)/.test(line))
+    .join('\n')
+    .replace(/`[^`\n]*`/g, '')
+    .replace(/"[^"\n]*"|“[^”\n]*”/g, '')
+  const isQuestion = /(?:^|[.!:\n]\s*|\*\*\s*)(?:[^\s.!?:*]+[ \t]+){3,}[^\s.!?:*]*[A-Za-z0-9)]\?(?=[\s*_)]|$)/m.test(prose)
+  return isQuestion || /^[\s#*_>-]*(waiting (on|for) you|waits (on|for) you)\b/im.test(prose)
 }
+const WAITS_KINDS = new Set(['claudopus:task', 'claudopus:quick', 'general-purpose', 'fork'])
 const unrecordedAtHandback = async ($: EngineInterface, id: string, message: string): Promise<string> => {
   const one = (await read($, todos)).find(card => card.id === id)
-  if (!one || isOff || !dir || one.parentId || one.chat || one.flagged || one.ask || one.waitsSet || one.toldWaits === one.startedAt || !asksInText(message)) return ''
+  if (!one || isOff || !dir || one.parentId || one.chat || one.flagged || one.ask || !WAITS_KINDS.has(one.kind ?? '') || one.waitsSet || one.toldWaits === one.startedAt || !asksInText(message)) return ''
   await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldWaits: one.startedAt } : card)))
   await log($, `work ${id} handed back a report that asks something with nothing recorded as waiting: refused once`)
   return named(UNRECORDED_WAITS)
+}
+
+const CARD_WAITS_SHOWN = 60_000
+const openResultWaits = (one: Todo, kept: Report[], at: number): { r?: Report; wait: Wait; index: number }[] => {
+  if (one.status !== 'done' || one.parentId || one.chat) return []
+  const fromResults = resultsOfWork(kept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer ? [] : [{ r, wait, index }])))
+  const fromCard = fromResults.length || at - one.endedAt > CARD_WAITS_SHOWN ? [] : (one.waits ?? []).map(askedWait).flatMap((wait, index) => (wait.answer ? [] : [{ wait, index }]))
+  return [...fromResults, ...fromCard].filter(({ wait }) => !one.ask || wait.ask !== one.ask.at)
 }
 
 const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
@@ -4487,7 +4503,7 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
       : one.status === 'failed'
         ? 'Failed.'
         : 'Stopped.'
-  return { title: one.title || 'Task', isDone: one.status === 'done', what }
+  return { title: one.title || 'Task', isDone: one.status === 'done', isWaiting: one.status === 'done' && waits.length > 0, what }
 }
 
 const announce = async ($: EngineInterface) => {
@@ -4506,9 +4522,11 @@ const announce = async ($: EngineInterface) => {
   if (config.sound !== false && items.some(one => one.isDone)) void $.audio.play({ asset: READY_SOUND }).catch(err => log($, `ready sound not played: ${String(err)}`))
   if (config.notifications === false) return
   const [first] = items
-  const done = items.filter(one => one.isDone).length
-  const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} tasks are done` : `${items.length} tasks ended`
-  const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${one.isDone ? 'done' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
+  const isWaiting = (one: (typeof items)[number]) => 'isWaiting' in one && Boolean(one.isWaiting)
+  const done = items.filter(one => one.isDone && !isWaiting(one)).length
+  const waiting = items.filter(isWaiting).length
+  const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} tasks are done` : waiting ? `${items.length} tasks ended · ${waiting} waiting for you` : `${items.length} tasks ended`
+  const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${isWaiting(one) ? 'waiting for you' : one.isDone ? 'done' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
   await alertPerson($, 'ready', title, text, `ready-${ids.map(one => one.id).join('-')}`)
 }
 
@@ -12320,7 +12338,7 @@ const workHooks = (on: On) => {
     const from = fromReport || goesOn
     await changeTodos($, list => {
       const old = list.find(one => one.id === id)
-      const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}) }
+      const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}), kind: e.fork ? 'fork' : (e.subagentType ?? '') }
       return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(rules ? { rulesSent: hashOf(rules) } : {}), ...(old?.scratch || scratch ? { scratch: old?.scratch || scratch } : {}) }])
     })
     if (isOwn) await openList($)
@@ -12949,7 +12967,9 @@ const bandHooks = (on: On) => {
     }
     if (e.props.hasSurvey) return next(e)
     const working = cards.filter(one => !one.parentId && one.status === 'working')
-    const happy = isHappy(cards, await $.clock.now())
+    const bandAt = await $.clock.now()
+    const bandKept = await read($, reports)
+    const happy = isHappy(cards.filter(one => !openResultWaits(one, bandKept, bandAt).length), bandAt)
     if (happy) await read($, tick)
     const ui = uiOf($, e)
     const { Box, Button, Text } = ui
@@ -13215,12 +13235,7 @@ const panelHooks = (on: On) => {
     const all = (await read($, todos)).map(asPressed)
     const own = all.filter(one => !one.parentId)
     const resultsKept = await read($, reports)
-    const resultWaits = (one: Todo): { r?: (typeof resultsKept)[number]; wait: Wait; index: number }[] => {
-      if (one.status !== 'done' || one.parentId || one.chat) return []
-      const fromResults = resultsOfWork(resultsKept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer ? [] : [{ r, wait, index }])))
-      const fromCard = fromResults.length ? [] : (one.waits ?? []).map(askedWait).flatMap((wait, index) => (wait.answer ? [] : [{ wait, index }]))
-      return [...fromResults, ...fromCard].filter(({ wait }) => !one.ask || wait.ask !== one.ask.at)
-    }
+    const resultWaits = (one: Todo) => openResultWaits(one, resultsKept, at)
     const otherChats = await read($, others)
     for (const one of cardsOf(otherChats)) if (one.ask?.replied && actingOn.get(`${one.id}:${one.ask.at}`) === one.ask.replied.text) actingOn.delete(`${one.id}:${one.ask.at}`)
     const elsewhere = cardsOf(otherChats).map(one => (one.ask && answeredHere.has(`${one.id}:${one.ask.at}`) ? { ...one, ask: undefined } : one))
@@ -13465,8 +13480,9 @@ const panelHooks = (on: On) => {
             </Box>
           ) : null}
           {r && open.length > 1 ? (
-            <Box flexDirection="row">
-              <Button key={`${key}-more-${r.id}-${presses}`} label={`${open.length - 1} more ${open.length === 2 ? 'question' : 'questions'} in its result`} plain onPress={() => void openReport($, r.id)} />
+            <Box flexDirection="row" alignItems="center" gap={1}>
+              <Text dimColor>{`${open.length - 1} more ${open.length === 2 ? 'question' : 'questions'}`}</Text>
+              <Button key={`${key}-more-${r.id}-${presses}`} label="Result" plain onPress={() => void openReport($, r.id)} />
             </Box>
           ) : null}
         </Box>

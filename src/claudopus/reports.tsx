@@ -221,20 +221,42 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
 }
 
 // (a question on its card is shown as waiting already)
-// A report that asks the person something: a question outside code and quotes, or a part headed as waiting on them
+// A report that asks the person something: a sentence of a few words ending in a question mark, outside code, quotes, headings and
+// tables, or a part headed as waiting on them
 const asksInText = (text: string) => {
-  const prose = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '').replace(/"[^"\n]*"|“[^”\n]*”/g, '')
-  return /\?(?=[\s*_)]|$)/m.test(prose) || /^[\s#*_>-]*(waiting (on|for) you|waits (on|for) you)\b/im.test(prose)
+  const prose = text
+    .replace(/```[\s\S]*?```/g, '')
+    .split('\n')
+    .filter(line => !/^(\s{4}|\t)/.test(line) && !/^\s*(#|\|)/.test(line))
+    .join('\n')
+    .replace(/`[^`\n]*`/g, '')
+    .replace(/"[^"\n]*"|“[^”\n]*”/g, '')
+  const isQuestion = /(?:^|[.!:\n]\s*|\*\*\s*)(?:[^\s.!?:*]+[ \t]+){3,}[^\s.!?:*]*[A-Za-z0-9)]\?(?=[\s*_)]|$)/m.test(prose)
+  return isQuestion || /^[\s#*_>-]*(waiting (on|for) you|waits (on|for) you)\b/im.test(prose)
 }
+// The kinds of agent that have the waits tool: Claudopus's own tasks, a general one, a copy of the chat
+const WAITS_KINDS = new Set(['claudopus:task', 'claudopus:quick', 'general-purpose', 'fork'])
 // Its report handed back asking the person something while the task recorded nothing as waiting on them: refused once a round, so
 // the question shows on its card as waiting for them, not as done (18 Nov: "Which opening should go out: A, B or C?" was asked only
 // in a report's text, and the panel showed nothing waiting). Sent again, it goes through as it is
 const unrecordedAtHandback = async ($: EngineInterface, id: string, message: string): Promise<string> => {
   const one = (await read($, todos)).find(card => card.id === id)
-  if (!one || isOff || !dir || one.parentId || one.chat || one.flagged || one.ask || one.waitsSet || one.toldWaits === one.startedAt || !asksInText(message)) return ''
+  if (!one || isOff || !dir || one.parentId || one.chat || one.flagged || one.ask || !WAITS_KINDS.has(one.kind ?? '') || one.waitsSet || one.toldWaits === one.startedAt || !asksInText(message)) return ''
   await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldWaits: one.startedAt } : card)))
   await log($, `work ${id} handed back a report that asks something with nothing recorded as waiting: refused once`)
   return named(UNRECORDED_WAITS)
+}
+
+// What a finished task's results still ask the person: a result with a question open waits for them, it is not done (18 Nov,
+// the person: three results asked something and the panel said only "3 tasks working"). In the minute before its result is kept,
+// what the task recorded is read from its card (never longer: a result that failed to be kept leaves nothing to answer). A
+// question tied to the open ask on its card is that ask's, which the card shows already
+const CARD_WAITS_SHOWN = 60_000
+const openResultWaits = (one: Todo, kept: Report[], at: number): { r?: Report; wait: Wait; index: number }[] => {
+  if (one.status !== 'done' || one.parentId || one.chat) return []
+  const fromResults = resultsOfWork(kept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer ? [] : [{ r, wait, index }])))
+  const fromCard = fromResults.length || at - one.endedAt > CARD_WAITS_SHOWN ? [] : (one.waits ?? []).map(askedWait).flatMap((wait, index) => (wait.answer ? [] : [{ wait, index }]))
+  return [...fromResults, ...fromCard].filter(({ wait }) => !one.ask || wait.ask !== one.ask.at)
 }
 
 // Keeps what a finished piece of work reported, once

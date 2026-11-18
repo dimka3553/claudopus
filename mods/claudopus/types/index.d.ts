@@ -187,6 +187,8 @@ export type Todo = {
   toldOpen?: { key: string; times: number }
   // The round (its start) whose report was refused once for asking something with nothing recorded as waiting
   toldWaits?: number
+  // The kind of agent it was started as (claudopus:task, general-purpose, fork…), when the chat started it
+  kind?: string
   // The to-dos it handed back its report with still not done: shown on its card and added to its result
   notDone?: string[]
   // Work with helpers running: when the mod last looked in on them, how many ran and how many had shown nothing new for a while

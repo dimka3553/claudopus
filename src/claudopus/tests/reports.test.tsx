@@ -58,7 +58,8 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(asking?.props.color).toBe('#E5A50A')
   expect(await pane.find({ type: 'Text', text: /^Waiting for you · / })).toBeDefined()
   expect((await pane.findAll({ type: 'Button' })).filter(b => /^result-ask-a1-say-/.test(b.key ?? '')).map(b => b.props.label)).toEqual(['Yes', 'No', 'Not now', 'Answer in words'])
-  expect((await pane.findAll({ type: 'Button' })).find(b => /^result-ask-a1-more-/.test(b.key ?? ''))?.props.label).toBe('1 more question in its result')
+  expect((await pane.findAll({ type: 'Button' })).find(b => /^result-ask-a1-more-/.test(b.key ?? ''))?.props.label).toBe('Result')
+  expect(await pane.find({ type: 'Text', text: '1 more question' })).toBeDefined()
   // Pressed, it opens the list as a pane of its own; the Claudopus pane stays as it was
   await pressed(pane, 'reports-open')
   expect(opened).toContain('reports')
@@ -215,17 +216,20 @@ test('a report handed back asking the person something it never recorded as wait
   await $.session.start(start)
   await $.prompt.submit({ text: 'make three videos', wait: false, origin: composer })
   const handback = async (agentId: string, message: string) => ((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: `h-${agentId}`, agentId, message } as never)) as { deny?: string }).deny
-  const cases: { title: string; message: string; waits?: string[]; refused: boolean }[] = [
+  const cases: { title: string; message: string; waits?: string[]; kind?: string; refused: boolean }[] = [
     // 18 Nov: the question was the report's first line, and nothing was recorded
     { title: 'Three openings', message: 'Which opening should go out: A, B or C? Nothing is posted until you pick one.', refused: true },
     { title: 'Life cycle', message: 'The picture is redrawn.\n\n**Waiting on you**\n- Yes or no to building it.', refused: true },
     { title: 'Recorded', message: 'Which opening should go out: A, B or C?', waits: ['Which opening should go out?'], refused: false },
     { title: 'Nothing waits', message: 'Should the chat say more? It did not, so I left it.', waits: [], refused: false },
     { title: 'Only code', message: 'The check `a?.b` and "Is it done?" are fixed. Pushed.', refused: false },
+    { title: 'Headings and tables', message: '## Why did it fail?\nIt timed out.\n\n| Passes? | Yes |\n\n    if (a ? b : c) return', refused: false },
+    // An agent with no waits tool is never told to call it
+    { title: 'Second look', message: 'Shall I look at the terminal too? I did not.', kind: 'claudopus:check', refused: false },
   ]
   for (const [n, one] of cases.entries()) {
     const id = `a${n + 1}`
-    await $.agent.spawn({ ...spawn, description: one.title, prompt: one.title } as never)
+    await $.agent.spawn({ ...spawn, description: one.title, prompt: one.title, ...(one.kind ? { subagentType: one.kind } : {}) } as never)
     if (one.waits) await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: `w-${id}`, items: one.waits, agentId: id } as never)
     expect([one.title, await handback(id, one.message)]).toEqual([one.title, one.refused ? expect.stringContaining('Not sent: your report asks') : undefined])
     // Refused once a round: sent again, it goes through as it is

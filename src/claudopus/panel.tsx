@@ -188,17 +188,10 @@ const panelHooks = (on: On) => {
     // A card whose ask or gate was just pressed is drawn answered, from the press itself (asPressed)
     const all = (await read($, todos)).map(asPressed)
     const own = all.filter(one => !one.parentId)
-    // What a finished task's results still ask the person: a result with a question open waits for them, it is not done (18 Nov,
-    // the person: three results asked something and the panel said only "3 tasks working"). Its card stays at the top in amber,
-    // never under Finished, until each is answered. In the instant before its result is kept, what the task recorded is read from
-    // its card; a question tied to the ask on its card is that ask's, which the card shows already
+    // What a finished task's results still ask the person (openResultWaits): its card stays at the top in amber, never under
+    // Finished, until each is answered
     const resultsKept = await read($, reports)
-    const resultWaits = (one: Todo): { r?: (typeof resultsKept)[number]; wait: Wait; index: number }[] => {
-      if (one.status !== 'done' || one.parentId || one.chat) return []
-      const fromResults = resultsOfWork(resultsKept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer ? [] : [{ r, wait, index }])))
-      const fromCard = fromResults.length ? [] : (one.waits ?? []).map(askedWait).flatMap((wait, index) => (wait.answer ? [] : [{ wait, index }]))
-      return [...fromResults, ...fromCard].filter(({ wait }) => !one.ask || wait.ask !== one.ask.at)
-    }
+    const resultWaits = (one: Todo) => openResultWaits(one, resultsKept, at)
     // The work of the other chats, by chat; an ask answered here leaves its card at once
     const otherChats = await read($, others)
     // A reply in words left here holds its ask as acted on until that chat's own file carries it; from then its file says
@@ -500,8 +493,9 @@ const panelHooks = (on: On) => {
             </Box>
           ) : null}
           {r && open.length > 1 ? (
-            <Box flexDirection="row">
-              <Button key={`${key}-more-${r.id}-${presses}`} label={`${open.length - 1} more ${open.length === 2 ? 'question' : 'questions'} in its result`} plain onPress={() => void openReport($, r.id)} />
+            <Box flexDirection="row" alignItems="center" gap={1}>
+              <Text dimColor>{`${open.length - 1} more ${open.length === 2 ? 'question' : 'questions'}`}</Text>
+              <Button key={`${key}-more-${r.id}-${presses}`} label="Result" plain onPress={() => void openReport($, r.id)} />
             </Box>
           ) : null}
         </Box>
