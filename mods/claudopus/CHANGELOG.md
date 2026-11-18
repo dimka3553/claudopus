@@ -2,6 +2,15 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.201 · 18 November 2026
+- The chat now does a short request itself (a change, a few fixes, a new part, a file to make, a push of its branch) in few steps. It starts a task only for a bigger request or one that runs long. Measured on 245 test chats, this scored higher than plain Claude Code, in less time and at lower cost.
+- No second helper checks the work, and Claude makes no picture after picture, unless you ask. Config's **Second check** now starts at **Only when I ask**. If you want every change checked as before, choose it there.
+- A task gets your words with nothing added, works in few steps, and fixes what would leave the result unusable instead of only telling you.
+- A result is text you read in the chat. A picture is for what you must see, never for a page of text.
+- Config has a new choice, **Short requests**: **The chat itself**, or **A task each**, which is how it was before.
+- The chat can't push to main, change Claudopus's own code where your chats run it, or run an admin command without your press, the same as a task.
+- The principles Claudopus starts with say the same. If you have your own copy, it stays as you wrote it.
+
 ## 0.2.200 · 18 November 2026
 - A finished task whose result asks you something now shows as Waiting for you: its card stays at the top in amber with the first question and its answers, the header counts each question, and it goes under Finished only once you've answered them all.
 - A task that asks you something in its result without recording it as waiting on you is told to record it before its result goes through, so its question shows on its card.

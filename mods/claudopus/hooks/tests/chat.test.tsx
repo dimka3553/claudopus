@@ -52,7 +52,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build what I asked for and what it plainly needs to work where I will use it, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n\n## Checking\n\n- Build it once and tell me where to look. No second agent and no rounds of pictures unless I ask.\n- A report is text I can read in the chat. A picture is for what I must see, never for a page of text.\n- After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -488,6 +488,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(files.has('git:top') ? `${files.get('git:top')}\n` : '', files.has('git:top') ? 0 : 128)
     // and where the repo a worktree belongs to keeps its git folder, as git:common lays it
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--git-common-dir')) return ok(files.has('git:common') ? `${files.get('git:common')}\n` : '', files.has('git:common') ? 0 : 128)
+    // (a folder's own branch, where the test lays git:branch:<folder>)
+    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref') && files.has(`git:branch:${rest[rest.indexOf('-C') + 1]}`)) return ok(`${files.get(`git:branch:${rest[rest.indexOf('-C') + 1]}`)}\n`)
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref')) return ok(files.has('git:branch') ? `${files.get('git:branch')}\n` : '', files.has('git:branch') ? 0 : 128)
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
@@ -768,6 +770,7 @@ const otherChat = (at: number, chat = 'chat-b', title = 'Billing page') =>
 
 test('a chat gets its role once, is told to start a fresh agent from a brief for every message, and every message is saved', async ($, on) => {
   const { files } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'tasks' } }))
   await $.session.start(start)
 
   const first = await $.prompt.submit({ text: 'fix the upload page', wait: false, origin: composer })
@@ -805,10 +808,64 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   expect(kept.slice(long.length)).toContain('and the chin')
 })
 
+test('as shipped the chat does a short request itself: it is told so with each message, its edits and joined commands run held open, it reads a paste it needs, an admin command still waits for the person, and a copy of itself is still refused', async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  const told = (await $.prompt.submit({ text: 'make the button orange', wait: false, origin: composer })).context?.join('\n') ?? ''
+  expect(told).toContain('A job of a few minutes: do it yourself, in this thread, in few steps.')
+  expect(told).toContain('Only a message that changes what a listed task is already doing')
+  expect(told).not.toContain('start a fresh agent')
+  for (const [i, call] of [
+    { tool: 'Edit', file_path: '/repo/css/app.css', old_string: 'blue', new_string: 'orange' },
+    { tool: 'Write', file_path: '/repo/notes.txt', content: 'done' },
+    { tool: 'Bash', command: "grep -rn 1d4ed8 . | head -40 && sed -i '' 's/1d4ed8/f28c28/g' css/app.css" },
+    { tool: 'Bash', command: 'npm test' },
+    { tool: 'Bash', command: 'git status' },
+  ].entries())
+    expect([call, (await $.tool.call({ ...call, tool_use_id: `own${i}` } as never)).deny]).toEqual([call, undefined])
+  const paste = `start ${'x'.repeat(20_000)} end`
+  await $.prompt.submit({ text: paste, wait: false, origin: composer })
+  const saved = [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/pastes/`))
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'own-p', file_path: saved?.[0] } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'own-f', prompt: 'push it', subagent_type: 'fork' } as never)).deny).toContain('never starts a task as a copy')
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'own-t', prompt: 'build the page', subagent_type: 'claudopus:task', model: 'opus' } as never)).deny).toBeUndefined()
+  const copy = (await $.tool.call({ tool: 'Agent', tool_use_id: 'own-f2', prompt: 'push it', subagent_type: 'fork' } as never)).deny ?? ''
+  expect(copy).not.toContain('claudopus:quick')
+  // What holds a task's commands holds the chat's: main is never pushed, by name or by a bare push from main; Claudopus's own
+  // checkout is never changed; a command that may take minutes is not held open
+  for (const [i, command] of ['git push origin main', 'git commit -qam x && git push origin HEAD:main', 'gh pr merge 12 --squash'].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-m${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never pushes or merges to main itself')])
+  // (Claudopus's own checkout is /code, laid before any command that changes a checkout is looked at)
+  files.set('git:top', '/code')
+  files.set('checkout:/code', 'main')
+  files.set('git:branch', 'main')
+  files.set('git:branch:/wt', 'fix-nose')
+  files.set('git:branch:/My Repo', 'main')
+  for (const [i, command] of ['git push', 'git add -A && git commit -qm x && git push -q', 'git -C "/My Repo" push -u origin', "sh -c 'git push'", 'git checkout -q main && git push'].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-b${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never pushes or merges to main itself')])
+  // With main checked out, what pushes no main runs: the word push in a message, a stash or a search, a named branch, tags, a
+  // branch made in the same command, and a push from a worktree on its own branch
+  for (const [i, command] of ['git commit -qm "fix the push button"', 'git stash push', 'git log --grep=push', 'git push origin fix-nose', 'git push --tags', 'git checkout -qb fix && git commit -qam x && git push -u origin fix', 'git checkout -qb fix && git push -u origin', 'cd /wt && git push -u origin', 'git -C /wt push'].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-n${i}`, command } as never)).deny]).toEqual([command, undefined])
+  // and from a folder on a branch, a push in a checkout of main is still main's
+  files.set('git:branch', 'fix-nose')
+  files.set('git:branch:/repo', 'main')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-b8', command: 'cd /repo && git push' } as never)).deny).toContain('never pushes or merges to main itself')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-b9', command: 'git push -u origin fix-nose' } as never)).deny).toBeUndefined()
+  for (const key of ['git:branch', 'git:branch:/wt', 'git:branch:/My Repo', 'git:branch:/repo']) files.delete(key)
+  for (const [i, command] of ['git -C /code checkout feature', 'cd /code; git reset --hard v0.2.191', 'cd /code && git commit -qam x'].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-c${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never changes what is checked out there')])
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l1', command: 'npm run build', description: 'Run the build (about 5 min)' } as never)).deny).toContain('keeps this chat from answering')
+  // A server left in the background stays up: nothing of Claudopus's stops it
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l2', command: 'npm run dev', description: 'Serve the site', run_in_background: true } as never)).deny).toBeUndefined()
+  expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain("the chat's own command started in the background")
+  expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain("in a chat's own thread")
+})
+
 test('work starts as a fresh agent from written instructions, never as a copy of the chat: a clearly stated job on Sonnet, the rest as a task, a fork or an agent with no model refused whatever an old config.json chose, and a brief gets the rules for the work', async ($, on) => {
   const { files } = world(on, { tokens: 400_000, chatRole: 'CHAT ROLE {lanes}' })
   // A choice of 0.2.152's that sent small jobs to a copy of the chat counts for nothing now
-  ownSet(files, 'config.json', JSON.stringify({ lean: { small: 'copy', quick: 'work' } }))
+  ownSet(files, 'config.json', JSON.stringify({ lean: { chat: 'tasks', small: 'copy', quick: 'work' } }))
   await $.session.start(start)
   const told = (await $.prompt.submit({ text: 'push it', wait: false, origin: composer })).context?.join('\n') ?? ''
   expect(told).toContain('`subagent_type: "claudopus:quick"` and `model: "sonnet"`')
@@ -1284,6 +1341,7 @@ test('a long build a task runs in the background that fails on another running t
 
 test('a large paste is saved to a file and left out of the chat', async ($, on) => {
   const { files } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'tasks' } }))
   await $.session.start(start)
   const paste = `start ${'x'.repeat(20_000)} end`
 
@@ -1300,6 +1358,7 @@ test('a large paste is saved to a file and left out of the chat', async ($, on) 
 
 test("a chat's own thread may only read, run a single command in the background, start agents and talk to them; an agent may do the work", async ($, on) => {
   const { files, stepped, clock } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'tasks' } }))
   await $.session.start(start)
   const told = await $.prompt.submit({ text: 'what does this function do', wait: false, origin: composer })
   expect(told.context?.join('\n')).toContain('Answer a question that a few reads settle here')
@@ -1551,7 +1610,7 @@ test("a chat's own thread may only read, run a single command in the background,
   for (const [i, call] of [{ tool: 'Edit', file_path: '/repo/src/nose.ts', old_string: 'a', new_string: 'b' }, { tool: 'Write', file_path: '/repo/x', content: 'x' }, { tool: 'Grep', pattern: 'nose' }, { tool: 'Bash', command: 'npm test' }].entries())
     for (const agentId of ['w1', 'helper-1']) expect((await $.tool.call({ ...call, tool_use_id: `w${i}${agentId}`, agentId } as never)).deny).toBeUndefined()
   // An old config.json's everything-as-a-full-task no longer stops the chat running its own single command
-  ownSet(files, 'config.json', JSON.stringify({ lean: { small: 'full' } }))
+  ownSet(files, 'config.json', JSON.stringify({ lean: { chat: 'tasks', small: 'full' } }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'push it', wait: false, origin: composer })
   files.set('git:branch', 'fix-nose')
