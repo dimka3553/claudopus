@@ -2232,15 +2232,16 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
 }
 
 const asksInText = (text: string) => {
-  const prose = text
-    .replace(/```[\s\S]*?```/g, '')
+  const unfenced = text.replace(/```[\s\S]*?```/g, '')
+  if (/^[\s#*_>-]*(waiting (on|for) you|waits (on|for) you)\b/im.test(unfenced)) return true
+  const prose = unfenced
     .split('\n')
-    .filter(line => !/^(\s{4}|\t)/.test(line) && !/^\s*(#|\|)/.test(line))
+    .filter(line => !/^(\s{4}|\t)(?!\s*([-*]|\d+\.)\s)/.test(line) && !/^\s*(#|\|)/.test(line))
+    .map(line => line.replace(/^\s*([-*]|\d+\.)\s+/, ''))
     .join('\n')
-    .replace(/`[^`\n]*`/g, '')
+    .replace(/`[^`\n]*`/g, 'code')
     .replace(/"[^"\n]*"|“[^”\n]*”/g, '')
-  const isQuestion = /(?:^|[.!:\n]\s*|\*\*\s*)(?:[^\s.!?:*]+[ \t]+){3,}[^\s.!?:*]*[A-Za-z0-9)]\?(?=[\s*_)]|$)/m.test(prose)
-  return isQuestion || /^[\s#*_>-]*(waiting (on|for) you|waits (on|for) you)\b/im.test(prose)
+  return /(?:^|[.!:]\s+|\*\*\s*)(?:[^\s.!?:*]+[ \t]+)+[^\s.!?:*]*[A-Za-z0-9)]\?(?=[\s*_)]|$)/m.test(prose)
 }
 const WAITS_KINDS = new Set(['claudopus:task', 'claudopus:quick', 'general-purpose', 'fork'])
 const unrecordedAtHandback = async ($: EngineInterface, id: string, message: string): Promise<string> => {

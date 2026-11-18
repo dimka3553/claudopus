@@ -986,6 +986,8 @@ test('a report handed back asking the person something it never recorded as wait
     // 18 Nov: the question was the report's first line, and nothing was recorded
     { title: 'Three openings', message: 'Which opening should go out: A, B or C? Nothing is posted until you pick one.', refused: true },
     { title: 'Life cycle', message: 'The picture is redrawn.\n\n**Waiting on you**\n- Yes or no to building it.', refused: true },
+    { title: 'Headed', message: 'Pushed.\n\n## Waiting on you\n- Yes or no to releasing it.', refused: true },
+    { title: 'Short', message: '1. Ship it to `main`?', refused: true },
     { title: 'Recorded', message: 'Which opening should go out: A, B or C?', waits: ['Which opening should go out?'], refused: false },
     { title: 'Nothing waits', message: 'Should the chat say more? It did not, so I left it.', waits: [], refused: false },
     { title: 'Only code', message: 'The check `a?.b` and "Is it done?" are fixed. Pushed.', refused: false },

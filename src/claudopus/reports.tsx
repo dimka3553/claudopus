@@ -221,18 +221,19 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
 }
 
 // (a question on its card is shown as waiting already)
-// A report that asks the person something: a sentence of a few words ending in a question mark, outside code, quotes, headings and
-// tables, or a part headed as waiting on them
+// A report that asks the person something: a part headed as waiting on them, or a sentence of two words or more ending in a
+// question mark, outside code blocks, quotes, headings and tables (list markers left out, inline code read as a word)
 const asksInText = (text: string) => {
-  const prose = text
-    .replace(/```[\s\S]*?```/g, '')
+  const unfenced = text.replace(/```[\s\S]*?```/g, '')
+  if (/^[\s#*_>-]*(waiting (on|for) you|waits (on|for) you)\b/im.test(unfenced)) return true
+  const prose = unfenced
     .split('\n')
-    .filter(line => !/^(\s{4}|\t)/.test(line) && !/^\s*(#|\|)/.test(line))
+    .filter(line => !/^(\s{4}|\t)(?!\s*([-*]|\d+\.)\s)/.test(line) && !/^\s*(#|\|)/.test(line))
+    .map(line => line.replace(/^\s*([-*]|\d+\.)\s+/, ''))
     .join('\n')
-    .replace(/`[^`\n]*`/g, '')
+    .replace(/`[^`\n]*`/g, 'code')
     .replace(/"[^"\n]*"|“[^”\n]*”/g, '')
-  const isQuestion = /(?:^|[.!:\n]\s*|\*\*\s*)(?:[^\s.!?:*]+[ \t]+){3,}[^\s.!?:*]*[A-Za-z0-9)]\?(?=[\s*_)]|$)/m.test(prose)
-  return isQuestion || /^[\s#*_>-]*(waiting (on|for) you|waits (on|for) you)\b/im.test(prose)
+  return /(?:^|[.!:]\s+|\*\*\s*)(?:[^\s.!?:*]+[ \t]+)+[^\s.!?:*]*[A-Za-z0-9)]\?(?=[\s*_)]|$)/m.test(prose)
 }
 // The kinds of agent that have the waits tool: Claudopus's own tasks, a general one, a copy of the chat
 const WAITS_KINDS = new Set(['claudopus:task', 'claudopus:quick', 'general-purpose', 'fork'])
