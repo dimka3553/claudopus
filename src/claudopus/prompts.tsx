@@ -181,12 +181,62 @@ const outcomeOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isErro
 // The mod's own message, once on its way: a prompt it raised that no hook of the mod saw (one of its own tools, by a plugin's call
 // id) is over with it
 // The mod's own message to work: a prompt it raises is over once it is on its way
-const sendOwn = async ($: EngineInterface, message: { to: { agentId: string }; text: string }) => {
+// It goes out only from inside one of the mod's hooks. Claude Code marks whatever a mod's code starts with that code's place: from
+// inside a hook, only that one hook is left out of what the started task then does; from a timer or a button's own handler, with no
+// hook around it, every hook of the mod is left out for the whole run the message starts. A task started so runs unseen: its panel
+// tools answer "no tool.call hook answered", Claude Code's requests for its result are not answered for it, its commands and
+// helpers are never taken up, and the end of its turn is never heard, so nothing starts it again (18 Nov: a task told to build was
+// started again to carry on from a timer, ran unseen, was asked for its result until its run ended, and its card ended done with
+// no build and no report). So a message sent from outside a hook waits here for the next hook, a drawing of the panel or the bar
+// among them, and Claudopus asks for one; `isStill` says, as it goes, whether it is still wanted
+type SendResult = Awaited<ReturnType<EngineInterface['session']['send']>>
+type OwnMessage = { to: { agentId: string }; text: string }
+const IN_HOOK = 'CLAUDOPUS_IN_HOOK'
+// Asked of the engine itself: the mod's own hook answers this name (promptHooks), and the engine leaves that hook out exactly
+// where it would leave the mod's hooks out of a task started from here
+const isInHook = async ($: EngineInterface) => (await $.env.get('CLAUDOPUS_IN_HOOK').catch(() => undefined)) === 'hook'
+const heldSends: { message: OwnMessage; isStill?: () => Promise<boolean>; onLost?: (reason: string) => Promise<void> }[] = []
+const sendOwnNow = async ($: EngineInterface, message: OwnMessage) => {
   const since = await $.clock.now()
   try {
     return await $.session.send(message)
   } finally {
     ownSent($, since)
+  }
+}
+// From outside a hook it is taken as on its way, so no timer ever waits on a hook: should it then not get through, `onLost` is
+// told why (not when it is merely no longer wanted)
+const sendOwn = async ($: EngineInterface, message: OwnMessage, isStill?: () => Promise<boolean>, onLost?: (reason: string) => Promise<void>): Promise<SendResult> => {
+  if (await isInHook($)) return sendOwnNow($, message)
+  heldSends.push({ message, isStill, onLost })
+  await log($, `a message for ${message.to.agentId} waits for a hook of the mod: sent from here, the task would run unseen by Claudopus`)
+  redraw($)
+  return { isDelivered: true } as SendResult
+}
+// Sends what waits, from inside the hook that calls it: the end of a turn, a message of the person's, a press, a drawing, a change
+// in how full the chat is. Never from a tool call's hook, which the engine leaves out of what the call starts
+let isSendingHeld = false
+const sendHeld = async ($: EngineInterface) => {
+  if (!heldSends.length || isSendingHeld || !(await isInHook($))) return
+  isSendingHeld = true
+  try {
+    for (let one = heldSends.shift(); one; one = heldSends.shift()) {
+      const { message, isStill, onLost } = one
+      const id = message.to.agentId
+      const isWanted = !(await isReplaced($)) && !isHeld((await read($, todos)).find(card => card.id === id)) && (!isStill || (await isStill().catch(() => false)))
+      if (!isWanted) {
+        await log($, `the message that waited for ${id} is no longer wanted: not sent`)
+        continue
+      }
+      const r = await sendOwnNow($, message).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+      if (r.isDelivered) await log($, `the message that waited for ${id} went from a hook: its task runs where Claudopus sees it`)
+      else {
+        await log($, `the message that waited for ${id} did not get through: ${r.reason}`)
+        await onLost?.(r.reason).catch(err => log($, `not taken up: ${String(err)}`))
+      }
+    }
+  } finally {
+    isSendingHeld = false
   }
 }
 const ownSent = ($: EngineInterface, since: number) => {
@@ -334,6 +384,8 @@ const OWN_CALLS = ['SendMessage', 'TaskStop']
 const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
 
 const promptHooks = (on: On) => {
+  // Answers only where the mod's hooks run for what its code starts here (isInHook)
+  on('env.get', ($, e, next) => ((e as unknown as { name?: string }).name === IN_HOOK ? ({ value: 'hook' } as never) : next(e)))
 
   // A prompt the app is about to put to the person shows amber in every panel. The mod answers only two kinds itself: its own messages
   // and Stops below, and a prompt the person answers with Yes or No on its card in this chat's own panel (PermissionRequest). A

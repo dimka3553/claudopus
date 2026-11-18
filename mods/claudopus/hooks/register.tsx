@@ -5459,7 +5459,7 @@ const toEnded = async ($: EngineInterface, one: Todo, target: string, text: stri
     const at = wakes.indexOf(wake)
     if (at < 0) return
     wakes.splice(at, 1)
-    void log($, `work ${target} started again from a timer: no hook of the mod ran within ${WAKE_WAIT / 1000} s, so its panel tools will not answer`)
+    void log($, `work ${target}'s answer was taken by no hook of the mod within ${WAKE_WAIT / 1000} s: it goes from the next one (sendOwn)`)
     void sendWake($, wake, false)
   })
 }
@@ -7516,12 +7516,48 @@ const outcomeOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isErro
   if (r.deny) return 'no'
   return r.isError ? 'stopped' : 'ran'
 }
-const sendOwn = async ($: EngineInterface, message: { to: { agentId: string }; text: string }) => {
+type SendResult = Awaited<ReturnType<EngineInterface['session']['send']>>
+type OwnMessage = { to: { agentId: string }; text: string }
+const IN_HOOK = 'CLAUDOPUS_IN_HOOK'
+const isInHook = async ($: EngineInterface) => (await $.env.get('CLAUDOPUS_IN_HOOK').catch(() => undefined)) === 'hook'
+const heldSends: { message: OwnMessage; isStill?: () => Promise<boolean>; onLost?: (reason: string) => Promise<void> }[] = []
+const sendOwnNow = async ($: EngineInterface, message: OwnMessage) => {
   const since = await $.clock.now()
   try {
     return await $.session.send(message)
   } finally {
     ownSent($, since)
+  }
+}
+const sendOwn = async ($: EngineInterface, message: OwnMessage, isStill?: () => Promise<boolean>, onLost?: (reason: string) => Promise<void>): Promise<SendResult> => {
+  if (await isInHook($)) return sendOwnNow($, message)
+  heldSends.push({ message, isStill, onLost })
+  await log($, `a message for ${message.to.agentId} waits for a hook of the mod: sent from here, the task would run unseen by Claudopus`)
+  redraw($)
+  return { isDelivered: true } as SendResult
+}
+let isSendingHeld = false
+const sendHeld = async ($: EngineInterface) => {
+  if (!heldSends.length || isSendingHeld || !(await isInHook($))) return
+  isSendingHeld = true
+  try {
+    for (let one = heldSends.shift(); one; one = heldSends.shift()) {
+      const { message, isStill, onLost } = one
+      const id = message.to.agentId
+      const isWanted = !(await isReplaced($)) && !isHeld((await read($, todos)).find(card => card.id === id)) && (!isStill || (await isStill().catch(() => false)))
+      if (!isWanted) {
+        await log($, `the message that waited for ${id} is no longer wanted: not sent`)
+        continue
+      }
+      const r = await sendOwnNow($, message).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+      if (r.isDelivered) await log($, `the message that waited for ${id} went from a hook: its task runs where Claudopus sees it`)
+      else {
+        await log($, `the message that waited for ${id} did not get through: ${r.reason}`)
+        await onLost?.(r.reason).catch(err => log($, `not taken up: ${String(err)}`))
+      }
+    }
+  } finally {
+    isSendingHeld = false
   }
 }
 const ownSent = ($: EngineInterface, since: number) => {
@@ -7648,6 +7684,7 @@ const OWN_CALLS = ['SendMessage', 'TaskStop']
 const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
 
 const promptHooks = (on: On) => {
+  on('env.get', ($, e, next) => ((e as unknown as { name?: string }).name === IN_HOOK ? ({ value: 'hook' } as never) : next(e)))
 
   on('tool.check', async ($, e, next) => {
     const r = await next(e)
@@ -8677,6 +8714,7 @@ const chatHooks = (on: On) => {
     await holdTest($)
     if (dir) await personCheck($).catch(err => log($, `files not compared as a message came: ${String(err)}`))
     if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     if (dir && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) await flowEnded($, e.text).catch(err => log($, `workflow end not read: ${String(err)}`))
     if (dir && !isOff && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) {
       const waitingWork = await waitingNow($)
@@ -8772,6 +8810,7 @@ const chatHooks = (on: On) => {
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     if (wakes.length && e.agentId === undefined) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     if (!dir) return done
     await lapsedSignIn($, e).catch(err => log($, `lapsed sign-in not handed over: ${String(err)}`))
     if (e.agentId !== undefined) {
@@ -9346,20 +9385,28 @@ const goOnNow = async ($: EngineInterface, id: string, how: string, isHeard: boo
   $.clock.after(CARRY_AFTER, () => void carryNow($, id, next.at).catch(err => log($, `work ${id} not started again: ${String(err)}`)))
 }
 const carryNow = async ($: EngineInterface, id: string, at: number) => {
-  const one = (await read($, todos)).find(card => card.id === id)
-  if (!one || one.status !== 'working' || one.carryOn?.at !== at || !isStoppedShort(one, '') || (await isReplaced($))) return
+  const stillStopped = async () => {
+    const card = (await read($, todos)).find(c => c.id === id)
+    return card && card.status === 'working' && card.carryOn?.at === at && isStoppedShort(card, '') && !(await isReplaced($)) ? card : undefined
+  }
+  const one = await stillStopped()
+  if (!one) return
   const status = (await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status
   if (WORKING.includes(String(status))) return void (await log($, `work ${id} was at work again before Claudopus started it: no note sent`))
   if (status === 'killed') return void (await log($, `work ${id} was stopped before Claudopus started it: no note sent`))
   if (carrySent.has(`${id}:${at}`)) return
   carrySent.add(`${id}:${at}`)
-  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  const isStill = async () => Boolean(await stillStopped()) && !WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))
+  const lost = async (reason: string) => {
+    const now = await $.clock.now()
+    await changeTodos($, list => list.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'stopped', now), carryOn: { ...(card.carryOn ?? nextCarry(card, now)), gaveUp: now, isLost: true } } : card)))
+    redraw($)
+    await log($, `work ${id} could not be started again to carry on: ${reason}`)
+    await tellChat($, named(CARRY_LOST_IN_CHAT(titleOf(one), id)))
+  }
+  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }, isStill, lost).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (r.isDelivered) return void (await log($, `work ${id} started again to carry on`))
-  const now = await $.clock.now()
-  await changeTodos($, list => list.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'stopped', now), carryOn: { ...(card.carryOn ?? nextCarry(card, now)), gaveUp: now, isLost: true } } : card)))
-  redraw($)
-  await log($, `work ${id} could not be started again to carry on: ${r.reason}`)
-  await tellChat($, named(CARRY_LOST_IN_CHAT(titleOf(one), id)))
+  await lost(r.reason)
 }
 
 const KEEP_TRIES = 3
@@ -10628,7 +10675,7 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   for (const one of ids.filter(one => !stoppedHere.has(one) && !isHeld(heldNow.find(card => card.id === one)) && !isFinished(one))) {
     const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
     const hasHelpers = Object.keys(helpers).some(kid => rootOf(kid) === one)
-    const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy, hasHelpers)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    const r = isLive ? { isDelivered: true as const } : await sendOwn($, { to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy, hasHelpers)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     ;(r.isDelivered ? back : lost).push(one)
     if (!r.isDelivered) await log($, `cut-off work ${one} not started again: ${r.reason}`)
   }
@@ -10639,7 +10686,7 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
     for (let at = parent, hops = 0; isKept && at !== rootOf(one) && hops < 10; at = helpers[at] ?? rootOf(one), hops += 1) isKept = at in helpers && !stoppedHere.has(at) && !isHeld(heldNow.find(card => card.id === at))
     if (!isKept || stoppedHere.has(one) || isHeld(heldNow.find(card => card.id === one))) continue
     const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
-    const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    const r = isLive ? { isDelivered: true as const } : await sendOwn($, { to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     ;(r.isDelivered ? helpersBack : helpersLost).push(one)
     if (!r.isDelivered) await log($, `cut-off helper ${one} not started again: ${r.reason}`)
   }
@@ -11737,6 +11784,7 @@ const workHooks = (on: On) => {
 
   on('session.measure', async ($, e, next) => {
     if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     const tokens = e.context.tokens
     if (tokens !== undefined) await update($, me, one => (one.tokens === tokens && one.window ? one : { ...one, tokens, window: one.window || e.context.window }))
 
@@ -12461,6 +12509,7 @@ const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     const drawBar = () => drawBarNow()
     if (e.surface !== 'desktop' || e.props.hasSurvey) return drawBar()
     const key = `bar|${e.requestId ?? ''}|${e.surface}|${e.props.bodyColumns}|${e.props.isCollapsed ? 1 : 0}`
@@ -12705,6 +12754,7 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     if (paneId === LIST) ((listDrawing += 1), (listSurface = e.surface))
     if (paneId === LIST) await holdTest($)
     try {
@@ -14416,6 +14466,7 @@ const tabHooks = (on: On) => {
       if (isTerminal) await tabMoves.finish(move => runTabMove($, move), ms => $.clock.sleep(ms))
     }
     if (e.plugin === 'claudopus' && (answersOnWay.size || wakes.length)) await sendWakes($, true).catch(err => log($, `answer not sent: ${String(err)}`))
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     return r
   })
   on('ui.input', async ($, e, next) => {

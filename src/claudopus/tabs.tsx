@@ -23,6 +23,7 @@ const tabHooks = (on: On) => {
     }
     // An answer the press gave to work that had ended starts it again from here, inside the press's own hook (sendWakes)
     if (e.plugin === 'claudopus' && (answersOnWay.size || wakes.length)) await sendWakes($, true).catch(err => log($, `answer not sent: ${String(err)}`))
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     return r
   })
   // and so does a reply typed in a card's box

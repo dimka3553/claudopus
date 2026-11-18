@@ -504,6 +504,7 @@ const chatHooks = (on: On) => {
     // The texts a message is answered with are the ones known: a change made since is put back first
     if (dir) await personCheck($).catch(err => log($, `files not compared as a message came: ${String(err)}`))
     if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     // The notice that a workflow ended ends its card
     if (dir && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) await flowEnded($, e.text).catch(err => log($, `workflow end not read: ${String(err)}`))
     // The engine's notice that work the person stopped has ended says it was stopped "by Claude": the chat is told it was them
@@ -625,6 +626,8 @@ const chatHooks = (on: On) => {
     const done = await next(e)
     // An answer waiting to start ended work again goes from inside this hook, at the end of any turn, the chat's own too (sendWakes)
     if (wakes.length && e.agentId === undefined) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
+    // and so does any message of the mod's that waits for a hook, at the end of any turn (sendHeld)
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     if (!dir) return done
     // A piece of work ended its turn: it has ended and leaves the panel, since the chat passes its answer on.
     // One that only waits for its helpers goes on working

@@ -9,9 +9,13 @@ const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url)
 const SLOW = { timeoutMs: 60_000 }
 function test(name: string, body: TestBody): void
 function test(name: string, options: { timeoutMs?: number }, body: TestBody): void
+// The test now running, for the world's clock (below): the tests of a file run one after another
+let driver: Parameters<TestBody>[0] | undefined
 function test(name: string, options: TestBody | { timeoutMs?: number }, body?: TestBody) {
-  if (typeof options === 'function') kitTest(name, SLOW, options)
-  else kitTest(name, { ...SLOW, ...options }, body as TestBody)
+  const run = (typeof options === 'function' ? options : body) as TestBody
+  const kept: TestBody = ($, on) => ((driver = $), run($, on))
+  if (typeof options === 'function') kitTest(name, SLOW, kept)
+  else kitTest(name, { ...SLOW, ...options }, kept)
 }
 const MEMORY = `${HOME}/.claude/claudopus`
 // This Mac's keychain, there unless a test takes it away as a home of a trial chat's own has none
@@ -52,7 +56,7 @@ const prompts: string[] = []
 // the release
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -116,7 +120,22 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const admins: { command: string; grants: { host: string; command: string; seal: string; at: number; id: string }[] }[] = []
   // The kit's clock moves only as a test moves it: the mod's look at how late its timer comes is left out, unless a test asks for it
   mock.env(on, { HOME, CLAUDOPUS_TIMING: 'test', ...options.env })
-  const clock = mock.clock(on, { now: 1_700_000_000_000 })
+  const kitClock = mock.clock(on, { now: 1_700_000_000_000 })
+  // A hook of the mod follows each move of the clock, as in the app, where a drawing or a step of some task is never far: what the
+  // mod's timers leave for a hook to send (sendHeld) goes then. A test that names `unseen` moves the clock bare, and brings the
+  // hook itself, and every agent a message started while its clock moved is listed in `unseen`
+  let moving = 0
+  const bare = async (ms: number) => {
+    moving += 1
+    try {
+      return await kitClock.advance(ms)
+    } finally {
+      moving -= 1
+    }
+  }
+  const clock: typeof kitClock = options.unseen
+    ? { ...kitClock, advance: bare as never }
+    : { ...kitClock, advance: async (ms: number) => (await kitClock.advance(ms), void (await driver?.session.measure({ context: {}, rateLimits: [], changed: [] } as never).catch(() => undefined))) as never }
   // What the engine draws where the mod draws nothing
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
@@ -506,6 +525,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   on('session.send', (_, e) => {
     if (options.unresumable?.has(e.to)) return { isDelivered: false, reason: 'no such agent' } as never
+    // `unseen`: the agents a message started from a timer of the mod's, as the clock moved with no hook around it: the engine
+    // leaves every hook of the mod out of such a run (seen in the kit: a hook of the mod's own answers its call from inside a hook,
+    // and is left out of the same call from a timer)
+    if (options.unseen && moving) options.unseen.push(e.to)
     resumed.push(`${e.to}: ${e.text}`)
     return { isDelivered: true } as never
   })
