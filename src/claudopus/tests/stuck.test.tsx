@@ -505,6 +505,9 @@ test('a task Claude Code pressed for its report that ended its step with none, a
   expect(resumed.filter(line => /^a[23]: /.test(line))).toEqual([])
   // Long words after Claude Code's press are no result either, as Claude Code itself says it ended without one: it is started again
   expect(carried('a4')).toHaveLength(1)
+  // It hands back its result: done, its line gone
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h4', agentId: 'a4', message: `Done. ${'Every banner is drawn and checked. '.repeat(20)}` } as never)
+  await ends('a4', '', 3)
   expect(await lines()).toEqual([{ text: 'Stopped partway at hh:mm without a result · Claudopus started it again', color: undefined }])
   // The chat's model is told only once Claudopus gives up; a run that ended with its words as its result, never pressed, ends as before
   talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text: 'Sorted.' }] })

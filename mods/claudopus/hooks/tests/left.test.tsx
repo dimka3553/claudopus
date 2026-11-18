@@ -1052,7 +1052,7 @@ test('a task whose step ends while only a preview server it left going runs, its
   })
   on('session.cwd', () => ({ value: '/repo' }) as never)
   const advance = async (ms: number) => ((now.at += ms), await w.clock.advance(ms))
-  const { resumed, notified } = w
+  const { resumed, notified, stepped } = w
   await $.session.start(start)
   await $.prompt.submit({ text: 'build and deploy the site', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Build and deploy the site', prompt: 'build it' } as never)
@@ -1088,14 +1088,31 @@ test('a task whose step ends while only a preview server it left going runs, its
   expect(await until(async () => resumed.find(line => line.startsWith('a1: From Claudopus: your helper "Check the page"')))).toBeDefined()
   agents.a1 = 'running'
   for await (const _ of $.turn.step({ turnId: 'w2', index: 0, model: 'm', messageCount: 1, agentId: 'a1' })) void _
-  agents.a1 = 'completed'
   pressedAfter("Waiting for the checker's report, which is due in the next message.")
+  // Claude Code presses it for its report: with only a server of its own running, nothing would start it again, so the press goes
+  // to Claude (before, Claudopus answered it itself, telling it to end its step and wait)
+  talk.splice(2)
+  const sent = stepped.length
+  for await (const _ of $.turn.step({ turnId: 'w2', index: 1, model: 'm', messageCount: 3, agentId: 'a1' })) void _
+  expect(stepped.length).toBe(sent + 1)
+  pressedAfter("Waiting for the checker's report, which is due in the next message.")
+  agents.a1 = 'completed'
   await ends('a1', "Waiting for the checker's report, which is due in the next message.", 'w2')
   await advance(6_000)
   // Not done, no ready note, no result: its card stays at work, and Claudopus starts it again to carry on
   expect((await card()).some(text => text === '✓ Done' || /^Done · /.test(text))).toBe(false)
   expect(notified).toEqual([])
   expect(resumed.filter(line => line.startsWith('a1: From Claudopus, not ') && line.includes('Carry on from where you were'))).toHaveLength(1)
+  // Started again, it runs a command, and its run ends again without its result where Claudopus hears no end of its turn, only the
+  // engine listing it as over: still not done, and started again once more
+  agents.a1 = 'running'
+  await call('Bash', 'b2', { command: 'git status', description: 'Run a look at what is committed' })
+  agents.a1 = 'completed'
+  await advance(25_000)
+  await advance(6_000)
+  expect((await card()).some(text => text === '✓ Done' || /^Done · /.test(text))).toBe(false)
+  expect(notified).toEqual([])
+  expect(resumed.filter(line => line.startsWith('a1: From Claudopus, not ') && line.includes('Carry on from where you were'))).toHaveLength(2)
   // It does the rest and hands back its result: only now is it done
   agents.a1 = 'running'
   await call('mcp__claudopus__todo', 't6', { item: 'Have a second Claude check the page, then put it live', state: 'done' })

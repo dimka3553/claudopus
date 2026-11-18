@@ -7,14 +7,17 @@
 //   detached, a helper at work, a watch, what it asked Claudopus to wake it for, or a heavy command held for its turn
 // - done: it handed back its report with SubagentHandback, and Claudopus received it as its report (or, in a run Claude Code never
 //   pressed for a hand-back, its last words were taken as its result). Nothing else makes it done: not its commands or helpers
-//   ending, not its step ending, not the engine listing its run as over, not words written after Claude Code pressed for its report
+//   ending, not its step ending, not the engine listing its run as over, not words written after Claude Code pressed for its report.
+//   holdDone keeps every change to the cards to this, so a card's status 'done' and this state always agree, and what counts or
+//   announces by status (the header, the bar, the ready notification, the results list) goes by the same
 // - stopped or failed: the person or the chat stopped it, Claudopus gave up starting it again, or its run failed
-// (18 Nov: a site-building task's card showed done for half an hour with 4 of 7 to-dos left, and no report ever came. A preview
+// (18 Nov: a site-building task's card showed done for half an hour with to-dos still to do, and no report ever came. A preview
 // server it left running counted as work that would start it again, so nothing kept it going, and as its run ended the card ended done)
 type TaskState = 'working' | 'waiting-you' | 'waiting-own' | 'done' | 'stopped' | 'failed'
 
 // A server runs until it is stopped: it never ends by itself, so it never starts the work that left it again
-const isServerRun = (cmd: string | undefined, what: string) => SERVER_CMD.test(cmd ?? '') || describedOf(what).kind === 'server'
+// (a build by a tool that also serves, as `vite build`, ends)
+const isServerRun = (cmd: string | undefined, what: string) => (SERVER_CMD.test(cmd ?? '') && !/\b(vite|next|nuxt|astro) build\b/.test(cmd ?? '')) || describedOf(what).kind === 'server'
 // What of its own starts the work again by itself once its step has ended: its commands in the background or detached that end
 // (a watch counts, as its lines reach it; a server does not), its helpers at work, and what it asked Claudopus to wake it for or a
 // heavy command held for its turn
@@ -39,9 +42,10 @@ const stateOf = (list: Todo[], one: Todo): TaskState => {
   if (needsPerson(one)) return 'waiting-you'
   return one.endedStepAt !== undefined && wakesOf(list, one).isAny ? 'waiting-own' : 'working'
 }
-// What a task's card line says while it waits on its own work, by what it waits for; '' in any other state
-const ownWorkWords = (list: Todo[], one: Todo) => {
-  if (stateOf(list, one) !== 'waiting-own') return ''
+// What a task's card line says while it waits on its own work, by what it waits for; '' in any other state, and where the card's
+// own line already says it waits for a command it started in the background (waitLine)
+const ownWorkWords = (list: Todo[], one: Todo, at: number) => {
+  if (stateOf(list, one) !== 'waiting-own' || waitLine(one, at)) return ''
   const { runs, helpers } = wakesOf(list, one)
   const what = [runs.length ? (runs.length === 1 ? 'its command' : 'its commands') : '', helpers ? (helpers === 1 ? 'its helper' : 'its helpers') : ''].filter(Boolean).join(' and ')
   return what ? `Waiting for ${what}` : 'Waiting to be started again'
@@ -55,9 +59,11 @@ const holdDone = (before: Todo[], next: Todo[], now: number) => {
   if (isOff) return { list: next, held }
   const was = new Map(before.map(one => [one.id, one]))
   const list = next.map(one => {
+    const old = was.get(one.id)
+    // (what the person allowed it under "Ask once per piece of work" ends with it, and only once it really ends)
+    if (old?.status === 'working' && one.status !== 'working' && !(one.status === 'done' && !one.parentId && !one.chat && !hasReport(one))) workAllowed.delete(one.id)
     if (one.parentId || one.chat || one.status !== 'done' || hasReport(one)) return one
     // (only a card at work: one read back from the chat's records ended before Claudopus kept it, as its records say)
-    const old = was.get(one.id)
     if (old?.status !== 'working') return one
     held.push(one.id)
     const base = old
@@ -65,29 +71,42 @@ const holdDone = (before: Todo[], next: Todo[], now: number) => {
   })
   return { list, held }
 }
-// Cards held from ending done without their report: one that waits on its own work waits; any other is started again to carry on,
-// as a task stopped partway is, until it hands back its report or Claudopus gives up and ends it stopped
+// Cards held from ending done without their report, each taken up once per stop (by its steps and the times it was carried on): one
+// whose run Claude Code never pressed ends done with its last words as its result, as at a heard end; one that waits on its own work
+// waits, and is taken up again if that work goes without starting it; one waiting for the person waits for them; one the person
+// stopped or held, or flagged, or given up on, ends stopped; any other is started again to carry on, as a task stopped partway is,
+// until it hands back its report or Claudopus gives up and ends it stopped
+const heldTaken = new Set<string>()
 const doneHeld = async ($: EngineInterface, ids: string[]) => {
   for (const id of ids) {
     const list = await read($, todos)
     const one = list.find(card => card.id === id)
     if (!one || one.status !== 'working') continue
-    // (a run Claude Code never pressed for a hand-back ended with its last words as its result: it is done with them)
     if (await isUnpressed($, id)) {
       const now = await $.clock.now()
       await changeTodos($, cards => cards.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'done', now), reportAt: now } : card)))
       await lookEnds($)
+      await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
+      const card = (await read($, todos)).find(c => c.id === id)
+      if (card?.status === 'done' && card.answer.trim()) $.clock.after(5, () => void saveReport($, card, card.answer).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
       continue
     }
-    if (wakesOf(list, one).isAny) {
-      await log($, `work ${id} would have ended done without its report: it waits on its own work`)
+    if (wakesOf(list, one).isAny) continue
+    const key = `${id}:${one.steps ?? 0}:${one.carryOn?.total ?? 0}`
+    if (heldTaken.has(key)) continue
+    heldTaken.add(key)
+    if (needsPerson(one)) {
+      await log($, `work ${id} would have ended done without its report: it waits for the person`)
       continue
     }
-    if (!isStoppedShort(one, '')) {
-      await log($, `work ${id} would have ended done without its report: kept at work`)
+    if (isHeld(one) || stoppedHere.has(id) || pressed.has(id) || one.flagged || one.carryOn?.gaveUp) {
+      const now = await $.clock.now()
+      await changeTodos($, cards => cards.map(card => (card.id === id && card.status === 'working' ? ended(card, 'stopped', now) : card)))
+      await log($, `work ${id} would have ended done without its report: ended stopped`)
+      await lookEnds($)
       continue
     }
     await log($, `work ${id} would have ended done without its report: started again to carry on`)
-    await goOn($, id, 'its card would have ended done without its report')
+    await goOn($, id, 'its card would have ended done without its report', true)
   }
 }

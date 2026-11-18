@@ -1,3 +1,3 @@
-- A task's card shows Done only once Claudopus has its result. Commands ending, helpers finishing or Claude Code ending the task's run no longer make it Done.
-- A task whose step ends with to-dos left while only a server of its own runs is started again to carry on. A server never ends, so it never starts the task again by itself.
+- A task's card shows Done only once Claudopus has its result. Commands ending, helpers finishing or Claude Code ending the task's run no longer make it Done, and you no longer get a notification that it's done before its result comes.
+- A task that stops with to-dos left while only a server it left running is still going is started again to carry on, instead of sitting there.
 - While a task waits for its own commands or helpers, its card says so, for example "Waiting for its helper".

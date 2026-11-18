@@ -86,7 +86,7 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   if (listed === 'running') $.clock.after(HELD_LOOK, () => void heldLook($, id).catch(err => log($, `work ${id} not looked at again: ${String(err)}`)))
   const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
   // A run Claude Code never pressed for a hand-back took its last words as its result: they are its report (isUnpressed)
-  const isOwnResult = how === 'done' && (await isUnpressed($, id))
+  const isOwnResult = how === 'done' && !(await read($, todos)).find(one => one.id === id)?.parentId && (await isUnpressed($, id))
   // Held only by its own background work, a turn that ends with its report has finished the work: by SubagentHandback, or a
   // reply as long as a report. A short line such as "started it in the background" has not, nor work that waits on its helpers
   // Held on a command or watch of its own that wakes it as it ends, with a to-do of its still being done, it has not finished:
@@ -98,11 +98,14 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   const isIdleReport = isReport && ownsNothing(await read($, todos), id)
   // SubagentHandback ends the work's run: its card ends done with its report, though what it left running in the background (a
   // server, a watch, a helper) goes on and is not stopped. Should that wake the work, its next step brings the card back
-  const isHandedBack = how === 'done' && (handedBack.has(id) || isIdleReport) && !isGoingOn
+  // (words alone count only where Claude Code took them as the run's result: never pressed for a hand-back. A helper's words go
+  // to its task as before)
+  const isTop = !(await read($, todos)).find(one => one.id === id)?.parentId
+  const isHandedBack = how === 'done' && (handedBack.has(id) || (isIdleReport && (isOwnResult || !isTop))) && !isGoingOn
   if (isHandedBack) (ownsNothing(await read($, todos), id) ? leftNothing.add(id) : leftNothing.delete(id))
   // Its report is received when it came by SubagentHandback, or as its run's last words where Claude Code never pressed it for a
   // hand-back, so took those words as its result. Words after a press reached no one, however long: no report (stateOf)
-  const isReceived = isHandedBack && (handedBack.has(id) || isOwnResult)
+  const isReceived = isHandedBack && isTop
   handedBack.delete(id)
   if (isHandedBack) endedByHandback.add(id)
   if (isHandedBack) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now, wakeWhen: undefined, ...(isReceived ? { reportAt: now } : {}) } : one)))
@@ -131,7 +134,7 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
           one.status !== 'working' && how === 'done' && !isHandedBack && endedByHandback.has(id)
           ? one
           : isWaiting
-          ? { ...one, answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt, ...(isReport && isOwnResult && !one.parentId ? { reportAt: one.reportAt ?? now } : {}), waitsSince: waitsSince(one), endedStepAt: now }
+          ? { ...one, answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt, waitsSince: waitsSince(one), endedStepAt: now }
           : how === 'stopped'
             ? one.status === 'working'
               ? ended(one, stoppedAs(one), now)

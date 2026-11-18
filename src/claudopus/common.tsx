@@ -127,13 +127,16 @@ const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => 
     held = r.held
     return r.list
   }
-  const next = hold(now)
-  if (JSON.stringify(next) === before) return now
-  const r = await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))
-  if (held.length) {
+  const taken = () => {
+    if (!held.length) return
     const ids = held
     $.clock.after(0, () => void doneHeld($, ids).catch(err => log($, `work held from ending done not taken up: ${String(err)}`)))
   }
+  const next = hold(now)
+  // (held so that nothing changed, it is still taken up)
+  if (JSON.stringify(next) === before) return (taken(), now)
+  const r = await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))
+  taken()
   return r
 }
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })

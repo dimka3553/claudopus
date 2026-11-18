@@ -845,7 +845,7 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   await after.unmount()
 })
 
-test('work that answered while only its own background work held it, then stopped by the chat, the panel or the engine, finished: green and happy for its pause; work stopped before it answered is not', async ($, on) => {
+test('work that answered in words while only its own background work held it has not finished: stopped by the chat or the engine, it is stopped, not done; a hand-back ends it done at once', async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}
   const talk: unknown[] = []
@@ -863,43 +863,30 @@ test('work that answered while only its own background work held it, then stoppe
     await $.turn.complete({ answer: report, durationMs: 1, isAborted: false, turnId, reason: 'answer', agentId: id } as never)
   }
 
-  // The chat stops it with TaskStop once its report is in: it ends at once, green and happy, and its report is kept then, once
+  // The chat stops it with TaskStop after a report in words, given while a watcher it started still runs: words are no result, as
+  // only a hand-back is, so it ends stopped, not done, and nothing is kept as its result
   await $.prompt.submit({ text: 'remove the hover', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Remove the hover', prompt: 'remove the hover' } as never)
   await clock.advance(60_000)
   await answer('a1', 't1')
   expect(await drawn(pane)).toEqual(['working'])
   const kept = () => [...files.keys()].filter(key => /\/reports\/[^/]+-remove-the-hover\/report\.md$/.test(key))
-  await clock.advance(10)
-  expect(kept()).toHaveLength(0)
   await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' } as never)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
-  expect(await drawn(pane)).toEqual(['happy'])
-  expect((await pane.find({ type: 'Text', text: /^Just finished$/ }))?.text).toBe('Just finished')
-  await clock.advance(10)
-  expect(await until(async () => kept()[0])).toBeDefined()
-  expect(files.get(kept()[0] ?? '')).toBe(`${report.trim()}\n`)
-  // The aborted turn that follows the stop changes nothing: its pause is not begun again, and its words are no report
-  await clock.advance(1_000)
-  await $.turn.complete({ answer: 'Partial words', durationMs: 1, isAborted: true, turnId: 't1x', reason: 'answer', agentId: 'a1' } as never)
-  await clock.advance(1_100)
   expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
-  expect(files.get(kept()[0] ?? '')).toBe(`${report.trim()}\n`)
-  await clock.advance(2_100)
-  expect(await pane.find({ type: 'Text', text: /Remove the hover/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'Stopped' })).toBeDefined()
   expect(await drawn(pane)).toEqual(['mark'])
-  // The engine's next look lists it killed: nothing changes, and no second report
+  await clock.advance(20)
+  expect(kept()).toHaveLength(0)
   agents.a1 = 'killed'
-  await clock.advance(20_000)
-  expect(kept()).toHaveLength(1)
+  await clock.advance(2_100)
 
-  // Stopped some other way, the engine lists it killed at its next look: the same green moment from then
+  // Stopped some other way, the engine lists it killed at its next look: stopped as well
   await $.agent.spawn({ ...spawn, description: 'Fold the idle chats', prompt: 'fold them' } as never)
   await answer('a2', 't1b')
   agents.a2 = 'killed'
-  for (let n = 0; n < 25 && !(await pane.find({ type: 'Text', text: '✓ Done' })); n += 1) await clock.advance(1000)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
-  expect(await drawn(pane)).toEqual(['happy'])
+  for (let n = 0; n < 25 && !(await pane.find({ type: 'Text', text: 'Stopped' })); n += 1) await clock.advance(1000)
+  expect(await pane.find({ type: 'Text', text: 'Stopped' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
   await clock.advance(2_100)
 
   // Held after only a short line ("started it in the background"), it has not finished: stopped, it is stopped
@@ -996,20 +983,20 @@ test('work that answered while only its own background work held it, then stoppe
   expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(2_100)
 
-  // The engine ends it as aborted instead: the same
+  // After a report in words while held, the engine ends it as aborted: stopped too, as words are no result
   await $.agent.spawn({ ...spawn, description: 'Fold the list', prompt: 'fold the list' } as never)
   await answer('a6', 't2')
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 't2b', reason: 'answer', agentId: 'a6' } as never)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
-  expect(await drawn(pane)).toEqual(['happy'])
+  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(2_100)
 
   // Stop pressed on its card in the panel: the same
   await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' } as never)
   await answer('a7', 't3')
   await pane.press({ key: 'stop-a7' })
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
-  expect(await drawn(pane)).toEqual(['happy'])
+  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(2_100)
 
   // Held work its watcher wakes takes a step again: from then it has not finished, and stopped it is stopped
