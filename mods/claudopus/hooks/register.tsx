@@ -1249,7 +1249,7 @@ const endedUnheardShort = async ($: EngineInterface, ids: Set<string>, live: { i
     if (!card || card.status !== 'working' || carryTaken.has(carryKey(card))) continue
     const f = folder ? await lastWordsOf($, folder, id, now) : { at: now, answer: '', isReport: false, isHandback: false, isPressed: false }
     const isReport = isWordsReport(card, f.answer, f.isHandback)
-    if (!isReport && f.isPressed && isStoppedShort(card, f.answer)) {
+    if (!isReport && (f.isPressed || isLetEnd(card)) && isStoppedShort(card, f.answer)) {
       await goOn($, id, 'its step ended while Claudopus was away')
       continue
     }
@@ -1310,7 +1310,7 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
       list = list.map(one => {
         const f = finished.get(one.id)
         if (!f || one.status !== 'working' || one.wakeWhen || isTurnWaited(list, one.id) || list.some(kid => kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id)))) return one
-        if (!one.parentId && !isWordsReport(one, f.answer, f.isHandback) && f.isPressed && isStoppedShort(one, f.answer)) return (short.add(one.id), one)
+        if (!one.parentId && !isWordsReport(one, f.answer, f.isHandback) && (f.isPressed || isLetEnd(one)) && isStoppedShort(one, f.answer)) return (short.add(one.id), one)
         gone.add(one.id)
         isMoved = true
         const isTop = !one.parentId
@@ -8937,7 +8937,8 @@ const isPressedAtEnd = (rows: unknown) => {
   }
   return false
 }
-const pressedAtEnd = async ($: EngineInterface, id: string) => isPressedAtEnd(await $.session.messages({ as: 'api', agentId: id }).catch(() => []))
+const pressedAtEnd = async ($: EngineInterface, id: string) => isLetEnd((await read($, todos)).find(one => one.id === id)) || isPressedAtEnd(await $.session.messages({ as: 'api', agentId: id }).catch(() => []))
+const isLetEnd = (one: Todo | undefined) => Boolean(one?.keptOn && openItems(one).length && (one.keptOn.tries > KEEP_TRIES || one.keptOn.total > KEEP_MOST))
 const nextCarry = (one: Todo, now: number): NonNullable<Todo['carryOn']> => {
   const was = one.carryOn
   const tries = was && (one.steps ?? 0) - was.steps < CARRY_PROGRESS ? was.tries + 1 : 1
@@ -9027,7 +9028,8 @@ const untickedAtHandback = async ($: EngineInterface, id: string, message: strin
   if (!one || isOff || !dir || one.parentId || one.chat || !open.length || one.flagged) return ''
   const key = open.join('\n')
   const times = one.toldOpen?.key === key ? one.toldOpen.times : 0
-  if (times >= NOT_TICKED_MOST || (times > 0 && /\bnot done\b/i.test(message))) return ''
+  const says = /\bnot done\b/i.test(message)
+  if (times >= NOT_TICKED_MOST || (says && (times > 0 || open.every(item => message.includes(item))))) return ''
   await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldOpen: { key, times: times + 1 } } : card)))
   await log($, `work ${id} handed back with ${open.length} to-dos still to do: refused once`)
   return named(NOT_TICKED(open))

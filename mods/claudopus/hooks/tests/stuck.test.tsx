@@ -1197,7 +1197,9 @@ test("a task ending its step with to-dos still to do and nothing of its own runn
   expect(await poll(4)).toBe(true)
   // Let end, its long word of how far it has got is no result: its card stays at work, nothing is kept, and it is carried on
   const progress = `The final tests are done. ${'I am now drawing the kept-aside heads and continue when they end. '.repeat(10)}`
-  talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text: progress }] }, PRESS)
+  // (let end past the limit, Claude Code has used up its presses: its words end the run with no press after them)
+  expect([await poll(5), await poll(6), await poll(7), await poll(8), await poll(9), await poll(10)]).toEqual([true, true, true, true, true, false])
+  talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'tool_use', id: 'p10', name: 'Bash', input: {} }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'p10', content: 'ok' }] }, { role: 'assistant', content: [{ type: 'text', text: progress }] })
   agents.a1 = 'completed'
   await $.turn.complete({ answer: progress, durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(6000)

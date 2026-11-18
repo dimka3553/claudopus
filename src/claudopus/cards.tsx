@@ -270,7 +270,7 @@ const endedUnheardShort = async ($: EngineInterface, ids: Set<string>, live: { i
     if (!card || card.status !== 'working' || carryTaken.has(carryKey(card))) continue
     const f = folder ? await lastWordsOf($, folder, id, now) : { at: now, answer: '', isReport: false, isHandback: false, isPressed: false }
     const isReport = isWordsReport(card, f.answer, f.isHandback)
-    if (!isReport && f.isPressed && isStoppedShort(card, f.answer)) {
+    if (!isReport && (f.isPressed || isLetEnd(card)) && isStoppedShort(card, f.answer)) {
       await goOn($, id, 'its step ended while Claudopus was away')
       continue
     }
@@ -344,7 +344,7 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
         const f = finished.get(one.id)
         if (!f || one.status !== 'working' || one.wakeWhen || isTurnWaited(list, one.id) || list.some(kid => kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id)))) return one
         // (a task left stopped partway is started again to carry on, below)
-        if (!one.parentId && !isWordsReport(one, f.answer, f.isHandback) && f.isPressed && isStoppedShort(one, f.answer)) return (short.add(one.id), one)
+        if (!one.parentId && !isWordsReport(one, f.answer, f.isHandback) && (f.isPressed || isLetEnd(one)) && isStoppedShort(one, f.answer)) return (short.add(one.id), one)
         gone.add(one.id)
         isMoved = true
         // (its words count as a report only when it handed one back or wrote one as long, as at a heard end)

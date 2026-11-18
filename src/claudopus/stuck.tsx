@@ -561,7 +561,10 @@ const isPressedAtEnd = (rows: unknown) => {
   }
   return false
 }
-const pressedAtEnd = async ($: EngineInterface, id: string) => isPressedAtEnd(await $.session.messages({ as: 'api', agentId: id }).catch(() => []))
+// (or let end past the times Claudopus kept it going: by then Claude Code has used up its own presses, so none follows its words)
+const pressedAtEnd = async ($: EngineInterface, id: string) => isLetEnd((await read($, todos)).find(one => one.id === id)) || isPressedAtEnd(await $.session.messages({ as: 'api', agentId: id }).catch(() => []))
+// A task Claudopus let end its step past the times it kept it going, with to-dos still to do: a stop with no result, as one pressed is
+const isLetEnd = (one: Todo | undefined) => Boolean(one?.keptOn && openItems(one).length && (one.keptOn.tries > KEEP_TRIES || one.keptOn.total > KEEP_MOST))
 // The next start's count, or the word that it is given up: a run that got something done since the last start counts from one again
 const nextCarry = (one: Todo, now: number): NonNullable<Todo['carryOn']> => {
   const was = one.carryOn
@@ -674,7 +677,9 @@ const untickedAtHandback = async ($: EngineInterface, id: string, message: strin
   if (!one || isOff || !dir || one.parentId || one.chat || !open.length || one.flagged) return ''
   const key = open.join('\n')
   const times = one.toldOpen?.key === key ? one.toldOpen.times : 0
-  if (times >= NOT_TICKED_MOST || (times > 0 && /\bnot done\b/i.test(message))) return ''
+  // (one that says what is not done goes through, at once when it names each to-do left)
+  const says = /\bnot done\b/i.test(message)
+  if (times >= NOT_TICKED_MOST || (says && (times > 0 || open.every(item => message.includes(item))))) return ''
   await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldOpen: { key, times: times + 1 } } : card)))
   await log($, `work ${id} handed back with ${open.length} to-dos still to do: refused once`)
   return named(NOT_TICKED(open))
