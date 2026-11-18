@@ -1,0 +1,1 @@
+- A find in your Downloads folder no longer shows on the card as a download.
