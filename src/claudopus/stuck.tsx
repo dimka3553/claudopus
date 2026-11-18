@@ -691,11 +691,11 @@ const notDoneLine = (one: Todo) => {
   const left = one.status === 'working' || one.chat || (one.ask && !one.ask.replied) ? [] : (one.notDone ?? [])
   return left.length ? `Not done · ${left.join(' · ')}` : ''
 }
-// A result's lines for the to-dos its task left not done and still has not done, that it does not name itself under what is not done
+// A result's lines for the to-dos its task left not done and still has not done, when it says nothing of what is not done itself
+// (named in its own words, a to-do it left is on its card already)
 const notDoneLines = (one: Todo, text: string) => {
   const open = new Set(openItems(one).map(item => item.text))
-  const said = /\bnot done\b/i.test(text)
-  const left = (one.notDone ?? []).filter(item => open.has(item) && !(said && text.includes(item)))
+  const left = /\bnot done\b/i.test(text) ? [] : (one.notDone ?? []).filter(item => open.has(item))
   return left.length ? `\n\nNot done:\n${left.map(item => `- ${item}`).join('\n')}` : ''
 }
 // A task Claudopus stopped starting again stays in its place, its line in sight, as a task cut off that could not be started again does

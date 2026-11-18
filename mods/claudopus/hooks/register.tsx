@@ -9044,8 +9044,7 @@ const notDoneLine = (one: Todo) => {
 }
 const notDoneLines = (one: Todo, text: string) => {
   const open = new Set(openItems(one).map(item => item.text))
-  const said = /\bnot done\b/i.test(text)
-  const left = (one.notDone ?? []).filter(item => open.has(item) && !(said && text.includes(item)))
+  const left = /\bnot done\b/i.test(text) ? [] : (one.notDone ?? []).filter(item => open.has(item))
   return left.length ? `\n\nNot done:\n${left.map(item => `- ${item}`).join('\n')}` : ''
 }
 const isLeftStopped = (one: Todo, at: number) => Boolean(one.carryOn?.gaveUp && one.status !== 'working' && at - one.carryOn.gaveUp < CUT_OLD)
