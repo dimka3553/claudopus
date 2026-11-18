@@ -628,9 +628,11 @@ const carryNow = async ($: EngineInterface, id: string, at: number) => {
 // Code presses it three times for its report, and it hands back what it has or nothing (16-17 Nov: since tasks stopped waiting on
 // their helpers with a command, 83% of tasks were pressed, 27% handed back with to-dos not done and 8% ended without a result).
 // Claudopus keeps such a step from ending, as Claude Code lets a stop hook do: the task goes on in the same run, told what is still
-// to do and that nothing of its own would start it again. Kept this many times in a row with no call between, its step ends, and
-// carrying it on (above) is the net
+// to do and that nothing of its own would start it again. Kept this many times in a row with no call between, or this many times
+// in all with no to-do ticked between (a task polling something Claudopus does not follow), its step ends, and carrying it on
+// (above) is the net
 const KEEP_TRIES = 3
+const KEEP_MOST = 6
 // Why the task ending its step now should go on instead, or '' to let it end: one of this chat's tasks at work, with to-dos still to
 // do, that has not handed back, is not stopped partway for a reason of its own (isStoppedShort: a question for the person, their
 // Allow, their stop or hold, a safety flag, a detached command), and has nothing of its own that starts it again: no command in the
@@ -650,23 +652,30 @@ const keepGoing = async ($: EngineInterface, id: string): Promise<string> => {
     return list.map(one => {
       if (one.id !== id) return one
       if (!why) return one.keptOn ? { ...one, keptOn: undefined } : one
-      const tries = one.keptOn && one.keptOn.steps === (one.steps ?? 0) ? one.keptOn.tries + 1 : 1
-      if (tries > KEEP_TRIES) why = ''
-      return { ...one, keptOn: { tries, steps: one.steps ?? 0 } }
+      const was = one.keptOn
+      const done = one.items.filter(item => item.state === 'done').length
+      const tries = was && was.steps === (one.steps ?? 0) ? was.tries + 1 : 1
+      const total = was && was.done === done ? was.total + 1 : 1
+      if (tries > KEEP_TRIES || total > KEEP_MOST) why = ''
+      return { ...one, keptOn: { tries, steps: one.steps ?? 0, total, done } }
     })
   })
   if (why) await log($, `work ${id} ended its step with to-dos still to do and nothing of its own running: kept going`)
   return why
 }
-// Its report handed back with to-dos not done: refused once, with what is still to do; the same report again, with the same to-dos
-// still to do, goes through, and those to-dos show as not done on its card and in its result
-const untickedAtHandback = async ($: EngineInterface, id: string): Promise<string> => {
+// Its report handed back with to-dos not done: refused, with what is still to do. Sent again with the same to-dos still to do, it
+// goes through once it says what is not done, or at the third try whatever it says (Claude Code presses for a report at the same
+// moment Claudopus keeps a task going, so a report sent only because of that press is refused again), and those to-dos show as not
+// done on its card and in its result
+const NOT_TICKED_MOST = 2
+const untickedAtHandback = async ($: EngineInterface, id: string, message: string): Promise<string> => {
   const one = (await read($, todos)).find(card => card.id === id)
   const open = openItems(one).map(item => item.text)
   if (!one || isOff || !dir || one.parentId || one.chat || !open.length || one.flagged) return ''
   const key = open.join('\n')
-  if (one.toldOpen === key) return ''
-  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldOpen: key } : card)))
+  const times = one.toldOpen?.key === key ? one.toldOpen.times : 0
+  if (times >= NOT_TICKED_MOST || (times > 0 && /\bnot done\b/i.test(message))) return ''
+  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldOpen: { key, times: times + 1 } } : card)))
   await log($, `work ${id} handed back with ${open.length} to-dos still to do: refused once`)
   return named(NOT_TICKED(open))
 }
@@ -677,14 +686,16 @@ const keepNotDone = async ($: EngineInterface, id: string) => {
   const open = openItems(one).map(item => item.text)
   await changeTodos($, list => list.map(card => (card.id === id ? { ...card, notDone: open.length ? open : undefined, toldOpen: undefined, keptOn: undefined } : card)))
 }
-// The card's line for a task that ended with to-dos not done
+// The card's line for a task that sent its result with to-dos not done, while it is not at work again or waiting on the person
 const notDoneLine = (one: Todo) => {
-  const open = one.status === 'working' ? [] : openItems(one).map(item => item.text)
-  return open.length ? `Not done · ${open.join(' · ')}` : ''
+  const left = one.status === 'working' || one.chat || (one.ask && !one.ask.replied) ? [] : (one.notDone ?? [])
+  return left.length ? `Not done · ${left.join(' · ')}` : ''
 }
-// A result's lines for the to-dos its task left not done that it does not name itself
+// A result's lines for the to-dos its task left not done and still has not done, that it does not name itself under what is not done
 const notDoneLines = (one: Todo, text: string) => {
-  const left = (one.notDone ?? []).filter(item => !text.includes(item))
+  const open = new Set(openItems(one).map(item => item.text))
+  const said = /\bnot done\b/i.test(text)
+  const left = (one.notDone ?? []).filter(item => open.has(item) && !(said && text.includes(item)))
   return left.length ? `\n\nNot done:\n${left.map(item => `- ${item}`).join('\n')}` : ''
 }
 // A task Claudopus stopped starting again stays in its place, its line in sight, as a task cut off that could not be started again does

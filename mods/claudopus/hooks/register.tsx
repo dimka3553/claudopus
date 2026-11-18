@@ -784,11 +784,11 @@ const RESTARTED_WORK = `From Claudopus, not {name}: you stopped partway through 
 const STOPPED_SHORT_GO_ON = `From Claudopus, not {name}: your step ended without your report, without a question for {name}, and with nothing of yours running that starts you again, so you were left stopped partway. Carry on from where you were: check what you already have and whether something you started still runs, then go on with your to-dos. When all is done, hand back your report with SubagentHandback; when a step needs {name}, ask with the ask tool; to wait for something, run it in the background or call wake_me, then end your step.`
 const quotedItems = (items: string[]) => items.map(item => `"${item}"`).join('; ')
 const KEEP_GOING = (items: string[]) =>
-  `From Claudopus, not {name}: don't end here, your task isn't finished. Still to do: ${quotedItems(items)}. Nothing of yours is running that would start you again (no command in the background, no detached command started with \`echo $!\` after it, no helper at work, no wake_me, no question on your card), so if your step ends now this work stops undone. Carry on now with the first of them. If you expected something you started to be running, look at its log: it may have failed or ended. Tick each to-do as soon as it is done, and hand back your report with SubagentHandback once all are ticked. For one only {name} can do, ask with the ask tool and end your step.`
+  `From Claudopus, not {name}: don't end here, your task isn't finished. Still to do: ${quotedItems(items)}. Nothing of yours is running that would start you again (no command in the background, no detached command started with \`echo $!\` after it, no helper at work, no wake_me, no question on your card), so if your step ends now this work stops undone. Claude Code's note that your report has not been delivered doesn't apply yet: send your report only once every to-do is ticked. Carry on now with the first of them. If you expected something you started to be running, look at its log: it may have failed or ended. To wait for something, run it in the background or detached with \`echo $!\` after it, or call wake_me for a file, a page or a time, then end your step. Tick each to-do as soon as it is done. For one only {name} can do, ask with the ask tool and end your step.`
 const NOT_TICKED = (items: string[]) =>
-  `Not sent: ${items.length === 1 ? 'a to-do of yours is' : `${items.length} of your to-dos are`} still to do: ${quotedItems(items)}. Do ${items.length === 1 ? 'it' : 'each'} now, or tick it done if it is done already, then hand back your report. One that only {name} can do or decide stays as it is: name it in your report under what is not done, with what {name} needs to do, and send your report again. Claudopus then shows it as not done on your card and in your result.`
+  `Not sent: ${items.length === 1 ? 'a to-do of yours is' : `${items.length} of your to-dos are`} still to do: ${quotedItems(items)}. Do ${items.length === 1 ? 'it' : 'each'} now, or tick it done if it is done already, then hand back your report. One that only {name} can do or decide stays as it is: name it in your report under "Not done", with what {name} needs to do, and send your report again. Claudopus then shows it as not done on your card and in your result.`
 const NOT_DONE_IN_CHAT = (title: string, items: string[]) =>
-  `From Claudopus: the task "${title}" handed back its result with ${items.length === 1 ? 'a to-do' : `${items.length} to-dos`} not done: ${quotedItems(items)}. When you pass its result on to {name}, say these are not done.`
+  `From Claudopus: the task "${title}" sent its result with ${items.length === 1 ? 'a to-do' : `${items.length} to-dos`} not done: ${quotedItems(items)}. When you pass its result on to {name}, say these are not done.`
 const CARRIED_IN_CHAT = (title: string) =>
   `From Claudopus: the task "${title}" stopped partway without its report, and Claudopus started it again to carry on. Claude Code may say it ended without delivering a report: there is nothing for you to do, and nothing to tell {name}.`
 const CARRY_GAVE_UP_IN_CHAT = (title: string, id: string) =>
@@ -1063,7 +1063,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
   status: 'working',
 })
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
-const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, newAt: at })
 const goesOn = (list: Todo[], id: string) => {
   const one = list.find(card => card.id === id)
   const isRunning = Boolean(one?.bg?.some(b => !b.isWatch)) || list.some(kid => kid.parentId === id && kid.status === 'working')
@@ -8994,6 +8994,7 @@ const carryNow = async ($: EngineInterface, id: string, at: number) => {
 }
 
 const KEEP_TRIES = 3
+const KEEP_MOST = 6
 const keepGoingWhy = (list: Todo[], id: string) => {
   const one = list.find(card => card.id === id)
   const open = openItems(one)
@@ -9008,21 +9009,26 @@ const keepGoing = async ($: EngineInterface, id: string): Promise<string> => {
     return list.map(one => {
       if (one.id !== id) return one
       if (!why) return one.keptOn ? { ...one, keptOn: undefined } : one
-      const tries = one.keptOn && one.keptOn.steps === (one.steps ?? 0) ? one.keptOn.tries + 1 : 1
-      if (tries > KEEP_TRIES) why = ''
-      return { ...one, keptOn: { tries, steps: one.steps ?? 0 } }
+      const was = one.keptOn
+      const done = one.items.filter(item => item.state === 'done').length
+      const tries = was && was.steps === (one.steps ?? 0) ? was.tries + 1 : 1
+      const total = was && was.done === done ? was.total + 1 : 1
+      if (tries > KEEP_TRIES || total > KEEP_MOST) why = ''
+      return { ...one, keptOn: { tries, steps: one.steps ?? 0, total, done } }
     })
   })
   if (why) await log($, `work ${id} ended its step with to-dos still to do and nothing of its own running: kept going`)
   return why
 }
-const untickedAtHandback = async ($: EngineInterface, id: string): Promise<string> => {
+const NOT_TICKED_MOST = 2
+const untickedAtHandback = async ($: EngineInterface, id: string, message: string): Promise<string> => {
   const one = (await read($, todos)).find(card => card.id === id)
   const open = openItems(one).map(item => item.text)
   if (!one || isOff || !dir || one.parentId || one.chat || !open.length || one.flagged) return ''
   const key = open.join('\n')
-  if (one.toldOpen === key) return ''
-  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldOpen: key } : card)))
+  const times = one.toldOpen?.key === key ? one.toldOpen.times : 0
+  if (times >= NOT_TICKED_MOST || (times > 0 && /\bnot done\b/i.test(message))) return ''
+  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldOpen: { key, times: times + 1 } } : card)))
   await log($, `work ${id} handed back with ${open.length} to-dos still to do: refused once`)
   return named(NOT_TICKED(open))
 }
@@ -9033,11 +9039,13 @@ const keepNotDone = async ($: EngineInterface, id: string) => {
   await changeTodos($, list => list.map(card => (card.id === id ? { ...card, notDone: open.length ? open : undefined, toldOpen: undefined, keptOn: undefined } : card)))
 }
 const notDoneLine = (one: Todo) => {
-  const open = one.status === 'working' ? [] : openItems(one).map(item => item.text)
-  return open.length ? `Not done · ${open.join(' · ')}` : ''
+  const left = one.status === 'working' || one.chat || (one.ask && !one.ask.replied) ? [] : (one.notDone ?? [])
+  return left.length ? `Not done · ${left.join(' · ')}` : ''
 }
 const notDoneLines = (one: Todo, text: string) => {
-  const left = (one.notDone ?? []).filter(item => !text.includes(item))
+  const open = new Set(openItems(one).map(item => item.text))
+  const said = /\bnot done\b/i.test(text)
+  const left = (one.notDone ?? []).filter(item => open.has(item) && !(said && text.includes(item)))
   return left.length ? `\n\nNot done:\n${left.map(item => `- ${item}`).join('\n')}` : ''
 }
 const isLeftStopped = (one: Todo, at: number) => Boolean(one.carryOn?.gaveUp && one.status !== 'working' && at - one.carryOn.gaveUp < CUT_OLD)
@@ -11254,7 +11262,7 @@ const workHooks = (on: On) => {
     if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
       const hold = await holdAtHandback($, e.agentId).catch(() => '')
       if (hold) return { deny: hold }
-      const unticked = await untickedAtHandback($, e.agentId).catch(() => '')
+      const unticked = await untickedAtHandback($, e.agentId, String((e as { message?: unknown }).message ?? '')).catch(() => '')
       if (unticked) return { deny: unticked }
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       handingBack.add(e.agentId)
@@ -11334,7 +11342,7 @@ const workHooks = (on: On) => {
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
     const waits = id !== undefined && card && !isOff && card.handedBackAt === undefined ? waitsOnOwn(await read($, todos), card) : undefined
-    if (id !== undefined && waits?.what && (await isPressedForReport($, id, (waits.helpers > 0 && card?.mayHandBack === undefined) || openItems(card).length > 0))) {
+    if (id !== undefined && waits?.what && (await isPressedForReport($, id, waits.helpers > 0 && card?.mayHandBack === undefined))) {
       await log($, `work ${id} pressed by the engine for its report while ${waits.what}: let it end its step, saying nothing`)
       yield { kind: 'text', index: 0, text: PRESS_ANSWER }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }

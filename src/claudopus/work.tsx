@@ -512,7 +512,7 @@ const workHooks = (on: On) => {
       const hold = await holdAtHandback($, e.agentId).catch(() => '')
       if (hold) return { deny: hold }
       // Its report with to-dos still to do: refused once, so it does them or names them as not done
-      const unticked = await untickedAtHandback($, e.agentId).catch(() => '')
+      const unticked = await untickedAtHandback($, e.agentId, String((e as { message?: unknown }).message ?? '')).catch(() => '')
       if (unticked) return { deny: unticked }
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       // The engine hands the hand-back on as it goes through: the chat may be given it from now (isQuietHandback)
@@ -627,9 +627,8 @@ const workHooks = (on: On) => {
     // is started again when that is done
     // With helpers of its own at work its report would be refused, unless it was told it may hand back, so whatever it said is no
     // report and the press is answered whatever its length (17 Nov: a long status line sent each first press to the model)
-    // So too with to-dos still to do: a long word of how far it has got is no report (isWordsReport)
     const waits = id !== undefined && card && !isOff && card.handedBackAt === undefined ? waitsOnOwn(await read($, todos), card) : undefined
-    if (id !== undefined && waits?.what && (await isPressedForReport($, id, (waits.helpers > 0 && card?.mayHandBack === undefined) || openItems(card).length > 0))) {
+    if (id !== undefined && waits?.what && (await isPressedForReport($, id, waits.helpers > 0 && card?.mayHandBack === undefined))) {
       await log($, `work ${id} pressed by the engine for its report while ${waits.what}: let it end its step, saying nothing`)
       yield { kind: 'text', index: 0, text: PRESS_ANSWER }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
