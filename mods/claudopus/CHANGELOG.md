@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.194 · 18 November 2026
+- Update works again when your chats run Claudopus from a copy of its code that a task switched to a released version. Update moves that copy to the newest version and back onto main.
+- A task or its helper can no longer switch, reset or commit in the copy of Claudopus's code your chats run. Claude reads other versions without switching, and changes the code in a copy of its own.
+
 ## 0.2.193 · 18 November 2026
 - A task that waits for hours on its own command, or on something that never comes, is no longer just marked stuck. If nothing has started it again, Claudopus starts it to check on what it's waiting for. The first check comes after the command's own expected time (at least half an hour after the task stopped). The next ones come after an hour, after two hours, and then every four hours. A task that finds it's stuck stops or fixes what's stuck, or sends what it has. Its card says "Claudopus asked Claude to check on what it waits for".
 - A question or an Allow that waits on a card is no longer forgotten when you don't see the card. Claudopus notifies you again 15 minutes, an hour, four hours and twelve hours after it began waiting. Once an hour at most, the chat ends its next reply with one line naming the card that waits for you.

@@ -197,6 +197,24 @@ const rulesAgain = async ($: EngineInterface, agent: string) => {
   return `${card.rulesDue ? 'Your context was compacted, and the rules you were handed at the start are no longer in it.' : 'The rules every task follows have changed since you started.'} These are the rules now; they replace any earlier copy.\n\n${rules}${card.scratch ? `\n${SCRATCH_LINE(card.scratch)}` : ''}`
 }
 
+// Claudopus's own checkout, when a command would change what is checked out there (changesOf), or nothing. Its own checkout is the
+// main checkout of the repo this chat's copy is made from or run from (knowSource, as this load first learnt it): every other repo,
+// a worktree of this one, and what a script it runs does are left to run
+const ownCheckoutChanged = async ($: EngineInterface, texts: string[], start: string) => {
+  const home = (await $.env.get('HOME')) ?? ''
+  const folders = texts.flatMap(text => changesOf(text, start, home))
+  if (!folders.length) return ''
+  const known = await knowSource($).catch(() => undefined)
+  const own = known?.src.kind === 'folder' ? known.src.repo.replace(/\/+$/, '') : ''
+  if (!own) return ''
+  for (const folder of folders) {
+    const said = await $.process.run(['git', '-C', folder, 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
+    const [gitDir = '', common = '', top = ''] = said.stdout.trim().split('\n').map(line => line.trim())
+    if (said.exitCode === 0 && gitDir && gitDir === common && top.replace(/\/+$/, '') === own) return own
+  }
+  return ''
+}
+
 const workHooks = (on: On) => {
 
   // A chat's own thread reads, starts agents and talks to them; the work runs in the agents, which carry an agent id
@@ -303,6 +321,16 @@ const workHooks = (on: On) => {
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
+    }
+    // The Claudopus code chats run stays as it is: work reads other versions with git show and changes code in worktrees of its own.
+    // Claudopus refuses it before Claude Code sees it, so no card offers it to be run on a press either
+    if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash') {
+      const command = String((e as { command?: unknown }).command ?? '')
+      const changed = /\bgit\b/.test(command) ? await ownCheckoutChanged($, [command], cwd || '.') : ''
+      if (changed) {
+        await log($, `refused work ${e.agentId}'s command that changes Claudopus's own checkout`)
+        return { deny: NO_SWITCH(changed) }
+      }
     }
     // The list of admin commands always allowed, and what seals it, are the person's alone
     if (touchesGate(e) || (e.tool === 'Bash' && (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(text => touchesGate({ ...e, command: text } as never)))) {

@@ -222,7 +222,11 @@ const lastLine = (out: { stdout: string; stderr: string }) => `${out.stderr || o
 // A folder of the code is offered a release only as Claudopus's own main checkout on main, following an online main: a worktree, a
 // branch other than main or another repo is never reached by a release, so a download there would not change what the chat runs.
 // What it is, or why it is not offered, in plain words
-export type FolderReady = { ok: true; branch: string; upstream: string } | { ok: false; why: string; what: string }
+// A main checkout left on a commit its online main already holds, with main itself behind that, is no test copy: something only
+// looked at a released commit there (a task did on 18 Nov), so Install moves it forward and puts it back on main (`detached`)
+export type FolderReady = { ok: true; branch: string; upstream: string; detached?: boolean } | { ok: false; why: string; what: string }
+// Says clear when the git folder it is handed holds no bisect or rebase under way
+export const MID_WAY = 'for f in BISECT_LOG rebase-merge rebase-apply; do [ -e "$1/$f" ] && exit 0; done; echo clear'
 export const folderReady = async (io: Pick<LookIo, 'run'>, folder: string): Promise<FolderReady> => {
   const git = gitIn(io, folder)
   if ((await git(['rev-parse', '--show-toplevel'])).exitCode !== 0) return { ok: false, what: "Claudopus code that Update can't change", why: "it isn't Claudopus's released code" }
@@ -234,7 +238,18 @@ export const folderReady = async (io: Pick<LookIo, 'run'>, folder: string): Prom
   const branch = named((await git(['symbolic-ref', '-q', '--short', 'HEAD'])).stdout.trim())
   if (gitDir.trim() !== commonDir.trim())
     return { ok: false, what: 'a copy of Claudopus that a task is changing', why: 'Update leaves it alone. It gets the newest version when that task is merged' }
-  if (!branch) return { ok: false, what: 'a test copy of Claudopus', why: 'Update leaves it alone' }
+  if (!branch) {
+    const upstream = named((await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', 'main@{u}'])).stdout.trim())
+    // Never in the middle of a bisect or a rebase, which keep their place on no branch
+    const clear = await io.run(['sh', '-c', MID_WAY, 'sh', gitDir.trim()], 20_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))
+    const isMidWay = clear.stdout.trim() !== 'clear'
+    const isReleased =
+      !isMidWay &&
+      /^[^/]+\/main$/.test(upstream) &&
+      (await git(['merge-base', '--is-ancestor', 'HEAD', upstream])).exitCode === 0 &&
+      (await git(['merge-base', '--is-ancestor', 'refs/heads/main', upstream])).exitCode === 0
+    return isReleased ? { ok: true, branch: 'main', upstream, detached: true } : { ok: false, what: 'a test copy of Claudopus', why: 'Update leaves it alone' }
+  }
   const upstream = named((await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])).stdout.trim())
   if (branch !== 'main' || !/^[^/]+\/main$/.test(upstream))
     return { ok: false, what: 'a test copy of Claudopus', why: 'Update leaves it alone' }
@@ -418,10 +433,18 @@ export const install = async (io: LookIo, src: Exclude<Source, { kind: 'none' }>
   const ready = await folderReady(io, src.repo)
   if (!ready.ok) return { ok: false, fail: 'moved', detail: ready.why }
   if ((await git(['merge-base', '--is-ancestor', 'HEAD', commit])).exitCode !== 0) return { ok: false, fail: 'own-commits', detail: '' }
+  // Left on a released commit: main must reach the release by a fast-forward too, and is moved there only from the very commit read
+  const main = ready.detached ? (await git(['rev-parse', '-q', '--verify', 'refs/heads/main'])).stdout.trim() : ''
+  if (ready.detached && (!main || (await git(['merge-base', '--is-ancestor', main, commit])).exitCode !== 0)) return { ok: false, fail: 'own-commits', detail: '' }
   const merged = await git(['merge', '--ff-only', '--quiet', commit], 120_000)
   if (merged.exitCode !== 0) {
     const said = `${merged.stderr}\n${merged.stdout}`
     return /would be overwritten/.test(said) ? { ok: false, fail: 'overwrite', detail: '' } : { ok: false, fail: 'moved', detail: lastLine(merged) }
+  }
+  if (ready.detached) {
+    const moved = await git(['update-ref', '-m', `Claudopus ${page.version}`, 'refs/heads/main', commit, main])
+    const back = moved.exitCode === 0 ? await git(['symbolic-ref', 'HEAD', 'refs/heads/main']) : moved
+    if (back.exitCode !== 0) return { ok: false, fail: 'moved', detail: lastLine(back) }
   }
   const status = await git(['status', '--porcelain', '--untracked-files=no', '--', src.sub])
   const dirty = status.exitCode !== 0 || Boolean(status.stdout.trim())

@@ -54,8 +54,10 @@ const prompts: string[] = []
 
 // A release on GitHub as the test world gives it: its version, commit and the tree it published; `got` a different tree that came
 // down instead, `manifest` a different version in it, `online` a newer commit online, and a fetch that fails, a folder with commits of its
-// own, or uncommitted changes the move would overwrite
-type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean }
+// own, or uncommitted changes the move would overwrite; a checkout on no branch, at a commit its online main holds (`detached`) or
+// one it doesn't (`noBranch`, a test copy); with a bisect or rebase under way, a main with commits online main lacks, or a main past
+// the release
+type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
 const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
@@ -318,6 +320,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       return ok()
     }
     if (release && tool === 'git' && rest.includes('--show-toplevel')) return ok('/plugins-src\n')
+    // No bisect or rebase under way in it, unless the test says one is
+    if (release && tool === 'sh' && String(rest[1]).includes('BISECT_LOG')) return ok(release.midWay ? '' : 'clear\n')
     if (release && tool === 'sh' && String(rest[1]).includes('write-tree')) return ok(`${files.get('tree:installed') ?? release.tree}\n`)
     if (release && tool === 'env' && rest.includes('git')) {
       const args = rest.slice(rest.indexOf('-C') + 2).map(String)
@@ -326,7 +330,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       if (args[0] === 'rev-parse' && args.includes('--show-toplevel')) return ok('/plugins-src\n')
       if (args[0] === 'ls-files') return ok('mods/claudopus/.claude-plugin/plugin.json\n')
       if (args[0] === 'rev-parse' && args.includes('--git-dir')) return ok(release.worktree ? '/plugins-src/.git/worktrees/fix\n/plugins-src/.git\n' : '/plugins-src/.git\n/plugins-src/.git\n')
-      if (args[0] === 'symbolic-ref') return release.noBranch ? ok('', 1) : ok(release.worktree ? 'fix-bar\n' : 'main\n')
+      if (args[0] === 'symbolic-ref' && args[1] === 'HEAD') return ok()
+      if (args[0] === 'symbolic-ref') return release.noBranch || release.detached ? ok('', 1) : ok(release.worktree ? 'fix-bar\n' : 'main\n')
       if (args.includes('--symbolic-full-name')) return ok('origin/main\n')
       if (args[0] === 'rev-parse' && args.includes('--verify')) {
         const what = args.at(-1) ?? ''
@@ -336,7 +341,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       }
       if (args[0] === 'show') return ok(JSON.stringify({ name: 'claudopus', version: release.manifest ?? release.version }))
       if (args[0] === 'update-ref' && args[1] === '-d') return (files.delete('git:ref'), ok())
-      if (args[0] === 'merge-base') return ok('', release.ownCommits ? 1 : 0)
+      if (args[0] === 'merge-base') {
+        const isMain = args.includes('refs/heads/main')
+        const isOwn = release.ownCommits || (release.noBranch && args.includes('origin/main')) || (release.mainAhead && isMain) || (release.mainPast && isMain && !args.includes('origin/main'))
+        return ok('', isOwn ? 1 : 0)
+      }
       if (args[0] === 'merge') {
         if (release.overwrite) return { value: { exitCode: 1, stdout: '', stderr: 'error: Your local changes to the following files would be overwritten by merge', isStdoutTruncated: false, isStderrTruncated: false } }
         files.set('manifest', JSON.stringify({ name: 'claudopus', version: release.version }))
@@ -434,6 +443,14 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       if (rest[0] === 'entries' && files.has('keyring:refused')) return ok('', 1)
       if (rest[0] === 'entries') return ok([...files.keys()].flatMap(one => (one.startsWith('secret:') && one !== 'secret:refused' ? [`claudopus-secret\t${one.slice(7)}\n`] : one.startsWith('keychain-entry:') ? [`${one.slice(15)}\n`] : [])).join(''))
       return ok('', 2)
+    }
+    // git, asked what a folder is as a command would change it: a main checkout where the test lays checkout:<folder>, a worktree
+    // of it where that says worktree, else no repo
+    if (tool === 'git' && rest.includes('--path-format=absolute') && rest.includes('--git-common-dir') && rest.includes('--show-toplevel')) {
+      const folder = String(rest[rest.indexOf('-C') + 1])
+      const on = files.get(`checkout:${folder}`)
+      if (on === undefined) return ok('', 128)
+      return ok(`${on === 'worktree' ? `${folder}/../.git/worktrees/x` : `${folder}/.git`}\n${folder}/.git\n${folder}\n`)
     }
     // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(files.has('git:top') ? `${files.get('git:top')}\n` : '', files.has('git:top') ? 0 : 128)
@@ -743,7 +760,8 @@ const shownIn = async (pane: { find: (q: { type: string; text: string | RegExp }
 const later = async (clock: { advance: (ms: number) => Promise<unknown> }, ms: number) => {
   for (let left = ms; left > 0; left -= 20 * 60_000) await clock.advance(Math.min(left, 20 * 60_000))
 }
-const changing = (ran: string[]) => ran.filter(one => /^(fetch|merge|reset|checkout|pull|update-ref)\b/.test(one) || one.includes('fetch --progress'))
+// (merge-base only reads)
+const changing = (ran: string[]) => ran.filter(one => /^(fetch|merge(?!-base)|reset|checkout|pull|update-ref|symbolic-ref HEAD)\b/.test(one) || one.includes('fetch --progress'))
 
 test('F-019 · the look only reads the version page: the panel says a newer version is out, with Update, and nothing is fetched, installed or reloaded, whatever config.json says', SLOW, async ($, on) => {
   const { files, clock, gitRan } = world(on, { release: RELEASE })
@@ -805,8 +823,11 @@ test('Update fetches the release and checks it against what the release publishe
   expect(reloads).toEqual([])
 })
 
-test('Update is one press for a chat run from its checkout: the fetch, its check, then a fast-forward; then the header says, beside the version, to type /reload-plugins, and nothing reloads the chat', SLOW, async ($, on) => {
-  const { files, clock, gitRan } = world(on, { release: RELEASE })
+// The checkout on main, or left by a task on a commit its online main holds (18 Nov: every chat on that Mac was called a test copy
+// and offered no Update), which Install puts back on main once it is at the release
+for (const one of [{ name: 'its checkout', release: RELEASE }, { name: 'a checkout left on a released commit', release: { ...RELEASE, detached: true } }] as { name: string; release: Release }[])
+test(`Update is one press for a chat run from ${one.name}: the fetch, its check, then a fast-forward; then the header says, beside the version, to type /reload-plugins, and nothing reloads the chat`, SLOW, async ($, on) => {
+  const { files, clock, gitRan } = world(on, { release: one.release })
   const reloads = reloadsOf(on)
   pageOn(on, () => pageText())
   await $.session.start(start)
@@ -821,6 +842,10 @@ test('Update is one press for a chat run from its checkout: the fetch, its check
   const checked = gitRan.findIndex(one => one.includes(`${COMMIT}:mods/claudopus`))
   const merged = gitRan.indexOf(`merge --ff-only --quiet ${COMMIT}`)
   expect(fetched >= 0 && checked > fetched && merged > checked).toBe(true)
+  // Main follows, from the very commit it was at, only for a checkout left on no branch
+  const followed = gitRan.indexOf(`update-ref -m Claudopus 0.1.2 refs/heads/main ${COMMIT} refs/heads/main`)
+  expect(followed > merged && gitRan.indexOf('symbolic-ref HEAD refs/heads/main') > followed).toBe(Boolean(one.release.detached))
+  expect(gitRan.some(ran => ran.startsWith('update-ref -m') || ran.startsWith('symbolic-ref HEAD'))).toBe(Boolean(one.release.detached))
   expect(gitRan.some(one => /^(reset|checkout|pull)\b/.test(one))).toBe(false)
   expect(JSON.parse(files.get('manifest') ?? '{}').version).toBe('0.1.2')
   expect(JSON.parse(files.get(`${MEMORY}/update-steps.json`) ?? '{}')).toMatchObject({ version: '0.1.2', stage: 'installed', commit: COMMIT, tree: TREE })
@@ -864,6 +889,7 @@ const STAYS: { name: string; release: Release; said: string; isNewerAfterFetch?:
   { name: 'uncommitted changes the move would overwrite', release: { ...RELEASE, overwrite: true }, said: 'Your copy of Claudopus has changes in files this version changes. Ask a chat to set them aside, then press Try again. Nothing changed: this chat still runs v0.1.0.' },
   { name: 'a newer version out between its fetch and its move', release: RELEASE, isNewerAfterFetch: true, title: 'Claudopus v0.1.3 is out', said: 'The bar shows the battery · and 3 more changes' },
   { name: 'a main with commits of its own', release: { ...RELEASE, ownCommits: true }, said: "Your copy of Claudopus has changes this version doesn't have, so Update leaves it alone. Nothing changed: this chat still runs v0.1.0." },
+  { name: 'a checkout left on a released commit, its main past this release', release: { ...RELEASE, detached: true, mainPast: true }, said: "Your copy of Claudopus has changes this version doesn't have, so Update leaves it alone. Nothing changed: this chat still runs v0.1.0." },
 ]
 for (const one of STAYS)
   test(`Update with ${one.name}: it says why it could not move forward, and nothing is overwritten or moved`, SLOW, async ($, on) => {
@@ -962,6 +988,8 @@ test('Not now keeps a version quiet for a day, Skip this version until a newer o
 const LEFT_ALONE: { name: string; release: Release; said: string }[] = [
   { name: 'a build a piece of work is changing', release: { ...RELEASE, worktree: true }, said: 'This chat runs a copy of Claudopus that a task is changing: Update leaves it alone. It gets the newest version when that task is merged.' },
   { name: 'a test build', release: { ...RELEASE, noBranch: true }, said: 'This chat runs a test copy of Claudopus: Update leaves it alone.' },
+  { name: 'a released commit whose main has commits of its own', release: { ...RELEASE, detached: true, mainAhead: true }, said: 'This chat runs a test copy of Claudopus: Update leaves it alone.' },
+  { name: 'a released commit in the middle of a bisect', release: { ...RELEASE, detached: true, midWay: true }, said: 'This chat runs a test copy of Claudopus: Update leaves it alone.' },
 ]
 for (const one of LEFT_ALONE)
   test(`a chat run from ${one.name} is told Update leaves it alone, and offered no download`, SLOW, async ($, on) => {
