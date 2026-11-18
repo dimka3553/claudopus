@@ -2,12 +2,16 @@
 
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
-const BRIEF =
+// The chat that does jobs itself is told so with each message, and what goes to a task
+const BRIEF_ITSELF =
+  'A job of a few minutes: do it yourself, in this thread, in few steps. A bigger or longer one: one task, as your rules say. Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words.'
+const BRIEF_TASKS =
   'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
+const briefNow = () => (lean.chat === 'itself' ? BRIEF_ITSELF : BRIEF_TASKS)
 const REFUSED =
   'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a push, a fetch or a look with git or gh, `git -C <folder>` for a look into a topic\'s repo, an open of a file or page, a local curl status check, sent with `run_in_background: true`; a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
-  `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
+  `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: ${lean.chat === 'itself' ? 'subagent_type "claudopus:task"' : 'subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest'}, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
 // A command that would print a password or key the keychain keeps (on Linux, the files bin/keyring keeps). Work uses a kept key only through `bin/secret`, which reads it itself
 // or that would point the runner at another store or another box
 const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus\/keyring\b/
@@ -60,6 +64,42 @@ const pushesMain = (command: string): boolean =>
     if (args.includes('--no-verify')) return true
     return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
   })
+// Each push in a command that names no branch, so pushes whatever is checked out: the folder it runs in (a `cd` before it, git's
+// -C) and, when the same command checks a branch out there first, that branch. Read as the shell splits it, so the word push in a
+// message, a stash or a search never counts; a push that names a branch or only tags is pushesMain's
+const barePushes = (command: string, start: string): { folder: string; to?: string }[] => {
+  const found: { folder: string; to?: string }[] = []
+  const under = (base: string, path: string) => (path.startsWith('/') ? path : `${base}/${path}`)
+  let folder = start
+  let to: string | undefined
+  for (const words of shellWords(command)) {
+    let i = 0
+    while (i < words.length && /^\w+=/.test(words[i]!)) i++
+    const tool = (words[i] ?? '').split('/').pop()
+    if (tool === 'cd' && words[i + 1]) {
+      folder = under(folder, words[i + 1]!)
+      to = undefined
+      continue
+    }
+    if ((tool === 'bash' || tool === 'sh' || tool === 'zsh') && words[i + 1] === '-c') {
+      found.push(...barePushes(words[i + 2] ?? '', folder))
+      continue
+    }
+    if (tool !== 'git') continue
+    i++
+    let at = folder
+    while (i < words.length && words[i]!.startsWith('-')) {
+      if (words[i] === '-C' && words[i + 1]) at = under(at, words[i + 1]!)
+      i += /^-[Cc]$/.test(words[i]!) ? 2 : 1
+    }
+    const verb = words[i]
+    const named = words.slice(i + 1).filter(one => !one.startsWith('-'))
+    if ((verb === 'checkout' || verb === 'switch') && at === folder && named.length) to = named[0]
+    if (verb !== 'push' || words.slice(i + 1).some(one => /^--(?:tags|delete)$|^-d$/.test(one))) continue
+    if (named.length <= 1) found.push({ folder: at, ...(at === folder && to ? { to } : {}) })
+  }
+  return found
+}
 // What a command would change in the code chats run: a git command that moves what is checked out or changes its files (checkout,
 // switch, restore, reset, rebase, bisect, stash, merge, pull, cherry-pick, revert, am, apply, clean, commit, rm, mv, update-ref,
 // symbolic-ref setting HEAD, and a branch renamed, forced, copied over or deleted), with the folder it runs in: git's -C, then its
@@ -281,7 +321,9 @@ const NO_PUSH = 'Claude never pushes or merges to main itself, so two tasks neve
 const SECRETS_MS = 60_000
 // The first line of what the mod adds to every brief: the work's own rules and where the chat's words are. The panel leaves it out
 const workHead = () => `What follows is what Claudopus tells Claude in every task started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`
-const PASTED = 'The middle of this message is in the file it names. Do not read that file into this chat: the agent that needs it reads it from that path.'
+const PASTED_TASKS = 'The middle of this message is in the file it names. Do not read that file into this chat: the agent that needs it reads it from that path.'
+const PASTED_ITSELF = 'The middle of this message is in the file it names. Read it from that path only when the job you do yourself needs it; a task that needs it reads it from that path.'
+const pastedNow = () => (lean.chat === 'itself' ? PASTED_ITSELF : PASTED_TASKS)
 const KEEP =
   "Keep every request the user made and every decision, in the user's own words where short. Keep the state of each file and what is not committed. Drop tool output."
 const KEEP_AGENTS = 'Keep the name or id of each background agent, with its topic and how far it has got.'
@@ -309,6 +351,16 @@ const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to "${t
 // What the work is told with a reply that does not settle its ask: the ask stays open on its card until it clears or replaces it
 const REPLY_HOLDS = `That reply does not settle your question by itself: act on it. Their card shows your question with their reply under it, and nothing more to press or type while you work on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still needs them after you have done what they said, ask it again, which brings back its answers.`
 // What work that had ended is told when the person answers its ask on the card: the answer starts it again
+// What a task is told of an answer to a question its result asks, pressed or typed on the panel, and what the chat is told of it
+const RESULT_ANSWER = (title: string, path: string, asked: string, said: string, isWords: boolean, left: number) =>
+  `${who(true)} ${isWords ? 'answered, in their own words, a question' : `pressed "${said}" to answer a question`} in your result "${title}" (${path}): ${asked}${isWords ? `\nTheir answer: ${said}` : ''}${left ? `\n${left} other ${left === 1 ? 'question' : 'questions'} of that result still ${left === 1 ? 'waits' : 'wait'} for them: each answer comes to you as a message of its own, so carry on with what you have.` : ''}`
+const RESULT_ANSWERED = (title: string, asked: string, said: string) => `✓ {Name} answered a question in the result "${title}" on the panel (${asked}): ${said}. Its task has the answer and carries on with it itself: start nothing for it.`
+const RESULT_WORDS_SENT = (title: string) => `Claudopus sent this answer of {name}'s to the task that asked ("${title}"), which carries on with it itself: start nothing for it and send it nothing, only say so in a line.`
+// Change something on a Done card: what the box asks, what its task is told with the person's words, and what the chat is told
+const CHANGE_WHAT = 'what should it change?'
+const CHANGE_ASKED = (said: string) =>
+  `${who(true)} pressed "Change something" on the card of your finished task and wrote, in their own words, what to change in your finished work: ${said}\nYou had finished; this starts you again. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
+const CHANGE_TOLD = (title: string, said: string) => `✓ {Name} asked the finished task "${title}" on its card to change something: ${said}. The task has their words and carries on with them itself: start nothing for it.`
 const RESUMED_BY_ANSWER = `You had finished; this answer starts you again. Continue the task with it, then end with your report as before.`
 // What the chat's model reads, and the person sees as a notice (isYou), when that work could not be started again with the answer
 const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = false) =>
@@ -400,10 +452,13 @@ const STOPPED_SHORT_GO_ON = `From Claudopus, not {name}: your step ended without
 // A task ending its step with to-dos still to do and nothing of its own running: what Claude is told as Claudopus keeps it going in
 // the same run; and what it is told when it hands back its report with to-dos not done
 const quotedItems = (items: string[]) => items.map(item => `"${item}"`).join('; ')
+// (and what is added for one with to-dos left on its card, which may have sent a report where Claudopus could not see its run)
+const STILL_TO_DO = (items: string[]) =>
+  ` Still to do on your card: ${quotedItems(items)}. If you already sent your report, it went out while your card still showed these: do each now, or tick it if it is done, or drop it if it will not be done, record with the waits tool what waits on {name}, and hand back again with only what is new.`
 const KEEP_GOING = (items: string[]) =>
   `From Claudopus, not {name}: don't end here, your task isn't finished. Still to do: ${quotedItems(items)}. Nothing of yours is running that would start you again (no command in the background, no detached command started with \`echo $!\` after it, no helper at work, no wake_me, no question on your card), so if your step ends now this work stops undone. Claude Code's note that your report has not been delivered doesn't apply yet: send your report only once every to-do is ticked. Carry on now with the first of them. If you expected something you started to be running, look at its log: it may have failed or ended. To wait for something, run it in the background or detached with \`echo $!\` after it, or call wake_me for a file, a page or a time, then end your step. Tick each to-do as soon as it is done. For one only {name} can do, ask with the ask tool and end your step.`
 const NOT_TICKED = (items: string[]) =>
-  `Not sent: ${items.length === 1 ? 'a to-do of yours is' : `${items.length} of your to-dos are`} still to do: ${quotedItems(items)}. Do ${items.length === 1 ? 'it' : 'each'} now, or tick it done if it is done already, then hand back your report. One that only {name} can do or decide stays as it is: name it in your report under "Not done", with what {name} needs to do, and send your report again. Claudopus then shows it as not done on your card and in your result.`
+  `Not sent: ${items.length === 1 ? 'a to-do of yours is' : `${items.length} of your to-dos are`} still to do: ${quotedItems(items)}. Do ${items.length === 1 ? 'it' : 'each'} now, or tick it done if it is done already, or drop it if it will no longer be done and say why in your report, then hand back your report. One that only {name} can do or decide stays as it is: record it with the waits tool, name it in your report under "Not done", with what {name} needs to do, and send your report again. Claudopus then shows it as not done on your card and in your result, and your card never says Done while a to-do is left.`
 // A task's report that asks the person something, with nothing recorded as waiting on them: what it is told as it is refused once
 const UNRECORDED_WAITS = `Not sent: your report asks {name} something, but you recorded nothing as waiting on {name}, so the panel would show your task as done. Record each question only {name} can answer with the waits tool, or call it with [] if nothing waits on {name}, then send your report again.`
 const NOT_DONE_IN_CHAT = (title: string, items: string[]) =>

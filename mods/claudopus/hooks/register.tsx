@@ -16,7 +16,7 @@ import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUD
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
 import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isKindSaid, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
-import { leftoversOf, leftCommandOf, isNamedBy, memOf, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
+import { groupsOf, leftoversOf, leftCommandOf, isNamedBy, memOf, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
 import { heavyOf, isWaiterTree, waiterLeavesOf, waitingOf, watcherOf } from './jobs'
 import type { HeavyKind, OpenCall, Proc, Span, WaitKind } from './jobs'
 import type { Job, JobKind } from './jobs'
@@ -592,12 +592,15 @@ const recorderHooks = (on: On) => {
 }
 
 
-const BRIEF =
+const BRIEF_ITSELF =
+  'A job of a few minutes: do it yourself, in this thread, in few steps. A bigger or longer one: one task, as your rules say. Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words.'
+const BRIEF_TASKS =
   'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
+const briefNow = () => (lean.chat === 'itself' ? BRIEF_ITSELF : BRIEF_TASKS)
 const REFUSED =
   'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a push, a fetch or a look with git or gh, `git -C <folder>` for a look into a topic\'s repo, an open of a file or page, a local curl status check, sent with `run_in_background: true`; a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
-  `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
+  `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: ${lean.chat === 'itself' ? 'subagent_type "claudopus:task"' : 'subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest'}, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
 const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus\/keyring\b/
 const NO_READ = 'A saved key or password is never read or printed. Use it as an environment variable through the secret runner the task rules name; it hides the value in anything the command prints.'
 const shellWords = (command: string) => {
@@ -643,6 +646,39 @@ const pushesMain = (command: string): boolean =>
     if (args.includes('--no-verify')) return true
     return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
   })
+const barePushes = (command: string, start: string): { folder: string; to?: string }[] => {
+  const found: { folder: string; to?: string }[] = []
+  const under = (base: string, path: string) => (path.startsWith('/') ? path : `${base}/${path}`)
+  let folder = start
+  let to: string | undefined
+  for (const words of shellWords(command)) {
+    let i = 0
+    while (i < words.length && /^\w+=/.test(words[i]!)) i++
+    const tool = (words[i] ?? '').split('/').pop()
+    if (tool === 'cd' && words[i + 1]) {
+      folder = under(folder, words[i + 1]!)
+      to = undefined
+      continue
+    }
+    if ((tool === 'bash' || tool === 'sh' || tool === 'zsh') && words[i + 1] === '-c') {
+      found.push(...barePushes(words[i + 2] ?? '', folder))
+      continue
+    }
+    if (tool !== 'git') continue
+    i++
+    let at = folder
+    while (i < words.length && words[i]!.startsWith('-')) {
+      if (words[i] === '-C' && words[i + 1]) at = under(at, words[i + 1]!)
+      i += /^-[Cc]$/.test(words[i]!) ? 2 : 1
+    }
+    const verb = words[i]
+    const named = words.slice(i + 1).filter(one => !one.startsWith('-'))
+    if ((verb === 'checkout' || verb === 'switch') && at === folder && named.length) to = named[0]
+    if (verb !== 'push' || words.slice(i + 1).some(one => /^--(?:tags|delete)$|^-d$/.test(one))) continue
+    if (named.length <= 1) found.push({ folder: at, ...(at === folder && to ? { to } : {}) })
+  }
+  return found
+}
 const CHANGING_GIT = ['checkout', 'switch', 'restore', 'reset', 'rebase', 'bisect', 'stash', 'merge', 'pull', 'cherry-pick', 'revert', 'am', 'apply', 'clean', 'commit', 'update-ref', 'branch', 'rm', 'mv', 'symbolic-ref']
 const changesOf = (command: string, start: string, home: string): string[] => {
   const at = (here: string, path: string) =>
@@ -820,7 +856,9 @@ const NO_BOXES =
 const NO_PUSH = 'Claude never pushes or merges to main itself, so two tasks never release at once: commit on your own branch and run the release runner the task rules name, from your worktree.'
 const SECRETS_MS = 60_000
 const workHead = () => `What follows is what Claudopus tells Claude in every task started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`
-const PASTED = 'The middle of this message is in the file it names. Do not read that file into this chat: the agent that needs it reads it from that path.'
+const PASTED_TASKS = 'The middle of this message is in the file it names. Do not read that file into this chat: the agent that needs it reads it from that path.'
+const PASTED_ITSELF = 'The middle of this message is in the file it names. Read it from that path only when the job you do yourself needs it; a task that needs it reads it from that path.'
+const pastedNow = () => (lean.chat === 'itself' ? PASTED_ITSELF : PASTED_TASKS)
 const KEEP =
   "Keep every request the user made and every decision, in the user's own words where short. Keep the state of each file and what is not committed. Drop tool output."
 const KEEP_AGENTS = 'Keep the name or id of each background agent, with its topic and how far it has got.'
@@ -835,6 +873,14 @@ const ANSWER_ALREADY_SENT = (said: string) => `Not sent: "${said}" is the answer
 const ANSWER_ECHO = 60 * 60_000
 const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs {name}.`
 const REPLY_HOLDS = `That reply does not settle your question by itself: act on it. Their card shows your question with their reply under it, and nothing more to press or type while you work on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still needs them after you have done what they said, ask it again, which brings back its answers.`
+const RESULT_ANSWER = (title: string, path: string, asked: string, said: string, isWords: boolean, left: number) =>
+  `${who(true)} ${isWords ? 'answered, in their own words, a question' : `pressed "${said}" to answer a question`} in your result "${title}" (${path}): ${asked}${isWords ? `\nTheir answer: ${said}` : ''}${left ? `\n${left} other ${left === 1 ? 'question' : 'questions'} of that result still ${left === 1 ? 'waits' : 'wait'} for them: each answer comes to you as a message of its own, so carry on with what you have.` : ''}`
+const RESULT_ANSWERED = (title: string, asked: string, said: string) => `✓ {Name} answered a question in the result "${title}" on the panel (${asked}): ${said}. Its task has the answer and carries on with it itself: start nothing for it.`
+const RESULT_WORDS_SENT = (title: string) => `Claudopus sent this answer of {name}'s to the task that asked ("${title}"), which carries on with it itself: start nothing for it and send it nothing, only say so in a line.`
+const CHANGE_WHAT = 'what should it change?'
+const CHANGE_ASKED = (said: string) =>
+  `${who(true)} pressed "Change something" on the card of your finished task and wrote, in their own words, what to change in your finished work: ${said}\nYou had finished; this starts you again. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
+const CHANGE_TOLD = (title: string, said: string) => `✓ {Name} asked the finished task "${title}" on its card to change something: ${said}. The task has their words and carries on with them itself: start nothing for it.`
 const RESUMED_BY_ANSWER = `You had finished; this answer starts you again. Continue the task with it, then end with your report as before.`
 const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = false) =>
   isYou
@@ -898,10 +944,12 @@ const NUDGED_IN_CHAT = (title: string, mins: number, isLast: boolean) =>
 const RESTARTED_WORK = `From Claudopus, not {name}: you stopped partway through a step without a report (the app restarted, the Mac slept or a command was interrupted). First check what you already have, then continue from where you were; a command or helper you started may still be running, or may need starting again.`
 const STOPPED_SHORT_GO_ON = `From Claudopus, not {name}: your step ended without your report, without a question for {name}, and with nothing of yours running that starts you again, so you were left stopped partway. Carry on from where you were: check what you already have and whether something you started still runs, then go on with your to-dos. When all is done, hand back your report with SubagentHandback; when a step needs {name}, ask with the ask tool; to wait for something, run it in the background or call wake_me, then end your step.`
 const quotedItems = (items: string[]) => items.map(item => `"${item}"`).join('; ')
+const STILL_TO_DO = (items: string[]) =>
+  ` Still to do on your card: ${quotedItems(items)}. If you already sent your report, it went out while your card still showed these: do each now, or tick it if it is done, or drop it if it will not be done, record with the waits tool what waits on {name}, and hand back again with only what is new.`
 const KEEP_GOING = (items: string[]) =>
   `From Claudopus, not {name}: don't end here, your task isn't finished. Still to do: ${quotedItems(items)}. Nothing of yours is running that would start you again (no command in the background, no detached command started with \`echo $!\` after it, no helper at work, no wake_me, no question on your card), so if your step ends now this work stops undone. Claude Code's note that your report has not been delivered doesn't apply yet: send your report only once every to-do is ticked. Carry on now with the first of them. If you expected something you started to be running, look at its log: it may have failed or ended. To wait for something, run it in the background or detached with \`echo $!\` after it, or call wake_me for a file, a page or a time, then end your step. Tick each to-do as soon as it is done. For one only {name} can do, ask with the ask tool and end your step.`
 const NOT_TICKED = (items: string[]) =>
-  `Not sent: ${items.length === 1 ? 'a to-do of yours is' : `${items.length} of your to-dos are`} still to do: ${quotedItems(items)}. Do ${items.length === 1 ? 'it' : 'each'} now, or tick it done if it is done already, then hand back your report. One that only {name} can do or decide stays as it is: name it in your report under "Not done", with what {name} needs to do, and send your report again. Claudopus then shows it as not done on your card and in your result.`
+  `Not sent: ${items.length === 1 ? 'a to-do of yours is' : `${items.length} of your to-dos are`} still to do: ${quotedItems(items)}. Do ${items.length === 1 ? 'it' : 'each'} now, or tick it done if it is done already, or drop it if it will no longer be done and say why in your report, then hand back your report. One that only {name} can do or decide stays as it is: record it with the waits tool, name it in your report under "Not done", with what {name} needs to do, and send your report again. Claudopus then shows it as not done on your card and in your result, and your card never says Done while a to-do is left.`
 const UNRECORDED_WAITS = `Not sent: your report asks {name} something, but you recorded nothing as waiting on {name}, so the panel would show your task as done. Record each question only {name} can answer with the waits tool, or call it with [] if nothing waits on {name}, then send your report again.`
 const NOT_DONE_IN_CHAT = (title: string, items: string[]) =>
   `From Claudopus: the task "${title}" sent its result with ${items.length === 1 ? 'a to-do' : `${items.length} to-dos`} not done: ${quotedItems(items)}. When you pass its result on to {name}, say these are not done.`
@@ -1184,8 +1232,8 @@ const started = (id: string, parentId: string, title: string, words: string, at:
   endedAt: 0,
   status: 'working',
 })
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
-const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, reportAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, ownWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, newAt: at })
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, leftOwn: status === 'done' && one.bg?.some(b => !b.isWatch && !isServerRun(b.cmd, b.what)) ? true : undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp || one.status === 'done' ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, reportAt: undefined, leftSince: undefined, leftOwn: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, ownWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, closedAt: undefined, newAt: at })
 const goesOn = (list: Todo[], id: string) => {
   const one = list.find(card => card.id === id)
   const isRunning = Boolean(one?.bg?.some(b => !b.isWatch)) || list.some(kid => kid.parentId === id && kid.status === 'working')
@@ -1463,6 +1511,13 @@ const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: n
   await openList($)
 }
 
+const isDismissed = (one: Todo) => one.status !== 'working' && Boolean(one.closedAt)
+const dismiss = async ($: EngineInterface, id: string) => {
+  const at = await $.clock.now()
+  await changeTodos($, list => list.map(one => (one.id === id && one.status !== 'working' && !one.closedAt ? { ...one, closedAt: at, ask: undefined } : one)))
+  redraw($)
+  await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
+}
 const tell = ($: EngineInterface, id: string, text: string) =>
   $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] }, agentId: id }).catch(async err => void (await log($, `work ${id} not told: ${String(err)}`)))
 
@@ -1560,7 +1615,7 @@ const saveFinished = async ($: EngineInterface) => {
   const { id } = await read($, me)
   const all = await read($, todos)
   const ended = all.filter(one => one.status !== 'working' && (!one.parentId || all.some(top => top.id === topOf(all, one.id) && !top.parentId && top.status !== 'working')))
-  const sign = ended.map(one => [one.id, one.status, one.endedAt, one.items.length, one.entries.length, one.answer.length, one.tokens, one.title, one.byYou ? `${one.byYou.at}${one.byYou.isLifted ? 'l' : ''}` : ''].join(':')).join(',')
+  const sign = ended.map(one => [one.id, one.status, one.endedAt, one.items.length, one.entries.length, one.answer.length, one.tokens, one.title, one.byYou ? `${one.byYou.at}${one.byYou.isLifted ? 'l' : ''}` : '', one.closedAt ?? ''].join(':')).join(',')
   if (!id || !dir || !ended.length || sign === finishedSaved) return
   const old = JSON.parse((await readOr($, finishedPath(id))) || '[]') as Todo[]
   const kept = capped([...old.filter(one => !ended.some(card => card.id === one.id)), ...ended].sort((a, b) => a.endedAt - b.endedAt))
@@ -1721,9 +1776,22 @@ const stateOf = (list: Todo[], one: Todo): TaskState => {
   if (needsPerson(one)) return 'waiting-you'
   return one.endedStepAt !== undefined && wakesOf(list, one).isAny ? 'waiting-own' : 'working'
 }
+const shownAs = (list: Todo[], _asks?: (one: Todo) => boolean): Todo[] =>
+  list.map(one => {
+    if (isOff || one.parentId || one.chat || one.status !== 'done') return one
+    if (one.closedAt) return openItems(one).length ? { ...one, leftOpen: openItems(one).length } : one
+    if (one.ask) return one
+    const { runs, helpers } = wakesOf(list, one)
+    if (runs.length || helpers || (one.leftSince && one.leftOwn)) return { ...one, status: 'working' as const, wasDone: one.endedAt, endedAt: 0, endedStepAt: one.endedStepAt ?? one.endedAt }
+    if (openItems(one).length) return { ...one, leftOpen: openItems(one).length }
+    return one
+  })
+const shownOne = (list: Todo[], id: string, asks?: (one: Todo) => boolean) => shownAs(list, asks).find(one => one.id === id)
+
 const ownWorkWords = (list: Todo[], one: Todo) => {
-  if (stateOf(list, one) !== 'waiting-own') return ''
+  if ((stateOf(list, one) !== 'waiting-own' && one.wasDone === undefined)) return ''
   const { runs, helpers } = wakesOf(list, one)
+  if (one.wasDone !== undefined && !runs.length && !helpers) return 'Waiting for its command'
   const what = [runs.length ? (runs.length === 1 ? 'its command' : 'its commands') : '', helpers ? (helpers === 1 ? 'its helper' : 'its helpers') : ''].filter(Boolean).join(' and ')
   return what ? `Waiting for ${what}` : 'Waiting to be started again'
 }
@@ -1749,7 +1817,7 @@ const doneHeld = async ($: EngineInterface, ids: string[]) => {
     const list = await read($, todos)
     const one = list.find(card => card.id === id)
     if (!one || one.status !== 'working') continue
-    if (await isUnpressed($, id)) {
+    if (!(openItems(one).length && (!one.kind || WAITS_KINDS.has(one.kind)) && isStoppedShort(one, '')) && (await isUnpressed($, id))) {
       const now = await $.clock.now()
       await changeTodos($, cards => cards.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'done', now), reportAt: now } : card)))
       await lookEnds($)
@@ -2162,12 +2230,22 @@ const answeredInMessage = async ($: EngineInterface, text: string) => {
     const n = Number(/^About question (\d+) of the result /.exec(part)?.[1] ?? 0)
     return n ? [{ n, part }] : []
   })
-  if (!parts.length) return
+  const told: string[] = []
+  if (!parts.length) return told
   for (const r of (await read($, reports)).filter(one => !one.archived && isOpenQuestion(one))) {
     const path = `${reportPath(r)}/report.md: `
-    const numbers = parts.filter(({ part }) => part.includes(path) && part.slice(part.indexOf(path) + path.length).trim()).map(({ n }) => n)
-    if (numbers.length) await settleWaits($, r, (_, index) => (numbers.includes(index + 1) ? { answer: IN_WORDS } : undefined))
+    const typed = parts.flatMap(({ n, part }) => (part.includes(path) && part.slice(part.indexOf(path) + path.length).trim() ? [{ n, words: part.slice(part.indexOf(path) + path.length).trim() }] : []))
+    const numbers = typed.map(({ n }) => n)
+    if (!numbers.length) continue
+    const card = taskOfResult(await read($, todos), r)
+    const open = typed.filter(({ n }) => waitsOf(r)[n - 1] && !waitsOf(r)[n - 1]?.answer)
+    if (card && open.length) drawWaking($, card, await $.clock.now())
+    await settleWaits($, r, (_, index) => (numbers.includes(index + 1) ? { answer: IN_WORDS } : undefined))
+    if (!card || !open.length) continue
+    for (const { n, words } of open) await answerToTask($, card, r, waitsOf(r)[n - 1] ?? { text: '' }, words, true)
+    told.push(named(RESULT_WORDS_SENT(r.title)))
   }
+  return told
 }
 
 const gists = new Map<string, string>()
@@ -2254,8 +2332,8 @@ const unrecordedAtHandback = async ($: EngineInterface, id: string, message: str
 
 const CARD_WAITS_SHOWN = 60_000
 const openResultWaits = (one: Todo, kept: Report[], at: number): { r?: Report; wait: Wait; index: number }[] => {
-  if (one.status !== 'done' || one.parentId || one.chat) return []
-  const fromResults = resultsOfWork(kept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer ? [] : [{ r, wait, index }])))
+  if (one.status !== 'done' || one.parentId || one.chat || one.closedAt) return []
+  const fromResults = resultsOfWork(kept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer || answering.has(`${r.id}:${index}`) ? [] : [{ r, wait, index }])))
   const fromCard = fromResults.length || at - one.endedAt > CARD_WAITS_SHOWN ? [] : (one.waits ?? []).map(askedWait).flatMap((wait, index) => (wait.answer ? [] : [{ wait, index }]))
   return [...fromResults, ...fromCard].filter(({ wait }) => !one.ask || wait.ask !== one.ask.at)
 }
@@ -2434,16 +2512,51 @@ const carryOn = async ($: EngineInterface, r: Report, now: number) => {
   if (!filled.isFilled) await log($, 'the chat box was not filled from a report')
 }
 const answering = new Set<string>()
-const answerWait = async ($: EngineInterface, r: Report, index: number, said: string, now: number) => {
+const answerWait = ($: EngineInterface, r: Report, index: number, said: string, now: number) => {
   const wait = waitsOf(r)[index]
-  if (!wait || wait.answer || answering.has(`${r.id}:${index}`)) return
+  if (!wait || wait.answer || answering.has(`${r.id}:${index}`)) return Promise.resolve()
   if (said === ANSWER_IN_WORDS) return answerInWords($, r, index, now)
   answering.add(`${r.id}:${index}`)
-  if (said !== 'Not now') await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "${said}" to answer the question in the result "${r.title}" (${dated(r.at, now)}): ${wait.text}\nThe result: ${reportPath(r)}/report.md`)
+  redraw($)
+  const run = answerWaitNow($, r, index, wait, said, now)
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
+  return run
+}
+const taskOfResult = (list: Todo[], r: Report) => list.find(one => one.id === r.agent && !one.parentId && !one.chat && !isHeld(one) && !one.flagged)
+const drawWaking = ($: EngineInterface, card: Todo, now: number) => {
+  if (card.status === 'working') return
+  resultWaking.set(card.id, now)
+  redraw($)
+  $.clock.after(WAKE_WAIT + HOOK_WAIT + 5000, () => void (resultWaking.get(card.id) === now && resultWaking.delete(card.id) && redraw($)))
+}
+const answerWaitNow = async ($: EngineInterface, r: Report, index: number, wait: Wait, said: string, now: number) => {
+  const again = (err: unknown) => {
+    answering.delete(`${r.id}:${index}`)
+    redraw($)
+    throw err
+  }
+  const card = said === 'Not now' ? undefined : taskOfResult(await read($, todos).catch(again), r)
+  if (card) drawWaking($, card, now)
+  else if (said !== 'Not now') await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "${said}" to answer the question in the result "${r.title}" (${dated(r.at, now)}): ${wait.text}\nThe result: ${reportPath(r)}/report.md`).catch(again)
   await markReport($, r, stored => ({ waiting: waitsOf(stored).map((one, at) => (at === index ? { ...one, answer: said } : one)) })).catch(err => {
-    if (said === 'Not now') answering.delete(`${r.id}:${index}`)
+    if (said === 'Not now' || card) answering.delete(`${r.id}:${index}`)
+    redraw($)
+    if (card && resultWaking.delete(card.id)) redraw($)
     throw err
   })
+  if (card) await answerToTask($, card, r, wait, said, false)
+}
+const answerToTask = async ($: EngineInterface, card: Todo, r: Report, wait: Wait, said: string, isWords: boolean) => {
+  const at = await $.clock.now()
+  const left = waitsOf((await read($, reports)).find(one => one.id === r.id) ?? r).filter(one => !one.answer && one.text !== wait.text).length
+  const text = RESULT_ANSWER(r.title, `${reportPath(r)}/report.md`, wait.text, said, isWords, left)
+  await changeTodos($, list => list.map(one => (one.id === card.id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: `${said} — to: ${wait.text}` }].slice(-ENTRIES_KEPT) } : one)))
+  const sent = { text: said, ask: wait.text, at, line: lineOf(card), isCard: true }
+  const told = (await read($, todos)).find(one => one.id === card.id)?.status === 'working' ? await tell($, card.id, text) : undefined
+  if (told && !told.deny) (writtenIn($, card.id, card.id), sentReplies.set(card.id, { ...sent, to: 'work' }), redraw($))
+  else await toEnded($, card, card.id, `${text}\n${RESUMED_BY_ANSWER}`, sent)
+  await tellChat($, named(RESULT_ANSWERED(r.title, wait.text, `“${cut(said, 120)}”`)))
 }
 const answerInWords = async ($: EngineInterface, r: Report, index: number, now: number) => {
   const text = wordsLine(r, index + 1, now)
@@ -4458,7 +4571,7 @@ const standing = (status: string, endedAt: number) => (status === 'working' ? 'w
 
 const lookEnds = async ($: EngineInterface) => {
   const mine = await sessionName($)
-  const cards = (await read($, todos)).filter(one => !one.parentId)
+  const cards = shownAs(await read($, todos), one => (one.waits ?? []).some(wait => !askedWait(wait).answer)).filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
   const all = [...cards.map(one => ({ id: one.id, status: one.status, endedAt: one.endedAt, waits: one.waits })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt, waits: undefined as Todo['waits'] }))]
@@ -4468,7 +4581,7 @@ const lookEnds = async ($: EngineInterface) => {
   for (const one of all) {
     const before = was.get(one.id)
     if (one.status === 'working' || before === undefined || before === standing(one.status, one.endedAt) || cutPending.has(one.id)) continue
-    if (now - one.endedAt > STALE_END || now - (announced.get(one.id) ?? -Infinity) < AGAIN) continue
+    if ((now - one.endedAt > STALE_END && before !== 'working') || now - (announced.get(one.id) ?? -Infinity) < AGAIN) continue
     announced.set(one.id, now)
     if (pressed.delete(one.id)) continue
     ready.push({ id: one.id, waits: one.waits })
@@ -4492,9 +4605,11 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
     const what = f.status === 'done' ? fewWords(f.result) || 'Done.' : f.status === 'failed' ? 'Failed.' : 'Stopped.'
     return { title: f.title || f.name || 'Workflow', isDone: f.status === 'done', what }
   }
-  const one = cards.find(card => card.id === id)
-  if (!one) return undefined
-  const waits = (one.waits ?? seen ?? []).filter(wait => !askedWait(wait).answer)
+  const kept = cards.find(card => card.id === id)
+  if (!kept) return undefined
+  const waits = (kept.waits ?? seen ?? []).filter(wait => !askedWait(wait).answer)
+  const one = shownOne(cards, id, () => waits.length > 0) ?? kept
+  if (one.status === 'working') return undefined
   const said = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text ?? ''
   const what =
     one.status === 'done'
@@ -4504,6 +4619,7 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
       : one.status === 'failed'
         ? 'Failed.'
         : 'Stopped.'
+  if (one.leftOpen) return { title: one.title || 'Task', isDone: false, what: `Not done: ${one.leftOpen === 1 ? 'a to-do is' : `${one.leftOpen} to-dos are`} left.` }
   return { title: one.title || 'Task', isDone: one.status === 'done', isWaiting: one.status === 'done' && waits.length > 0, what }
 }
 
@@ -5485,7 +5601,7 @@ const freeTimes = ($: EngineInterface) => {
   if (wasHeld) drawAgain($)
 }
 let isRedrawOwed = false
-const isBoxHeld = (at: number) => Boolean(replyTo || boxOpen) && barBoxAt > 0 && at - barBoxAt < TYPING
+const isBoxHeld = (at: number) => Boolean(replyTo || boxOpen || changeTo) && barBoxAt > 0 && at - barBoxAt < TYPING
 const drawFresh = async ($: EngineInterface, isThroughTyping = false) => {
   if (!isThroughTyping && isBoxHeld(await $.clock.now())) return void ((isRedrawOwed = true), recordEvent($, 'redraw-owed'))
   isRedrawOwed = false
@@ -5624,7 +5740,10 @@ const plainWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/
 const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) =>
   !isReply || Boolean(ask.refused) || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))
 const askPressed = new Map<string, string>()
-const asPressed = (one: Todo): Todo => {
+const resultWaking = new Map<string, number>()
+const asPressed = (given: Todo): Todo => {
+  const wakingAt = given.status === 'working' ? undefined : resultWaking.get(given.id)
+  const one: Todo = wakingAt !== undefined ? { ...given, status: 'working', startedAt: given.endedAt ? wakingAt - (given.endedAt - given.startedAt) : given.startedAt, endedAt: 0 } : given.closedAt && given.ask ? { ...given, ask: undefined } : given
   const isAnswered = Boolean(one.ask && askPressed.get(one.id) === `${one.ask.at}:${one.ask.text}`)
   const admins = one.admins?.filter(gate => !gatePressed.has(gate.id))
   if (!isAnswered && admins?.length === one.admins?.length) return one
@@ -5665,6 +5784,7 @@ const sendFromBar = ($: EngineInterface, id: string, value: string) => {
 }
 const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) => {
   if (replyTo) barLeft.set(replyTo, barDraft(replyTo))
+  if (one?.ask) changeTo = ''
   if (one) (carryDraft($, one, barLeft.get(one.id)), barLeft.delete(one.id))
   replyTo = one?.ask ? one.id : ''
   if (one?.ask) boxOpen = undefined
@@ -5680,6 +5800,46 @@ const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) =
     .focus({ requestId: bar, key: barBoxKey(one.id) })
     .then(r => recordEvent($, 'focus-call', { deny: r.deny ?? null }))
     .catch(err => recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }))
+}
+let changeTo = ''
+const changeBoxKey = (id: string) => `band-${id}-reply-change-${replies.get(id) ?? 0}`
+const changeDraft = (id: string) => `${id}|change`
+const canChange = (one: Todo) => !one.chat && !one.parentId && one.status === 'done' && !one.leftOpen && !openItems(one).length && !one.ask && !one.admins?.length
+const openChange = ($: EngineInterface, one: Todo | undefined, surface: string) => {
+  if (one && replyTo) (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''))
+  if (one) boxOpen = undefined
+  if (changeTo) (dropDrafts($, changeTo), replies.set(changeTo, (replies.get(changeTo) ?? 0) + 1))
+  changeTo = one?.id ?? ''
+  barBoxAt = 0
+  isBarSettling = false
+  presses += 1
+  freeTimes($)
+  redraw($)
+  const bar = barIds.get(surface)
+  if (!one || !bar) return
+  void $.ui
+    .focus({ requestId: bar, key: changeBoxKey(one.id) })
+    .then(r => recordEvent($, 'focus-call', { deny: r.deny ?? null }))
+    .catch(err => recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }))
+}
+const sendChange = ($: EngineInterface, id: string, value: string) => {
+  const run = changeTask($, id, value.trim())
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
+  return run
+}
+const changeTask = async ($: EngineInterface, id: string, said: string) => {
+  const card = (await read($, todos)).find(one => one.id === id)
+  if (!card || !said || card.chat || card.parentId || isHeld(card)) return
+  const at = await $.clock.now()
+  drawWaking($, card, at)
+  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) } : one)))
+  const text = CHANGE_ASKED(said)
+  const sent = { text: said, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true }
+  const told = (await read($, todos)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
+  if (told && !told.deny) (writtenIn($, id, id), sentReplies.set(id, { ...sent, to: 'work' }), redraw($))
+  else await toEnded($, card, id, text, sent)
+  await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(said, 120)}”`)))
 }
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   if (one.chat) return
@@ -5867,12 +6027,19 @@ const sendWakes = async ($: EngineInterface, isAnswering = false) => {
   }
 }
 const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number], isInHook = true) => {
+  try {
+    await sendWakeNow($, wake, isInHook)
+  } finally {
+    if (resultWaking.delete(wake.target)) redraw($)
+  }
+}
+const sendWakeNow = async ($: EngineInterface, wake: (typeof wakes)[number], isInHook = true) => {
   if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`), await runsSent($, wake, 'held'))
   if (wake.spawn && isInHook) {
     const r = await $.agent.spawn(wake.spawn).catch(err => ({ deny: String(err) }) as { deny: string })
     if (!r.deny) return void (await log($, `a small task ${(r as { agentId?: string }).agentId ?? ''} does the last step of ${wake.target}`))
     await log($, `the last step's small task not started (${r.deny}): its work is started again instead`)
-    return sendWake($, { ...wake, spawn: undefined })
+    return sendWakeNow($, { ...wake, spawn: undefined })
   }
   if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`))
   const r = (await isReplaced($))
@@ -5994,7 +6161,7 @@ const sentLine = (one: Todo, now: number) => {
   }[sent.to]
   if (isHeld) return `✓ You answered “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : ' · the question is still open'}`
 
-  return `✓ You answered “${cut(sent.text, 60)}” · ${how}`
+  return `✓ You ${sent.ask === CHANGE_WHAT ? 'asked for' : 'answered'} “${cut(sent.text, 60)}” · ${how}`
 }
 
 
@@ -6046,7 +6213,8 @@ const shareMine = async ($: EngineInterface) => {
     )
     return Object.keys(seen).length ? { ...one, seenJobs: seen } : one
   }
-  const cards = shareable(list, now).map(withSeen)
+  const sharedKept = await read($, reports)
+  const cards = shareable(shownAs(list, one => openResultWaits(one, sharedKept, now).length > 0), now).map(withSeen)
   const helpers = shareableHelpers(list, cards).map(withSeen)
   const jobsSign = [...cards, ...helpers].map(one => Object.values(one.seenJobs ?? {}).map(s => `${s.latest}:${s.tail?.at(-1) ?? ''}:${Math.floor((s.wroteAt ?? 0) / 30_000)}:${s.target ?? ''}`).join('|')).join(' ')
   const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, input: _input, ...p }: Waiting): Prompt => p
@@ -6879,6 +7047,7 @@ const looksLikeKey = (text: string) => keyWords(text).length > 0
 const BOX_LOOKS_KEY = (where: string) => `That looks like the key itself. An answer in words goes into the chat, where Claude reads it. Save it as the key to keep it only in ${where}, or send it as an answer anyway.`
 const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surface: string) => {
   if (id && replyTo) (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''))
+  if (id) changeTo = ''
   boxOpen = id ? { id, mode } : undefined
   barKeyTyped.clear()
   if (id) (boxHeldReply.delete(id), boxSaid.delete(id))
@@ -9192,7 +9361,7 @@ const chatHooks = (on: On) => {
         .slice(-8)
         .map(one => `${one.title || 'task'} (${one.id}) ${one.isFork && m.window ? `${Math.round((one.tokens / m.window) * 100)}%` : thousands(one.tokens)}`)
       const told = reportsTold(await read($, reports), await $.clock.now())
-      context.push(`${BRIEF}${sizes.length ? `\nHow full each task's context is: ${sizes.join('; ')}.` : ''}${told ? `\n${told}` : ''}`)
+      context.push(`${briefNow()}${sizes.length ? `\nHow full each task's context is: ${sizes.join('; ')}.` : ''}${told ? `\n${told}` : ''}`)
       await update($, me, one => ({ ...one, isChat: true, needsContext: false, roleSent }))
 
       if (text.length > PASTE_CHARS) {
@@ -9200,14 +9369,14 @@ const chatHooks = (on: On) => {
         const path = `${dir}/pastes/${stamp}.md`
         await $.fs.write(`${dir}/pastes/${stamp}.md`, hideKeys(text))
         text = `${text.slice(0, 600)}\n\n[${text.length - 1200} characters pasted here were saved to ${path} and left out of this chat]\n\n${text.slice(-600)}`
-        context.push(PASTED)
+        context.push(pastedNow())
       }
     }
 
     said = text
     heard = [...heard, text]
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
-    await answeredInMessage($, text).catch(err => log($, `results answered in words not marked: ${String(err)}`))
+    context.push(...(await answeredInMessage($, text).catch(err => (void log($, `results answered in words not marked: ${String(err)}`), [] as string[]))))
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
     await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
 
@@ -9794,7 +9963,7 @@ const carryNow = async ($: EngineInterface, id: string, at: number) => {
   if (carrySent.has(`${id}:${at}`)) return
   carrySent.add(`${id}:${at}`)
   const isStill = async () => Boolean(await stillStopped()) && !WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))
-  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON + (openItems(one).length ? STILL_TO_DO(openItems(one).map(item => item.text)) : '')) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (r.isDelivered) return void (await log($, `work ${id} started again to carry on`))
   if (!(await isStill())) return void (await log($, `work ${id} moved on before Claudopus started it: no note sent`))
   const now = await $.clock.now()
@@ -9860,6 +10029,7 @@ const notDoneLines = (one: Todo, text: string) => {
   return left.length ? `\n\nNot done:\n${left.map(item => `- ${item}`).join('\n')}` : ''
 }
 const isLeftStopped = (one: Todo, at: number) => Boolean(one.carryOn?.gaveUp && one.status !== 'working' && at - one.carryOn.gaveUp < CUT_OLD)
+const isLeftOpen = (one: Todo, at: number) => Boolean(one.leftOpen && !one.chat && at - one.endedAt < CUT_OLD)
 const carryLine = (one: Todo) => {
   const c = one.carryOn
   if (!c?.gaveUp || one.status === 'working') return ''
@@ -9974,7 +10144,7 @@ const lookJobs = async ($: EngineInterface) => {
     }
   }
   await pruneSpans($, now)
-  if (!owned.length && !unfound.length && !spans.length) return
+  if (!owned.length && !unfound.length && !spans.length && !openCalls.size) return
   const sid = await $.session.id().catch(() => '')
   if (sid !== tasksOf) ((tasksOf = sid), (tasksDir = ''), (tasksMissedAt = 0))
   if (owned.some(o => !o.file) && !tasksDir && now - tasksMissedAt >= JOB_NEWS) {
@@ -9999,7 +10169,7 @@ const lookJobs = async ($: EngineInterface) => {
   if (!r) return
   const [body = '', tail = ''] = r.stdout.split('\n@@ALIVE@@')
   const [aliveText = '', psText] = tail.split('@@PS@@\n')
-  if (psText !== undefined) ((jobProcs = procsOf(psText, await $.clock.now())), (jobProcsAt = now))
+  if (psText !== undefined) ((jobProcs = procsOf(psText, await $.clock.now())), (jobProcsAt = now), seeGroups(jobProcs))
   if (psText !== undefined && spans.length) await adoptLeft($, jobProcs, now).catch(err => log($, `left runs not followed: ${String(err)}`))
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
   const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]))
@@ -10118,8 +10288,39 @@ type KeptSpan = Span & { agent: string; what: string; bgId?: string }
 let spans: KeptSpan[] = []
 const SPANS_KEPT = 300
 const SPAN_KEPT_FOR = 2 * 60_000
-const openCalls = new Map<string, OpenCall>()
+const openCalls = new Map<string, OpenCall & { looking?: Promise<unknown> }>()
 const adopted = new Set<string>()
+const isOpenSpan = (s: KeptSpan) => Boolean(s.bgId) && s.until === undefined
+const seeGroups = (procs: Proc[]) => {
+  const shells = () => new Set([...openCalls.values(), ...spans].flatMap(one => (one.groups?.[0] ? [one.groups[0]] : [])))
+  for (const call of openCalls.values()) {
+    const groups = call.cmd ? groupsOf(procs, { cmd: call.cmd, at: call.at, from: call.from, groups: call.groups }, call.groups ? undefined : shells()) : undefined
+    if (groups) call.groups = groups
+  }
+  for (const span of spans.filter(isOpenSpan)) {
+    const groups = groupsOf(procs, span, span.groups ? undefined : shells())
+    if (groups && groups.length !== span.groups?.length) spans = spans.map(s => (s.id === span.id ? { ...s, groups } : s))
+  }
+}
+const SHELL_LOOKS = [0, 60, 200, 600, 2_000, 5_000, ...Array.from({ length: 8 }, () => JOB_PS)]
+const isOpenCall = (id: string) => openCalls.has(id) || spans.some(s => s.id === id && isOpenSpan(s))
+const groupsSeen = (id: string) => openCalls.get(id)?.groups ?? spans.find(s => s.id === id)?.groups
+const seeShell = ($: EngineInterface, id: string, n = 0) => {
+  const look = async () => {
+    if (!isOpenCall(id) || groupsSeen(id)) return
+    const r = await $.process.run(['sh', '-c', `printf '@@SHELLS@@\\n'; ps -axww -o ${PS_COLUMNS}`], { timeoutMs: 5000 }).catch(() => undefined)
+    if (r?.exitCode === 0 && r.stdout.includes('@@SHELLS@@')) seeGroups(procsOf(r.stdout.split('@@SHELLS@@\n')[1] ?? '', await $.clock.now()))
+    if (isOpenCall(id) && !groupsSeen(id) && n + 1 < SHELL_LOOKS.length) seeShell($, id, n + 1)
+  }
+  const go = () => {
+    const call = openCalls.get(id)
+    const looking = look().catch(err => log($, `a command's shell not looked for: ${String(err)}`))
+    if (call) call.looking = looking
+  }
+  const wait = SHELL_LOOKS[n] ?? 0
+  if (wait) $.clock.after(wait, go)
+  else go()
+}
 const pruneSpans = async ($: EngineInterface, now: number) => {
   const list = spans.some(s => s.bgId && s.until === undefined) ? await read($, todos) : []
   spans = spans.map(s => (s.bgId && s.until === undefined && !list.some(one => one.bg?.some(b => b.id === s.bgId)) ? { ...s, until: now } : s))
@@ -10130,17 +10331,18 @@ const pidNow = async ($: EngineInterface) => {
   const n = Number(r?.stdout.trim())
   return Number.isInteger(n) && n > 1 ? n : 0
 }
-const keepSpan = async ($: EngineInterface, agent: string, call: { tool: string; command?: unknown; description?: unknown; tool_use_id?: unknown; run_in_background?: unknown }, from: number, at: number, result?: unknown) => {
+const keepSpan = async ($: EngineInterface, agent: string, call: { tool: string; command?: unknown; description?: unknown; tool_use_id?: unknown; run_in_background?: unknown }, from: number, at: number, result?: unknown, held?: OpenCall & { looking?: Promise<unknown> }) => {
   if (call.tool !== 'Bash' || !from) return
   const to = await pidNow($)
   openCalls.delete(String(call.tool_use_id ?? ''))
+  await held?.looking
   if (!to) return
   const now = await $.clock.now()
   const command = String(call.command ?? '')
   if (/^\s*(\S*\/)?ssh\b/.test(command)) return
   const bgId = (result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId
   const isBackground = Boolean(call.run_in_background) && typeof bgId === 'string'
-  const span: KeptSpan = { id: String(call.tool_use_id ?? now), agent, what: oneLine(String(call.description ?? '')).slice(0, 160), cmd: oneLine(command).slice(0, 4000), from, to, at, endAt: now, ...(isBackground ? { bgId: String(bgId) } : { until: now }) }
+  const span: KeptSpan = { id: String(call.tool_use_id ?? now), agent, what: oneLine(String(call.description ?? '')).slice(0, 160), cmd: oneLine(command).slice(0, 4000), from, to, at, endAt: now, ...(held?.groups ? { groups: held.groups } : {}), ...(isBackground ? { bgId: String(bgId) } : { until: now }) }
   const rest = [...spans.filter(s => s.id !== span.id), span]
   const open = rest.filter(s => s.bgId && s.until === undefined)
   spans = [...open, ...rest.filter(s => !(s.bgId && s.until === undefined)).slice(-Math.max(0, SPANS_KEPT - open.length))].sort((a, b) => a.at - b.at)
@@ -10596,7 +10798,7 @@ const stepLines = (agent: string, calls: { tool: string; input: unknown; tookMs:
   const kind = one && command && one.tookMs >= LONG_RUN && !isLookup(one.tool, one.input) && !WAIT_RUN.test(command) ? kindOf(command) : ''
   if (kind && seen.lastRun === kind) say('serial', SERIAL_RUNS(kind))
   seen.lastRun = kind || (one ? undefined : seen.lastRun)
-  if (isTop && seen.checkerAt === undefined && work.some(call => call.tool === 'Bash' && COMMIT.test(String((call.input as { command?: unknown })?.command ?? '')))) say('look', LOOK_NOW)
+  if (isTop && lean.second !== 'asked' && seen.checkerAt === undefined && work.some(call => call.tool === 'Bash' && COMMIT.test(String((call.input as { command?: unknown })?.command ?? '')))) say('look', LOOK_NOW)
   return lines
 }
 
@@ -11733,6 +11935,7 @@ const NO_FOLLOW =
   'Not run: this only follows a log and would never end, so read the log once when you need it (tail -n 20); you are woken the moment your command ends.'
 const SEND_BACKGROUND = (name: string) =>
   `Not run: this command may run for minutes, and held open it keeps ${name}'s replies from you until it ends. Send the same call again with \`run_in_background: true\` and nothing else changed: Claudopus tells you when it ends, and ${name}'s replies reach you while it runs. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
+const CHAT_HELD_LONG = 'Not run: this command may run for minutes, and held open it keeps this chat from answering until it ends. Send the same call again with `run_in_background: true` and nothing else changed: you are told when it ends.'
 const CHAT_SEND_BACKGROUND = 'Not run: the chat runs its own command only in the background. Send the same call again with `run_in_background: true` and nothing else changed.'
 
 const scriptsRun = async ($: EngineInterface, command: string) => {
@@ -11903,15 +12106,26 @@ const workHooks = (on: On) => {
         return { deny: silent === 'wait' ? NO_PROGRESS_WAIT : NO_PROGRESS_SCRIPT }
       }
     }
+    const itselfHere = e.agentId === undefined && !isOff && Boolean(dir) && lean.chat === 'itself' && (await read($, me)).isChat
+    const pushed = itselfHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
+    let onMain = false
+    for (const push of pushed ? [pushed, ...(await scriptsRun($, pushed))].flatMap(text => barePushes(text, cwd || '.')) : []) {
+      const branch = push.to ?? (await $.process.run(['git', '-C', push.folder, 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => ''))
+      if (/^(?:main|master)$/.test(branch)) onMain = true
+    }
+    if (onMain) {
+      await log($, "refused the chat's push from main")
+      return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
+    }
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }
-    if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash') {
+    if (dir && !isOff && (e.agentId !== undefined || itselfHere) && e.tool === 'Bash') {
       const command = String((e as { command?: unknown }).command ?? '')
       const changed = /\bgit\b/.test(command) ? await ownCheckoutChanged($, [command], cwd || '.') : ''
       if (changed) {
-        await log($, `refused work ${e.agentId}'s command that changes Claudopus's own checkout`)
+        await log($, `refused ${e.agentId === undefined ? "the chat's" : `work ${e.agentId}'s`} command that changes Claudopus's own checkout`)
         return { deny: NO_SWITCH(changed) }
       }
     }
@@ -11924,7 +12138,8 @@ const workHooks = (on: On) => {
       return { deny: NO_RUNNER_MOVED }
     }
     const isChatHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat
-    const chatCommand = isChatHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
+    const isItself = isChatHere && lean.chat === 'itself'
+    const chatCommand = isChatHere && !isItself && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
     if (chatCommand && !isOneCommand(chatCommand) && !RUNNER_NAMED.test(chatCommand)) {
       await log($, "refused a chat's own command that is more than one command")
       return { deny: NOT_ONE_COMMAND }
@@ -11932,10 +12147,10 @@ const workHooks = (on: On) => {
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const places = /^\s*git\s+-C\s/.test(chatCommand) ? [cwd, ...(await readIndex($).catch(() => [])).map(s => s.repo).filter(repo => repo.startsWith('/'))] : []
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom, places) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
-    if (dir && !isOff && e.agentId !== undefined && isLongHeld(e as never)) {
-      await log($, `refused work ${e.agentId}'s long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
-      return { deny: SEND_BACKGROUND(who()) }
+    const isRefusedHere = isChatHere && !isItself && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
+    if (dir && !isOff && (e.agentId !== undefined || isItself) && isLongHeld(e as never)) {
+      await log($, `refused ${e.agentId === undefined ? "the chat's" : `work ${e.agentId}'s`} long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
+      return { deny: e.agentId === undefined ? CHAT_HELD_LONG : SEND_BACKGROUND(who()) }
     }
     if (isChatCommand && !(e as { run_in_background?: unknown }).run_in_background) {
       await log($, "refused the chat's own command held open")
@@ -11974,13 +12189,14 @@ const workHooks = (on: On) => {
       const isSpanned = Boolean(dir) && !isOff && e.agentId !== undefined && call.tool === 'Bash'
       const spanAt = isSpanned ? await $.clock.now() : 0
       const from = isSpanned ? await pidNow($) : 0
-      if (from) openCalls.set(String(call.tool_use_id ?? ''), { from, at: spanAt })
+      const open: OpenCall | undefined = from ? { from, at: spanAt, cmd: oneLine(String((call as { command?: unknown }).command ?? '')).slice(0, 4000) } : undefined
+      if (open) (openCalls.set(String(call.tool_use_id ?? ''), open), seeShell($, String(call.tool_use_id ?? '')))
       const r = await run(call).finally(() => openCalls.delete(String(call.tool_use_id ?? '')))
       if (woken && !r.deny && !r.isError) await changeTodos($, list => list.map(one => (one.id === woken && one.answeredAt ? { ...one, answeredAt: undefined } : one)))
       if (woken && !r.deny && !r.isError) await wakeCard($, woken)
       if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
       if (dir && e.agentId !== undefined && !r.deny && !r.isError && !(call as { run_in_background?: unknown }).run_in_background) await keepDetached($, e.agentId, call as never, r.result).catch(err => log($, `detached work not followed: ${String(err)}`))
-      if (from && e.agentId !== undefined && !r.deny) await keepSpan($, e.agentId, call as never, from, spanAt, r.result).catch(err => log($, `left runs not looked for: ${String(err)}`))
+      if (from && e.agentId !== undefined && !r.deny) await keepSpan($, e.agentId, call as never, from, spanAt, r.result, open).catch(err => log($, `left runs not looked for: ${String(err)}`))
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
       const shown = await hideKept($, call, r)
       const broke = r.deny ? '' : await crossEnded($, e as never, crossed, r.result, Boolean(r.isError)).catch(() => '')
@@ -12160,6 +12376,7 @@ const workHooks = (on: On) => {
     const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
     const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
     if (READS.includes(e.tool) && !isPaste) return next(e)
+    if (isItself) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
     if (grants.length) await dropGrants($, grants).catch(() => undefined)
     const kind = e.tool === 'Bash' ? (shellWords(chatCommand)[0]?.[0] ?? '') : (/__(preview_start)$/.exec(e.tool)?.[1] ?? '')
@@ -12827,19 +13044,19 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
       ) : null}
     </ui.Box>
   ) : null
-const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
-  const draft = barDraft(one.id)
-  const send = (value: string) => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
+const barReply = ($: EngineInterface, ui: Ui, one: Todo, isChange = false) => {
+  const draft = isChange ? changeDraft(one.id) : barDraft(one.id)
+  const send = isChange ? (value: string) => void (value.trim() && ((barBoxAt = 0), (changeTo = ''), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendChange($, one.id, value).catch(err => log($, `change not sent: ${String(err)}`)))) : (value: string) => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
   return (
     <ui.Box key="band-reply" flexDirection="column" flexShrink={0} width="100%">
       <ui.Box flexDirection="row" height={1} overflow="hidden">
-        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↳ Your answer to “${cut(titleOf(one), 60)}”`}</ui.Text>
+        <ui.Text color={isChange ? undefined : NEEDS} bold wrap="truncate-end">{isChange ? `${cut(titleOf(one), 60)} · ${CHANGE_WHAT}` : `↳ Your answer to “${cut(titleOf(one), 60)}”`}</ui.Text>
       </ui.Box>
       {'Input' in ui ? (
         <ui.Box flexDirection="column" width="100%" flexShrink={0}>
           <ui.Input
-            key={barBoxKey(one.id)}
-            placeholder="Type your reply"
+            key={isChange ? changeBoxKey(one.id) : barBoxKey(one.id)}
+            placeholder={isChange ? 'Type what to change' : 'Type your reply'}
             value={draftDrawn(draft)}
             rows={BOX_ROWS}
             autoFocus
@@ -12848,19 +13065,19 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
           />
         </ui.Box>
       ) : null}
-      {barFoot($, ui, 'band-reply', presses, () => void ((drafts.get(draft) ?? '').trim() && send(drafts.get(draft) ?? '')), press => openReply($, undefined, press.surface))}
+      {barFoot($, ui, isChange ? 'band-change' : 'band-reply', presses, () => void ((drafts.get(draft) ?? '').trim() && send(drafts.get(draft) ?? '')), press => (isChange ? openChange($, undefined, press.surface) : openReply($, undefined, press.surface)), true, isChange ? 'Cancel' : 'Close')}
     </ui.Box>
   )
 }
 const BOX_KEYS = 'Enter sends · Shift+Enter for a new line'
-const barFoot = ($: EngineInterface, ui: Ui, where: string, mark: number, onSend: () => void, onClose: (press: { surface: string }) => void, isLines = true) => (
+const barFoot = ($: EngineInterface, ui: Ui, where: string, mark: number, onSend: () => void, onClose: (press: { surface: string }) => void, isLines = true, close = 'Close') => (
   <ui.Box key={`${where}-foot`} flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
     <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
       <ui.Text dimColor wrap="truncate-end">{isLines ? BOX_KEYS : 'Enter sends'}</ui.Text>
     </ui.Box>
     <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
       <ui.Button key={`${where}-send-${mark}`} label="Send" variant="primary" onPress={onSend} />
-      <ui.Button key={`${where}-close-${mark}`} label="Close" plain dimColor onPress={onClose} />
+      <ui.Button key={`${where}-close-${mark}`} label={close} plain dimColor onPress={onClose} />
     </ui.Box>
   </ui.Box>
 )
@@ -12868,16 +13085,20 @@ const barHeld = new Map<string, { shape: string; mark: string; drawing: unknown 
 const barShape = () => {
   const keyBox = barKeyTarget()
   if (boxOpen && keyBox) return `key|${barKeyBoxKey(keyBox.id, boxOpen.mode)}|${boxSaid.get(keyBox.id) ?? ''}|${boxHeldReply.has(keyBox.id)}`
+  if (changeTo) return `change|${changeBoxKey(changeTo)}|${barCardsDrawn}`
   return replyTo ? `reply|${barBoxKey(replyTo)}|${barCardsDrawn}` : ''
 }
 let barCardsDrawn = ''
+const changeTarget = (cards: Todo[]) => (changeTo ? cards.find(one => one.id === changeTo && canChange(asPressed(one))) : undefined)
 const barCardsSign = (cards: Todo[]) => {
+  const changing = changeTarget(cards)
+  if (changing) return `${changing.id}|${titleOf(changing)}`
   const target = barTarget(cards)
   return target?.ask ? `${target.id}|${titleOf(target)}` : ''
 }
 const lookBar = async ($: EngineInterface) => {
   if (isRedrawOwed && !isBoxHeld(await $.clock.now())) drawAgain($)
-  if (!barHeld.size || !replyTo) return
+  if (!barHeld.size || !(replyTo || changeTo)) return
   const sign = barCardsSign(await read($, todos))
   if (sign === barCardsDrawn) return
   barCardsDrawn = sign
@@ -12920,7 +13141,7 @@ const bandHooks = (on: On) => {
     if (e.requestId) barIds.set(e.surface, e.requestId)
     const flipAt = await $.clock.now()
     const kept = barHeld.get(e.surface)
-    if (kept && canBox && barBoxes.has(e.surface) && (replyTo || boxOpen) && kept.shape === barShape()) {
+    if (kept && canBox && barBoxes.has(e.surface) && (replyTo || boxOpen || changeTo) && kept.shape === barShape()) {
       const isHeldNow = isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)
       if (isHeldNow || kept.mark === (await markerSign($, e.surface))) return ((isBarSettling = false), kept.drawing as Awaited<ReturnType<typeof next>>)
     }
@@ -12930,15 +13151,16 @@ const bandHooks = (on: On) => {
       else barBoxes.delete(e.surface)
       const open = canBox ? undefined : cards.find(one => one.id === replyTo)
       if (open) (carryDraft($, open, barDraft(open.id)), freeTimes($))
-      if (!canBox) ((replyTo = ''), (replyMark = ''), (boxOpen = undefined), barHeld.delete(e.surface))
+      if (!canBox) ((replyTo = ''), (replyMark = ''), (changeTo = ''), (boxOpen = undefined), barHeld.delete(e.surface))
       barBoxAt = 0
-      if ((asksForBar(cards).length || boxes.some(one => !one.key)) && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
+      if ((asksForBar(cards).length || boxes.some(one => !one.key) || cards.some(one => canChange(asPressed(one)))) && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
     }
     if (e.props.hasSurvey) return next(e)
-    const working = cards.filter(one => !one.parentId && one.status === 'working')
     const bandAt = await $.clock.now()
     const bandKept = await read($, reports)
-    const happy = isHappy(cards.filter(one => !openResultWaits(one, bandKept, bandAt).length), bandAt)
+    const shown = shownAs(cards, one => openResultWaits(one, bandKept, bandAt).length > 0)
+    const working = shown.filter(one => !one.parentId && one.status === 'working')
+    const happy = isHappy(shown.filter(one => !one.leftOpen && !openResultWaits(one, bandKept, bandAt).length), bandAt)
     if (happy) await read($, tick)
     const ui = uiOf($, e)
     const { Box, Button, Text } = ui
@@ -13009,13 +13231,15 @@ const bandHooks = (on: On) => {
       settleBar($)
       return drawing
     }
-    const target = canBox ? barTarget(cards) : undefined
+    const changing = canBox ? changeTarget(cards) : undefined
+    if (changeTo && canBox && !changing) changeTo = ''
+    const target = changing ?? (canBox ? barTarget(cards) : undefined)
     if (replyTo && canBox && !target) ((replyTo = ''), (replyMark = ''))
-    if (target?.ask) {
+    if (changing || target?.ask) {
       barCardsDrawn = barCardsSign(cards)
       const shape = barShape()
       const marker = await waitMarker($, ui, e.surface)
-      const reply = barReply($, ui, target)
+      const reply = barReply($, ui, target as Todo, Boolean(changing))
       const drawing = marker ? (
         <Box flexDirection="column">
           {marker}
@@ -13201,7 +13425,9 @@ const panelHooks = (on: On) => {
       }
       listFreshAt = from
     }
-    const all = (await read($, todos)).map(asPressed)
+    const shownKept = await read($, reports)
+    const shownAt = await $.clock.now()
+    const all = shownAs((await read($, todos)).map(asPressed), one => openResultWaits(one, shownKept, shownAt).length > 0)
     const own = all.filter(one => !one.parentId)
     const resultsKept = await read($, reports)
     const resultWaits = (one: Todo) => openResultWaits(one, resultsKept, at)
@@ -13214,7 +13440,7 @@ const panelHooks = (on: On) => {
     const answeredOf = (list: Prompt[] | undefined) => (list ?? []).filter(p => !p.endedAt || at - p.endedAt < PROMPT_SHOWN)
     const promptsAnswered = answeredShown(at)
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
-    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || resultWaits(one).length > 0 || one.admins?.length || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD) || isLeftStopped(one, at))
+    const shownWork = own.filter(one => !isDismissed(one)).filter(one => one.status === 'working' || isLingering(one, at) || one.ask || resultWaits(one).length > 0 || one.admins?.length || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD) || isLeftStopped(one, at) || isLeftOpen(one, at))
     let onCards = new Map<string, { at: number; key: string; what: string; node: JSX.Element }[]>()
     let doneOnCards = new Map<string, { at: number; key: string; node: JSX.Element }[]>()
     let promptsLoose = promptsAnswered
@@ -13222,12 +13448,12 @@ const panelHooks = (on: On) => {
     const ours = modelName(await $.session.model().catch(() => ''))
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
     const isAbovePrompt = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
-    const isFinishMoment = (one: Todo) => one.status === 'done' && !one.ask && !resultWaits(one).length && lingers(one, at)
+    const isFinishMoment = (one: Todo) => one.status === 'done' && !one.leftOpen && !one.ask && !resultWaits(one).length && lingers(one, at)
     const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
     const stood: Record<Todo['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
     const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `Claude Code moved it to ${one.moved}` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
     const glance = (one: Todo, count = '') =>
-      [(one.ask && one.status === 'done' && !isActingOnReply(one)) || resultWaits(one).length ? 'Waiting for you' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one), modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.leftOpen ? 'Not done' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one), modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     const { picking = '' } = await read($, view)
     const lead = e.surface === 'terminal' ? 0 : 'xs'
     const facts = (one: Todo, isWhole: boolean, count = '') => {
@@ -13439,7 +13665,7 @@ const panelHooks = (on: On) => {
       const { r, wait, index } = first
       return (
         <Box key={key} flexDirection="column" gap={1}>
-          <Text wrap="wrap" color={NEEDS} bold>{`Result ready · ${cut(wait.text, Math.round(room * 1.6))}`}</Text>
+          <Text wrap="wrap" color={one.leftOpen ? NEEDS : undefined} bold>{`Result ready · ${cut(wait.text, Math.round(room * 1.6))}`}</Text>
           {r ? (
             <Box flexDirection="row" flexWrap="wrap" gap={1}>
               {answersOf(wait).map((said, n) => (
@@ -13479,8 +13705,9 @@ const panelHooks = (on: On) => {
       if (!one.admins?.length && !cardNotesOf(one.id, at).length) gatePartAt.delete(one.id)
       return gatePartAt.get(one.id) ?? open
     }
+    const canDismiss = (one: Todo) => !one.chat && !one.parentId && one.status !== 'working' && shownWork.some(up => up.id === one.id) && !isActingOnReply(one) && !one.admins?.length
     const small = (one: Todo) => {
-      const isMomentNow = isFinishMoment(one) && !keptUpNow.has(one.id)
+      const isMomentNow = isFinishMoment(one) && !keptUpNow.has(one.id) && !isDismissed(one)
       if (!isMomentNow) cardNo += 1
       const digit = keyed && cardNo <= 9 && !isMomentNow ? String(cardNo) : undefined
       const kept = one.items.filter(item => item.state !== 'dropped')
@@ -13500,9 +13727,22 @@ const panelHooks = (on: On) => {
                   </Button>
                 </Box>
                 <Box flexGrow={1} />
-                {one.status === 'working' && !one.chat ? (
+                {one.status === 'working' && !one.chat && (!one.wasDone || one.leftSince) ? (
                   <Box flexShrink={0}>
                     <Button key={`stop-${one.id}`} label="Stop" plain dimColor hover={{ scope: `stop-${one.id}`, underline: true }} onPress={() => void stop($, one.id)} />
+                  </Box>
+                ) : null}
+                {/* Done, at the top or under Finished: a press opens the box above the chat for what to change, where that bar
+                    takes a box; the same task then carries on with what is typed */}
+                {(canChange(one) && !resultWaits(one).length) && 'Input' in table && repliesInBar(e.surface) ? (
+                  <Box flexShrink={0}>
+                    <Button key={`change-${one.id}-${presses}`} label="Change something" plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openChange($, one, press.surface)} />
+                  </Box>
+                ) : null}
+                {/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again */}
+                {canDismiss(one) ? (
+                  <Box flexShrink={0}>
+                    <Button key={`dismiss-${one.id}-${presses}`} label="Dismiss" plain dimColor hover={{ scope: `dismiss-${one.id}`, underline: true }} onPress={() => void ((presses += 1), dismiss($, one.id).catch(err => log($, `card not dismissed: ${String(err)}`)))} />
                   </Box>
                 ) : null}
               </Box>
@@ -13580,8 +13820,8 @@ const panelHooks = (on: On) => {
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* In its pause after ending, the line says in a word how it ended: green when it finished, plain when it was stopped */}
                 {(!one.ask && lingers(one, at)) || leftLine(one, at) ? (
-                  <Text wrap="truncate-end" color={one.status === 'done' ? DONE : one.status === 'failed' ? 'error' : undefined} dimColor={one.status !== 'done' && one.status !== 'failed'}>
-                    {one.status === 'done' ? '✓ Done' : one.status === 'failed' ? '✕ Failed' : one.byYou ? 'Stopped by you' : 'Stopped'}
+                  <Text wrap="truncate-end" color={one.leftOpen ? NEEDS : one.status === 'done' ? DONE : one.status === 'failed' ? 'error' : undefined} dimColor={one.status !== 'done' && one.status !== 'failed'}>
+                    {one.leftOpen ? 'Not done' : one.status === 'done' ? '✓ Done' : one.status === 'failed' ? '✕ Failed' : one.byYou ? 'Stopped by you' : 'Stopped'}
                   </Text>
                 ) : (
                   <Box flexDirection="column" minWidth={0}>
@@ -13617,7 +13857,7 @@ const panelHooks = (on: On) => {
     const edge = (one: Todo, count: number, done: number, isDoing: boolean) => {
       if (one.status === 'failed') return <Box width={1} flexShrink={0} backgroundColor="error" />
       if (one.status !== 'working' && one.status !== 'done') return <Box width={1} flexShrink={0} />
-      const isNeeded = needsPerson(one) || (onCards.get(one.id)?.length ?? 0) > 0 || resultWaits(one).length > 0
+      const isNeeded = needsPerson(one) || (onCards.get(one.id)?.length ?? 0) > 0 || Boolean(one.leftOpen)
       if (isNeeded || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={isNeeded ? NEEDS : one.status === 'working' || isActingOnReply(one) ? LIVE : DONE} />
       const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
       return count > EDGE_PARTS ? (
@@ -14505,7 +14745,7 @@ const panelHooks = (on: On) => {
     const endedElsewhere = elsewhere.filter(one => one.status !== 'working' && !one.ask && !lingers(one, at) && !isVanished(one.id))
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length || answeredOf(c.answeredPrompts).length)
-    const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at) && !one.ask && !resultWaits(one).length && !isLeftStopped(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
+    const finished = [...own.filter(one => isDismissed(one) || (one.status !== 'working' && !isLingering(one, at) && !one.ask && !resultWaits(one).length && !isLeftStopped(one, at) && !isLeftOpen(one, at))), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
         <Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
@@ -14740,7 +14980,7 @@ const panelHooks = (on: On) => {
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
       asks: waitsCount,
-      isDone: isHappy(own.filter(one => !resultWaits(one).length), at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
+      isDone: isHappy(own.filter(one => !one.leftOpen && !resultWaits(one).length), at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
     }
     const mood = headMood(head)
     const isKeyed = e.surface === 'terminal' && !boxes.length

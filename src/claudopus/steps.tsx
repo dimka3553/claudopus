@@ -83,7 +83,7 @@ const stepLines = (agent: string, calls: { tool: string; input: unknown; tookMs:
   if (kind && seen.lastRun === kind) say('serial', SERIAL_RUNS(kind))
   seen.lastRun = kind || (one ? undefined : seen.lastRun)
   // A commit with no second look started
-  if (isTop && seen.checkerAt === undefined && work.some(call => call.tool === 'Bash' && COMMIT.test(String((call.input as { command?: unknown })?.command ?? '')))) say('look', LOOK_NOW)
+  if (isTop && lean.second !== 'asked' && seen.checkerAt === undefined && work.some(call => call.tool === 'Bash' && COMMIT.test(String((call.input as { command?: unknown })?.command ?? '')))) say('look', LOOK_NOW)
   return lines
 }
 

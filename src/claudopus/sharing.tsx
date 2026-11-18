@@ -57,7 +57,9 @@ const shareMine = async ($: EngineInterface) => {
     )
     return Object.keys(seen).length ? { ...one, seenJobs: seen } : one
   }
-  const cards = shareable(list, now).map(withSeen)
+  // (each as this chat shows it: never done to another chat while a command or helper of its own runs or to-dos are left)
+  const sharedKept = await read($, reports)
+  const cards = shareable(shownAs(list, one => openResultWaits(one, sharedKept, now).length > 0), now).map(withSeen)
   const helpers = shareableHelpers(list, cards).map(withSeen)
   const jobsSign = [...cards, ...helpers].map(one => Object.values(one.seenJobs ?? {}).map(s => `${s.latest}:${s.tail?.at(-1) ?? ''}:${Math.floor((s.wroteAt ?? 0) / 30_000)}:${s.target ?? ''}`).join('|')).join(' ')
   const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, input: _input, ...p }: Waiting): Prompt => p

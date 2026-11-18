@@ -32,12 +32,15 @@ export const MODEL_NAMES: Record<string, string> = { opus: 'Opus 5.5', sonnet: '
 export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; updateEvery?: number; skipVersion?: string; models?: Partial<Models>; lean?: Partial<Lean>; heavy?: string; admin?: string; adminSealed?: string; adminPassword?: string }
 
 // When Fable runs and when a second agent checks, each a choice in Config's Tasks band, the shipped one first. `lean` in config.json
-// holds only the ones changed; a key of a choice that was taken out (small, quick, start, checker, readers) is read as nothing. How a job
-// is handed out has no choice: measured (16 Nov, 108 jobs), written instructions to a fresh task cost least and ran as fast or faster
-// than a copy of the chat at every chat size and model, and Sonnet least of all for a clearly stated job
+// holds only the ones changed; a key of a choice that was taken out (small, quick, start, checker, readers) is read as nothing. A job
+// handed to a task goes as written instructions to a fresh one, never a copy of the chat: measured (16 Nov, 108 jobs), that cost least
+// and ran as fast or faster at every chat size and model. Who does a job of a few minutes is the chat itself as shipped: measured
+// (18 Nov, 245 chats on eight practice jobs, each scored blind), a chat that does the job itself in few steps, with no second agent,
+// scored 93.5% against plain Claude Code's 90.5% and the every-job-a-task way's 84%, at less than a quarter of that way's cost and time
 export const LEAN = [
+  { key: 'chat', name: 'Short requests', what: 'Who does a request that takes a few minutes or less. A longer one always goes to a task.', options: [{ value: 'itself', label: 'The chat itself' }, { value: 'tasks', label: 'A task each' }] },
   { key: 'fable', name: 'Fable 5.2 tasks', what: 'Which tasks run on Fable 5.2.', options: [{ value: 'heavy', label: 'Heavy tasks' }, { value: 'all', label: 'Every task' }, { value: 'named', label: 'Only when I ask' }] },
-  { key: 'second', name: 'Second check', what: "When a helper that didn't build the change looks for faults before you see the result.", options: [{ value: 'beyond', label: 'All but small tested fixes' }, { value: 'every', label: 'Every change' }, { value: 'asked', label: 'Only when I ask' }] },
+  { key: 'second', name: 'Second check', what: "When a helper that didn't build the change looks for faults before you see the result.", options: [{ value: 'asked', label: 'Only when I ask' }, { value: 'beyond', label: 'All but small tested fixes' }, { value: 'every', label: 'Every change' }] },
 ] as const
 export type LeanKey = (typeof LEAN)[number]['key']
 export type Lean = { [K in (typeof LEAN)[number] as K['key']]: K['options'][number]['value'] }
@@ -110,15 +113,40 @@ export const modelsRule = (m: Models, lean: Lean = LEAN_SHIPPED) => {
         ? `${name(m.heavy)}, \`model: "${m.heavy}"\`, runs a task only when {name} asks for it by name.`
         : `${name(m.heavy)}, \`model: "${m.heavy}"\`, is only for heavy or really complicated work.`
   const clear = clearModel(m, lean)
-  return `${lean.fable === 'all' ? '' : `Most work runs on ${name(n.work)}, \`model: "${n.work}"\`. `}${clear === n.legwork ? `A clearly stated job, and long legwork such as indexing, runs on ${name(n.legwork)}, \`model: "${n.legwork}"\`.` : `Long legwork such as indexing runs on ${name(n.legwork)}, \`model: "${n.legwork}"\`.`} ${heavy} ${checkRule(n)}${noHaiku(n) ? ' Never Haiku.' : ''} A model is named by these aliases, never by an older version: an agent named an older model starts on its newest.`
+  return `${lean.fable === 'all' ? '' : `Most work runs on ${name(n.work)}, \`model: "${n.work}"\`. `}${clear === n.legwork && lean.chat !== 'itself' ? `A clearly stated job, and long legwork such as indexing, runs on ${name(n.legwork)}, \`model: "${n.legwork}"\`.` : `Long legwork such as indexing runs on ${name(n.legwork)}, \`model: "${n.legwork}"\`.`} ${heavy} ${checkRule(n)}${noHaiku(n) ? ' Never Haiku.' : ''} A model is named by these aliases, never by an older version: an agent named an older model starts on its newest.`
 }
 // The chat's ways of handing work out, the cheapest and fastest measured (16 Nov: 108 jobs, 3 chat sizes and Opus or Fable chats):
 // one command the chat runs itself; a clearly stated job as written instructions to a fresh task on the legwork model (Sonnet as
 // shipped: least money in all 36 cases, fastest in 32, the other 4 within 9 s, on jobs of up to about 25 steps); judgment work to a
 // fresh task on the work model; never a copy of the chat, which cost 1.4 to 5.9 times the Sonnet task and rereads the whole chat at
 // every step
+// What the chat's rules open with, and how the chat that does jobs itself works: the eight rules of the measured setup
+const wayRule = (lean: Lean) =>
+  lean.chat === 'itself'
+    ? 'This chat does a job of a few minutes itself, in its own thread, as Claude Code does without Claudopus: it reads, changes files and runs commands. A bigger or longer job goes to one background task.'
+    : 'This chat changes no file in its own thread, and runs a command only as the rules below allow: every task runs in a background agent, and this thread talks with {name} and reads.'
+const OWN_AGENT =
+  '- A request that can be done on its own gets its own agent right away, so it never waits behind another task; several unrelated requests in one message get one agent each, started together. A fault, a question or a new request is not part of a running task just because it shares a topic, code or card with it, or may have been caused by it. When in doubt, give it its own agent.'
+const lanesItself = (m: Models, lean: Lean) =>
+  [
+    '- A job of one part, or a few small ones, that takes about ten steps or fewer (a change, a few fixes, a new part in an existing style, a file to make, a push, a merge, a look-up): do it yourself, at once. Start no agent for it.',
+    '- Work in as few steps as the job allows. One step of searches, sent together, finds every place and every form of what you are about to change. The change is one step: all edits sent together, and one command for the same replacement across files. Then reply. Read a whole file only when you edit it by hand. Take no step only to say what comes next.',
+    '- Before you change one thing, find what goes with it: the same value written another way, values made from it, every page, theme and screen width that shares it. Change them together.',
+    '- A new part is built from what its place already has (its components, names, variables and patterns) and holds in every page, theme and screen width the place covers.',
+    '- Do what the request plainly needs to be of use where {name} will meet it, and say that you did. When what you built would not work or could not be reached somewhere it should (a page, a theme, a phone), fix that as part of the job instead of reporting it. Build nothing else.',
+    '- Look at a picture of the result only when its look cannot be judged from the code, and then once. No second agent looks unless {name} asks.',
+    '- Reply in a few plain lines: what changed, where to look, and what you did not check. A file {name} asked for: its full path on a line of its own.',
+    '- In a git repo that says how its work reaches main (a `.release` file, or its `CLAUDE.md`), or where a task is at work, change files in a worktree of your own on your own branch from its newest main; elsewhere change them in place. Commit or push only when {name} asks or the repo\'s own files say to, where the change was made. A push of main itself goes only through Claudopus\'s release, which its refusal of one names.',
+    '- A command that may take minutes (a build, a test run, a download) is sent with `run_in_background: true`, and you are told when it ends; so is a server {name} asks for, which stays up. Work that takes longer than a few minutes is a task\'s.',
+    '- An admin (sudo) command, a release and a command that needs a key go through Claudopus\'s runners, as its refusal of one says.',
+    `- A bigger job (several parts that build on each other, a new page or feature, more than about ten steps), work that runs long with nothing for you to do (a training, a long build or download, a search across many sources), and a task {name} asks for: read nothing first. Write one line saying you are on it, and in the same turn start one task: the Agent tool with \`subagent_type: "claudopus:task"\`, the task's instructions as the prompt, and \`model\` as the next rule says. A task that needs a connector, a skill or the browser is started with \`subagent_type: "general-purpose"\` instead. Then stop; do not wait for it. Its instructions set no limit {name} did not set.`,
+    '- A new request that comes while a task runs is done here or gets a task of its own, as above: it is not part of the running task just because it shares a topic, code or card with it.',
+    '- Never start a copy of this chat (`subagent_type: "fork"`): it rereads the whole chat at every step, so it costs several times a fresh task and runs no faster. Claudopus refuses one.',
+  ].join('\n')
 export const lanesRule = (m: Models, lean: Lean = LEAN_SHIPPED) => {
+  if (lean.chat === 'itself') return lanesItself(m, lean)
   return [
+    OWN_AGENT,
     '- A message that is one command that changes no file (a push, a fetch, or a look with git or gh, such as a status, a log, a pull request or a build\'s checks; `open` of a local server\'s page, a folder, or a picture, PDF, page or text; a `curl -q` status check of a local address): run it yourself with Bash and `run_in_background: true`, as a single command with no `&&`, `;`, `|` or `>`. Claudopus stops it at 10 minutes and gives you how it ended and its last lines; tell {name} from that. Show a local server\'s page in the browser pane yourself with its `preview_start` and a `url` (http://localhost:3000). Anything else goes to a task, quick or full, as the next two lines say: a script, a deploy, a commit, a merge or a pull, anything that edits files, takes more than one step, needs its output read to decide the next step, or may ask for a password.',
     `- A job you can state clearly in a few paragraphs, with no judgment left to make (a change you can describe exactly, a push and a look at the build, a merge, a look-up, a chain of commands): write one line saying what you are now doing about it, and in the same turn start a quick task, the Agent tool with \`subagent_type: "claudopus:quick"\` and \`model: "${clearModel(m, lean)}"\`, which Claudopus keeps whatever model is named; when {name} names a model for the job, start it as a full task on that model instead. Its instructions say what to do, where, what done looks like, and what it needs from this talk, written out; name files rather than copy them in. Then stop; do not wait for it.`,
     `- For every other message, write one line saying what you are now doing about it, and in the same turn start a fresh task: the Agent tool with \`subagent_type: "claudopus:task"\`, the task's instructions as the prompt, and \`model\` as the next rule says. A task that needs a connector, a skill or the browser is started with \`subagent_type: "general-purpose"\` instead. Then stop; do not wait for it.`,
@@ -133,12 +161,17 @@ const secondRule = (lean: Lean) =>
       ? '- No second agent looks unless {name} asks for one; the report says nobody else checked it.'
       : '- A lookup, or a small fix in one area that changes nothing beyond the fault and has a test that fails without it and passes with it, needs no second agent; the report says nobody else checked it.'
 // The same said short, as the chat is reminded when it tried to copy itself or named no model
-export const modelsShort = (m: Models, lean: Lean = LEAN_SHIPPED) => `"${m.work}" for most work, "${clearModel(m, lean)}" for a clearly stated job (subagent_type "claudopus:quick"), "${m.legwork}" for long legwork, "${m.heavy}" only for heavy or really complicated work, ${checkHeavy(m) ? `"${checkWork(m)}" or "${m.heavy}"` : `"${checkWork(m)}"`} for checking what was built, never weaker than what built it`
-export const fillModels = (text: string, m: Models, lean: Lean = LEAN_SHIPPED) => {
+export const modelsShort = (m: Models, lean: Lean = LEAN_SHIPPED) => `"${m.work}" for most work, ${lean.chat === 'itself' ? '' : `"${clearModel(m, lean)}" for a clearly stated job (subagent_type "claudopus:quick"), `}"${m.legwork}" for long legwork, "${m.heavy}" only for heavy or really complicated work, ${checkHeavy(m) ? `"${checkWork(m)}" or "${m.heavy}"` : `"${checkWork(m)}"`} for checking what was built, never weaker than what built it`
+const WAY_BEFORE = 'This chat changes no file in its own thread, and runs a command only as the rules below allow: every task runs in a background agent, and this thread talks with {name} and reads.'
+export const fillModels = (given: string, m: Models, lean: Lean = LEAN_SHIPPED) => {
   const n = modelsIn(m, lean)
+  const isBefore = given.includes('{lanes}') && !given.includes('{way}')
+  const moved = isBefore ? given.replace(WAY_BEFORE, '{way}').replace(`${OWN_AGENT}\n`, '') : given
+  const text = isBefore && !moved.includes('{way}') ? `{way}\n\n${moved}` : moved
   return text
     .replace(/\{models\}/g, modelsRule(m, lean))
     .replace(/\{lanes\}/g, lanesRule(m, lean))
+    .replace(/\{way\}/g, wayRule(lean))
     .replace(/\{second\}/g, secondRule(lean))
     .replace(/\{helpers\}/g, `${name(n.legwork)}, \`model: "${n.legwork}"\`${noHaiku(n) ? ', never Haiku' : ''}, and never on an older model`)
     .replace(/\{checker\}/g, `${checkers(n)}: never on a model weaker than the one that built what it checks${notLegwork(n)}`)

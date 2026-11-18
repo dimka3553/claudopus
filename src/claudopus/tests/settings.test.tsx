@@ -98,7 +98,7 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ models: { legwork: 'opus' } })
   // The chat is told at its next message, and the work's rules name the helpers' model
   const told = (await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })) as { context?: string[] }
-  expect((told.context ?? []).join('\n')).toContain('A clearly stated job, and long legwork such as indexing, runs on Opus 5.5, `model: "opus"`.')
+  expect((told.context ?? []).join('\n')).toContain('Long legwork such as indexing runs on Opus 5.5, `model: "opus"`.')
   await $.agent.spawn({ ...spawn, prompt: 'index the photos' } as never)
   expect(prompts[0]).not.toContain('{helpers}')
   expect(prompts[0]).not.toContain('{checker}')
@@ -107,13 +107,14 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
 })
 
-test("Config's Tasks band shows only when Fable runs and when a second agent checks, each with its shipped choice, and a choice is written as lean in config.json; the choices of how work is handed out are gone", async ($, on) => {
+test("Config's Tasks band shows who does a short request, when Fable runs and when a second agent checks, each with its shipped choice, and a choice is written as lean in config.json; the choices of how work is handed out are gone", async ($, on) => {
   const { files } = world(on)
   await $.session.start(start)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   const settings: [string, string, string, string][] = [
+    ['chat', 'Short requests', 'itself', 'tasks'],
     ['fable', 'Fable 5.2 tasks', 'heavy', 'named'],
-    ['second', 'Second check', 'beyond', 'every'],
+    ['second', 'Second check', 'asked', 'every'],
   ]
   for (const [key, name] of [['small', 'Small jobs'], ['quick', 'Quick task model'], ['start', 'What a task starts with'], ['checker', 'Checker model'], ['readers', 'Helpers that only read']])
     expect([name, Boolean(await config.find({ type: 'Text', text: name })), Boolean(await config.find({ type: 'Select', key: `config-lean-${key}-pick` } as never))]).toEqual([name, false, false])

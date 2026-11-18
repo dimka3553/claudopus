@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { heavyOf, isNamedBy, leftoversOf, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, waitingOf, watcherOf, isWaiterTree, PLAIN_MOST } from './jobs'
+import { groupsOf, heavyOf, isNamedBy, leftoversOf, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, waitingOf, watcherOf, isWaiterTree, PLAIN_MOST } from './jobs'
 import type { WaitKind } from './jobs'
 import type { Job } from './jobs'
 
@@ -474,7 +474,7 @@ test('how a run ended, from the last line the engine writes on its output: finis
   expect(isOutputEnded('frame 81/120\n')).toBe(false)
 })
 
-test('what a command left running is told by its group and by when it started: old app helpers, other commands and runs still deciding are never taken for it', () => {
+test('what a command left running is told by the group it was seen to hold and by when it started, and by its number only where the command names it: old app helpers, other commands, runs still deciding and what a task out of sight started meanwhile are never taken for it (18 Nov: a finished task\'s card showed another task\'s 12 GB run for 47 minutes)', () => {
   const now = 1_700_000_000_000
   const at = now - 10_000
   const ps = (lines: string[]) => procsOf(lines.join('\n'), now)
@@ -487,7 +487,7 @@ test('what a command left running is told by its group and by when it started: o
   expect(found.map(l => l.top.pid)).toEqual(['5060'])
   expect(memOf(found[0]?.tree ?? [])).toBe('6.7 GB')
   // Numbers that wrapped round past the most macOS hands out
-  expect(leftoversOf(ps(['120 1 99990 S 00:05 1000 sleep 60']), [{ ...span, from: 99_950, to: 300 }]).length).toBe(1)
+  expect(leftoversOf(ps(['120 1 99990 S 00:05 1000 /u/bin/python fig4.py']), [{ ...span, from: 99_950, to: 300 }]).length).toBe(1)
   // A run a command still running may have started waits for that one
   const daemon = '5080 1 5080 S 00:05 1000 /u/bin/python daemon.py'
   expect(leftoversOf(ps([daemon]), [span], new Set(), [{ from: 5070, at: now - 8_000 }]).length).toBe(0)
@@ -495,11 +495,11 @@ test('what a command left running is told by its group and by when it started: o
   // The rest of a pipeline whose last command is followed by its printed number is that run's
   expect(leftoversOf(ps([mine, '5061 1 5050 S 00:05 1000 tee out.log']), [span], new Set(['5061'])).length).toBe(0)
   // A command sent to the background takes what starts after it as long as it is open
-  expect(leftoversOf(ps(['5060 1 5050 S 00:01 1000 sleep 60']), [{ ...span, until: undefined }]).length).toBe(1)
+  expect(leftoversOf(ps(['5060 1 5050 S 00:01 1000 /u/bin/python fig4.py']), [{ ...span, until: undefined }]).length).toBe(1)
   // Two commands at once: each group goes to the command whose first number is nearest below its leader, whichever is newer
   const a = { ...span, id: 'a', from: 5000, to: 5200, at: now - 20_000, until: now - 1_000 }
   const b = { ...span, id: 'b', from: 5100, to: 5150, at: now - 9_000, until: now - 6_000 }
-  const both = leftoversOf(ps(['5003 1 5002 S 00:08 1000 sleep 600', '5110 1 5102 S 00:08 1000 sleep 601']), [b, a])
+  const both = leftoversOf(ps(['5003 1 5002 S 00:08 1000 /u/bin/python fig4.py 600', '5110 1 5102 S 00:08 1000 /u/bin/python fig4.py 601']), [b, a])
   expect(both.map(l => `${l.top.pid}>${l.span}`).sort()).toEqual(['5003>a', '5110>b'])
   // Two tasks' commands at once, where the run's shell got its number after the other task's command began (16 Nov): the run goes
   // to the command that names it, never to a code search beside it; one that no command names, between two tasks, goes to neither
@@ -515,12 +515,39 @@ test('what a command left running is told by its group and by when it started: o
   // An app's own helper forked away from it, its group's leader gone, is no command's, nor an updater in the person's Library
   expect(leftoversOf(ps(['5060 1 5050 S 00:05 1000 /Applications/Google Chrome.app/Contents/Frameworks/Helpers/chrome_crashpad_handler', '5061 1 5061 S 00:05 1000 /Users/sam/Library/Application Support/Google/GoogleUpdater/GoogleUpdater.app/Contents/MacOS/GoogleUpdater --wake']), [span]).length).toBe(0)
   // while an app's own program a script drives still is
-  expect(leftoversOf(ps(['5060 1 5050 S 00:05 1000 /Applications/Blender.app/Contents/MacOS/Blender -b scene.blend']), [span]).length).toBe(1)
+  expect(leftoversOf(ps(['5060 1 5050 S 00:05 1000 /Applications/Blender.app/Contents/MacOS/Blender -b scene.blend']), [{ ...span, cmd: 'python drive.py scene.blend' }]).length).toBe(1)
   // Another task's command sent to the background still runs, its numbers long past: what starts beside a short command now, that
   // the short command does not name, goes to neither
   const shoot = { ...span, id: 'shoot', agent: 'pics', from: 60_000, to: 60_100, at: now - 900_000, until: undefined, cmd: 'node shoot.mjs' }
   const push = { ...span, id: 'push', agent: 'fix', from: 5000, to: 5100, cmd: 'git push -q origin fix' }
   expect(leftoversOf(ps(['5060 1 5050 S 00:05 1000 /u/.cache/chrome/Chrome for Testing.app/Contents/MacOS/Chrome for Testing --headless']), [shoot, push]).length).toBe(0)
+  // A task's long command held open, and a run a task out of sight started meanwhile (no command is kept for it): its number was
+  // handed out while the command ran, it started in time, and it is in another shell's group. Never the command's: not where the
+  // command's own shell was seen (were the run even the same program), nor where it never was, as the command does not name it
+  const shots = { ...span, id: 'shots', agent: 'icons', from: 61_300, to: 61_420, at: now - 91_000, endAt: now - 1_000, until: now - 1_000, cmd: 'cd /w && node shots.mjs both-cards' }
+  const stray = '61380 1 61376 S 00:50 12000000 /u/bin/python tools/run.py confirm 8'
+  expect(leftoversOf(ps([stray]), [{ ...shots, groups: ['61310'] }]).length).toBe(0)
+  expect(leftoversOf(ps([stray]), [shots]).length).toBe(0)
+  expect(leftoversOf(ps(['61380 1 61376 S 00:50 1000 /u/bin/node other.mjs']), [{ ...shots, groups: ['61310'] }]).length).toBe(0)
+  // What is in the group of the command's own shell is its, whatever its name: a launcher's training, the launcher gone
+  expect(leftoversOf(ps(['5060 1 5050 S 00:05 1000 /u/bin/python train.py']), [{ ...span, cmd: 'nohup ./launcher.sh > log 2>&1 &', groups: ['5050'] }]).map(l => l.span)).toEqual(['c1'])
+  // and so is what is in a group seen under that shell while it ran, whatever its number
+  expect(leftoversOf(ps(['7000 1 6990 S 00:05 1000 /u/chrome/chrome --headless']), [{ ...shots, groups: ['61310', '6990'] }]).length).toBe(1)
+  // A command still running holds back only its own groups once its shell is seen
+  expect(leftoversOf(ps([mine]), [span], new Set(), [{ from: 5010, at: now - 8_000, groups: ['5020'] }]).length).toBe(1)
+  expect(leftoversOf(ps([mine]), [span], new Set(), [{ from: 4000, at: now - 8_000, groups: ['5050'] }]).length).toBe(0)
+  // A command's groups, as the processes are listed while it runs: its own shell's (the engine's shell that runs its very words,
+  // handed its number after it began) and those of all under it; never a shell that is another command's, or older than it
+  const shell = (pid: number, cmd: string) => `${pid} 900 ${pid} S 00:03 1000 /bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh 2>/dev/null || true && eval '${cmd}' < /dev/null && pwd -P >| /tmp/claude-1-cwd`
+  const call = { cmd: shots.cmd, at: now - 4_000, from: 61_300 }
+  const listed = ps([shell(61_310, call.cmd), '61312 61310 61310 S 00:02 1000 node shots.mjs both-cards', '61320 61312 61320 S 00:02 1000 /u/chrome/chrome --headless', shell(61_376, 'cd /w && nohup python tools/run.py confirm 8 > confirm.log 2>&1 & echo $!')])
+  expect(groupsOf(listed, call)).toEqual(['61310', '61320'])
+  expect(groupsOf(listed, call, new Set(['61310']))).toBeUndefined()
+  expect(groupsOf(listed, { ...call, from: 61_350 })).toBeUndefined()
+  expect(groupsOf(listed, { ...call, cmd: 'cd /w' })).toBeUndefined()
+  // (kept once its shell has gone, and added to while it runs)
+  expect(groupsOf(ps([]), { ...call, groups: ['61310'] })).toEqual(['61310'])
+  expect(groupsOf(listed, { ...call, groups: ['61310', '6990'] })).toEqual(['61310', '6990', '61320'])
   // A command names a process by its program or a word of its own, never by a word that only starts the same
   const named: [string, string, boolean][] = [
     ['/usr/bin/python3 daemon.py --serve', 'cd /w && python3 daemon.py --serve &', true],

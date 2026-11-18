@@ -840,17 +840,23 @@ export const treeOf = (procs: Proc[], pid: string): Proc[] => {
 // quotes written '"'"' and its new lines as ps writes them) and by when it started; undefined when none is. A command's words
 // alone are too few to tell most commands by (python3 train.py), so the command is matched whole, from its start
 const flat = (text: string) => text.replace(/\s+/g, ' ').replaceAll(' | ', ' / ').trim()
+// What the engine handed a shell to run, as ps writes it; '' where the process is no shell of the engine's
+const evalBodyOf = (p: Proc) => {
+  if (!/shell-snapshots\/snapshot-/.test(p.command) || p.ppid === '1') return ''
+  const start = p.command.indexOf(" eval '")
+  if (start < 0) return ''
+  const end = p.command.lastIndexOf("' < /dev/null")
+  return flat(p.command.slice(start + 7, end > start ? end : undefined).replaceAll(`'"'"'`, "'").replaceAll(`'\\''`, "'").replace(/\\012/g, '\n'))
+}
 export const heldShellOf = (procs: Proc[], cmd: string, at: number) => {
   const want = flat(cmd).slice(0, 200)
   if (!want) return undefined
   return procs
     .filter(p => /shell-snapshots\/snapshot-/.test(p.command) && p.ppid !== '1' && Math.abs(p.startAt - at) <= 20_000)
     .filter(p => {
-      const start = p.command.indexOf(" eval '")
-      if (start < 0) return false
-      const end = p.command.lastIndexOf("' < /dev/null")
-      const body = p.command.slice(start + 7, end > start ? end : undefined).replaceAll(`'"'"'`, "'").replaceAll(`'\\''`, "'").replace(/\\012/g, '\n')
-      return flat(body).startsWith(want) || want.startsWith(flat(body).slice(0, 200))
+      if (!p.command.includes(" eval '")) return false
+      const body = evalBodyOf(p)
+      return body.startsWith(want) || want.startsWith(body.slice(0, 200))
     })
     .sort((a, b) => Math.abs(a.startAt - at) - Math.abs(b.startAt - at))[0]?.pid
 }
@@ -890,11 +896,39 @@ export const shellsOf = (procs: Proc[], jobs: { id: string; cmd: string; at: num
 // (on 15 Nov a launcher started with nohup but no `echo $!` drew 8 pages at once with 56 GB and no row on its card)
 // (`until`: the latest a process it left can have started; none while a command sent to the background may still start more)
 // (`agent`: whose command it is, where known)
-export type Span = { id: string; from: number; to: number; at: number; endAt: number; cmd: string; until?: number; agent?: string }
+// A number handed out while a command ran proves nothing by itself: anything else of the same chat that no command is kept for (a
+// task out of sight, the chat itself, a helper, a hook) is handed numbers then too (18 Nov: a finished task's card showed another
+// task's 12 GB run for 47 minutes, started while its own long command was held open). So a command is tied to what it leaves by the
+// groups it was seen to hold while it ran (`groups`: its own shell's, found among the engine's shells by the command itself, and
+// those of all that ran under that shell). A group's leftover goes to the command seen to hold that group, and to no other. Only
+// where a command's shell was never seen (it ended before the processes were listed), and for a process that leads a group of its
+// own with no parent left (it may have left the shell's tree between two looks), does the number count, and then only for a
+// process the command names
+export type Span = { id: string; from: number; to: number; at: number; endAt: number; cmd: string; until?: number; agent?: string; groups?: string[] }
 // A command still running: what it starts is not given to another that ended meanwhile
-export type OpenCall = { from: number; at: number }
+export type OpenCall = { from: number; at: number; cmd?: string; groups?: string[] }
 // Process numbers wrap round past this on macOS
 const PID_MOST = 99_999
+// (numbers handed out after one, counted round the wrap)
+const after = (n: number, from: number) => (n - from + PID_MOST + 1) % (PID_MOST + 1)
+// The groups a command still running is seen to hold, as the processes are listed now: its shell's first, then those of all under
+// it, added to what was seen before. Its shell is the engine's shell that runs the command itself (the same words), handed its number after the
+// command began and started no earlier, and no other command's (`taken`); the one handed its number soonest where several fit.
+// undefined while no shell of its own has been seen
+export const groupsOf = (procs: Proc[], call: { cmd: string; at: number; from: number; groups?: string[] }, taken: Set<string> = new Set()): string[] | undefined => {
+  const want = flat(call.cmd).slice(0, 200)
+  const isIts = (p: Proc) => {
+    const body = evalBodyOf(p)
+    const n = Number(p.pid)
+    return Boolean(body) && (p.pgid === undefined || p.pgid === p.pid) && !taken.has(p.pid) && p.startAt >= call.at - 2_000 && after(n, call.from) > 0 && after(n, call.from) < 50_000 && body.slice(0, 200) === want
+  }
+  const shell = call.groups?.[0] ?? (want ? procs.filter(isIts).sort((a, b) => after(Number(a.pid), call.from) - after(Number(b.pid), call.from))[0]?.pid : undefined)
+  if (!shell) return undefined
+  // (its shell gone from the list, or its number handed to another program since: nothing new is learnt)
+  const top = procs.find(p => p.pid === shell)
+  if (!top || (!call.groups && !isIts(top)) || (call.groups && !evalBodyOf(top))) return call.groups
+  return [...new Set([shell, ...(call.groups ?? []), ...treeOf(procs, shell).flatMap(p => (p.pgid ? [p.pgid] : []))])]
+}
 const inSpan = (pid: number, span: Pick<Span, 'from' | 'to'>) => (span.to >= span.from ? pid > span.from && pid < span.to : pid > span.from || (pid < span.to && pid <= PID_MOST))
 // The system's own programs, which launchd starts in sessions of their own whenever it likes, are never a command's
 // (and an app's own updaters and helpers in a Library folder, the person's own as well: GoogleUpdater, 17 Nov)
@@ -914,17 +948,20 @@ export const leftoversOf = (procs: Proc[], spans: Span[], known: Set<string> = n
   // The groups of runs already followed: the rest of a pipeline sent off with `& echo $!` is that run's
   const knownGroups = new Set(procs.filter(p => known.has(p.pid) && p.pgid).map(p => p.pgid))
   const isTimely = (p: Proc, s: Span) => p.startAt >= s.at - 2_000 && (s.until === undefined || p.startAt <= s.until + 2_000)
-  // One a command still running may have started waits for that command to end
-  // (numbers handed out after it, counted round the wrap)
-  const after = (n: number, from: number) => (n - from + PID_MOST + 1) % (PID_MOST + 1)
-  const isOpenOnes = (n: number, p: Proc) => open.some(o => after(n, o.from) > 0 && after(n, o.from) < 50_000 && p.startAt >= o.at - 2_000)
+  // One a command still running may have started waits for that command to end: one in a group that command is seen to hold, and,
+  // where its shell is not yet seen or the process leads a group of its own, one handed its number after that command began
+  const isOpenOnes = (n: number, p: Proc, isOwnSession: boolean) =>
+    open.some(o => o.groups?.includes(p.pgid ?? '') || ((isOwnSession || !o.groups?.length) && after(n, o.from) > 0 && after(n, o.from) < 50_000 && p.startAt >= o.at - 2_000))
+  // The command seen to hold the process's group while it ran: the newest, should the number have come round
+  const holderOf = (p: Proc) => spans.filter(s => s.groups?.includes(p.pgid ?? '') && isTimely(p, s)).reduce<Span | undefined>((a, b) => (a && a.at > b.at ? a : b), undefined)
   // A process under one already followed is that one's
   const isUnderKnown = (p: Proc) => {
     for (let at: Proc | undefined = p, n = 0; at && n < 64; at = byPid.get(at.ppid), n++) if (known.has(at.pid)) return true
     return false
   }
-  // The command a number was handed out under; where two ran at once, the one that names the process (its script or its
-  // arguments), else the one whose first number is nearest below
+  // Where no command was seen to hold its group: the command a number was handed out under that names the process, among those
+  // whose shell was never seen (any, for a process that leads its own group); where two ran at once, the one that holds the
+  // process's own words (its script or its arguments), else the one whose first number is nearest below
   const spanOf = (pid: number, p: Proc, isOwnSession: boolean) => {
     // A command sent to the background that still runs goes on being handed numbers after the one it had as it went there: every
     // number since its first is in its range, so what another task's running command starts is never given to a short command
@@ -933,7 +970,7 @@ export const leftoversOf = (procs: Proc[], spans: Span[], known: Set<string> = n
     // (as long as it runs, however far the numbers have gone: process numbers go round in minutes on a busy Mac. So a short command's
     // own leftover that it does not name, started while another task's background command runs, goes to neither: a card shows
     // nothing rather than another task's programs)
-    const fits = spans.filter(s => (inSpan(pid, s) || (s.until === undefined && after(pid, s.from) > 0)) && isTimely(p, s))
+    const fits = spans.filter(s => (isOwnSession || !s.groups?.length) && (inSpan(pid, s) || (s.until === undefined && after(pid, s.from) > 0)) && isTimely(p, s) && isNamedBy(p.command, s.cmd))
     if (fits.length <= 1) return fits[0]
     // The process's own words, past its program: a command that holds them started it. A session of its own also goes by the
     // command's words it holds
@@ -956,8 +993,8 @@ export const leftoversOf = (procs: Proc[], spans: Span[], known: Set<string> = n
     // Chrome's did on 17 Nov; an app's own program a script drives, such as Blender, still counts)
     if (/^\(/.test(p.command.trim()) || (isOwnSession ? SYSTEM_PROG.test(p.command) : pids.has(p.pgid) || (SYSTEM_PROG.test(p.command) && APP_HELPER.test(p.command)))) continue
     const n = Number(isOwnSession ? p.pid : p.pgid)
-    if (isOpenOnes(n, p)) continue
-    const span = spanOf(n, p, isOwnSession)
+    if (isOpenOnes(n, p, isOwnSession)) continue
+    const span = holderOf(p) ?? spanOf(n, p, isOwnSession)
     if (span) out.push({ span: span.id, top: p, tree: treeOf(procs, p.pid) })
   }
   return out

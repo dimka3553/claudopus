@@ -2,6 +2,7 @@
 
 test('a chat gets its role once, is told to start a fresh agent from a brief for every message, and every message is saved', async ($, on) => {
   const { files } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'tasks' } }))
   await $.session.start(start)
 
   const first = await $.prompt.submit({ text: 'fix the upload page', wait: false, origin: composer })
@@ -39,10 +40,64 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   expect(kept.slice(long.length)).toContain('and the chin')
 })
 
+test('as shipped the chat does a short request itself: it is told so with each message, its edits and joined commands run held open, it reads a paste it needs, an admin command still waits for the person, and a copy of itself is still refused', async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  const told = (await $.prompt.submit({ text: 'make the button orange', wait: false, origin: composer })).context?.join('\n') ?? ''
+  expect(told).toContain('A job of a few minutes: do it yourself, in this thread, in few steps.')
+  expect(told).toContain('Only a message that changes what a listed task is already doing')
+  expect(told).not.toContain('start a fresh agent')
+  for (const [i, call] of [
+    { tool: 'Edit', file_path: '/repo/css/app.css', old_string: 'blue', new_string: 'orange' },
+    { tool: 'Write', file_path: '/repo/notes.txt', content: 'done' },
+    { tool: 'Bash', command: "grep -rn 1d4ed8 . | head -40 && sed -i '' 's/1d4ed8/f28c28/g' css/app.css" },
+    { tool: 'Bash', command: 'npm test' },
+    { tool: 'Bash', command: 'git status' },
+  ].entries())
+    expect([call, (await $.tool.call({ ...call, tool_use_id: `own${i}` } as never)).deny]).toEqual([call, undefined])
+  const paste = `start ${'x'.repeat(20_000)} end`
+  await $.prompt.submit({ text: paste, wait: false, origin: composer })
+  const saved = [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/pastes/`))
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'own-p', file_path: saved?.[0] } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'own-f', prompt: 'push it', subagent_type: 'fork' } as never)).deny).toContain('never starts a task as a copy')
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'own-t', prompt: 'build the page', subagent_type: 'claudopus:task', model: 'opus' } as never)).deny).toBeUndefined()
+  const copy = (await $.tool.call({ tool: 'Agent', tool_use_id: 'own-f2', prompt: 'push it', subagent_type: 'fork' } as never)).deny ?? ''
+  expect(copy).not.toContain('claudopus:quick')
+  // What holds a task's commands holds the chat's: main is never pushed, by name or by a bare push from main; Claudopus's own
+  // checkout is never changed; a command that may take minutes is not held open
+  for (const [i, command] of ['git push origin main', 'git commit -qam x && git push origin HEAD:main', 'gh pr merge 12 --squash'].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-m${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never pushes or merges to main itself')])
+  // (Claudopus's own checkout is /code, laid before any command that changes a checkout is looked at)
+  files.set('git:top', '/code')
+  files.set('checkout:/code', 'main')
+  files.set('git:branch', 'main')
+  files.set('git:branch:/wt', 'fix-nose')
+  files.set('git:branch:/My Repo', 'main')
+  for (const [i, command] of ['git push', 'git add -A && git commit -qm x && git push -q', 'git -C "/My Repo" push -u origin', "sh -c 'git push'", 'git checkout -q main && git push'].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-b${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never pushes or merges to main itself')])
+  // With main checked out, what pushes no main runs: the word push in a message, a stash or a search, a named branch, tags, a
+  // branch made in the same command, and a push from a worktree on its own branch
+  for (const [i, command] of ['git commit -qm "fix the push button"', 'git stash push', 'git log --grep=push', 'git push origin fix-nose', 'git push --tags', 'git checkout -qb fix && git commit -qam x && git push -u origin fix', 'git checkout -qb fix && git push -u origin', 'cd /wt && git push -u origin', 'git -C /wt push'].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-n${i}`, command } as never)).deny]).toEqual([command, undefined])
+  // and from a folder on a branch, a push in a checkout of main is still main's
+  files.set('git:branch', 'fix-nose')
+  files.set('git:branch:/repo', 'main')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-b8', command: 'cd /repo && git push' } as never)).deny).toContain('never pushes or merges to main itself')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-b9', command: 'git push -u origin fix-nose' } as never)).deny).toBeUndefined()
+  for (const key of ['git:branch', 'git:branch:/wt', 'git:branch:/My Repo', 'git:branch:/repo']) files.delete(key)
+  for (const [i, command] of ['git -C /code checkout feature', 'cd /code; git reset --hard v0.2.191', 'cd /code && git commit -qam x'].entries())
+    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-c${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never changes what is checked out there')])
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l1', command: 'npm run build', description: 'Run the build (about 5 min)' } as never)).deny).toContain('keeps this chat from answering')
+  // A server left in the background stays up: nothing of Claudopus's stops it
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l2', command: 'npm run dev', description: 'Serve the site', run_in_background: true } as never)).deny).toBeUndefined()
+  expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain("the chat's own command started in the background")
+  expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain("in a chat's own thread")
+})
+
 test('work starts as a fresh agent from written instructions, never as a copy of the chat: a clearly stated job on Sonnet, the rest as a task, a fork or an agent with no model refused whatever an old config.json chose, and a brief gets the rules for the work', async ($, on) => {
   const { files } = world(on, { tokens: 400_000, chatRole: 'CHAT ROLE {lanes}' })
   // A choice of 0.2.152's that sent small jobs to a copy of the chat counts for nothing now
-  ownSet(files, 'config.json', JSON.stringify({ lean: { small: 'copy', quick: 'work' } }))
+  ownSet(files, 'config.json', JSON.stringify({ lean: { chat: 'tasks', small: 'copy', quick: 'work' } }))
   await $.session.start(start)
   const told = (await $.prompt.submit({ text: 'push it', wait: false, origin: composer })).context?.join('\n') ?? ''
   expect(told).toContain('`subagent_type: "claudopus:quick"` and `model: "sonnet"`')
@@ -518,6 +573,7 @@ test('a long build a task runs in the background that fails on another running t
 
 test('a large paste is saved to a file and left out of the chat', async ($, on) => {
   const { files } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'tasks' } }))
   await $.session.start(start)
   const paste = `start ${'x'.repeat(20_000)} end`
 
@@ -534,6 +590,7 @@ test('a large paste is saved to a file and left out of the chat', async ($, on) 
 
 test("a chat's own thread may only read, run a single command in the background, start agents and talk to them; an agent may do the work", async ($, on) => {
   const { files, stepped, clock } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'tasks' } }))
   await $.session.start(start)
   const told = await $.prompt.submit({ text: 'what does this function do', wait: false, origin: composer })
   expect(told.context?.join('\n')).toContain('Answer a question that a few reads settle here')
@@ -785,7 +842,7 @@ test("a chat's own thread may only read, run a single command in the background,
   for (const [i, call] of [{ tool: 'Edit', file_path: '/repo/src/nose.ts', old_string: 'a', new_string: 'b' }, { tool: 'Write', file_path: '/repo/x', content: 'x' }, { tool: 'Grep', pattern: 'nose' }, { tool: 'Bash', command: 'npm test' }].entries())
     for (const agentId of ['w1', 'helper-1']) expect((await $.tool.call({ ...call, tool_use_id: `w${i}${agentId}`, agentId } as never)).deny).toBeUndefined()
   // An old config.json's everything-as-a-full-task no longer stops the chat running its own single command
-  ownSet(files, 'config.json', JSON.stringify({ lean: { small: 'full' } }))
+  ownSet(files, 'config.json', JSON.stringify({ lean: { chat: 'tasks', small: 'full' } }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'push it', wait: false, origin: composer })
   files.set('git:branch', 'fix-nose')

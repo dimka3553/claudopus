@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Claudopus: Claude Code, with eight arms</title>
-<meta name="description" content="Claudopus is a free mod for Claude Code. Each message becomes a task that runs in the background, a panel beside the chat shows every task, and what each task found is kept.">
+<meta name="description" content="Claudopus is a free mod for Claude Code. The chat does a short request itself, a longer one runs as a task in the background, a panel beside the chat shows every task, and what each task found is kept.">
 <link rel="canonical" href="https://claudopus.ai/">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#111112" media="(prefers-color-scheme:dark)">
 <meta name="theme-color" content="#FAF9F5" media="(prefers-color-scheme:light)">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Claudopus: Claude Code, with eight arms">
-<meta property="og:description" content="A free mod for Claude Code. Ask for the next thing without waiting: each one runs in the background, a panel shows them all, and what each one found is kept.">
+<meta property="og:description" content="A free mod for Claude Code. Ask for the next thing without waiting: a long request runs in the background, a panel shows them all, and what each one found is kept.">
 <meta property="og:url" content="https://claudopus.ai/">
 <meta property="og:image" content="https://claudopus.ai/og.png">
 <meta name="twitter:card" content="summary_large_image">
@@ -35,7 +35,7 @@
 <section class="hero h3d">
   <div>
     <h1>Claude Code, <span class="name">with eight arms.</span></h1>
-    <p class="lead">Ask Claude Code for three things, and they wait in line. <b>Claudopus</b> turns each message into a task that runs in the background, shows every task in a panel beside the chat, and keeps what each one found.</p>
+    <p class="lead">Ask Claude Code for three things, and they wait in line. With <b>Claudopus</b> the chat does a short request itself in few steps, runs a longer one as a task in the background, shows every task in a panel beside the chat, and keeps what each one found.</p>
     <div class="quick">
       <div class="term screen notch">
         <div class="cmd"><span class="pr" aria-hidden="true">&gt;</span><code>/plugin marketplace add <b>dimka3553/claudopus</b></code><button class="copy notch" type="button" data-copy="/plugin marketplace add dimka3553/claudopus" aria-label="Copy: /plugin marketplace add dimka3553/claudopus"><span class="say">Copy</span><span class="said"><svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>Copied</span><span class="fail">Selected</span></button></div>
@@ -97,7 +97,7 @@
       <div class="heads" aria-hidden="true"><span></span><p class="was">Claude Code alone</p><p class="now">With Claudopus</p></div>
       <div class="duo">
         <div class="was"><h3>You wait</h3><p>One chat works on one request at a time. You can type your next idea, but it waits until Claude finishes the last one.</p></div>
-        <div class="now"><h3>You keep talking</h3><p>Each request becomes its own task in the background. The chat is free for your next message right away.</p></div>
+        <div class="now"><h3>You keep talking</h3><p>A longer request becomes its own task in the background. The chat is free for your next message right away.</p></div>
       </div>
       <div class="duo">
         <div class="was"><h3>You lose track</h3><p>To do more at once you open more chats, then forget which one is doing what.</p></div>
@@ -261,7 +261,7 @@
       <h3>What you see afterwards</h3>
       <ol class="steps">
         <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="1"><rect x="1" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="1" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>Claudopus is on in every chat you open from then on, in every folder.</span></li>
-        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="2"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>You send a message. The chat answers in one line, starts a task in the background, and is free for your next message.</span></li>
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="2"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>You send a message. The chat does a short request itself. For a longer one it answers in one line, starts a task in the background, and is free for your next message.</span></li>
         <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="3"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>The panel opens beside the chat by itself the first time a task starts in that chat. If you close it, it closes in every chat. Type <code>/claudopus</code> to open it again.</span></li>
         <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="4"><rect x="0" y="0" width="1" height="1"/><rect x="2" y="0" width="1" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><span>While tasks run, a bar above the prompt shows memory, processor, graphics, battery, disk and network, with Claude's own share in purple.</span></li>
         <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="5"><rect x="0" y="0" width="3" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>When a task finishes, the chat passes on its result, and the panel lists it under Finished.</span></li>

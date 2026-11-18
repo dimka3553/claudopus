@@ -162,6 +162,8 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
 
   // Work that has ended leaves the list by itself; its Details tab stays and keeps up: it says it finished, with no Stop
   expect(await tab.find({ type: 'Button', key: 'stop-a1' })).toBeDefined()
+  // (every to-do ticked first: with one left it would not be done, and Claudopus would start it again)
+  for (const item of ['Compare the head with your scan', 'Check the left ear', 'Later step 1', 'Later step 2', 'Later step 3', 'Later step 4']) await call('todo', { item, state: 'done' })
   await $.turn.complete({ answer: 'The nostril is **closed**.', durationMs: 1, isAborted: false, turnId: 'turn-4', reason: 'answer', agentId: 'a1' } as never)
   expect((await tab.find({ type: 'Text', text: /^Done · \d+m/ }))?.text).toBe('Done · 2m 00s')
   expect(await tab.find({ type: 'Button', key: 'stop-a1' })).toBeUndefined()
@@ -172,7 +174,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
   expect((await pane.find({ type: 'Text', text: /^Just finished$/ }))?.text).toBe('Just finished')
   // Its helper, ended in the same moment, stays in its card for the same pause
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', 'Search the docs'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', 'Dismiss', 'Search the docs'])
   await clock.advance(1_000)
   expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeDefined()
   await clock.advance(1_100)
@@ -184,7 +186,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect(buttons.map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', '▸ Finished 1'])
   await pane.press({ key: String(buttons.find(b => b.props.label === '▸ Finished 1')?.key) })
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.wrap).toBe('truncate-end')
-  expect((await pane.find({ type: 'Text', text: /^Done ·/ }))?.text).toBe('Done · 1 of 7 to-dos done · 2m 00s')
+  expect((await pane.find({ type: 'Text', text: /^Done ·/ }))?.text).toBe('Done · 7 of 7 to-dos done · 2m 00s')
   expect(await pane.find({ type: 'Button', key: 'stop-a1' })).toBeUndefined()
   // Finished work's Details opens as a tab of its own too
   await pressed(pane, 'open-a1')

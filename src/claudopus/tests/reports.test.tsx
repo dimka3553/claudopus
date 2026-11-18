@@ -1,10 +1,11 @@
 // Results: kept, listed, opened, answered, put away and brought back, and rounds of one work
 
 test('finished work leaves a report for good: its pictures copied, listed under Reports, opened, answered, and named to the chat', async ($, on) => {
-  const { files, submitted, clock, copied, opened } = world(on)
+  const { files, submitted, clock, copied, opened, resumed, appended } = world(on)
   const filled: string[] = []
   on('prompt.fill', (_, e) => (filled.push(e.text), { isFilled: true }))
   files.set('/private/tmp/s/scratchpad/revenue.png', 'PNG')
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'tasks' } }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'how is revenue doing', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Weekly revenue', prompt: 'how is revenue doing' } as never)
@@ -51,12 +52,14 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(await pane.find({ type: 'Text', text: /^Results$/ })).toBeUndefined()
   expect((await keyed(pane, 'reports-open'))?.props.label).toBe('Results 1')
   expect(await pane.find({ type: 'Text', text: /^●$/ })).toBeUndefined()
-  // A finished task whose result asks something waits for the person, not done: its card stays at the top in amber, never under
-  // Finished, with the first question and its answers, and the header counts each question
+  // A finished task whose result asks something more is done, in green: its card stays at the top, never under Finished, with
+  // the first question and its answers, until it is answered or dismissed, and the header counts each question
   expect(await pane.find({ type: 'Text', text: /^2 questions waiting for you/ })).toBeDefined()
   const asking = await pane.find({ type: 'Text', text: 'Result ready · Shall I send it to the team?' })
-  expect(asking?.props.color).toBe('#E5A50A')
-  expect(await pane.find({ type: 'Text', text: /^Waiting for you · / })).toBeDefined()
+  expect([asking?.props.color, asking?.props.bold]).toEqual([undefined, true])
+  expect(await pane.find({ type: 'Text', text: /^Waiting for you · / })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Done · / })).toBeDefined()
+  expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === '#E5A50A').length).toBe(0)
   expect((await pane.findAll({ type: 'Button' })).filter(b => /^result-ask-a1-say-/.test(b.key ?? '')).map(b => b.props.label)).toEqual(['Yes', 'No', 'Not now', 'Answer in words'])
   expect((await pane.findAll({ type: 'Button' })).find(b => /^result-ask-a1-more-/.test(b.key ?? ''))?.props.label).toBe('Result')
   expect(await pane.find({ type: 'Text', text: '1 more question' })).toBeDefined()
@@ -91,15 +94,31 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(filled[0]).toContain(`${folder}/report.md`)
   // Each waiting item has its own answers; answering one clears that one alone
   expect(await one.find({ type: 'Text', text: 'Post it in the channel too?' })).toBeDefined()
+  // The answer goes to the task that asked, which is started again with it from the press's own hook, never from a timer (the
+  // clock has not moved), and the chat is asked nothing: it is only told the task has it (18 Nov: "A" pressed on a result went to
+  // the chat alone, which had to hand the job to another task)
+  const answers = () => resumed.filter(line => line.includes('to answer a question in your result'))
+  const doneCards = (await pane.findAll({ type: 'Text' })).filter(text => /^Done · /.test(text.text ?? '')).length
   await pressed(one, 'report-say-0-Yes')
-  await until(async () => submitted.length > 0 || undefined)
-  expect(submitted[0]).toContain('From the Claudopus panel: The person pressed "Yes" to answer the question in the result "Weekly revenue"')
-  expect(submitted[0]).not.toMatch(/\b(me|my)\b/)
-  expect(submitted[0]).toContain('Shall I send it to the team?')
+  expect(answers()).toHaveLength(1)
+  expect(answers()[0]).toMatch(/^a1: The person pressed "Yes" to answer a question in your result "Weekly revenue" \(.*\/report\.md\): Shall I send it to the team\?\n1 other question of that result still waits for them/)
+  expect(answers()[0]).toContain('this answer starts you again')
+  expect(answers()[0]).not.toMatch(/\b(me|my)\b/)
+  expect(submitted).toHaveLength(0)
+  expect(appended.filter(line => line.includes('answered a question in the result "Weekly revenue"'))).toEqual([expect.stringContaining('Its task has the answer and carries on with it itself')])
+  // Its card is at work at once: Stop, no question, no longer Done
+  expect(await until(async () => (await pane.find({ type: 'Button', key: 'stop-a1' })) ?? undefined)).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^1 task working/ })).toBeDefined()
+  expect((await pane.findAll({ type: 'Text' })).filter(text => /^Done · /.test(text.text ?? ''))).toHaveLength(doneCards - 1)
+  expect(await keyed(pane, 'dismiss-a1')).toBeUndefined()
   await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[0]?.answer ? true : undefined))
+  // It ends again with the other question still open: it waits for the person again
+  await $.turn.complete({ agentId: 'a1', answer: report, durationMs: 1, isAborted: false, turnId: 't4', reason: 'answer' })
+  await clock.advance(10)
   expect(JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting).toEqual([{ text: 'Shall I send it to the team?', answer: 'Yes' }, { text: 'Post it in the channel too?' }])
   expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeDefined()
-  await until(async () => ((await one.find({ type: 'Text', text: 'Shall I send it to the team?' })) ? undefined : true))
+  expect(await until(async () => ((await one.find({ type: 'Text', text: /^Shall I send it to the team\?$/ })) ? undefined : true))).toBe(true)
   expect(await one.find({ type: 'Text', text: 'Post it in the channel too?' })).toBeDefined()
   // The card goes on to the next question, the last one
   expect(await until(async () => (await pane.find({ type: 'Text', text: 'Result ready · Post it in the channel too?' })) ?? undefined)).toBeDefined()
@@ -108,7 +127,8 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   // Not now clears the other and sends nothing
   await pressed(one, 'report-say-1-Not now')
   await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[1]?.answer ? true : undefined))
-  expect(submitted).toHaveLength(1)
+  expect(submitted).toHaveLength(0)
+  expect(answers()).toHaveLength(1)
   await until(async () => ((await list.find({ type: 'Text', text: /^Waiting for you$/ })) ? undefined : true))
   expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeUndefined()
   expect(await one.find({ type: 'Text', text: /^Waiting for you$/ })).toBeUndefined()
@@ -123,6 +143,54 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(next.context?.join('\n')).toContain(`${folder}/report.md`)
   expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r1', file_path: `${folder}/report.md` } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'r2', command: `cat ${folder}/report.md` } as never)).deny).toContain('Start a fresh agent')
+
+  // The person dismisses a card themselves, one that waits for them and one just done: it goes under Finished at once and stays
+  // there across a redraw and a reload of the cards, its question still open in its result (18 Nov: "Either way, I should have
+  // the ability to just close it")
+  const finishedCount = async () => Number(/Finished (\d+)/.exec(String((await keyed(cards, 'finished-fold'))?.props.label))?.[1] ?? 0)
+  await $.agent.spawn({ ...spawn, description: 'Pick an opening', prompt: 'pick an opening' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w4', items: ['Which opening should go out?'], agentId: 'a4' } as never)
+  await $.turn.complete({ agentId: 'a4', answer: 'Three openings are cut, A, B and C. Nothing is posted until one is picked.', durationMs: 1, isAborted: false, turnId: 't5', reason: 'answer' })
+  await clock.advance(3_000)
+  await pane.unmount()
+  const cards = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  expect(await until(async () => (await cards.find({ type: 'Text', text: 'Result ready · Which opening should go out?' })) ?? undefined)).toBeDefined()
+  // (the two that ended before it are under Finished once their two seconds are over)
+  await until(async () => ((await finishedCount()) === 2 ? true : undefined))
+  const before = await finishedCount()
+  expect(before).toBe(2)
+  expect((await keyed(cards, 'dismiss-a4'))?.props.label).toBe('Dismiss')
+  await pressed(cards, 'dismiss-a4')
+  expect(await until(async () => ((await cards.find({ type: 'Text', text: /^Result ready/ })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await finishedCount()) === before + 1 ? true : undefined))).toBe(true)
+  expect(await cards.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
+  await $.agent.spawn({ ...spawn, description: 'Save another rule', prompt: 'save it' } as never)
+  await $.turn.complete({ agentId: 'a5', answer: 'The rule is saved.', durationMs: 1, isAborted: false, turnId: 't6', reason: 'answer' })
+  expect(await until(async () => (await cards.find({ type: 'Text', text: '✓ Done' })) ?? undefined)).toBeDefined()
+  await pressed(cards, 'dismiss-a5')
+  expect(await until(async () => ((await cards.find({ type: 'Text', text: '✓ Done' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await finishedCount()) === before + 2 ? true : undefined))).toBe(true)
+  // A redraw later, and a reload of the cards: both still under Finished, nothing back at the top
+  await clock.advance(30_000)
+  await cards.unmount()
+  await $.session.start(start)
+  await clock.advance(30_000)
+  const after = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  expect(await after.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
+  expect(await after.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
+  expect(Number(/Finished (\d+)/.exec(String((await keyed(after, 'finished-fold'))?.props.label))?.[1])).toBe(before + 2)
+  expect((await after.findAll({ type: 'Button' })).some(b => /^dismiss-/.test(b.key ?? ''))).toBe(false)
+  // Its question is still open in its result
+  const kept = [...files.keys()].find(path => path.includes('pick-an-opening') && path.endsWith('/meta.json'))
+  expect(JSON.parse(files.get(kept ?? '') ?? '{}').waiting).toEqual([{ text: 'Which opening should go out?' }])
+  // Answered there in words, the answer goes to its task too, the chat is told only that, and the card is back up at work
+  const typed = await $.prompt.submit({ text: `About question 1 of the result "Pick an opening" (15 Nov, 02:13), ${(kept ?? '').replace('/meta.json', '')}/report.md: B, with the louder music`, wait: false, origin: composer })
+  expect(typed.context?.join('\n')).toContain('Claudopus sent this answer of the person\'s to the task that asked ("Pick an opening"), which carries on with it itself')
+  await clock.advance(5_000)
+  const words = await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('answered, in their own words, a question in your result "Pick an opening"')))
+  expect(words).toContain('Which opening should go out?\nTheir answer: B, with the louder music')
+  expect(await until(async () => (await after.find({ type: 'Button', key: 'stop-a4' })) ?? undefined)).toBeDefined()
+  expect(Number(/Finished (\d+)/.exec(String((await keyed(after, 'finished-fold'))?.props.label))?.[1])).toBe(before + 1)
 })
 
 test('work started from a report keeps its own report linked to it, beside the older one on the same subject', async ($, on) => {

@@ -111,6 +111,8 @@ const NO_FOLLOW =
 const SEND_BACKGROUND = (name: string) =>
   `Not run: this command may run for minutes, and held open it keeps ${name}'s replies from you until it ends. Send the same call again with \`run_in_background: true\` and nothing else changed: Claudopus tells you when it ends, and ${name}'s replies reach you while it runs. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
 // The chat's own command, which runs only in the background
+// A long command of a chat that does short requests itself
+const CHAT_HELD_LONG = 'Not run: this command may run for minutes, and held open it keeps this chat from answering until it ends. Send the same call again with `run_in_background: true` and nothing else changed: you are told when it ends.'
 const CHAT_SEND_BACKGROUND = 'Not run: the chat runs its own command only in the background. Send the same call again with `run_in_background: true` and nothing else changed.'
 
 // The files a command runs, as filesRun finds them, each read (the first megabyte): the mod's own runners (bin/admin, bin/secret,
@@ -319,18 +321,31 @@ const workHooks = (on: On) => {
         return { deny: silent === 'wait' ? NO_PROGRESS_WAIT : NO_PROGRESS_SCRIPT }
       }
     }
+    // A chat that does short requests itself meets the guards a task's commands meet
+    const itselfHere = e.agentId === undefined && !isOff && Boolean(dir) && lean.chat === 'itself' && (await read($, me)).isChat
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
+    // (the chat works where it is, which may be main: a push there that names no branch would push main)
+    const pushed = itselfHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
+    let onMain = false
+    for (const push of pushed ? [pushed, ...(await scriptsRun($, pushed))].flatMap(text => barePushes(text, cwd || '.')) : []) {
+      const branch = push.to ?? (await $.process.run(['git', '-C', push.folder, 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => ''))
+      if (/^(?:main|master)$/.test(branch)) onMain = true
+    }
+    if (onMain) {
+      await log($, "refused the chat's push from main")
+      return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
+    }
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }
     // The Claudopus code chats run stays as it is: work reads other versions with git show and changes code in worktrees of its own.
     // Claudopus refuses it before Claude Code sees it, so no card offers it to be run on a press either
-    if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash') {
+    if (dir && !isOff && (e.agentId !== undefined || itselfHere) && e.tool === 'Bash') {
       const command = String((e as { command?: unknown }).command ?? '')
       const changed = /\bgit\b/.test(command) ? await ownCheckoutChanged($, [command], cwd || '.') : ''
       if (changed) {
-        await log($, `refused work ${e.agentId}'s command that changes Claudopus's own checkout`)
+        await log($, `refused ${e.agentId === undefined ? "the chat's" : `work ${e.agentId}'s`} command that changes Claudopus's own checkout`)
         return { deny: NO_SWITCH(changed) }
       }
     }
@@ -348,7 +363,9 @@ const workHooks = (on: On) => {
     // or granted for a call that does not run
     const isChatHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat
     // A single command the chat runs itself: one command and nothing joined to it
-    const chatCommand = isChatHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
+    // (a chat that does jobs itself runs its commands as Claude Code does: joined, held open, and behind the same gates as a task's)
+    const isItself = isChatHere && lean.chat === 'itself'
+    const chatCommand = isChatHere && !isItself && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
     if (chatCommand && !isOneCommand(chatCommand) && !RUNNER_NAMED.test(chatCommand)) {
       await log($, "refused a chat's own command that is more than one command")
       return { deny: NOT_ONE_COMMAND }
@@ -357,12 +374,12 @@ const workHooks = (on: On) => {
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const places = /^\s*git\s+-C\s/.test(chatCommand) ? [cwd, ...(await readIndex($).catch(() => [])).map(s => s.repo).filter(repo => repo.startsWith('/'))] : []
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom, places) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
+    const isRefusedHere = isChatHere && !isItself && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
     // A call is never changed on its way: auto mode reviews it as written and refuses one a hook has changed since, so one that must
     // run in the background is refused with the same call to send that way, and the call sent again is reviewed as it runs
-    if (dir && !isOff && e.agentId !== undefined && isLongHeld(e as never)) {
-      await log($, `refused work ${e.agentId}'s long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
-      return { deny: SEND_BACKGROUND(who()) }
+    if (dir && !isOff && (e.agentId !== undefined || isItself) && isLongHeld(e as never)) {
+      await log($, `refused ${e.agentId === undefined ? "the chat's" : `work ${e.agentId}'s`} long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
+      return { deny: e.agentId === undefined ? CHAT_HELD_LONG : SEND_BACKGROUND(who()) }
     }
     if (isChatCommand && !(e as { run_in_background?: unknown }).run_in_background) {
       await log($, "refused the chat's own command held open")
@@ -408,7 +425,8 @@ const workHooks = (on: On) => {
       const isSpanned = Boolean(dir) && !isOff && e.agentId !== undefined && call.tool === 'Bash'
       const spanAt = isSpanned ? await $.clock.now() : 0
       const from = isSpanned ? await pidNow($) : 0
-      if (from) openCalls.set(String(call.tool_use_id ?? ''), { from, at: spanAt })
+      const open: OpenCall | undefined = from ? { from, at: spanAt, cmd: oneLine(String((call as { command?: unknown }).command ?? '')).slice(0, 4000) } : undefined
+      if (open) (openCalls.set(String(call.tool_use_id ?? ''), open), seeShell($, String(call.tool_use_id ?? '')))
       const r = await run(call).finally(() => openCalls.delete(String(call.tool_use_id ?? '')))
       if (woken && !r.deny && !r.isError) await changeTodos($, list => list.map(one => (one.id === woken && one.answeredAt ? { ...one, answeredAt: undefined } : one)))
       // Ended work a message starts again is at work from now: its card leaves Finished while it acts on the message
@@ -416,7 +434,7 @@ const workHooks = (on: On) => {
       if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
       if (dir && e.agentId !== undefined && !r.deny && !r.isError && !(call as { run_in_background?: unknown }).run_in_background) await keepDetached($, e.agentId, call as never, r.result).catch(err => log($, `detached work not followed: ${String(err)}`))
       // (one that failed may still have left something going)
-      if (from && e.agentId !== undefined && !r.deny) await keepSpan($, e.agentId, call as never, from, spanAt, r.result).catch(err => log($, `left runs not looked for: ${String(err)}`))
+      if (from && e.agentId !== undefined && !r.deny) await keepSpan($, e.agentId, call as never, from, spanAt, r.result, open).catch(err => log($, `left runs not looked for: ${String(err)}`))
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
       const shown = await hideKept($, call, r)
       // What it wrote is kept as it ends, and what crossed another task's is told then
@@ -639,6 +657,8 @@ const workHooks = (on: On) => {
     const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
     const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
     if (READS.includes(e.tool) && !isPaste) return next(e)
+    // (what it leaves in the background runs on as in Claude Code, which tells the chat when it ends: a server {name} asked for stays up)
+    if (isItself) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
     if (grants.length) await dropGrants($, grants).catch(() => undefined)
     // An open, a curl or a preview not in the shape the chat runs is told that shape, so it can be run that way or go to a task
