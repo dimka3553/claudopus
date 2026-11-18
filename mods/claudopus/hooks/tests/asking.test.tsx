@@ -63,7 +63,7 @@ const prompts: string[] = []
 // the release
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -308,6 +308,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The newest process number, as a shell started now gets it, and the processes as a command that has just ended leaves them
     if (options.jobs?.pid && tool === 'sh' && String(rest[1]).includes('# pid now')) return ok(`${options.jobs.pid()}\n`)
     if (options.jobs?.ps && tool === 'sh' && String(rest[1]).includes('@@LEFT@@')) return ok(`@@LEFT@@\n${options.jobs.ps()}\n`)
+    // (and as they are while a command runs, where its shell is looked for: with the shells the test says run then)
+    if (options.jobs?.ps && tool === 'sh' && String(rest[1]).includes('@@SHELLS@@')) return ok(`@@SHELLS@@\n${options.jobs.shells?.() ?? ''}\n${options.jobs.ps()}\n`)
     if (options.jobs?.fd && tool === 'sh' && String(rest[1]).includes('/proc/$p/fd/1')) return ok(options.jobs.fd())
     // Whose each process is by its environment, as the test says (this chat's where it says nothing)
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('# whose runs')) return ok(rest.slice(4).map(p => `${p} ${options.jobs?.owner?.(String(p)) ?? 'mine'}\n`).join(''))
@@ -2444,8 +2446,8 @@ test('a reply never waits behind a long command: one that may run for minutes is
   expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “Yep, looks good” · Claude is working on it' }))).toBeDefined()
   await settle()
 })
-test("where the bar above the prompt takes a box, a card's answers end with Reply in your own words, which opens the reply box in that bar and never in the panel or its Details, whose window the app drags to a box that holds the cursor (15 Nov); Close takes it away with what was typed kept; one box at a time", async ($, on) => {
-  const { appended, clock, files, keep } = world(on, { panes: ['claudopus'] })
+test("where the bar above the prompt takes a box, a card's answers end with Reply in your own words, which opens the reply box in that bar and never in the panel or its Details, whose window the app drags to a box that holds the cursor (15 Nov); Close takes it away with what was typed kept; one box at a time; Change something on a Done card opens the same box, and what is sent from it starts that task again", async ($, on) => {
+  const { appended, clock, files, keep, resumed, submitted } = world(on, { panes: ['claudopus'] })
   await $.session.start(start)
   await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
@@ -2715,7 +2717,54 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
     await list.press({ key: (await labelled(list, 'Send'))[0]?.key ?? '' })
     expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('in their own words: one\ntwo')))).toBeDefined()
   }
-  await Promise.all([list.unmount(), details.unmount(), shut.unmount()])
+  // Change something, on a Done card of this chat's, beside its Dismiss: only where the bar above the chat takes a box, so not
+  // while that bar is folded, and never on a card still at work
+  const key = async (base: string) => (await list.findAll({ type: 'Button' })).find(b => new RegExp(`^${base}-\\d+$`).test(b.key ?? ''))
+  await $.agent.spawn({ ...spawn, description: 'Trim the tail', prompt: 'trim the tail' } as never)
+  await $.turn.complete({ agentId: 'a3', answer: 'The tail is trimmed.', durationMs: 1, isAborted: false, turnId: 'c1', reason: 'answer' })
+  expect(await until(async () => (await key('dismiss-a3')) ?? undefined)).toBeDefined()
+  expect(await key('change-a3')).toBeUndefined()
+  await shut.unmount()
+  const top = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  expect((await until(async () => (await key('change-a3')) ?? undefined))?.props.label).toBe('Change something')
+  expect((await list.findAll({ type: 'Button' })).map(b => String(b.key)).filter(one => /^(change|dismiss)-a3-/.test(one)).map(one => one.split('-')[0])).toEqual(['change', 'dismiss'])
+  expect(await key('change-a2')).toBeUndefined()
+  // Pressed, it opens the box in the bar for that card, with no question: its title and what it asks, Send and Cancel
+  const changeBox = async () => (await top.findAll({ type: 'Input' } as never)).find(one => /-reply-change-/.test(one.key ?? ''))
+  const changes = () => resumed.filter(line => line.includes('pressed "Change something"'))
+  const toldOfChange = () => appended.filter(line => line.includes('to change something'))
+  const wasSubmitted = submitted.length
+  expect(await changeBox()).toBeUndefined()
+  await list.press({ key: (await key('change-a3'))?.key ?? '' })
+  const opened = await until(changeBox)
+  expect(opened).toBeDefined()
+  expect(await says(top, /^Trim the tail · what should it change\?$/)).toBe(true)
+  expect((await top.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => ['Send', 'Cancel', CLOSE].includes(label))).toEqual(['Send', 'Cancel'])
+  // Cancel closes it and sends nothing: the card is Done as it was, and the box opened again is empty
+  await top.input({ key: opened?.key ?? '', text: 'Never mind this', kind: 'change' } as never)
+  await top.press({ key: (await labelled(top, 'Cancel'))[0]?.key ?? '' })
+  expect(await until(async () => ((await changeBox()) ? undefined : true))).toBe(true)
+  expect(changes()).toHaveLength(0)
+  expect(toldOfChange()).toHaveLength(0)
+  expect(await key('stop-a3') ?? (await list.find({ type: 'Button', key: 'stop-a3' }))).toBeUndefined()
+  await list.press({ key: (await until(async () => (await key('change-a3')) ?? undefined))?.key ?? '' })
+  const again2 = await until(changeBox)
+  expect(again2?.props.value).toBe('')
+  // Send starts that same task again with the words, from the submit's own hook, never from a timer (the clock has not moved);
+  // its card is at work at once, the box is gone, and the chat is asked nothing: it is only told, with no turn of its own
+  const sentAt = clock.now()
+  await top.input({ key: again2?.key ?? '', text: 'Leave the tip longer' })
+  expect(clock.now()).toBe(sentAt)
+  expect(changes()).toEqual(['a3: The person pressed "Change something" on the card of your finished task and wrote, in their own words, what to change in your finished work: Leave the tip longer\nYou had finished; this starts you again. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.'])
+  expect(submitted).toHaveLength(wasSubmitted)
+  expect(toldOfChange()).toEqual([expect.stringContaining('asked the finished task "Trim the tail" on its card to change something: “Leave the tip longer”. The task has their words and carries on with them itself: start nothing for it.')])
+  expect(await until(async () => (await list.find({ type: 'Button', key: 'stop-a3' })) ?? undefined)).toBeDefined()
+  expect(await key('change-a3')).toBeUndefined()
+  expect(await until(async () => ((await changeBox()) ? undefined : true))).toBe(true)
+  // It finishes again, and can be asked for a change again
+  await $.turn.complete({ agentId: 'a3', answer: 'The tip is longer now.', durationMs: 1, isAborted: false, turnId: 'c2', reason: 'answer' })
+  expect(await until(async () => (await key('change-a3')) ?? undefined)).toBeDefined()
+  await Promise.all([list.unmount(), details.unmount(), top.unmount()])
 })
 
 

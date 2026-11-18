@@ -691,7 +691,7 @@ const carryNow = async ($: EngineInterface, id: string, at: number) => {
   carrySent.add(`${id}:${at}`)
   // (sent from a hook, where the task it starts keeps the mod's hooks; from this timer it waits for one, and is looked at again as it goes)
   const isStill = async () => Boolean(await stillStopped()) && !WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))
-  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON + (openItems(one).length ? STILL_TO_DO(openItems(one).map(item => item.text)) : '')) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (r.isDelivered) return void (await log($, `work ${id} started again to carry on`))
   // (no longer wanted as it went: it had moved on by itself)
   if (!(await isStill())) return void (await log($, `work ${id} moved on before Claudopus started it: no note sent`))
@@ -781,6 +781,8 @@ const notDoneLines = (one: Todo, text: string) => {
 }
 // A task Claudopus stopped starting again stays in its place, its line in sight, as a task cut off that could not be started again does
 const isLeftStopped = (one: Todo, at: number) => Boolean(one.carryOn?.gaveUp && one.status !== 'working' && at - one.carryOn.gaveUp < CUT_OLD)
+// And so does a task that sent its result with to-dos left, shown not done (shownAs): never folded away under Finished at once
+const isLeftOpen = (one: Todo, at: number) => Boolean(one.leftOpen && !one.chat && at - one.endedAt < CUT_OLD)
 // The line on its card: dim while Claudopus has just started it again, amber once it was left stopped
 const carryLine = (one: Todo, at: number) => {
   const c = one.carryOn

@@ -63,7 +63,7 @@ const prompts: string[] = []
 // the release
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -308,6 +308,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The newest process number, as a shell started now gets it, and the processes as a command that has just ended leaves them
     if (options.jobs?.pid && tool === 'sh' && String(rest[1]).includes('# pid now')) return ok(`${options.jobs.pid()}\n`)
     if (options.jobs?.ps && tool === 'sh' && String(rest[1]).includes('@@LEFT@@')) return ok(`@@LEFT@@\n${options.jobs.ps()}\n`)
+    // (and as they are while a command runs, where its shell is looked for: with the shells the test says run then)
+    if (options.jobs?.ps && tool === 'sh' && String(rest[1]).includes('@@SHELLS@@')) return ok(`@@SHELLS@@\n${options.jobs.shells?.() ?? ''}\n${options.jobs.ps()}\n`)
     if (options.jobs?.fd && tool === 'sh' && String(rest[1]).includes('/proc/$p/fd/1')) return ok(options.jobs.fd())
     // Whose each process is by its environment, as the test says (this chat's where it says nothing)
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('# whose runs')) return ok(rest.slice(4).map(p => `${p} ${options.jobs?.owner?.(String(p)) ?? 'mine'}\n`).join(''))
@@ -1155,6 +1157,22 @@ test('work that reports with everything it set out to do done, leaving a server 
   expect(await pane.find({ type: 'Text', text: /^Waiting for a command/ })).toBeUndefined()
   await clock.advance(20_000)
   expect(await pane.find({ type: 'Text', text: /^A command Claude started is still running · / })).toBeDefined()
+  // One that reports while a command of its own that ends by itself still runs has not finished: its card waits for its command
+  // in purple, never Done, and only once the command has ended is it done
+  const train = (tool: string, id: string, input: Record<string, unknown> = {}) => $.tool.call({ tool, tool_use_id: id, agentId: 'a2', ...input } as never)
+  await $.agent.spawn({ ...spawn, description: 'Train the model', prompt: 'train it' } as never)
+  kinds.a2 = 'general-purpose'
+  await train('mcp__claudopus__todo', 't3', { item: 'Start the training', state: 'done' })
+  await train('Bash', 'b2', { command: 'python3 train.py', description: 'Run the training', run_in_background: true })
+  await train('SubagentHandback', 'h2', { message: 'The training is started and takes two hours.' })
+  agents.a2 = 'waiting'
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w2', reason: 'answer', agentId: 'a2' } as never)
+  await clock.advance(20_000)
+  const texts = async () => (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  expect((await texts()).filter(text => /^Waiting for its command|^Done · |^✓ Done$/.test(text)).map(text => text.split(' · ')[0])).toEqual(['Done', '✓ Done', 'Waiting for its command'])
+  agents.a2 = 'completed'
+  await clock.advance(30_000)
+  expect((await texts()).filter(text => /^Waiting for its command/.test(text)).length).toBe(0)
   await pane.unmount()
 })
 

@@ -22,9 +22,9 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // What the person allowed it under "Ask once per piece of work" ends with it
 // A reply its ask was held with has been acted on once the run it started ends: the ask waits on the person again, every answer back
 // (what the person allowed it goes once the change that ends it is kept, and not when holdDone keeps it at work)
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, leftOwn: status === 'done' && one.bg?.some(b => !b.isWatch && !isServerRun(b.cmd, b.what)) ? true : undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, reportAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, ownWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp || one.status === 'done' ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, reportAt: undefined, leftSince: undefined, leftOwn: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, ownWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, closedAt: undefined, newAt: at })
 // Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
 // a to-do of its is still being done. It is still at work; an answer it handed back on the way is no report. A watch it set is no
 // such command: it may run until stopped
@@ -379,6 +379,17 @@ const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: n
   await openList($)
 }
 
+// The person dismisses the card of a task that has ended, whatever it still asks (18 Nov: "Either way, I should have the ability to
+// just close it"): it goes under Finished and stays there, kept on the card so a reload keeps it too, and comes back up only when
+// the task works again (resumed). Its result stays in Results, where its open questions are still answered
+const isDismissed = (one: Todo) => one.status !== 'working' && Boolean(one.closedAt)
+const dismiss = async ($: EngineInterface, id: string) => {
+  const at = await $.clock.now()
+  // (dismissed, it is done with: a question of its own on the card goes with it, and it is drawn at once, before it is kept)
+  await changeTodos($, list => list.map(one => (one.id === id && one.status !== 'working' && !one.closedAt ? { ...one, closedAt: at, ask: undefined } : one)))
+  redraw($)
+  await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
+}
 // Writes a line into a piece of work's own chat, which it reads at its next step
 const tell = ($: EngineInterface, id: string, text: string) =>
   $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] }, agentId: id }).catch(async err => void (await log($, `work ${id} not told: ${String(err)}`)))
@@ -498,7 +509,7 @@ const saveFinished = async ($: EngineInterface) => {
   // Its helpers are kept with it, so its Details still lists them after a reload
   const all = await read($, todos)
   const ended = all.filter(one => one.status !== 'working' && (!one.parentId || all.some(top => top.id === topOf(all, one.id) && !top.parentId && top.status !== 'working')))
-  const sign = ended.map(one => [one.id, one.status, one.endedAt, one.items.length, one.entries.length, one.answer.length, one.tokens, one.title, one.byYou ? `${one.byYou.at}${one.byYou.isLifted ? 'l' : ''}` : ''].join(':')).join(',')
+  const sign = ended.map(one => [one.id, one.status, one.endedAt, one.items.length, one.entries.length, one.answer.length, one.tokens, one.title, one.byYou ? `${one.byYou.at}${one.byYou.isLifted ? 'l' : ''}` : '', one.closedAt ?? ''].join(':')).join(',')
   if (!id || !dir || !ended.length || sign === finishedSaved) return
   const old = JSON.parse((await readOr($, finishedPath(id))) || '[]') as Todo[]
   const kept = capped([...old.filter(one => !ended.some(card => card.id === one.id)), ...ended].sort((a, b) => a.endedAt - b.endedAt))

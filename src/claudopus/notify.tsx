@@ -25,7 +25,9 @@ const standing = (status: string, endedAt: number) => (status === 'working' ? 'w
 // Looks for work of this chat's that has ended since the last look; helpers are never listed, so never announced
 const lookEnds = async ($: EngineInterface) => {
   const mine = await sessionName($)
-  const cards = (await read($, todos)).filter(one => !one.parentId)
+  // (each as its card shows it: one that handed back while a command or helper of its own still runs has not ended yet, and is
+  // announced once that has ended, however long ago its report came)
+  const cards = shownAs(await read($, todos), one => (one.waits ?? []).some(wait => !askedWait(wait).answer)).filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
   const all = [...cards.map(one => ({ id: one.id, status: one.status, endedAt: one.endedAt, waits: one.waits })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt, waits: undefined as Todo['waits'] }))]
@@ -35,7 +37,7 @@ const lookEnds = async ($: EngineInterface) => {
   for (const one of all) {
     const before = was.get(one.id)
     if (one.status === 'working' || before === undefined || before === standing(one.status, one.endedAt) || cutPending.has(one.id)) continue
-    if (now - one.endedAt > STALE_END || now - (announced.get(one.id) ?? -Infinity) < AGAIN) continue
+    if ((now - one.endedAt > STALE_END && before !== 'working') || now - (announced.get(one.id) ?? -Infinity) < AGAIN) continue
     announced.set(one.id, now)
     if (pressed.delete(one.id)) continue
     ready.push({ id: one.id, waits: one.waits })
@@ -61,9 +63,12 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
     const what = f.status === 'done' ? fewWords(f.result) || 'Done.' : f.status === 'failed' ? 'Failed.' : 'Stopped.'
     return { title: f.title || f.name || 'Workflow', isDone: f.status === 'done', what }
   }
-  const one = cards.find(card => card.id === id)
-  if (!one) return undefined
-  const waits = (one.waits ?? seen ?? []).filter(wait => !askedWait(wait).answer)
+  const kept = cards.find(card => card.id === id)
+  if (!kept) return undefined
+  const waits = (kept.waits ?? seen ?? []).filter(wait => !askedWait(wait).answer)
+  // (as its card shows it: one that still waits for a command or helper of its own has not ended, and one that left to-dos is not done)
+  const one = shownOne(cards, id, () => waits.length > 0) ?? kept
+  if (one.status === 'working') return undefined
   const said = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text ?? ''
   const what =
     one.status === 'done'
@@ -73,6 +78,7 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
       : one.status === 'failed'
         ? 'Failed.'
         : 'Stopped.'
+  if (one.leftOpen) return { title: one.title || 'Task', isDone: false, what: `Not done: ${one.leftOpen === 1 ? 'a to-do is' : `${one.leftOpen} to-dos are`} left.` }
   return { title: one.title || 'Task', isDone: one.status === 'done', isWaiting: one.status === 'done' && waits.length > 0, what }
 }
 

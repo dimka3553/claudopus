@@ -480,7 +480,7 @@ test('a task Claude Code pressed for its report that ended its step with none, a
   const talk: unknown[] = [...pressed]
   const { clock, resumed, appended } = world(on, { agents, talk })
   await $.session.start(start)
-  for (const title of ['Paint the skin', 'Ask about the logo', 'Draw the banner', 'Write the notes', 'Sort the frames']) await $.agent.spawn({ ...spawn, description: title, prompt: title } as never)
+  for (const title of ['Paint the skin', 'Ask about the logo', 'Draw the banner', 'Write the notes', 'Sort the frames', 'Label the frames']) await $.agent.spawn({ ...spawn, description: title, prompt: title } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Which logo?', choices: ['Round', 'Square'] } as never)
   const ends = async (id: string, answer: string, n: number, isAborted = false) => {
     agents[id] = 'completed'
@@ -533,6 +533,13 @@ test('a task Claude Code pressed for its report that ended its step with none, a
   await ends('a1', `Painted. ${'Every patch is gone. '.repeat(30)}`, 6)
   await clock.advance(6000)
   expect(await lines()).toEqual([])
+  // One whose run ended where Claudopus heard nothing of it (no hook of the mod ran for it), a to-do of its still to do, is never
+  // done on Claude Code's word: it is started again to do it and hand back
+  talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text: 'Sorted.' }] })
+  await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 'd6', agentId: 'a6', item: 'Label each frame', state: 'doing' } as never)
+  agents.a6 = 'completed'
+  await clock.advance(30_000)
+  expect(resumed.filter(line => line.startsWith('a6: From Claudopus, not ') && line.includes('Still to do on your card: "Label each frame"')).length).toBe(1)
 })
 
 test('a task that asked "Shall I build this?", was told Build it, and ended its step partway with nothing of its own running is started again where Claudopus still sees it: never from a timer, where its run would go unseen, its panel tools unanswered and its end unheard; its card is done only once it hands back the build (18 Nov: started again from a timer, the task ran unseen, was asked for its result until its run ended, and its card showed done with no build and no report)', SLOW, async ($, on) => {
@@ -705,8 +712,11 @@ test("a task ending its step with to-dos still to do and nothing of its own runn
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const fold = await until(async () => (await pane.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label))))
   if (fold) await pane.press({ key: String(fold.key) })
-  const line = await until(async () => (await pane.find({ type: 'Text', text: /^Not done · / })) ?? undefined)
+  const line = await until(async () => (await pane.find({ type: 'Text', text: /^Not done · Second/ })) ?? undefined)
   expect([line?.text, line?.props.color]).toEqual(['Not done · Second look', '#E5A50A'])
+  // With a to-do left it is not done: its card never says Done
+  expect((await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(text => text === '✓ Done' || /^Done · /.test(text))).toEqual([])
+  expect((await pane.findAll({ type: 'Text' })).some(one => /^Not done · \d/.test(String(one.text ?? '')))).toBe(true)
   await pane.unmount()
   // A task waiting on your answer with to-dos still to do is no task left undone
   await $.agent.spawn({ ...spawn, description: 'Pick the skin tone', prompt: 'pick' } as never)
@@ -716,6 +726,6 @@ test("a task ending its step with to-dos still to do and nothing of its own runn
   await $.turn.complete({ answer: 'Waiting for your pick.', durationMs: 1, isAborted: false, turnId: 't4', reason: 'answer', agentId: 'a3' } as never)
   const shown = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => (JSON.stringify(await shown.drawn()).includes('Which tone?') ? true : undefined))).toBe(true)
-  expect((await shown.findAll({ type: 'Text', text: /^Not done · / })).map(one => one.text)).toEqual(['Not done · Second look'])
+  expect((await shown.findAll({ type: 'Text', text: /^Not done · Second/ })).map(one => one.text)).toEqual(['Not done · Second look'])
   await shown.unmount()
 })

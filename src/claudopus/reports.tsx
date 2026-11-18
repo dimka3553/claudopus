@@ -138,12 +138,23 @@ const answeredInMessage = async ($: EngineInterface, text: string) => {
     const n = Number(/^About question (\d+) of the result /.exec(part)?.[1] ?? 0)
     return n ? [{ n, part }] : []
   })
-  if (!parts.length) return
+  const told: string[] = []
+  if (!parts.length) return told
   for (const r of (await read($, reports)).filter(one => !one.archived && isOpenQuestion(one))) {
     const path = `${reportPath(r)}/report.md: `
-    const numbers = parts.filter(({ part }) => part.includes(path) && part.slice(part.indexOf(path) + path.length).trim()).map(({ n }) => n)
-    if (numbers.length) await settleWaits($, r, (_, index) => (numbers.includes(index + 1) ? { answer: IN_WORDS } : undefined))
+    const typed = parts.flatMap(({ n, part }) => (part.includes(path) && part.slice(part.indexOf(path) + path.length).trim() ? [{ n, words: part.slice(part.indexOf(path) + path.length).trim() }] : []))
+    const numbers = typed.map(({ n }) => n)
+    if (!numbers.length) continue
+    // Their words go to the task that asked, which is started again with them, as a press on the question does (answerToTask)
+    const card = taskOfResult(await read($, todos), r)
+    const open = typed.filter(({ n }) => waitsOf(r)[n - 1] && !waitsOf(r)[n - 1]?.answer)
+    if (card && open.length) drawWaking($, card, await $.clock.now())
+    await settleWaits($, r, (_, index) => (numbers.includes(index + 1) ? { answer: IN_WORDS } : undefined))
+    if (!card || !open.length) continue
+    for (const { n, words } of open) await answerToTask($, card, r, waitsOf(r)[n - 1] ?? { text: '' }, words, true)
+    told.push(named(RESULT_WORDS_SENT(r.title)))
   }
+  return told
 }
 
 const gists = new Map<string, string>()
@@ -251,11 +262,12 @@ const unrecordedAtHandback = async ($: EngineInterface, id: string, message: str
 // What a finished task's results still ask the person: a result with a question open waits for them, it is not done (18 Nov,
 // the person: three results asked something and the panel said only "3 tasks working"). In the minute before its result is kept,
 // what the task recorded is read from its card (never longer: a result that failed to be kept leaves nothing to answer). A
-// question tied to the open ask on its card is that ask's, which the card shows already
+// question tied to the open ask on its card is that ask's, which the card shows already. A card the person dismissed waits on
+// nothing where cards are drawn: its questions are answered in its result
 const CARD_WAITS_SHOWN = 60_000
 const openResultWaits = (one: Todo, kept: Report[], at: number): { r?: Report; wait: Wait; index: number }[] => {
-  if (one.status !== 'done' || one.parentId || one.chat) return []
-  const fromResults = resultsOfWork(kept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer ? [] : [{ r, wait, index }])))
+  if (one.status !== 'done' || one.parentId || one.chat || one.closedAt) return []
+  const fromResults = resultsOfWork(kept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer || answering.has(`${r.id}:${index}`) ? [] : [{ r, wait, index }])))
   const fromCard = fromResults.length || at - one.endedAt > CARD_WAITS_SHOWN ? [] : (one.waits ?? []).map(askedWait).flatMap((wait, index) => (wait.answer ? [] : [{ wait, index }]))
   return [...fromResults, ...fromCard].filter(({ wait }) => !one.ask || wait.ask !== one.ask.at)
 }

@@ -63,7 +63,7 @@ const prompts: string[] = []
 // the release
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -308,6 +308,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The newest process number, as a shell started now gets it, and the processes as a command that has just ended leaves them
     if (options.jobs?.pid && tool === 'sh' && String(rest[1]).includes('# pid now')) return ok(`${options.jobs.pid()}\n`)
     if (options.jobs?.ps && tool === 'sh' && String(rest[1]).includes('@@LEFT@@')) return ok(`@@LEFT@@\n${options.jobs.ps()}\n`)
+    // (and as they are while a command runs, where its shell is looked for: with the shells the test says run then)
+    if (options.jobs?.ps && tool === 'sh' && String(rest[1]).includes('@@SHELLS@@')) return ok(`@@SHELLS@@\n${options.jobs.shells?.() ?? ''}\n${options.jobs.ps()}\n`)
     if (options.jobs?.fd && tool === 'sh' && String(rest[1]).includes('/proc/$p/fd/1')) return ok(options.jobs.fd())
     // Whose each process is by its environment, as the test says (this chat's where it says nothing)
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('# whose runs')) return ok(rest.slice(4).map(p => `${p} ${options.jobs?.owner?.(String(p)) ?? 'mine'}\n`).join(''))
@@ -929,6 +931,8 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
 
   // Work that has ended leaves the list by itself; its Details tab stays and keeps up: it says it finished, with no Stop
   expect(await tab.find({ type: 'Button', key: 'stop-a1' })).toBeDefined()
+  // (every to-do ticked first: with one left it would not be done, and Claudopus would start it again)
+  for (const item of ['Compare the head with your scan', 'Check the left ear', 'Later step 1', 'Later step 2', 'Later step 3', 'Later step 4']) await call('todo', { item, state: 'done' })
   await $.turn.complete({ answer: 'The nostril is **closed**.', durationMs: 1, isAborted: false, turnId: 'turn-4', reason: 'answer', agentId: 'a1' } as never)
   expect((await tab.find({ type: 'Text', text: /^Done · \d+m/ }))?.text).toBe('Done · 2m 00s')
   expect(await tab.find({ type: 'Button', key: 'stop-a1' })).toBeUndefined()
@@ -939,7 +943,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
   expect((await pane.find({ type: 'Text', text: /^Just finished$/ }))?.text).toBe('Just finished')
   // Its helper, ended in the same moment, stays in its card for the same pause
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', 'Search the docs'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', 'Dismiss', 'Search the docs'])
   await clock.advance(1_000)
   expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeDefined()
   await clock.advance(1_100)
@@ -951,7 +955,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect(buttons.map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', '▸ Finished 1'])
   await pane.press({ key: String(buttons.find(b => b.props.label === '▸ Finished 1')?.key) })
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.wrap).toBe('truncate-end')
-  expect((await pane.find({ type: 'Text', text: /^Done ·/ }))?.text).toBe('Done · 1 of 7 to-dos done · 2m 00s')
+  expect((await pane.find({ type: 'Text', text: /^Done ·/ }))?.text).toBe('Done · 7 of 7 to-dos done · 2m 00s')
   expect(await pane.find({ type: 'Button', key: 'stop-a1' })).toBeUndefined()
   // Finished work's Details opens as a tab of its own too
   await pressed(pane, 'open-a1')

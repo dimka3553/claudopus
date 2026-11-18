@@ -18,7 +18,7 @@ import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUD
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
 import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isKindSaid, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
-import { leftoversOf, leftCommandOf, isNamedBy, memOf, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
+import { groupsOf, leftoversOf, leftCommandOf, isNamedBy, memOf, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
 import { heavyOf, isWaiterTree, waiterLeavesOf, waitingOf, watcherOf } from './jobs'
 import type { HeavyKind, OpenCall, Proc, Span, WaitKind } from './jobs'
 import type { Job, JobKind } from './jobs'

@@ -143,7 +143,7 @@ const lookJobs = async ($: EngineInterface) => {
     }
   }
   await pruneSpans($, now)
-  if (!owned.length && !unfound.length && !spans.length) return
+  if (!owned.length && !unfound.length && !spans.length && !openCalls.size) return
   const sid = await $.session.id().catch(() => '')
   if (sid !== tasksOf) ((tasksOf = sid), (tasksDir = ''), (tasksMissedAt = 0))
   if (owned.some(o => !o.file) && !tasksDir && now - tasksMissedAt >= JOB_NEWS) {
@@ -175,7 +175,7 @@ const lookJobs = async ($: EngineInterface) => {
   const [aliveText = '', psText] = tail.split('@@PS@@\n')
   // ps gives each process's age: its start is that age before ps answered, not before this look began (on a slow Mac the look can
   // start well before its ps runs, and every shell then seemed to start earlier than it did, too early to be the command held open)
-  if (psText !== undefined) ((jobProcs = procsOf(psText, await $.clock.now())), (jobProcsAt = now))
+  if (psText !== undefined) ((jobProcs = procsOf(psText, await $.clock.now())), (jobProcsAt = now), seeGroups(jobProcs))
   // What a command left going, however it was started, becomes a run of its card as soon as the processes show it
   if (psText !== undefined && spans.length) await adoptLeft($, jobProcs, now).catch(err => log($, `left runs not followed: ${String(err)}`))
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
@@ -327,8 +327,45 @@ let spans: KeptSpan[] = []
 const SPANS_KEPT = 300
 const SPAN_KEPT_FOR = 2 * 60_000
 // The commands of work still running, by their call, and every process already made a run, so none is added twice
-const openCalls = new Map<string, OpenCall>()
+const openCalls = new Map<string, OpenCall & { looking?: Promise<unknown> }>()
 const adopted = new Set<string>()
+// The groups each command still running is seen to hold, as the processes are listed: its own shell's and those of all under it, so
+// what it leaves is tied to it by its group and to no other command (leftoversOf). A shell is one command's only
+const isOpenSpan = (s: KeptSpan) => Boolean(s.bgId) && s.until === undefined
+const seeGroups = (procs: Proc[]) => {
+  const shells = () => new Set([...openCalls.values(), ...spans].flatMap(one => (one.groups?.[0] ? [one.groups[0]] : [])))
+  for (const call of openCalls.values()) {
+    const groups = call.cmd ? groupsOf(procs, { cmd: call.cmd, at: call.at, from: call.from, groups: call.groups }, call.groups ? undefined : shells()) : undefined
+    if (groups) call.groups = groups
+  }
+  for (const span of spans.filter(isOpenSpan)) {
+    const groups = groupsOf(procs, span, span.groups ? undefined : shells())
+    if (groups && groups.length !== span.groups?.length) spans = spans.map(s => (s.id === span.id ? { ...s, groups } : s))
+  }
+}
+// A command's shell is looked for as it starts, and again a little later each time until it is seen or the command has ended: a
+// short command's shell is gone long before the processes are next listed for the panel (after two minutes unseen it is left to
+// the panel's own looks)
+const SHELL_LOOKS = [0, 60, 200, 600, 2_000, 5_000, ...Array.from({ length: 8 }, () => JOB_PS)]
+const isOpenCall = (id: string) => openCalls.has(id) || spans.some(s => s.id === id && isOpenSpan(s))
+const groupsSeen = (id: string) => openCalls.get(id)?.groups ?? spans.find(s => s.id === id)?.groups
+const seeShell = ($: EngineInterface, id: string, n = 0) => {
+  const look = async () => {
+    if (!isOpenCall(id) || groupsSeen(id)) return
+    const r = await $.process.run(['sh', '-c', `printf '@@SHELLS@@\\n'; ps -axww -o ${PS_COLUMNS}`], { timeoutMs: 5000 }).catch(() => undefined)
+    if (r?.exitCode === 0 && r.stdout.includes('@@SHELLS@@')) seeGroups(procsOf(r.stdout.split('@@SHELLS@@\n')[1] ?? '', await $.clock.now()))
+    if (isOpenCall(id) && !groupsSeen(id) && n + 1 < SHELL_LOOKS.length) seeShell($, id, n + 1)
+  }
+  const go = () => {
+    const call = openCalls.get(id)
+    const looking = look().catch(err => log($, `a command's shell not looked for: ${String(err)}`))
+    // (a command that ends meanwhile waits for this look, so what it saw is kept with the command)
+    if (call) call.looking = looking
+  }
+  const wait = SHELL_LOOKS[n] ?? 0
+  if (wait) $.clock.after(wait, go)
+  else go()
+}
 const pruneSpans = async ($: EngineInterface, now: number) => {
   // One sent to the background is open until its row has left every card
   const list = spans.some(s => s.bgId && s.until === undefined) ? await read($, todos) : []
@@ -343,10 +380,11 @@ const pidNow = async ($: EngineInterface) => {
 }
 // A piece of work's Bash call has ended (or gone to the background): kept by the numbers handed out while it ran, and what a
 // command that has ended left going is followed at once
-const keepSpan = async ($: EngineInterface, agent: string, call: { tool: string; command?: unknown; description?: unknown; tool_use_id?: unknown; run_in_background?: unknown }, from: number, at: number, result?: unknown) => {
+const keepSpan = async ($: EngineInterface, agent: string, call: { tool: string; command?: unknown; description?: unknown; tool_use_id?: unknown; run_in_background?: unknown }, from: number, at: number, result?: unknown, held?: OpenCall & { looking?: Promise<unknown> }) => {
   if (call.tool !== 'Bash' || !from) return
   const to = await pidNow($)
   openCalls.delete(String(call.tool_use_id ?? ''))
+  await held?.looking
   if (!to) return
   const now = await $.clock.now()
   const command = String(call.command ?? '')
@@ -354,7 +392,7 @@ const keepSpan = async ($: EngineInterface, agent: string, call: { tool: string;
   if (/^\s*(\S*\/)?ssh\b/.test(command)) return
   const bgId = (result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId
   const isBackground = Boolean(call.run_in_background) && typeof bgId === 'string'
-  const span: KeptSpan = { id: String(call.tool_use_id ?? now), agent, what: oneLine(String(call.description ?? '')).slice(0, 160), cmd: oneLine(command).slice(0, 4000), from, to, at, endAt: now, ...(isBackground ? { bgId: String(bgId) } : { until: now }) }
+  const span: KeptSpan = { id: String(call.tool_use_id ?? now), agent, what: oneLine(String(call.description ?? '')).slice(0, 160), cmd: oneLine(command).slice(0, 4000), from, to, at, endAt: now, ...(held?.groups ? { groups: held.groups } : {}), ...(isBackground ? { bgId: String(bgId) } : { until: now }) }
   // (a command sent to the background that still runs is kept however many have come since, so what another task starts while it
   // runs never goes to a short command beside it)
   const rest = [...spans.filter(s => s.id !== span.id), span]

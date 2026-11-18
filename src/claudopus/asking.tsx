@@ -163,7 +163,7 @@ const freeTimes = ($: EngineInterface) => {
 let isRedrawOwed = false
 // Only the bar's box: a box in a pane is drawn again with its pane as before. The hold ends TYPING after the last letter or focus,
 // as the app may say nothing when the cursor leaves; a letter typed after that holds it again at once
-const isBoxHeld = (at: number) => Boolean(replyTo || boxOpen) && barBoxAt > 0 && at - barBoxAt < TYPING
+const isBoxHeld = (at: number) => Boolean(replyTo || boxOpen || changeTo) && barBoxAt > 0 && at - barBoxAt < TYPING
 const drawFresh = async ($: EngineInterface, isThroughTyping = false) => {
   if (!isThroughTyping && isBoxHeld(await $.clock.now())) return void ((isRedrawOwed = true), recordEvent($, 'redraw-owed'))
   isRedrawOwed = false
@@ -385,7 +385,12 @@ const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) 
 // gone in the press's own drawing, before the answer is written; the mark goes once the card's file no longer carries the ask
 const askPressed = new Map<string, string>()
 // A card as the panel draws it: an ask or a gate already pressed is not drawn as still waiting
-const asPressed = (one: Todo): Todo => {
+// A task whose result's question was just answered is drawn at work from the press, never done in between, until the answer has
+// started it again or could not (resultWaking, by card: when it was pressed). A card the person dismissed is drawn asking nothing
+const resultWaking = new Map<string, number>()
+const asPressed = (given: Todo): Todo => {
+  const wakingAt = given.status === 'working' ? undefined : resultWaking.get(given.id)
+  const one: Todo = wakingAt !== undefined ? { ...given, status: 'working', startedAt: given.endedAt ? wakingAt - (given.endedAt - given.startedAt) : given.startedAt, endedAt: 0 } : given.closedAt && given.ask ? { ...given, ask: undefined } : given
   const isAnswered = Boolean(one.ask && askPressed.get(one.id) === `${one.ask.at}:${one.ask.text}`)
   const admins = one.admins?.filter(gate => !gatePressed.has(gate.id))
   if (!isAnswered && admins?.length === one.admins?.length) return one
@@ -454,6 +459,7 @@ const sendFromBar = ($: EngineInterface, id: string, value: string) => {
 // the bar already holds the keys, so where it does not the person clicks the box
 const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) => {
   if (replyTo) barLeft.set(replyTo, barDraft(replyTo))
+  if (one?.ask) changeTo = ''
   if (one) (carryDraft($, one, barLeft.get(one.id)), barLeft.delete(one.id))
   replyTo = one?.ask ? one.id : ''
   if (one?.ask) boxOpen = undefined
@@ -469,6 +475,51 @@ const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) =
     .focus({ requestId: bar, key: barBoxKey(one.id) })
     .then(r => recordEvent($, 'focus-call', { deny: r.deny ?? null }))
     .catch(err => recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }))
+}
+// Change something, on a Done card of this chat's: the same box in the bar, opened for a card that asks nothing (changeTo: its
+// card, none when closed). What is sent from it goes to that task as the person's own words, which starts it again from the
+// submit's or the press's own hook (answersOnWay, toEnded), never from a timer; its card is at work from the press (drawWaking),
+// and the chat is only told, with no turn of its own. Cancel closes the box and keeps nothing of what was typed
+let changeTo = ''
+const changeBoxKey = (id: string) => `band-${id}-reply-change-${replies.get(id) ?? 0}`
+const changeDraft = (id: string) => `${id}|change`
+const canChange = (one: Todo) => !one.chat && !one.parentId && one.status === 'done' && !one.leftOpen && !openItems(one).length && !one.ask && !one.admins?.length
+const openChange = ($: EngineInterface, one: Todo | undefined, surface: string) => {
+  if (one && replyTo) (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''))
+  if (one) boxOpen = undefined
+  // A box closed and opened again is a new one, empty
+  if (changeTo) (dropDrafts($, changeTo), replies.set(changeTo, (replies.get(changeTo) ?? 0) + 1))
+  changeTo = one?.id ?? ''
+  barBoxAt = 0
+  isBarSettling = false
+  presses += 1
+  freeTimes($)
+  redraw($)
+  const bar = barIds.get(surface)
+  if (!one || !bar) return
+  void $.ui
+    .focus({ requestId: bar, key: changeBoxKey(one.id) })
+    .then(r => recordEvent($, 'focus-call', { deny: r.deny ?? null }))
+    .catch(err => recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }))
+}
+const sendChange = ($: EngineInterface, id: string, value: string) => {
+  const run = changeTask($, id, value.trim())
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
+  return run
+}
+const changeTask = async ($: EngineInterface, id: string, said: string) => {
+  const card = (await read($, todos)).find(one => one.id === id)
+  if (!card || !said || card.chat || card.parentId || isHeld(card)) return
+  const at = await $.clock.now()
+  drawWaking($, card, at)
+  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) } : one)))
+  const text = CHANGE_ASKED(said)
+  const sent = { text: said, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true }
+  const told = (await read($, todos)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
+  if (told && !told.deny) (writtenIn($, id, id), sentReplies.set(id, { ...sent, to: 'work' }), redraw($))
+  else await toEnded($, card, id, text, sent)
+  await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(said, 120)}”`)))
 }
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   // Another chat's ask is answered only in that chat: no file carries an answer to it, from this Mac or another
@@ -725,6 +776,14 @@ const sendWakes = async ($: EngineInterface, isAnswering = false) => {
   }
 }
 const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number], isInHook = true) => {
+  // (a card drawn at work since its result's question was answered is drawn as it is from here: started again, or not)
+  try {
+    await sendWakeNow($, wake, isInHook)
+  } finally {
+    if (resultWaking.delete(wake.target)) redraw($)
+  }
+}
+const sendWakeNow = async ($: EngineInterface, wake: (typeof wakes)[number], isInHook = true) => {
   // Work the person stopped is not woken by an answer that was on its way
   if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`), await runsSent($, wake, 'held'))
   // A small fresh task for a last step, started from inside a hook so it keeps the mod's own tools and guards; from the timer, where
@@ -733,7 +792,7 @@ const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number], isInHo
     const r = await $.agent.spawn(wake.spawn).catch(err => ({ deny: String(err) }) as { deny: string })
     if (!r.deny) return void (await log($, `a small task ${(r as { agentId?: string }).agentId ?? ''} does the last step of ${wake.target}`))
     await log($, `the last step's small task not started (${r.deny}): its work is started again instead`)
-    return sendWake($, { ...wake, spawn: undefined })
+    return sendWakeNow($, { ...wake, spawn: undefined })
   }
   // Work the person stopped is not woken by an answer that was on its way
   if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`))
@@ -892,7 +951,7 @@ const sentLine = (one: Todo, now: number) => {
   }[sent.to]
   if (isHeld) return `✓ You answered “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : ' · the question is still open'}`
 
-  return `✓ You answered “${cut(sent.text, 60)}” · ${how}`
+  return `✓ You ${sent.ask === CHANGE_WHAT ? 'asked for' : 'answered'} “${cut(sent.text, 60)}” · ${how}`
 }
 
 

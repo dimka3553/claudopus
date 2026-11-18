@@ -602,7 +602,8 @@ const chatHooks = (on: On) => {
     // A message that names a report starts work from it: that work's own report is kept linked to it
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
     // One that names a result and quotes what in it waits answers that, as "Answer in words" on the result starts it
-    await answeredInMessage($, text).catch(err => log($, `results answered in words not marked: ${String(err)}`))
+    // (and goes to the task that asked, which carries on with it: the chat is told so with the message)
+    context.push(...(await answeredInMessage($, text).catch(err => (void log($, `results answered in words not marked: ${String(err)}`), [] as string[]))))
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
     await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
 
