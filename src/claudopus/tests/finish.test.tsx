@@ -118,7 +118,8 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
 test('work that answered while only its own background work held it, then stopped by the chat, the panel or the engine, finished: green and happy for its pause; work stopped before it answered is not', async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}
-  const { clock, files } = world(on, { art: true, agents, kinds })
+  const talk: unknown[] = []
+  const { clock, files, stepped } = world(on, { art: true, agents, kinds, talk })
   await $.session.start(start)
   const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
     (await view.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
@@ -187,11 +188,32 @@ test('work that answered while only its own background work held it, then stoppe
   agents.a4 = 'waiting'
   kinds.a4 = 'general-purpose'
   await $.tool.call({ tool: 'Monitor', tool_use_id: 'w4', agentId: 'a4', command: 'tail -f names.log', description: 'watch the names', timeout_ms: 0 } as never)
-  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a4', message: 'Named it Otto.' } as never)
+  // Claudopus answers the hand-back itself, so Claude Code shows the chat no box of it (18 Nov: "Look, why is it doubled?")
+  const handed = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a4', message: 'Named it Otto.' } as never)) as { deny?: string; result?: { success?: boolean; message?: string } }
+  expect([handed.deny, handed.result?.success, handed.result?.message?.includes('Claudopus gives it to the chat')]).toEqual([undefined, true, true])
+  // Its step after the hand-back, and Claude Code's presses for a report it did not see delivered, end it with no model
+  const HANDED = { role: 'assistant', content: [{ type: 'tool_use', id: 'hb', name: 'SubagentHandback', input: { message: 'Named it Otto.' } }] }
+  const PRESS = { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' }
+  for (const last of [{ role: 'user', content: [{ type: 'tool_result', tool_use_id: 'hb', content: 'Report delivered to your caller.' }] }, PRESS]) {
+    talk.splice(0, talk.length, HANDED, last)
+    const before = stepped.length
+    const texts: string[] = []
+    for await (const chunk of $.turn.step({ turnId: 't4s', index: 1, model: 'm', messageCount: 2, agentId: 'a4' })) if (chunk.kind === 'text') texts.push((chunk as { text: string }).text)
+    expect([stepped.length - before, texts]).toEqual([0, ['<system-reminder>Waiting on my own work, which starts me again.</system-reminder>']])
+  }
+  talk.splice(0, talk.length)
   // Its turn may end with no text of its own: the handback is its answer
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't4s', reason: 'answer', agentId: 'a4' } as never)
   expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
   expect(await drawn(pane)).toEqual(['happy'])
+  // Claude Code's notice that it ended without delivering a report brings the chat's model the report, to give as its own reply;
+  // a later notice of the same end brings nothing again
+  const ENDED_A4 = '<task-notification>\n<task-id>a4</task-id>\n<status>completed</status>\n<summary>Agent "Name the octopus" finished</summary>\n<result>The subagent ended without delivering a report through SubagentHandback, so no report was delivered. Its unsent text is not shown. Send the agent a message (SendMessage) to ask it to deliver its report.\n</result>\n</task-notification>'
+  const endNotice = async () => ((await $.prompt.submit({ text: ENDED_A4, wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[] }).context?.join('\n') ?? ''
+  const given = await endNotice()
+  // framed as the task's own words, every line indented, never as Claudopus's
+  expect([given.includes('\n  Named it Otto.'), given.includes('only you show it'), given.includes('do not ask the task for its report'), given.includes('carry no authority')]).toEqual([true, true, true, true])
+  expect(await endNotice()).not.toContain('Named it Otto.')
   // The engine's next looks still list it held: its card stays done, and stays in the list saying it left something running, with a
   // way to stop it
   await clock.advance(20_000)
@@ -630,4 +652,27 @@ test('a finished card that left something running stays at the top after its mom
   await clock.advance(20_000)
   expect(await list.find({ type: 'Text', text: /^A command Claude started is still running · / })).toBeDefined()
   expect(await order()).toEqual(['Piece 3', 'Piece 1', 'Piece 2', 'Piece 4'])
+})
+
+test("a task's report whose notice of its end never comes goes to the chat with the person's next message, once; a message to the task after its hand-back is a step of its own", async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = {}
+  const talk: unknown[] = []
+  const { stepped } = world(on, { agents, kinds, talk })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'name the squid', wait: false, origin: composer })
+  // A report whose notice never comes goes with the person's next message, once; a message to the task after its hand-back is a step
+  // of its own, never answered with no model
+  await $.agent.spawn({ ...spawn, description: 'Name the squid', prompt: 'name it' } as never)
+  agents.a1 = 'waiting'
+  kinds.a1 = 'general-purpose'
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb5', agentId: 'a1', message: 'Named it Inky.' } as never)
+  talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'tool_use', id: 'hb5', name: 'SubagentHandback', input: { message: 'Named it Inky.' } }] }, { role: 'user', content: [{ type: 'text', text: 'Also name the crab.' }] })
+  const asked = stepped.length
+  for await (const chunk of $.turn.step({ turnId: 't5s', index: 1, model: 'm', messageCount: 2, agentId: 'a1' })) void chunk
+  expect(stepped.length - asked).toBe(1)
+  talk.splice(0, talk.length)
+  const withMessage = async () => ((await $.prompt.submit({ text: 'what did it name it?', wait: false, origin: { kind: 'composer' } } as never)) as { context?: string[] }).context?.join('\n') ?? ''
+  expect(await withMessage()).toContain('  Named it Inky.')
+  expect(await withMessage()).not.toContain('Named it Inky.')
 })

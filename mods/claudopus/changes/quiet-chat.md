@@ -1,0 +1,2 @@
+- A task's result shows once in the chat, as the chat's own reply: Claudopus hands it to the chat itself, so Claude Code's grey "Report from subagent" box no longer appears above it.
+- A task's question, a request to release or to run an admin command, and other news of a task now show only on its card and in the panel's notification, no longer as Claudopus lines in the chat.

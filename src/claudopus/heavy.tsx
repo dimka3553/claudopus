@@ -142,7 +142,7 @@ const lookHeld = async ($: EngineInterface) => {
   heavyLetAt = now
   if (r.isDelivered && !isAtStep) await wakeCard($, first.agent)
   const card = list.find(one => one.id === first.agent)
-  if (!r.isDelivered) await sayInChat($, HEAVY_LOST(card ? titleOf(card) : first.agent, cut(first.what, 120)))
+  if (!r.isDelivered) await (card ? lostToPerson($, card, HEAVY_LOST(titleOf(card), cut(first.what, 120))) : tellChat($, HEAVY_LOST(first.agent, cut(first.what, 120))))
   await log($, `work ${first.agent}'s heavy command's turn came after ${shortAgo(now - first.at)}${isLate ? ', before the Mac had room' : ''}: ${r.isDelivered ? (isAtStep ? 'told' : 'started again') : `not reached (${r.reason}): the chat is told`}`)
   redraw($)
 }

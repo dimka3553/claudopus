@@ -483,7 +483,8 @@ const chatHooks = (on: On) => {
     return next(e)
   })
 
-  on('prompt.submit', async ($, e, next) => {
+  on('prompt.submit', async ($, given, next) => {
+    let e = given
     await holdTest($)
     // The texts a message is answered with are the ones known: a change made since is put back first
     if (dir) await personCheck($).catch(err => log($, `files not compared as a message came: ${String(err)}`))
@@ -495,9 +496,13 @@ const chatHooks = (on: On) => {
       // Each notice that a work waiting on its helpers or a wake_me ended goes with the word that it is still at work, whatever else
       // the prompt brings
       const waitingWork = await waitingNow($)
-      const quiet = quietNotices(e.text, new Set(waitingWork.keys()))
-      const waits = quiet.waits.map(id => waitsText(waitingWork.get(id)!))
       const ids = [...e.text.matchAll(/<task-id>([^<]+)<\/task-id>/g)].map(m => m[1] ?? '')
+      // A task's report Claudopus took at its hand-back comes to the chat's model with this notice that the task ended, for the chat
+      // to give as its own reply (REPORT_FOR_CHAT); a later notice of the same end repeats nothing
+      const reports = await reportsFor($, ids)
+      if (reports.length) e = { ...e, context: [...(e.context ?? []), ...reports] }
+      const quiet = quietNotices(e.text, new Set(waitingWork.keys()), new Set((await read($, todos)).filter(one => one.reportGiven && !reports.length).map(one => one.id)))
+      const waits = quiet.waits.map(id => waitsText(waitingWork.get(id)!))
       const held = (await read($, todos)).filter(one => !one.parentId && isHeld(one) && ids.includes(one.id))
       if (held.length) {
         const told = held.map(one => named(STOPPED_BY_YOU(titleOf(one), one.id, stopLeft.get(one.id) ?? [])))
@@ -511,7 +516,7 @@ const chatHooks = (on: On) => {
       // nothing else is answered with no model (turn.start below, workHooks' turn.step), and one that comes while the chat is at
       // work goes into that turn, or makes such a turn should that turn end first. None is dropped, which Claude Code shows as a
       // warning card. The word that a task still waits goes with it, so the chat, reading it later, does not take the task for ended
-      if (quiet.isQuiet) {
+      if (quiet.isQuiet && !reports.length) {
         for (const one of noticesOf(e.text)) quietHeld.add(one)
         await log($, quiet.isRepeat ? 'let in the notice that repeats a report already given, with no turn of the model\'s' : 'let in notices with nothing new, with no turn of the model\'s: tasks still at work')
         return next(waits.length ? { ...e, context: [...(e.context ?? []), ...waits] } : e)
@@ -529,7 +534,8 @@ const chatHooks = (on: On) => {
     const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text)
     const isPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || isPressed
     if (!isPerson) return next(e)
-    const context = [...(e.context ?? [])]
+    // A report Claudopus took whose notice never came goes with their message, so it is never left unsaid
+    const context = [...(e.context ?? []), ...(await reportsFor($))]
     // Their message lifts the hold on work they stopped: the chat is reminded it was stopped, and starts it again only if asked
     const stillHeld = (await read($, todos)).filter(one => isHeld(one) && !one.parentId)
     if ((await read($, todos)).some(isHeld)) {

@@ -255,7 +255,7 @@ const tellStuck = async ($: EngineInterface, one: Todo, mins: number, now: numbe
   await changeTodos($, all => all.map(card => (card.id === one.id ? { ...card, stuckTold: now } : card)))
   const list = await read($, todos)
   const said = STUCK_IN_CHAT(titleOf(one), mins, runningKids(list, one.id).some(kid => isBusy(list, kid, now)))
-  await sayInChat($, named(`${said} ${STUCK_ASK}`), named(said))
+  await tellChat($, named(`${said} ${STUCK_ASK}`))
 }
 
 // Work whose step ended while all its helpers sit silent follows a fixed schedule from then: at HELPER_WAIT_STEP it is started again
@@ -309,7 +309,7 @@ const lookHelperWaits = async ($: EngineInterface, now: number) => {
       // The chat already told it is stuck is not told again
       if (one.stuckTold !== undefined) continue
       await log($, `work ${id} still stuck ${mins} min on silent helpers after Claudopus asked it to hand back: the chat is told`)
-      await sayInChat($, named(`${GAVE_UP_IN_CHAT(titleOf(one), mins)} ${STUCK_ASK}`), named(GAVE_UP_IN_CHAT(titleOf(one), mins)))
+      await tellChat($, named(`${GAVE_UP_IN_CHAT(titleOf(one), mins)} ${STUCK_ASK}`))
       continue
     }
     const line = (step === 2 ? HELPERS_STILL_SILENT : HELPERS_SILENT)(mins, silentHelpers(list, id, now))

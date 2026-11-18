@@ -80,7 +80,7 @@ Claudopus never updates by itself. Every hour (or as often as Config says), it c
 
 - Everything that waits for you is at the top of the panel, newest first, from every chat: questions from Claude, admin commands, releases, password and key boxes, and Claude Code's own permission prompts. The card turns amber and shows what it's about right under the question.
 - Answer with the buttons on the card. In the desktop app, **Reply in your own words** opens a reply box in the bar just above the chat's prompt, named after the task it goes to. **Close** takes the box away and saves what you typed. In a terminal, the answers to the first question are numbered above the prompt: press a number twice in the empty prompt. You answer another chat's question in that chat. Other panels show it without buttons.
-- You also get a notification with a short sound, and the question arrives in the chat, where you can answer in your own words too.
+- You also get a notification with a short sound, and you can answer in your own words in the chat too.
 - Claude gets your reply right away, even while it's running something long. If it has to wait for a short command to finish, the card says which. A question never times out: it stays until you answer.
 - After you answer, the card stays where it was for a minute and shows what you answered.
 

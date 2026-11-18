@@ -271,9 +271,9 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   const text = `${gateAct(gate)}: ${cut(oneLine(gate.command), 200)}`
   await (card ? askAloud($, card, text) : aloud($, 'ask', 'This chat has a question for you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
   const act = gateAct(gate)
-  $.ui.log(
-    `${card ? `"${titleOf(card)}"` : 'This chat'} wants to ${act.charAt(0).toLowerCase()}${act.slice(1)}: ${cut(oneLine(gate.command), 120)}. Allow it ${card ? 'on its card in' : 'at the top of'} the Claudopus panel (/claudopus opens it). Typing here doesn't allow it.`,
-  )
+  // The press is on the card or at the top of the panel, which the notification above points to: the chat shows nothing of it, and
+  // its model is told only so it knows, should the person ask (18 Nov: a line in the chat for each release was "garbage I don't need")
+  await tellChat($, named(GATE_IN_CHAT(card ? titleOf(card) : '', `${act.charAt(0).toLowerCase()}${act.slice(1)}`, cut(oneLine(gate.command), 120))))
   let said: GateSaid | 'gone' | 'late' | undefined
   try {
     for (;;) {
