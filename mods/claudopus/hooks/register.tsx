@@ -898,10 +898,12 @@ const NUDGED_IN_CHAT = (title: string, mins: number, isLast: boolean) =>
 const RESTARTED_WORK = `From Claudopus, not {name}: you stopped partway through a step without a report (the app restarted, the Mac slept or a command was interrupted). First check what you already have, then continue from where you were; a command or helper you started may still be running, or may need starting again.`
 const STOPPED_SHORT_GO_ON = `From Claudopus, not {name}: your step ended without your report, without a question for {name}, and with nothing of yours running that starts you again, so you were left stopped partway. Carry on from where you were: check what you already have and whether something you started still runs, then go on with your to-dos. When all is done, hand back your report with SubagentHandback; when a step needs {name}, ask with the ask tool; to wait for something, run it in the background or call wake_me, then end your step.`
 const quotedItems = (items: string[]) => items.map(item => `"${item}"`).join('; ')
+const STILL_TO_DO = (items: string[]) =>
+  ` Still to do on your card: ${quotedItems(items)}. If you already sent your report, it went out while your card still showed these: do each now, or tick it if it is done, or drop it if it will not be done, record with the waits tool what waits on {name}, and hand back again with only what is new.`
 const KEEP_GOING = (items: string[]) =>
   `From Claudopus, not {name}: don't end here, your task isn't finished. Still to do: ${quotedItems(items)}. Nothing of yours is running that would start you again (no command in the background, no detached command started with \`echo $!\` after it, no helper at work, no wake_me, no question on your card), so if your step ends now this work stops undone. Claude Code's note that your report has not been delivered doesn't apply yet: send your report only once every to-do is ticked. Carry on now with the first of them. If you expected something you started to be running, look at its log: it may have failed or ended. To wait for something, run it in the background or detached with \`echo $!\` after it, or call wake_me for a file, a page or a time, then end your step. Tick each to-do as soon as it is done. For one only {name} can do, ask with the ask tool and end your step.`
 const NOT_TICKED = (items: string[]) =>
-  `Not sent: ${items.length === 1 ? 'a to-do of yours is' : `${items.length} of your to-dos are`} still to do: ${quotedItems(items)}. Do ${items.length === 1 ? 'it' : 'each'} now, or tick it done if it is done already, then hand back your report. One that only {name} can do or decide stays as it is: name it in your report under "Not done", with what {name} needs to do, and send your report again. Claudopus then shows it as not done on your card and in your result.`
+  `Not sent: ${items.length === 1 ? 'a to-do of yours is' : `${items.length} of your to-dos are`} still to do: ${quotedItems(items)}. Do ${items.length === 1 ? 'it' : 'each'} now, or tick it done if it is done already, or drop it if it will no longer be done and say why in your report, then hand back your report. One that only {name} can do or decide stays as it is: record it with the waits tool, name it in your report under "Not done", with what {name} needs to do, and send your report again. Claudopus then shows it as not done on your card and in your result, and your card never says Done while a to-do is left.`
 const UNRECORDED_WAITS = `Not sent: your report asks {name} something, but you recorded nothing as waiting on {name}, so the panel would show your task as done. Record each question only {name} can answer with the waits tool, or call it with [] if nothing waits on {name}, then send your report again.`
 const NOT_DONE_IN_CHAT = (title: string, items: string[]) =>
   `From Claudopus: the task "${title}" sent its result with ${items.length === 1 ? 'a to-do' : `${items.length} to-dos`} not done: ${quotedItems(items)}. When you pass its result on to {name}, say these are not done.`
@@ -1184,8 +1186,8 @@ const started = (id: string, parentId: string, title: string, words: string, at:
   endedAt: 0,
   status: 'working',
 })
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
-const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, reportAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, ownWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, newAt: at })
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, leftOwn: status === 'done' && one.bg?.some(b => !b.isWatch && !isServerRun(b.cmd, b.what)) ? true : undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, reportAt: undefined, leftSince: undefined, leftOwn: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, ownWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, newAt: at })
 const goesOn = (list: Todo[], id: string) => {
   const one = list.find(card => card.id === id)
   const isRunning = Boolean(one?.bg?.some(b => !b.isWatch)) || list.some(kid => kid.parentId === id && kid.status === 'working')
@@ -1721,9 +1723,20 @@ const stateOf = (list: Todo[], one: Todo): TaskState => {
   if (needsPerson(one)) return 'waiting-you'
   return one.endedStepAt !== undefined && wakesOf(list, one).isAny ? 'waiting-own' : 'working'
 }
+const shownAs = (list: Todo[], asks: (one: Todo) => boolean = () => false): Todo[] =>
+  list.map(one => {
+    if (isOff || one.parentId || one.chat || one.status !== 'done') return one
+    const { runs, helpers } = wakesOf(list, one)
+    if (runs.length || helpers || (one.leftSince && one.leftOwn)) return { ...one, status: 'working' as const, wasDone: one.endedAt, endedAt: 0, endedStepAt: one.endedStepAt ?? one.endedAt }
+    if (openItems(one).length && !one.ask && !asks(one)) return { ...one, status: 'stopped' as const, leftOpen: openItems(one).length }
+    return one
+  })
+const shownOne = (list: Todo[], id: string, asks?: (one: Todo) => boolean) => shownAs(list, asks).find(one => one.id === id)
+
 const ownWorkWords = (list: Todo[], one: Todo, at: number) => {
-  if (stateOf(list, one) !== 'waiting-own' || waitLine(one, at)) return ''
+  if ((stateOf(list, one) !== 'waiting-own' && one.wasDone === undefined) || waitLine(one, at)) return ''
   const { runs, helpers } = wakesOf(list, one)
+  if (one.wasDone !== undefined && !runs.length && !helpers) return 'Waiting for its command'
   const what = [runs.length ? (runs.length === 1 ? 'its command' : 'its commands') : '', helpers ? (helpers === 1 ? 'its helper' : 'its helpers') : ''].filter(Boolean).join(' and ')
   return what ? `Waiting for ${what}` : 'Waiting to be started again'
 }
@@ -1749,7 +1762,7 @@ const doneHeld = async ($: EngineInterface, ids: string[]) => {
     const list = await read($, todos)
     const one = list.find(card => card.id === id)
     if (!one || one.status !== 'working') continue
-    if (await isUnpressed($, id)) {
+    if (!openItems(one).length && (await isUnpressed($, id))) {
       const now = await $.clock.now()
       await changeTodos($, cards => cards.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'done', now), reportAt: now } : card)))
       await lookEnds($)
@@ -4458,7 +4471,7 @@ const standing = (status: string, endedAt: number) => (status === 'working' ? 'w
 
 const lookEnds = async ($: EngineInterface) => {
   const mine = await sessionName($)
-  const cards = (await read($, todos)).filter(one => !one.parentId)
+  const cards = shownAs(await read($, todos)).filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
   const all = [...cards.map(one => ({ id: one.id, status: one.status, endedAt: one.endedAt, waits: one.waits })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt, waits: undefined as Todo['waits'] }))]
@@ -4468,7 +4481,7 @@ const lookEnds = async ($: EngineInterface) => {
   for (const one of all) {
     const before = was.get(one.id)
     if (one.status === 'working' || before === undefined || before === standing(one.status, one.endedAt) || cutPending.has(one.id)) continue
-    if (now - one.endedAt > STALE_END || now - (announced.get(one.id) ?? -Infinity) < AGAIN) continue
+    if ((now - one.endedAt > STALE_END && before !== 'working') || now - (announced.get(one.id) ?? -Infinity) < AGAIN) continue
     announced.set(one.id, now)
     if (pressed.delete(one.id)) continue
     ready.push({ id: one.id, waits: one.waits })
@@ -4492,9 +4505,11 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
     const what = f.status === 'done' ? fewWords(f.result) || 'Done.' : f.status === 'failed' ? 'Failed.' : 'Stopped.'
     return { title: f.title || f.name || 'Workflow', isDone: f.status === 'done', what }
   }
-  const one = cards.find(card => card.id === id)
-  if (!one) return undefined
-  const waits = (one.waits ?? seen ?? []).filter(wait => !askedWait(wait).answer)
+  const kept = cards.find(card => card.id === id)
+  if (!kept) return undefined
+  const waits = (kept.waits ?? seen ?? []).filter(wait => !askedWait(wait).answer)
+  const one = shownOne(cards, id, () => waits.length > 0) ?? kept
+  if (one.status === 'working') return undefined
   const said = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text ?? ''
   const what =
     one.status === 'done'
@@ -4503,7 +4518,9 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
         : fewWords(one.answer) || fewWords(said) || 'Done.'
       : one.status === 'failed'
         ? 'Failed.'
-        : 'Stopped.'
+        : one.leftOpen
+          ? `Stopped with ${one.leftOpen === 1 ? 'a to-do' : `${one.leftOpen} to-dos`} not done.`
+          : 'Stopped.'
   return { title: one.title || 'Task', isDone: one.status === 'done', isWaiting: one.status === 'done' && waits.length > 0, what }
 }
 
@@ -9812,7 +9829,7 @@ const carryNow = async ($: EngineInterface, id: string, at: number) => {
   if (carrySent.has(`${id}:${at}`)) return
   carrySent.add(`${id}:${at}`)
   const isStill = async () => Boolean(await stillStopped()) && !WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))
-  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON + (openItems(one).length ? STILL_TO_DO(openItems(one).map(item => item.text)) : '')) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (r.isDelivered) return void (await log($, `work ${id} started again to carry on`))
   if (!(await isStill())) return void (await log($, `work ${id} moved on before Claudopus started it: no note sent`))
   const now = await $.clock.now()
@@ -12967,10 +12984,11 @@ const bandHooks = (on: On) => {
       if ((asksForBar(cards).length || boxes.some(one => !one.key)) && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
     }
     if (e.props.hasSurvey) return next(e)
-    const working = cards.filter(one => !one.parentId && one.status === 'working')
     const bandAt = await $.clock.now()
     const bandKept = await read($, reports)
-    const happy = isHappy(cards.filter(one => !openResultWaits(one, bandKept, bandAt).length), bandAt)
+    const shown = shownAs(cards, one => openResultWaits(one, bandKept, bandAt).length > 0)
+    const working = shown.filter(one => !one.parentId && one.status === 'working')
+    const happy = isHappy(shown.filter(one => !openResultWaits(one, bandKept, bandAt).length), bandAt)
     if (happy) await read($, tick)
     const ui = uiOf($, e)
     const { Box, Button, Text } = ui
@@ -13233,7 +13251,9 @@ const panelHooks = (on: On) => {
       }
       listFreshAt = from
     }
-    const all = (await read($, todos)).map(asPressed)
+    const shownKept = await read($, reports)
+    const shownAt = await $.clock.now()
+    const all = shownAs((await read($, todos)).map(asPressed), one => openResultWaits(one, shownKept, shownAt).length > 0)
     const own = all.filter(one => !one.parentId)
     const resultsKept = await read($, reports)
     const resultWaits = (one: Todo) => openResultWaits(one, resultsKept, at)
@@ -13540,7 +13560,7 @@ const panelHooks = (on: On) => {
                   </Button>
                 </Box>
                 <Box flexGrow={1} />
-                {one.status === 'working' && !one.chat ? (
+                {one.status === 'working' && !one.chat && !one.wasDone ? (
                   <Box flexShrink={0}>
                     <Button key={`stop-${one.id}`} label="Stop" plain dimColor hover={{ scope: `stop-${one.id}`, underline: true }} onPress={() => void stop($, one.id)} />
                   </Box>

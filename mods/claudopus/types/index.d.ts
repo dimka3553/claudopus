@@ -123,6 +123,13 @@ export type Todo = {
   stuckTold?: number
   // Finished work that its own background work still holds: since when the mod has seen it so. Absent once nothing holds it
   leftSince?: number
+  // Kept as a card ends done: a command of its own that ends by itself was still in the background then, so while Claude Code
+  // holds its run for it (leftSince) the card is shown waiting for its command, not Done
+  leftOwn?: boolean
+  // Only on a card as it is shown, never kept (shownAs): when a card kept as done ended, while something of its own still runs and
+  // it is shown at work; and how many to-dos a card kept as done left, shown as stopped
+  wasDone?: number
+  leftOpen?: number
   // What it started in the background itself that wakes it when it ends (a command, a watch): the engine's task id, what it is
   // in its own words, and since when, with the command itself. Dropped as it ends or is stopped
   bg?: { id: string; what: string; at: number; isWatch?: boolean; cmd?: string; expiresAt?: number }[]

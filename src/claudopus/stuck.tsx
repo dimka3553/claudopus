@@ -691,7 +691,7 @@ const carryNow = async ($: EngineInterface, id: string, at: number) => {
   carrySent.add(`${id}:${at}`)
   // (sent from a hook, where the task it starts keeps the mod's hooks; from this timer it waits for one, and is looked at again as it goes)
   const isStill = async () => Boolean(await stillStopped()) && !WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))
-  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON + (openItems(one).length ? STILL_TO_DO(openItems(one).map(item => item.text)) : '')) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (r.isDelivered) return void (await log($, `work ${id} started again to carry on`))
   // (no longer wanted as it went: it had moved on by itself)
   if (!(await isStill())) return void (await log($, `work ${id} moved on before Claudopus started it: no note sent`))

@@ -191,13 +191,15 @@ const bandHooks = (on: On) => {
       if ((asksForBar(cards).length || boxes.some(one => !one.key)) && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
     }
     if (e.props.hasSurvey) return next(e)
-    const working = cards.filter(one => !one.parentId && one.status === 'working')
+    const bandAt = await $.clock.now()
+    const bandKept = await read($, reports)
+    // (each card as it is shown: never done while something of its own runs or to-dos are left)
+    const shown = shownAs(cards, one => openResultWaits(one, bandKept, bandAt).length > 0)
+    const working = shown.filter(one => !one.parentId && one.status === 'working')
     // Work that just finished makes the octopus happy for its pause, the band staying that long even when nothing else runs;
     // the redraw set for the pause's end is read so the band leaves or goes back to work then
     // (not for a task whose result asks the person something: that waits for them)
-    const bandAt = await $.clock.now()
-    const bandKept = await read($, reports)
-    const happy = isHappy(cards.filter(one => !openResultWaits(one, bandKept, bandAt).length), bandAt)
+    const happy = isHappy(shown.filter(one => !openResultWaits(one, bandKept, bandAt).length), bandAt)
     if (happy) await read($, tick)
     const ui = uiOf($, e)
     const { Box, Button, Text } = ui

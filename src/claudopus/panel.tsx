@@ -186,7 +186,10 @@ const panelHooks = (on: On) => {
     }
     // Every piece of work this chat keeps; its own are the ones the chat's thread started, the rest are their helpers
     // A card whose ask or gate was just pressed is drawn answered, from the press itself (asPressed)
-    const all = (await read($, todos)).map(asPressed)
+    // (each read as it stands, never as Done while something of its own runs or to-dos are left: shownAs)
+    const shownKept = await read($, reports)
+    const shownAt = await $.clock.now()
+    const all = shownAs((await read($, todos)).map(asPressed), one => openResultWaits(one, shownKept, shownAt).length > 0)
     const own = all.filter(one => !one.parentId)
     // What a finished task's results still ask the person (openResultWaits): its card stays at the top in amber, never under
     // Finished, until each is answered
@@ -563,7 +566,7 @@ const panelHooks = (on: On) => {
                   </Button>
                 </Box>
                 <Box flexGrow={1} />
-                {one.status === 'working' && !one.chat ? (
+                {one.status === 'working' && !one.chat && !one.wasDone ? (
                   <Box flexShrink={0}>
                     <Button key={`stop-${one.id}`} label="Stop" plain dimColor hover={{ scope: `stop-${one.id}`, underline: true }} onPress={() => void stop($, one.id)} />
                   </Box>

@@ -1,0 +1,5 @@
+- A card says Done only when the task finished everything: its result is in, every to-do is ticked or dropped, and no command or helper of its own still runs. Until then it stays purple and says what it waits for, or says Stopped with how many to-dos are done.
+- A task that ended where Claudopus could not see it, with to-dos left, is started again to finish them instead of going green.
+- A command that another task started no longer shows up under a task that happened to run a command at the same moment.
+- Your answer on a finished task's question goes to that same task, which carries on with it.
+- You can close any finished, stopped or waiting card yourself.
