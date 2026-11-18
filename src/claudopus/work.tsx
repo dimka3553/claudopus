@@ -197,6 +197,24 @@ const rulesAgain = async ($: EngineInterface, agent: string) => {
   return `${card.rulesDue ? 'Your context was compacted, and the rules you were handed at the start are no longer in it.' : 'The rules every task follows have changed since you started.'} These are the rules now; they replace any earlier copy.\n\n${rules}${card.scratch ? `\n${SCRATCH_LINE(card.scratch)}` : ''}`
 }
 
+// The main checkout a command would move to another branch or commit (switchesOf), or nothing: a folder that is no repo, a
+// worktree (its git folder is not the repo's own), a bare repo, a checkout named for the branch it is already on, or a file
+// checked out by name are left to run
+const mainCheckoutMoved = async ($: EngineInterface, command: string, start: string) => {
+  const home = (await $.env.get('HOME')) ?? ''
+  for (const one of switchesOf(command, start, home)) {
+    const git = (args: string[]) =>
+      $.process.run(['git', '-C', one.folder, ...args], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
+    const said = await git(['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--is-bare-repository', '--show-toplevel', '--abbrev-ref', 'HEAD'])
+    const [gitDir = '', common = '', bare = '', top = '', branch = ''] = said.stdout.trim().split('\n').map(line => line.trim())
+    if (said.exitCode !== 0 || !gitDir || gitDir !== common || bare !== 'false' || !top) continue
+    if (one.to && branch !== 'HEAD' && one.to === branch) continue
+    if (one.isNamed && (await git(['rev-parse', '-q', '--verify', `${one.to}^{commit}`])).exitCode !== 0) continue
+    return top
+  }
+  return ''
+}
+
 const workHooks = (on: On) => {
 
   // A chat's own thread reads, starts agents and talks to them; the work runs in the agents, which carry an agent id
@@ -303,6 +321,17 @@ const workHooks = (on: On) => {
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
+    }
+    // A repo's main checkout stays where it is: work reads other commits with git show and works in worktrees of its own. Claudopus
+    // refuses it before Claude Code sees it, so no card offers it to be run on a press either
+    if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash') {
+      const command = String((e as { command?: unknown }).command ?? '')
+      const start = typeof (e as { cwd?: unknown }).cwd === 'string' ? String((e as { cwd?: unknown }).cwd) : cwd
+      const moved = /\bgit\b/.test(command) ? await mainCheckoutMoved($, command, start || '.') : ''
+      if (moved) {
+        await log($, `refused work ${e.agentId}'s command that moves the main checkout ${moved}`)
+        return { deny: NO_SWITCH(moved) }
+      }
     }
     // The list of admin commands always allowed, and what seals it, are the person's alone
     if (touchesGate(e) || (e.tool === 'Bash' && (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(text => touchesGate({ ...e, command: text } as never)))) {

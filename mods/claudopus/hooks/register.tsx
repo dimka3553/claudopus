@@ -600,6 +600,37 @@ const pushesMain = (command: string): boolean =>
     if (args.includes('--no-verify')) return true
     return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
   })
+type Switch = { folder: string; to: string; isNamed: boolean }
+const switchesOf = (command: string, start: string, home: string): Switch[] => {
+  const at = (here: string, path: string) =>
+    (path.startsWith('/') ? path : path === '~' || path.startsWith('~/') ? `${home}${path.slice(1)}` : `${here}/${path}`)
+      .split('/')
+      .reduce<string[]>((kept, part) => (part === '..' ? kept.slice(0, Math.max(1, kept.length - 1)) : part === '.' || (part === '' && kept.length) ? kept : [...kept, part]), [])
+      .join('/') || '/'
+  let here = start
+  return shellWords(command).flatMap((words): Switch[] => {
+    const i = commandAt(words)
+    const tool = (words[i] ?? '').split('/').pop()
+    if (tool === 'cd') return (words[i + 1] && !words[i + 1]!.startsWith('-') && (here = at(here, words[i + 1]!)), [])
+    if ((tool === 'bash' || tool === 'sh' || tool === 'zsh') && words[i + 1] === '-c') return switchesOf(words[i + 2] ?? '', here, home)
+    if (tool !== 'git') return []
+    let j = i + 1
+    let folder = here
+    while (j < words.length && words[j]!.startsWith('-')) {
+      if (words[j] === '-C' && words[j + 1]) folder = at(folder, words[j + 1]!)
+      j += /^-[Cc]$/.test(words[j]!) ? 2 : 1
+    }
+    const args = words.slice(j + 1)
+    const names = args.filter(one => !one.startsWith('-'))
+    if (args.some(one => one === '-h' || one === '--help')) return []
+    if (words[j] === 'switch') return [{ folder, to: args.some(one => /^(-[cCd]|--create|--force-create|--detach|--orphan)$/.test(one)) ? '' : names.at(-1) ?? '', isNamed: false }]
+    if (words[j] !== 'checkout' || args.includes('--') || args.some(one => /^(-p|--patch|--pathspec-from-file(=.*)?)$/.test(one))) return []
+    if (args.some(one => /^(-[bB]|--orphan|--detach)$/.test(one))) return [{ folder, to: '', isNamed: false }]
+    return names.length === 1 ? [{ folder, to: names[0]!, isNamed: true }] : []
+  })
+}
+const NO_SWITCH = (folder: string) =>
+  named(`Not run: ${folder} is a repo's main checkout, and chats and {name} use what it has checked out, so Claude never moves it to another branch or commit. To read another commit, use git show <commit>:<path> or git grep <pattern> <commit>. To work on one, make a worktree of your own.`)
 const BOX_READERS = ['rg', 'grep', 'egrep', 'fgrep', 'ls', 'du', 'git', 'gh', 'wc', 'head', 'tail', 'less', 'file', 'stat', 'tree']
 const BOX_WRAPPERS = ['env', 'command', 'sudo', 'nohup', 'time', 'exec', 'nice', 'timeout', 'xargs', 'caffeinate']
 const commandAt = (words: string[]) => {
@@ -11166,6 +11197,21 @@ const rulesAgain = async ($: EngineInterface, agent: string) => {
   return `${card.rulesDue ? 'Your context was compacted, and the rules you were handed at the start are no longer in it.' : 'The rules every task follows have changed since you started.'} These are the rules now; they replace any earlier copy.\n\n${rules}${card.scratch ? `\n${SCRATCH_LINE(card.scratch)}` : ''}`
 }
 
+const mainCheckoutMoved = async ($: EngineInterface, command: string, start: string) => {
+  const home = (await $.env.get('HOME')) ?? ''
+  for (const one of switchesOf(command, start, home)) {
+    const git = (args: string[]) =>
+      $.process.run(['git', '-C', one.folder, ...args], { timeoutMs: 10_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
+    const said = await git(['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir', '--is-bare-repository', '--show-toplevel', '--abbrev-ref', 'HEAD'])
+    const [gitDir = '', common = '', bare = '', top = '', branch = ''] = said.stdout.trim().split('\n').map(line => line.trim())
+    if (said.exitCode !== 0 || !gitDir || gitDir !== common || bare !== 'false' || !top) continue
+    if (one.to && branch !== 'HEAD' && one.to === branch) continue
+    if (one.isNamed && (await git(['rev-parse', '-q', '--verify', `${one.to}^{commit}`])).exitCode !== 0) continue
+    return top
+  }
+  return ''
+}
+
 const workHooks = (on: On) => {
 
   on('tool.call', async ($, e, raw) => {
@@ -11254,6 +11300,15 @@ const workHooks = (on: On) => {
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
+    }
+    if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash') {
+      const command = String((e as { command?: unknown }).command ?? '')
+      const start = typeof (e as { cwd?: unknown }).cwd === 'string' ? String((e as { cwd?: unknown }).cwd) : cwd
+      const moved = /\bgit\b/.test(command) ? await mainCheckoutMoved($, command, start || '.') : ''
+      if (moved) {
+        await log($, `refused work ${e.agentId}'s command that moves the main checkout ${moved}`)
+        return { deny: NO_SWITCH(moved) }
+      }
     }
     if (touchesGate(e) || (e.tool === 'Bash' && (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(text => touchesGate({ ...e, command: text } as never)))) {
       await log($, `refused ${e.tool} on the admin gate's own files`)

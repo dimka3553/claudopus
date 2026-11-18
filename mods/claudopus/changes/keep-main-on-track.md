@@ -1,0 +1,2 @@
+- Update works again for chats that run Claudopus from its own code on your Mac after a task looked at an older version there. Before, every such chat said it ran a test copy and showed no Update button.
+- Claudopus no longer lets a task or its helper switch a project's main folder to another version. Your chats keep running what you had, and Claude reads other versions without switching.
