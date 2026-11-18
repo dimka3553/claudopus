@@ -839,6 +839,10 @@ const RESULT_ANSWER = (title: string, path: string, asked: string, said: string,
   `${who(true)} ${isWords ? 'answered, in their own words, a question' : `pressed "${said}" to answer a question`} in your result "${title}" (${path}): ${asked}${isWords ? `\nTheir answer: ${said}` : ''}${left ? `\n${left} other ${left === 1 ? 'question' : 'questions'} of that result still ${left === 1 ? 'waits' : 'wait'} for them: each answer comes to you as a message of its own, so carry on with what you have.` : ''}`
 const RESULT_ANSWERED = (title: string, asked: string, said: string) => `✓ {Name} answered a question in the result "${title}" on the panel (${asked}): ${said}. Its task has the answer and carries on with it itself: start nothing for it.`
 const RESULT_WORDS_SENT = (title: string) => `Claudopus sent this answer of {name}'s to the task that asked ("${title}"), which carries on with it itself: start nothing for it and send it nothing, only say so in a line.`
+const CHANGE_WHAT = 'what should it change?'
+const CHANGE_ASKED = (said: string) =>
+  `${who(true)} pressed "Change something" on the card of your finished task and wrote, in their own words, what to change in your finished work: ${said}\nYou had finished; this starts you again. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
+const CHANGE_TOLD = (title: string, said: string) => `✓ {Name} asked the finished task "${title}" on its card to change something: ${said}. The task has their words and carries on with them itself: start nothing for it.`
 const RESUMED_BY_ANSWER = `You had finished; this answer starts you again. Continue the task with it, then end with your report as before.`
 const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = false) =>
   isYou
@@ -5552,7 +5556,7 @@ const freeTimes = ($: EngineInterface) => {
   if (wasHeld) drawAgain($)
 }
 let isRedrawOwed = false
-const isBoxHeld = (at: number) => Boolean(replyTo || boxOpen) && barBoxAt > 0 && at - barBoxAt < TYPING
+const isBoxHeld = (at: number) => Boolean(replyTo || boxOpen || changeTo) && barBoxAt > 0 && at - barBoxAt < TYPING
 const drawFresh = async ($: EngineInterface, isThroughTyping = false) => {
   if (!isThroughTyping && isBoxHeld(await $.clock.now())) return void ((isRedrawOwed = true), recordEvent($, 'redraw-owed'))
   isRedrawOwed = false
@@ -5735,6 +5739,7 @@ const sendFromBar = ($: EngineInterface, id: string, value: string) => {
 }
 const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) => {
   if (replyTo) barLeft.set(replyTo, barDraft(replyTo))
+  if (one?.ask) changeTo = ''
   if (one) (carryDraft($, one, barLeft.get(one.id)), barLeft.delete(one.id))
   replyTo = one?.ask ? one.id : ''
   if (one?.ask) boxOpen = undefined
@@ -5750,6 +5755,46 @@ const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) =
     .focus({ requestId: bar, key: barBoxKey(one.id) })
     .then(r => recordEvent($, 'focus-call', { deny: r.deny ?? null }))
     .catch(err => recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }))
+}
+let changeTo = ''
+const changeBoxKey = (id: string) => `band-${id}-reply-change-${replies.get(id) ?? 0}`
+const changeDraft = (id: string) => `${id}|change`
+const canChange = (one: Todo) => !one.chat && !one.parentId && one.status === 'done' && !one.leftOpen && !openItems(one).length && !one.ask && !one.admins?.length
+const openChange = ($: EngineInterface, one: Todo | undefined, surface: string) => {
+  if (one && replyTo) (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''))
+  if (one) boxOpen = undefined
+  if (changeTo) (dropDrafts($, changeTo), replies.set(changeTo, (replies.get(changeTo) ?? 0) + 1))
+  changeTo = one?.id ?? ''
+  barBoxAt = 0
+  isBarSettling = false
+  presses += 1
+  freeTimes($)
+  redraw($)
+  const bar = barIds.get(surface)
+  if (!one || !bar) return
+  void $.ui
+    .focus({ requestId: bar, key: changeBoxKey(one.id) })
+    .then(r => recordEvent($, 'focus-call', { deny: r.deny ?? null }))
+    .catch(err => recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }))
+}
+const sendChange = ($: EngineInterface, id: string, value: string) => {
+  const run = changeTask($, id, value.trim())
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
+  return run
+}
+const changeTask = async ($: EngineInterface, id: string, said: string) => {
+  const card = (await read($, todos)).find(one => one.id === id)
+  if (!card || !said || card.chat || card.parentId || isHeld(card)) return
+  const at = await $.clock.now()
+  drawWaking($, card, at)
+  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) } : one)))
+  const text = CHANGE_ASKED(said)
+  const sent = { text: said, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true }
+  const told = (await read($, todos)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
+  if (told && !told.deny) (writtenIn($, id, id), sentReplies.set(id, { ...sent, to: 'work' }), redraw($))
+  else await toEnded($, card, id, text, sent)
+  await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(said, 120)}”`)))
 }
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   if (one.chat) return
@@ -6071,7 +6116,7 @@ const sentLine = (one: Todo, now: number) => {
   }[sent.to]
   if (isHeld) return `✓ You answered “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : ' · the question is still open'}`
 
-  return `✓ You answered “${cut(sent.text, 60)}” · ${how}`
+  return `✓ You ${sent.ask === CHANGE_WHAT ? 'asked for' : 'answered'} “${cut(sent.text, 60)}” · ${how}`
 }
 
 
@@ -6957,6 +7002,7 @@ const looksLikeKey = (text: string) => keyWords(text).length > 0
 const BOX_LOOKS_KEY = (where: string) => `That looks like the key itself. An answer in words goes into the chat, where Claude reads it. Save it as the key to keep it only in ${where}, or send it as an answer anyway.`
 const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surface: string) => {
   if (id && replyTo) (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''))
+  if (id) changeTo = ''
   boxOpen = id ? { id, mode } : undefined
   barKeyTyped.clear()
   if (id) (boxHeldReply.delete(id), boxSaid.delete(id))
@@ -12971,19 +13017,19 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
       ) : null}
     </ui.Box>
   ) : null
-const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
-  const draft = barDraft(one.id)
-  const send = (value: string) => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
+const barReply = ($: EngineInterface, ui: Ui, one: Todo, isChange = false) => {
+  const draft = isChange ? changeDraft(one.id) : barDraft(one.id)
+  const send = isChange ? (value: string) => void (value.trim() && ((barBoxAt = 0), (changeTo = ''), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendChange($, one.id, value).catch(err => log($, `change not sent: ${String(err)}`)))) : (value: string) => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
   return (
     <ui.Box key="band-reply" flexDirection="column" flexShrink={0} width="100%">
       <ui.Box flexDirection="row" height={1} overflow="hidden">
-        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↳ Your answer to “${cut(titleOf(one), 60)}”`}</ui.Text>
+        <ui.Text color={isChange ? undefined : NEEDS} bold wrap="truncate-end">{isChange ? `${cut(titleOf(one), 60)} · ${CHANGE_WHAT}` : `↳ Your answer to “${cut(titleOf(one), 60)}”`}</ui.Text>
       </ui.Box>
       {'Input' in ui ? (
         <ui.Box flexDirection="column" width="100%" flexShrink={0}>
           <ui.Input
-            key={barBoxKey(one.id)}
-            placeholder="Type your reply"
+            key={isChange ? changeBoxKey(one.id) : barBoxKey(one.id)}
+            placeholder={isChange ? 'Type what to change' : 'Type your reply'}
             value={draftDrawn(draft)}
             rows={BOX_ROWS}
             autoFocus
@@ -12992,19 +13038,19 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
           />
         </ui.Box>
       ) : null}
-      {barFoot($, ui, 'band-reply', presses, () => void ((drafts.get(draft) ?? '').trim() && send(drafts.get(draft) ?? '')), press => openReply($, undefined, press.surface))}
+      {barFoot($, ui, isChange ? 'band-change' : 'band-reply', presses, () => void ((drafts.get(draft) ?? '').trim() && send(drafts.get(draft) ?? '')), press => (isChange ? openChange($, undefined, press.surface) : openReply($, undefined, press.surface)), true, isChange ? 'Cancel' : 'Close')}
     </ui.Box>
   )
 }
 const BOX_KEYS = 'Enter sends · Shift+Enter for a new line'
-const barFoot = ($: EngineInterface, ui: Ui, where: string, mark: number, onSend: () => void, onClose: (press: { surface: string }) => void, isLines = true) => (
+const barFoot = ($: EngineInterface, ui: Ui, where: string, mark: number, onSend: () => void, onClose: (press: { surface: string }) => void, isLines = true, close = 'Close') => (
   <ui.Box key={`${where}-foot`} flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
     <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
       <ui.Text dimColor wrap="truncate-end">{isLines ? BOX_KEYS : 'Enter sends'}</ui.Text>
     </ui.Box>
     <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
       <ui.Button key={`${where}-send-${mark}`} label="Send" variant="primary" onPress={onSend} />
-      <ui.Button key={`${where}-close-${mark}`} label="Close" plain dimColor onPress={onClose} />
+      <ui.Button key={`${where}-close-${mark}`} label={close} plain dimColor onPress={onClose} />
     </ui.Box>
   </ui.Box>
 )
@@ -13012,16 +13058,20 @@ const barHeld = new Map<string, { shape: string; mark: string; drawing: unknown 
 const barShape = () => {
   const keyBox = barKeyTarget()
   if (boxOpen && keyBox) return `key|${barKeyBoxKey(keyBox.id, boxOpen.mode)}|${boxSaid.get(keyBox.id) ?? ''}|${boxHeldReply.has(keyBox.id)}`
+  if (changeTo) return `change|${changeBoxKey(changeTo)}|${barCardsDrawn}`
   return replyTo ? `reply|${barBoxKey(replyTo)}|${barCardsDrawn}` : ''
 }
 let barCardsDrawn = ''
+const changeTarget = (cards: Todo[]) => (changeTo ? cards.find(one => one.id === changeTo && canChange(asPressed(one))) : undefined)
 const barCardsSign = (cards: Todo[]) => {
+  const changing = changeTarget(cards)
+  if (changing) return `${changing.id}|${titleOf(changing)}`
   const target = barTarget(cards)
   return target?.ask ? `${target.id}|${titleOf(target)}` : ''
 }
 const lookBar = async ($: EngineInterface) => {
   if (isRedrawOwed && !isBoxHeld(await $.clock.now())) drawAgain($)
-  if (!barHeld.size || !replyTo) return
+  if (!barHeld.size || !(replyTo || changeTo)) return
   const sign = barCardsSign(await read($, todos))
   if (sign === barCardsDrawn) return
   barCardsDrawn = sign
@@ -13064,7 +13114,7 @@ const bandHooks = (on: On) => {
     if (e.requestId) barIds.set(e.surface, e.requestId)
     const flipAt = await $.clock.now()
     const kept = barHeld.get(e.surface)
-    if (kept && canBox && barBoxes.has(e.surface) && (replyTo || boxOpen) && kept.shape === barShape()) {
+    if (kept && canBox && barBoxes.has(e.surface) && (replyTo || boxOpen || changeTo) && kept.shape === barShape()) {
       const isHeldNow = isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)
       if (isHeldNow || kept.mark === (await markerSign($, e.surface))) return ((isBarSettling = false), kept.drawing as Awaited<ReturnType<typeof next>>)
     }
@@ -13074,9 +13124,9 @@ const bandHooks = (on: On) => {
       else barBoxes.delete(e.surface)
       const open = canBox ? undefined : cards.find(one => one.id === replyTo)
       if (open) (carryDraft($, open, barDraft(open.id)), freeTimes($))
-      if (!canBox) ((replyTo = ''), (replyMark = ''), (boxOpen = undefined), barHeld.delete(e.surface))
+      if (!canBox) ((replyTo = ''), (replyMark = ''), (changeTo = ''), (boxOpen = undefined), barHeld.delete(e.surface))
       barBoxAt = 0
-      if ((asksForBar(cards).length || boxes.some(one => !one.key)) && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
+      if ((asksForBar(cards).length || boxes.some(one => !one.key) || cards.some(one => canChange(asPressed(one)))) && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
     }
     if (e.props.hasSurvey) return next(e)
     const bandAt = await $.clock.now()
@@ -13154,13 +13204,15 @@ const bandHooks = (on: On) => {
       settleBar($)
       return drawing
     }
-    const target = canBox ? barTarget(cards) : undefined
+    const changing = canBox ? changeTarget(cards) : undefined
+    if (changeTo && canBox && !changing) changeTo = ''
+    const target = changing ?? (canBox ? barTarget(cards) : undefined)
     if (replyTo && canBox && !target) ((replyTo = ''), (replyMark = ''))
-    if (target?.ask) {
+    if (changing || target?.ask) {
       barCardsDrawn = barCardsSign(cards)
       const shape = barShape()
       const marker = await waitMarker($, ui, e.surface)
-      const reply = barReply($, ui, target)
+      const reply = barReply($, ui, target as Todo, Boolean(changing))
       const drawing = marker ? (
         <Box flexDirection="column">
           {marker}
@@ -13659,6 +13711,13 @@ const panelHooks = (on: On) => {
                 {one.status === 'working' && !one.chat && (!one.wasDone || one.leftSince) ? (
                   <Box flexShrink={0}>
                     <Button key={`stop-${one.id}`} label="Stop" plain dimColor hover={{ scope: `stop-${one.id}`, underline: true }} onPress={() => void stop($, one.id)} />
+                  </Box>
+                ) : null}
+                {/* Done, at the top or under Finished: a press opens the box above the chat for what to change, where that bar
+                    takes a box; the same task then carries on with what is typed */}
+                {canChange(one) && 'Input' in table && repliesInBar(e.surface) ? (
+                  <Box flexShrink={0}>
+                    <Button key={`change-${one.id}-${presses}`} label="Change something" plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openChange($, one, press.surface)} />
                   </Box>
                 ) : null}
                 {/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again */}

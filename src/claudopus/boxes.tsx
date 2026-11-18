@@ -369,6 +369,7 @@ const BOX_LOOKS_KEY = (where: string) => `That looks like the key itself. An ans
 // an ask's reply box open there closes (openReply does the same the other way). The cursor is asked into the field
 const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surface: string) => {
   if (id && replyTo) (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''))
+  if (id) changeTo = ''
   boxOpen = id ? { id, mode } : undefined
   barKeyTyped.clear()
   if (id) (boxHeldReply.delete(id), boxSaid.delete(id))

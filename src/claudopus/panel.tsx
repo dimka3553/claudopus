@@ -575,6 +575,13 @@ const panelHooks = (on: On) => {
                     <Button key={`stop-${one.id}`} label="Stop" plain dimColor hover={{ scope: `stop-${one.id}`, underline: true }} onPress={() => void stop($, one.id)} />
                   </Box>
                 ) : null}
+                {/* Done, at the top or under Finished: a press opens the box above the chat for what to change, where that bar
+                    takes a box; the same task then carries on with what is typed */}
+                {canChange(one) && 'Input' in table && repliesInBar(e.surface) ? (
+                  <Box flexShrink={0}>
+                    <Button key={`change-${one.id}-${presses}`} label="Change something" plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openChange($, one, press.surface)} />
+                  </Box>
+                ) : null}
                 {/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again */}
                 {canDismiss(one) ? (
                   <Box flexShrink={0}>

@@ -1,0 +1,1 @@
+- A Done card has Change something beside Dismiss: you type what to change above the chat, and the same task carries on with it and finishes again.
