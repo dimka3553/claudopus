@@ -152,6 +152,12 @@ export type Todo = {
   // done (1 a check-in at 12 minutes, 2 the order to hand back at 24, 3 the chat told it is stuck at 36). Starts over only when a
   // helper hands back a result or prints something new. `at`: when the last step was taken; steps come at least 12 minutes apart
   helperWait?: { from: number; done: number; at?: number }
+  // Work whose step ended to wait with no helper at work (on its own command, a watch, or nothing Claudopus can see) and that nothing
+  // started again: how many times Claudopus started it to look at what it waits on (`done`), when it last did (`at`), and what it
+  // waited on then (`key`: its to-dos done, its commands ended and running), which starts the count over when it moves
+  ownWait?: { key: string; done: number; at: number }
+  // How many reminders Claudopus sent of what waits on the person on it (its question, or the Allow its commands wait for), waiting since `at`
+  reminded?: { at: number; times: number }
   // Claudopus told it to hand back what it has (its wait ran out, or its helpers sat silent): since when. Its report goes through
   // while helpers run, until it hands back
   mayHandBack?: number

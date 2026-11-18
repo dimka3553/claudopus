@@ -1026,6 +1026,83 @@ test('the word that the chat was told a task is stuck lasts only until it or its
   expect(after[0]).not.toContain('Claudopus told you it is stuck')
 })
 
+test('a task whose step ended to wait on its own command, with nothing starting it again, is started to look at it after the command\'s own time, then after an hour, two and every four; its card and the chat say so, and a command that ends counts afresh', SLOW, async ($, on) => {
+  const agents: Record<string, string> = {}
+  const { clock, held, appended, resumed } = world(on, { agents, kinds: { a1: 'general-purpose' } })
+  // (Claude Code's own answer to its stop hook)
+  on('classic.SubagentStop', () => ({}) as never)
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Rebuild the head model', prompt: 'rebuild' } as never)
+  agents.a1 = 'running'
+  await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 'd1', agentId: 'a1', item: 'Fit our head to every scan', state: 'doing' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 's-a1', agentId: 'a1', command: 'git status' } as never)
+  // 18 Nov: it waits on cloud jobs that never start, and nothing ever starts it again
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'w-a1', agentId: 'a1', command: 'hold jobs', description: 'Wait for the cloud jobs (about 40 min)', run_in_background: true } as never)
+  const ends = async (turnId: string) => {
+    agents.a1 = 'running'
+    await $.turn.complete({ answer: 'Waiting on my own work, which starts me again.', durationMs: 1, isAborted: false, turnId, reason: 'answer', agentId: 'a1' } as never)
+    // (the engine lists a task held by its own command as waiting)
+    agents.a1 = 'waiting'
+  }
+  await ends('e1')
+  const looks = () => resumed.filter(line => line.startsWith('a1: From Claudopus, not the person: you ended your step'))
+  const minutes = async (n: number) => {
+    for (let at = 0; at < n; at += 1) await clock.advance(60_000)
+  }
+  // Not before its command's own 40 minutes and ten more
+  await minutes(48)
+  expect(looks()).toEqual([])
+  await minutes(3)
+  expect(looks()).toHaveLength(1)
+  expect(looks()[0]).toMatch(/you ended your step 5\dm ago to wait for your command "Wait for the cloud jobs \(about 40 min\)", running 5\dm/)
+  expect(looks()[0]).toContain("If it is stuck, or waits on something that won't come")
+  expect(appended.filter(line => line.includes('Nothing new from "Rebuild the head model" for 5') && line.endsWith('Claudopus started Claude again to check on what it waits for.'))).toHaveLength(1)
+  const line = async () => {
+    const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 90 }, surface: 'desktop' } as never)
+    const r = (await pane.find({ type: 'Text', text: /^Claudopus asked Claude to check on what it waits for/ }))?.text
+    await pane.unmount()
+    return r
+  }
+  // It looks, finds it still going and ends its step again: the next look is an hour after that, the one after two hours
+  agents.a1 = 'running'
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'l-a1', agentId: 'a1', command: 'git log' } as never)
+  await ends('e2')
+  await minutes(2)
+  expect(await line()).toMatch(/· [23]m ago$/)
+  await minutes(57)
+  expect(looks()).toHaveLength(1)
+  await minutes(2)
+  expect(looks()).toHaveLength(2)
+  await minutes(110)
+  expect(looks()).toHaveLength(2)
+  await minutes(12)
+  expect(looks()).toHaveLength(3)
+  // It stops its wait and starts it again: that is no news, and the next look keeps its four hours
+  agents.a1 = 'running'
+  await $.tool.call({ tool: 'TaskStop', tool_use_id: 'x-a1', agentId: 'a1', task_id: 'bg-w-a1' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'w2-a1', agentId: 'a1', command: 'hold jobs', description: 'Wait for the cloud jobs again', run_in_background: true } as never)
+  await ends('e3')
+  await minutes(40)
+  expect(looks()).toHaveLength(3)
+  // Its command ends of itself, as Claude Code says at its next step's end: the count starts over, at half an hour
+  agents.a1 = 'running'
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'w3-a1', agentId: 'a1', command: 'hold more', description: 'Wait for the second jobs', run_in_background: true } as never)
+  await ($ as unknown as { classic: { SubagentStop: (e: object) => Promise<unknown> } }).classic.SubagentStop({ hook_event_name: 'SubagentStop', agent_id: 'a1', background_tasks: [{ id: 'bg-w3-a1' }] })
+  await ends('e4')
+  await minutes(29)
+  expect(looks()).toHaveLength(3)
+  await minutes(3)
+  expect(looks()).toHaveLength(4)
+  // Waiting on the person, it is never looked in on
+  agents.a1 = 'running'
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'The share is full. May I raise its size?', choices: ['Raise it', 'Not now'] } as never)
+  await ends('e5')
+  // (past the hour after which its next look would have come)
+  await minutes(70)
+  expect(looks()).toHaveLength(4)
+  held.get('more')?.('done')
+})
+
 test('a step that runs for minutes says so on its row, with its time, and the flag names what keeps waiting', SLOW, async ($, on) => {
   const { keep, settle, clock, held } = world(on)
   await $.session.start(start)

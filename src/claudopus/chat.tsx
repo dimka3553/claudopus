@@ -403,6 +403,8 @@ const chatHooks = (on: On) => {
       // While a command has a row, its output is read every few seconds (lookJobs keeps to JOB_LOOK), not only as the list is followed
       // every 20: a download rewriting its percent each second sat still for 20 seconds and read "nothing printed for 15s" (16 Nov)
       if (jobLog.size) void lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))
+      // A question nobody has answered is said again now and then (remindAsks)
+      if (seconds % 60 === 30) await remindAsks($).catch(err => log($, `questions not reminded of: ${String(err)}`))
       if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
       if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
         await readAnswers($).catch(err => log($, `answers from other chats not read: ${String(err)}`))
@@ -541,6 +543,10 @@ const chatHooks = (on: On) => {
     if ((await read($, todos)).some(isHeld)) {
       await changeTodos($, list => list.map(one => (isHeld(one) && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
       if (stillHeld.length) context.push(named(STOPPED_EARLIER(stillHeld.map(one => `"${titleOf(one)}" (${one.id})`))))
+    }
+    if (!isOff) {
+      const board = await cardsNow($).catch(err => (void log($, `cards not told to the chat: ${String(err)}`), ''))
+      if (board) context.push(named(board))
     }
     let text = e.text
     const m = await read($, me)

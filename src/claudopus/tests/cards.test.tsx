@@ -317,6 +317,11 @@ test('a steer is sent as written and the work is told it is one, the work is rem
   expect(appended[0]).toContain('Decide which of three it is')
   expect(appended[0]).toContain('added it to your to-do list')
   expect(appended.join('\n')).not.toMatch(/steer/i)
+  // 17 Nov: a task handed back the person's "upload the second video like the first one" though it held the accounts to do it, and
+  // parts of a message the chat had already seen to elsewhere: what the chat sends is done here, and only an unrelated request goes back
+  expect(appended[0]).toContain('do it here, as the chat sent it to you to be done')
+  expect(appended[0]).toContain('only a request this task has nothing to do with')
+  expect(appended[0]).toContain("Do only what the chat's message asks of you: the chat has seen to the rest of what the person said.")
 
   // The work goes on without saying what it decided: after two steps it is told so, once
   await step('Bash')

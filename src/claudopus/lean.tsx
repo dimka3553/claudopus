@@ -156,13 +156,23 @@ const isPaneShow = (e: { tool: string }) => {
   const call = e as { url?: unknown; name?: unknown }
   return m[1] === 'preview_start' && call.name === undefined && typeof call.url === 'string' && /^https?:\/\//i.test(call.url) && CURL_LOCAL.test(call.url)
 }
-const isChatRunnable = (command: string, branch = '') => {
+// The folders a chat's `git -C` may look into: its own folder and the topics' repos, each with what is below it. Never another
+// path: a repo's own settings can make git run a program (core.fsmonitor on status, diff.external, a textconv or gpg.program on log),
+// so a look into an unpacked download would run what it holds. A path with .. in it is no place of these
+const isPlaceOf = (path: string, places: string[]) =>
+  !path.split('/').includes('..') && places.some(place => place && (path === place || path.startsWith(`${place.replace(/\/+$/, '')}/`) || (!path.startsWith('/') && place === cwd)))
+const isChatRunnable = (command: string, branch = '', places: string[] = []) => {
   if (!isOneCommand(command) || RUNNER_NAMED.test(command) || /claudopus\/p\W?stes|\bpastes\b/.test(command)) return false
   // nothing the shell fills in or spreads out: no variables, braces, globs, escapes, home or history, outside quotes; inside double
   // quotes no variable or escape (single quotes hold anything as written)
   // (a backslash there that the shell keeps as written, as in "%{http_code}\n", is as written; the address [::1] is curl's own)
   // (and an open's path may start at the home folder: ~ or $HOME, alone or before a /)
-  const words = shellWords(command)[0] ?? []
+  const said = shellWords(command)[0] ?? []
+  // A look into a topic's repo or a folder in the chat's own (isPlaceOf): git -C and a plain path first, for a look only, never a push or fetch (whose
+  // branch is read in the chat's folder). 17 Nov: a chat opened above its repos had every git log refused, and guessed at status
+  const isElsewhere = said[0] === 'git' && said[1] === '-C' && /^[^-]/.test(said[2] ?? '') && !['push', 'fetch'].includes(said[3] ?? '')
+  if (said[0] === 'git' && said[1] === '-C' && !(isElsewhere && isPlaceOf(said[2] ?? '', places))) return false
+  const words = isElsewhere ? ['git', ...said.slice(3)] : said
   const head = words[0] ?? ''
   const homed = head === 'open' ? command.replace(/(^|\s)~(?=\/|\s|$)/g, '$1').replace(/\$HOME(?=[/\s"]|$)/g, '') : command
   if (/[$\\{}*?[\]~!]/.test(homed.replace(/'[^']*'|"(?:[^"$`\\]|\\[^$`"\\\n])*"/g, '""').replace(/\[::1\]/g, ''))) return false
@@ -187,7 +197,7 @@ const isChatRunnable = (command: string, branch = '') => {
   return CHAT_LOOKS.includes(head)
 }
 const NOT_ONE_COMMAND =
-  'Not run: the chat runs only a single command with nothing joined to it (no `&&`, `;`, `|`, `>`, `$( )` or backticks), and only one that changes no file: a push, a fetch, a look with git or gh, an `open` of a file or page, or a `curl` status check of a local server, sent with `run_in_background: true`. Start a task for anything else.'
+  'Not run: the chat runs only a single command with nothing joined to it (no `&&`, `;`, `|`, `>`, `$( )` or backticks), and only one that changes no file: a push, a fetch, a look with git or gh (`git -C <folder> log` for a topic\'s repo or a folder in the chat\'s), an `open` of a file or page, or a `curl` status check of a local server, sent with `run_in_background: true`. Start a task for anything else.'
 // The chat's own commands under way, by their background id: when each started and what it was
 const chatCommands = new Map<string, { at: number; command: string; description: string }>()
 // The background id a command sent to the background answers with, as the engine writes it

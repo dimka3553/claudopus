@@ -186,3 +186,91 @@ const lostToPerson = async ($: EngineInterface, one: Todo, said: string, ask = '
   await tellChat($, ask ? `${said} ${ask}` : said)
 }
 const askAloud = ($: EngineInterface, one: Todo, text: string) => aloud($, 'ask', `${titleOf(one)} has a question for you`, text, `ask-${one.id}`)
+
+// A question on a card nobody has answered is said again, with the "needs you" sound, this long after it was asked, and no more
+// after the last. 17 Nov: a sign-in and a go-ahead to push sat unseen for hours, as only the first notification ever went
+const REMIND_AT = [15 * 60_000, 60 * 60_000, 4 * 3_600_000, 12 * 3_600_000]
+// What waits on the person on a card: its question, or the Allow its commands wait for, its words, and since when: since the question
+// came, or since the person's last reply to it that did not settle it. Not on a stopped card
+const waitingOnPerson = (one: Todo) =>
+  one.status === 'stopped'
+    ? undefined
+    : one.ask && !isActingOnReply(one) && !one.ask.refused
+      ? { text: one.ask.text, at: Math.max(one.ask.at, one.ask.replied?.at ?? 0) }
+      : one.admins?.length
+        ? {
+            text: one.admins.some(a => a.kind === 'release')
+              ? 'A release waits for you to allow it on its card.'
+              : one.admins.some(a => a.kind === 'file')
+                ? 'A change to your file waits for Allow or Deny on its card.'
+                : 'An admin command waits for Allow or Deny on its card.',
+            at: Math.min(...one.admins.map(a => a.at)),
+          }
+        : undefined
+const remindAsks = async ($: EngineInterface) => {
+  const now = await $.clock.now()
+  const due: { one: Todo; text: string; at: number; times: number }[] = []
+  await changeTodos($, list => {
+    due.length = 0
+    let isChanged = false
+    const next = list.map(one => {
+      const waits = one.parentId ? undefined : waitingOnPerson(one)
+      if (!waits) return one
+      // How many reminders are due by now: one that came due while the chat was closed is said once, never one for each missed
+      const times = REMIND_AT.filter(after => now - waits.at >= after).length
+      const said = one.reminded?.at === waits.at ? one.reminded.times : 0
+      if (times <= said) return one
+      isChanged = true
+      due.push({ one, ...waits, times })
+      return { ...one, reminded: { at: waits.at, times } }
+    })
+    return isChanged ? next : list
+  })
+  for (const { one, text, at } of due) {
+    await log($, `reminded of what waits on the person on ${one.id}, since ${took(now - at)} ago`)
+    await aloud($, 'ask', `${titleOf(one)} still waits for you`, `Waiting ${minutesSaid(Math.round((now - at) / 60_000))} · ${text}`, `remind-${one.id}-${at}-${Math.floor(now / 60_000)}`).catch(err => log($, `reminder not sent: ${String(err)}`))
+  }
+}
+
+// What the chat's model reads with a message of the person's: what the latest cards show, so it answers how things stand from the
+// cards rather than from memory (18 Nov: "I can't see your panel, so I'm guessing which card is which"), sent again only once they
+// changed, and what has waited on a card, so its reply names each once an hour at most while nobody answers it, until the last reminder
+const ASK_NAMED_AFTER = 5 * 60_000
+const ASK_NAMED_EVERY = 60 * 60_000
+const ASK_NAMED_MOST = REMIND_AT.at(-1)!
+const askNamed = new Map<string, number>()
+let cardsSent = ''
+const cardsNow = async ($: EngineInterface) => {
+  const now = await $.clock.now()
+  const list = (await read($, todos)).filter(one => {
+    const waits = one.parentId ? undefined : waitingOnPerson(one)
+    return !one.parentId && (one.status === 'working' ? true : waits ? now - waits.at < ASK_NAMED_MOST : now - one.endedAt < 30 * 60_000)
+  }).slice(-12)
+  const facts = list.map(one => {
+    const waits = waitingOnPerson(one)
+    const items = one.items.filter(item => item.state !== 'dropped')
+    const doing = items.find(item => item.state === 'doing')?.text
+    const note = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text
+    const what = waits
+      ? `waiting for {name}: ${cut(oneLine(waits.text), 160)}`
+      : one.status === 'working'
+        ? `working, ${items.filter(item => item.state === 'done').length} of ${items.length} to-dos done${doing ? `, doing "${cut(doing, 80)}"` : ''}${note ? `, last note "${cut(oneLine(note), 120)}"` : ''}`
+        : one.status
+    return { one, waits, what, row: `- "${cut(titleOf(one), 80)}" (${one.id}): ${waits ? `${what.replace(/^waiting for \{name\}/, `waiting for {name} for ${minutesSaid(Math.round((now - waits.at) / 60_000))}`)}` : one.status === 'working' ? what : `${what} ${minutesSaid(Math.round((now - one.endedAt) / 60_000))} ago`}` }
+  })
+  const toName = facts.filter(({ one, waits }) => {
+    const key = waits ? `${one.id}:${waits.at}` : ''
+    if (!waits || now - waits.at < ASK_NAMED_AFTER || now - (askNamed.get(key) ?? -Infinity) < ASK_NAMED_EVERY) return false
+    askNamed.set(key, now)
+    return true
+  })
+  // (sent again only when something on them changed, not their times, or a card is to be named)
+  const sign = mark(facts.map(f => `${f.one.id}:${f.what}`).join('\n'))
+  if (!toName.length && sign === cardsSent) return ''
+  cardsSent = sign
+  if (!facts.length) return ''
+  const nameThem = toName.length
+    ? `\nWaiting on {name} on ${toName.length === 1 ? 'a card' : 'cards'}, unanswered: ${toName.map(({ one }) => `"${cut(titleOf(one), 80)}"`).join(', ')}. Unless your reply is about ${toName.length === 1 ? 'it' : 'them'}, end it with one short line saying which card waits for {name} and what for, so it isn't missed.`
+    : ''
+  return `What the latest task cards show now, for when {name} asks how things stand: answer from this, not from memory, and leave it out of a reply about something else:\n${facts.map(f => f.row).join('\n')}${nameThem}`
+}

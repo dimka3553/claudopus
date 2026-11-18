@@ -2,6 +2,14 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.193 · 18 November 2026
+- A task that waits for hours on its own command, or on something that never comes, is no longer just marked stuck. If nothing has started it again, Claudopus starts it to check on what it's waiting for. The first check comes after the command's own expected time (at least half an hour after the task stopped). The next ones come after an hour, after two hours, and then every four hours. A task that finds it's stuck stops or fixes what's stuck, or sends what it has. Its card says "Claudopus asked Claude to check on what it waits for".
+- A question or an Allow that waits on a card is no longer forgotten when you don't see the card. Claudopus notifies you again 15 minutes, an hour, four hours and twelve hours after it began waiting. Once an hour at most, the chat ends its next reply with one line naming the card that waits for you.
+- When you write in the chat, it now sees what the latest task cards show: working, how many to-dos are done, what each is doing, and what waits for you. It answers how things stand from the cards, not from memory.
+- The chat can now look at a topic's repo, or a folder inside its own, with `git -C <folder> log`, `status`, `diff` and the like. Before, these were refused when the repo wasn't the folder the chat was opened in, so the chat guessed. Other folders are still refused, because a repo's own settings can make git run a program.
+- A task now does what you send it, as long as it can with what it already has, instead of sending it to the chat as "a new task of its own". It sends the chat only a request that has nothing to do with its work. It also no longer sends back the parts of your message that the chat already gave to another task.
+- The chat no longer promises to do something later and then forgets. It starts the task now, set to wait for whatever it needs.
+
 ## 0.2.192 · 18 November 2026
 - A task's result shows once in the chat, as the chat's own reply: Claudopus hands it to the chat itself, so Claude Code's grey "Report from subagent" box no longer appears above it.
 - A task's question, a request to release or to run an admin command, and other news of a task now show only on its card and in the panel's notification, no longer as Claudopus lines in the chat.
