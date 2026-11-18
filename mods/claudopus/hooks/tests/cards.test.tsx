@@ -869,10 +869,11 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect(await pane.find({ type: 'Text', text: /^I am fitting/ })).toBeUndefined()
   expect((await pane.find({ type: 'Text', text: /^The nostril is closed/ }))?.text).toBe('The nostril is closed; I am comparing the head with your scan.')
   expect((await pane.find({ type: 'Text', text: /of \d+ to-dos done/ }))?.text).toContain('1 of 2 to-dos done')
-  // The done to-do's part of the edge is bright, and with none being done the other is dim, named dim as the next
+  // The done to-do's part of the edge is bright, and with none being done the other is dim; with none marked doing the card names
+  // no to-do: no "Next to-do 2 of 2" beside "1 of 2 to-dos done" (18 Nov)
   expect(await edgeOf(pane)).toEqual(['#8A63F0', '#8A63F05C'])
-  expect((await pane.find({ type: 'Text', text: /^Next to-do / }))?.text).toBe('Next to-do 2 of 2 ·')
-  expect((await pane.find({ type: 'Text', text: /^Compare the head/ }))?.props.dimColor).toBe(true)
+  expect(await pane.find({ type: 'Text', text: /to-do \d+ of \d+/i })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Compare the head/ })).toBeUndefined()
   expect(await pane.findAll({ type: 'Svg' })).toHaveLength(1)
   expect(await pane.find({ type: 'Text', text: /^To do/ })).toBeUndefined()
 
@@ -993,14 +994,15 @@ test('past the parts the edge has, it is one bar in three shades, and the step b
   expect((await pane.find({ type: 'Text', text: /^To-do / }))?.text).toBe('To-do 13 of 16 ·')
   expect(await pane.find({ type: 'Text', text: /^Round step 13$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^Round step 14$/ })).toBeUndefined()
-  // With nothing being done, the bar has no lighter part and the next is named dim
+  // With nothing being done, the bar has no lighter part and no to-do is named, nor once every one is ticked: the facts row counts them
   await call('todo', { item: 'Round step 13', state: 'done' })
   const after = (await pane.findAll({ type: 'Box' })).filter(b => String(b.props.backgroundColor).startsWith('#8A63F0'))
   expect(after.map(b => [b.props.backgroundColor, b.props.flexGrow])).toEqual([['#8A63F0', 13], ['#8A63F05C', 3]])
-  expect((await pane.find({ type: 'Text', text: /^Next to-do / }))?.text).toBe('Next to-do 14 of 16 ·')
-  // Every step ticked while it still runs: the row stays and says so
+  expect(await pane.find({ type: 'Text', text: /to-do \d+ of \d+/i })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Round step 14$/ })).toBeUndefined()
   for (let n = 14; n <= 16; n += 1) await call('todo', { item: `Round step ${n}`, state: 'done' })
-  expect((await pane.find({ type: 'Text', text: /^All \d+ to-dos done$/ }))?.text).toBe('All 16 to-dos done')
+  expect(await pane.find({ type: 'Text', text: /^All \d+ to-dos done$/ })).toBeUndefined()
+  expect((await pane.find({ type: 'Text', text: /of \d+ to-dos done/ }))?.text).toContain('16 of 16 to-dos done')
 })
 
 test("a pressed card shows the work's own chat: what it was told, what it wrote, and each tool step in order", async ($, on) => {
@@ -2015,7 +2017,7 @@ test('a run whose output cannot be found says so after three minutes, so a blank
   await list.unmount()
 })
 
-test('a run of a work\'s own wakes it the moment it ends: any command that only waits, the work\'s or its helper\'s, is refused in one sentence, the work is told it ended, and its card no longer says how far it was (16 Nov an upload read 100% beside "about 40% done"; a helper polled for a file its own script wrote)', SLOW, async ($, on) => {
+test('a run of a work\'s own wakes it the moment it ends: any command that only waits, the work\'s or its helper\'s, is refused in one sentence, the work is told it ended, and its card\'s line stays the work\'s own words until it writes again, never a line of commands that ended (16 Nov an upload read 100% beside "about 40% done"; 18 Nov "Run: …: ended" stood in place of the task\'s note; a helper polled for a file its own script wrote)', SLOW, async ($, on) => {
   let isAlive = true
   const talk: unknown[] = []
   // (at a step of its own, as the engine lists it, until it ends its step below)
@@ -2050,12 +2052,14 @@ test('a run of a work\'s own wakes it the moment it ends: any command that only 
     return texts
   }
   expect((await line()).some(text => /about 40% done/.test(text))).toBe(true)
-  // It ends: the work is told at once, and the card says so in place of the line written while it ran
+  // It ends: the work is told at once, so it writes its next line; until then the card keeps its own words, never "…: ended"
   isAlive = false
   await clock.advance(20_000)
   expect(await until(async () => appended.find(one => one === 'a1: Your command "Upload both zips to the folder" has ended. Look at how it ended in its log, /w/upload.log, and carry on with the next step now.'))).toBeDefined()
-  expect(await until(async () => ((await line()).some(text => text === 'Upload both zips to the folder: ended') || undefined))).toBe(true)
-  expect((await line()).some(text => /about 40% done/.test(text))).toBe(false)
+  expect((await line()).some(text => /: ended$/.test(text ?? ''))).toBe(false)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n2', agentId: 'a1', text: 'Both zips are in the folder; I am checking them.' } as never)
+  expect(await until(async () => ((await line()).some(text => text === 'Both zips are in the folder; I am checking them.') || undefined))).toBe(true)
+  expect((await line()).some(text => /about 40% done/.test(text ?? ''))).toBe(false)
   // The sifter outlived what it watched: stopped a minute on, and the work told why
   await clock.advance(60_000)
   expect(await until(async () => stopped.includes('bg-g1') || undefined)).toBe(true)
@@ -2246,8 +2250,8 @@ test('only runs really running are listed: a watch the engine killed at its time
   // The watches the engine killed at their limit, the failed and the finished command are gone from the tree, and no clock runs for them
   expect(shown.some(text => /\[killed\]/.test(text))).toBe(false)
   expect(shown.some(text => /^(Wait for first screening pass ×2|Run the fetch of the list|Run the tidy up)\b(?!: (failed|done))/.test(text))).toBe(false)
-  // (the card's own line names the two that ended since its last line, with how each ended)
-  expect(shown).toContain('Run the tidy up: done · Run the fetch of the list: failed')
+  // (the card's own line never names the commands that ended: how each ended is in Details, 18 Nov)
+  expect(shown.some(text => /^Run the (tidy up|fetch of the list): (done|failed)/.test(text))).toBe(false)
   // The closing row counts them and says, in words, how many did not finish well
   expect(shown).toContain('4 commands ended · 1 failed, 2 ran out of time')
   // The wait still running stays, within its time

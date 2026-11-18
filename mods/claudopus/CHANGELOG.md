@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.203 · 18 November 2026
+- A task's card shows only its stage, the to-do it is on and its own last note: lines such as "Next to-do 6 of 10", "Waiting for a command to finish", "Interrupted at 16:08 when the chat stopped · running again since 16:09" and "Claudopus starts Claude again at 18:02" are gone
+
 ## 0.2.202 · 18 November 2026
 - A card says Done only when the task finished everything: its result is in, every to-do is ticked or dropped, and no command or helper of its own still runs. Until then it stays purple and says what it waits for, or says Not done in amber with how many to-dos are done.
 - A finished task whose result asks you something more is green and Done, at the top with its question, until you answer or dismiss it.

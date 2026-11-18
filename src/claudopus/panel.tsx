@@ -235,7 +235,7 @@ const panelHooks = (on: On) => {
     // Work the app sent to an older model says so, and which one; work that answers from one all the same says so
     const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `Claude Code moved it to ${one.moved}` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
     const glance = (one: Todo, count = '') =>
-      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.leftOpen ? 'Not done' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one, at), modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.leftOpen ? 'Not done' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one), modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
@@ -268,7 +268,7 @@ const panelHooks = (on: On) => {
             ))}
           </Box>
         )
-      const rest = [ownWorkWords(all, one, at), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
+      const rest = [ownWorkWords(all, one), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
       return (
         <Box flexDirection="row" alignItems="flex-start">
           <Button
@@ -299,10 +299,9 @@ const panelHooks = (on: On) => {
       const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))}: ${said[r.how] ?? 'ended'}`)
       return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} · ${second}` : `${first} · ${second} · ${runs.length - 2} more ended`
     }
-    // A task's own note under three minutes old stands as its line: what Claude says it does beats the name of its latest action
-    const isFreshNote = (one: Todo) => { const note = [...one.entries].reverse().find(one => one.kind !== 'steer' && one.text); return Boolean(note && at - (note.at ?? 0) < 3 * 60_000) }
-    // Whether the card's line is commands that ended since its last word, which stays above what it does now
-    const endedNow = (one: Todo) => now(one) !== ([...one.entries].reverse().find(one => one.kind !== 'steer')?.text ?? '')
+    // The card's line: the task's own latest note, in its own words, whatever ran or ended since (those are rows on its tree and in
+    // its Details), never words of Claudopus's own about its actions, how long it was quiet or which command ended (18 Nov)
+    const noteOf = (one: Todo) => [...one.entries].reverse().find(entry => entry.kind !== 'steer')?.text ?? ''
 
     const table = uiOf($, e)
     // How much text two rows of a small card hold: the pane's cells less the card's bar, padding and dots. The app's letters are
@@ -506,31 +505,25 @@ const panelHooks = (on: On) => {
       )
     }
     // The small card: its title, which opens its Details, with Stop at the far end of that row; where it stands and how many
-    // to-dos are done; the line the work last wrote beside the three dots; its helpers. Each part has a fixed number of rows
-    // and is clipped to them, so a card never changes height as the work goes
+    // to-dos are done; the to-do marked doing, while one is; the line the work last wrote beside the three dots; its helpers. Each
+    // part has a fixed number of rows and is clipped to them, so a card changes height only as that to-do row comes and goes
     let cardNo = 0
     let keyed = false
-    // One row under the facts while the work runs: the to-do being done, or the next when none is, numbered done + 1 of all kept,
-    // which is how far along it is (the edge's lighter part), not its place in the Details list
+    // One row under the facts while the work runs: the to-do being done, numbered done + 1 of all kept, which is how far along it
+    // is (the edge's lighter part), not its place in the Details list. None is said while none is marked doing: a to-do not begun,
+    // or every one ticked, is no current to-do, and the facts row already counts them (18 Nov: "Next to-do 6 of 10" read as
+    // Claudopus's own bookkeeping beside "5 of 10 to-dos done")
     const stepLine = (one: Todo, kept: Item[], done: number) => {
       if (one.status !== 'working' || one.chat) return null
       const doing = kept.find(item => item.state === 'doing')
-      const named = doing ?? kept.find(item => item.state === 'open')
-      if (!kept.length) return null
-      // Every step ticked while it still runs: said in the same row, so the card keeps its height until it ends
-      if (!named)
-        return (
-          <Box key={`step-${one.id}`} height={1} overflow="hidden" paddingLeft={lead}>
-            <Text dimColor wrap="truncate-end">{`All ${kept.length} to-dos done`}</Text>
-          </Box>
-        )
+      if (!doing) return null
       return (
         <Box key={`step-${one.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" paddingLeft={lead}>
           <Box flexShrink={0}>
-            <Text dimColor>{`${doing ? 'To-do' : 'Next to-do'} ${done + 1} of ${kept.length} ·`}</Text>
+            <Text dimColor>{`To-do ${done + 1} of ${kept.length} ·`}</Text>
           </Box>
           <Box flexShrink={1} minWidth={0}>
-            <Text wrap="truncate-end" dimColor={!doing}>{named.text}</Text>
+            <Text wrap="truncate-end" dimColor={false}>{doing.text}</Text>
           </Box>
         </Box>
       )
@@ -631,53 +624,31 @@ const panelHooks = (on: On) => {
                 </Box>
               ) })),
             ].sort((a, b) => a.at - b.at).map(part => part.node)}
-            {/* Nothing new has come back under it for a while: said in the colour of what needs the person */}
-            {one.stuckAt && one.status === 'working' && !one.chat ? (
+            {/* A card says its stage, its to-do and what it does now, and in amber what needs the person. What Claudopus did on the
+                way (started it again after the chat stopped or after it stopped partway, the command it waits for, the time it starts
+                it again, the helpers it was told to check on) is never on the card (18 Nov) */}
+            {/* Nothing new has come back under it for a while, and no helper of its is at work: amber */}
+            {stuckLine(all, one, at) && one.status === 'working' && !one.chat ? (
               <Box key={`stuck-${one.id}`} paddingLeft={lead}>
-                {runningKids(all, one.id).some(kid => isBusy(all, kid, at)) ? <Text dimColor wrap="wrap">{stuckLine(all, one, at)}</Text> : <Text color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>}
+                <Text color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
               </Box>
             ) : null}
-            {/* Cut off as the chat's process ended: when, and since when it goes on again; amber when it could not be started again */}
+            {/* Cut off as the chat's process ended, and Claudopus could not start it again: amber, as it needs the person */}
             {cutLine(one) && !one.chat ? (
               <Box key={`cut-${one.id}`} paddingLeft={lead}>
-                <Text color={one.backAt ? undefined : NEEDS} dimColor={Boolean(one.backAt)} wrap="wrap">{cutLine(one)}</Text>
+                <Text color={NEEDS} wrap="wrap">{cutLine(one)}</Text>
               </Box>
             ) : null}
-            {/* Stopped partway without a result: dim while Claudopus has just started it again, amber once it stopped doing so */}
-            {carryLine(one, at) && !one.chat ? (
+            {/* Stopped partway without a result, and Claudopus stopped starting it again: amber */}
+            {carryLine(one) && !one.chat ? (
               <Box key={`carry-${one.id}`} paddingLeft={lead}>
-                <Text color={one.carryOn?.gaveUp ? NEEDS : undefined} dimColor={!one.carryOn?.gaveUp} wrap="wrap">{carryLine(one, at)}</Text>
+                <Text color={NEEDS} wrap="wrap">{carryLine(one)}</Text>
               </Box>
             ) : null}
             {/* Ended with to-dos not done: which, in the colour of what needs the person, so nobody has to ask what was left */}
             {notDoneLine(one) ? (
               <Box key={`not-done-${one.id}`} paddingLeft={lead}>
                 <Text color={NEEDS} wrap="wrap">{notDoneLine(one)}</Text>
-              </Box>
-            ) : null}
-            {/* Still at work, waiting for a command of its own it started in the background: that it waits, the command itself
-                being a row on its tree */}
-            {waitLine(one, at) ? (
-              <Box key={`wait-${one.id}`} paddingLeft={lead}>
-                <Text dimColor wrap="wrap">{waitLine(one, at, jobsOf(one, at).length > 0)}</Text>
-              </Box>
-            ) : null}
-            {/* Waiting with nothing that started it again for long: Claudopus started it to look at what it waits for */}
-            {ownWaitLine(all, one, at) ? (
-              <Box key={`own-wait-${one.id}`} paddingLeft={lead}>
-                <Text dimColor wrap="wrap">{ownWaitLine(all, one, at)}</Text>
-              </Box>
-            ) : null}
-            {/* Its helpers gone quiet, in amber: those at work are rows on its tree */}
-            {lookedInLine(one, at) && !one.chat ? (
-              <Box key={`looked-${one.id}`} paddingLeft={lead}>
-                <Text dimColor={!one.lookedIn?.quiet} color={one.lookedIn?.quiet ? NEEDS : undefined} wrap="wrap">{lookedInLine(one, at)}</Text>
-              </Box>
-            ) : null}
-            {/* What it asked Claudopus to start it again for, in place of a command that would only wait */}
-            {wakeLine(one) && !one.chat ? (
-              <Box key={`wake-${one.id}`} paddingLeft={lead}>
-                <Text dimColor wrap="wrap">{wakeLine(one)}</Text>
               </Box>
             ) : null}
             {/* A result's question is all a card waiting for its answer says: no line of what Claude last did */}
@@ -692,7 +663,7 @@ const panelHooks = (on: On) => {
                   </Text>
                 ) : (
                   <Box flexDirection="column" minWidth={0}>
-                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || (one.status === 'working' && !one.ask && !endedNow(one) && !isFreshNote(one) ? helperNow(one, at, jobsOf(one, at).length, room) : '') || cut(now(one), room) || (one.status === 'working' ? (one.ask ? 'Waiting for you' : 'Starting') : "Claude hasn't said what it's doing")}</Text>
+                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(noteOf(one), room) || (one.status === 'working' ? (one.ask ? 'Waiting for you' : at - one.startedAt < 60_000 ? 'Starting' : 'Working') : "Claude hasn't said what it's doing")}</Text>
                     {/* Held where it was after an answer, once a newer line of the work's took the answer's place: why it is still up there */}
                     {!one.ask && !sentLine(one, at) && heldAnswer(one, at) && heldAnswer(one, at)?.to !== 'ran' && !heldAnswer(one, at)?.isRun ? <Text key={`held-answer-${one.id}`} dimColor wrap="truncate-end">{`✓ You answered “${cut(heldAnswer(one, at)?.text ?? '', 60)}”`}</Text> : null}
                   </Box>

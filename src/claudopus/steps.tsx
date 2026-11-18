@@ -103,7 +103,7 @@ const SERIAL_STEPS = 20
 const SERIAL_SHARE = 0.85
 
 // Looked at every LOOK_IN_EVERY while work runs: each running helper that has shown nothing new for HELPER_QUIET, and each that
-// works in order, is named to the work that started it, once each stretch, and its card says when it was looked at and what of
+// works in order, is named to the work that started it, once each stretch (its card says nothing of it)
 const lookInOnHelpers = async ($: EngineInterface) => {
   const now = await $.clock.now()
   const list = await read($, todos)
@@ -228,22 +228,6 @@ const lookWakes = async ($: EngineInterface) => {
   }
   if (isChanged) redraw($)
 }
-// What a card that asked to be started again says under its line, in place of a command that would wait
-// and by when at the latest, when Claude is started again all the same
-const wakeLine = (one: Todo) => {
-  const w = one.wakeWhen
-  if (!w) return ''
-  return w.file || w.url ? `Waiting for ${w.what} · Claudopus starts Claude again when it comes, or at ${hhmm(w.until)}` : `Claudopus starts Claude again at ${hhmm(w.until)}: ${w.what}`
-}
-
-// What a card with helpers running says under its line: only how many have gone quiet, as those at work are rows on its tree
-const lookedInLine = (one: Todo, at: number) => {
-  const l = one.lookedIn
-  // Helpers at work are rows on its tree already; only one gone quiet is said, as the work was told of it
-  if (!l || one.status !== 'working' || !l.running || !l.quiet) return ''
-  return `${l.quiet === 1 ? '1 helper has' : `${l.quiet} helpers have`} shown nothing new for over ${HELPER_QUIET / 60_000}m · Claude was told to check it`
-}
-
 const stepHooks = (on: On) => {
   // After each step of a piece of work or a helper: the patterns its calls show, as lines in its next request
   on('classic.PostToolBatch', async ($, e, next) => {

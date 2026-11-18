@@ -1788,8 +1788,8 @@ const shownAs = (list: Todo[], _asks?: (one: Todo) => boolean): Todo[] =>
   })
 const shownOne = (list: Todo[], id: string, asks?: (one: Todo) => boolean) => shownAs(list, asks).find(one => one.id === id)
 
-const ownWorkWords = (list: Todo[], one: Todo, at: number) => {
-  if ((stateOf(list, one) !== 'waiting-own' && one.wasDone === undefined) || waitLine(one, at)) return ''
+const ownWorkWords = (list: Todo[], one: Todo) => {
+  if ((stateOf(list, one) !== 'waiting-own' && one.wasDone === undefined)) return ''
   const { runs, helpers } = wakesOf(list, one)
   if (one.wasDone !== undefined && !runs.length && !helpers) return 'Waiting for its command'
   const what = [runs.length ? (runs.length === 1 ? 'its command' : 'its commands') : '', helpers ? (helpers === 1 ? 'its helper' : 'its helpers') : ''].filter(Boolean).join(' and ')
@@ -9778,9 +9778,6 @@ const lookOwnWaits = async ($: EngineInterface, now: number) => {
     await tellChat($, named(OWN_WAIT_IN_CHAT(titleOf(one), mins)))
   }
 }
-const ownWaitLine = (list: Todo[], one: Todo, at: number) =>
-  one.ownWait?.done && one.ownWait.at && isOwnWaiting(list, one, at) ? `Claudopus asked Claude to check on what it waits for · ${minutesSaid(Math.round((at - one.ownWait.at) / 60_000))} ago` : ''
-
 const silentHelpers = (list: Todo[], id: string, at: number) =>
   list
     .filter(kid => kid.parentId === id && kid.status === 'working')
@@ -9790,19 +9787,13 @@ const silentHelpers = (list: Todo[], id: string, at: number) =>
 const stuckLine = (list: Todo[], one: Todo, at: number) => {
   if (!one.stuckAt) return ''
   const mins = Math.max(1, Math.round((at - one.stuckAt) / 60_000))
-  if (runningKids(list, one.id).some(kid => isBusy(list, kid, at))) return "Waiting for its helpers"
+  if (runningKids(list, one.id).some(kid => isBusy(list, kid, at))) return ''
   const isLong = (kid: Todo) => Boolean(kid.running && at - kid.running.at >= RUNNING_SHOWN)
   const helpers = underOf(list, one.id).filter(kid => kid.status === 'working')
   const tail = helpers.length
     ? helpers.every(isLong) ? ` ${helpers.length === 1 ? 'Its helper is still' : helpers.length === 2 ? 'Both helpers are still' : `All ${helpers.length} helpers are still`} waiting.` : ''
     : isLong(one) ? ` One action has been running for ${took(at - (one.running?.at ?? at))}.` : ''
-  const done = one.helperWait?.done ?? 0
-  const nudge = !done
-    ? ''
-    : done >= 3
-      ? ' Claudopus asked Claude to check on its helpers, then to finish with what it has, and told the chat it may be stuck.'
-      : ` Claudopus asked Claude ${done >= 2 ? 'to finish with what it has' : 'to check on its helpers'}.`
-  return `Nothing new for ${mins}m.${tail}${nudge}`
+  return `Nothing new for ${mins}m.${tail}`
 }
 
 
@@ -9871,15 +9862,6 @@ const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Re
       return { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.some(b => !b.isWatch) ? one.waitsSince : undefined, ...keepEnded(one, runs) }
     })
   })
-}
-
-const waitLine = (one: Todo, at: number, isShort = false) => {
-  const commands = (one.bg ?? []).filter(b => !b.isWatch)
-  const first = commands.at(-1)
-  if (one.status !== 'working' || !one.waitsSince || one.answeredAt || !first) return ''
-  const more = commands.length > 1 ? ` and ${commands.length - 1} more` : ''
-  if (isShort) return `Waiting for a command${more} to finish`
-  return `Waiting for a command${more} to finish · ${took(at - first.at)}${first.what ? ` · ${cut(first.what, 90)}` : ''}`
 }
 
 const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'working' ? `A command Claude started is still running · ${took(at - one.leftSince)}` : '')
@@ -10048,11 +10030,10 @@ const notDoneLines = (one: Todo, text: string) => {
 }
 const isLeftStopped = (one: Todo, at: number) => Boolean(one.carryOn?.gaveUp && one.status !== 'working' && at - one.carryOn.gaveUp < CUT_OLD)
 const isLeftOpen = (one: Todo, at: number) => Boolean(one.leftOpen && !one.chat && at - one.endedAt < CUT_OLD)
-const carryLine = (one: Todo, at: number) => {
+const carryLine = (one: Todo) => {
   const c = one.carryOn
-  if (!c) return ''
-  if (c.gaveUp && one.status !== 'working') return c.isLost ? `Stopped partway at ${hhmm(c.gaveUp)} · Claudopus couldn't start it again · send it a message to carry on` : `Stopped partway ${c.tries > CARRY_TRIES ? c.tries : c.total} times without a result · Claudopus stopped starting it again · send it a message to carry on`
-  return one.status === 'working' && !c.gaveUp && at - c.at < CARRY_SHOWN ? `Stopped partway at ${hhmm(c.at)} without a result · Claudopus started it again` : ''
+  if (!c?.gaveUp || one.status === 'working') return ''
+  return c.isLost ? `Stopped partway at ${hhmm(c.gaveUp)} · Claudopus couldn't start it again · send it a message to carry on` : `Stopped partway ${c.tries > CARRY_TRIES ? c.tries : c.total} times without a result · Claudopus stopped starting it again · send it a message to carry on`
 }
 
 
@@ -10938,18 +10919,6 @@ const lookWakes = async ($: EngineInterface) => {
   }
   if (isChanged) redraw($)
 }
-const wakeLine = (one: Todo) => {
-  const w = one.wakeWhen
-  if (!w) return ''
-  return w.file || w.url ? `Waiting for ${w.what} · Claudopus starts Claude again when it comes, or at ${hhmm(w.until)}` : `Claudopus starts Claude again at ${hhmm(w.until)}: ${w.what}`
-}
-
-const lookedInLine = (one: Todo, at: number) => {
-  const l = one.lookedIn
-  if (!l || one.status !== 'working' || !l.running || !l.quiet) return ''
-  return `${l.quiet === 1 ? '1 helper has' : `${l.quiet} helpers have`} shown nothing new for over ${HELPER_QUIET / 60_000}m · Claude was told to check it`
-}
-
 const stepHooks = (on: On) => {
   on('classic.PostToolBatch', async ($, e, next) => {
     const r = await next(e)
@@ -11348,8 +11317,7 @@ const tellDevice = async ($: EngineInterface, text: string) => {
   await alertPerson($, 'cut', 'Task interrupted', text, `cut-${Math.round((await $.clock.now()) / 60_000)}`)
 }
 
-const cutLine = (one: Todo) =>
-  one.cutAt ? (one.backAt ? `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · running again since ${hhmm(one.backAt)}` : `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · Claudopus couldn't start it again`) : ''
+const cutLine = (one: Todo) => (one.cutAt && !one.backAt ? `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · Claudopus couldn't start it again` : '')
 
 
 
@@ -13485,7 +13453,7 @@ const panelHooks = (on: On) => {
     const stood: Record<Todo['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
     const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `Claude Code moved it to ${one.moved}` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
     const glance = (one: Todo, count = '') =>
-      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.leftOpen ? 'Not done' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one, at), modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.leftOpen ? 'Not done' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one), modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     const { picking = '' } = await read($, view)
     const lead = e.surface === 'terminal' ? 0 : 'xs'
     const facts = (one: Todo, isWhole: boolean, count = '') => {
@@ -13512,7 +13480,7 @@ const panelHooks = (on: On) => {
             ))}
           </Box>
         )
-      const rest = [ownWorkWords(all, one, at), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
+      const rest = [ownWorkWords(all, one), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
       return (
         <Box flexDirection="row" alignItems="flex-start">
           <Button
@@ -13536,8 +13504,7 @@ const panelHooks = (on: On) => {
       const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))}: ${said[r.how] ?? 'ended'}`)
       return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} · ${second}` : `${first} · ${second} · ${runs.length - 2} more ended`
     }
-    const isFreshNote = (one: Todo) => { const note = [...one.entries].reverse().find(one => one.kind !== 'steer' && one.text); return Boolean(note && at - (note.at ?? 0) < 3 * 60_000) }
-    const endedNow = (one: Todo) => now(one) !== ([...one.entries].reverse().find(one => one.kind !== 'steer')?.text ?? '')
+    const noteOf = (one: Todo) => [...one.entries].reverse().find(entry => entry.kind !== 'steer')?.text ?? ''
 
     const table = uiOf($, e)
     const room = Math.max(40, Math.floor((e.props.bodyColumns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)))
@@ -13720,21 +13687,14 @@ const panelHooks = (on: On) => {
     const stepLine = (one: Todo, kept: Item[], done: number) => {
       if (one.status !== 'working' || one.chat) return null
       const doing = kept.find(item => item.state === 'doing')
-      const named = doing ?? kept.find(item => item.state === 'open')
-      if (!kept.length) return null
-      if (!named)
-        return (
-          <Box key={`step-${one.id}`} height={1} overflow="hidden" paddingLeft={lead}>
-            <Text dimColor wrap="truncate-end">{`All ${kept.length} to-dos done`}</Text>
-          </Box>
-        )
+      if (!doing) return null
       return (
         <Box key={`step-${one.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" paddingLeft={lead}>
           <Box flexShrink={0}>
-            <Text dimColor>{`${doing ? 'To-do' : 'Next to-do'} ${done + 1} of ${kept.length} ·`}</Text>
+            <Text dimColor>{`To-do ${done + 1} of ${kept.length} ·`}</Text>
           </Box>
           <Box flexShrink={1} minWidth={0}>
-            <Text wrap="truncate-end" dimColor={!doing}>{named.text}</Text>
+            <Text wrap="truncate-end" dimColor={false}>{doing.text}</Text>
           </Box>
         </Box>
       )
@@ -13826,53 +13786,31 @@ const panelHooks = (on: On) => {
                 </Box>
               ) })),
             ].sort((a, b) => a.at - b.at).map(part => part.node)}
-            {/* Nothing new has come back under it for a while: said in the colour of what needs the person */}
-            {one.stuckAt && one.status === 'working' && !one.chat ? (
+            {/* A card says its stage, its to-do and what it does now, and in amber what needs the person. What Claudopus did on the
+                way (started it again after the chat stopped or after it stopped partway, the command it waits for, the time it starts
+                it again, the helpers it was told to check on) is never on the card (18 Nov) */}
+            {/* Nothing new has come back under it for a while, and no helper of its is at work: amber */}
+            {stuckLine(all, one, at) && one.status === 'working' && !one.chat ? (
               <Box key={`stuck-${one.id}`} paddingLeft={lead}>
-                {runningKids(all, one.id).some(kid => isBusy(all, kid, at)) ? <Text dimColor wrap="wrap">{stuckLine(all, one, at)}</Text> : <Text color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>}
+                <Text color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
               </Box>
             ) : null}
-            {/* Cut off as the chat's process ended: when, and since when it goes on again; amber when it could not be started again */}
+            {/* Cut off as the chat's process ended, and Claudopus could not start it again: amber, as it needs the person */}
             {cutLine(one) && !one.chat ? (
               <Box key={`cut-${one.id}`} paddingLeft={lead}>
-                <Text color={one.backAt ? undefined : NEEDS} dimColor={Boolean(one.backAt)} wrap="wrap">{cutLine(one)}</Text>
+                <Text color={NEEDS} wrap="wrap">{cutLine(one)}</Text>
               </Box>
             ) : null}
-            {/* Stopped partway without a result: dim while Claudopus has just started it again, amber once it stopped doing so */}
-            {carryLine(one, at) && !one.chat ? (
+            {/* Stopped partway without a result, and Claudopus stopped starting it again: amber */}
+            {carryLine(one) && !one.chat ? (
               <Box key={`carry-${one.id}`} paddingLeft={lead}>
-                <Text color={one.carryOn?.gaveUp ? NEEDS : undefined} dimColor={!one.carryOn?.gaveUp} wrap="wrap">{carryLine(one, at)}</Text>
+                <Text color={NEEDS} wrap="wrap">{carryLine(one)}</Text>
               </Box>
             ) : null}
             {/* Ended with to-dos not done: which, in the colour of what needs the person, so nobody has to ask what was left */}
             {notDoneLine(one) ? (
               <Box key={`not-done-${one.id}`} paddingLeft={lead}>
                 <Text color={NEEDS} wrap="wrap">{notDoneLine(one)}</Text>
-              </Box>
-            ) : null}
-            {/* Still at work, waiting for a command of its own it started in the background: that it waits, the command itself
-                being a row on its tree */}
-            {waitLine(one, at) ? (
-              <Box key={`wait-${one.id}`} paddingLeft={lead}>
-                <Text dimColor wrap="wrap">{waitLine(one, at, jobsOf(one, at).length > 0)}</Text>
-              </Box>
-            ) : null}
-            {/* Waiting with nothing that started it again for long: Claudopus started it to look at what it waits for */}
-            {ownWaitLine(all, one, at) ? (
-              <Box key={`own-wait-${one.id}`} paddingLeft={lead}>
-                <Text dimColor wrap="wrap">{ownWaitLine(all, one, at)}</Text>
-              </Box>
-            ) : null}
-            {/* Its helpers gone quiet, in amber: those at work are rows on its tree */}
-            {lookedInLine(one, at) && !one.chat ? (
-              <Box key={`looked-${one.id}`} paddingLeft={lead}>
-                <Text dimColor={!one.lookedIn?.quiet} color={one.lookedIn?.quiet ? NEEDS : undefined} wrap="wrap">{lookedInLine(one, at)}</Text>
-              </Box>
-            ) : null}
-            {/* What it asked Claudopus to start it again for, in place of a command that would only wait */}
-            {wakeLine(one) && !one.chat ? (
-              <Box key={`wake-${one.id}`} paddingLeft={lead}>
-                <Text dimColor wrap="wrap">{wakeLine(one)}</Text>
               </Box>
             ) : null}
             {/* A result's question is all a card waiting for its answer says: no line of what Claude last did */}
@@ -13887,7 +13825,7 @@ const panelHooks = (on: On) => {
                   </Text>
                 ) : (
                   <Box flexDirection="column" minWidth={0}>
-                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || (one.status === 'working' && !one.ask && !endedNow(one) && !isFreshNote(one) ? helperNow(one, at, jobsOf(one, at).length, room) : '') || cut(now(one), room) || (one.status === 'working' ? (one.ask ? 'Waiting for you' : 'Starting') : "Claude hasn't said what it's doing")}</Text>
+                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(noteOf(one), room) || (one.status === 'working' ? (one.ask ? 'Waiting for you' : at - one.startedAt < 60_000 ? 'Starting' : 'Working') : "Claude hasn't said what it's doing")}</Text>
                     {/* Held where it was after an answer, once a newer line of the work's took the answer's place: why it is still up there */}
                     {!one.ask && !sentLine(one, at) && heldAnswer(one, at) && heldAnswer(one, at)?.to !== 'ran' && !heldAnswer(one, at)?.isRun ? <Text key={`held-answer-${one.id}`} dimColor wrap="truncate-end">{`✓ You answered “${cut(heldAnswer(one, at)?.text ?? '', 60)}”`}</Text> : null}
                   </Box>

@@ -73,11 +73,10 @@ const shownAs = (list: Todo[], _asks?: (one: Todo) => boolean): Todo[] =>
 // One card read so
 const shownOne = (list: Todo[], id: string, asks?: (one: Todo) => boolean) => shownAs(list, asks).find(one => one.id === id)
 
-// What a task's card line says while it waits on its own work, by what it waits for; '' in any other state, and where the card's
-// own line already says it waits for a command it started in the background (waitLine)
-const ownWorkWords = (list: Todo[], one: Todo, at: number) => {
+// What a task's card says while it waits on its own work, by what it waits for; '' in any other state
+const ownWorkWords = (list: Todo[], one: Todo) => {
   // (a card that handed back its result while a command of its own still runs waits for it too: shownAs)
-  if ((stateOf(list, one) !== 'waiting-own' && one.wasDone === undefined) || waitLine(one, at)) return ''
+  if ((stateOf(list, one) !== 'waiting-own' && one.wasDone === undefined)) return ''
   const { runs, helpers } = wakesOf(list, one)
   if (one.wasDone !== undefined && !runs.length && !helpers) return 'Waiting for its command'
   const what = [runs.length ? (runs.length === 1 ? 'its command' : 'its commands') : '', helpers ? (helpers === 1 ? 'its helper' : 'its helpers') : ''].filter(Boolean).join(' and ')

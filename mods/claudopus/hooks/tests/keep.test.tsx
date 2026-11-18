@@ -803,7 +803,7 @@ test('a chat this Mac runs itself, and the copy the keeper started, start no kee
   expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain('keeper started')
 })
 
-test('work cut off as the process ended is started again with a message, its card says so, and the person is told', SLOW, async ($, on) => {
+test('work cut off as the process ended is started again with a message, its card says nothing of it, and the person is told', SLOW, async ($, on) => {
   const { files, clock, resumed, logged } = world(on)
   leftAtWork(files, ['a7', 'a8'])
   await $.session.start(start)
@@ -813,10 +813,9 @@ test('work cut off as the process ended is started again with a message, its car
   expect(resumed.map(one => one.split(':')[0])).toEqual(['a7', 'a8'])
   expect(resumed[0]).toContain("this chat's process was ended at")
   expect(resumed[0]).toContain('not by')
-  const lines = await cardText($ as never, /^Interrupted at /)
-  expect(lines).toHaveLength(2)
-  expect(lines[0]?.text).toMatch(/^Interrupted at \d\d:\d\d when the chat stopped · running again since \d\d:\d\d$/)
-  // The cards say they were started again: nothing in the chat
+  // Started again, the cards go on as they were: no line of when the chat stopped or since when they run again (18 Nov)
+  expect(await cardText($ as never, /Interrupted|running again/)).toEqual([])
+  // Nothing in the chat either
   expect(logged.some(line => line.includes('after the chat stopped at'))).toBe(false)
   expect(files.get(`${MEMORY}/log.md`)).toContain('cut-off notice pushed')
   // The keeper's file says both are at work again
@@ -831,12 +830,8 @@ test('in the copy kept on this Mac, work Claude Code started again itself is onl
   expect(resumed).toEqual([])
   const lines = await cardText($ as never, /^Interrupted at /)
   const said = (end: string) => lines.find(one => one.text?.endsWith(end))
-  expect(lines.map(one => one.text?.replace(/\d\d:\d\d/g, 'hh:mm')).sort()).toEqual([
-    "Interrupted at hh:mm when the chat stopped · Claudopus couldn't start it again",
-    'Interrupted at hh:mm when the chat stopped · running again since hh:mm',
-  ])
+  expect(lines.map(one => one.text?.replace(/\d\d:\d\d/g, 'hh:mm')).sort()).toEqual(["Interrupted at hh:mm when the chat stopped · Claudopus couldn't start it again"])
   expect(said("couldn't start it again")?.color).toBe('#E5A50A')
-  expect(lines.find(one => one.text?.includes('running again'))?.color).toBeUndefined()
   expect(logged.some(line => line.includes("couldn't start"))).toBe(true)
 })
 
@@ -936,7 +931,7 @@ test('a chat this Mac runs whose process ended with tasks at work, as when the a
   // The helper, which this process had no card for, is back under its task by the title the last process kept
   expect((await pane.findAll({ type: 'Button' })).map(one => one.props.label)).toContain('Lay out the frames')
   await pane.unmount()
-  expect(cut.filter(line => line?.endsWith('running again since hh:mm'))).toHaveLength(2)
+  expect(cut.filter(line => line?.includes('running again'))).toHaveLength(0)
   expect(cut.filter(line => line?.endsWith("Claudopus couldn't start it again"))).toHaveLength(1)
   expect(appended.filter(line => line.includes('Claudopus has started "Solve the cameras", "Train the splats" again, with 2 helpers cut off under them') && line.includes('Do not start them again'))).toHaveLength(1)
   // Loaded again in this process: nothing more

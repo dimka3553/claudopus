@@ -254,8 +254,9 @@ test('a background command whose shell ends leaving its scripts running hands th
   expect(await until(async () => ((await leftTexts($)).some(text => /3 commands ended/.test(text)) || undefined))).toBe(true)
   const shown = await leftTexts($)
   expect(shown.some(text => /2 programs/.test(text))).toBe(true)
-  expect(shown).toContain('Run a build of the scene: ended · Run a check of the scene: ended')
-  expect(shown.some(text => /commands have ended|Run the renders (has|have) /.test(text))).toBe(false)
+  // The card's line stays the task's own note: which commands ended is its tree's count and its Details, never its line (18 Nov)
+  expect(shown).toContain('I am building the scene before the renders.')
+  expect(shown.some(text => /: ended\b|commands have ended|Run the renders (has|have) /.test(text))).toBe(false)
 })
 
 test('a script that starts a session of its own while its command runs is still that command\'s run, even where its environment cannot be read, with what its shell\'s group holds under any name; the system\'s own programs, what another chat or app started at that moment, and what a task of this chat out of sight started while the command was held open, never are (17 Nov: a git push and a dig took headless Chrome\'s crash reporters as runs they left, "Run Google Chrome"; 18 Nov: a finished task\'s card showed another task\'s 12 GB run for 47 minutes)', SLOW, async ($, on) => {

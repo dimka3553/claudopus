@@ -319,10 +319,11 @@ test('work that answers a question while a copy of its own still runs, with that
   agents.a1 = 'waiting'
   await $.turn.complete({ answer: 'Sending the 14.5 GB now; it takes about four hours.', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
   expect(await drawn(pane)).toEqual(['working'])
-  const wait = () => pane.find({ type: 'Text', text: /^Waiting for a command to finish/ })
-  expect((await wait())?.text).toBe('Waiting for a command to finish')
+  // Its stage, in the facts row; no line of its own under it (18 Nov "Waiting for a command to finish")
+  expect(await pane.find({ type: 'Text', text: /^Waiting for its commands · / })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /Waiting for a command/ })).toBeUndefined()
   // The copy itself is a row on its tree: what it is in its own words, and how long it has run
-  const job = async () => (await pane.find({ type: 'Text', text: /^Command · Send the four/ })) ?? (await pane.findAll({ type: 'Button' })).find(b => /^Command · Send the four/.test(String(b.props.label)))
+  const job = async () => (await pane.find({ type: 'Text', text: /^Command · Send the\b/ })) ?? (await pane.findAll({ type: 'Button' })).find(b => /^Command · Send the\b/.test(String(b.props.label)))
   expect(await job()).toBeDefined()
   // Nothing new past the twelve minutes that flag other work (STUCK_AFTER) is a long copy, not stuck work. Only a minute past it:
   // each second the clock moves runs the panel's every-second look, so forty minutes here took 5 to 20 s on GitHub's runner
@@ -340,7 +341,7 @@ test('work that answers a question while a copy of its own still runs, with that
   expect(await drawn(pane)).toEqual(['working'])
   expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /still running ·/ })).toBeUndefined()
-  expect(await wait()).toBeDefined()
+  expect(await job()).toBeDefined()
   await clock.advance(20_000)
   expect(await drawn(pane)).toEqual(['working'])
   expect(await pane.find({ type: 'Text', text: /still running ·/ })).toBeUndefined()
@@ -348,8 +349,8 @@ test('work that answers a question while a copy of its own still runs, with that
 
   // The copy ends: the engine, as it stops, lists only the watch in flight, and the work's next step brings the card on
   await $.classic.SubagentStop({ agent_id: 'a1', agent_type: 'general-purpose', agent_transcript_path: '', stop_hook_active: false, background_tasks: [{ id: 'mon-m1', type: 'monitor', status: 'running', description: 'big data copy to the M4: steps and failures' }] } as never)
-  // The card lets go of the copy at once, before any step: it no longer says it waits for it
-  expect(await wait()).toBeUndefined()
+  // The card lets go of the copy at once, before any step: its row goes
+  expect(await job()).toBeUndefined()
   expect(await drawn(pane)).toEqual(['working'])
   await call('Bash', 'b2', { command: 'shasum -a 256 -c sums.txt' })
   // It stops its watch, ticks the to-do and reports: now it has finished, green, with its report kept
