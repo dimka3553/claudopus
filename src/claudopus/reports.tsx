@@ -220,6 +220,46 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
   return copies
 }
 
+// (a question on its card is shown as waiting already)
+// A report that asks the person something: a part headed as waiting on them, or a sentence of two words or more ending in a
+// question mark, outside code blocks, quotes, headings and tables (list markers left out, inline code read as a word)
+const asksInText = (text: string) => {
+  const unfenced = text.replace(/```[\s\S]*?```/g, '')
+  if (/^[\s#*_>-]*(waiting (on|for) you|waits (on|for) you)\b/im.test(unfenced)) return true
+  const prose = unfenced
+    .split('\n')
+    .filter(line => !/^(\s{4}|\t)(?!\s*([-*]|\d+\.)\s)/.test(line) && !/^\s*(#|\|)/.test(line))
+    .map(line => line.replace(/^\s*([-*]|\d+\.)\s+/, ''))
+    .join('\n')
+    .replace(/`[^`\n]*`/g, 'code')
+    .replace(/"[^"\n]*"|“[^”\n]*”/g, '')
+  return /(?:^|[.!:]\s+|\*\*\s*)(?:[^\s.!?:*]+[ \t]+)+[^\s.!?:*]*[A-Za-z0-9)]\?(?=[\s*_)]|$)/m.test(prose)
+}
+// The kinds of agent that have the waits tool: Claudopus's own tasks, a general one, a copy of the chat
+const WAITS_KINDS = new Set(['claudopus:task', 'claudopus:quick', 'general-purpose', 'fork'])
+// Its report handed back asking the person something while the task recorded nothing as waiting on them: refused once a round, so
+// the question shows on its card as waiting for them, not as done (18 Nov: "Which opening should go out: A, B or C?" was asked only
+// in a report's text, and the panel showed nothing waiting). Sent again, it goes through as it is
+const unrecordedAtHandback = async ($: EngineInterface, id: string, message: string): Promise<string> => {
+  const one = (await read($, todos)).find(card => card.id === id)
+  if (!one || isOff || !dir || one.parentId || one.chat || one.flagged || one.ask || !WAITS_KINDS.has(one.kind ?? '') || one.waitsSet || one.toldWaits === one.startedAt || !asksInText(message)) return ''
+  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldWaits: one.startedAt } : card)))
+  await log($, `work ${id} handed back a report that asks something with nothing recorded as waiting: refused once`)
+  return named(UNRECORDED_WAITS)
+}
+
+// What a finished task's results still ask the person: a result with a question open waits for them, it is not done (18 Nov,
+// the person: three results asked something and the panel said only "3 tasks working"). In the minute before its result is kept,
+// what the task recorded is read from its card (never longer: a result that failed to be kept leaves nothing to answer). A
+// question tied to the open ask on its card is that ask's, which the card shows already
+const CARD_WAITS_SHOWN = 60_000
+const openResultWaits = (one: Todo, kept: Report[], at: number): { r?: Report; wait: Wait; index: number }[] => {
+  if (one.status !== 'done' || one.parentId || one.chat) return []
+  const fromResults = resultsOfWork(kept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer ? [] : [{ r, wait, index }])))
+  const fromCard = fromResults.length || at - one.endedAt > CARD_WAITS_SHOWN ? [] : (one.waits ?? []).map(askedWait).flatMap((wait, index) => (wait.answer ? [] : [{ wait, index }]))
+  return [...fromResults, ...fromCard].filter(({ wait }) => !one.ask || wait.ask !== one.ask.at)
+}
+
 // Keeps what a finished piece of work reported, once
 const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
   // What the work recorded as waiting is read as it stands now; a short answer that leaves something waiting is still kept
@@ -281,9 +321,10 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
     ...(one.from ? { from: one.from } : {}),
   }
   await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
-  // Its report holds them now: the work's next round records what still waits afresh
-  if (one.waits?.length) await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, waits: undefined } : card)))
+  // Its report holds them now: the work's next round records what still waits afresh. The list of results is read first, so the
+  // card that shows them never has a moment with neither (a green finish in between)
   await loadReports($)
+  if (one.waits?.length) await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, waits: undefined } : card)))
 }
 
 // The small copy of a picture the panel draws, kept beside the report

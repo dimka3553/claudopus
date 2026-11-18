@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.200 · 18 November 2026
+- A finished task whose result asks you something now shows as Waiting for you: its card stays at the top in amber with the first question and its answers, the header counts each question, and it goes under Finished only once you've answered them all.
+- A task that asks you something in its result without recording it as waiting on you is told to record it before its result goes through, so its question shows on its card.
+
 ## 0.2.199 · 18 November 2026
 - A task's card now shows an icon beside each thing the task made, as designed: the app had been leaving every icon out
 

@@ -194,7 +194,10 @@ const bandHooks = (on: On) => {
     const working = cards.filter(one => !one.parentId && one.status === 'working')
     // Work that just finished makes the octopus happy for its pause, the band staying that long even when nothing else runs;
     // the redraw set for the pause's end is read so the band leaves or goes back to work then
-    const happy = isHappy(cards, await $.clock.now())
+    // (not for a task whose result asks the person something: that waits for them)
+    const bandAt = await $.clock.now()
+    const bandKept = await read($, reports)
+    const happy = isHappy(cards.filter(one => !openResultWaits(one, bandKept, bandAt).length), bandAt)
     if (happy) await read($, tick)
     const ui = uiOf($, e)
     const { Box, Button, Text } = ui
