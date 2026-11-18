@@ -185,6 +185,8 @@ export type Todo = {
   keptOn?: { tries: number; steps: number; total: number; done: number }
   // The to-dos not done it was told of when its report was refused, joined, and how many times its report was refused with them
   toldOpen?: { key: string; times: number }
+  // The round (its start) whose report was refused once for asking something with nothing recorded as waiting
+  toldWaits?: number
   // The to-dos it handed back its report with still not done: shown on its card and added to its result
   notDone?: string[]
   // Work with helpers running: when the mod last looked in on them, how many ran and how many had shown nothing new for a while

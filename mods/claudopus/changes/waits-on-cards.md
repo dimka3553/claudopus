@@ -1,0 +1,2 @@
+- A finished task whose result asks you something now shows as Waiting for you: its card stays at the top in amber with the first question and its answers, the header counts each question, and it goes under Finished only once you've answered them all.
+- A task that asks you something in its result without recording it as waiting on you is told to record it before its result goes through, so its question shows on its card.

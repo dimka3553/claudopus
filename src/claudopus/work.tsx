@@ -558,6 +558,9 @@ const workHooks = (on: On) => {
       // Its report with to-dos still to do: refused once, so it does them or names them as not done
       const unticked = await untickedAtHandback($, e.agentId, String((e as { message?: unknown }).message ?? '')).catch(() => '')
       if (unticked) return { deny: unticked }
+      // Its report asks the person something it never recorded as waiting on them: refused once, so it records it
+      const unrecorded = flowAgents.has(e.agentId) ? '' : await unrecordedAtHandback($, e.agentId, String((e as { message?: unknown }).message ?? '')).catch(() => '')
+      if (unrecorded) return { deny: unrecorded }
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       // A task's report goes to the chat as its own reply, not in Claude Code's box (REPORT_TAKEN): Claudopus answers the hand-back
       // itself, keeps the report as one that went through, and gives it to the chat with Claude Code's notice that the task ended

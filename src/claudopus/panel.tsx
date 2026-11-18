@@ -188,6 +188,17 @@ const panelHooks = (on: On) => {
     // A card whose ask or gate was just pressed is drawn answered, from the press itself (asPressed)
     const all = (await read($, todos)).map(asPressed)
     const own = all.filter(one => !one.parentId)
+    // What a finished task's results still ask the person: a result with a question open waits for them, it is not done (18 Nov,
+    // the person: three results asked something and the panel said only "3 tasks working"). Its card stays at the top in amber,
+    // never under Finished, until each is answered. In the instant before its result is kept, what the task recorded is read from
+    // its card; a question tied to the ask on its card is that ask's, which the card shows already
+    const resultsKept = await read($, reports)
+    const resultWaits = (one: Todo): { r?: (typeof resultsKept)[number]; wait: Wait; index: number }[] => {
+      if (one.status !== 'done' || one.parentId || one.chat) return []
+      const fromResults = resultsOfWork(resultsKept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer ? [] : [{ r, wait, index }])))
+      const fromCard = fromResults.length ? [] : (one.waits ?? []).map(askedWait).flatMap((wait, index) => (wait.answer ? [] : [{ wait, index }]))
+      return [...fromResults, ...fromCard].filter(({ wait }) => !one.ask || wait.ask !== one.ask.at)
+    }
     // The work of the other chats, by chat; an ask answered here leaves its card at once
     const otherChats = await read($, others)
     // A reply in words left here holds its ask as acted on until that chat's own file carries it; from then its file says
@@ -202,7 +213,7 @@ const panelHooks = (on: On) => {
     const promptsAnswered = answeredShown(at)
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
-    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD) || isLeftStopped(one, at))
+    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || resultWaits(one).length > 0 || one.admins?.length || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD) || isLeftStopped(one, at))
     // A key box or a prompt of the app's that a task's own command raised, by that task's card: drawn on the card, never above it
     // (filled where the top of the panel is put together, below)
     let onCards = new Map<string, { at: number; key: string; what: string; node: JSX.Element }[]>()
@@ -220,14 +231,14 @@ const panelHooks = (on: On) => {
     // then it goes under Finished. Work stopped or stopped by an error is not: it pauses in its place, in its own look
     // In the few rows above the prompt a narrow terminal gives the panel, the outline would take two of them
     const isAbovePrompt = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
-    const isFinishMoment = (one: Todo) => one.status === 'done' && !one.ask && lingers(one, at)
+    const isFinishMoment = (one: Todo) => one.status === 'done' && !one.ask && !resultWaits(one).length && lingers(one, at)
     const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
     // Work under way says nothing of its state: the moving dots do
     const stood: Record<Todo['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
     // Work the app sent to an older model says so, and which one; work that answers from one all the same says so
     const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `Claude Code moved it to ${one.moved}` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
     const glance = (one: Todo, count = '') =>
-      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one, at), modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [(one.ask && one.status === 'done' && !isActingOnReply(one)) || resultWaits(one).length ? 'Waiting for you' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one, at), modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
@@ -471,6 +482,31 @@ const panelHooks = (on: On) => {
       )
     }
 
+    // What a finished task's result still asks, on its card: "Result ready" and the first open question in amber, its answers (the
+    // same buttons as in the result, answered the same way), and a press to the result for the rest
+    const resultAskBlock = (one: Todo, key: string) => {
+      const open = resultWaits(one)
+      const [first] = open
+      if (!first) return null
+      const { r, wait, index } = first
+      return (
+        <Box key={key} flexDirection="column" gap={1}>
+          <Text wrap="wrap" color={NEEDS} bold>{`Result ready · ${cut(wait.text, Math.round(room * 1.6))}`}</Text>
+          {r ? (
+            <Box flexDirection="row" flexWrap="wrap" gap={1}>
+              {answersOf(wait).map((said, n) => (
+                <Button key={`${key}-say-${r.id}-${index}-${n}-${presses}`} label={said} variant={n === 0 ? 'primary' : undefined} {...(said === ANSWER_IN_WORDS ? { plain: true } : {})} onPress={() => void ((presses += 1), answerWait($, r, index, said, at).catch(err => log($, `answer not kept: ${String(err)}`)))} />
+              ))}
+            </Box>
+          ) : null}
+          {r && open.length > 1 ? (
+            <Box flexDirection="row">
+              <Button key={`${key}-more-${r.id}-${presses}`} label={`${open.length - 1} more ${open.length === 2 ? 'question' : 'questions'} in its result`} plain onPress={() => void openReport($, r.id)} />
+            </Box>
+          ) : null}
+        </Box>
+      )
+    }
     // The small card: its title, which opens its Details, with Stop at the far end of that row; where it stands and how many
     // to-dos are done; the line the work last wrote beside the three dots; its helpers. Each part has a fixed number of rows
     // and is clipped to them, so a card never changes height as the work goes
@@ -558,6 +594,12 @@ const panelHooks = (on: On) => {
                   {askBlock(one, `ask-${one.id}`)}
                 </Box>
               ) }] : []),
+              // what its result still asks: the first question with its answers, as its result offers them, and how many more
+              ...(resultWaits(one).length ? [{ at: one.endedAt, node: (
+                <Box key={`result-ask-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
+                  {resultAskBlock(one, `result-ask-${one.id}`)}
+                </Box>
+              ) }] : []),
               // a command the person ran on a press: where it began
               ...(runningOn(one.id).length && !one.chat ? [{ at: Math.min(...runningOn(one.id).map(run => run.startedAt ?? 0)), node: (
                 <Box key={`run-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
@@ -624,6 +666,8 @@ const panelHooks = (on: On) => {
                 <Text dimColor wrap="wrap">{wakeLine(one)}</Text>
               </Box>
             ) : null}
+            {/* A result's question is all a card waiting for its answer says: no line of what Claude last did */}
+            {resultWaits(one).length ? null : (
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden" paddingLeft={lead}>
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -641,6 +685,7 @@ const panelHooks = (on: On) => {
                 )}
               </Box>
             </Box>
+            )}
             {/* A button's answer, while the card says it: a press to take it back, the question back on the card */}
             {canTakeBack(one, at) ? (
               <Box key={`take-back-${one.id}`} paddingLeft={lead} flexDirection="row">
@@ -671,7 +716,7 @@ const panelHooks = (on: On) => {
       // An error that stopped it is said in red, on its edge too
       if (one.status === 'failed') return <Box width={1} flexShrink={0} backgroundColor="error" />
       if (one.status !== 'working' && one.status !== 'done') return <Box width={1} flexShrink={0} />
-      const isNeeded = needsPerson(one) || (onCards.get(one.id)?.length ?? 0) > 0
+      const isNeeded = needsPerson(one) || (onCards.get(one.id)?.length ?? 0) > 0 || resultWaits(one).length > 0
       if (isNeeded || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={isNeeded ? NEEDS : one.status === 'working' || isActingOnReply(one) ? LIVE : DONE} />
       const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
       return count > EDGE_PARTS ? (
@@ -1701,7 +1746,7 @@ const panelHooks = (on: On) => {
     // is not listed at all, however many are open: the app's own list of chats has them
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length || answeredOf(c.answeredPrompts).length)
-    const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at) && !one.ask && !isLeftStopped(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
+    const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at) && !one.ask && !resultWaits(one).length && !isLeftStopped(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
         <Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
@@ -1900,7 +1945,7 @@ const panelHooks = (on: On) => {
     const isWaitingPress = (one: Todo) => one.status === 'working' && Boolean(one.admins?.length)
     const ownCount = (one: Todo) => (one.chat ? 0 : (onCards.get(one.id)?.length ?? 0))
     // Each thing that waits, counted once: a card with a question and a key box waits on two
-    const waitsOn = (one: Todo) => (isAsking(one) ? 1 : 0) + (isWaitingPress(one) ? (one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).length : 0) + ownCount(one)
+    const waitsOn = (one: Todo) => (isAsking(one) ? 1 : 0) + resultWaits(one).length + (isWaitingPress(one) ? (one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).length : 0) + ownCount(one)
     const isOpen = (one: Todo) => waitsOn(one) > 0
     // An ask answered on its card keeps the card where it was, its answer said in it, for ANSWER_SHOWN: a press or a reply never
     // takes the card from under the person's eyes, as a gate answered on its card does not
@@ -1923,7 +1968,7 @@ const panelHooks = (on: On) => {
     // goes under it, never above
     const isKeptUp = (one: Todo) => isWaits(one) || (!one.chat && cardNotesOf(one.id, at).length > 0 && isKeptPlace(one))
     // Where a card stands among what waits: where it first came, kept for as long as it stays up there
-    const cameAt = (one: Todo) => Math.min(isAsking(one) ? (one.ask?.at ?? Infinity) : Infinity, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : (onCards.get(one.id) ?? []).map(row => row.at)))
+    const cameAt = (one: Todo) => Math.min(isAsking(one) ? (one.ask?.at ?? Infinity) : Infinity, resultWaits(one).length ? one.endedAt : Infinity, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : (onCards.get(one.id) ?? []).map(row => row.at)))
     const placeOf = (one: Todo) => topPlaces.get(placeKey(one)) ?? (Number.isFinite(cameAt(one)) ? cameAt(one) : answeredPlace(one) || at)
     // Just finished: up at the top, right under what waits, the newest first, each for its own two seconds
     const isFinishing = (one: Todo) => !isWaits(one) && isFinishMoment(one)
@@ -1956,7 +2001,7 @@ const panelHooks = (on: On) => {
     // What waits first, notices and cards in the order they came; under it what just finished, the newest first; then cards that only
     // say what was allowed or left something running. A card is drawn when the panel is
     const finishingFlows = shownFlows.filter(isFlowMoment)
-    const whatOf = (one: Todo) => (isAsking(one) ? oneLine(one.ask?.text ?? '') : (onCards.get(one.id)?.[0]?.what ?? (one.admins?.[0] ? gateWhat(one.admins[0]) : '')))
+    const whatOf = (one: Todo) => (isAsking(one) ? oneLine(one.ask?.text ?? '') : resultWaits(one)[0] ? oneLine(resultWaits(one)[0]?.wait.text ?? '') : (onCards.get(one.id)?.[0]?.what ?? (one.admins?.[0] ? gateWhat(one.admins[0]) : '')))
     const top = [
       ...notices.map(one => ({ rank: 0, at: one.at, what: one.what, draw: () => one.node })),
       ...askCards.map(one => (isKeptUp(one) ? { rank: 0, at: placeOf(one), what: isOpen(one) ? whatOf(one) : '', draw: () => small(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: () => small(one) } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: () => small(one) })),
@@ -1975,7 +2020,7 @@ const panelHooks = (on: On) => {
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
       // Each thing at the top counts once, as the line above the prompt counts them
       asks: waitsCount,
-      isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
+      isDone: isHappy(own.filter(one => !resultWaits(one).length), at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
     }
     const mood = headMood(head)
     // A letter for each header button, in the terminal alone, and only while the panel has no password box to type in: there the

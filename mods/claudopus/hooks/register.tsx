@@ -902,6 +902,7 @@ const KEEP_GOING = (items: string[]) =>
   `From Claudopus, not {name}: don't end here, your task isn't finished. Still to do: ${quotedItems(items)}. Nothing of yours is running that would start you again (no command in the background, no detached command started with \`echo $!\` after it, no helper at work, no wake_me, no question on your card), so if your step ends now this work stops undone. Claude Code's note that your report has not been delivered doesn't apply yet: send your report only once every to-do is ticked. Carry on now with the first of them. If you expected something you started to be running, look at its log: it may have failed or ended. To wait for something, run it in the background or detached with \`echo $!\` after it, or call wake_me for a file, a page or a time, then end your step. Tick each to-do as soon as it is done. For one only {name} can do, ask with the ask tool and end your step.`
 const NOT_TICKED = (items: string[]) =>
   `Not sent: ${items.length === 1 ? 'a to-do of yours is' : `${items.length} of your to-dos are`} still to do: ${quotedItems(items)}. Do ${items.length === 1 ? 'it' : 'each'} now, or tick it done if it is done already, then hand back your report. One that only {name} can do or decide stays as it is: name it in your report under "Not done", with what {name} needs to do, and send your report again. Claudopus then shows it as not done on your card and in your result.`
+const UNRECORDED_WAITS = `Not sent: your report asks {name} something, but you recorded nothing as waiting on {name}, so the panel would show your task as done. Record each question only {name} can answer with the waits tool, or call it with [] if nothing waits on {name}, then send your report again.`
 const NOT_DONE_IN_CHAT = (title: string, items: string[]) =>
   `From Claudopus: the task "${title}" sent its result with ${items.length === 1 ? 'a to-do' : `${items.length} to-dos`} not done: ${quotedItems(items)}. When you pass its result on to {name}, say these are not done.`
 const REPORT_TAKEN = 'Report delivered to your caller: Claudopus gives it to the chat, which shows it to {name}. Your work is done: end your step now, writing nothing more.'
@@ -2230,6 +2231,18 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
   return copies
 }
 
+const asksInText = (text: string) => {
+  const prose = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '').replace(/"[^"\n]*"|“[^”\n]*”/g, '')
+  return /\?(?=[\s*_)]|$)/m.test(prose) || /^[\s#*_>-]*(waiting (on|for) you|waits (on|for) you)\b/im.test(prose)
+}
+const unrecordedAtHandback = async ($: EngineInterface, id: string, message: string): Promise<string> => {
+  const one = (await read($, todos)).find(card => card.id === id)
+  if (!one || isOff || !dir || one.parentId || one.chat || one.flagged || one.ask || one.waitsSet || one.toldWaits === one.startedAt || !asksInText(message)) return ''
+  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldWaits: one.startedAt } : card)))
+  await log($, `work ${id} handed back a report that asks something with nothing recorded as waiting: refused once`)
+  return named(UNRECORDED_WAITS)
+}
+
 const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
   const one = (await read($, todos)).find(todo => todo.id === card.id) ?? card
   const waits = (one.waits ?? []).map(askedWait)
@@ -2277,8 +2290,8 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
     ...(one.from ? { from: one.from } : {}),
   }
   await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
-  if (one.waits?.length) await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, waits: undefined } : card)))
   await loadReports($)
+  if (one.waits?.length) await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, waits: undefined } : card)))
 }
 
 const thumbPath = (r: Report, file: string) => `${reportPath(r)}/thumbs/${file.replaceAll('/', '--')}.jpg`
@@ -12096,6 +12109,8 @@ const workHooks = (on: On) => {
       if (hold) return { deny: hold }
       const unticked = await untickedAtHandback($, e.agentId, String((e as { message?: unknown }).message ?? '')).catch(() => '')
       if (unticked) return { deny: unticked }
+      const unrecorded = flowAgents.has(e.agentId) ? '' : await unrecordedAtHandback($, e.agentId, String((e as { message?: unknown }).message ?? '')).catch(() => '')
+      if (unrecorded) return { deny: unrecorded }
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       const taken = (await read($, todos)).find(one => one.id === e.agentId)
       if (dir && !isOff && taken && !taken.parentId && !flowAgents.has(e.agentId)) {
@@ -13199,6 +13214,13 @@ const panelHooks = (on: On) => {
     }
     const all = (await read($, todos)).map(asPressed)
     const own = all.filter(one => !one.parentId)
+    const resultsKept = await read($, reports)
+    const resultWaits = (one: Todo): { r?: (typeof resultsKept)[number]; wait: Wait; index: number }[] => {
+      if (one.status !== 'done' || one.parentId || one.chat) return []
+      const fromResults = resultsOfWork(resultsKept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer ? [] : [{ r, wait, index }])))
+      const fromCard = fromResults.length ? [] : (one.waits ?? []).map(askedWait).flatMap((wait, index) => (wait.answer ? [] : [{ wait, index }]))
+      return [...fromResults, ...fromCard].filter(({ wait }) => !one.ask || wait.ask !== one.ask.at)
+    }
     const otherChats = await read($, others)
     for (const one of cardsOf(otherChats)) if (one.ask?.replied && actingOn.get(`${one.id}:${one.ask.at}`) === one.ask.replied.text) actingOn.delete(`${one.id}:${one.ask.at}`)
     const elsewhere = cardsOf(otherChats).map(one => (one.ask && answeredHere.has(`${one.id}:${one.ask.at}`) ? { ...one, ask: undefined } : one))
@@ -13208,7 +13230,7 @@ const panelHooks = (on: On) => {
     const answeredOf = (list: Prompt[] | undefined) => (list ?? []).filter(p => !p.endedAt || at - p.endedAt < PROMPT_SHOWN)
     const promptsAnswered = answeredShown(at)
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
-    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD) || isLeftStopped(one, at))
+    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || resultWaits(one).length > 0 || one.admins?.length || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD) || isLeftStopped(one, at))
     let onCards = new Map<string, { at: number; key: string; what: string; node: JSX.Element }[]>()
     let doneOnCards = new Map<string, { at: number; key: string; node: JSX.Element }[]>()
     let promptsLoose = promptsAnswered
@@ -13216,12 +13238,12 @@ const panelHooks = (on: On) => {
     const ours = modelName(await $.session.model().catch(() => ''))
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
     const isAbovePrompt = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
-    const isFinishMoment = (one: Todo) => one.status === 'done' && !one.ask && lingers(one, at)
+    const isFinishMoment = (one: Todo) => one.status === 'done' && !one.ask && !resultWaits(one).length && lingers(one, at)
     const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
     const stood: Record<Todo['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
     const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `Claude Code moved it to ${one.moved}` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
     const glance = (one: Todo, count = '') =>
-      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one, at), modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [(one.ask && one.status === 'done' && !isActingOnReply(one)) || resultWaits(one).length ? 'Waiting for you' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one, at), modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     const { picking = '' } = await read($, view)
     const lead = e.surface === 'terminal' ? 0 : 'xs'
     const facts = (one: Todo, isWhole: boolean, count = '') => {
@@ -13427,6 +13449,29 @@ const panelHooks = (on: On) => {
       )
     }
 
+    const resultAskBlock = (one: Todo, key: string) => {
+      const open = resultWaits(one)
+      const [first] = open
+      if (!first) return null
+      const { r, wait, index } = first
+      return (
+        <Box key={key} flexDirection="column" gap={1}>
+          <Text wrap="wrap" color={NEEDS} bold>{`Result ready · ${cut(wait.text, Math.round(room * 1.6))}`}</Text>
+          {r ? (
+            <Box flexDirection="row" flexWrap="wrap" gap={1}>
+              {answersOf(wait).map((said, n) => (
+                <Button key={`${key}-say-${r.id}-${index}-${n}-${presses}`} label={said} variant={n === 0 ? 'primary' : undefined} {...(said === ANSWER_IN_WORDS ? { plain: true } : {})} onPress={() => void ((presses += 1), answerWait($, r, index, said, at).catch(err => log($, `answer not kept: ${String(err)}`)))} />
+              ))}
+            </Box>
+          ) : null}
+          {r && open.length > 1 ? (
+            <Box flexDirection="row">
+              <Button key={`${key}-more-${r.id}-${presses}`} label={`${open.length - 1} more ${open.length === 2 ? 'question' : 'questions'} in its result`} plain onPress={() => void openReport($, r.id)} />
+            </Box>
+          ) : null}
+        </Box>
+      )
+    }
     let cardNo = 0
     let keyed = false
     const stepLine = (one: Todo, kept: Item[], done: number) => {
@@ -13503,6 +13548,11 @@ const panelHooks = (on: On) => {
                   {askBlock(one, `ask-${one.id}`)}
                 </Box>
               ) }] : []),
+              ...(resultWaits(one).length ? [{ at: one.endedAt, node: (
+                <Box key={`result-ask-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
+                  {resultAskBlock(one, `result-ask-${one.id}`)}
+                </Box>
+              ) }] : []),
               ...(runningOn(one.id).length && !one.chat ? [{ at: Math.min(...runningOn(one.id).map(run => run.startedAt ?? 0)), node: (
                 <Box key={`run-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
                   {runBlock($, table, one, `runs-${one.id}`, at)}
@@ -13568,6 +13618,8 @@ const panelHooks = (on: On) => {
                 <Text dimColor wrap="wrap">{wakeLine(one)}</Text>
               </Box>
             ) : null}
+            {/* A result's question is all a card waiting for its answer says: no line of what Claude last did */}
+            {resultWaits(one).length ? null : (
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden" paddingLeft={lead}>
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -13585,6 +13637,7 @@ const panelHooks = (on: On) => {
                 )}
               </Box>
             </Box>
+            )}
             {/* A button's answer, while the card says it: a press to take it back, the question back on the card */}
             {canTakeBack(one, at) ? (
               <Box key={`take-back-${one.id}`} paddingLeft={lead} flexDirection="row">
@@ -13609,7 +13662,7 @@ const panelHooks = (on: On) => {
     const edge = (one: Todo, count: number, done: number, isDoing: boolean) => {
       if (one.status === 'failed') return <Box width={1} flexShrink={0} backgroundColor="error" />
       if (one.status !== 'working' && one.status !== 'done') return <Box width={1} flexShrink={0} />
-      const isNeeded = needsPerson(one) || (onCards.get(one.id)?.length ?? 0) > 0
+      const isNeeded = needsPerson(one) || (onCards.get(one.id)?.length ?? 0) > 0 || resultWaits(one).length > 0
       if (isNeeded || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={isNeeded ? NEEDS : one.status === 'working' || isActingOnReply(one) ? LIVE : DONE} />
       const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
       return count > EDGE_PARTS ? (
@@ -14497,7 +14550,7 @@ const panelHooks = (on: On) => {
     const endedElsewhere = elsewhere.filter(one => one.status !== 'working' && !one.ask && !lingers(one, at) && !isVanished(one.id))
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length || answeredOf(c.answeredPrompts).length)
-    const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at) && !one.ask && !isLeftStopped(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
+    const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at) && !one.ask && !resultWaits(one).length && !isLeftStopped(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
         <Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
@@ -14679,7 +14732,7 @@ const panelHooks = (on: On) => {
     const isAsking = (one: Todo) => Boolean(one.ask) && !isActingOnReply(one)
     const isWaitingPress = (one: Todo) => one.status === 'working' && Boolean(one.admins?.length)
     const ownCount = (one: Todo) => (one.chat ? 0 : (onCards.get(one.id)?.length ?? 0))
-    const waitsOn = (one: Todo) => (isAsking(one) ? 1 : 0) + (isWaitingPress(one) ? (one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).length : 0) + ownCount(one)
+    const waitsOn = (one: Todo) => (isAsking(one) ? 1 : 0) + resultWaits(one).length + (isWaitingPress(one) ? (one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).length : 0) + ownCount(one)
     const isOpen = (one: Todo) => waitsOn(one) > 0
     const answeredSince = (one: Todo) => {
       return heldAnswer(one, at)?.at ?? 0
@@ -14691,7 +14744,7 @@ const panelHooks = (on: On) => {
     const isKeptPlace = (one: Todo) => topPlaces.has(placeKey(one)) && (isOpenHere || at - (topClosed.get(placeKey(one)) ?? at) < KEPT_MOST)
     const isWaits = (one: Todo) => isOpen(one) || answeredSince(one) > 0 || (isAnyOpen && isKeptPlace(one))
     const isKeptUp = (one: Todo) => isWaits(one) || (!one.chat && cardNotesOf(one.id, at).length > 0 && isKeptPlace(one))
-    const cameAt = (one: Todo) => Math.min(isAsking(one) ? (one.ask?.at ?? Infinity) : Infinity, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : (onCards.get(one.id) ?? []).map(row => row.at)))
+    const cameAt = (one: Todo) => Math.min(isAsking(one) ? (one.ask?.at ?? Infinity) : Infinity, resultWaits(one).length ? one.endedAt : Infinity, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : (onCards.get(one.id) ?? []).map(row => row.at)))
     const placeOf = (one: Todo) => topPlaces.get(placeKey(one)) ?? (Number.isFinite(cameAt(one)) ? cameAt(one) : answeredPlace(one) || at)
     const isFinishing = (one: Todo) => !isWaits(one) && isFinishMoment(one)
     const finishFrom = (one: Todo) => (one.chat ? (endSeen.get(`${one.id}:${one.endedAt}`) ?? one.endedAt) : pauseFrom(one))
@@ -14717,7 +14770,7 @@ const panelHooks = (on: On) => {
     const restFlows = shownFlows.filter(f => !isFlowMoment(f))
     const begun = (one: Todo) => one.begunAt ?? one.startedAt
     const finishingFlows = shownFlows.filter(isFlowMoment)
-    const whatOf = (one: Todo) => (isAsking(one) ? oneLine(one.ask?.text ?? '') : (onCards.get(one.id)?.[0]?.what ?? (one.admins?.[0] ? gateWhat(one.admins[0]) : '')))
+    const whatOf = (one: Todo) => (isAsking(one) ? oneLine(one.ask?.text ?? '') : resultWaits(one)[0] ? oneLine(resultWaits(one)[0]?.wait.text ?? '') : (onCards.get(one.id)?.[0]?.what ?? (one.admins?.[0] ? gateWhat(one.admins[0]) : '')))
     const top = [
       ...notices.map(one => ({ rank: 0, at: one.at, what: one.what, draw: () => one.node })),
       ...askCards.map(one => (isKeptUp(one) ? { rank: 0, at: placeOf(one), what: isOpen(one) ? whatOf(one) : '', draw: () => small(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: () => small(one) } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: () => small(one) })),
@@ -14732,7 +14785,7 @@ const panelHooks = (on: On) => {
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
       asks: waitsCount,
-      isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
+      isDone: isHappy(own.filter(one => !resultWaits(one).length), at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
     }
     const mood = headMood(head)
     const isKeyed = e.surface === 'terminal' && !boxes.length
