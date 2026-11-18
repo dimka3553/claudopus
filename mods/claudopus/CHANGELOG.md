@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.195 · 18 November 2026
+- A task's card shows Done only once Claudopus has its result. Commands ending, helpers finishing or Claude Code ending the task's run no longer make it Done, and you no longer get a notification that it's done before its result comes.
+- A task that stops with to-dos left while only a server it left running is still going is started again to carry on, instead of sitting there.
+- While a task waits for its own commands or helpers, its card says so, for example "Waiting for its helper".
+
 ## 0.2.194 · 18 November 2026
 - Update works again when your chats run Claudopus from a copy of its code that a task switched to a released version. Update moves that copy to the newest version and back onto main.
 - A task or its helper can no longer switch, reset or commit in the copy of Claudopus's code your chats run. Claude reads other versions without switching, and changes the code in a copy of its own.

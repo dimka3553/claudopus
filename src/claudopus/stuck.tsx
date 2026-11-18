@@ -611,8 +611,9 @@ const isStoppedShort = (one: Todo | undefined, answer: string) =>
       !pressed.has(one.id) &&
       !one.flagged &&
       !one.carryOn?.gaveUp &&
-      // (a command it left detached starts it again as it ends, and Claude Code's press is answered for it with no model)
-      !one.detached?.length,
+      // (a command it left detached starts it again as it ends, and Claude Code's press is answered for it with no model; a server
+      // never ends, so never starts it again)
+      !one.detached?.some(d => !isServerRun(d.cmd, d.what)),
   )
 // Whether Claude Code pressed it for its report as its run ended, after its last call: the sign that its words reached no one (the
 // chat is told only that it "ended without delivering a report"). A run where the engine asks for no report, as headless ones, ends
@@ -711,7 +712,7 @@ const keepGoingWhy = (list: Todo[], id: string) => {
   const one = list.find(card => card.id === id)
   const open = openItems(one)
   if (!one || isOff || !dir || one.status !== 'working' || !open.length || handedBack.has(id) || one.mayHandBack !== undefined) return ''
-  if (!isStoppedShort(one, '') || !ownsNothing(list, id) || one.wakeWhen !== undefined || isTurnWaited(list, id)) return ''
+  if (!isStoppedShort(one, '') || wakesOf(list, one).isAny) return ''
   return named(KEEP_GOING(open.map(item => item.text)))
 }
 // Its step's end: kept from ending while it should go on, counting the times in a row with no call of its own between

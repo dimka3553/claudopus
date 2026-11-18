@@ -85,6 +85,8 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   const isHeld = listed === 'waiting' || listed === 'running'
   if (listed === 'running') $.clock.after(HELD_LOOK, () => void heldLook($, id).catch(err => log($, `work ${id} not looked at again: ${String(err)}`)))
   const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
+  // A run Claude Code never pressed for a hand-back took its last words as its result: they are its report (isUnpressed)
+  const isOwnResult = how === 'done' && !(await read($, todos)).find(one => one.id === id)?.parentId && (await isUnpressed($, id))
   // Held only by its own background work, a turn that ends with its report has finished the work: by SubagentHandback, or a
   // reply as long as a report. A short line such as "started it in the background" has not, nor work that waits on its helpers
   // Held on a command or watch of its own that wakes it as it ends, with a to-do of its still being done, it has not finished:
@@ -96,11 +98,17 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   const isIdleReport = isReport && ownsNothing(await read($, todos), id)
   // SubagentHandback ends the work's run: its card ends done with its report, though what it left running in the background (a
   // server, a watch, a helper) goes on and is not stopped. Should that wake the work, its next step brings the card back
-  const isHandedBack = how === 'done' && (handedBack.has(id) || isIdleReport) && !isGoingOn
+  // (words alone count only where Claude Code took them as the run's result: never pressed for a hand-back. A helper's words go
+  // to its task as before)
+  const isTop = !(await read($, todos)).find(one => one.id === id)?.parentId
+  const isHandedBack = how === 'done' && (handedBack.has(id) || (isIdleReport && (isOwnResult || !isTop))) && !isGoingOn
   if (isHandedBack) (ownsNothing(await read($, todos), id) ? leftNothing.add(id) : leftNothing.delete(id))
+  // Its report is received when it came by SubagentHandback, or as its run's last words where Claude Code never pressed it for a
+  // hand-back, so took those words as its result. Words after a press reached no one, however long: no report (stateOf)
+  const isReceived = isHandedBack && isTop
   handedBack.delete(id)
   if (isHandedBack) endedByHandback.add(id)
-  if (isHandedBack) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now, wakeWhen: undefined } : one)))
+  if (isHandedBack) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now, wakeWhen: undefined, ...(isReceived ? { reportAt: now } : {}) } : one)))
   // Work nothing holds any more has nothing of its own left running in the background
   if (!isHeld) await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
   // A task of this chat's whose step ended with no result, no question and nothing of its own that starts it again is not
@@ -111,7 +119,9 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   await changeTodos($, list => {
     isCarried = false
     // (or for what it asked Claudopus to start it again for)
-    const isWaiting = how === 'done' && !isHandedBack && (isHeld || isTurnWaited(list, id) || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)))
+    // (or for a command of its own that ends and starts it again, detached or left going: wakesOf)
+    const self = list.find(one => one.id === id)
+    const isWaiting = how === 'done' && !isHandedBack && (isHeld || isTurnWaited(list, id) || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)) || Boolean(self && !self.parentId && wakesOf(list, self).isAny))
     // What it waits on of its own, since when: the card says so, and a long wait for it is not taken for being stuck
     // Work that gave its report waits on nothing it means to finish
     const waitsSince = (one: Todo) => (isHeld && !isReport && one.bg?.some(b => !b.isWatch) ? (one.waitsSince ?? now) : undefined)
@@ -131,7 +141,7 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
               : one
             : mayBeShort && one.status === 'working' && isStoppedShort(one, answer)
               ? ((isCarried = true), { ...one, answer: answer || one.answer })
-              : { ...ended(one, how, now), answer: answer || one.answer },
+              : { ...ended(one, how, now), answer: answer || one.answer, ...(isOwnResult && !one.parentId ? { reportAt: one.reportAt ?? now } : {}) },
     )
   })
   if (isCarried) await goOn($, id, e.reason === 'error' ? 'its step failed' : 'its step ended', true)

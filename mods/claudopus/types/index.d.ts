@@ -91,6 +91,8 @@ export type Todo = {
   answeredAt?: number
   // When its turn last ended by handing back its report: it has finished for good, so nothing it left running wakes it again
   handedBackAt?: number
+  // When Claudopus received its report, handed back with SubagentHandback, as its turn ended: the one thing that makes it done
+  reportAt?: number
   // The report Claudopus took from its hand-back, until the chat is given it with Claude Code's notice that the task ended; then
   // `reportGiven`, so a later notice of the same end repeats nothing, until a message starts it again
   reportForChat?: string

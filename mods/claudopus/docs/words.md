@@ -26,7 +26,8 @@ Every word Claudopus shows you (panel, cards, the bar, questions, notices, resul
 - One idea per line. Say what happens next or what you can do, never why the code did it.
 
 ## Standard forms
-- **States**, one word each, one colour each: Starting, Working (purple), Waiting for you (amber), Done (green), Failed (amber), Stopped, Stopped by you (grey).
+- **States**, one word each, one colour each: Starting, Working (purple), Waiting for you (amber), Done (green), Failed (amber), Stopped, Stopped by you (grey). Done means one thing only: Claudopus has the task's result.
+- A working task whose step ended while its own commands or helpers run says what it waits for on its line, in Working's purple: `Waiting for its command`, `Waiting for its helpers`, `Waiting for its command and helper`.
 - **Time running** `29m 40s`, over an hour `1h 05m`. **Expected** `of about 5m`. **Past it** `29m 40s · 24m over` (amber). **Ago** `2m ago`. **Left** `1m left`. **Dates** `11 Nov, 14:20`.
 - **Counts** `<n> of <total> <what>`: `2 of 6 stills`, `2 of 5 to-dos`.
 - **Buttons** are a verb of one to three words, the same word for the same act: Stop, Details, Result, Release it, Not now, Send, Open chat, Answer in words, Allow once, Deny.
