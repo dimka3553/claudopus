@@ -1,264 +1,574 @@
-"use strict";
 // The other Macs over ssh: their chats fetched, and the same results on every Mac
+var __assign = (this && this.__assign) || function () {
+    __assign = Object.assign || function(t) {
+        for (var s, i = 1, n = arguments.length; i < n; i++) {
+            s = arguments[i];
+            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
+                t[p] = s[p];
+        }
+        return t;
+    };
+    return __assign.apply(this, arguments);
+};
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+var __generator = (this && this.__generator) || function (thisArg, body) {
+    var _ = { label: 0, sent: function() { if (t[0] & 1) throw t[1]; return t[1]; }, trys: [], ops: [] }, f, y, t, g = Object.create((typeof Iterator === "function" ? Iterator : Object).prototype);
+    return g.next = verb(0), g["throw"] = verb(1), g["return"] = verb(2), typeof Symbol === "function" && (g[Symbol.iterator] = function() { return this; }), g;
+    function verb(n) { return function (v) { return step([n, v]); }; }
+    function step(op) {
+        if (f) throw new TypeError("Generator is already executing.");
+        while (g && (g = 0, op[0] && (_ = 0)), _) try {
+            if (f = 1, y && (t = op[0] & 2 ? y["return"] : op[0] ? y["throw"] || ((t = y["return"]) && t.call(y), 0) : y.next) && !(t = t.call(y, op[1])).done) return t;
+            if (y = 0, t) op = [op[0] & 2, t.value];
+            switch (op[0]) {
+                case 0: case 1: t = op; break;
+                case 4: _.label++; return { value: op[1], done: false };
+                case 5: _.label++; y = op[1]; op = [0]; continue;
+                case 7: op = _.ops.pop(); _.trys.pop(); continue;
+                default:
+                    if (!(t = _.trys, t = t.length > 0 && t[t.length - 1]) && (op[0] === 6 || op[0] === 2)) { _ = 0; continue; }
+                    if (op[0] === 3 && (!t || (op[1] > t[0] && op[1] < t[3]))) { _.label = op[1]; break; }
+                    if (op[0] === 6 && _.label < t[1]) { _.label = t[1]; t = op; break; }
+                    if (t && _.label < t[2]) { _.label = t[2]; _.ops.push(op); break; }
+                    if (t[2]) _.ops.pop();
+                    _.trys.pop(); continue;
+            }
+            op = body.call(thisArg, _);
+        } catch (e) { op = [6, e]; y = 0; } finally { f = t = 0; }
+        if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
+    }
+};
+var __rest = (this && this.__rest) || function (s, e) {
+    var t = {};
+    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
+        t[p] = s[p];
+    if (s != null && typeof Object.getOwnPropertySymbols === "function")
+        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
+            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
+                t[p[i]] = s[p[i]];
+        }
+    return t;
+};
+var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
+    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
+        if (ar || !(i in from)) {
+            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
+            ar[i] = from[i];
+        }
+    }
+    return to.concat(ar || Array.prototype.slice.call(from));
+};
+var _this = this;
 // The other Macs config.json names under `macs`, as ssh reaches them; none for a person with one Mac. Each is known by the name
 // config.json gives it, and shown by the first part of its host name
-let macs = [];
-const macPath = (mac) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.json`;
+var macs = [];
+var macPath = function (mac) { return "".concat(liveDir(), "/").concat(MACS, "/").concat(mac.replace(/[^A-Za-z0-9_.-]/g, '-'), ".json"); };
 // One connection to each Mac is kept open a minute after its last use and shared by every chat here, so a trip costs a fraction
 // of a second rather than a new login each time, and a name pressed on that Mac opens here within moments. A connection gone dead,
 // as after sleep, is dropped within ten seconds and the next call logs in afresh
-const ssh = (mac, command) => ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ControlMaster=auto', '-o', 'ControlPath=/tmp/claudopus-%i-%C', '-o', 'ControlPersist=60', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', '--', mac, command];
+var ssh = function (mac, command) { return ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ControlMaster=auto', '-o', 'ControlPath=/tmp/claudopus-%i-%C', '-o', 'ControlPersist=60', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', '--', mac, command]; };
 // This Mac's own name, as its Sharing settings give it, read once: what it is called on the Macs it hands its chats to
-let localName = '';
-const knowLocalName = async ($) => {
-    if (localName)
-        return localName;
-    const r = await $.process.run(isLinux ? ['hostname', '-s'] : ['scutil', '--get', 'LocalHostName'], { timeoutMs: 5000 }).catch(() => ({ exitCode: -1, stdout: '' }));
-    localName = keyOf(r.exitCode === 0 ? r.stdout.trim() : '') || 'mac';
-    return localName;
-};
+var localName = '';
+var knowLocalName = function ($) { return __awaiter(_this, void 0, void 0, function () {
+    var r;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0:
+                if (localName)
+                    return [2 /*return*/, localName];
+                return [4 /*yield*/, $.process.run(isLinux ? ['hostname', '-s'] : ['scutil', '--get', 'LocalHostName'], { timeoutMs: 5000 }).catch(function () { return ({ exitCode: -1, stdout: '' }); })];
+            case 1:
+                r = _a.sent();
+                localName = keyOf(r.exitCode === 0 ? r.stdout.trim() : '') || 'mac';
+                return [2 /*return*/, localName];
+        }
+    });
+}); };
 // This Mac's own chats' files, as handed to the other Macs: those written in the last three minutes, never another Mac's copies
-const ownFiles = async ($, now) => {
-    const listed = (await $.fs.list(liveDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && !(entry.mtimeMs && now - entry.mtimeMs > 180000));
-    return (await Promise.all(listed.map(entry => readOr($, `${liveDir()}/${entry.name}`)))).filter(text => text.trim().startsWith('{')).map(forOtherMac);
-};
+var ownFiles = function ($, now) { return __awaiter(_this, void 0, void 0, function () {
+    var listed;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0: return [4 /*yield*/, $.fs.list(liveDir()).catch(function () { return []; })];
+            case 1:
+                listed = (_a.sent()).filter(function (entry) { return entry.kind === 'file' && entry.name.endsWith('.json') && !(entry.mtimeMs && now - entry.mtimeMs > 180000); });
+                return [4 /*yield*/, Promise.all(listed.map(function (entry) { return readOr($, "".concat(liveDir(), "/").concat(entry.name)); }))];
+            case 2: return [2 /*return*/, (_a.sent()).filter(function (text) { return text.trim().startsWith('{'); }).map(forOtherMac)];
+        }
+    });
+}); };
 // What leaves this Mac for another: a chat's file less every command and text that work runs or sends. Gone are the text an ask
 // gives to paste (a code, a token or a command), the command or text a prompt shows whole and the words of its line that came from
 // the command, the command a card shows running, sent to the background or detached (and the log it writes), and the command, change
 // or release an admin, file or release press is asked for: a card there says what kind of thing waits, and what it is in the work's
 // own words where it gave some, never the command. All of it stays on this Mac's own cards and in its chats
-const AS_COMMAND = 'a command';
-const forOtherMac = (text) => {
+var AS_COMMAND = 'a command';
+var forOtherMac = function (text) {
     try {
-        const one = JSON.parse(text);
+        var one = JSON.parse(text);
         // The work's own words for what runs, never a line of the command itself
-        const said = (run) => {
-            const what = typeof run.what === 'string' ? run.what : '';
-            const cmd = typeof run.cmd === 'string' ? run.cmd : '';
-            const label = typeof run.label === 'string' ? run.label : '';
-            const first = cmd.split('\n')[0]?.trim() ?? '';
-            const isCommand = !what || (first && (first.startsWith(what.trim()) || what.trim().startsWith(first.slice(0, 40)) || cmd.includes(what.trim())));
+        var said_1 = function (run) {
+            var _a, _b;
+            var what = typeof run.what === 'string' ? run.what : '';
+            var cmd = typeof run.cmd === 'string' ? run.cmd : '';
+            var label = typeof run.label === 'string' ? run.label : '';
+            var first = (_b = (_a = cmd.split('\n')[0]) === null || _a === void 0 ? void 0 : _a.trim()) !== null && _b !== void 0 ? _b : '';
+            var isCommand = !what || (first && (first.startsWith(what.trim()) || what.trim().startsWith(first.slice(0, 40)) || cmd.includes(what.trim())));
             return isCommand ? label && !cmd.includes(label) ? label : AS_COMMAND : what;
         };
-        const run = (r) => {
+        var run_1 = function (r) {
             if (!r || typeof r !== 'object')
                 return r;
-            const { cmd: _cmd, label: _label, log: _log, pid: _pid, ...rest } = r;
-            return 'cmd' in r ? { ...rest, what: said(r), ...('log' in r ? { cmd: '', log: '' } : {}) } : rest;
+            var _a = r, _cmd = _a.cmd, _label = _a.label, _log = _a.log, _pid = _a.pid, rest = __rest(_a, ["cmd", "label", "log", "pid"]);
+            return 'cmd' in r ? __assign(__assign(__assign({}, rest), { what: said_1(r) }), ('log' in r ? { cmd: '', log: '' } : {})) : rest;
         };
-        const card = (c) => {
+        var card = function (c) {
             if (!c || typeof c !== 'object')
                 return c;
-            const t = c;
-            const ask = t.ask ? (({ copy: _copy, ...rest }) => rest)(t.ask) : undefined;
-            return {
-                ...t,
-                ...(t.ask ? { ask } : {}),
-                ...(t.running ? { running: run(t.running) } : {}),
-                ...(Array.isArray(t.bg) ? { bg: t.bg.map(run) } : {}),
-                ...(Array.isArray(t.detached) ? { detached: t.detached.map(run) } : {}),
-                ...(Array.isArray(t.admins) ? { admins: t.admins.map(g => (g && typeof g === 'object' ? { ...g, command: '' } : g)) } : {}),
-            };
+            var t = c;
+            var ask = t.ask ? (function (_a) {
+                var _copy = _a.copy, rest = __rest(_a, ["copy"]);
+                return rest;
+            })(t.ask) : undefined;
+            return __assign(__assign(__assign(__assign(__assign(__assign({}, t), (t.ask ? { ask: ask } : {})), (t.running ? { running: run_1(t.running) } : {})), (Array.isArray(t.bg) ? { bg: t.bg.map(run_1) } : {})), (Array.isArray(t.detached) ? { detached: t.detached.map(run_1) } : {})), (Array.isArray(t.admins) ? { admins: t.admins.map(function (g) { return (g && typeof g === 'object' ? __assign(__assign({}, g), { command: '' }) : g); }) } : {}));
         };
-        const prompt = (p) => {
+        var prompt_1 = function (p) {
             if (!p || typeof p !== 'object')
                 return p;
-            const { detail: _detail, ...rest } = p;
+            var _a = p, _detail = _a.detail, rest = __rest(_a, ["detail"]);
             // "Run a command: <its words>": only the kind of thing it asks, as the words after it may be the command
-            return typeof rest.text === 'string' && rest.kind === 'allow' ? { ...rest, text: rest.text.split(': ')[0] } : rest;
+            return typeof rest.text === 'string' && rest.kind === 'allow' ? __assign(__assign({}, rest), { text: rest.text.split(': ')[0] }) : rest;
         };
-        const each = (list, fn) => (Array.isArray(list) ? list.map(fn) : list);
-        return JSON.stringify({ ...one, cards: each(one.cards, card), ended: each(one.ended, card), prompts: each(one.prompts, prompt), answeredPrompts: each(one.answeredPrompts, prompt) });
+        var each = function (list, fn) { return (Array.isArray(list) ? list.map(fn) : list); };
+        return JSON.stringify(__assign(__assign({}, one), { cards: each(one.cards, card), ended: each(one.ended, card), prompts: each(one.prompts, prompt_1), answeredPrompts: each(one.answeredPrompts, prompt_1) }));
     }
-    catch {
+    catch (_a) {
         return text;
     }
 };
 // Each other Mac is reached by whichever chat here finds its copy older than FETCH_EVERY: one trip for every chat on this Mac. A trip
 // hands that Mac this Mac's chats, brings back its chats and the answers pressed there for this Mac's chats. What a trip that failed
 // leaves is the copy before it, which goes stale on its own
-let isFetching = false;
-const fetchMacs = async ($) => {
-    if (isFetching)
-        return;
-    isFetching = true;
-    try {
-        const from = await knowLocalName($);
-        for (const mac of macs) {
-            const now = await $.clock.now();
-            const was = JSON.parse((await readOr($, macPath(mac))) || '{}');
-            if (now - Math.max(was.fetchedAt ?? 0, was.triedAt ?? 0) < FETCH_EVERY)
-                continue;
-            const kept = { mac, text: was.text ?? '', fetchedAt: was.fetchedAt ?? 0, acks: was.acks ?? [], seen: was.seen ?? [] };
-            await $.fs.write(macPath(mac), JSON.stringify({ ...kept, triedAt: now }));
-            const push = pushOf(from, keyOf(macName(mac)), now, await ownFiles($, now));
-            const r = await $.process.run(ssh(mac, trip(from, kept.acks)), { stdin: push, timeoutMs: 15000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }));
-            if (r.exitCode !== 0 || !r.stdout.includes('\n')) {
-                // Said once when the Mac stops answering, not at every try
-                if ((was.fetchedAt ?? 0) >= (was.triedAt ?? 0))
-                    await log($, `chats on ${mac} not fetched: ${r.stderr.trim().slice(0, 160)}`);
-                continue;
-            }
-            const fetchedAt = await $.clock.now();
-            const { text, carried } = tripOf(r.stdout);
-            // An answer carried back from that Mac answers nothing here: an ask is answered only in its own chat, and that Mac (or anything
-            // that can write its outbox) proves nothing of who pressed it. Each is only put away there, on the next trip
-            const names = carried.map(one => one.name);
-            if (names.some(name => !kept.seen.includes(name)))
-                await log($, `answers carried from ${mac} put away unread: an ask is answered only in its own chat`);
-            await $.fs.write(macPath(mac), JSON.stringify({ mac, text, fetchedAt, triedAt: now, acks: names, seen: [...new Set([...kept.seen, ...names])].slice(-200) }));
+var isFetching = false;
+var fetchMacs = function ($) { return __awaiter(_this, void 0, void 0, function () {
+    var from, _loop_1, _i, macs_1, mac;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
+    return __generator(this, function (_j) {
+        switch (_j.label) {
+            case 0:
+                if (isFetching)
+                    return [2 /*return*/];
+                isFetching = true;
+                _j.label = 1;
+            case 1:
+                _j.trys.push([1, , 7, 8]);
+                return [4 /*yield*/, knowLocalName($)];
+            case 2:
+                from = _j.sent();
+                _loop_1 = function (mac) {
+                    var now, was, _k, _l, kept, push, _m, _o, r, fetchedAt, _p, text, carried, names;
+                    return __generator(this, function (_q) {
+                        switch (_q.label) {
+                            case 0: return [4 /*yield*/, $.clock.now()];
+                            case 1:
+                                now = _q.sent();
+                                _l = (_k = JSON).parse;
+                                return [4 /*yield*/, readOr($, macPath(mac))];
+                            case 2:
+                                was = _l.apply(_k, [(_q.sent()) || '{}']);
+                                if (now - Math.max((_a = was.fetchedAt) !== null && _a !== void 0 ? _a : 0, (_b = was.triedAt) !== null && _b !== void 0 ? _b : 0) < FETCH_EVERY)
+                                    return [2 /*return*/, "continue"];
+                                kept = { mac: mac, text: (_c = was.text) !== null && _c !== void 0 ? _c : '', fetchedAt: (_d = was.fetchedAt) !== null && _d !== void 0 ? _d : 0, acks: (_e = was.acks) !== null && _e !== void 0 ? _e : [], seen: (_f = was.seen) !== null && _f !== void 0 ? _f : [] };
+                                return [4 /*yield*/, $.fs.write(macPath(mac), JSON.stringify(__assign(__assign({}, kept), { triedAt: now })))];
+                            case 3:
+                                _q.sent();
+                                _m = pushOf;
+                                _o = [from, keyOf(macName(mac)), now];
+                                return [4 /*yield*/, ownFiles($, now)];
+                            case 4:
+                                push = _m.apply(void 0, _o.concat([_q.sent()]));
+                                return [4 /*yield*/, $.process.run(ssh(mac, trip(from, kept.acks)), { stdin: push, timeoutMs: 15000 }).catch(function (err) { return ({ exitCode: -1, stdout: '', stderr: String(err) }); })];
+                            case 5:
+                                r = _q.sent();
+                                if (!(r.exitCode !== 0 || !r.stdout.includes('\n'))) return [3 /*break*/, 8];
+                                if (!(((_g = was.fetchedAt) !== null && _g !== void 0 ? _g : 0) >= ((_h = was.triedAt) !== null && _h !== void 0 ? _h : 0))) return [3 /*break*/, 7];
+                                return [4 /*yield*/, log($, "chats on ".concat(mac, " not fetched: ").concat(r.stderr.trim().slice(0, 160)))];
+                            case 6:
+                                _q.sent();
+                                _q.label = 7;
+                            case 7: return [2 /*return*/, "continue"];
+                            case 8: return [4 /*yield*/, $.clock.now()];
+                            case 9:
+                                fetchedAt = _q.sent();
+                                _p = tripOf(r.stdout), text = _p.text, carried = _p.carried;
+                                names = carried.map(function (one) { return one.name; });
+                                if (!names.some(function (name) { return !kept.seen.includes(name); })) return [3 /*break*/, 11];
+                                return [4 /*yield*/, log($, "answers carried from ".concat(mac, " put away unread: an ask is answered only in its own chat"))];
+                            case 10:
+                                _q.sent();
+                                _q.label = 11;
+                            case 11: return [4 /*yield*/, $.fs.write(macPath(mac), JSON.stringify({ mac: mac, text: text, fetchedAt: fetchedAt, triedAt: now, acks: names, seen: __spreadArray([], new Set(__spreadArray(__spreadArray([], kept.seen, true), names, true)), true).slice(-200) }))];
+                            case 12:
+                                _q.sent();
+                                return [2 /*return*/];
+                        }
+                    });
+                };
+                _i = 0, macs_1 = macs;
+                _j.label = 3;
+            case 3:
+                if (!(_i < macs_1.length)) return [3 /*break*/, 6];
+                mac = macs_1[_i];
+                return [5 /*yield**/, _loop_1(mac)];
+            case 4:
+                _j.sent();
+                _j.label = 5;
+            case 5:
+                _i++;
+                return [3 /*break*/, 3];
+            case 6: return [3 /*break*/, 8];
+            case 7:
+                isFetching = false;
+                return [7 /*endfinally*/];
+            case 8: return [2 /*return*/];
         }
-    }
-    finally {
-        isFetching = false;
-    }
-};
+    });
+}); };
 // The results of each other Mac made the same as this one's, at most every RESULTS_EVERY, by whichever chat here comes first: what
 // that Mac lacks is handed to it, what this one lacks is brought here, and the marks of a result both have are made the same on both.
 // A result is moved into place only whole and only where none has its name; nothing is deleted
-const resultsPath = (mac) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.results.json`;
-let isSyncing = false;
-const syncResults = async ($) => {
-    if (isSyncing)
-        return;
-    isSyncing = true;
-    try {
-        let isTried = false;
-        for (const mac of macs) {
-            const now = await $.clock.now();
-            const was = JSON.parse((await readOr($, resultsPath(mac))) || '{}');
-            if (now - Math.max(was.syncedAt ?? 0, was.triedAt ?? 0) < RESULTS_EVERY)
-                continue;
-            isTried = true;
-            await $.fs.write(resultsPath(mac), JSON.stringify({ ...was, triedAt: now }));
-            const staging = `${reportsDir()}/_sync/${now}-${Math.random().toString(36).slice(2, 8)}`;
-            try {
-                await syncWith($, mac, was, now, staging);
-            }
-            finally {
-                await $.process.run(['rm', '-rf', staging, `${staging}-out`]).catch(() => undefined);
-            }
+var resultsPath = function (mac) { return "".concat(liveDir(), "/").concat(MACS, "/").concat(mac.replace(/[^A-Za-z0-9_.-]/g, '-'), ".results.json"); };
+var isSyncing = false;
+var syncResults = function ($) { return __awaiter(_this, void 0, void 0, function () {
+    var isTried, _i, macs_2, mac, now, was, _a, _b, staging;
+    var _c, _d;
+    return __generator(this, function (_e) {
+        switch (_e.label) {
+            case 0:
+                if (isSyncing)
+                    return [2 /*return*/];
+                isSyncing = true;
+                _e.label = 1;
+            case 1:
+                _e.trys.push([1, , 14, 15]);
+                isTried = false;
+                _i = 0, macs_2 = macs;
+                _e.label = 2;
+            case 2:
+                if (!(_i < macs_2.length)) return [3 /*break*/, 11];
+                mac = macs_2[_i];
+                return [4 /*yield*/, $.clock.now()];
+            case 3:
+                now = _e.sent();
+                _b = (_a = JSON).parse;
+                return [4 /*yield*/, readOr($, resultsPath(mac))];
+            case 4:
+                was = _b.apply(_a, [(_e.sent()) || '{}']);
+                if (now - Math.max((_c = was.syncedAt) !== null && _c !== void 0 ? _c : 0, (_d = was.triedAt) !== null && _d !== void 0 ? _d : 0) < RESULTS_EVERY)
+                    return [3 /*break*/, 10];
+                isTried = true;
+                return [4 /*yield*/, $.fs.write(resultsPath(mac), JSON.stringify(__assign(__assign({}, was), { triedAt: now })))];
+            case 5:
+                _e.sent();
+                staging = "".concat(reportsDir(), "/_sync/").concat(now, "-").concat(Math.random().toString(36).slice(2, 8));
+                _e.label = 6;
+            case 6:
+                _e.trys.push([6, , 8, 10]);
+                return [4 /*yield*/, syncWith($, mac, was, now, staging)];
+            case 7:
+                _e.sent();
+                return [3 /*break*/, 10];
+            case 8: return [4 /*yield*/, $.process.run(['rm', '-rf', staging, "".concat(staging, "-out")]).catch(function () { return undefined; })];
+            case 9:
+                _e.sent();
+                return [7 /*endfinally*/];
+            case 10:
+                _i++;
+                return [3 /*break*/, 2];
+            case 11:
+                if (!isTried) return [3 /*break*/, 13];
+                return [4 /*yield*/, $.process.run(['find', "".concat(reportsDir(), "/_sync"), '-mindepth', '1', '-maxdepth', '1', '-mmin', '+60', '-exec', 'rm', '-rf', '{}', '+']).catch(function () { return undefined; })];
+            case 12:
+                _e.sent();
+                _e.label = 13;
+            case 13: return [3 /*break*/, 15];
+            case 14:
+                isSyncing = false;
+                return [7 /*endfinally*/];
+            case 15: return [2 /*return*/];
         }
-        // What a sync cut off left of its own folders goes after an hour; nothing else there is ever touched
-        if (isTried)
-            await $.process.run(['find', `${reportsDir()}/_sync`, '-mindepth', '1', '-maxdepth', '1', '-mmin', '+60', '-exec', 'rm', '-rf', '{}', '+']).catch(() => undefined);
-    }
-    finally {
-        isSyncing = false;
-    }
-};
+    });
+}); };
 // The results missing on one side that one trip takes: those tried longest ago first, never tried before all, so results that keep
 // failing, or that the other Mac keeps leaving out, take turns with the rest and never hold them back
-const aTrip = (ids, tried = {}) => ids.map((id, i) => ({ id, i, at: tried[id] ?? 0 })).sort((a, b) => a.at - b.at || a.i - b.i).slice(0, RESULTS_A_TRIP).map(one => one.id);
-const syncWith = async ($, mac, was, now, staging) => {
-    const home = dir.slice(0, -'/.claude/claudopus'.length);
-    const looked = await $.process.run(ssh(mac, RESULTS_LOOK), { timeoutMs: 60000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err), isStdoutTruncated: false }));
-    // A list cut short is no list: what it leaves out would look missing there
-    const theirs = looked.exitCode === 0 && !looked.isStdoutTruncated ? resultsOf(looked.stdout) : undefined;
-    if (!theirs) {
-        if ((was.syncedAt ?? 0) >= (was.triedAt ?? 0))
-            await log($, `results on ${mac} not looked at: ${looked.isStdoutTruncated ? 'its list was cut short' : looked.stderr.trim().slice(0, 160)}`);
-        return;
-    }
-    // This Mac's results as they stand: each folder with its meta.json, by name
-    const mine = new Map();
-    for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {
-        if (entry.kind !== 'dir' || !isResultId(entry.name))
-            continue;
-        const text = await readOr($, `${reportsDir()}/${entry.name}/meta.json`);
-        if (text.trim().startsWith('{'))
-            mine.set(entry.name, text);
-    }
-    let changed = 0;
-    // Brought here one at a time, each into a folder of its own first, its paths moved onto this Mac's home, then into place whole:
-    // one whose stream was cut short is left out, and brought on a later trip
-    const missingHere = [...theirs.results.keys()].filter(id => !mine.has(id));
-    const missingThere = [...mine.keys()].filter(id => !theirs.results.has(id));
-    const wanted = aTrip(missingHere, was.tried);
-    for (const id of wanted) {
-        const into = `${staging}/${id}`;
-        await $.process.run(['mkdir', '-p', into]);
-        const r = await $.process.run(['bash', '-c', PULL, 'bash', into, mac, pullThere([id])], { timeoutMs: 300000 }).catch(err => ({ exitCode: -1, stderr: String(err) }));
-        // Its stream ends with an empty _end, so one cut between two files is known as cut
-        const isWhole = r.exitCode === 0 && (await $.fs.exists(`${into}/_end`).catch(() => false));
-        if (!isWhole || parsedMeta(await readOr($, `${into}/${id}/meta.json`)).id !== id) {
-            await log($, `result ${id} from ${mac} not brought: ${r.exitCode !== 0 ? r.stderr.trim().slice(0, 160) : 'it came cut short'}`);
-            continue;
-        }
-        for (const file of ['meta.json', 'report.md']) {
-            const text = await readOr($, `${into}/${id}/${file}`);
-            if (text)
-                await $.fs.write(`${into}/${id}/${file}`, rehome(text, theirs.home, home));
-        }
-        const moved = await $.process.run(['sh', '-c', PLACE, 'sh', `${into}/${id}`, `${reportsDir()}/${id}`, `${reportsDir()}/_sync/claim-${id}`]).catch(() => ({ exitCode: -1 }));
-        if (moved.exitCode === 0)
-            changed += 1;
-    }
-    // Handed there: copied aside here with its paths moved onto that Mac's home, then sent in one stream, put in place there only
-    // once the whole stream is in
-    const handed = aTrip(missingThere, was.tried);
-    if (handed.length) {
-        const out = `${staging}-out`;
-        await $.process.run(['mkdir', '-p', out]);
-        const ready = [];
-        for (const id of handed) {
-            if ((await $.process.run(['cp', '-Rp', `${reportsDir()}/${id}`, `${out}/${id}`]).catch(() => ({ exitCode: -1 }))).exitCode !== 0)
-                continue;
-            for (const file of ['meta.json', 'report.md']) {
-                const text = await readOr($, `${out}/${id}/${file}`);
-                if (text)
-                    await $.fs.write(`${out}/${id}/${file}`, rehome(text, home, theirs.home));
-            }
-            ready.push(id);
-        }
-        const r = ready.length ? await $.process.run(['bash', '-c', PUSH, 'bash', out, mac, PUSH_THERE, ...ready], { timeoutMs: 300000 }).catch(err => ({ exitCode: -1, stderr: String(err) })) : { exitCode: 0, stderr: '' };
-        if (r.exitCode !== 0)
-            await log($, `results not handed to ${mac}: ${r.stderr.trim().slice(0, 160)}`);
-    }
-    // What the person did to a result both have: the later of put away and brought back, every answer, on both. Each side is written
-    // only when it differs; there only when unchanged since it was read
-    let marked = 0;
-    const archived = {};
-    for (const [id, there] of theirs.results) {
-        const here = mine.get(id);
-        if (!here)
-            continue;
-        const wasArchived = was.archived?.[id] ?? 0;
-        const theirsNow = broughtBackBy(parsedMeta(there.text), wasArchived);
-        const mineNow = broughtBackBy(parsedMeta(here), wasArchived);
-        const target = marksOf(mineNow, theirsNow);
-        // Its archive is kept as made the same only once both sides hold it; else what was kept before stands
-        let isSame = marked < RESULTS_A_TRIP;
-        if (marked < RESULTS_A_TRIP) {
-            if (merged(here, theirsNow, wasArchived)) {
-                const ok = await markReport($, { id }, stored => marksOf(broughtBackBy(stored, wasArchived), theirsNow)).then(() => true, err => (void log($, `result ${id} not marked from ${mac}: ${String(err)}`), false));
-                (isSame &&= ok), (changed += 1), (marked += 1);
-            }
-            const theirsNext = merged(there.text, mineNow, wasArchived);
-            if (theirsNext) {
-                const r = await $.process.run(ssh(mac, markThere(id, there.sum)), { stdin: theirsNext, timeoutMs: 15000 }).catch(err => ({ exitCode: -1, stderr: String(err) }));
-                if (r.exitCode !== 0)
-                    await log($, `result ${id} not marked on ${mac}: ${r.exitCode === 3 ? 'changed there since' : r.stderr.trim().slice(0, 160)}`);
-                (isSame &&= r.exitCode === 0), (marked += 1);
-            }
-        }
-        const kept = isSame ? (target.archived ?? 0) : wasArchived;
-        if (kept)
-            archived[id] = kept;
-    }
-    if (changed)
-        await loadReports($);
-    // When each result still missing on either side was last tried; one that has come across is dropped from it the next trip
-    const tried = {};
-    for (const id of [...missingHere, ...missingThere])
-        if (was.tried?.[id])
-            tried[id] = was.tried[id];
-    for (const id of [...wanted, ...handed])
-        tried[id] = now;
-    await $.fs.write(resultsPath(mac), JSON.stringify({ syncedAt: await $.clock.now(), triedAt: now, brought: wanted.length, handed: handed.length, marked, archived, tried }));
-    if (wanted.length || handed.length || marked)
-        await log($, `results with ${mac}: ${wanted.length} brought, ${handed.length} handed, ${marked} marked`);
+var aTrip = function (ids, tried) {
+    if (tried === void 0) { tried = {}; }
+    return ids.map(function (id, i) { var _a; return ({ id: id, i: i, at: (_a = tried[id]) !== null && _a !== void 0 ? _a : 0 }); }).sort(function (a, b) { return a.at - b.at || a.i - b.i; }).slice(0, RESULTS_A_TRIP).map(function (one) { return one.id; });
 };
+var syncWith = function ($, mac, was, now, staging) { return __awaiter(_this, void 0, void 0, function () {
+    var home, looked, theirs, mine, _i, _a, entry, text, changed, missingHere, missingThere, wanted, _b, wanted_1, id, into, r, isWhole_1, _c, _d, _e, _f, _g, file, text, moved, handed, out, ready_1, _h, handed_1, id, _j, _k, file, text, r, _l, marked, archived, _loop_2, _m, _o, _p, id, there, tried, _q, _r, id, _s, _t, id, _u, _v, _w, _x, _y;
+    var _z;
+    var _0, _1, _2, _3, _4, _5;
+    return __generator(this, function (_6) {
+        switch (_6.label) {
+            case 0:
+                home = dir.slice(0, -'/.claude/claudopus'.length);
+                return [4 /*yield*/, $.process.run(ssh(mac, RESULTS_LOOK), { timeoutMs: 60000 }).catch(function (err) { return ({ exitCode: -1, stdout: '', stderr: String(err), isStdoutTruncated: false }); })
+                    // A list cut short is no list: what it leaves out would look missing there
+                ];
+            case 1:
+                looked = _6.sent();
+                theirs = looked.exitCode === 0 && !looked.isStdoutTruncated ? resultsOf(looked.stdout) : undefined;
+                if (!!theirs) return [3 /*break*/, 4];
+                if (!(((_0 = was.syncedAt) !== null && _0 !== void 0 ? _0 : 0) >= ((_1 = was.triedAt) !== null && _1 !== void 0 ? _1 : 0))) return [3 /*break*/, 3];
+                return [4 /*yield*/, log($, "results on ".concat(mac, " not looked at: ").concat(looked.isStdoutTruncated ? 'its list was cut short' : looked.stderr.trim().slice(0, 160)))];
+            case 2:
+                _6.sent();
+                _6.label = 3;
+            case 3: return [2 /*return*/];
+            case 4:
+                mine = new Map();
+                _i = 0;
+                return [4 /*yield*/, $.fs.list(reportsDir()).catch(function () { return []; })];
+            case 5:
+                _a = _6.sent();
+                _6.label = 6;
+            case 6:
+                if (!(_i < _a.length)) return [3 /*break*/, 9];
+                entry = _a[_i];
+                if (entry.kind !== 'dir' || !isResultId(entry.name))
+                    return [3 /*break*/, 8];
+                return [4 /*yield*/, readOr($, "".concat(reportsDir(), "/").concat(entry.name, "/meta.json"))];
+            case 7:
+                text = _6.sent();
+                if (text.trim().startsWith('{'))
+                    mine.set(entry.name, text);
+                _6.label = 8;
+            case 8:
+                _i++;
+                return [3 /*break*/, 6];
+            case 9:
+                changed = 0;
+                missingHere = __spreadArray([], theirs.results.keys(), true).filter(function (id) { return !mine.has(id); });
+                missingThere = __spreadArray([], mine.keys(), true).filter(function (id) { return !theirs.results.has(id); });
+                wanted = aTrip(missingHere, was.tried);
+                _b = 0, wanted_1 = wanted;
+                _6.label = 10;
+            case 10:
+                if (!(_b < wanted_1.length)) return [3 /*break*/, 26];
+                id = wanted_1[_b];
+                into = "".concat(staging, "/").concat(id);
+                return [4 /*yield*/, $.process.run(['mkdir', '-p', into])];
+            case 11:
+                _6.sent();
+                return [4 /*yield*/, $.process.run(['bash', '-c', PULL, 'bash', into, mac, pullThere([id])], { timeoutMs: 300000 }).catch(function (err) { return ({ exitCode: -1, stderr: String(err) }); })
+                    // Its stream ends with an empty _end, so one cut between two files is known as cut
+                ];
+            case 12:
+                r = _6.sent();
+                _c = r.exitCode === 0;
+                if (!_c) return [3 /*break*/, 14];
+                return [4 /*yield*/, $.fs.exists("".concat(into, "/_end")).catch(function () { return false; })];
+            case 13:
+                _c = (_6.sent());
+                _6.label = 14;
+            case 14:
+                isWhole_1 = _c;
+                _d = !isWhole_1;
+                if (_d) return [3 /*break*/, 16];
+                _e = parsedMeta;
+                return [4 /*yield*/, readOr($, "".concat(into, "/").concat(id, "/meta.json"))];
+            case 15:
+                _d = _e.apply(void 0, [_6.sent()]).id !== id;
+                _6.label = 16;
+            case 16:
+                if (!_d) return [3 /*break*/, 18];
+                return [4 /*yield*/, log($, "result ".concat(id, " from ").concat(mac, " not brought: ").concat(r.exitCode !== 0 ? r.stderr.trim().slice(0, 160) : 'it came cut short'))];
+            case 17:
+                _6.sent();
+                return [3 /*break*/, 25];
+            case 18:
+                _f = 0, _g = ['meta.json', 'report.md'];
+                _6.label = 19;
+            case 19:
+                if (!(_f < _g.length)) return [3 /*break*/, 23];
+                file = _g[_f];
+                return [4 /*yield*/, readOr($, "".concat(into, "/").concat(id, "/").concat(file))];
+            case 20:
+                text = _6.sent();
+                if (!text) return [3 /*break*/, 22];
+                return [4 /*yield*/, $.fs.write("".concat(into, "/").concat(id, "/").concat(file), rehome(text, theirs.home, home))];
+            case 21:
+                _6.sent();
+                _6.label = 22;
+            case 22:
+                _f++;
+                return [3 /*break*/, 19];
+            case 23: return [4 /*yield*/, $.process.run(['sh', '-c', PLACE, 'sh', "".concat(into, "/").concat(id), "".concat(reportsDir(), "/").concat(id), "".concat(reportsDir(), "/_sync/claim-").concat(id)]).catch(function () { return ({ exitCode: -1 }); })];
+            case 24:
+                moved = _6.sent();
+                if (moved.exitCode === 0)
+                    changed += 1;
+                _6.label = 25;
+            case 25:
+                _b++;
+                return [3 /*break*/, 10];
+            case 26:
+                handed = aTrip(missingThere, was.tried);
+                if (!handed.length) return [3 /*break*/, 41];
+                out = "".concat(staging, "-out");
+                return [4 /*yield*/, $.process.run(['mkdir', '-p', out])];
+            case 27:
+                _6.sent();
+                ready_1 = [];
+                _h = 0, handed_1 = handed;
+                _6.label = 28;
+            case 28:
+                if (!(_h < handed_1.length)) return [3 /*break*/, 36];
+                id = handed_1[_h];
+                return [4 /*yield*/, $.process.run(['cp', '-Rp', "".concat(reportsDir(), "/").concat(id), "".concat(out, "/").concat(id)]).catch(function () { return ({ exitCode: -1 }); })];
+            case 29:
+                if ((_6.sent()).exitCode !== 0)
+                    return [3 /*break*/, 35];
+                _j = 0, _k = ['meta.json', 'report.md'];
+                _6.label = 30;
+            case 30:
+                if (!(_j < _k.length)) return [3 /*break*/, 34];
+                file = _k[_j];
+                return [4 /*yield*/, readOr($, "".concat(out, "/").concat(id, "/").concat(file))];
+            case 31:
+                text = _6.sent();
+                if (!text) return [3 /*break*/, 33];
+                return [4 /*yield*/, $.fs.write("".concat(out, "/").concat(id, "/").concat(file), rehome(text, home, theirs.home))];
+            case 32:
+                _6.sent();
+                _6.label = 33;
+            case 33:
+                _j++;
+                return [3 /*break*/, 30];
+            case 34:
+                ready_1.push(id);
+                _6.label = 35;
+            case 35:
+                _h++;
+                return [3 /*break*/, 28];
+            case 36:
+                if (!ready_1.length) return [3 /*break*/, 38];
+                return [4 /*yield*/, $.process.run(__spreadArray(['bash', '-c', PUSH, 'bash', out, mac, PUSH_THERE], ready_1, true), { timeoutMs: 300000 }).catch(function (err) { return ({ exitCode: -1, stderr: String(err) }); })];
+            case 37:
+                _l = _6.sent();
+                return [3 /*break*/, 39];
+            case 38:
+                _l = { exitCode: 0, stderr: '' };
+                _6.label = 39;
+            case 39:
+                r = _l;
+                if (!(r.exitCode !== 0)) return [3 /*break*/, 41];
+                return [4 /*yield*/, log($, "results not handed to ".concat(mac, ": ").concat(r.stderr.trim().slice(0, 160)))];
+            case 40:
+                _6.sent();
+                _6.label = 41;
+            case 41:
+                marked = 0;
+                archived = {};
+                _loop_2 = function (id, there) {
+                    var here, wasArchived, theirsNow, mineNow, target, isSame, ok, theirsNext, r, kept;
+                    return __generator(this, function (_7) {
+                        switch (_7.label) {
+                            case 0:
+                                here = mine.get(id);
+                                if (!here)
+                                    return [2 /*return*/, "continue"];
+                                wasArchived = (_3 = (_2 = was.archived) === null || _2 === void 0 ? void 0 : _2[id]) !== null && _3 !== void 0 ? _3 : 0;
+                                theirsNow = broughtBackBy(parsedMeta(there.text), wasArchived);
+                                mineNow = broughtBackBy(parsedMeta(here), wasArchived);
+                                target = marksOf(mineNow, theirsNow);
+                                isSame = marked < RESULTS_A_TRIP;
+                                if (!(marked < RESULTS_A_TRIP)) return [3 /*break*/, 6];
+                                if (!merged(here, theirsNow, wasArchived)) return [3 /*break*/, 2];
+                                return [4 /*yield*/, markReport($, { id: id }, function (stored) { return marksOf(broughtBackBy(stored, wasArchived), theirsNow); }).then(function () { return true; }, function (err) { return (void log($, "result ".concat(id, " not marked from ").concat(mac, ": ").concat(String(err))), false); })];
+                            case 1:
+                                ok = _7.sent();
+                                (isSame && (isSame = ok)), (changed += 1), (marked += 1);
+                                _7.label = 2;
+                            case 2:
+                                theirsNext = merged(there.text, mineNow, wasArchived);
+                                if (!theirsNext) return [3 /*break*/, 6];
+                                return [4 /*yield*/, $.process.run(ssh(mac, markThere(id, there.sum)), { stdin: theirsNext, timeoutMs: 15000 }).catch(function (err) { return ({ exitCode: -1, stderr: String(err) }); })];
+                            case 3:
+                                r = _7.sent();
+                                if (!(r.exitCode !== 0)) return [3 /*break*/, 5];
+                                return [4 /*yield*/, log($, "result ".concat(id, " not marked on ").concat(mac, ": ").concat(r.exitCode === 3 ? 'changed there since' : r.stderr.trim().slice(0, 160)))];
+                            case 4:
+                                _7.sent();
+                                _7.label = 5;
+                            case 5:
+                                (isSame && (isSame = r.exitCode === 0)), (marked += 1);
+                                _7.label = 6;
+                            case 6:
+                                kept = isSame ? ((_4 = target.archived) !== null && _4 !== void 0 ? _4 : 0) : wasArchived;
+                                if (kept)
+                                    archived[id] = kept;
+                                return [2 /*return*/];
+                        }
+                    });
+                };
+                _m = 0, _o = theirs.results;
+                _6.label = 42;
+            case 42:
+                if (!(_m < _o.length)) return [3 /*break*/, 45];
+                _p = _o[_m], id = _p[0], there = _p[1];
+                return [5 /*yield**/, _loop_2(id, there)];
+            case 43:
+                _6.sent();
+                _6.label = 44;
+            case 44:
+                _m++;
+                return [3 /*break*/, 42];
+            case 45:
+                if (!changed) return [3 /*break*/, 47];
+                return [4 /*yield*/, loadReports($)
+                    // When each result still missing on either side was last tried; one that has come across is dropped from it the next trip
+                ];
+            case 46:
+                _6.sent();
+                _6.label = 47;
+            case 47:
+                tried = {};
+                for (_q = 0, _r = __spreadArray(__spreadArray([], missingHere, true), missingThere, true); _q < _r.length; _q++) {
+                    id = _r[_q];
+                    if ((_5 = was.tried) === null || _5 === void 0 ? void 0 : _5[id])
+                        tried[id] = was.tried[id];
+                }
+                for (_s = 0, _t = __spreadArray(__spreadArray([], wanted, true), handed, true); _s < _t.length; _s++) {
+                    id = _t[_s];
+                    tried[id] = now;
+                }
+                _v = (_u = $.fs).write;
+                _w = [resultsPath(mac)];
+                _y = (_x = JSON).stringify;
+                _z = {};
+                return [4 /*yield*/, $.clock.now()];
+            case 48: return [4 /*yield*/, _v.apply(_u, _w.concat([_y.apply(_x, [(_z.syncedAt = _6.sent(), _z.triedAt = now, _z.brought = wanted.length, _z.handed = handed.length, _z.marked = marked, _z.archived = archived, _z.tried = tried, _z)])]))];
+            case 49:
+                _6.sent();
+                if (!(wanted.length || handed.length || marked)) return [3 /*break*/, 51];
+                return [4 /*yield*/, log($, "results with ".concat(mac, ": ").concat(wanted.length, " brought, ").concat(handed.length, " handed, ").concat(marked, " marked"))];
+            case 50:
+                _6.sent();
+                _6.label = 51;
+            case 51: return [2 /*return*/];
+        }
+    });
+}); };
 // The Macs that handed this one their chats lately, by the name each gave, and what the freshest called this Mac: its name here once
 // other Macs' chats are listed beside its own
-const pushedFrom = new Set();
+var pushedFrom = new Set();

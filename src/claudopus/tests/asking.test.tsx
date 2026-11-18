@@ -612,6 +612,72 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   await list.unmount()
 })
 
+// 18 Nov, the person: "Until it's done releasing, it's not done. Why does it turn from purple to green to purple to green to
+// purple? It should only go green when it's fully done." The card was green Done while Claudopus released it, and green again
+// between the release failing and the task being started again
+test('a release Claudopus runs on the go-ahead is Releasing, in purple, from the press until it has finished, then Done in green once with the to-do it left done; one that fails starts the task again, never Done in between', async ($, on) => {
+  const { files, clock, resumed } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two fixes', wait: false, origin: composer })
+  for (const description of ['Fix the nose', 'Fix the ear']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  files.set('/repo/wt/.release', 'mods/claudopus/bin/release')
+  files.set('git:top', '/repo/wt')
+  files.set('git:branch', 'fix-nose')
+  for (const id of ['a1', 'a2']) {
+    const call = (tool: string, n: number, input: object) => $.tool.call({ tool: `mcp__claudopus__${tool}`, tool_use_id: `${tool}-${id}-${n}`, agentId: id, ...input } as never)
+    await call('todo', 1, { item: 'Fix it', state: 'done' })
+    await call('todo', 2, { item: 'Release it on your press' })
+    await call('ask', 3, { text: `Release ${id}?`, choices: ['Release it', 'Not now'], last_step: 'release', folder: '/repo/wt' })
+    await $.turn.complete({ answer: 'Waits for your Release it.', durationMs: 1, isAborted: false, turnId: `turn-${id}`, reason: 'answer', agentId: id } as never)
+  }
+  await clock.advance(60_000)
+  // Each card's stage: Releasing on its line while it releases, how it ended under its top row once it has
+  const stages = async () =>
+    (await list.findAll({ type: 'Text' }))
+      .map(one => String(one.text ?? ''))
+      .flatMap(text => {
+        const releasing = /^Claudopus is releasing (\S+)$/.exec(text) ?? /^You pressed “Release it” · Claudopus releases (\S+) once you allow it below$/.exec(text)
+        return releasing ? [`Releasing ${releasing[1]}`] : text === '✓ Done' || text === 'Not done' ? [text] : []
+      })
+  const button = async (pattern: RegExp) => until(async () => (await list.findAll({ type: 'Button' })).find(b => pattern.test(String(b.key ?? '')))?.key)
+  const logged = (text: string) => until(async () => ((files.get(`${MEMORY}/log.md`) ?? '').includes(text) ? true : undefined))
+  const releaseLog = (id: string) => [...files.keys()].find(path => path.startsWith(`${MEMORY}/releases/step-${id}-`)) ?? ''
+  await list.press({ key: (await button(/^ask-a1-.*choice-0/)) ?? '' })
+  // From the press on it is Releasing, its branch named once known, while its allow box waits and while the release runs
+  expect(await until(async () => ((await stages()).includes('Releasing fix-nose') ? true : undefined))).toBe(true)
+  await list.press({ key: (await button(/^gate-step-a1-.*once/)) ?? '' })
+  expect(await logged('started by Claudopus for a1')).toBe(true)
+  for (let i = 0; i < 3; i++) {
+    await clock.advance(10_000)
+    expect(await stages()).toContain('Releasing fix-nose')
+    expect((await stages()).filter(stage => stage === 'Done' || stage === '✓ Done' || stage === 'Not done')).toEqual([])
+    expect(await list.find({ type: 'Text', text: 'You allowed it. Claudopus is releasing it now.' })).toBeDefined()
+  }
+  // Released: Done, green, once, with the to-do the release was ticked
+  files.set(releaseLog('a1'), 'release: pushed\nClaudopus 0.2.300 is out\nclaudopus-exit 0\n')
+  await clock.advance(10_000)
+  expect(await until(async () => ((await list.findAll({ type: 'Text' })).some(one => /2 of 2 to-dos done/.test(String(one.text ?? ''))) ? true : undefined))).toBe(true)
+  expect((await list.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect(await stages()).not.toContain('Releasing fix-nose')
+  expect(await stages()).not.toContain('Not done')
+  // and nothing on it still says it is being released
+  expect(await list.find({ type: 'Text', text: /releasing it now/ })).toBeUndefined()
+  await list.press({ key: (await button(/^dismiss-a1/)) ?? '' })
+  // A release that fails: the task is started again to look, at work in purple, and never Done on the way
+  await list.press({ key: (await button(/^ask-a2-.*choice-0/)) ?? '' })
+  await list.press({ key: (await button(/^gate-step-a2-.*once/)) ?? '' })
+  expect(await logged('started by Claudopus for a2')).toBe(true)
+  files.set(releaseLog('a2'), 'release: merge origin/main into fix-nose, keep what both meant\nclaudopus-exit 2\n')
+  for (let i = 0; i < 3; i++) {
+    await clock.advance(5_000)
+    expect((await stages()).filter(stage => stage === 'Done' || stage === '✓ Done')).toEqual([])
+  }
+  expect(await until(async () => resumed.find(line => line.startsWith('a2: ') && line.includes('failed with exit 2')))).toBeDefined()
+  expect(await stages()).not.toContain('Releasing fix-nose')
+  await list.unmount()
+})
+
 test('a reply in words that does not settle an ask keeps it, and the card active, with nothing to press while the work acts on it, until it is settled: the 13 Nov "Show me images first." to work that asked "Release it?" and handed in its report', async ($, on) => {
   const { resumed, clock } = world(on)
   await $.session.start(start)

@@ -747,7 +747,7 @@ const keepNotDone = async ($: EngineInterface, id: string) => {
 }
 // The card's line for a task that sent its result with to-dos not done, while it is not at work again or waiting on the person
 const notDoneLine = (one: Todo) => {
-  const left = one.status === 'working' || one.chat || (one.ask && !one.ask.replied) ? [] : (one.notDone ?? [])
+  const left = one.status === 'working' || one.chat || (one.ask && !one.ask.replied) || isReleased(one) ? [] : (one.notDone ?? [])
   return left.length ? `Not done · ${left.join(' · ')}` : ''
 }
 // A result's lines for the to-dos its task left not done and still has not done, when it says nothing of what is not done itself

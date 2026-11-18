@@ -2,6 +2,13 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.205 · 18 November 2026
+- A task that finished before the update, or that Claudopus already released for you, no longer comes back to the top as Not done because a to-do was left unticked.
+- A card being released stays purple from your Release it until the release has finished, its line saying Claudopus is releasing it. It turns green and Done once, at the end, with the release's to-do ticked. A release that fails starts the task again, and the card never shows Done in between.
+- A task that hands back its result while its own command still runs stays purple from that moment. It no longer flashes green before Claudopus sees the command.
+- Dismiss moves the card under Finished in the drawing right after your press, even while you scroll the panel. Not now and the answer buttons respond just as fast.
+- A card's top row shows only the model, how full it is, its to-dos and its time. How a task ended (Done, Not done, Stopped, Failed) begins the line under it instead.
+
 ## 0.2.204 · 18 November 2026
 - A find in your Downloads folder no longer shows on the card as a download.
 

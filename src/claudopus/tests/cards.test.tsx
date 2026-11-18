@@ -186,7 +186,9 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect(buttons.map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', '▸ Finished 1'])
   await pane.press({ key: String(buttons.find(b => b.props.label === '▸ Finished 1')?.key) })
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.wrap).toBe('truncate-end')
-  expect((await pane.find({ type: 'Text', text: /^Done ·/ }))?.text).toBe('Done · 7 of 7 to-dos done · 2m 00s')
+  // its top row only its facts, the line under it how it ended
+  expect((await pane.find({ type: 'Text', text: /to-dos done ·/ }))?.text).toBe('7 of 7 to-dos done · 2m 00s')
+  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
   expect(await pane.find({ type: 'Button', key: 'stop-a1' })).toBeUndefined()
   // Finished work's Details opens as a tab of its own too
   await pressed(pane, 'open-a1')
@@ -950,8 +952,8 @@ test('work that ended before the mod kept it is read back from the chat\'s own r
   const fold = await until(async () => (await pane.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label))))
   expect(fold?.props.label).toBe('▸ Finished 1')
   await pane.press({ key: String(fold?.key) })
-  expect((await pane.find({ type: 'Text', text: /The old line/ }))?.text).toBe('The old line')
-  expect((await pane.find({ type: 'Text', text: /^Done ·/ }))?.text).toBe('Done · Opus 5.5 · 1 of 1 to-dos done · 5m 00s')
+  expect((await pane.find({ type: 'Text', text: /The old line/ }))?.text).toBe(' · The old line')
+  expect((await pane.find({ type: 'Text', text: /to-dos done ·/ }))?.text).toBe('Opus 5.5 · 1 of 1 to-dos done · 5m 00s')
   expect(await pane.find({ type: 'Text', text: /secret|not ours|helper/ })).toBeUndefined()
   await pane.unmount()
 })

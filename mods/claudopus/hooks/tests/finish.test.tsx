@@ -1089,8 +1089,9 @@ test('work that answers a question while a copy of its own still runs, with that
   agents.a1 = 'waiting'
   await $.turn.complete({ answer: 'Sending the 14.5 GB now; it takes about four hours.', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
   expect(await drawn(pane)).toEqual(['working'])
-  // Its stage, in the facts row; no line of its own under it (18 Nov "Waiting for a command to finish")
-  expect(await pane.find({ type: 'Text', text: /^Waiting for its commands · / })).toBeDefined()
+  // Its stage is its colour: never a word in its top row (18 Nov, the person: "This top row should never say 'waiting for its
+  // command'"), nor a line of its own under it (18 Nov "Waiting for a command to finish")
+  expect(await pane.find({ type: 'Text', text: /Waiting for its/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /Waiting for a command/ })).toBeUndefined()
   // The copy itself is a row on its tree: what it is in its own words, and how long it has run
   const job = async () => (await pane.find({ type: 'Text', text: /^Command · Send the\b/ })) ?? (await pane.findAll({ type: 'Button' })).find(b => /^Command · Send the\b/.test(String(b.props.label)))
@@ -1168,12 +1169,18 @@ test('work that reports with everything it set out to do done, leaving a server 
   await train('SubagentHandback', 'h2', { message: 'The training is started and takes two hours.' })
   agents.a2 = 'waiting'
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w2', reason: 'answer', agentId: 'a2' } as never)
-  await clock.advance(20_000)
   const texts = async () => (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
-  expect((await texts()).filter(text => /^Waiting for its command|^Done · |^✓ Done$/.test(text)).map(text => text.split(' · ')[0])).toEqual(['Done', '✓ Done', 'Waiting for its command'])
+  // From its hand-back on, every second: at work, with its Stop, never Done in between, before as after the engine's list says it
+  // holds the run (18 Nov, the person: "Why does it turn from purple to green to purple to green to purple?")
+  const isAtWork = async () => (await texts()).filter(text => text === '✓ Done').length === 1
+  for (let i = 0; i < 20; i++) {
+    expect(await isAtWork()).toBe(true)
+    await clock.advance(1000)
+  }
   agents.a2 = 'completed'
-  await clock.advance(30_000)
-  expect((await texts()).filter(text => /^Waiting for its command/.test(text)).length).toBe(0)
+  // and once its command has ended it is Done
+  for (let i = 0; i < 30 && (await isAtWork()); i++) await clock.advance(1000)
+  expect((await texts()).filter(text => text === '✓ Done')).toHaveLength(2)
   await pane.unmount()
 })
 
@@ -1236,7 +1243,8 @@ test('work that reports with nothing of its own running finishes, though the eng
   expect(await labels()).toContain('Release it')
   expect(await pane.find({ type: 'Text', text: /still running ·/ })).toBeUndefined()
   const asking = await line()
-  expect(asking).toMatch(/^Waiting for you/)
+  expect(asking).not.toMatch(/Done|Waiting/)
+  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
   await clock.advance(10 * 60_000)
   expect(await line()).toBe(asking)
 
@@ -1254,7 +1262,8 @@ test('work that reports with nothing of its own running finishes, though the eng
   expect(await drawn(pane)).toEqual(['happy'])
   expect(await pane.find({ type: 'Text', text: /^Waiting for a command/ })).toBeUndefined()
   expect((await pane.findAll({ type: 'Button' })).some(b => b.key === 'stop-a1')).toBe(false)
-  expect(await line()).toMatch(/^Done · /)
+  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeDefined()
+  expect(await line()).not.toMatch(/Done|Waiting/)
   // and once its moment is over it leaves the list, as finished work does, never counting on
   await clock.advance(60_000)
   expect(await line()).toBeUndefined()

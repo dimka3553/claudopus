@@ -343,7 +343,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') =
         said === 'deny'
           ? `You denied it. ${gate.kind === 'release' ? 'Nothing was released' : gate.kind === 'file' ? 'Nothing changed' : "It didn't run"}, and Claudopus told Claude.`
           : gate.kind
-            ? `You allowed it. ${gate.kind === 'release' ? 'Claude is releasing it now.' : 'Claude is making the change now.'}`
+            ? `You allowed it. ${gate.kind === 'release' ? (gate.call?.startsWith('step-') ? 'Claudopus is releasing it now.' : 'Claude is releasing it now.') : 'Claude is making the change now.'}`
             : said === 'always'
             ? "You always allow this command. It runs now, and Claudopus won't ask again."
             : gate.isWork

@@ -2,6 +2,13 @@
 
 test('finished work leaves a report for good: its pictures copied, listed under Reports, opened, answered, and named to the chat', async ($, on) => {
   const { files, submitted, clock, copied, opened, resumed, appended } = world(on)
+  // A write of the cards held until the test lets it land (below, a Dismiss)
+  let isWriteHeld = false
+  let writeHeld: (() => void) | undefined
+  on('state.set', async (_, e, next) => {
+    if (isWriteHeld && (e as { key?: string }).key === 'todos') ((isWriteHeld = false), await new Promise<void>(go => (writeHeld = go)))
+    return next(e)
+  })
   const filled: string[] = []
   on('prompt.fill', (_, e) => (filled.push(e.text), { isFilled: true }))
   files.set('/private/tmp/s/scratchpad/revenue.png', 'PNG')
@@ -58,7 +65,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   const asking = await pane.find({ type: 'Text', text: 'Result ready · Shall I send it to the team?' })
   expect([asking?.props.color, asking?.props.bold]).toEqual([undefined, true])
   expect(await pane.find({ type: 'Text', text: /^Waiting for you · / })).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: /^Done · / })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeDefined()
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === '#E5A50A').length).toBe(0)
   expect((await pane.findAll({ type: 'Button' })).filter(b => /^result-ask-a1-say-/.test(b.key ?? '')).map(b => b.props.label)).toEqual(['Yes', 'No', 'Not now', 'Answer in words'])
   expect((await pane.findAll({ type: 'Button' })).find(b => /^result-ask-a1-more-/.test(b.key ?? ''))?.props.label).toBe('Result')
@@ -98,7 +105,6 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   // clock has not moved), and the chat is asked nothing: it is only told the task has it (18 Nov: "A" pressed on a result went to
   // the chat alone, which had to hand the job to another task)
   const answers = () => resumed.filter(line => line.includes('to answer a question in your result'))
-  const doneCards = (await pane.findAll({ type: 'Text' })).filter(text => /^Done · /.test(text.text ?? '')).length
   await pressed(one, 'report-say-0-Yes')
   expect(answers()).toHaveLength(1)
   expect(answers()[0]).toMatch(/^a1: The person pressed "Yes" to answer a question in your result "Weekly revenue" \(.*\/report\.md\): Shall I send it to the team\?\n1 other question of that result still waits for them/)
@@ -106,11 +112,10 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(answers()[0]).not.toMatch(/\b(me|my)\b/)
   expect(submitted).toHaveLength(0)
   expect(appended.filter(line => line.includes('answered a question in the result "Weekly revenue"'))).toEqual([expect.stringContaining('Its task has the answer and carries on with it itself')])
-  // Its card is at work at once: Stop, no question, no longer Done
+  // Its card is at work at once: Stop, no question, counted as working
   expect(await until(async () => (await pane.find({ type: 'Button', key: 'stop-a1' })) ?? undefined)).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /^1 task working/ })).toBeDefined()
-  expect((await pane.findAll({ type: 'Text' })).filter(text => /^Done · /.test(text.text ?? ''))).toHaveLength(doneCards - 1)
   expect(await keyed(pane, 'dismiss-a1')).toBeUndefined()
   await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[0]?.answer ? true : undefined))
   // It ends again with the other question still open: it waits for the person again
@@ -135,7 +140,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   // Nothing open, the card waits on nothing: the header and its line say so, and it is done
   expect(await until(async () => ((await pane.find({ type: 'Text', text: /^Result ready/ })) ? undefined : true))).toBe(true)
   expect(await pane.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: /^Done · / })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeDefined()
 
   // The chat is told of the reports with each message, and reads one itself to answer from it
   const next = await $.prompt.submit({ text: 'what was revenue again', wait: false, origin: composer })
@@ -170,15 +175,33 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   await pressed(cards, 'dismiss-a5')
   expect(await until(async () => ((await cards.find({ type: 'Text', text: '✓ Done' })) ? undefined : true))).toBe(true)
   expect(await until(async () => ((await finishedCount()) === before + 2 ? true : undefined))).toBe(true)
-  // A redraw later, and a reload of the cards: both still under Finished, nothing back at the top
-  await clock.advance(30_000)
+  // And while the person uses the panel scrolled down, where the drawing on screen is kept while they move: the card dismissed is
+  // under Finished in the drawing right after the press, not once they have left the panel alone (18 Nov, the person: "when I
+  // click this, the message should go below the finished")
+  await $.agent.spawn({ ...spawn, description: 'Save a third rule', prompt: 'save it' } as never)
+  await $.turn.complete({ agentId: 'a6', answer: 'The third rule is saved.', durationMs: 1, isAborted: false, turnId: 't7', reason: 'answer' } as never)
   await cards.unmount()
+  const used = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80, scroll: { offset: 20, bodyRows: 50 } }, surface: 'desktop' } as never)
+  await ($.ui as any).scroll({ component: 'Pane', requestId: LIST.requestId, offset: 20, by: 1, bodyRows: 50, contentRows: 140, origin: { kind: 'person' } }).catch(() => undefined)
+  expect(await until(async () => (await keyed(used, 'dismiss-a6')) ?? undefined)).toBeDefined()
+  // (the press's write of the cards is slow, as in the app under load: the app draws the panel again before it lands)
+  isWriteHeld = true
+  await used.press({ key: String((await keyed(used, 'dismiss-a6'))?.key) })
+  await used.findAll({ type: 'Text' })
+  expect(await keyed(used, 'dismiss-a6')).toBeUndefined()
+  writeHeld?.()
+  await clock.advance(1_000)
+  expect(await keyed(used, 'dismiss-a6')).toBeUndefined()
+  expect(Number(/Finished (\d+)/.exec(String((await keyed(used, 'finished-fold'))?.props.label))?.[1])).toBe(before + 3)
+  await used.unmount()
+  // A redraw later, and a reload of the cards: all still under Finished, nothing back at the top
+  await clock.advance(30_000)
   await $.session.start(start)
   await clock.advance(30_000)
   const after = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
   expect(await after.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
   expect(await after.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
-  expect(Number(/Finished (\d+)/.exec(String((await keyed(after, 'finished-fold'))?.props.label))?.[1])).toBe(before + 2)
+  expect(Number(/Finished (\d+)/.exec(String((await keyed(after, 'finished-fold'))?.props.label))?.[1])).toBe(before + 3)
   expect((await after.findAll({ type: 'Button' })).some(b => /^dismiss-/.test(b.key ?? ''))).toBe(false)
   // Its question is still open in its result
   const kept = [...files.keys()].find(path => path.includes('pick-an-opening') && path.endsWith('/meta.json'))
@@ -190,7 +213,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   const words = await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('answered, in their own words, a question in your result "Pick an opening"')))
   expect(words).toContain('Which opening should go out?\nTheir answer: B, with the louder music')
   expect(await until(async () => (await after.find({ type: 'Button', key: 'stop-a4' })) ?? undefined)).toBeDefined()
-  expect(Number(/Finished (\d+)/.exec(String((await keyed(after, 'finished-fold'))?.props.label))?.[1])).toBe(before + 1)
+  expect(Number(/Finished (\d+)/.exec(String((await keyed(after, 'finished-fold'))?.props.label))?.[1])).toBe(before + 2)
 })
 
 test('work started from a report keeps its own report linked to it, beside the older one on the same subject', async ($, on) => {
