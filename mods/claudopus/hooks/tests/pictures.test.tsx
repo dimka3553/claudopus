@@ -990,6 +990,12 @@ test("what a task made is on its card under its title, side by side, and as tile
   await until(async () => ((await tiles()).includes('3 pictures') ? true : undefined))
   expect((await tab.findAll({ type: 'Text' })).some(one => /\/Users\/me|\/repo\/src/.test(String(one.text)))).toBe(false)
   await tab.unmount()
+  // Done: what its result names joins in, but a code file it names stays in the count, and only a link it says it made is a thing
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: `The report is made: ${pdf}. The fix is in /repo/src/app.ts.\n\nReport added: https://os.example.com/reports/9\nSee the guide at https://docs.example.com/guide` } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a1' } as never)
+  await until(async () => (await keyed(pane, 'made-a1-link-0-open')) || undefined)
+  expect((await pane.findAll({ type: 'Button' })).filter(one => String(one.key).startsWith('made-a1-')).map(one => String(one.props.label))).toEqual(['3 pictures', 'vat-report', 'os reports 9 ↗'])
+  expect((await pane.findAll({ type: 'Text' })).map(one => one.text).filter(text => /code file/.test(String(text)))).toEqual(['1 code file'])
   await pane.unmount()
   expect(logged).toEqual([])
 })

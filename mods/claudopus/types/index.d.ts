@@ -26,12 +26,14 @@ export type Entry = { at: number; kind: 'note' | 'decision' | 'steer'; text: str
 // One thing the work set out to do under its to-do; `doing` is the one it is on now, at most one at a time
 export type Item = { text: string; state: 'open' | 'doing' | 'done' | 'dropped' }
 
-// One thing the person asked for: a card in the panel, and the one piece of background work that does it
-// What a task made: a file or link of its own, by its kind, and its code as a count of files and lines
+// What a task made: a file or link of its own, by its kind (with the file's time when it was listed), and its code as a count of
+// files and lines
 export type MadeKind = 'picture' | 'video' | 'pdf' | 'sheet' | 'doc' | 'file' | 'link'
-export type Made = { path: string; name: string; kind: MadeKind }
+export type Made = { path: string; name: string; kind: MadeKind; at?: number }
 export type CodeMade = { count: number; plus: number; minus: number }
 export type FilesMade = { made: Made[]; code?: CodeMade }
+
+// One thing the person asked for: a card in the panel, and the one piece of background work that does it
 export type Todo = {
   // The id of the agent that does the work
   id: string
@@ -259,9 +261,9 @@ export type Report = {
   gist: string
   // The pictures and pages copied in, relative to its folder
   files: string[]
-  // The work that wrote it; empty for one brought in by hand
-  // What its task made, as listed the first time the result was opened
+  // What its task made, as listed when the result was saved
   made?: FilesMade
+  // The work that wrote it; empty for one brought in by hand
   agent: string
   // Tells one text from another, so the same report is not kept twice
   mark?: string

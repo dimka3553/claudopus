@@ -18,7 +18,7 @@ const madeKindOf = (kind: MadeKind) => MADE_KINDS.find(one => one.kind === kind)
 const TEXT_DOC = /\.(md|txt|html?|csv)$/i
 // The most paths a task's card keeps of what its steps wrote or named, and the most looked at when its files are listed
 const WROTE_KEPT = 300
-const MADE_LOOKED = 150
+const MADE_LOOKED = 300
 // The most things a card's row names before "and N more", and the most tiles a Files part draws before the same
 const CHIPS_MOST = 6
 const TILES_MOST = 24
@@ -27,8 +27,11 @@ const FACES_MOST = 12
 // A tile's picture in the panel's pixels, and the most characters every tile's small copy together takes in one drawing
 const TILE_W = 112
 const TILE_H = 84
-const TILE_CHARS = 60_000
-const TILE_THUMB_BYTES = 9_000
+const TILE_CHARS = 90_000
+const TILE_THUMB_BYTES = 7_000
+// A small copy's own size: one and a half times the tile's
+const FACE_W = 168
+const FACE_H = 126
 
 // The paths one tool call writes or names: the file a file tool is given, and in a command the files of a kind a tile is drawn for
 const wroteBy = (e: { tool: string }) => {
@@ -54,9 +57,10 @@ const repoTop = async ($: EngineInterface, folder: string) => {
   return top
 }
 // How many lines a task added to and took from the files it changed in one repo, against the repo as it stood when the task began:
-// only the files it wrote itself are counted, so what a merge brought in is left out. A file new since then counts every line
+// only the files it wrote itself are counted, so what a merge brought in is left out. A file new since then counts every line, as
+// does every file of a repo with no commit from before the task (one it made); a file it deleted is no longer there to count
 const COUNT_LINES =
-  'cd "$1" || exit 1; since=$2; shift 2; base=$(git rev-list -1 --before="$since" HEAD 2>/dev/null); [ -n "$base" ] || base=$(git rev-parse HEAD 2>/dev/null) || exit 1; for f in "$@"; do if git cat-file -e "$base:$f" 2>/dev/null; then git diff --numstat "$base" -- "$f"; elif [ -f "$f" ]; then printf \'%s\\t0\\t%s\\n\' "$(grep -c \'\' "$f")" "$f"; fi; done'
+  'cd "$1" || exit 1; since=$2; shift 2; base=$(git rev-list -1 --before="$since" HEAD 2>/dev/null); [ -n "$base" ] || base=4b825dc642cb6eb9a060e54bf8d69288fbee4904; for f in "$@"; do if git cat-file -e "$base:$f" 2>/dev/null; then git diff --numstat "$base" -- "$f"; elif [ -f "$f" ]; then printf \'%s\\t0\\t%s\\n\' "$(grep -c \'\' "$f")" "$f"; fi; done'
 const codeOf = async ($: EngineInterface, byTop: Map<string, string[]>, since: number): Promise<CodeMade | undefined> => {
   let count = 0
   let plus = 0
@@ -74,8 +78,11 @@ const codeOf = async ($: EngineInterface, byTop: Map<string, string[]>, since: n
   }
   return count ? { count, plus, minus } : undefined
 }
-// Links a result names, the first few: a page it put online, a report it added
-const linksIn = (text: string) => [...new Set((text.match(/https?:\/\/[^\s`'"()<>[\]{}|,;*]+/g) ?? []).map(link => link.replace(/[.:!?]+$/, '')))].slice(0, 3)
+// Links a result names on a line that says it made or put them up, the first few: a page it put online, a report it added. A page
+// it only cites is no thing it made
+const MADE_LINK_LINE = /\b(made|added|created|published|deployed|live|online|posted|uploaded|opened|pushed|report|pull request|PR|release[sd]?)\b/i
+const linksIn = (text: string) =>
+  [...new Set(text.split('\n').filter(line => MADE_LINK_LINE.test(line)).flatMap(line => (line.match(/https?:\/\/[^\s`'"()<>[\]{}|,;*]+/g) ?? []).map(link => link.replace(/[.:!?]+$/, ''))))].slice(0, 3)
 const linkName = (link: string) => {
   const [host = '', ...rest] = link.replace(/^https?:\/\//, '').replace(/\/$/, '').split('/')
   const last = rest.at(-1) ?? ''
@@ -89,7 +96,11 @@ const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since
   const made: Made[] = []
   const byTop = new Map<string, string[]>()
   const seen = new Set<string>()
-  for (const given of [...named, ...wrote].slice(0, MADE_LOOKED)) {
+  // What the result names first, then the newest of what its steps wrote, things of their own before code, so a long task's last
+  // pictures are never left past the most looked at
+  const isThing = (path: string) => madeKind(path).kind !== 'file' && !TEXT_DOC.test(path)
+  const newest = [...wrote].reverse()
+  for (const given of [...named, ...newest.filter(isThing), ...newest.filter(path => !isThing(path))].slice(0, MADE_LOOKED)) {
     const path = given.replace(/^\/private(?=\/(tmp|var)\/)/, '')
     if (seen.has(path)) continue
     seen.add(path)
@@ -97,33 +108,49 @@ const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since
     const stat = await $.fs.stat(path).catch(() => undefined)
     if (!stat || stat.kind !== 'file' || (isDated && stat.mtimeMs < since - 5000)) continue
     const kind = madeKind(path).kind
-    const isOwn = kind !== 'file' && !(TEXT_DOC.test(path) && !isNamed)
-    if (isOwn || isNamed) {
-      // What a step only wrote into a temporary folder or Claudopus's own memory is its scratch, not what it made
-      if (!isNamed && (TEMP.test(path) || (dir && path.startsWith(`${dir}/`)))) continue
-      made.push({ path, name: fileName(path), kind })
+    // A file with no kind of its own (code) is counted in its repo, even one the result names; outside a repo, a named one is a thing
+    const top = kind === 'file' || (TEXT_DOC.test(path) && !isNamed) ? await repoTop($, path.slice(0, path.lastIndexOf('/'))) : ''
+    if (top && path.startsWith(`${top}/`)) {
+      byTop.set(top, [...(byTop.get(top) ?? []), path])
       continue
     }
-    const top = await repoTop($, path.slice(0, path.lastIndexOf('/')))
-    if (top && path.startsWith(`${top}/`)) byTop.set(top, [...(byTop.get(top) ?? []), path])
+    if ((kind !== 'file' && !TEXT_DOC.test(path)) || isNamed) {
+      // What a step only wrote into a temporary folder or Claudopus's own memory is its scratch, not what it made
+      if (!isNamed && (TEMP.test(path) || (dir && path.startsWith(`${dir}/`)))) continue
+      // Two files of one name are one thing to the person: the one the result names, else the newest, is kept
+      if (made.some(one => one.name === fileName(path))) continue
+      made.push({ path, name: fileName(path), kind, at: Math.round(stat.mtimeMs) })
+    }
   }
+  // Shown in the order they were named and written, the oldest first
+  const order = new Map<string, number>()
+  for (const [n, given] of [...named, ...wrote].entries()) if (!order.has(given.replace(/^\/private(?=\/(tmp|var)\/)/, ''))) order.set(given.replace(/^\/private(?=\/(tmp|var)\/)/, ''), n)
+  made.sort((a, b) => (order.get(a.path) ?? 0) - (order.get(b.path) ?? 0))
   for (const link of linksIn(answer)) made.push({ path: link, name: linkName(link), kind: 'link' })
   const code = byTop.size ? await codeOf($, byTop, since).catch(() => undefined) : undefined
   return { made, ...(code ? { code } : {}) }
 }
-// What a card draws: its task's files as last listed, and listed again, out of the drawing, once it has written more or ended
-const madeOf = new Map<string, { key: string; files: FilesMade }>()
+// What a card draws: its task's files as last listed, and listed again, out of the drawing, once it has made a step since (a file a
+// step writes is there only after the step), at most every MADE_AGAIN while it works, and once it ends. The listings take turns, so a
+// panel opened on many cards lists them one after another
+const MADE_AGAIN = 20_000
+const madeOf = new Map<string, { key: string; at: number; files: FilesMade }>()
 const madeLoading = new Set<string>()
+let madeTurn: Promise<unknown> = Promise.resolve()
 const madeNow = ($: EngineInterface, one: Todo): FilesMade | undefined => {
   if (one.chat) return undefined
-  const key = `${(one.wrote ?? []).length}:${one.answer.length}:${one.status}`
+  // While it works a helper's edits change no count of the task's own, so time is part of what is listed
+  const key = `${one.steps ?? 0}:${(one.wrote ?? []).length}:${one.answer.length}:${one.status}:${one.status === 'working' ? Math.floor(Date.now() / MADE_AGAIN) : ''}`
   const was = madeOf.get(one.id)
-  if (was?.key !== key && !madeLoading.has(one.id) && ((one.wrote ?? []).length || one.answer)) {
+  const isDue = !was || (was.key !== key && (one.status !== 'working' || Date.now() - was.at >= MADE_AGAIN))
+  if (isDue && !madeLoading.has(one.id) && ((one.wrote ?? []).length || one.answer)) {
     madeLoading.add(one.id)
-    void madeBy($, one.wrote ?? [], one.status === 'working' ? '' : one.answer, one.begunAt ?? one.startedAt)
+    const run = madeTurn.then(() => madeBy($, one.wrote ?? [], one.status === 'working' ? '' : one.answer, one.begunAt ?? one.startedAt))
+    madeTurn = run.catch(() => undefined)
+    void run
       .then(files => {
         if (madeOf.size > 200) madeOf.delete(madeOf.keys().next().value ?? '')
-        madeOf.set(one.id, { key, files })
+        madeOf.set(one.id, { key, at: Date.now(), files })
       })
       .catch(err => log($, `files of ${one.id} not listed: ${String(err)}`))
       .finally(() => (madeLoading.delete(one.id), redraw($)))
@@ -160,6 +187,10 @@ const madeOfReport = ($: EngineInterface, r: Report, text: string): FilesMade =>
 type Face = { base64: string } | null
 const faces = new Map<string, Face>()
 const facesLoading = new Set<string>()
+// A file's small copy is known by the file as it stands: written again, it is made again
+const faceKey = (one: Made) => `${one.path}:${one.at ?? 0}`
+// How many small copies have been made, which a drawing's keys carry
+let facesMade = 0
 let qlMade = 0
 const makeFace = async ($: EngineInterface, one: Made): Promise<Face> => {
   if (one.kind === 'link' || one.kind === 'file' || /\.svg$/i.test(one.path)) return null
@@ -179,30 +210,40 @@ const makeFace = async ($: EngineInterface, one: Made): Promise<Face> => {
       from = `${scratch}/${fileName(one.path)}.png`
       if (!(await $.fs.exists(from))) return (await $.process.run(['rm', '-rf', scratch]).catch(() => undefined), null)
     }
-    for (const [size, quality] of [['240', '50'], ['240', '35'], ['180', '40']] as const) {
-      await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, from, '--out', to], { timeoutMs: 15_000 }).catch(() => undefined)
+    // Only what the tile shows is kept: a page or a tall picture is cut to the tile's shape from its top, at one and a half times the
+    // tile's size, so a dozen of them fit in one drawing
+    const said = (await $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', from], { timeoutMs: 15_000 }).catch(() => undefined))?.stdout ?? ''
+    const [width = 0, height = 0] = [/pixelWidth: (\d+)/, /pixelHeight: (\d+)/].map(re => Number(re.exec(said)?.[1] ?? 0))
+    const isTall = width > 0 && height / width > FACE_H / FACE_W
+    const mid = `${to}.png`
+    if (isTall) await $.process.run([sips($), '--resampleWidth', String(FACE_W), '-s', 'format', 'png', from, '--out', mid], { timeoutMs: 15_000 }).catch(() => undefined)
+    for (const quality of ['50', '35', '20']) {
+      await $.process
+        .run(isTall ? [sips($), '-c', String(FACE_H), String(FACE_W), '--cropOffset', '0', '0', '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, mid, '--out', to] : [sips($), '-Z', String(FACE_W), '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, from, '--out', to], { timeoutMs: 15_000 })
+        .catch(() => undefined)
       if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= TILE_THUMB_BYTES) break
     }
-    if (scratch) await $.process.run(['rm', '-rf', scratch]).catch(() => undefined)
+    await $.process.run(['rm', '-rf', mid, ...(scratch ? [scratch] : [])]).catch(() => undefined)
   }
   const read = (await $.fs.read(to, { as: 'bytes' }).catch(() => undefined)) as { base64: string } | undefined
   return read?.base64 && read.base64.length < TILE_THUMB_BYTES * 2 ? { base64: read.base64 } : null
 }
 // The small copies as made so far; the missing ones are made out of the drawing, one after another, and the drawing drawn again
 const facesNow = ($: EngineInterface, list: Made[]) => {
-  const missing = list.filter(one => !faces.has(one.path) && !facesLoading.has(one.path))
+  const missing = list.filter(one => !faces.has(faceKey(one)) && !facesLoading.has(faceKey(one)))
   if (missing.length) {
-    for (const one of missing) facesLoading.add(one.path)
+    for (const one of missing) facesLoading.add(faceKey(one))
     void (async () => {
       for (const one of missing) {
         const face = await makeFace($, one).catch(() => null)
         if (faces.size > 300) faces.delete(faces.keys().next().value ?? '')
-        faces.set(one.path, face)
-        facesLoading.delete(one.path)
+        faces.set(faceKey(one), face)
+        facesMade += 1
+        facesLoading.delete(faceKey(one))
       }
     })()
       .catch(err => log($, `small copies of files not made: ${String(err)}`))
-      .finally(() => (missing.forEach(one => facesLoading.delete(one.path)), redraw($)))
+      .finally(() => (missing.forEach(one => facesLoading.delete(faceKey(one))), redraw($)))
   }
   return faces
 }
@@ -215,25 +256,30 @@ const pageIcon = (badge: string, color: string) =>
   `<path d="M4.5 1.5h13l7 7v21a1 1 0 0 1-1 1h-19a1 1 0 0 1-1-1v-27a1 1 0 0 1 1-1z" fill="#3b3b39" stroke="#9a9890" stroke-width="1.2"/><path d="M17.5 1.5v7h7" fill="none" stroke="#9a9890" stroke-width="1.2"/>${badge ? `<rect x="1" y="15" width="${badge.length > 3 ? 22 : 19}" height="10" rx="2" fill="${color}"/><text x="${badge.length > 3 ? 12 : 10.5}" y="22.6" font-size="7" ${SVG_FONT} font-weight="700" fill="#fff" text-anchor="middle">${badge}</text>` : ''}`
 const LINK_ICON = '<rect x="2.5" y="4.5" width="23" height="23" rx="5" fill="#3b3b39" stroke="#9a9890" stroke-width="1.2"/><path d="M11 13.5h-1.5a3.5 3.5 0 0 0 0 7H11M17 13.5h1.5a3.5 3.5 0 0 1 0 7H17M11.5 17h5" fill="none" stroke="#C9A7FF" stroke-width="1.6" stroke-linecap="round"/>'
 const CODE_ICON = '<circle cx="9" cy="8" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="9" cy="24" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="19" cy="12" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><path d="M9 10.6v10.8M19 14.6c0 4-10 3-10 6.8" fill="none" stroke="#9a9890" stroke-width="1.5"/>'
-const iconOf = (kind: MadeKind | 'code') => (kind === 'code' ? CODE_ICON : kind === 'link' ? LINK_ICON : pageIcon(madeKindOf(kind).badge, madeKindOf(kind).color))
-const svgOfIcon = (kind: MadeKind | 'code', width: number, height: number) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 28 32">${iconOf(kind)}</svg>`
+// A file of no kind of its own shows its ending on its page, such as JSON
+const endingOf = (path = '') => (/\.([a-z0-9]{1,4})$/i.exec(path)?.[1] ?? '').toUpperCase()
+const iconOf = (kind: MadeKind | 'code', path?: string) =>
+  kind === 'code' ? CODE_ICON : kind === 'link' ? LINK_ICON : pageIcon(kind === 'file' ? endingOf(path) : madeKindOf(kind).badge, madeKindOf(kind).color)
+const svgOfIcon = (kind: MadeKind | 'code', width: number, height: number, path?: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 28 32">${iconOf(kind, path)}</svg>`
 const tileSvg = (inner: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="${TILE_W}" height="${TILE_H}" viewBox="0 0 ${TILE_W} ${TILE_H}">${inner}</svg>`
-// A small copy cut to its place from its top, with rounded corners
-const tilePicture = (face: { base64: string }, x: number, y: number, w: number, h: number) =>
-  `<clipPath id="c"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4"/></clipPath><g clip-path="url(#c)"><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#fff"/><image href="data:image/jpeg;base64,${face.base64}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="xMidYMin slice"/></g><rect x="${x + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" rx="4" fill="none" stroke="#ffffff30"/>`
+// A small copy cut to its place from its top, with rounded corners; each tile's cut has a name of its own, should the app draw them
+// in one page
+const clipId = (one: Made) => `t${mark(one.path).replace(':', '-')}`
+const tilePicture = (face: { base64: string }, x: number, y: number, w: number, h: number, id: string) =>
+  `<clipPath id="${id}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4"/></clipPath><g clip-path="url(#${id})"><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#fff"/><image href="data:image/jpeg;base64,${face.base64}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="xMidYMin slice"/></g><rect x="${x + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" rx="4" fill="none" stroke="#ffffff30"/>`
 const tilePlay = (cx: number, cy: number) => `<circle cx="${cx}" cy="${cy}" r="12" fill="#000a"/><path d="M${cx - 4} ${cy - 6}l10 6-10 6z" fill="#fff"/>`
 const tileBadge = (kind: MadeKind) => {
   const { badge, color } = madeKindOf(kind)
   return kind === 'pdf' || kind === 'sheet' || kind === 'doc' ? `<rect x="4" y="${TILE_H - 17}" width="${badge.length * 6 + 8}" height="13" rx="3" fill="${color}"/><text x="8" y="${TILE_H - 7.5}" font-size="8.5" ${SVG_FONT} font-weight="700" fill="#fff">${badge}</text>` : ''
 }
-const tileIcon = (kind: MadeKind | 'code') => `<rect width="${TILE_W}" height="${TILE_H}" rx="4" fill="#ffffff12"/><g transform="translate(${TILE_W / 2 - 17.5} ${TILE_H / 2 - 20}) scale(1.25)">${iconOf(kind)}</g>`
+const tileIcon = (kind: MadeKind | 'code', path?: string) => `<rect width="${TILE_W}" height="${TILE_H}" rx="4" fill="#ffffff12"/><g transform="translate(${TILE_W / 2 - 17.5} ${TILE_H / 2 - 20}) scale(1.25)">${iconOf(kind, path)}</g>`
 // One file: its small copy filling the tile, with its kind in the corner where the picture alone does not say it; else its icon
-const oneTile = (one: Made, face: Face | undefined) => tileSvg(face ? tilePicture(face, 0, 0, TILE_W, TILE_H) + (one.kind === 'video' ? tilePlay(TILE_W / 2, TILE_H / 2) : '') + tileBadge(one.kind) : tileIcon(one.kind))
+const oneTile = (one: Made, face: Face | undefined) => tileSvg(face ? tilePicture(face, 0, 0, TILE_W, TILE_H, clipId(one)) + (one.kind === 'video' ? tilePlay(TILE_W / 2, TILE_H / 2) : '') + tileBadge(one.kind) : tileIcon(one.kind, one.path))
 // Several of a kind: the first one's small copy on two more sheets
 const pileTile = (first: Made, face: Face | undefined) =>
   tileSvg(
     `<rect x="8" y="0" width="${TILE_W - 8}" height="${TILE_H - 8}" rx="4" fill="#55554f"/><rect x="4" y="4" width="${TILE_W - 8}" height="${TILE_H - 8}" rx="4" fill="#77766f"/>` +
-      (face ? tilePicture(face, 0, 8, TILE_W - 8, TILE_H - 8) + (first.kind === 'video' ? tilePlay((TILE_W - 8) / 2, 8 + (TILE_H - 8) / 2) : '') : `<rect x="0" y="8" width="${TILE_W - 8}" height="${TILE_H - 8}" rx="4" fill="#3b3b39" stroke="#ffffff30"/><g transform="translate(${(TILE_W - 8) / 2 - 17.5} ${8 + (TILE_H - 8) / 2 - 20}) scale(1.25)">${iconOf(first.kind)}</g>`),
+      (face ? tilePicture(face, 0, 8, TILE_W - 8, TILE_H - 8, clipId(first)) + (first.kind === 'video' ? tilePlay((TILE_W - 8) / 2, 8 + (TILE_H - 8) / 2) : '') : `<rect x="0" y="8" width="${TILE_W - 8}" height="${TILE_H - 8}" rx="4" fill="#3b3b39" stroke="#ffffff30"/><g transform="translate(${(TILE_W - 8) / 2 - 17.5} ${8 + (TILE_H - 8) / 2 - 20}) scale(1.25)">${iconOf(first.kind, first.path)}</g>`),
   )
 // Code: how many lines were added and taken away
 const codeTile = (code: CodeMade) =>
@@ -282,12 +328,12 @@ const madeChips = ($: EngineInterface, ui: Ui, one: Todo, key: string, onOpenWor
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   const things = thingsOf(files, () => false)
   const shown = things.slice(0, CHIPS_MOST)
-  const icon = (kind: MadeKind | 'code', at: string) => (table.Svg && !('isTerminal' in ui) ? <table.Svg key={`${at}-icon`} source={svgOfIcon(kind, 18, 20)} alt="" width={18} height={20} /> : null)
+  const icon = (kind: MadeKind | 'code', at: string, path?: string) => (table.Svg && !('isTerminal' in ui) ? <table.Svg key={`${at}-icon`} source={svgOfIcon(kind, 18, 20, path)} alt="" width={18} height={20} /> : null)
   return (
     <Box key={key} flexDirection="row" flexWrap="wrap" columnGap={2} rowGap={0}>
       {shown.map(thing => (
         <Box key={`${key}-${thing.key}`} flexDirection="row" alignItems="center" flexShrink={0} height={1} overflow="hidden">
-          {icon(thing.kind, `${key}-${thing.key}`)}
+          {icon(thing.kind, `${key}-${thing.key}`, thing.files[0]?.path)}
           <Button
             key={`${key}-${thing.key}-open-${presses}`}
             label={`${cut(thing.label, 18)}${thing.kind === 'link' ? ' ↗' : ''}`}
@@ -296,7 +342,7 @@ const madeChips = ($: EngineInterface, ui: Ui, one: Todo, key: string, onOpenWor
           />
         </Box>
       ))}
-      {things.length > shown.length ? <Text key={`${key}-more`} dimColor>{`and ${things.length - shown.length} more`}</Text> : null}
+      {things.length > shown.length ? <Text key={`${key}-more`} dimColor>{`${things.length - shown.length} more`}</Text> : null}
       {files.code ? (
         <Box key={`${key}-code`} flexDirection="row" alignItems="center" gap={1} flexShrink={0} height={1} overflow="hidden">
           {icon('code', `${key}-code`)}
@@ -310,7 +356,8 @@ const madeChips = ($: EngineInterface, ui: Ui, one: Todo, key: string, onOpenWor
 }
 // In a task's Details and in its result: the same things as tiles side by side, a small copy and a name each, each a press. A
 // stack opens out into a tile for each of its files. Where no picture can be drawn, a row each
-const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, key: string, surface?: RenderSurface) => {
+// `gen`, where the pane has one, is the mark of what its drawing shows, which every key carries
+const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, key: string, surface?: RenderSurface, gen = '') => {
   if (!files.made.length && !files.code) return null
   const { Box, Button, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
@@ -320,7 +367,7 @@ const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, k
   const made = canDraw ? facesNow($, shown.slice(0, FACES_MOST).flatMap(thing => thing.files.slice(0, 1))) : faces
   let chars = 0
   const faceOf = (one: Made | undefined) => {
-    const face = one ? made.get(one.path) : undefined
+    const face = one ? made.get(faceKey(one)) : undefined
     if (!face || chars + face.base64.length > TILE_CHARS) return undefined
     chars += face.base64.length
     return face
@@ -339,7 +386,7 @@ const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, k
           return (
             <Box key={row} flexDirection="column" alignItems="flex-start" width={canDraw ? 12 : undefined} flexShrink={0}>
               {canDraw && table.Svg ? <table.Svg key={`${row}-svg`} source={thing.files.length > 1 ? pileTile(thing.files[0]!, faceOf(thing.files[0])) : oneTile(thing.files[0]!, faceOf(thing.files[0]))} alt={thing.label} width={TILE_W} height={TILE_H} /> : null}
-              <Button key={`${row}-open-${presses}`} label={cut(thing.label, canDraw ? 13 : 60)} plain onPress={press(thing, row)} />
+              <Button key={`${row}-open-${presses}${gen}`} label={cut(thing.label, canDraw ? 13 : 60)} plain onPress={press(thing, row)} />
             </Box>
           )
         })}
@@ -350,10 +397,10 @@ const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, k
           </Box>
         ) : null}
       </Box>
-      {things.length > shown.length ? <Text dimColor>{`and ${things.length - shown.length} more`}</Text> : null}
+      {things.length > shown.length ? <Text dimColor>{`${things.length - shown.length} more`}</Text> : null}
       {fewer.length ? (
         <Box alignItems="flex-start">
-          <Button key={`${key}-fewer-${presses}`} label="Show fewer" plain dimColor onPress={() => void ((presses += 1), fewer.forEach(kind => openPiles.delete(`${pane}:${kind}`)), redraw($))} />
+          <Button key={`${key}-fewer-${presses}${gen}`} label="Show less" plain dimColor onPress={() => void ((presses += 1), fewer.forEach(kind => openPiles.delete(`${pane}:${kind}`)), redraw($))} />
         </Box>
       ) : null}
     </Box>

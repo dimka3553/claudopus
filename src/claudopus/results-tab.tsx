@@ -370,7 +370,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
     [one.id === r.from ? 'this result came from it' : one.from === r.id ? 'came from this result' : rounds.includes(one) ? (one.at < r.at ? 'earlier result' : 'later result') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
   const pane = paneOf(r)
   // As in the list: each key carries a mark of what this drawing shows, so the app never keeps a button whose handle is gone
-  const gen = drawingMark(pane, [presses, height, r, mark(text), at, JSON.stringify(files), [...openPiles].join(), faces.size, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
+  const gen = drawingMark(pane, [presses, height, r, mark(text), at, JSON.stringify(files), [...openPiles].join(), facesMade, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
   // Where pictures can be drawn, what the task made is tiles under the title, its pictures among them; the terminal keeps its rows
   const hasTiles = !('isTerminal' in ui) && Boolean(table.Svg) && (files.made.length > 0 || Boolean(files.code))
   const show = (to: number) => void ((presses += 1), hasTiles ? void showPicture($, pictures[to]?.path ?? '', pane, '') : (pictureAt.set(pane, to), redraw($)))
@@ -385,7 +385,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         <Button key={`report-archive-${gen}`} label={r.archived ? 'Bring back' : 'Archive'} onPress={() => archiveReport($, r, !r.archived)} />
       </Box>
       {/* What its task made, right under its title: tiles side by side, each a press that opens it */}
-      {hasTiles ? band(ui, 'report-files', 'Files', '', madeTiles($, ui, files, pane, `report-files-${r.id}`) ?? <Box />) : null}
+      {hasTiles ? band(ui, 'report-files', 'Files', '', madeTiles($, ui, files, pane, `report-files-${r.id}`, undefined, `-${gen}`) ?? <Box />) : null}
       {isOpenQuestion(r) || (!r.archived && waitsOf(r).some(byPerson))
         ? band(
             ui,

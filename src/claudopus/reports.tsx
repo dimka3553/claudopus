@@ -272,7 +272,7 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
     files,
     // What its task made, listed now and kept with it, so its tiles are there once the task's card is gone
     ...(await madeBy($, one.wrote ?? [], text, one.begunAt ?? one.startedAt)
-      .then(made => (made.made.length || made.code ? { made } : {}))
+      .then(made => ({ made }))
       .catch(err => (void log($, `files of report ${id} not listed: ${String(err)}`), {}))),
     agent: one.id,
     mark: marked,

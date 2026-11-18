@@ -522,11 +522,12 @@ const workHooks = (on: On) => {
         const isKeeping = isTool(e.tool, 'todo') || isTool(e.tool, 'note')
         let nudge = ''
         await changeTodos($, list => {
-          // What a helper writes is what its task made too: the task it belongs to keeps it as well
+          // What a helper writes is what its task made: the task it belongs to keeps it, not the helper's own card
           const top = topOf(list, id)
           return list.map(one => {
             if (one.id !== id) return one.id === top ? withWrote(one, e) : one
-            const base = withWrote({ ...(one.status === 'working' ? one : resumed(one, now)), ...(one.carryOn?.gaveUp ? { carryOn: undefined } : {}), steps: (one.steps ?? 0) + 1, answeredAt: undefined, reportAt: undefined, waitsSince: undefined, endedStepAt: undefined }, e)
+            const own = { ...(one.status === 'working' ? one : resumed(one, now)), ...(one.carryOn?.gaveUp ? { carryOn: undefined } : {}), steps: (one.steps ?? 0) + 1, answeredAt: undefined, reportAt: undefined, waitsSince: undefined, endedStepAt: undefined }
+            const base = top === id ? withWrote(own, e) : own
             if (isKeeping) return { ...base, quiet: 0, owes: isTool(e.tool, 'note') ? undefined : one.owes }
             const owes = one.owes === undefined ? undefined : one.owes + 1
             const quiet = (one.quiet ?? 0) + 1
