@@ -93,8 +93,8 @@ const memoryButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   </ui.Box>
 )
 
-// ---- Every chat in memory: bin/catch-up saves the words of chats no chat saved itself, each chat's work (what its helpers were
-// asked and reported, what connected tools returned, the documents it wrote) and the other Macs' words, so recall finds them all.
+// ---- Every chat on this Mac in memory: bin/catch-up saves the words of chats no chat saved itself and each chat's work (what its
+// helpers were asked and reported, what connected tools returned, the documents it wrote), so recall finds them all.
 // Each chat starts it; it keeps its own lock and its own pause between runs, so one runs at a time and no more often than that.
 // In a session of its own, so it outlives the chat, at a low priority ----
 const CATCH_UP_AFTER = 60_000
@@ -103,7 +103,7 @@ const CATCH_UP_EVERY = 10 * 60_000
 const CATCH_UP_START = `d=$1; shift; l="$d/caught/log.txt"; mkdir -p "$d/caught" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
 const startCatchUp = async ($: EngineInterface) => {
   if (!dir) return
-  const r = await $.process.run(['/bin/sh', '-c', CATCH_UP_START, 'sh', dir, `${$.plugin.root}/bin/catch-up`, dir, `${await configDir($)}/projects`, ...macs])
+  const r = await $.process.run(['/bin/sh', '-c', CATCH_UP_START, 'sh', dir, `${$.plugin.root}/bin/catch-up`, dir, `${await configDir($)}/projects`])
   if (r.exitCode !== 0) await log($, `chats not caught up: ${r.stderr.slice(0, 200)}`)
 }
 

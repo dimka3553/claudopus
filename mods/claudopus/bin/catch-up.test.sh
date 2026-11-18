@@ -1,6 +1,5 @@
 #!/bin/bash
-# Tests bin/catch-up on made-up chat records, in a folder of its own, with another Mac played by a second home that a stand-in ssh
-# reaches. Nothing real is read or changed.
+# Tests bin/catch-up on made-up chat records, in a folder of its own. Nothing real is read or changed.
 #   bash mods/claudopus/bin/catch-up.test.sh
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -8,8 +7,7 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/claudopus-catch-up-test.XXXXXX") || exit 1
 trap '[ -n "${CATCH_UP_TEST_KEEP:-}" ] || rm -rf "$tmp"' EXIT
 mem=$tmp/memory
 projects=$tmp/projects
-other=$tmp/other
-mkdir -p "$mem/words" "$projects/-p-app/c1/subagents" "$projects/-p-app" "$projects/ssh-remote1" "$other/.claude/claudopus/words" "$tmp/bin"
+mkdir -p "$mem/words" "$projects/-p-app/c1/subagents" "$projects/-p-app" "$projects/ssh-remote1"
 fails=0
 ok() { printf 'ok   %s\n' "$1"; }
 no() { printf 'FAIL %s\n' "$1"; fails=$((fails + 1)); }
@@ -17,15 +15,6 @@ check() { if eval "$2"; then ok "$1"; else no "$1"; fi; }
 old() { touch -t 202001010000 "$@"; }
 export CLAUDOPUS_CATCH_UP_EVERY=0 CLAUDOPUS_CATCH_UP_QUIET=60
 run() { "$here/catch-up" "$mem" "$projects" "$@" > "$tmp/out" 2>&1; }
-# The other Mac: what ssh would run there runs here with that Mac's home
-cat > "$tmp/bin/ssh" <<'EOF'
-#!/bin/bash
-while [ $# -gt 0 ] && [ "$1" != "--" ]; do shift; done
-shift 2
-if command -v zsh > /dev/null; then HOME=$FAKE_HOME exec zsh -c "$1"; else HOME=$FAKE_HOME exec /bin/sh -c "$1"; fi
-EOF
-chmod +x "$tmp/bin/ssh"
-export FAKE_HOME=$other
 
 u() { printf '{"type":"user","sessionId":"%s","timestamp":"%s","origin":{"kind":"%s"},"message":{"role":"user","content":%s}}\n' "$1" "$2" "$3" "$4"; }
 a() { printf '{"type":"assistant","sessionId":"%s","timestamp":"%s","message":{"role":"assistant","content":%s}}\n' "$1" "$2" "$3"; }
@@ -128,23 +117,5 @@ printf '## 2026-11-10T01:00:00.010Z\ntyped again later\n\n' > "$mem/words/c6.md"
 old "$projects/-p-app/c6.jsonl"
 run
 check "the start of a chat saved from partway goes beside it" 'grep -q "the early part" "$mem/words/c6.before.md" && ! grep -q "typed again later" "$mem/words/c6.before.md" && ! grep -q "the early part" "$mem/words/c6.md"'
-
-# The other Mac: its words come here, this Mac's go there, the longer copy wins, and no name a command could read crosses
-printf 'words of a chat on the other mac\n' > "$other/.claude/claudopus/words/theirs.md"
-printf '## 2026-11-03T00:00:00.000Z\n' > "$other/.claude/claudopus/words/c2.md"
-printf 'x\n' > "$other/.claude/claudopus/words/bad;name.md"
-# a file both Macs hold that differ is left as each has it, a link never comes, and a key in what comes is hidden
-printf 'a different chat, longer than this Mac\x27s own copy of it\n' > "$other/.claude/claudopus/words/c3.md"
-printf 'secret\n' > "$tmp/private.txt"
-ln -s "$tmp/private.txt" "$other/.claude/claudopus/words/link.md"
-printf 'their token ghp_abcdefghijklmnopqrstuvwxyz0123456789\n' > "$other/.claude/claudopus/words/keyed.md"
-PATH="$tmp/bin:$PATH" run othermac
-check "the other Mac's words come here" '[ "$(cat "$mem/words/theirs.md" 2>/dev/null)" = "words of a chat on the other mac" ]'
-check "this Mac's words and work go there, the longer copy replacing the shorter" '[ "$(cat "$other/.claude/claudopus/words/c2.md")" = "$(cat "$mem/words/c2.md")" ] && grep -q "4711" "$other/.claude/claudopus/work/c1.md"'
-check "a name no file of words could have never crosses" '[ ! -e "$mem/words/bad;name.md" ]'
-check "a file that differs on the two Macs is left as each has it" 'grep -q "still typing" "$mem/words/c3.md" && grep -q "a different chat" "$other/.claude/claudopus/words/c3.md"'
-check "a link on the other Mac never comes" '[ ! -e "$mem/words/link.md" ] && [ ! -L "$mem/words/link.md" ]'
-check "a key in what the other Mac sends is hidden" 'grep -q "their token \[key hidden\]" "$mem/words/keyed.md"'
-check "nothing that crossed is left waiting inside memory" '[ -z "$(find "$mem" -name "in.*")" ]'
 
 if [ "$fails" = 0 ]; then echo "catch-up: all passed"; else echo "catch-up: $fails failed"; cat "$tmp/out"; exit 1; fi

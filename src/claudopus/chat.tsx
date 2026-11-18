@@ -449,7 +449,7 @@ const chatHooks = (on: On) => {
     await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
     if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
-    // What no chat saved itself, and the other Macs' words, caught up into memory a minute after the load and then every while
+    // What no chat on this Mac saved itself, caught up into memory a minute after the load and then every while
     afterLoad($, CATCH_UP_AFTER, () => startCatchUp($).catch(err => log($, `chats not caught up: ${String(err)}`)))
     everyLoad($, CATCH_UP_EVERY, () => startCatchUp($).catch(err => log($, `chats not caught up: ${String(err)}`)))
     await shareMine($).catch(() => undefined)

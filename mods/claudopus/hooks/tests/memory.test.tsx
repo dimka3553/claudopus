@@ -786,7 +786,7 @@ test('Memory, beside Stats, opens the memory folder in Finder', async ($, on) =>
   expect(await until(async () => shown.find(argv => argv[1] === MEMORY))).toEqual(['open', MEMORY])
 })
 
-test('every chat starts the catch-up a minute after it loads and every ten minutes, with memory, its chat records and the other Macs', async ($, on) => {
+test('every chat starts the catch-up a minute after it loads and every ten minutes, with memory and its chat records only, never the other Macs', async ($, on) => {
   const { files, own, clock } = world(on)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
   await $.session.start(start)
@@ -794,7 +794,7 @@ test('every chat starts the catch-up a minute after it loads and every ten minut
   expect(runs()).toHaveLength(0)
   await clock.advance(61_000)
   expect(runs()).toHaveLength(1)
-  expect(runs()[0]?.slice(6)).toEqual([MEMORY, `${HOME}/.claude/projects`, 'sam@m4.local'])
+  expect(runs()[0]?.slice(6)).toEqual([MEMORY, `${HOME}/.claude/projects`])
   await clock.advance(10 * 60_000)
   expect(runs()).toHaveLength(2)
 })
