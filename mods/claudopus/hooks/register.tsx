@@ -3864,6 +3864,9 @@ const TILES_MOST = 24
 const FACES_MOST = 12
 const TILE_W = 112
 const TILE_H = 84
+const TILE_COLUMNS = 11
+const TILE_SHOWN_W = 96
+const TILE_SHOWN_H = 72
 const TILE_CHARS = 90_000
 const TILE_THUMB_BYTES = 7_000
 const FACE_W = 168
@@ -3914,7 +3917,8 @@ const linksIn = (text: string) =>
 const linkName = (link: string) => {
   const [host = '', ...rest] = link.replace(/^https?:\/\//, '').replace(/\/$/, '').split('/')
   const last = rest.at(-1) ?? ''
-  return last ? `${host.replace(/^www\./, '').split('.')[0]} ${rest.length > 1 ? `${rest.at(-2)} ` : ''}${last}`.slice(0, 40) : host.replace(/^www\./, '')
+  const kind = rest.length > 1 ? (rest.at(-2) ?? '').replace(/(?<=\w{3})s$/, '') : ''
+  return last ? `${host.replace(/^www\./, '').split('.')[0]} ${kind ? `${kind} ` : ''}${last}`.slice(0, 40) : host.replace(/^www\./, '')
 }
 const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since: number, isDated = true): Promise<FilesMade> => {
   const named = namedPaths(answer)
@@ -4008,6 +4012,7 @@ const makeFace = async ($: EngineInterface, one: Made): Promise<Face> => {
     await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
     let from = one.path
     let scratch = ''
+    if (TEXT_DOC.test(one.path) && !/\.html?$/i.test(one.path)) return null
     if (one.kind !== 'picture' && one.kind !== 'pdf') {
       if (isLinux) return null
       scratch = `${dir}/thumbs/ql-${Math.round(await $.clock.now())}-${(qlMade += 1)}`
@@ -4169,15 +4174,15 @@ const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, k
         {shown.map(thing => {
           const row = `${key}-${thing.key}`
           return (
-            <Box key={row} flexDirection="column" alignItems="flex-start" width={canDraw ? 12 : undefined} flexShrink={0}>
-              {canDraw && table.Svg ? <table.Svg key={`${row}-svg`} source={thing.files.length > 1 ? pileTile(thing.files[0]!, faceOf(thing.files[0])) : oneTile(thing.files[0]!, faceOf(thing.files[0]))} alt={thing.label} width={TILE_W} height={TILE_H} /> : null}
-              <Button key={`${row}-open-${presses}${gen}`} label={cut(thing.label, canDraw ? 13 : 60)} plain onPress={press(thing, row)} />
+            <Box key={row} flexDirection="column" alignItems="flex-start" width={canDraw ? TILE_COLUMNS : undefined} flexShrink={0}>
+              {canDraw && table.Svg ? <table.Svg key={`${row}-svg`} source={thing.files.length > 1 ? pileTile(thing.files[0]!, faceOf(thing.files[0])) : oneTile(thing.files[0]!, faceOf(thing.files[0]))} alt={thing.label} width={TILE_SHOWN_W} height={TILE_SHOWN_H} /> : null}
+              <Button key={`${row}-open-${presses}${gen}`} label={cut(thing.label, canDraw ? 12 : 60)} plain onPress={press(thing, row)} />
             </Box>
           )
         })}
         {files.code ? (
-          <Box key={`${key}-code`} flexDirection="column" alignItems="flex-start" width={canDraw ? 12 : undefined} flexShrink={0}>
-            {canDraw && table.Svg ? <table.Svg key={`${key}-code-svg`} source={codeTile(files.code)} alt={countWord(files.code)} width={TILE_W} height={TILE_H} /> : null}
+          <Box key={`${key}-code`} flexDirection="column" alignItems="flex-start" width={canDraw ? TILE_COLUMNS : undefined} flexShrink={0}>
+            {canDraw && table.Svg ? <table.Svg key={`${key}-code-svg`} source={codeTile(files.code)} alt={countWord(files.code)} width={TILE_SHOWN_W} height={TILE_SHOWN_H} /> : null}
             <Text dimColor wrap="truncate-end">{canDraw ? countWord(files.code) : `${countWord(files.code)} · +${files.code.plus.toLocaleString('en-US')} −${files.code.minus.toLocaleString('en-US')}`}</Text>
           </Box>
         ) : null}

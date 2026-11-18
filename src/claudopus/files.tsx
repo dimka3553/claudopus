@@ -27,6 +27,11 @@ const FACES_MOST = 12
 // A tile's picture in the panel's pixels, and the most characters every tile's small copy together takes in one drawing
 const TILE_W = 112
 const TILE_H = 84
+// How a tile is laid in the pane: its box in columns, and its picture drawn a little smaller than it is made, so three sit side by
+// side in a narrow pane with a gap between
+const TILE_COLUMNS = 11
+const TILE_SHOWN_W = 96
+const TILE_SHOWN_H = 72
 const TILE_CHARS = 90_000
 const TILE_THUMB_BYTES = 7_000
 // A small copy's own size: one and a half times the tile's
@@ -86,7 +91,9 @@ const linksIn = (text: string) =>
 const linkName = (link: string) => {
   const [host = '', ...rest] = link.replace(/^https?:\/\//, '').replace(/\/$/, '').split('/')
   const last = rest.at(-1) ?? ''
-  return last ? `${host.replace(/^www\./, '').split('.')[0]} ${rest.length > 1 ? `${rest.at(-2)} ` : ''}${last}`.slice(0, 40) : host.replace(/^www\./, '')
+  // "os.example.com/reports/362" is "os report 362": the site's first word, the kind of page in the singular, and the page
+  const kind = rest.length > 1 ? (rest.at(-2) ?? '').replace(/(?<=\w{3})s$/, '') : ''
+  return last ? `${host.replace(/^www\./, '').split('.')[0]} ${kind ? `${kind} ` : ''}${last}`.slice(0, 40) : host.replace(/^www\./, '')
 }
 // What a task made: the files its steps wrote or its commands named, and the files and links its result names, that are there and
 // were made since it began. A picture, video, PDF, spreadsheet or document is a thing of its own, as is any file the result names;
@@ -201,6 +208,8 @@ const makeFace = async ($: EngineInterface, one: Made): Promise<Face> => {
     await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
     let from = one.path
     let scratch = ''
+    // Plain text has no picture worth a tile (Quick Look draws its lines too small to read): it keeps its icon
+    if (TEXT_DOC.test(one.path) && !/\.html?$/i.test(one.path)) return null
     if (one.kind !== 'picture' && one.kind !== 'pdf') {
       // Quick Look is the Mac's own: elsewhere the tile keeps its icon
       if (isLinux) return null
@@ -384,15 +393,15 @@ const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, k
         {shown.map(thing => {
           const row = `${key}-${thing.key}`
           return (
-            <Box key={row} flexDirection="column" alignItems="flex-start" width={canDraw ? 12 : undefined} flexShrink={0}>
-              {canDraw && table.Svg ? <table.Svg key={`${row}-svg`} source={thing.files.length > 1 ? pileTile(thing.files[0]!, faceOf(thing.files[0])) : oneTile(thing.files[0]!, faceOf(thing.files[0]))} alt={thing.label} width={TILE_W} height={TILE_H} /> : null}
-              <Button key={`${row}-open-${presses}${gen}`} label={cut(thing.label, canDraw ? 13 : 60)} plain onPress={press(thing, row)} />
+            <Box key={row} flexDirection="column" alignItems="flex-start" width={canDraw ? TILE_COLUMNS : undefined} flexShrink={0}>
+              {canDraw && table.Svg ? <table.Svg key={`${row}-svg`} source={thing.files.length > 1 ? pileTile(thing.files[0]!, faceOf(thing.files[0])) : oneTile(thing.files[0]!, faceOf(thing.files[0]))} alt={thing.label} width={TILE_SHOWN_W} height={TILE_SHOWN_H} /> : null}
+              <Button key={`${row}-open-${presses}${gen}`} label={cut(thing.label, canDraw ? 12 : 60)} plain onPress={press(thing, row)} />
             </Box>
           )
         })}
         {files.code ? (
-          <Box key={`${key}-code`} flexDirection="column" alignItems="flex-start" width={canDraw ? 12 : undefined} flexShrink={0}>
-            {canDraw && table.Svg ? <table.Svg key={`${key}-code-svg`} source={codeTile(files.code)} alt={countWord(files.code)} width={TILE_W} height={TILE_H} /> : null}
+          <Box key={`${key}-code`} flexDirection="column" alignItems="flex-start" width={canDraw ? TILE_COLUMNS : undefined} flexShrink={0}>
+            {canDraw && table.Svg ? <table.Svg key={`${key}-code-svg`} source={codeTile(files.code)} alt={countWord(files.code)} width={TILE_SHOWN_W} height={TILE_SHOWN_H} /> : null}
             <Text dimColor wrap="truncate-end">{canDraw ? countWord(files.code) : `${countWord(files.code)} · +${files.code.plus.toLocaleString('en-US')} −${files.code.minus.toLocaleString('en-US')}`}</Text>
           </Box>
         ) : null}
