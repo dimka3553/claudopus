@@ -2028,7 +2028,7 @@ const panelHooks = (on: On) => {
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
       // Each thing at the top counts once, as the line above the prompt counts them
       asks: waitsCount,
-      isDone: isHappy(own.filter(one => !resultWaits(one).length), at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
+      isDone: isHappy(own.filter(one => !one.leftOpen && !resultWaits(one).length), at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
     }
     const mood = headMood(head)
     // A letter for each header button, in the terminal alone, and only while the panel has no password box to type in: there the

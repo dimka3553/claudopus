@@ -819,12 +819,14 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(await pane.find({ type: 'Text', text: /^Results$/ })).toBeUndefined()
   expect((await keyed(pane, 'reports-open'))?.props.label).toBe('Results 1')
   expect(await pane.find({ type: 'Text', text: /^●$/ })).toBeUndefined()
-  // A finished task whose result asks something waits for the person, not done: its card stays at the top in amber, never under
-  // Finished, with the first question and its answers, and the header counts each question
+  // A finished task whose result asks something more is done, in green: its card stays at the top, never under Finished, with
+  // the first question and its answers, until it is answered or dismissed, and the header counts each question
   expect(await pane.find({ type: 'Text', text: /^2 questions waiting for you/ })).toBeDefined()
   const asking = await pane.find({ type: 'Text', text: 'Result ready · Shall I send it to the team?' })
-  expect(asking?.props.color).toBe('#E5A50A')
-  expect(await pane.find({ type: 'Text', text: /^Waiting for you · / })).toBeDefined()
+  expect([asking?.props.color, asking?.props.bold]).toEqual([undefined, true])
+  expect(await pane.find({ type: 'Text', text: /^Waiting for you · / })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Done · / })).toBeDefined()
+  expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === '#E5A50A').length).toBe(0)
   expect((await pane.findAll({ type: 'Button' })).filter(b => /^result-ask-a1-say-/.test(b.key ?? '')).map(b => b.props.label)).toEqual(['Yes', 'No', 'Not now', 'Answer in words'])
   expect((await pane.findAll({ type: 'Button' })).find(b => /^result-ask-a1-more-/.test(b.key ?? ''))?.props.label).toBe('Result')
   expect(await pane.find({ type: 'Text', text: '1 more question' })).toBeDefined()
@@ -871,11 +873,11 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(answers()[0]).not.toMatch(/\b(me|my)\b/)
   expect(submitted).toHaveLength(0)
   expect(appended.filter(line => line.includes('answered a question in the result "Weekly revenue"'))).toEqual([expect.stringContaining('Its task has the answer and carries on with it itself')])
-  // Its card is at work at once: Stop, no question, not done
+  // Its card is at work at once: Stop, no question, no longer Done
   expect(await until(async () => (await pane.find({ type: 'Button', key: 'stop-a1' })) ?? undefined)).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /^1 task working/ })).toBeDefined()
-  expect((await pane.findAll({ type: 'Text' })).filter(text => /^Done · /.test(text.text ?? ''))).toHaveLength(doneCards)
+  expect((await pane.findAll({ type: 'Text' })).filter(text => /^Done · /.test(text.text ?? ''))).toHaveLength(doneCards - 1)
   expect(await keyed(pane, 'dismiss-a1')).toBeUndefined()
   await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[0]?.answer ? true : undefined))
   // It ends again with the other question still open: it waits for the person again

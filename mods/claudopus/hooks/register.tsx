@@ -1736,7 +1736,8 @@ const stateOf = (list: Todo[], one: Todo): TaskState => {
 }
 const shownAs = (list: Todo[], _asks?: (one: Todo) => boolean): Todo[] =>
   list.map(one => {
-    if (isOff || one.parentId || one.chat || one.status !== 'done' || one.closedAt) return one
+    if (isOff || one.parentId || one.chat || one.status !== 'done') return one
+    if (one.closedAt) return openItems(one).length ? { ...one, leftOpen: openItems(one).length } : one
     if (one.ask) return one
     const { runs, helpers } = wakesOf(list, one)
     if (runs.length || helpers || (one.leftSince && one.leftOwn)) return { ...one, status: 'working' as const, wasDone: one.endedAt, endedAt: 0, endedStepAt: one.endedStepAt ?? one.endedAt }
@@ -14924,7 +14925,7 @@ const panelHooks = (on: On) => {
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
       asks: waitsCount,
-      isDone: isHappy(own.filter(one => !resultWaits(one).length), at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
+      isDone: isHappy(own.filter(one => !one.leftOpen && !resultWaits(one).length), at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
     }
     const mood = headMood(head)
     const isKeyed = e.surface === 'terminal' && !boxes.length

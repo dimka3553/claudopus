@@ -1480,10 +1480,10 @@ test("a task ending its step with to-dos still to do and nothing of its own runn
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const fold = await until(async () => (await pane.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label))))
   if (fold) await pane.press({ key: String(fold.key) })
-  const line = await until(async () => (await pane.find({ type: 'Text', text: /^Not done · / })) ?? undefined)
+  const line = await until(async () => (await pane.find({ type: 'Text', text: /^Not done · Second/ })) ?? undefined)
   expect([line?.text, line?.props.color]).toEqual(['Not done · Second look', '#E5A50A'])
   // With a to-do left it is not done: its card never says Done
-  expect((await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(text => text === '✓ Done' || text === 'Not done' || /^Done · /.test(text))).toEqual([])
+  expect((await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(text => text === '✓ Done' || /^Done · /.test(text))).toEqual([])
   expect((await pane.findAll({ type: 'Text' })).some(one => /^Not done · \d/.test(String(one.text ?? '')))).toBe(true)
   await pane.unmount()
   // A task waiting on your answer with to-dos still to do is no task left undone
@@ -1494,6 +1494,6 @@ test("a task ending its step with to-dos still to do and nothing of its own runn
   await $.turn.complete({ answer: 'Waiting for your pick.', durationMs: 1, isAborted: false, turnId: 't4', reason: 'answer', agentId: 'a3' } as never)
   const shown = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => (JSON.stringify(await shown.drawn()).includes('Which tone?') ? true : undefined))).toBe(true)
-  expect((await shown.findAll({ type: 'Text', text: /^Not done · / })).map(one => one.text)).toEqual(['Not done · Second look'])
+  expect((await shown.findAll({ type: 'Text', text: /^Not done · Second/ })).map(one => one.text)).toEqual(['Not done · Second look'])
   await shown.unmount()
 })

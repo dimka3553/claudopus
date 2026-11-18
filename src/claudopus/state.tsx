@@ -57,8 +57,9 @@ const stateOf = (list: Todo[], one: Todo): TaskState => {
 // (`_asks` is no longer read: a result's question changes nothing of this)
 const shownAs = (list: Todo[], _asks?: (one: Todo) => boolean): Todo[] =>
   list.map(one => {
-    // (nor one the person dismissed: it is under Finished as it ended, until its task works again)
-    if (isOff || one.parentId || one.chat || one.status !== 'done' || one.closedAt) return one
+    if (isOff || one.parentId || one.chat || one.status !== 'done') return one
+    // (one the person dismissed is under Finished and waits for nothing more, but with to-dos left it still never reads Done)
+    if (one.closedAt) return openItems(one).length ? { ...one, leftOpen: openItems(one).length } : one
     // (a question of its own on its card comes first: it is Waiting for you, its command's row under it)
     if (one.ask) return one
     const { runs, helpers } = wakesOf(list, one)
