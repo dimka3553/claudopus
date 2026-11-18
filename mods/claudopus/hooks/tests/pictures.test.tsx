@@ -409,6 +409,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       const path = `${rest[3]}/${rest[4]}/${rest[5]}`
       return files.has(path) ? ok(files.get(path)) : ok('', 1)
     }
+    // The lines a task added to and took from its files, as the test lays git:numstat
+    if (tool === 'sh' && String(rest[1]).includes('git diff --numstat')) return ok(files.get('git:numstat') ?? '')
     if (tool === 'sh' || tool === 'bash') {
       sshed.push([String(rest[1]), String(rest.slice(3).join(' '))])
       // A stream cut short lays half of what it carried and fails
@@ -945,4 +947,55 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   await term.unmount()
   // Only the ask's notice in the chat is logged: nothing failed
   expect(logged.filter(line => !line.startsWith('"Pick a design" has a question for you'))).toEqual([])
+})
+
+test("what a task made is on its card under its title, side by side, and as tiles under the title in its Details: a file opens on a press, three of a kind are one stack that opens out, its code is a count of files and lines, and no folder or path is shown", async ($, on) => {
+  const { files, shown, logged } = world(on, {})
+  const NEW = '9999999999999'
+  const pdf = '/Users/me/out/vat-report.pdf'
+  const shots = ['/Users/me/out/a.png', '/Users/me/out/b.png', '/Users/me/out/c.png']
+  for (const path of [pdf, ...shots, '/repo/src/app.ts', '/tmp/work/scratch.png']) (files.set(path, 'x'), files.set(`mtime:${path}`, NEW))
+  // One that was there before the task began is not of its making
+  files.set('/Users/me/out/old.pdf', 'x')
+  files.set('git:top', '/repo')
+  files.set('git:numstat', '12\t3\tsrc/app.ts\n')
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'make the report', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Make the report.' } as never)
+  await $.tool.call({ tool: 'Write', tool_use_id: 'w1', agentId: 'a1', file_path: '/repo/src/app.ts', content: 'x' } as never)
+  await $.tool.call({ tool: 'Write', tool_use_id: 'w2', agentId: 'a1', file_path: '/tmp/work/scratch.png', content: 'x' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1', command: `render ${[pdf, ...shots, '/Users/me/out/old.pdf'].join(' ')}`, description: 'Run the render of the report' } as never)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  // While it still works: its files right under its title, each an icon and a word or two
+  await until(async () => (await keyed(pane, 'made-a1-pdf-0-open')) || undefined)
+  const chips = (await pane.findAll({ type: 'Button' })).filter(one => String(one.key).startsWith('made-a1-')).map(one => String(one.props.label))
+  expect(chips).toEqual(['3 pictures', 'vat-report'])
+  expect((await pane.findAll({ type: 'Text' })).map(one => one.text).filter(text => /code file|^[+−]\d/.test(String(text)))).toEqual(['1 code file', '+12', '−3'])
+  expect((await pane.findAll({ type: 'Text' })).some(one => /\/Users\/me|\/repo\/src|scratch|old/.test(String(one.text)))).toBe(false)
+  // A file opens on a press, as the system opens it
+  await pressed(pane, 'made-a1-pdf-0-open')
+  expect(shown).toEqual([['open', pdf]])
+  // In its Details: the same things as tiles, right under the title and above everything else
+  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  await until(async () => (await keyed(tab, 'files-a1-pile-picture-open')) || undefined)
+  const bold = (await tab.findAll({ type: 'Text' })).filter(text => text.props.bold).map(text => text.text)
+  expect(bold[1]).toBe('Files')
+  const tiles = async () => (await tab.findAll({ type: 'Svg' })).filter(svg => svg.props.width === 96).map(svg => String(svg.props.alt))
+  expect(await tiles()).toEqual(['3 pictures', 'vat-report', '1 code file'])
+  // A stack opens out into a tile for each of its files, and folds again
+  await pressed(tab, 'files-a1-pile-picture-open')
+  await until(async () => ((await tiles()).includes('a') ? true : undefined))
+  expect(await tiles()).toEqual(['a', 'b', 'c', 'vat-report', '1 code file'])
+  await pressed(tab, 'files-a1-fewer')
+  await until(async () => ((await tiles()).includes('3 pictures') ? true : undefined))
+  expect((await tab.findAll({ type: 'Text' })).some(one => /\/Users\/me|\/repo\/src/.test(String(one.text)))).toBe(false)
+  await tab.unmount()
+  // Done: what its result names joins in, but a code file it names stays in the count, and only a link it says it made is a thing
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: `The report is made: ${pdf}. The fix is in /repo/src/app.ts.\n\nReport added: https://os.example.com/reports/9\nSee the guide at https://docs.example.com/guide` } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a1' } as never)
+  await until(async () => (await keyed(pane, 'made-a1-link-0-open')) || undefined)
+  expect((await pane.findAll({ type: 'Button' })).filter(one => String(one.key).startsWith('made-a1-')).map(one => String(one.props.label))).toEqual(['3 pictures', 'vat-report', 'os report 9 ↗'])
+  expect((await pane.findAll({ type: 'Text' })).map(one => one.text).filter(text => /code file/.test(String(text)))).toEqual(['1 code file'])
+  await pane.unmount()
+  expect(logged).toEqual([])
 })

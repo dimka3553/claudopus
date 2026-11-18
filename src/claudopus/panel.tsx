@@ -539,6 +539,12 @@ const panelHooks = (on: On) => {
               </Box>
               {facts(one, false, kept.length > 0 ? `${done} of ${kept.length} to-dos done` : '')}
             </Box>
+            {/* What it made so far, right under its title: side by side, each a press that opens it */}
+            {madeNow($, one)?.made.length || madeNow($, one)?.code ? (
+              <Box key={`made-lead-${one.id}`} paddingLeft={lead}>
+                {madeChips($, table, one, `made-${one.id}`, () => openWork($, one.id))}
+              </Box>
+            ) : null}
             {/* The to-do it is on, numbered by how many are done, as the edge's lighter part is, so the edge, the count and the row agree */}
             {stepLine(one, kept, done)}
             {/* Every part under the title starts at the title's own left edge (lead). What the card waits on, each in the order it
@@ -1545,6 +1551,8 @@ const panelHooks = (on: On) => {
               ) : null}
             </Box>
           </Box>
+          {/* What it made, right under its title, while it works and once it is done */}
+          {madeNow($, one)?.made.length || madeNow($, one)?.code ? part('part-files', 'Files', '', madeTiles($, table, madeNow($, one) ?? { made: [] }, paneId, `files-${one.id}`, e.surface) ?? <Box />) : null}
           {one.admins?.length || cardNotesOf(one.id, at).length ? (
             <Box key="part-gates" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
