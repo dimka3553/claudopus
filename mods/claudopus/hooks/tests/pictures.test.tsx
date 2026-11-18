@@ -970,6 +970,9 @@ test("what a task made is on its card under its title, side by side, and as tile
   await until(async () => (await keyed(pane, 'made-a1-pdf-0-open')) || undefined)
   const chips = (await pane.findAll({ type: 'Button' })).filter(one => String(one.key).startsWith('made-a1-')).map(one => String(one.props.label))
   expect(chips).toEqual(['3 pictures', 'vat-report'])
+  // Each has its icon, which the app draws only with words of its own (it drops a picture whose alt is blank)
+  const icons = (await pane.findAll({ type: 'Svg' })).filter(svg => svg.props.width === 18)
+  expect(icons.map(svg => String(svg.props.alt).trim())).toEqual(['Picture', 'PDF', 'Code'])
   expect((await pane.findAll({ type: 'Text' })).map(one => one.text).filter(text => /code file|^[+−]\d/.test(String(text)))).toEqual(['1 code file', '+12', '−3'])
   expect((await pane.findAll({ type: 'Text' })).some(one => /\/Users\/me|\/repo\/src|scratch|old/.test(String(one.text)))).toBe(false)
   // A file opens on a press, as the system opens it

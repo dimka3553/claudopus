@@ -1,0 +1,1 @@
+- A task's card now shows an icon beside each thing the task made, as designed: the app had been leaving every icon out

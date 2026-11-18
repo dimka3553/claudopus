@@ -4125,7 +4125,8 @@ const madeChips = ($: EngineInterface, ui: Ui, one: Todo, key: string, onOpenWor
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   const things = thingsOf(files, () => false)
   const shown = things.slice(0, CHIPS_MOST)
-  const icon = (kind: MadeKind | 'code', at: string, path?: string) => (table.Svg && !('isTerminal' in ui) ? <table.Svg key={`${at}-icon`} source={svgOfIcon(kind, 18, 20, path)} alt="" width={18} height={20} /> : null)
+  const icon = (kind: MadeKind | 'code', at: string, path?: string) =>
+    table.Svg && !('isTerminal' in ui) ? <table.Svg key={`${at}-icon`} source={svgOfIcon(kind, 18, 20, path)} alt={kind === 'code' ? 'Code' : kind === 'link' ? 'Link' : madeKindOf(kind).one.replace(/^\w/, c => c.toUpperCase())} width={18} height={20} /> : null
   return (
     <Box key={key} flexDirection="row" flexWrap="wrap" columnGap={2} rowGap={0}>
       {shown.map(thing => (
