@@ -63,7 +63,7 @@ const prompts: string[] = []
 // the release
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -308,6 +308,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The newest process number, as a shell started now gets it, and the processes as a command that has just ended leaves them
     if (options.jobs?.pid && tool === 'sh' && String(rest[1]).includes('# pid now')) return ok(`${options.jobs.pid()}\n`)
     if (options.jobs?.ps && tool === 'sh' && String(rest[1]).includes('@@LEFT@@')) return ok(`@@LEFT@@\n${options.jobs.ps()}\n`)
+    // (and as they are while a command runs, where its shell is looked for: with the shells the test says run then)
+    if (options.jobs?.ps && tool === 'sh' && String(rest[1]).includes('@@SHELLS@@')) return ok(`@@SHELLS@@\n${options.jobs.shells?.() ?? ''}\n${options.jobs.ps()}\n`)
     if (options.jobs?.fd && tool === 'sh' && String(rest[1]).includes('/proc/$p/fd/1')) return ok(options.jobs.fd())
     // Whose each process is by its environment, as the test says (this chat's where it says nothing)
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('# whose runs')) return ok(rest.slice(4).map(p => `${p} ${options.jobs?.owner?.(String(p)) ?? 'mine'}\n`).join(''))
@@ -773,7 +775,8 @@ const psLine = (pid: number, ppid: number, pgid: number, command: string, rssKb 
 
 // A world where the work's command is handed process numbers from 5000 to 5100 (the probe before it gets 5000, the one after 5100),
 // and the test lays the processes on this Mac, which of them still run, and where each writes
-const leftWorld = (on: On, procs: { list: string[]; logs: Record<string, string>; outputs?: Record<string, string>; owners?: Record<string, 'mine' | 'other' | 'hidden'> }) => {
+// (`shells`: the shells that run while a command does, gone as it ends)
+const leftWorld = (on: On, procs: { list: string[]; logs: Record<string, string>; outputs?: Record<string, string>; owners?: Record<string, 'mine' | 'other' | 'hidden'>; shells?: string[] }) => {
   let pid = 4900
   const now = { at: 1_700_000_000_000 }
   // (the work is at a step of its own throughout, as the engine lists it: an ended run's word goes into its run)
@@ -783,6 +786,7 @@ const leftWorld = (on: On, procs: { list: string[]; logs: Record<string, string>
       output: file => procs.outputs?.[file] ?? '',
       wroteAt: () => now.at - 2_000,
       ps: () => procs.list.join('\n'),
+      shells: () => (procs.shells ?? []).join('\n'),
       fd: () => Object.entries(procs.logs).map(([p, f]) => `${p} ${f}`).join('\n'),
       pid: () => String((pid += 100)),
       alive: p => procs.list.some(line => line.trim().startsWith(`${p} `)),
@@ -1022,13 +1026,19 @@ test('a background command whose shell ends leaving its scripts running hands th
   expect(shown.some(text => /commands have ended|Run the renders (has|have) /.test(text))).toBe(false)
 })
 
-test('a script that starts a session of its own while its command runs is still that command\'s run, even where its environment cannot be read; the system\'s own programs, and what another chat or app started at that moment, never are (17 Nov: a git push and a dig took headless Chrome\'s crash reporters as runs they left, "Run Google Chrome")', SLOW, async ($, on) => {
+test('a script that starts a session of its own while its command runs is still that command\'s run, even where its environment cannot be read, with what its shell\'s group holds under any name; the system\'s own programs, what another chat or app started at that moment, and what a task of this chat out of sight started while the command was held open, never are (17 Nov: a git push and a dig took headless Chrome\'s crash reporters as runs they left, "Run Google Chrome"; 18 Nov: a finished task\'s card showed another task\'s 12 GB run for 47 minutes)', SLOW, async ($, on) => {
   // (another chat's headless browser: its crash reporter forks away from it, its group's leader gone, its number within the command's)
   const crashpad = '/u/.cache/puppeteer/chrome/mac_arm-148/chrome-mac-arm64/Google Chrome for Testing.app/Contents/Frameworks/Google Chrome for Testing Framework.framework/Helpers/chrome_crashpad_handler --monitor-self'
-  const procs = { list: [] as string[], logs: {} as Record<string, string>, owners: { '5060': 'hidden', '5080': 'other' } as Record<string, 'mine' | 'other' | 'hidden'> }
+  const procs = { list: [] as string[], logs: {} as Record<string, string>, owners: { '5060': 'hidden', '5080': 'other' } as Record<string, 'mine' | 'other' | 'hidden'>, shells: [] as string[] }
   const { advance } = leftWorld(on, procs)
   await leftStart($)
   procs.list.push(psLine(5060, 1, 5060, '/u/bin/python daemon.py --serve-tiles'), psLine(5070, 1, 5070, '/System/Library/CoreServices/mdworker_shared'), psLine(5080, 1, 5077, crashpad))
+  // The command's own shell (5050), seen while it runs, and a worker left in its group under a name the command never says
+  procs.shells.push(psLine(5050, 900, 5050, "/bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'python daemon.py --serve-tiles' < /dev/null"))
+  procs.list.push(psLine(5065, 1, 5050, '/u/bin/node tiles-worker.mjs', 2_000))
+  // A task of this chat that Claudopus has no command for starts two runs meanwhile, from shells of its own (5076, 5078): their
+  // numbers are within the command's, they started in time and carry this chat's session, one even runs the command's own program
+  procs.list.push(psLine(5085, 1, 5076, '/u/bin/node tools/confirm.mjs 8', 12_000_000), psLine(5090, 1, 5078, '/u/bin/python tools/run.py confirm 8', 12_000_000))
   await $.tool.call({ tool: 'Bash', tool_use_id: 'l7', agentId: 'a1', command: 'python daemon.py --serve-tiles', description: 'Run the tile daemon' } as never)
   await advance(20_000)
   const shown = await until(async () => {
@@ -1036,7 +1046,9 @@ test('a script that starts a session of its own while its command runs is still 
     return all.some(text => text.startsWith('Run the tile daemon')) ? all : undefined
   })
   expect(shown?.some(text => text.includes('mdworker'))).toBe(false)
-  expect(shown?.some(text => /Chrome|crashpad|programs/.test(text))).toBe(false)
+  // (the daemon and its worker, and nothing of the task out of sight: none of its 12 GB)
+  expect(shown?.some(text => /2 programs/.test(text))).toBe(true)
+  expect(shown?.some(text => /Chrome|crashpad|[^2] programs| GB/.test(text))).toBe(false)
 })
 
 test('what another task of the same chat starts while its command runs in the background is never taken by a short command of another task beside it (17 Nov: a screenshot script sent to the background started headless Chrome while a git push ran, and the push\'s card showed its crash reporters)', SLOW, async ($, on) => {
@@ -1048,7 +1060,12 @@ test('what another task of the same chat starts while its command runs in the ba
   // The other task's script, sent to the background, is handed 5000 to 5100 as it goes there and runs on
   procs.list.push(psLine(5050, 900, 5050, "/bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh && eval './run.sh old & ./run.sh new; wait; node shoot.mjs' < /dev/null"))
   await $.tool.call({ tool: 'Bash', tool_use_id: 's1', agentId: 'a2', command: './run.sh old & ./run.sh new; wait; node shoot.mjs', description: 'Run the screenshots of both sides (about 3 min)', run_in_background: true } as never)
-  // Its headless browser's crash reporters fork away while this task's git push is handed 5200 to 5300, and carry this chat's session
+  // Its headless browsers are seen under its shell, each leading a group of its own
+  const browsers = [5250, 5251].map(pid => psLine(pid, 5050, pid, '/u/.cache/puppeteer/chrome/mac_arm-148/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing --headless', 300_000))
+  procs.list.push(...browsers)
+  await advance(20_000)
+  // The browsers end, and their crash reporters fork away while this task's git push is handed its numbers, and carry this chat's session
+  procs.list = procs.list.filter(line => !browsers.includes(line))
   procs.list.push(psLine(5260, 1, 5250, crashpad, 30_000), psLine(5262, 1, 5251, crashpad, 30_000))
   await $.tool.call({ tool: 'Bash', tool_use_id: 'p1', agentId: 'a1', command: 'git push -q origin fix', description: 'Upload the fix' } as never)
   await advance(20_000)

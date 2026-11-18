@@ -251,6 +251,7 @@ declare global {
   export import shellsOf = M10.shellsOf
   export import treeOf = M10.treeOf
   export import waitOf = M10.waitOf
+  export import groupsOf = M10.groupsOf
   export import leftoversOf = M10.leftoversOf
   export import leftCommandOf = M10.leftCommandOf
   export import isNamedBy = M10.isNamedBy
