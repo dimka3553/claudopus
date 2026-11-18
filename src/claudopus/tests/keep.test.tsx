@@ -103,7 +103,8 @@ test('the notice names each piece by its own title', SLOW, async ($, on) => {
   leftAtWork(files, ['a7', 'a8'])
   await $.session.start(start)
   await clock.advance(31_000)
-  const said = logged.find(line => line.includes('after the chat stopped at')) ?? ''
+  // (each is sent from a hook, a moment after the look)
+  const said = (await until(async () => logged.find(line => line.includes('after the chat stopped at')))) ?? ''
   // Only the task that could not be started again is said in the chat
   expect(said).toMatch(/^Claudopus couldn't start "Train the splats" again after the chat stopped at \d\d:\d\d\.$/)
 })

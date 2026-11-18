@@ -14,11 +14,15 @@ const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url)
 // (about twice as slow as a Mac) the longest scenarios, 4 to 8 seconds alone, passed or failed by the machine's load, not by the mod.
 // SLOW is that limit, kept for the tests that name it
 const SLOW = { timeoutMs: 60_000 }
+// The test now running, for the world's clock (below): the tests of a file run one after another
+let driver: Parameters<TestBody>[0] | undefined
 function test(name: string, body: TestBody): void
 function test(name: string, options: { timeoutMs?: number }, body: TestBody): void
 function test(name: string, options: TestBody | { timeoutMs?: number }, body?: TestBody) {
-  if (typeof options === 'function') kitTest(name, SLOW, options)
-  else kitTest(name, { ...SLOW, ...options }, body as TestBody)
+  const run = (typeof options === 'function' ? options : body) as TestBody
+  const kept: TestBody = ($, on) => ((driver = $), run($, on))
+  if (typeof options === 'function') kitTest(name, SLOW, kept)
+  else kitTest(name, { ...SLOW, ...options }, kept)
 }
 const MEMORY = `${HOME}/.claude/claudopus`
 // This Mac's keychain, there unless a test takes it away as a home of a trial chat's own has none
@@ -59,7 +63,7 @@ const prompts: string[] = []
 // the release
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -123,7 +127,31 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const admins: { command: string; grants: { host: string; command: string; seal: string; at: number; id: string }[] }[] = []
   // The kit's clock moves only as a test moves it: the mod's look at how late its timer comes is left out, unless a test asks for it
   mock.env(on, { HOME, CLAUDOPUS_TIMING: 'test', ...options.env })
-  const clock = mock.clock(on, { now: 1_700_000_000_000 })
+  const kitClock = mock.clock(on, { now: 1_700_000_000_000 })
+  // A hook of the mod follows each move of the clock, as in the app, where a drawing or a step of some task is never far: what the
+  // mod's timers leave for a hook to send (sendHeld) goes then. A test that names `unseen` moves the clock bare, and brings the
+  // hook itself, and every agent a message started while its clock moved is listed in `unseen`
+  let moving = 0
+  const bare = async (ms: number) => {
+    moving += 1
+    try {
+      return await kitClock.advance(ms)
+    } finally {
+      moving -= 1
+    }
+  }
+  const clock: typeof kitClock = options.unseen
+    ? { ...kitClock, advance: bare as never }
+    : {
+        ...kitClock,
+        // (in moves of half a minute at most, each followed by its hook: a long move with none would be a chat where nothing ran)
+        advance: (async (ms: number) => {
+          for (let left = ms; left > 0; left -= 30_000) {
+            await kitClock.advance(Math.min(left, 30_000))
+            await driver?.session.measure({ context: {}, rateLimits: [], changed: [] } as never).catch(() => undefined)
+          }
+        }) as never,
+      }
   // What the engine draws where the mod draws nothing
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
@@ -292,6 +320,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // What was handed to this Mac's keychain on security's stdin
     if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    // bin/catch-up, started in a session of its own
+    if (tool === '/bin/sh' && String(rest[4] ?? '').endsWith('/bin/catch-up')) return (own.push([...e.argv]), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
     if (tool?.endsWith('bin/notify')) {
       own.push([...e.argv])
@@ -407,6 +437,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       const path = `${rest[3]}/${rest[4]}/${rest[5]}`
       return files.has(path) ? ok(files.get(path)) : ok('', 1)
     }
+    // The lines a task added to and took from its files, as the test lays git:numstat
+    if (tool === 'sh' && String(rest[1]).includes('git diff --numstat')) return ok(files.get('git:numstat') ?? '')
     if (tool === 'sh' || tool === 'bash') {
       sshed.push([String(rest[1]), String(rest.slice(3).join(' '))])
       // A stream cut short lays half of what it carried and fails
@@ -473,7 +505,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
       : tool === 'grep'
-        ? `${MEMORY}/words/local_1.md:2:the nose is flawed\n`
+        ? `${MEMORY}/work/local_1.md:9:the nose model returned\n${MEMORY}/words/local_1.md:2:the nose is flawed\n`
         : tool === 'lsof' && rest.includes('-iTCP')
           ? `p635\nn*:7000\n${isGone ? '' : 'p700\nn127.0.0.1:3100\nn[::1]:3100\n'}`
           : tool === 'lsof'
@@ -511,6 +543,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   on('session.send', (_, e) => {
     if (options.unresumable?.has(e.to)) return { isDelivered: false, reason: 'no such agent' } as never
+    // `unseen`: the agents a message started from a timer of the mod's, as the clock moved with no hook around it: the engine
+    // leaves every hook of the mod out of such a run (seen in the kit: a hook of the mod's own answers its call from inside a hook,
+    // and is left out of the same call from a timer)
+    if (options.unseen && moving) options.unseen.push(e.to)
     resumed.push(`${e.to}: ${e.text}`)
     return { isDelivered: true } as never
   })
@@ -1024,4 +1060,102 @@ test('what another task of the same chat starts while its command runs in the ba
   expect(shown?.some(text => /^Upload the fix|Chrome/.test(text))).toBe(false)
   expect(shown?.filter(text => text.startsWith('Run the screenshots of both sides')).length).toBe(1)
   expect(shown?.some(text => text.startsWith('What “Run the screenshots of both sides” started'))).toBe(true)
+})
+
+test('a task whose step ends while only a preview server it left going runs, its helper\'s result just passed on and to-dos still to do, is not done: it stays at work and is started again, and it is done only once it hands back its result (18 Nov: a site task\'s card showed done for half an hour, no result ever came)', SLOW, async ($, on) => {
+  const procs = { list: [] as string[], logs: {} as Record<string, string> }
+  let pid = 4900
+  const now = { at: 1_700_000_000_000 }
+  const agents: Record<string, string> = { a1: 'running' }
+  const kinds: Record<string, string> = {}
+  const PRESS = { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' }
+  const QUIET = { role: 'assistant', content: [{ type: 'text', text: '<system-reminder>Waiting on my own work, which starts me again.</system-reminder>' }] }
+  const talk: unknown[] = []
+  const pressedAfter = (words: string) => talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text: words }] }, PRESS, QUIET, PRESS, QUIET, PRESS, QUIET)
+  const w = world(on, {
+    agents,
+    talk,
+    kinds,
+    jobs: {
+      output: () => '',
+      wroteAt: () => now.at - 2_000,
+      ps: () => procs.list.join('\n'),
+      fd: () => '',
+      pid: () => String((pid += 100)),
+      alive: p => procs.list.some(line => line.trim().startsWith(`${p} `)),
+      owner: () => 'mine',
+    },
+  })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  const advance = async (ms: number) => ((now.at += ms), await w.clock.advance(ms))
+  const { resumed, notified, stepped } = w
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'build and deploy the site', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Build and deploy the site', prompt: 'build it' } as never)
+  kinds.a1 = 'general-purpose'
+  const call = (tool: string, id: string, input: Record<string, unknown> = {}) => $.tool.call({ tool, tool_use_id: id, agentId: 'a1', ...input } as never)
+  const ends = async (id: string, answer: string, turn: string) => $.turn.complete({ answer, durationMs: 1, isAborted: false, turnId: turn, reason: 'answer', agentId: id } as never)
+  const card = async () => {
+    const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+    const texts = (await pane.findAll({ type: 'Text' })).map(one => one.text ?? '')
+    await pane.unmount()
+    return texts
+  }
+  for (const [n, item] of ['Find where the site is hosted', 'Say whether its domain takes email', 'Put a first page live', 'Build the full page'].entries()) await call('mcp__claudopus__todo', `t${n}`, { item, state: 'done' })
+  await call('mcp__claudopus__todo', 't5', { item: 'Have a second Claude check the page, then put it live', state: 'doing' })
+  // Its command builds the page, leaves a preview server going in its group, and takes pictures of it
+  procs.list.push(psLine(5060, 1, 5050, 'node /repo/node_modules/.bin/vite preview --port 4174'))
+  await call('Bash', 'b1', { command: 'npm run build && (npx vite preview --port 4174 >/dev/null 2>&1 &) && node shot.mjs http://localhost:4174 desktop.png', description: 'Run build of the full page and capture desktop and phone pictures' })
+  await advance(20_000)
+  expect(await until(async () => ((await leftTexts($)).some(text => text.startsWith('Run build of the full page')) || undefined))).toBe(true)
+  // It starts a second look and ends its step to wait for it, pressed for its report
+  await $.agent.spawn({ ...spawn, description: 'Check the page', prompt: 'check it', parentAgentId: 'a1' } as never)
+  kinds.a2 = 'general-purpose'
+  agents.a2 = 'running'
+  agents.a1 = 'completed'
+  pressedAfter("Waiting for the second Claude's findings.")
+  await ends('a1', "Waiting for the second Claude's findings.", 'w1')
+  await advance(6_000)
+  // The helper hands back and ends: Claudopus passes its result on to the task, which takes it in a step of its own, misreads it as
+  // still to come and ends its step again, pressed for its report three times, with only the server running
+  agents.a2 = 'completed'
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'a2', message: 'I found 1 serious fault: the 3D covers the headline at tablet width.' } as never)
+  await ends('a2', '', 'h1')
+  expect(await until(async () => resumed.find(line => line.startsWith('a1: From Claudopus: your helper "Check the page"')))).toBeDefined()
+  agents.a1 = 'running'
+  for await (const _ of $.turn.step({ turnId: 'w2', index: 0, model: 'm', messageCount: 1, agentId: 'a1' })) void _
+  pressedAfter("Waiting for the checker's report, which is due in the next message.")
+  // Claude Code presses it for its report: with only a server of its own running, nothing would start it again, so the press goes
+  // to Claude (before, Claudopus answered it itself, telling it to end its step and wait)
+  talk.splice(2)
+  const sent = stepped.length
+  for await (const _ of $.turn.step({ turnId: 'w2', index: 1, model: 'm', messageCount: 3, agentId: 'a1' })) void _
+  expect(stepped.length).toBe(sent + 1)
+  pressedAfter("Waiting for the checker's report, which is due in the next message.")
+  agents.a1 = 'completed'
+  await ends('a1', "Waiting for the checker's report, which is due in the next message.", 'w2')
+  await advance(6_000)
+  // Not done, no ready note, no result: its card stays at work, and Claudopus starts it again to carry on
+  expect((await card()).some(text => text === '✓ Done' || /^Done · /.test(text))).toBe(false)
+  expect(notified).toEqual([])
+  expect(resumed.filter(line => line.startsWith('a1: From Claudopus, not ') && line.includes('Carry on from where you were'))).toHaveLength(1)
+  // Started again, it runs a command, and its run ends again without its result where Claudopus hears no end of its turn, only the
+  // engine listing it as over: still not done, and started again once more
+  agents.a1 = 'running'
+  await call('Bash', 'b2', { command: 'git status', description: 'Run a look at what is committed' })
+  agents.a1 = 'completed'
+  await advance(25_000)
+  await advance(6_000)
+  expect((await card()).some(text => text === '✓ Done' || /^Done · /.test(text))).toBe(false)
+  expect(notified).toEqual([])
+  expect(resumed.filter(line => line.startsWith('a1: From Claudopus, not ') && line.includes('Carry on from where you were'))).toHaveLength(2)
+  // It does the rest and hands back its result: only now is it done
+  agents.a1 = 'running'
+  await call('mcp__claudopus__todo', 't6', { item: 'Have a second Claude check the page, then put it live', state: 'done' })
+  await call('SubagentHandback', 'hb1', { message: 'The full page is live, checked by a second Claude.' })
+  agents.a1 = 'completed'
+  await ends('a1', '', 'w3')
+  expect(await until(async () => ((await card()).includes('✓ Done') || undefined))).toBe(true)
+  await advance(2_000)
+  expect(notified.map(line => line.split(' | ')[1])).toEqual(['The full page is live, checked by a second Claude.'])
 })

@@ -14,11 +14,15 @@ const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url)
 // (about twice as slow as a Mac) the longest scenarios, 4 to 8 seconds alone, passed or failed by the machine's load, not by the mod.
 // SLOW is that limit, kept for the tests that name it
 const SLOW = { timeoutMs: 60_000 }
+// The test now running, for the world's clock (below): the tests of a file run one after another
+let driver: Parameters<TestBody>[0] | undefined
 function test(name: string, body: TestBody): void
 function test(name: string, options: { timeoutMs?: number }, body: TestBody): void
 function test(name: string, options: TestBody | { timeoutMs?: number }, body?: TestBody) {
-  if (typeof options === 'function') kitTest(name, SLOW, options)
-  else kitTest(name, { ...SLOW, ...options }, body as TestBody)
+  const run = (typeof options === 'function' ? options : body) as TestBody
+  const kept: TestBody = ($, on) => ((driver = $), run($, on))
+  if (typeof options === 'function') kitTest(name, SLOW, kept)
+  else kitTest(name, { ...SLOW, ...options }, kept)
 }
 const MEMORY = `${HOME}/.claude/claudopus`
 // This Mac's keychain, there unless a test takes it away as a home of a trial chat's own has none
@@ -59,7 +63,7 @@ const prompts: string[] = []
 // the release
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -123,7 +127,31 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const admins: { command: string; grants: { host: string; command: string; seal: string; at: number; id: string }[] }[] = []
   // The kit's clock moves only as a test moves it: the mod's look at how late its timer comes is left out, unless a test asks for it
   mock.env(on, { HOME, CLAUDOPUS_TIMING: 'test', ...options.env })
-  const clock = mock.clock(on, { now: 1_700_000_000_000 })
+  const kitClock = mock.clock(on, { now: 1_700_000_000_000 })
+  // A hook of the mod follows each move of the clock, as in the app, where a drawing or a step of some task is never far: what the
+  // mod's timers leave for a hook to send (sendHeld) goes then. A test that names `unseen` moves the clock bare, and brings the
+  // hook itself, and every agent a message started while its clock moved is listed in `unseen`
+  let moving = 0
+  const bare = async (ms: number) => {
+    moving += 1
+    try {
+      return await kitClock.advance(ms)
+    } finally {
+      moving -= 1
+    }
+  }
+  const clock: typeof kitClock = options.unseen
+    ? { ...kitClock, advance: bare as never }
+    : {
+        ...kitClock,
+        // (in moves of half a minute at most, each followed by its hook: a long move with none would be a chat where nothing ran)
+        advance: (async (ms: number) => {
+          for (let left = ms; left > 0; left -= 30_000) {
+            await kitClock.advance(Math.min(left, 30_000))
+            await driver?.session.measure({ context: {}, rateLimits: [], changed: [] } as never).catch(() => undefined)
+          }
+        }) as never,
+      }
   // What the engine draws where the mod draws nothing
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
@@ -292,6 +320,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // What was handed to this Mac's keychain on security's stdin
     if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    // bin/catch-up, started in a session of its own
+    if (tool === '/bin/sh' && String(rest[4] ?? '').endsWith('/bin/catch-up')) return (own.push([...e.argv]), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
     if (tool?.endsWith('bin/notify')) {
       own.push([...e.argv])
@@ -407,6 +437,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       const path = `${rest[3]}/${rest[4]}/${rest[5]}`
       return files.has(path) ? ok(files.get(path)) : ok('', 1)
     }
+    // The lines a task added to and took from its files, as the test lays git:numstat
+    if (tool === 'sh' && String(rest[1]).includes('git diff --numstat')) return ok(files.get('git:numstat') ?? '')
     if (tool === 'sh' || tool === 'bash') {
       sshed.push([String(rest[1]), String(rest.slice(3).join(' '))])
       // A stream cut short lays half of what it carried and fails
@@ -473,7 +505,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
       : tool === 'grep'
-        ? `${MEMORY}/words/local_1.md:2:the nose is flawed\n`
+        ? `${MEMORY}/work/local_1.md:9:the nose model returned\n${MEMORY}/words/local_1.md:2:the nose is flawed\n`
         : tool === 'lsof' && rest.includes('-iTCP')
           ? `p635\nn*:7000\n${isGone ? '' : 'p700\nn127.0.0.1:3100\nn[::1]:3100\n'}`
           : tool === 'lsof'
@@ -511,6 +543,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   on('session.send', (_, e) => {
     if (options.unresumable?.has(e.to)) return { isDelivered: false, reason: 'no such agent' } as never
+    // `unseen`: the agents a message started from a timer of the mod's, as the clock moved with no hook around it: the engine
+    // leaves every hook of the mod out of such a run (seen in the kit: a hook of the mod's own answers its call from inside a hook,
+    // and is left out of the same call from a timer)
+    if (options.unseen && moving) options.unseen.push(e.to)
     resumed.push(`${e.to}: ${e.text}`)
     return { isDelivered: true } as never
   })
@@ -845,7 +881,7 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   await after.unmount()
 })
 
-test('work that answered while only its own background work held it, then stopped by the chat, the panel or the engine, finished: green and happy for its pause; work stopped before it answered is not', async ($, on) => {
+test('work that answered in words while only its own background work held it has not finished: stopped by the chat or the engine, it is stopped, not done; a hand-back ends it done at once', async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}
   const talk: unknown[] = []
@@ -863,43 +899,30 @@ test('work that answered while only its own background work held it, then stoppe
     await $.turn.complete({ answer: report, durationMs: 1, isAborted: false, turnId, reason: 'answer', agentId: id } as never)
   }
 
-  // The chat stops it with TaskStop once its report is in: it ends at once, green and happy, and its report is kept then, once
+  // The chat stops it with TaskStop after a report in words, given while a watcher it started still runs: words are no result, as
+  // only a hand-back is, so it ends stopped, not done, and nothing is kept as its result
   await $.prompt.submit({ text: 'remove the hover', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Remove the hover', prompt: 'remove the hover' } as never)
   await clock.advance(60_000)
   await answer('a1', 't1')
   expect(await drawn(pane)).toEqual(['working'])
   const kept = () => [...files.keys()].filter(key => /\/reports\/[^/]+-remove-the-hover\/report\.md$/.test(key))
-  await clock.advance(10)
-  expect(kept()).toHaveLength(0)
   await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' } as never)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
-  expect(await drawn(pane)).toEqual(['happy'])
-  expect((await pane.find({ type: 'Text', text: /^Just finished$/ }))?.text).toBe('Just finished')
-  await clock.advance(10)
-  expect(await until(async () => kept()[0])).toBeDefined()
-  expect(files.get(kept()[0] ?? '')).toBe(`${report.trim()}\n`)
-  // The aborted turn that follows the stop changes nothing: its pause is not begun again, and its words are no report
-  await clock.advance(1_000)
-  await $.turn.complete({ answer: 'Partial words', durationMs: 1, isAborted: true, turnId: 't1x', reason: 'answer', agentId: 'a1' } as never)
-  await clock.advance(1_100)
   expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
-  expect(files.get(kept()[0] ?? '')).toBe(`${report.trim()}\n`)
-  await clock.advance(2_100)
-  expect(await pane.find({ type: 'Text', text: /Remove the hover/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'Stopped' })).toBeDefined()
   expect(await drawn(pane)).toEqual(['mark'])
-  // The engine's next look lists it killed: nothing changes, and no second report
+  await clock.advance(20)
+  expect(kept()).toHaveLength(0)
   agents.a1 = 'killed'
-  await clock.advance(20_000)
-  expect(kept()).toHaveLength(1)
+  await clock.advance(2_100)
 
-  // Stopped some other way, the engine lists it killed at its next look: the same green moment from then
+  // Stopped some other way, the engine lists it killed at its next look: stopped as well
   await $.agent.spawn({ ...spawn, description: 'Fold the idle chats', prompt: 'fold them' } as never)
   await answer('a2', 't1b')
   agents.a2 = 'killed'
-  for (let n = 0; n < 25 && !(await pane.find({ type: 'Text', text: '✓ Done' })); n += 1) await clock.advance(1000)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
-  expect(await drawn(pane)).toEqual(['happy'])
+  for (let n = 0; n < 25 && !(await pane.find({ type: 'Text', text: 'Stopped' })); n += 1) await clock.advance(1000)
+  expect(await pane.find({ type: 'Text', text: 'Stopped' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
   await clock.advance(2_100)
 
   // Held after only a short line ("started it in the background"), it has not finished: stopped, it is stopped
@@ -996,20 +1019,20 @@ test('work that answered while only its own background work held it, then stoppe
   expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(2_100)
 
-  // The engine ends it as aborted instead: the same
+  // After a report in words while held, the engine ends it as aborted: stopped too, as words are no result
   await $.agent.spawn({ ...spawn, description: 'Fold the list', prompt: 'fold the list' } as never)
   await answer('a6', 't2')
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 't2b', reason: 'answer', agentId: 'a6' } as never)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
-  expect(await drawn(pane)).toEqual(['happy'])
+  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(2_100)
 
   // Stop pressed on its card in the panel: the same
   await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' } as never)
   await answer('a7', 't3')
   await pane.press({ key: 'stop-a7' })
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
-  expect(await drawn(pane)).toEqual(['happy'])
+  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(2_100)
 
   // Held work its watcher wakes takes a step again: from then it has not finished, and stopped it is stopped

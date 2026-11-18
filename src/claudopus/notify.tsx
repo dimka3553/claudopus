@@ -73,7 +73,7 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
       : one.status === 'failed'
         ? 'Failed.'
         : 'Stopped.'
-  return { title: one.title || 'Task', isDone: one.status === 'done', what }
+  return { title: one.title || 'Task', isDone: one.status === 'done', isWaiting: one.status === 'done' && waits.length > 0, what }
 }
 
 // One sound for all that ended together, only when some finished; one notification naming them. config.json switches each off
@@ -94,9 +94,12 @@ const announce = async ($: EngineInterface) => {
   if (config.sound !== false && items.some(one => one.isDone)) void $.audio.play({ asset: READY_SOUND }).catch(err => log($, `ready sound not played: ${String(err)}`))
   if (config.notifications === false) return
   const [first] = items
-  const done = items.filter(one => one.isDone).length
-  const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} tasks are done` : `${items.length} tasks ended`
-  const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${one.isDone ? 'done' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
+  // (a task whose result asks something is waiting for the person, not done)
+  const isWaiting = (one: (typeof items)[number]) => 'isWaiting' in one && Boolean(one.isWaiting)
+  const done = items.filter(one => one.isDone && !isWaiting(one)).length
+  const waiting = items.filter(isWaiting).length
+  const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} tasks are done` : waiting ? `${items.length} tasks ended · ${waiting} waiting for you` : `${items.length} tasks ended`
+  const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${isWaiting(one) ? 'waiting for you' : one.isDone ? 'done' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
   await alertPerson($, 'ready', title, text, `ready-${ids.map(one => one.id).join('-')}`)
 }
 

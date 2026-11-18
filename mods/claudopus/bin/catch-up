@@ -1,0 +1,309 @@
+#!/usr/bin/perl
+# Saves into memory what no chat saved itself, so recall finds every chat:
+#   - words/<chat>.md for each chat whose words Claudopus never wrote (it was not loaded, the chat ran before it, or a program
+#     typed its messages), in the format the chat itself writes;
+#   - work/<chat>.md for every chat: what each of its helpers was asked and reported, what connected tools (SBOS, Notion, mail…)
+#     and fetched pages returned, and the documents it wrote;
+# Keys and passwords are hidden in all it writes. It reads each chat's record from where it last stopped, only once the record has
+# been quiet a while, so a chat still writing is left for the next time.
+#   catch-up [--now] [--hide-existing] <memory folder> <projects folder>
+use strict;
+use warnings;
+use Fcntl qw(SEEK_SET);
+use File::Basename qw(basename dirname);
+use File::Path qw(make_path remove_tree);
+use File::Temp qw(tempdir);
+use Digest::MD5 qw(md5_hex);
+use POSIX qw(strftime);
+use Time::Local qw(timegm);
+
+my ($now, $hideExisting) = (0, 0);
+while (@ARGV && $ARGV[0] =~ /^--/) {
+  my $flag = shift @ARGV;
+  $now = 1 if $flag eq '--now';
+  $hideExisting = 1 if $flag eq '--hide-existing';
+}
+my ($mem, $projects) = @ARGV;
+die "usage: catch-up [--now] [--hide-existing] <memory folder> <projects folder>\n" unless $mem && $projects && -d $mem;
+my $EVERY = $ENV{CLAUDOPUS_CATCH_UP_EVERY} // 540;     # seconds between two runs, whichever chat starts it
+my $QUIET = $ENV{CLAUDOPUS_CATCH_UP_QUIET} // 600;     # seconds a record stays unchanged before it is read
+my $state_dir = "$mem/caught";
+make_path($state_dir, "$mem/words", "$mem/work", "$mem/locks");
+
+# One run at a time: the run that made the lock is the only one that removes it, and a lock left by a run that died goes after
+# three hours. A run starts at most every EVERY seconds, counted from when the last one started
+my $lock = "$mem/locks/catch-up";
+my $isMine = 0;
+END { rmdir $lock if $isMine }
+if (!mkdir $lock) {
+  my $age = time - ((stat $lock)[9] // time);
+  exit 0 if $age < 3 * 3600;
+  remove_tree($lock);
+  mkdir $lock or exit 0;
+}
+$isMine = 1;
+# Each projects folder (a chat run under its own Claude settings folder has its own) is read on its own pause and kept apart
+my $folder = substr(md5_hex($projects), 0, 12);
+my $stamp = "$state_dir/last-$folder";
+exit 0 if !$now && -e $stamp && time - (stat $stamp)[9] < $EVERY;
+$| = 1;
+
+# ---- Keys and passwords hidden: the distinctive shapes keys and tokens take, a private key whole, a password inside an address,
+# a value given to a name that says it is a key, a signed address's signature, and a bearer token. Ordinary words, paths, ids and hashes pass ----
+sub hide {
+  my $t = shift;
+  $t =~ s/-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----/[key hidden]/gs;
+  $t =~ s/\b(?:ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AIza|ya29\.)[A-Za-z0-9_.\-]{10,}/[key hidden]/g;
+  $t =~ s/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/[key hidden]/g;
+  $t =~ s/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/[key hidden]/g;
+  $t =~ s/\b(?:GOCSPX-|ntn_|sbp_|lin_api_|r8_|glsa_|dop_v1_|shpat_|shpss_|xapp-)[A-Za-z0-9_-]{16,}/[key hidden]/g;
+  $t =~ s/\bsecret_(?=[A-Za-z]*\d)[A-Za-z0-9]{32,}/[key hidden]/g;
+  $t =~ s/\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/[key hidden]/g;
+  $t =~ s/\b\d{8,10}:AA[A-Za-z0-9_-]{30,}/[key hidden]/g;
+  $t =~ s/\bsk-(?:ant|proj|svcacct|admin)-[A-Za-z0-9_-]{16,}/[key hidden]/g;
+  $t =~ s/\b(?:sk|pk|rk|hf|npm|vck|whsec)[-_](?:(?:live|test)_)?(?=[A-Za-z0-9]*\d[A-Za-z0-9]*\d)[A-Za-z0-9]{16,}/[key hidden]/g;
+  $t =~ s/(\\?"(?:key|name)\\?"[ \t]*:[ \t]*\\?"[A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIALS?)\\?"[ \t]*,[ \t]*\\?"value\\?"[ \t]*:[ \t]*\\?")(?:[^"\\]|\\[^"])+(?=\\?")/$1\[hidden\]/g;
+  $t =~ s/(\bAuthorization\\?["']?[ \t]*[:=][ \t]*\\?["']?[ \t]*(?:Basic|Bearer|token)[ \t]+)[^\s"'\\]{8,}/$1\[hidden\]/gi;
+  $t =~ s{(\{[^{}]*\\*"(?:key|name)\\*"[ \t]*:[ \t]*\\*"[A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?)\\*"[^{}]*\})}{ my $o = $1; $o =~ s/(\\*"value\\*"[ \t]*:[ \t]*\\*")(?:[^"\\]|\\[^"])+/$1\[hidden\]/g; $o }ge;
+  $t =~ s/(--password[ =]|\bcurl\b[^\n]*?\s-u[ \t]*[^\s:]+:)(?!\[(?:key )?hidden\])[^\s"'`]{4,}/$1\[hidden\]/g;
+  $t =~ s{(\bhooks\.slack\.com/(?:services|workflows|triggers)/)[A-Za-z0-9/_-]+}{$1\[hidden\]}g;
+  $t =~ s{(\b[a-z][a-z0-9+.-]*://[^/\s:@]+:)[^/\s@]+@}{$1\[hidden\]@}gi;
+  $t =~ s/(\b(?i:[A-Za-z0-9_]*(?:api[_-]?key|account[_-]?key|access[_-]?key|private[_-]?key|secret|token|password|passwd))\\*["']?[ \t]*[=:][ \t]*\\*["']?)(?!\[(?:key )?hidden\])(?!(?i:true|false|null|none|undefined)\b)(?!\d{1,7}\b)[^\s"'`,;\\]{4,}/$1\[hidden\]/g;
+  $t =~ s/(\b[A-Z0-9_]*(?:_KEY|_PWD|_PASS)\\*["']?[ \t]*[=:][ \t]*\\*["']?)(?!\[(?:key )?hidden\])(?![\/~.])[^\s"'`,;\\]{4,}/$1\[hidden\]/g;
+  $t =~ s/([?&](?:Policy|Signature|X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token|sig|token|access_token|api_key|apikey|key)=)(?!\[(?:key )?hidden\])[^&\s"'<>),]+/$1\[hidden\]/gi;
+  $t =~ s/(\bBearer[ \t]+)[A-Za-z0-9._~+\/=-]{16,}/$1\[hidden\]/g;
+  return $t;
+}
+
+sub append {
+  my ($path, $text) = @_;
+  return unless length $text;
+  open my $fh, '>>', $path or return;
+  print $fh hide($text);
+  close $fh;
+}
+sub size_of { my $s = -s $_[0]; return defined $s ? $s : 0 }
+sub touch_file { open my $fh, ">", $_[0] or return; close $fh }
+touch_file($stamp);
+
+# Every words and work file hidden once (and again on --hide-existing), each written only when it changed and nothing was added
+# to it meanwhile
+$hideExisting = 1 unless -e "$state_dir/hidden-2";
+if ($hideExisting) {
+  for my $f (map { glob("$mem/$_/*.md") } qw(words work asks pastes)) {
+    my $before = size_of($f);
+    open my $in, '<', $f or next;
+    local $/;
+    my $text = <$in>;
+    close $in;
+    my $hidden = hide($text);
+    next if $hidden eq $text || size_of($f) != $before;
+    open my $out, '>', "$f.hiding" or next;
+    print $out $hidden;
+    close $out;
+    if (size_of($f) == $before) { rename "$f.hiding", $f } else { unlink "$f.hiding" }
+  }
+  touch_file("$state_dir/hidden-2");
+}
+
+# Without jq no record is read
+my $JQ = (grep { -x $_ } map { "$_/jq" } split /:/, ($ENV{PATH} // ''))[0] // (-x '/usr/bin/jq' ? '/usr/bin/jq' : '');
+print "jq is missing: no chat record is read\n" unless $JQ;
+
+# ---- What jq takes from a record's lines ----
+my $JQ_COMMON = <<'JQ';
+def text_of: if type == "string" then . elif type == "array" then [ .[] | select(type == "object" and .type == "text") | .text ] | join("\n") else "" end;
+def has_result: type == "array" and any(.[]; type == "object" and .type == "tool_result");
+def cap($n): if length > $n then .[0:$n] + "\n[\(length - $n) more characters left out]" else . end;
+JQ
+# The chat's own messages and Claude's replies, in the chat's own format; lines copied from another chat it was made from are that chat's
+my $JQ_WORDS = $JQ_COMMON . <<'JQ';
+def sender: .origin.kind // (if .promptSource == "sdk" or .turnOrigin == "sdk" then "sdk" elif .promptSource == "system" then "system" else "human" end);
+def origin_label: sender as $k
+  | if $k == "human" or $k == "composer" then "" elif $k == "bridge" then " (from the phone)" elif $k == "sdk" then " (sent by a program)"
+    elif $k == "channel" then " (from \(.origin.server // "a channel"))" elif $k == "scheduled-trigger" then " (scheduled)"
+    elif $k == "slack-ping" then " (from Slack)"
+    elif $k == "coordinator" or $k == "projects-relay" then " (sent by the chat that runs this one)" else null end;
+inputs | fromjson? | select(type == "object" and .sessionId == $sid and (.isSidechain | not) and (.isMeta | not) and ($before == "" or (.timestamp // "") < $before))
+| if .type == "user" and (.isCompactSummary | not) and (origin_label != null) and (.message.content | has_result | not) then
+    (.message.content | text_of) as $t
+    | select(($t | test("\\S")) and ($t | test("^\\s*(<(command-|local-command|task-notification|system-reminder)|\\[Request interrupted)") | not))
+    | "## \(.timestamp)\(origin_label)\n\($t | cap(50000))\n\n"
+  elif .type == "assistant" and (.isApiErrorMessage | not) then
+    (.message.content | text_of) as $t | select(($t | test("\\S")) and $t != "No response requested.") | "### Claude \(.timestamp)\n\($t | cap(50000))\n\n"
+  else empty end
+JQ
+# What its tools brought: connected services' answers (never Claudopus's own, the browser's or the app's, nor any tool about keys,
+# tokens, passwords or logins), pages fetched, and documents written
+my $JQ_WORK = $JQ_COMMON . <<'JQ';
+def kept_tool: test("^mcp__") and (test("^mcp__(claudopus|progress|ccd_|Claude_|plugin_claudopus|terminal|screenpipe|prisma)") | not)
+  and (test("secret|key|token|passw|credential|login|auth|cookie|terminal|shell|command|screen|env"; "i") | not);
+def tool_label($n): if $n == "WebFetch" then "Fetched" else ($n | sub("^mcp__"; "") | sub("__"; " ")) + " returned" end;
+def doc: test("\\.(md|txt|csv|tsv|html?)$"; "i");
+foreach (inputs | fromjson? | select(type == "object" and ($helper != "" or (.sessionId == $sid and (.isSidechain | not))))) as $l ({names: {}, out: null};
+  .out = null
+  | if $l.type == "assistant" then
+      reduce ($l.message.content[]? | select(type == "object" and .type == "tool_use")) as $u (.;
+        .names[$u.id] = ($u.name + (if $u.name == "WebFetch" then " " + ($u.input.url // "") else "" end))
+        | if $u.name == "Write" and (($u.input.file_path // "") | doc) then .out += ["## Wrote \($u.input.file_path) \($l.timestamp)\($who)\n\(($u.input.content // "") | cap(20000))\n\n"] else . end)
+    elif $l.type == "user" then
+      reduce ($l.message.content[]? | select(type == "object" and .type == "tool_result")) as $r (.;
+        (.names[$r.tool_use_id] // "") as $n
+        | if ($n | kept_tool) or ($n | startswith("WebFetch")) then
+            (($r.content | text_of) // "") as $t
+            | if ($t | test("\\S")) and ($r.is_error | not) then .out += ["## \(tool_label($n | split(" ")[0]))\($n | if startswith("WebFetch ") then " " + .[9:] else "" end) \($l.timestamp)\($who)\n\($t | cap(20000))\n\n"] else . end
+          else . end)
+    else . end;
+  .out // empty | .[])
+JQ
+# A helper's own record: what it was asked, and what it handed back, else its last words
+my $JQ_HELPER = $JQ_COMMON . <<'JQ';
+reduce (inputs | fromjson? | select(type == "object")) as $l ({asked: null, at: null, said: null, saidAt: null, back: null, backAt: null};
+  if $l.type == "user" and .asked == null and $start and ($l.message.content | has_result | not) then
+    ($l.message.content | text_of) as $t | if ($t | test("\\S")) then .asked = $t | .at = $l.timestamp else . end
+  elif $l.type == "assistant" then
+    ([$l.message.content[]? | select(type == "object" and .type == "tool_use" and .name == "SubagentHandback") | .input.message // empty] | first) as $h
+    | ($l.message.content | text_of) as $t
+    | (if $h then .back = $h | .backAt = $l.timestamp else . end)
+    | (if ($t | test("\\S")) then .said = $t | .saidAt = $l.timestamp else . end)
+  else . end)
+| (.back // .said) as $r | (.backAt // .saidAt) as $rAt
+| if .asked == null and $r == null then empty else
+    "## Helper \(.at // $rAt) \($title)\n"
+    + (if .asked then "Asked:\n\(.asked | cap(10000))\n\n" else "" end)
+    + (if $r then "Reported\(if $rAt then " " + $rAt else "" end):\n\($r | cap(30000))\n\n" else "" end)
+  end
+JQ
+
+# The whole lines of a record from a byte on that can hold a message, and the byte after the last whole line: a line not yet ended
+# is read next time. The rest (the app's own bookkeeping) is never read by jq
+sub lines_from {
+  my ($path, $off, $end, $into) = @_;
+  open my $in, '<', $path or return;
+  binmode $in;
+  seek $in, $off, SEEK_SET;
+  open my $out, '>', $into or return;
+  my $at = $off;
+  while ($at < $end && defined(my $line = <$in>)) {
+    last unless substr($line, -1) eq "\n" && $at + length($line) <= $end;
+    $at += length $line;
+    print $out $line if index($line, '"type":"user"') >= 0 || index($line, '"type":"assistant"') >= 0;
+  }
+  close $out;
+  close $in;
+  return $at;
+}
+sub jq {
+  my ($program, $file, @args) = @_;
+  open my $p, '-|', $JQ, '-nRrj', @args, $program, $file or return '';
+  local $/;
+  my $text = <$p> // '';
+  close $p;
+  return $text;
+}
+
+# ---- What was read of each record, kept beside memory: its bytes read, whether its words are Claudopus's own (live), written
+# here (caught, with the size this left them) or not words at all (helper) ----
+my %state;
+# Kept apart for each projects folder (a chat run under its own Claude settings folder has its own), so a run over one never
+# forgets what a run over another read
+my $state_file = "$state_dir/records-$folder.tsv";
+if (open my $in, '<', $state_file) {
+  while (<$in>) {
+    chomp;
+    my ($bytes, $mode, $wbytes, $key) = split /\t/, $_, 4;
+    $state{$key} = [$bytes, $mode, $wbytes] if defined $key && $key !~ m{^/};
+  }
+  close $in;
+}
+sub save_state {
+  open my $out, '>', "$state_file.new" or return;
+  print $out join("\t", @{ $state{$_} }, $_), "\n" for sort keys %state;
+  close $out;
+  rename "$state_file.new", $state_file;
+}
+
+my @records;
+my $walk;
+$walk = sub {
+  my ($d, $depth) = @_;
+  opendir my $dh, $d or return;
+  for my $e (readdir $dh) {
+    next if $e =~ /^\./;
+    my $p = "$d/$e";
+    # Another Mac's chats, run from this Mac's app: each Mac keeps only its own
+    next if $depth == 0 && $e =~ /^ssh-/;
+    if (-d $p) { $walk->($p, $depth + 1) if $depth < 6 }
+    elsif ($e =~ /\.jsonl$/) { push @records, $p }
+  }
+  closedir $dh;
+};
+$walk->($projects, 0) if $JQ && -d $projects;
+
+# What lines a run reads wait outside memory, so no search finds them
+my $scratch = tempdir('claudopus-catch-up.XXXXXX', TMPDIR => 1, CLEANUP => 1);
+my $tmp = "$scratch/lines";
+my %seen;
+my ($done, $total, $said, $chats, $works) = (0, scalar @records, time, 0, 0);
+for my $path (@records) {
+  $done++;
+  if (time - $said >= 10) { print "progress: $done/$total chat records read\n"; $said = time }
+  my $size = size_of($path);
+  my $key = substr($path, length($projects) + 1);
+  $seen{$key} = 1;
+  my ($bytes, $mode, $wbytes) = @{ $state{$key} // [0, '', 0] };
+  next if $size <= $bytes;
+  next if time - (stat $path)[9] < $QUIET;
+  my @parts = split m{/}, $key;
+  my $isHelper = @parts > 2;
+  my $chat = $isHelper ? $parts[1] : basename($parts[1], '.jsonl');
+  next unless $chat =~ /^[A-Za-z0-9_-]{1,80}$/;
+  my $upto = lines_from($path, $bytes, $size, $tmp);
+  next unless defined $upto && $upto > $bytes;
+  if ($isHelper) {
+    my $agent = basename($path, '.jsonl');
+    my ($desc, $type) = ('', '');
+    (my $meta = $path) =~ s/\.jsonl$/.meta.json/;
+    if (open my $m, '<', $meta) { local $/; my $j = <$m> // ''; close $m; ($desc) = $j =~ /"description":"((?:[^"\\]|\\.)*)"/; ($type) = $j =~ /"agentType":"((?:[^"\\]|\\.)*)"/ }
+    s/\\(["\\\/])/$1/g, s/\\[nrt]/ /g for grep { defined } $desc, $type;
+    my $title = join(' ', grep { length } ($desc // ''), '(' . join(', ', grep { length } ($type // ''), $agent) . ')');
+    my $text = jq($JQ_HELPER, $tmp, '--argjson', 'start', $bytes == 0 ? 'true' : 'false', '--arg', 'title', $title);
+    $text .= jq($JQ_WORK, $tmp, '--arg', 'sid', $chat, '--arg', 'helper', $agent, '--arg', 'who', " (helper $agent)");
+    append("$mem/work/$chat.md", $text);
+    $works++ if length $text;
+    $state{$key} = [$upto, 'helper', 0];
+  } else {
+    my $words = "$mem/words/$chat.md";
+    my $first = 0;
+    # The first look decides whose words they are: a chat that saved its own keeps them, and one whose file grew since this last
+    # wrote it is saved by Claudopus from then on
+    $mode = -e $words ? 'live' : 'caught' if !$mode && ($first = 1);
+    # A chat that saved its own words from partway (it was typed in again before this first read it, or a program typed it while
+    # Claudopus saved only Claude's answers): what came before the file's first line goes beside it
+    if ($first && $mode eq 'live' && !-e "$mem/words/$chat.before.md") {
+      my ($t0) = do { open my $w, '<', $words; my $l = ''; while (<$w>) { if (/^#{2,3} (?:Claude )?(\d{4}-\d\d-\d\dT\S+)/) { $l = $1; last } } close $w; ($l) };
+      # (the file's first line is written moments after the record's own, so only what came a minute before it counts)
+      if ($t0 =~ /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)/) {
+        my $cut = strftime('%Y-%m-%dT%H:%M:%S', gmtime(timegm($6, $5, $4, $3, $2 - 1, $1) - 60));
+        append("$mem/words/$chat.before.md", jq($JQ_WORDS, $tmp, '--arg', 'sid', $chat, '--arg', 'before', $cut));
+      }
+    }
+    $mode = 'live' if $mode eq 'caught' && -e $words && size_of($words) != $wbytes;
+    if ($mode eq 'caught') {
+      my $text = jq($JQ_WORDS, $tmp, '--arg', 'sid', $chat, '--arg', 'before', '');
+      append($words, $text);
+      $chats++ if length $text;
+    }
+    my $work = jq($JQ_WORK, $tmp, '--arg', 'sid', $chat, '--arg', 'helper', '', '--arg', 'who', '');
+    append("$mem/work/$chat.md", $work);
+    $works++ if length $work;
+    $state{$key} = [$upto, $mode, $mode eq 'caught' ? size_of($words) : 0];
+  }
+  save_state() if $done % 50 == 0;
+}
+unlink $tmp;
+# A record gone is forgotten, only when the folder was read at all
+delete $state{$_} for grep { !$seen{$_} } (%seen ? keys %state : ());
+save_state() if $JQ && -d $projects;
+print "progress: $total/$total chat records read\n";
+print "saved words of $chats chats, work of $works records\n";

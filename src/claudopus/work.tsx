@@ -92,9 +92,11 @@ const isAfterTaken = async ($: EngineInterface, id: string, call: string) => {
 // started detached; what it asked Claudopus to wake it for; a command Claudopus holds for its turn; or a helper of its own still at
 // work (its end, or its result, starts the work). A command it sent to the background the engine sees, and presses nothing while
 // it runs
+// A server it left going never ends, so never starts it again (wakesOf)
 const waitsOnOwn = (list: Todo[], card: Todo) => {
-  const helpers = runningHelpers(list, card.id).length
-  const what = card.detached?.length ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : card.wakeWhen || isTurnWaited(list, card.id) ? 'it waits to be woken' : ''
+  const { helpers, isWoken } = wakesOf(list, card)
+  const isDetached = Boolean(card.detached?.some(d => !isServerRun(d.cmd, d.what)))
+  const what = isDetached ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : isWoken ? 'it waits to be woken' : ''
   return { what, helpers }
 }
 // What a command that only waits is told instead, by what it waits for
@@ -519,18 +521,21 @@ const workHooks = (on: On) => {
         const now = await $.clock.now()
         const isKeeping = isTool(e.tool, 'todo') || isTool(e.tool, 'note')
         let nudge = ''
-        await changeTodos($, list =>
-          list.map(one => {
-            if (one.id !== id) return one
-            const base = { ...(one.status === 'working' ? one : resumed(one, now)), ...(one.carryOn?.gaveUp ? { carryOn: undefined } : {}), steps: (one.steps ?? 0) + 1, answeredAt: undefined, waitsSince: undefined, endedStepAt: undefined }
+        await changeTodos($, list => {
+          // What a helper writes is what its task made too: the task it belongs to keeps it as well as the helper's own card
+          const top = topOf(list, id)
+          return list.map(one => {
+            if (one.id !== id) return one.id === top ? withWrote(one, e) : one
+            const own = { ...(one.status === 'working' ? one : resumed(one, now)), ...(one.carryOn?.gaveUp ? { carryOn: undefined } : {}), steps: (one.steps ?? 0) + 1, answeredAt: undefined, reportAt: undefined, waitsSince: undefined, endedStepAt: undefined }
+            const base = withWrote(own, e)
             if (isKeeping) return { ...base, quiet: 0, owes: isTool(e.tool, 'note') ? undefined : one.owes }
             const owes = one.owes === undefined ? undefined : one.owes + 1
             const quiet = (one.quiet ?? 0) + 1
             const isQuiet = !one.parentId && owes === undefined && quiet >= QUIET_STEPS
             nudge = owes === OWED_AFTER ? named(OWED) : isQuiet ? drifted(quiet) : ''
             return { ...base, owes, quiet: isQuiet ? 0 : quiet }
-          }),
-        )
+          })
+        })
         if (nudge) void tell($, id, nudge)
       }
     }
@@ -553,6 +558,9 @@ const workHooks = (on: On) => {
       // Its report with to-dos still to do: refused once, so it does them or names them as not done
       const unticked = await untickedAtHandback($, e.agentId, String((e as { message?: unknown }).message ?? '')).catch(() => '')
       if (unticked) return { deny: unticked }
+      // Its report asks the person something it never recorded as waiting on them: refused once, so it records it
+      const unrecorded = flowAgents.has(e.agentId) ? '' : await unrecordedAtHandback($, e.agentId, String((e as { message?: unknown }).message ?? '')).catch(() => '')
+      if (unrecorded) return { deny: unrecorded }
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       // A task's report goes to the chat as its own reply, not in Claude Code's box (REPORT_TAKEN): Claudopus answers the hand-back
       // itself, keeps the report as one that went through, and gives it to the chat with Claude Code's notice that the task ended
@@ -642,6 +650,7 @@ const workHooks = (on: On) => {
   // How full this chat's context is, as the app counts it, each time it moves
   on('session.measure', async ($, e, next) => {
     if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     const tokens = e.context.tokens
     if (tokens !== undefined) await update($, me, one => (one.tokens === tokens && one.window ? one : { ...one, tokens, window: one.window || e.context.window }))
 
@@ -680,7 +689,7 @@ const workHooks = (on: On) => {
       await changeTodos($, list => list.map(one => (one.id === id ? { ...one, tookReport: undefined } : one)))
     }
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
-    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
+    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined, reportAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
     // A step the app sends to an older model or to Haiku after its safeguards flag a message is not moved back past the flag: the
     // work is ended there with a report that says so (FLAGGED), so its parent starts what is left again on a current model. An agent
@@ -826,7 +835,7 @@ const workHooks = (on: On) => {
     await changeTodos($, list => {
       const old = list.find(one => one.id === id)
       // Its title is the few words the task was given; under it, the person's message as they wrote it
-      const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}) }
+      const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}), kind: e.fork ? 'fork' : (e.subagentType ?? '') }
       return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(rules ? { rulesSent: hashOf(rules) } : {}), ...(old?.scratch || scratch ? { scratch: old?.scratch || scratch } : {}) }])
     })
     if (isOwn) await openList($)

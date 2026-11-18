@@ -23,6 +23,7 @@ const tabHooks = (on: On) => {
     }
     // An answer the press gave to work that had ended starts it again from here, inside the press's own hook (sendWakes)
     if (e.plugin === 'claudopus' && (answersOnWay.size || wakes.length)) await sendWakes($, true).catch(err => log($, `answer not sent: ${String(err)}`))
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     return r
   })
   // and so does a reply typed in a card's box
@@ -32,6 +33,7 @@ const tabHooks = (on: On) => {
     // Two replies to ended work went from the timer with no sign of why: each submit says here what it found on its way
     void log($, `reply submitted: ${answersOnWay.size} answer(s) and ${wakes.length} wake(s) on the way`)
     if (answersOnWay.size || wakes.length) await sendWakes($, true).catch(err => log($, `reply not sent: ${String(err)}`))
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     return r
   })
 
@@ -111,7 +113,7 @@ const tabHooks = (on: On) => {
     const picture = e.surface === 'terminal' ? null : RASTER.test(file) ? await thumbOf($, thumbPath(r, file)) : /\.svg$/i.test(file) ? await svgOf($, `${reportPath(r)}/${file}`) : null
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows)}
+        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows, e.surface === 'terminal' ? { made: [] } : madeOfReport($, r, reportText.get(r.id) ?? ''))}
       </Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))

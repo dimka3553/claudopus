@@ -139,6 +139,8 @@ const bandHooks = (on: On) => {
   // a newer drawing retires the buttons on screen, and a click on one already gone runs nothing. Never while its reply box is typed
   // into or holds the cursor: a bar with a box open keeps a drawing of its own (barHeld)
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    // A message that waits for a hook to start a task again goes from this drawing (sendHeld)
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     const drawBar = () => drawBarNow()
     if (e.surface !== 'desktop' || e.props.hasSurvey) return drawBar()
     const key = `bar|${e.requestId ?? ''}|${e.surface}|${e.props.bodyColumns}|${e.props.isCollapsed ? 1 : 0}`
@@ -192,7 +194,10 @@ const bandHooks = (on: On) => {
     const working = cards.filter(one => !one.parentId && one.status === 'working')
     // Work that just finished makes the octopus happy for its pause, the band staying that long even when nothing else runs;
     // the redraw set for the pause's end is read so the band leaves or goes back to work then
-    const happy = isHappy(cards, await $.clock.now())
+    // (not for a task whose result asks the person something: that waits for them)
+    const bandAt = await $.clock.now()
+    const bandKept = await read($, reports)
+    const happy = isHappy(cards.filter(one => !openResultWaits(one, bandKept, bandAt).length), bandAt)
     if (happy) await read($, tick)
     const ui = uiOf($, e)
     const { Box, Button, Text } = ui

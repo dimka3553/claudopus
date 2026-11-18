@@ -2,6 +2,33 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.200 · 18 November 2026
+- A finished task whose result asks you something now shows as Waiting for you: its card stays at the top in amber with the first question and its answers, the header counts each question, and it goes under Finished only once you've answered them all.
+- A task that asks you something in its result without recording it as waiting on you is told to record it before its result goes through, so its question shows on its card.
+
+## 0.2.199 · 18 November 2026
+- A task's card now shows an icon beside each thing the task made, as designed: the app had been leaving every icon out
+
+## 0.2.198 · 18 November 2026
+- A task that Claudopus starts again by itself now stays where Claudopus can see it. This covers a task that stopped partway, one cut off when the chat stopped, one started to look at its helpers or commands, and one started with your answer. Before, a task started again a moment after it stopped could run unseen: its to-dos, notes and questions never reached its card, nothing kept it going, and its card could say Done with nothing built and no result.
+
+## 0.2.197 · 18 November 2026
+- A task's card now shows what the task made, right under its title: an icon and a word or two for each file, side by side. Press a file to open it. It shows while the task still works.
+- A task's Details and its result start with a Files part: a tile for each thing the task made, with a small preview. Three or more of a kind are one tile, such as "7 pictures", that opens out on a press.
+- Code a task changed is one tile: how many files, and how many lines it added and took away. The lines themselves are never shown.
+- A result's pictures are now among its Files tiles, in place of the Pictures part that showed one at a time.
+
+## 0.2.196 · 18 November 2026
+- Recall now finds every chat: Claudopus saves the words of chats it never saved itself (older chats, chats a program started), 10 to 20 minutes after they go quiet.
+- Messages a program, a schedule or a channel sent are saved too, marked with where they came from.
+- Recall now also finds what each chat's helpers were asked and reported, what connected tools such as SBOS returned, and the documents a chat wrote.
+- Keys and passwords are hidden in the chats, asks and pastes Claudopus saves, including those saved before.
+
+## 0.2.195 · 18 November 2026
+- A task's card shows Done only once Claudopus has its result. Commands ending, helpers finishing or Claude Code ending the task's run no longer make it Done, and you no longer get a notification that it's done before its result comes.
+- A task that stops with to-dos left while only a server it left running is still going is started again to carry on, instead of sitting there.
+- While a task waits for its own commands or helpers, its card says so, for example "Waiting for its helper".
+
 ## 0.2.194 · 18 November 2026
 - Update works again when your chats run Claudopus from a copy of its code that a task switched to a released version. Update moves that copy to the newest version and back onto main.
 - A task or its helper can no longer switch, reset or commit in the copy of Claudopus's code your chats run. Claude reads other versions without switching, and changes the code in a copy of its own.

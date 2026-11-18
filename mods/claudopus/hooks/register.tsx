@@ -1,6 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { ElementTable, EngineInterface, McpToolResult, On, RasterProps, Register, RenderSurface, Timer, ToolCallInput, ToolCallResult, SessionMessage, ToolUseSummary } from 'claude-code'
-import type { Entry, Flow, FlowAgent, Item, Link, Me, PressRun, Prompt, Report, Server, Shared, Stream, Todo, Wait } from '../types'
+import type { CodeMade, Entry, FilesMade, Flow, FlowAgent, Item, Link, Made, MadeKind, Me, PressRun, Prompt, Report, Server, Shared, Stream, Todo, Wait } from '../types'
 import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresBefore, squaresKept, squaresOf, squaresSvg, squaresWidth, stageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'
 import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, svgFits, view as statsShown } from './stats'
@@ -86,9 +86,23 @@ let finishedAtTop: string[] = []
 const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
   const now = await read($, todos)
   const before = JSON.stringify(now)
-  const next = fn(now)
-  if (JSON.stringify(next) === before) return now
-  return update($, todos, list => (JSON.stringify(list) === before ? next : fn(list)))
+  const at = await $.clock.now()
+  let held: string[] = []
+  const hold = (list: Todo[]) => {
+    const r = holdDone(list, fn(list), at)
+    held = r.held
+    return r.list
+  }
+  const taken = () => {
+    if (!held.length) return
+    const ids = held
+    $.clock.after(0, () => void doneHeld($, ids).catch(err => log($, `work held from ending done not taken up: ${String(err)}`)))
+  }
+  const next = hold(now)
+  if (JSON.stringify(next) === before) return (taken(), now)
+  const r = await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))
+  taken()
+  return r
 }
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
 const draftsKept = atom({ plugin: 'claudopus', key: 'drafts' } as const, {}, { shape: 'drafts-1' })
@@ -291,8 +305,37 @@ const tidyLog = async ($: EngineInterface) => {
   const text = await readOr($, `${dir}/log.md`)
   if (text.includes('\u0000')) await $.fs.write(`${dir}/log.md`, text.replaceAll('\u0000', '')).catch(() => undefined)
 }
-const appendWords = async ($: EngineInterface, chatId: string, text: string) => appendTo($, `${dir}/words/${chatId}.md`, text)
-const appendAsks = async ($: EngineInterface, chatId: string, text: string) => appendTo($, `${dir}/asks/${chatId}.md`, text)
+const hideKeys = (text: string) =>
+  text
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[key hidden]')
+    .replace(/\b(?:ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AIza|ya29\.)[A-Za-z0-9_.-]{10,}/g, '[key hidden]')
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[key hidden]')
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[key hidden]')
+    .replace(/\b(?:GOCSPX-|ntn_|sbp_|lin_api_|r8_|glsa_|dop_v1_|shpat_|shpss_|xapp-)[A-Za-z0-9_-]{16,}/g, '[key hidden]')
+    .replace(/\bsecret_(?=[A-Za-z]*\d)[A-Za-z0-9]{32,}/g, '[key hidden]')
+    .replace(/\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/g, '[key hidden]')
+    .replace(/\b\d{8,10}:AA[A-Za-z0-9_-]{30,}/g, '[key hidden]')
+    .replace(/\bsk-(?:ant|proj|svcacct|admin)-[A-Za-z0-9_-]{16,}/g, '[key hidden]')
+    .replace(/\b(?:sk|pk|rk|hf|npm|vck|whsec)[-_](?:(?:live|test)_)?(?=[A-Za-z0-9]*\d[A-Za-z0-9]*\d)[A-Za-z0-9]{16,}/g, '[key hidden]')
+    .replace(/(\\?"(?:key|name)\\?"[ \t]*:[ \t]*\\?"[A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIALS?)\\?"[ \t]*,[ \t]*\\?"value\\?"[ \t]*:[ \t]*\\?")(?:[^"\\]|\\[^"])+(?=\\?")/g, '$1[hidden]')
+    .replace(/(\bAuthorization\\?["']?[ \t]*[:=][ \t]*\\?["']?[ \t]*(?:Basic|Bearer|token)[ \t]+)[^\s"'\\]{8,}/gi, '$1[hidden]')
+    .replace(/(\{[^{}]*\\*"(?:key|name)\\*"[ \t]*:[ \t]*\\*"[A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?)\\*"[^{}]*\})/g, (o: string) => o.replace(/(\\*"value\\*"[ \t]*:[ \t]*\\*")(?:[^"\\]|\\[^"])+/g, '$1[hidden]'))
+    .replace(/(--password[ =]|\bcurl\b[^\n]*?\s-u[ \t]*[^\s:]+:)(?!\[(?:key )?hidden\])[^\s"'`]{4,}/g, '$1[hidden]')
+    .replace(/(\bhooks\.slack\.com\/(?:services|workflows|triggers)\/)[A-Za-z0-9/_-]+/g, '$1[hidden]')
+    .replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:)[^/\s@]+@/gi, '$1[hidden]@')
+    .replace(/(\b[A-Za-z0-9_]*(?:[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Oo][Uu][Nn][Tt][_-]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss][_-]?[Kk][Ee][Yy]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee][_-]?[Kk][Ee][Yy])\\*["']?[ \t]*[=:][ \t]*\\*["']?)(?!\[(?:key )?hidden\])(?!(?:[Tt]rue|[Ff]alse|[Nn]ull|NULL|[Nn]one|undefined|TRUE|FALSE|NONE)\b)(?!\d{1,7}\b)[^\s"'`,;\\]{4,}/g, '$1[hidden]')
+    .replace(/(\b[A-Z0-9_]*(?:_KEY|_PWD|_PASS)\\*["']?[ \t]*[=:][ \t]*\\*["']?)(?!\[(?:key )?hidden\])(?![/~.])[^\s"'`,;\\]{4,}/g, '$1[hidden]')
+    .replace(/([?&](?:Policy|Signature|X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token|sig|token|access_token|api_key|apikey|key)=)(?!\[(?:key )?hidden\])[^&\s"'<>),]+/gi, '$1[hidden]')
+    .replace(/(\bBearer[ \t]+)[A-Za-z0-9._~+/=-]{16,}/g, '$1[hidden]')
+const appendWords = async ($: EngineInterface, chatId: string, text: string) => appendTo($, `${dir}/words/${chatId}.md`, hideKeys(text))
+const programFrom = (origin: { kind: string; server?: string }) =>
+  origin.kind === 'sdk' ? 'sent by a program'
+  : origin.kind === 'scheduled-trigger' ? 'scheduled'
+  : origin.kind === 'channel' ? `from ${origin.server || 'a channel'}`
+  : origin.kind === 'slack-ping' ? 'from Slack'
+  : origin.kind === 'coordinator' || origin.kind === 'projects-relay' ? 'sent by the chat that runs this one'
+  : ''
+const appendAsks = async ($: EngineInterface, chatId: string, text: string) => appendTo($, `${dir}/asks/${chatId}.md`, hideKeys(text))
 
 type Ui = ElementTable
 const alphaOf = (color: unknown) => (typeof color === 'string' && /^#[0-9a-f]{8}$/i.test(color) ? parseInt(color.slice(7), 16) : 255)
@@ -859,6 +902,7 @@ const KEEP_GOING = (items: string[]) =>
   `From Claudopus, not {name}: don't end here, your task isn't finished. Still to do: ${quotedItems(items)}. Nothing of yours is running that would start you again (no command in the background, no detached command started with \`echo $!\` after it, no helper at work, no wake_me, no question on your card), so if your step ends now this work stops undone. Claude Code's note that your report has not been delivered doesn't apply yet: send your report only once every to-do is ticked. Carry on now with the first of them. If you expected something you started to be running, look at its log: it may have failed or ended. To wait for something, run it in the background or detached with \`echo $!\` after it, or call wake_me for a file, a page or a time, then end your step. Tick each to-do as soon as it is done. For one only {name} can do, ask with the ask tool and end your step.`
 const NOT_TICKED = (items: string[]) =>
   `Not sent: ${items.length === 1 ? 'a to-do of yours is' : `${items.length} of your to-dos are`} still to do: ${quotedItems(items)}. Do ${items.length === 1 ? 'it' : 'each'} now, or tick it done if it is done already, then hand back your report. One that only {name} can do or decide stays as it is: name it in your report under "Not done", with what {name} needs to do, and send your report again. Claudopus then shows it as not done on your card and in your result.`
+const UNRECORDED_WAITS = `Not sent: your report asks {name} something, but you recorded nothing as waiting on {name}, so the panel would show your task as done. Record each question only {name} can answer with the waits tool, or call it with [] if nothing waits on {name}, then send your report again.`
 const NOT_DONE_IN_CHAT = (title: string, items: string[]) =>
   `From Claudopus: the task "${title}" sent its result with ${items.length === 1 ? 'a to-do' : `${items.length} to-dos`} not done: ${quotedItems(items)}. When you pass its result on to {name}, say these are not done.`
 const REPORT_TAKEN = 'Report delivered to your caller: Claudopus gives it to the chat, which shows it to {name}. Your work is done: end your step now, writing nothing more.'
@@ -1140,14 +1184,14 @@ const started = (id: string, parentId: string, title: string, words: string, at:
   endedAt: 0,
   status: 'working',
 })
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
-const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, ownWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, newAt: at })
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, reportAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, ownWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, newAt: at })
 const goesOn = (list: Todo[], id: string) => {
   const one = list.find(card => card.id === id)
   const isRunning = Boolean(one?.bg?.some(b => !b.isWatch)) || list.some(kid => kid.parentId === id && kid.status === 'working')
   return Boolean(one && isRunning && one.items.some(item => item.state === 'doing'))
 }
-const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'stopped')
+const stoppedAs = (one: Todo): Todo['status'] => (hasReport(one) ? 'done' : 'stopped')
 const handedBack = new Map<string, string>()
 const endedByHandback = new Set<string>()
 const stoppedHere = new Set<string>()
@@ -1332,7 +1376,7 @@ const endedUnheardShort = async ($: EngineInterface, ids: Set<string>, live: { i
       continue
     }
     const how = live.find(one => one.id === id)?.status === 'failed' ? 'failed' : 'done'
-    await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? { ...ended(one, how, now), answer: f.answer || one.answer, ...(isReport ? { answeredAt: one.answeredAt ?? now } : {}) } : one)))
+    await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? { ...ended(one, how, now), answer: f.answer || one.answer, ...(isReport ? { answeredAt: one.answeredAt ?? now } : {}), ...(f.isHandback || (isReport && !f.isPressed) ? { reportAt: one.reportAt ?? now } : {}) } : one)))
   }
 }
 
@@ -1393,7 +1437,7 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
         isMoved = true
         const isTop = !one.parentId
         const answer = f.answer || one.answer
-        return { ...ended(one, 'done', isTop ? now : Math.min(f.at, now)), answer, ...(isTop && isWordsReport(one, f.answer, f.isHandback) ? { answeredAt: one.answeredAt ?? now } : {}), stuckAt: undefined }
+        return { ...ended(one, 'done', isTop ? now : Math.min(f.at, now)), answer, ...(isTop && isWordsReport(one, f.answer, f.isHandback) ? { answeredAt: one.answeredAt ?? now } : {}), ...(isTop && (f.isHandback || (isWordsReport(one, f.answer) && !f.isPressed)) ? { reportAt: one.reportAt ?? now } : {}), stuckAt: undefined }
       })
     }
     endedNow = [...gone]
@@ -1655,6 +1699,83 @@ const withLinks = (Link: ElementTable['Link'], text: string, key: string, whole 
   }
   parts.push(text.slice(at))
   return parts.filter(part => part !== '')
+}
+
+
+type TaskState = 'working' | 'waiting-you' | 'waiting-own' | 'done' | 'stopped' | 'failed'
+
+const isServerRun = (cmd: string | undefined, what: string) => (SERVER_CMD.test(cmd ?? '') && !/\b(vite|next|nuxt|astro) build\b/.test(cmd ?? '')) || describedOf(what).kind === 'server'
+const wakesOf = (list: Todo[], card: Todo) => {
+  const runs = [...(card.bg ?? []).filter(b => !isServerRun(b.cmd, b.what)), ...(card.detached ?? []).filter(d => !isServerRun(d.cmd, d.what))]
+  const helpers = runningHelpers(list, card.id).length
+  const isWoken = card.wakeWhen !== undefined || isTurnWaited(list, card.id)
+  return { runs, helpers, isWoken, isAny: runs.length > 0 || helpers > 0 || isWoken }
+}
+const isUnpressed = async ($: EngineInterface, id: string) => {
+  const rows = await $.session.messages({ as: 'api', agentId: id }).catch(() => undefined)
+  return Array.isArray(rows) && !isPressedAtEnd(rows) && !isLetEnd((await read($, todos)).find(one => one.id === id))
+}
+const hasReport = (one: Todo | undefined) => one?.reportAt !== undefined
+const stateOf = (list: Todo[], one: Todo): TaskState => {
+  if (one.status === 'done' || one.status === 'stopped' || one.status === 'failed') return one.status
+  if (needsPerson(one)) return 'waiting-you'
+  return one.endedStepAt !== undefined && wakesOf(list, one).isAny ? 'waiting-own' : 'working'
+}
+const ownWorkWords = (list: Todo[], one: Todo, at: number) => {
+  if (stateOf(list, one) !== 'waiting-own' || waitLine(one, at)) return ''
+  const { runs, helpers } = wakesOf(list, one)
+  const what = [runs.length ? (runs.length === 1 ? 'its command' : 'its commands') : '', helpers ? (helpers === 1 ? 'its helper' : 'its helpers') : ''].filter(Boolean).join(' and ')
+  return what ? `Waiting for ${what}` : 'Waiting to be started again'
+}
+
+const holdDone = (before: Todo[], next: Todo[], now: number) => {
+  const held: string[] = []
+  if (isOff) return { list: next, held }
+  const was = new Map(before.map(one => [one.id, one]))
+  const list = next.map(one => {
+    const old = was.get(one.id)
+    if (old?.status === 'working' && one.status !== 'working' && !(one.status === 'done' && !one.parentId && !one.chat && !hasReport(one))) workAllowed.delete(one.id)
+    if (one.parentId || one.chat || one.status !== 'done' || hasReport(one)) return one
+    if (old?.status !== 'working') return one
+    held.push(one.id)
+    const base = old
+    return { ...base, status: 'working' as const, endedAt: 0, answer: one.answer || base.answer, answeredAt: undefined, endedStepAt: base.endedStepAt ?? now }
+  })
+  return { list, held }
+}
+const heldTaken = new Set<string>()
+const doneHeld = async ($: EngineInterface, ids: string[]) => {
+  for (const id of ids) {
+    const list = await read($, todos)
+    const one = list.find(card => card.id === id)
+    if (!one || one.status !== 'working') continue
+    if (await isUnpressed($, id)) {
+      const now = await $.clock.now()
+      await changeTodos($, cards => cards.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'done', now), reportAt: now } : card)))
+      await lookEnds($)
+      await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
+      const card = (await read($, todos)).find(c => c.id === id)
+      if (card?.status === 'done' && card.answer.trim()) $.clock.after(5, () => void saveReport($, card, card.answer).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
+      continue
+    }
+    if (wakesOf(list, one).isAny) continue
+    const key = `${id}:${one.steps ?? 0}:${one.carryOn?.total ?? 0}`
+    if (heldTaken.has(key)) continue
+    heldTaken.add(key)
+    if (needsPerson(one)) {
+      await log($, `work ${id} would have ended done without its report: it waits for the person`)
+      continue
+    }
+    if (isHeld(one) || stoppedHere.has(id) || pressed.has(id) || one.flagged || one.carryOn?.gaveUp) {
+      const now = await $.clock.now()
+      await changeTodos($, cards => cards.map(card => (card.id === id && card.status === 'working' ? ended(card, 'stopped', now) : card)))
+      await log($, `work ${id} would have ended done without its report: ended stopped`)
+      await lookEnds($)
+      continue
+    }
+    await log($, `work ${id} would have ended done without its report: started again to carry on`)
+    await goOn($, id, 'its card would have ended done without its report', true)
+  }
 }
 
 
@@ -2110,6 +2231,35 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
   return copies
 }
 
+const asksInText = (text: string) => {
+  const unfenced = text.replace(/```[\s\S]*?```/g, '')
+  if (/^[\s#*_>-]*(waiting (on|for) you|waits (on|for) you)\b/im.test(unfenced)) return true
+  const prose = unfenced
+    .split('\n')
+    .filter(line => !/^(\s{4}|\t)(?!\s*([-*]|\d+\.)\s)/.test(line) && !/^\s*(#|\|)/.test(line))
+    .map(line => line.replace(/^\s*([-*]|\d+\.)\s+/, ''))
+    .join('\n')
+    .replace(/`[^`\n]*`/g, 'code')
+    .replace(/"[^"\n]*"|“[^”\n]*”/g, '')
+  return /(?:^|[.!:]\s+|\*\*\s*)(?:[^\s.!?:*]+[ \t]+)+[^\s.!?:*]*[A-Za-z0-9)]\?(?=[\s*_)]|$)/m.test(prose)
+}
+const WAITS_KINDS = new Set(['claudopus:task', 'claudopus:quick', 'general-purpose', 'fork'])
+const unrecordedAtHandback = async ($: EngineInterface, id: string, message: string): Promise<string> => {
+  const one = (await read($, todos)).find(card => card.id === id)
+  if (!one || isOff || !dir || one.parentId || one.chat || one.flagged || one.ask || !WAITS_KINDS.has(one.kind ?? '') || one.waitsSet || one.toldWaits === one.startedAt || !asksInText(message)) return ''
+  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldWaits: one.startedAt } : card)))
+  await log($, `work ${id} handed back a report that asks something with nothing recorded as waiting: refused once`)
+  return named(UNRECORDED_WAITS)
+}
+
+const CARD_WAITS_SHOWN = 60_000
+const openResultWaits = (one: Todo, kept: Report[], at: number): { r?: Report; wait: Wait; index: number }[] => {
+  if (one.status !== 'done' || one.parentId || one.chat) return []
+  const fromResults = resultsOfWork(kept, one.id).flatMap(r => waitsOf(r).flatMap((wait, index) => (wait.answer ? [] : [{ r, wait, index }])))
+  const fromCard = fromResults.length || at - one.endedAt > CARD_WAITS_SHOWN ? [] : (one.waits ?? []).map(askedWait).flatMap((wait, index) => (wait.answer ? [] : [{ wait, index }]))
+  return [...fromResults, ...fromCard].filter(({ wait }) => !one.ask || wait.ask !== one.ask.at)
+}
+
 const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
   const one = (await read($, todos)).find(todo => todo.id === card.id) ?? card
   const waits = (one.waits ?? []).map(askedWait)
@@ -2148,14 +2298,17 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
     folder: [(await readIndex($)).find(s => one.subject && slug(s.name) === slug(one.subject))?.repo ?? ''].find(repo => repo.startsWith('/')) ?? cwd,
     gist: gistOf(text, title),
     files,
+    ...(await madeBy($, one.wrote ?? [], text, one.begunAt ?? one.startedAt)
+      .then(made => ({ made }))
+      .catch(err => (void log($, `files of report ${id} not listed: ${String(err)}`), {}))),
     agent: one.id,
     mark: marked,
     ...(waiting.length ? { waiting } : {}),
     ...(one.from ? { from: one.from } : {}),
   }
   await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
-  if (one.waits?.length) await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, waits: undefined } : card)))
   await loadReports($)
+  if (one.waits?.length) await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, waits: undefined } : card)))
 }
 
 const thumbPath = (r: Report, file: string) => `${reportPath(r)}/thumbs/${file.replaceAll('/', '--')}.jpg`
@@ -2250,7 +2403,7 @@ const closeWelcome = async ($: EngineInterface) => {
 const indexAsk = (root: string) =>
   [
     'Bring in my old chats (pressed in the Claudopus panel).',
-    `Run python3 "${root}/onboard/extract.py" "${dir}/onboard": it saves each past chat's messages under ${dir}/words and writes digests of them, one or more per project, into ${dir}/onboard.`,
+    `Run python3 "${root}/onboard/extract.py" "${dir}/onboard": it writes digests of your past chats, one or more per project, into ${dir}/onboard (Claudopus saves each chat's words under ${dir}/words itself).`,
     'If python3 is missing (macOS asks to install the Command Line Tools), say so with the command xcode-select --install and stop.',
     `Then for each digest file it wrote, have a helper follow ${root}/onboard/reader.md on it, writing its streams to ${dir}/onboard/streams/<the digest's file name>.`,
     'Last, record each stream found as a topic with the `update` tool (its name, folder, state and summary, and its section as `brief`), and list the topics you found in a few lines.',
@@ -2558,7 +2711,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
 }
 
 type Thumb = { source: string; width: number; height: number } | null
-const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb, height = 0) => {
+const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb, height = 0, files: FilesMade = { made: [] }) => {
   const { Box, Button, Markdown, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   const rounds = (entriesOf(list.filter(one => Boolean(one.archived) === Boolean(r.archived))).find(entry => entry.some(one => one.id === r.id)) ?? []).filter(one => one.id !== r.id)
@@ -2568,8 +2721,9 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
   const how = (one: Report) =>
     [one.id === r.from ? 'this result came from it' : one.from === r.id ? 'came from this result' : rounds.includes(one) ? (one.at < r.at ? 'earlier result' : 'later result') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
   const pane = paneOf(r)
-  const gen = drawingMark(pane, [presses, height, r, mark(text), at, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
-  const show = (to: number) => void ((presses += 1), pictureAt.set(pane, to), redraw($))
+  const gen = drawingMark(pane, [presses, height, r, mark(text), at, JSON.stringify(files), [...openPiles].join(), facesMade, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
+  const hasTiles = !('isTerminal' in ui) && Boolean(table.Svg) && (files.made.length > 0 || Boolean(files.code))
+  const show = (to: number) => void ((presses += 1), hasTiles ? void showPicture($, pictures[to]?.path ?? '', pane, '') : (pictureAt.set(pane, to), redraw($)))
   return (
     <Box key={`report-${r.id}`} flexDirection="column" gap={1} flexGrow={1}>
       {/* Archive at the head's right: pressed, the tab closes; one archived says so, with Bring back */}
@@ -2580,6 +2734,8 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         </Box>
         <Button key={`report-archive-${gen}`} label={r.archived ? 'Bring back' : 'Archive'} onPress={() => archiveReport($, r, !r.archived)} />
       </Box>
+      {/* What its task made, right under its title: tiles side by side, each a press that opens it */}
+      {hasTiles ? band(ui, 'report-files', 'Files', '', madeTiles($, ui, files, pane, `report-files-${r.id}`, undefined, `-${gen}`) ?? <Box />) : null}
       {isOpenQuestion(r) || (!r.archived && waitsOf(r).some(byPerson))
         ? band(
             ui,
@@ -2613,7 +2769,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
             <Text wrap="wrap">{r.gist}</Text>,
           )
         : null}
-      {pictures.length
+      {pictures.length && !hasTiles
         ? band(
             ui,
             'report-pictures',
@@ -2758,6 +2914,15 @@ const memoryButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
     <ui.Button key={`memory-open-${presses}`} label="Memory" hotkey={isKeyed ? 'm' : undefined} plain={isKeyed ? true : undefined} onPress={press => void showMemory($, press.surface).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
   </ui.Box>
 )
+
+const CATCH_UP_AFTER = 60_000
+const CATCH_UP_EVERY = 10 * 60_000
+const CATCH_UP_START = `d=$1; shift; l="$d/caught/log.txt"; mkdir -p "$d/caught" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
+const startCatchUp = async ($: EngineInterface) => {
+  if (!dir) return
+  const r = await $.process.run(['/bin/sh', '-c', CATCH_UP_START, 'sh', dir, `${$.plugin.root}/bin/catch-up`, dir, `${await configDir($)}/projects`])
+  if (r.exitCode !== 0) await log($, `chats not caught up: ${r.stderr.slice(0, 200)}`)
+}
 
 const memoryHooks = (on: On) => {
 
@@ -3711,6 +3876,364 @@ const askPicturesOf = ($: EngineInterface, one: Todo): Pic[] | undefined => {
 
 
 
+const MADE_KINDS: { kind: MadeKind; test: RegExp; one: string; many: string; badge: string; color: string }[] = [
+  { kind: 'picture', test: /\.(png|jpe?g|gif|webp|svg|heic)$/i, one: 'picture', many: 'pictures', badge: 'IMG', color: '#3A78C9' },
+  { kind: 'video', test: /\.(mp4|mov|webm|m4v)$/i, one: 'video', many: 'videos', badge: 'VID', color: '#8B5CF6' },
+  { kind: 'pdf', test: /\.pdf$/i, one: 'PDF', many: 'PDFs', badge: 'PDF', color: '#D0473E' },
+  { kind: 'sheet', test: /\.(xlsx?|csv|numbers)$/i, one: 'spreadsheet', many: 'spreadsheets', badge: 'XLS', color: '#23955A' },
+  { kind: 'doc', test: /\.(docx?|pages|pptx?|key|md|txt|html?)$/i, one: 'document', many: 'documents', badge: 'DOC', color: '#6B6A65' },
+  { kind: 'file', test: /^/, one: 'file', many: 'files', badge: '', color: '#6B6A65' },
+]
+const madeKind = (path: string) => MADE_KINDS.find(one => one.test.test(path)) ?? MADE_KINDS[MADE_KINDS.length - 1]!
+const madeKindOf = (kind: MadeKind) => MADE_KINDS.find(one => one.kind === kind) ?? MADE_KINDS[MADE_KINDS.length - 1]!
+const TEXT_DOC = /\.(md|txt|html?|csv)$/i
+const WROTE_KEPT = 300
+const MADE_LOOKED = 300
+const CHIPS_MOST = 6
+const TILES_MOST = 24
+const FACES_MOST = 12
+const TILE_W = 112
+const TILE_H = 84
+const TILE_COLUMNS = 11
+const TILE_SHOWN_W = 96
+const TILE_SHOWN_H = 72
+const TILE_CHARS = 90_000
+const TILE_THUMB_BYTES = 7_000
+const FACE_W = 168
+const FACE_H = 126
+
+const wroteBy = (e: { tool: string }) => {
+  const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
+  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) return [String(input.file_path ?? input.notebook_path ?? '')].filter(path => path.startsWith('/'))
+  if (e.tool === 'Bash') return namedPaths(String(input.command ?? '')).filter(path => madeKind(path).kind !== 'file' && !TEXT_DOC.test(path))
+  return []
+}
+const withWrote = (one: Todo, e: { tool: string }): Todo => {
+  const paths = wroteBy(e).filter(path => !(one.wrote ?? []).includes(path))
+  return paths.length ? { ...one, wrote: [...(one.wrote ?? []), ...paths].slice(-WROTE_KEPT) } : one
+}
+
+const repoOf = new Map<string, string>()
+const repoTop = async ($: EngineInterface, folder: string) => {
+  if (repoOf.has(folder)) return repoOf.get(folder) ?? ''
+  const r = await $.process.run(['git', '-C', folder, 'rev-parse', '--show-toplevel'], { timeoutMs: 4000 }).catch(() => undefined)
+  const top = r?.exitCode === 0 ? r.stdout.trim() : ''
+  if (repoOf.size > 200) repoOf.clear()
+  repoOf.set(folder, top)
+  return top
+}
+const COUNT_LINES =
+  'cd "$1" || exit 1; since=$2; shift 2; base=$(git rev-list -1 --before="$since" HEAD 2>/dev/null); [ -n "$base" ] || base=4b825dc642cb6eb9a060e54bf8d69288fbee4904; for f in "$@"; do if git cat-file -e "$base:$f" 2>/dev/null; then git diff --numstat "$base" -- "$f"; elif [ -f "$f" ]; then printf \'%s\\t0\\t%s\\n\' "$(grep -c \'\' "$f")" "$f"; fi; done'
+const codeOf = async ($: EngineInterface, byTop: Map<string, string[]>, since: number): Promise<CodeMade | undefined> => {
+  let count = 0
+  let plus = 0
+  let minus = 0
+  for (const [top, paths] of byTop) {
+    const r = await $.process.run(['sh', '-c', COUNT_LINES, 'sh', top, String(Math.floor(since / 1000)), ...paths.map(path => path.slice(top.length + 1))], { timeoutMs: 8000 }).catch(() => undefined)
+    if (r?.exitCode !== 0) continue
+    for (const line of rows(r.stdout)) {
+      const [added = '', taken = ''] = line.split('\t')
+      if (!/^(\d+|-)$/.test(added)) continue
+      count += 1
+      plus += Number(added) || 0
+      minus += Number(taken) || 0
+    }
+  }
+  return count ? { count, plus, minus } : undefined
+}
+const MADE_LINK_LINE = /\b(made|added|created|published|deployed|live|online|posted|uploaded|opened|pushed|report|pull request|PR|release[sd]?)\b/i
+const linksIn = (text: string) =>
+  [...new Set(text.split('\n').filter(line => MADE_LINK_LINE.test(line)).flatMap(line => (line.match(/https?:\/\/[^\s`'"()<>[\]{}|,;*]+/g) ?? []).map(link => link.replace(/[.:!?]+$/, ''))))].slice(0, 3)
+const linkName = (link: string) => {
+  const [host = '', ...rest] = link.replace(/^https?:\/\//, '').replace(/\/$/, '').split('/')
+  const last = rest.at(-1) ?? ''
+  const kind = rest.length > 1 ? (rest.at(-2) ?? '').replace(/(?<=\w{3})s$/, '') : ''
+  return last ? `${host.replace(/^www\./, '').split('.')[0]} ${kind ? `${kind} ` : ''}${last}`.slice(0, 40) : host.replace(/^www\./, '')
+}
+const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since: number, isDated = true): Promise<FilesMade> => {
+  const named = namedPaths(answer)
+  const made: Made[] = []
+  const byTop = new Map<string, string[]>()
+  const seen = new Set<string>()
+  const isThing = (path: string) => madeKind(path).kind !== 'file' && !TEXT_DOC.test(path)
+  const newest = [...wrote].reverse()
+  for (const given of [...named, ...newest.filter(isThing), ...newest.filter(path => !isThing(path))].slice(0, MADE_LOOKED)) {
+    const path = given.replace(/^\/private(?=\/(tmp|var)\/)/, '')
+    if (seen.has(path)) continue
+    seen.add(path)
+    const isNamed = named.includes(given)
+    const stat = await $.fs.stat(path).catch(() => undefined)
+    if (!stat || stat.kind !== 'file' || (isDated && stat.mtimeMs < since - 5000)) continue
+    const kind = madeKind(path).kind
+    const top = kind === 'file' || (TEXT_DOC.test(path) && !isNamed) ? await repoTop($, path.slice(0, path.lastIndexOf('/'))) : ''
+    if (top && path.startsWith(`${top}/`)) {
+      byTop.set(top, [...(byTop.get(top) ?? []), path])
+      continue
+    }
+    if ((kind !== 'file' && !TEXT_DOC.test(path)) || isNamed) {
+      if (!isNamed && (TEMP.test(path) || (dir && path.startsWith(`${dir}/`)))) continue
+      made.push({ path, name: fileName(path), kind, at: Math.round(stat.mtimeMs) })
+    }
+  }
+  const order = new Map<string, number>()
+  for (const [n, given] of [...named, ...wrote].entries()) if (!order.has(given.replace(/^\/private(?=\/(tmp|var)\/)/, ''))) order.set(given.replace(/^\/private(?=\/(tmp|var)\/)/, ''), n)
+  made.sort((a, b) => (order.get(a.path) ?? 0) - (order.get(b.path) ?? 0))
+  for (const link of linksIn(answer)) made.push({ path: link, name: linkName(link), kind: 'link' })
+  const code = byTop.size ? await codeOf($, byTop, since).catch(() => undefined) : undefined
+  return { made, ...(code ? { code } : {}) }
+}
+const MADE_AGAIN = 20_000
+const MADE_HOLD = 15_000
+const shownOf = (files?: FilesMade) => (files && (files.made.length || files.code) ? JSON.stringify(files) : '')
+const madeOf = new Map<string, { key: string; at: number; files: FilesMade }>()
+const madeLoading = new Set<string>()
+let madeTurn: Promise<unknown> = Promise.resolve()
+const madeNow = ($: EngineInterface, one: Todo): FilesMade | undefined => {
+  if (one.chat) return undefined
+  const key = `${one.steps ?? 0}:${(one.wrote ?? []).length}:${one.answer.length}:${one.status}:${one.status === 'working' ? Math.floor(Date.now() / MADE_AGAIN) : ''}`
+  const was = madeOf.get(one.id)
+  const isDue = !was || (was.key !== key && (one.status !== 'working' || Date.now() - was.at >= MADE_AGAIN))
+  if (isDue && !madeLoading.has(one.id) && ((one.wrote ?? []).length || one.answer)) {
+    madeLoading.add(one.id)
+    const run = madeTurn.then(() => madeBy($, one.wrote ?? [], one.status === 'working' ? '' : one.answer, one.begunAt ?? one.startedAt))
+    madeTurn = Promise.race([run.catch(() => undefined), $.clock.sleep(MADE_HOLD)])
+    let isNew = false
+    void run
+      .then(files => {
+        if (madeOf.size > 200) madeOf.delete(madeOf.keys().next().value ?? '')
+        isNew = shownOf(files) !== shownOf(madeOf.get(one.id)?.files)
+        madeOf.set(one.id, { key, at: Date.now(), files })
+      })
+      .catch(err => log($, `files of ${one.id} not listed: ${String(err)}`))
+      .finally(() => (madeLoading.delete(one.id), isNew ? redraw($) : undefined))
+  }
+  return was?.files
+}
+const madeOfOld = new Map<string, FilesMade>()
+const madeOfReport = ($: EngineInterface, r: Report, text: string): FilesMade => {
+  const files = r.made ?? madeOfOld.get(r.id)
+  if (!files && !madeLoading.has(r.id)) {
+    madeLoading.add(r.id)
+    void (async () => {
+      const one = (await read($, todos)).find(card => card.id === r.agent)
+      const listed = await madeBy($, one?.wrote ?? [], text, one ? (one.begunAt ?? one.startedAt) : 0, Boolean(one)).catch(() => ({ made: [] }))
+      if (madeOfOld.size > 200) madeOfOld.delete(madeOfOld.keys().next().value ?? '')
+      madeOfOld.set(r.id, listed)
+    })()
+      .catch(err => log($, `files of result ${r.id} not listed: ${String(err)}`))
+      .finally(() => (madeLoading.delete(r.id), redraw($)))
+  }
+  const made = files?.made ?? []
+  const names = new Set(made.map(one => one.name))
+  const copies = r.files.filter(file => isInside(file) && !names.has(fileName(file))).map(file => ({ path: `${reportPath(r)}/${file}`, name: fileName(file), kind: madeKind(file).kind }))
+  return { ...(files ?? {}), made: [...made, ...copies] }
+}
+
+
+type Face = { base64: string } | null
+const faces = new Map<string, Face>()
+const facesLoading = new Set<string>()
+const faceKey = (one: Made) => `${one.path}:${one.at ?? 0}`
+let facesMade = 0
+let qlMade = 0
+const makeFace = async ($: EngineInterface, one: Made): Promise<Face> => {
+  if (one.kind === 'link' || one.kind === 'file' || /\.svg$/i.test(one.path)) return null
+  const stat = await $.fs.stat(one.path).catch(() => undefined)
+  if (!stat || stat.kind !== 'file') return null
+  const to = `${dir}/thumbs/tile-${slug(one.path).slice(-60)}-${mark(one.path).replace(':', '-')}-${Math.round(stat.mtimeMs)}.jpg`
+  if (!(await $.fs.exists(to))) {
+    await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
+    let from = one.path
+    let scratch = ''
+    if (TEXT_DOC.test(one.path) && !/\.html?$/i.test(one.path)) return null
+    if (one.kind !== 'picture' && one.kind !== 'pdf') {
+      if (isLinux) return null
+      scratch = `${dir}/thumbs/ql-${Math.round(await $.clock.now())}-${(qlMade += 1)}`
+      await $.process.run(['mkdir', '-p', scratch])
+      await $.process.run(['qlmanage', '-t', '-s', '320', '-o', scratch, one.path], { timeoutMs: 15_000 }).catch(() => undefined)
+      from = `${scratch}/${fileName(one.path)}.png`
+      if (!(await $.fs.exists(from))) return (await $.process.run(['rm', '-rf', scratch]).catch(() => undefined), null)
+    }
+    const said = (await $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', from], { timeoutMs: 15_000 }).catch(() => undefined))?.stdout ?? ''
+    const [width = 0, height = 0] = [/pixelWidth: (\d+)/, /pixelHeight: (\d+)/].map(re => Number(re.exec(said)?.[1] ?? 0))
+    const isTall = width > 0 && height / width > FACE_H / FACE_W
+    const mid = `${to}.png`
+    if (isTall) await $.process.run([sips($), '--resampleWidth', String(FACE_W), '-s', 'format', 'png', from, '--out', mid], { timeoutMs: 15_000 }).catch(() => undefined)
+    for (const quality of ['50', '35', '20']) {
+      await $.process
+        .run(isTall ? [sips($), '-c', String(FACE_H), String(FACE_W), '--cropOffset', '0', '0', '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, mid, '--out', to] : [sips($), '-Z', String(FACE_W), '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, from, '--out', to], { timeoutMs: 15_000 })
+        .catch(() => undefined)
+      if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= TILE_THUMB_BYTES) break
+    }
+    await $.process.run(['rm', '-rf', mid, ...(scratch ? [scratch] : [])]).catch(() => undefined)
+  }
+  const read = (await $.fs.read(to, { as: 'bytes' }).catch(() => undefined)) as { base64: string } | undefined
+  return read?.base64 && read.base64.length < TILE_THUMB_BYTES * 2 ? { base64: read.base64 } : null
+}
+const facesNow = ($: EngineInterface, list: Made[]) => {
+  const missing = list.filter(one => !faces.has(faceKey(one)) && !facesLoading.has(faceKey(one)))
+  if (missing.length) {
+    for (const one of missing) facesLoading.add(faceKey(one))
+    void (async () => {
+      for (const one of missing) {
+        const face = await makeFace($, one).catch(() => null)
+        if (faces.size > 300) faces.delete(faces.keys().next().value ?? '')
+        faces.set(faceKey(one), face)
+        facesMade += 1
+        facesLoading.delete(faceKey(one))
+      }
+    })()
+      .catch(err => log($, `small copies of files not made: ${String(err)}`))
+      .finally(() => (missing.forEach(one => facesLoading.delete(faceKey(one))), redraw($)))
+  }
+  return faces
+}
+
+
+const SVG_FONT = 'font-family="-apple-system,Helvetica,sans-serif"'
+const pageIcon = (badge: string, color: string) =>
+  `<path d="M4.5 1.5h13l7 7v21a1 1 0 0 1-1 1h-19a1 1 0 0 1-1-1v-27a1 1 0 0 1 1-1z" fill="#3b3b39" stroke="#9a9890" stroke-width="1.2"/><path d="M17.5 1.5v7h7" fill="none" stroke="#9a9890" stroke-width="1.2"/>${badge ? `<rect x="1" y="15" width="${badge.length > 3 ? 22 : 19}" height="10" rx="2" fill="${color}"/><text x="${badge.length > 3 ? 12 : 10.5}" y="22.6" font-size="7" ${SVG_FONT} font-weight="700" fill="#fff" text-anchor="middle">${badge}</text>` : ''}`
+const LINK_ICON = '<rect x="2.5" y="4.5" width="23" height="23" rx="5" fill="#3b3b39" stroke="#9a9890" stroke-width="1.2"/><path d="M11 13.5h-1.5a3.5 3.5 0 0 0 0 7H11M17 13.5h1.5a3.5 3.5 0 0 1 0 7H17M11.5 17h5" fill="none" stroke="#C9A7FF" stroke-width="1.6" stroke-linecap="round"/>'
+const CODE_ICON = '<circle cx="9" cy="8" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="9" cy="24" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="19" cy="12" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><path d="M9 10.6v10.8M19 14.6c0 4-10 3-10 6.8" fill="none" stroke="#9a9890" stroke-width="1.5"/>'
+const endingOf = (path = '') => (/\.([a-z0-9]{1,4})$/i.exec(path)?.[1] ?? '').toUpperCase()
+const iconOf = (kind: MadeKind | 'code', path?: string) =>
+  kind === 'code' ? CODE_ICON : kind === 'link' ? LINK_ICON : pageIcon(kind === 'file' ? endingOf(path) : madeKindOf(kind).badge, madeKindOf(kind).color)
+const svgOfIcon = (kind: MadeKind | 'code', width: number, height: number, path?: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 28 32">${iconOf(kind, path)}</svg>`
+const tileSvg = (inner: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="${TILE_W}" height="${TILE_H}" viewBox="0 0 ${TILE_W} ${TILE_H}">${inner}</svg>`
+const clipId = (one: Made) => `t${mark(one.path).replace(':', '-')}`
+const tilePicture = (face: { base64: string }, x: number, y: number, w: number, h: number, id: string) =>
+  `<clipPath id="${id}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4"/></clipPath><g clip-path="url(#${id})"><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#fff"/><image href="data:image/jpeg;base64,${face.base64}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="xMidYMin slice"/></g><rect x="${x + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" rx="4" fill="none" stroke="#ffffff30"/>`
+const tilePlay = (cx: number, cy: number) => `<circle cx="${cx}" cy="${cy}" r="12" fill="#000a"/><path d="M${cx - 4} ${cy - 6}l10 6-10 6z" fill="#fff"/>`
+const tileBadge = (kind: MadeKind) => {
+  const { badge, color } = madeKindOf(kind)
+  return kind === 'pdf' || kind === 'sheet' || kind === 'doc' ? `<rect x="4" y="${TILE_H - 17}" width="${badge.length * 6 + 8}" height="13" rx="3" fill="${color}"/><text x="8" y="${TILE_H - 7.5}" font-size="8.5" ${SVG_FONT} font-weight="700" fill="#fff">${badge}</text>` : ''
+}
+const tileIcon = (kind: MadeKind | 'code', path?: string) => `<rect width="${TILE_W}" height="${TILE_H}" rx="4" fill="#ffffff12"/><g transform="translate(${TILE_W / 2 - 17.5} ${TILE_H / 2 - 20}) scale(1.25)">${iconOf(kind, path)}</g>`
+const oneTile = (one: Made, face: Face | undefined) => tileSvg(face ? tilePicture(face, 0, 0, TILE_W, TILE_H, clipId(one)) + (one.kind === 'video' ? tilePlay(TILE_W / 2, TILE_H / 2) : '') + tileBadge(one.kind) : tileIcon(one.kind, one.path))
+const pileTile = (first: Made, face: Face | undefined) =>
+  tileSvg(
+    `<rect x="8" y="0" width="${TILE_W - 8}" height="${TILE_H - 8}" rx="4" fill="#55554f"/><rect x="4" y="4" width="${TILE_W - 8}" height="${TILE_H - 8}" rx="4" fill="#77766f"/>` +
+      (face ? tilePicture(face, 0, 8, TILE_W - 8, TILE_H - 8, clipId(first)) + (first.kind === 'video' ? tilePlay((TILE_W - 8) / 2, 8 + (TILE_H - 8) / 2) : '') : `<rect x="0" y="8" width="${TILE_W - 8}" height="${TILE_H - 8}" rx="4" fill="#3b3b39" stroke="#ffffff30"/><g transform="translate(${(TILE_W - 8) / 2 - 17.5} ${8 + (TILE_H - 8) / 2 - 20}) scale(1.25)">${iconOf(first.kind, first.path)}</g>`),
+  )
+const codeTile = (code: CodeMade) =>
+  tileSvg(
+    `<rect width="${TILE_W}" height="${TILE_H}" rx="4" fill="#ffffff12"/><text x="${TILE_W / 2}" y="${TILE_H / 2 - 3}" font-size="15" ${SVG_FONT} font-weight="600" fill="#57AB5A" text-anchor="middle">+${code.plus.toLocaleString('en-US')}</text><text x="${TILE_W / 2}" y="${TILE_H / 2 + 16}" font-size="15" ${SVG_FONT} font-weight="600" fill="#E5534B" text-anchor="middle">−${code.minus.toLocaleString('en-US')}</text>`,
+  )
+
+const sharedStart = (names: string[]) => {
+  if (names.length < 2) return 0
+  let n = 0
+  while (names.every(name => name[n] !== undefined && name[n] === names[0]?.[n])) n += 1
+  const cut = (names[0] ?? '').slice(0, n).search(/[-_ ][^-_ ]*$/)
+  return cut < 0 ? 0 : cut + 1
+}
+const bareName = (name: string) => name.replace(/\.[a-z0-9]+$/i, '')
+type Thing = { key: string; label: string; kind: MadeKind; files: Made[] }
+const thingsOf = (files: FilesMade, opened: (kind: MadeKind) => boolean): Thing[] => {
+  const skip = sharedStart(files.made.filter(one => one.kind !== 'link').map(one => bareName(one.name)))
+  const nameOf = (one: Made) => (one.kind === 'link' ? one.name : bareName(one.name).slice(skip) || bareName(one.name))
+  const kinds: MadeKind[] = [...MADE_KINDS.map(one => one.kind), 'link']
+  return kinds.flatMap(kind => {
+    const list = files.made.filter(one => one.kind === kind)
+    if (kind !== 'link' && list.length >= 3 && !opened(kind)) return [{ key: `pile-${kind}`, label: `${list.length} ${madeKindOf(kind).many}`, kind, files: list }]
+    return list.map((one, n) => ({ key: `${kind}-${n}`, label: nameOf(one), kind, files: [one] }))
+  })
+}
+const middleCut = (text: string, most: number) => (text.length <= most ? text : `${text.slice(0, Math.ceil((most - 1) / 2))}…${text.slice(text.length - Math.floor((most - 1) / 2))}`)
+const countWord = (code: CodeMade) => `${code.count.toLocaleString('en-US')} code ${code.count === 1 ? 'file' : 'files'}`
+const openMade = async ($: EngineInterface, one: Made, pane: string, row: string, surface?: RenderSurface) => {
+  if (one.kind === 'picture') return showPicture($, one.path, pane, row, surface)
+  const opened = await openOn($, one.path)
+  if (opened.exitCode !== 0) await log($, `${one.path} not opened: ${opened.stderr}`)
+}
+const openPiles = new Set<string>()
+
+const madeChips = ($: EngineInterface, ui: Ui, one: Todo, key: string, onOpenWork: () => void) => {
+  const files = madeNow($, one)
+  if (!files || (!files.made.length && !files.code)) return null
+  const { Box, Button, Text } = ui
+  const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
+  const things = thingsOf(files, () => false)
+  const shown = things.slice(0, CHIPS_MOST)
+  const icon = (kind: MadeKind | 'code', at: string, path?: string) =>
+    table.Svg && !('isTerminal' in ui) ? <table.Svg key={`${at}-icon`} source={svgOfIcon(kind, 18, 20, path)} alt={kind === 'code' ? 'Code' : kind === 'link' ? 'Link' : madeKindOf(kind).one.replace(/^\w/, c => c.toUpperCase())} width={18} height={20} /> : null
+  return (
+    <Box key={key} flexDirection="row" flexWrap="wrap" columnGap={2} rowGap={0}>
+      {shown.map(thing => (
+        <Box key={`${key}-${thing.key}`} flexDirection="row" alignItems="center" flexShrink={0} height={1} overflow="hidden">
+          {icon(thing.kind, `${key}-${thing.key}`, thing.files[0]?.path)}
+          <Button
+            key={`${key}-${thing.key}-open-${presses}`}
+            label={`${middleCut(thing.label, 18)}${thing.kind === 'link' ? ' ↗' : ''}`}
+            plain
+            onPress={press => void ((presses += 1), thing.files.length > 1 ? onOpenWork() : thing.files[0] ? openMade($, thing.files[0], '', '', press.surface) : undefined)}
+          />
+        </Box>
+      ))}
+      {things.length > shown.length ? <Text key={`${key}-more`} dimColor>{`${things.length - shown.length} more`}</Text> : null}
+      {files.code ? (
+        <Box key={`${key}-code`} flexDirection="row" alignItems="center" gap={1} flexShrink={0} height={1} overflow="hidden">
+          {icon('code', `${key}-code`)}
+          <Text>{countWord(files.code)}</Text>
+          <Text color="success">{`+${files.code.plus.toLocaleString('en-US')}`}</Text>
+          {files.code.minus ? <Text color="error">{`−${files.code.minus.toLocaleString('en-US')}`}</Text> : null}
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
+const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, key: string, surface?: RenderSurface, gen = '') => {
+  if (!files.made.length && !files.code) return null
+  const { Box, Button, Text } = ui
+  const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
+  const canDraw = Boolean(table.Svg) && surface !== 'terminal' && !('isTerminal' in ui)
+  const things = thingsOf(files, kind => openPiles.has(`${pane}:${kind}`))
+  const shown = things.slice(0, TILES_MOST)
+  const made = canDraw ? facesNow($, shown.slice(0, FACES_MOST).flatMap(thing => thing.files.slice(0, 1))) : faces
+  let chars = 0
+  const faceOf = (one: Made | undefined) => {
+    const face = one ? made.get(faceKey(one)) : undefined
+    if (!face || chars + face.base64.length > TILE_CHARS) return undefined
+    chars += face.base64.length
+    return face
+  }
+  const press = (thing: Thing, row: string) => (e: { surface?: RenderSurface }) => {
+    presses += 1
+    if (thing.files.length > 1) return void (openPiles.add(`${pane}:${thing.kind}`), redraw($))
+    if (thing.files[0]) void openMade($, thing.files[0], pane, row, e.surface)
+  }
+  const fewer = [...new Set(files.made.map(one => one.kind))].filter(kind => openPiles.has(`${pane}:${kind}`) && files.made.filter(one => one.kind === kind).length >= 3)
+  return (
+    <Box key={key} flexDirection="column" gap={1}>
+      <Box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={1}>
+        {shown.map(thing => {
+          const row = `${key}-${thing.key}`
+          return (
+            <Box key={row} flexDirection="column" alignItems="flex-start" width={canDraw ? TILE_COLUMNS : undefined} flexShrink={0}>
+              {canDraw && table.Svg ? <table.Svg key={`${row}-svg`} source={thing.files.length > 1 ? pileTile(thing.files[0]!, faceOf(thing.files[0])) : oneTile(thing.files[0]!, faceOf(thing.files[0]))} alt={thing.label} width={TILE_SHOWN_W} height={TILE_SHOWN_H} /> : null}
+              <Button key={`${row}-open-${presses}${gen}`} label={canDraw ? middleCut(thing.label, TILE_COLUMNS) : cut(thing.label, 60)} plain onPress={press(thing, row)} />
+            </Box>
+          )
+        })}
+        {files.code ? (
+          <Box key={`${key}-code`} flexDirection="column" alignItems="flex-start" width={canDraw ? TILE_COLUMNS : undefined} flexShrink={0}>
+            {canDraw && table.Svg ? <table.Svg key={`${key}-code-svg`} source={codeTile(files.code)} alt={countWord(files.code)} width={TILE_SHOWN_W} height={TILE_SHOWN_H} /> : null}
+            <Text dimColor wrap="truncate-end">{canDraw ? countWord(files.code) : `${countWord(files.code)} · +${files.code.plus.toLocaleString('en-US')} −${files.code.minus.toLocaleString('en-US')}`}</Text>
+          </Box>
+        ) : null}
+      </Box>
+      {things.length > shown.length ? <Text dimColor>{`${things.length - shown.length} more`}</Text> : null}
+      {fewer.length ? (
+        <Box alignItems="flex-start">
+          <Button key={`${key}-fewer-${presses}${gen}`} label="Show less" plain dimColor onPress={() => void ((presses += 1), fewer.forEach(kind => openPiles.delete(`${pane}:${kind}`)), redraw($))} />
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
+
+
+
 const flows = atom({ plugin: 'claudopus', key: 'flows' } as const, [], { shape: 'flows-1' })
 let ccd = { id: '', parent: '' }
 const fullModel = (id: string) => (/^(opus|sonnet|fable)$/i.test(id.trim()) ? (MODELS.find(one => one.includes(id.trim().toLowerCase())) ?? id) : id)
@@ -3981,7 +4504,7 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
       : one.status === 'failed'
         ? 'Failed.'
         : 'Stopped.'
-  return { title: one.title || 'Task', isDone: one.status === 'done', what }
+  return { title: one.title || 'Task', isDone: one.status === 'done', isWaiting: one.status === 'done' && waits.length > 0, what }
 }
 
 const announce = async ($: EngineInterface) => {
@@ -4000,9 +4523,11 @@ const announce = async ($: EngineInterface) => {
   if (config.sound !== false && items.some(one => one.isDone)) void $.audio.play({ asset: READY_SOUND }).catch(err => log($, `ready sound not played: ${String(err)}`))
   if (config.notifications === false) return
   const [first] = items
-  const done = items.filter(one => one.isDone).length
-  const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} tasks are done` : `${items.length} tasks ended`
-  const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${one.isDone ? 'done' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
+  const isWaiting = (one: (typeof items)[number]) => 'isWaiting' in one && Boolean(one.isWaiting)
+  const done = items.filter(one => one.isDone && !isWaiting(one)).length
+  const waiting = items.filter(isWaiting).length
+  const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} tasks are done` : waiting ? `${items.length} tasks ended · ${waiting} waiting for you` : `${items.length} tasks ended`
+  const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${isWaiting(one) ? 'waiting for you' : one.isDone ? 'done' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
   await alertPerson($, 'ready', title, text, `ready-${ids.map(one => one.id).join('-')}`)
 }
 
@@ -5330,7 +5855,7 @@ const toEnded = async ($: EngineInterface, one: Todo, target: string, text: stri
     const at = wakes.indexOf(wake)
     if (at < 0) return
     wakes.splice(at, 1)
-    void log($, `work ${target} started again from a timer: no hook of the mod ran within ${WAKE_WAIT / 1000} s, so its panel tools will not answer`)
+    void log($, `work ${target}'s answer was taken by no hook of the mod within ${WAKE_WAIT / 1000} s: it goes from the next one (sendOwn)`)
     void sendWake($, wake, false)
   })
 }
@@ -7387,12 +7912,65 @@ const outcomeOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isErro
   if (r.deny) return 'no'
   return r.isError ? 'stopped' : 'ran'
 }
-const sendOwn = async ($: EngineInterface, message: { to: { agentId: string }; text: string }) => {
+type SendResult = Awaited<ReturnType<EngineInterface['session']['send']>>
+type OwnMessage = { to: { agentId: string }; text: string }
+const IN_HOOK = 'CLAUDOPUS_IN_HOOK'
+const HOOK_WAIT = 60_000
+const UNSEEN_RUN = `From Claudopus: this message starts you where Claudopus cannot see you, as nothing of its own ran for a minute to send it from. In this run its panel tools (todo, note, ask, wake_me, waits) do not answer, and nothing starts you again once your step ends. So do not end your step to wait for anything: do what you can now, then hand back your report with SubagentHandback, saying what is left.`
+const isInHook = async ($: EngineInterface) => (await $.env.get('CLAUDOPUS_IN_HOOK').catch(() => undefined)) === 'hook'
+type HeldSend = { message: OwnMessage; isStill?: () => Promise<boolean>; resolve: (r: SendResult) => void; reject: (err: unknown) => void; result?: Promise<SendResult> }
+const heldSends: HeldSend[] = []
+const sendOwnNow = async ($: EngineInterface, message: OwnMessage) => {
   const since = await $.clock.now()
   try {
     return await $.session.send(message)
   } finally {
     ownSent($, since)
+  }
+}
+const sendOwn = async ($: EngineInterface, message: OwnMessage, isStill?: () => Promise<boolean>): Promise<SendResult> => {
+  if (await isInHook($)) return sendOwnNow($, message)
+  const same = heldSends.find(one => one.message.to.agentId === message.to.agentId && one.message.text === message.text)
+  if (same?.result) return same.result
+  const one: HeldSend = { message, isStill, resolve: () => undefined, reject: () => undefined }
+  one.result = new Promise<SendResult>((resolve, reject) => ((one.resolve = resolve), (one.reject = reject)))
+  heldSends.push(one)
+  redraw($)
+  void log($, `a message for ${message.to.agentId} waits for a hook of the mod: sent from here, the task would run unseen by Claudopus`)
+  $.clock.after(HOOK_WAIT, () => {
+    const at = heldSends.indexOf(one)
+    if (at < 0) return
+    heldSends.splice(at, 1)
+    void isReplaced($).then(isOld => {
+      if (isOld) return one.resolve({ isDelivered: false, reason: 'this copy of the mod was replaced by a reload' } as SendResult)
+      void log($, `the message for ${message.to.agentId} goes from a timer after all: no hook of the mod came in ${HOOK_WAIT / 1000} s, so its task runs unseen and is told so`)
+      void sendOne($, one, `${message.text}\n\n${UNSEEN_RUN}`)
+    })
+  })
+  return one.result
+}
+const sendOne = async ($: EngineInterface, { message, isStill, resolve, reject }: HeldSend, text = message.text) => {
+  const id = message.to.agentId
+  if (stoppedHere.has(id) || isHeld((await read($, todos)).find(card => card.id === id))) return resolve({ isDelivered: false, reason: 'the person stopped it meanwhile' } as SendResult)
+  if (isStill && !(await isStill().catch(() => false))) return resolve({ isDelivered: false, reason: 'no longer wanted by the time it could be sent' } as SendResult)
+  await sendOwnNow($, { ...message, text }).then(resolve, reject)
+}
+let isSendingHeld = false
+const sendHeld = async ($: EngineInterface) => {
+  if (!heldSends.length || isSendingHeld) return
+  isSendingHeld = true
+  try {
+    if (!(await isInHook($)) || (await isReplaced($))) return
+    for (let idle = 0; idle < 4; idle += 1) {
+      for (let one = heldSends.shift(); one; one = heldSends.shift()) {
+        idle = 0
+        await sendOne($, one)
+        await log($, `the message that waited for ${one.message.to.agentId} went from a hook: its task runs where Claudopus sees it`)
+      }
+      await $.clock.now().catch(() => undefined)
+    }
+  } finally {
+    isSendingHeld = false
   }
 }
 const ownSent = ($: EngineInterface, since: number) => {
@@ -7519,6 +8097,11 @@ const OWN_CALLS = ['SendMessage', 'TaskStop']
 const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
 
 const promptHooks = (on: On) => {
+  on('env.get', ($, e, next) => ((e as unknown as { name?: string }).name === IN_HOOK ? ({ value: 'hook' } as never) : next(e)))
+  on('classic.PreToolUse', async ($, e, next) => {
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
+    return next(e)
+  })
 
   on('tool.check', async ($, e, next) => {
     const r = await next(e)
@@ -8217,21 +8800,25 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   const isHeld = listed === 'waiting' || listed === 'running'
   if (listed === 'running') $.clock.after(HELD_LOOK, () => void heldLook($, id).catch(err => log($, `work ${id} not looked at again: ${String(err)}`)))
   const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
+  const isOwnResult = how === 'done' && !(await read($, todos)).find(one => one.id === id)?.parentId && (await isUnpressed($, id))
   const isGoingOn = how === 'done' && isHeld && goesOn(await read($, todos), id)
   const isReport = how === 'done' && isHeld && !isGoingOn && (handedBack.has(id) || isWordsReport((await read($, todos)).find(one => one.id === id), answer))
   const isIdleReport = isReport && ownsNothing(await read($, todos), id)
-  const isHandedBack = how === 'done' && (handedBack.has(id) || isIdleReport) && !isGoingOn
+  const isTop = !(await read($, todos)).find(one => one.id === id)?.parentId
+  const isHandedBack = how === 'done' && (handedBack.has(id) || (isIdleReport && (isOwnResult || !isTop))) && !isGoingOn
   if (isHandedBack) (ownsNothing(await read($, todos), id) ? leftNothing.add(id) : leftNothing.delete(id))
+  const isReceived = isHandedBack && isTop
   handedBack.delete(id)
   if (isHandedBack) endedByHandback.add(id)
-  if (isHandedBack) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now, wakeWhen: undefined } : one)))
+  if (isHandedBack) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now, wakeWhen: undefined, ...(isReceived ? { reportAt: now } : {}) } : one)))
   if (!isHeld) await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
   const isShortHow = how === 'done' || (how === 'failed' && e.reason === 'error')
   const mayBeShort = isShortHow && !isHandedBack && isStoppedShort((await read($, todos)).find(one => one.id === id), answer) && (await pressedAtEnd($, id))
   let isCarried = false
   await changeTodos($, list => {
     isCarried = false
-    const isWaiting = how === 'done' && !isHandedBack && (isHeld || isTurnWaited(list, id) || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)))
+    const self = list.find(one => one.id === id)
+    const isWaiting = how === 'done' && !isHandedBack && (isHeld || isTurnWaited(list, id) || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)) || Boolean(self && !self.parentId && wakesOf(list, self).isAny))
     const waitsSince = (one: Todo) => (isHeld && !isReport && one.bg?.some(b => !b.isWatch) ? (one.waitsSince ?? now) : undefined)
     return list.map(one =>
       one.id !== id
@@ -8247,7 +8834,7 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
               : one
             : mayBeShort && one.status === 'working' && isStoppedShort(one, answer)
               ? ((isCarried = true), { ...one, answer: answer || one.answer })
-              : { ...ended(one, how, now), answer: answer || one.answer },
+              : { ...ended(one, how, now), answer: answer || one.answer, ...(isOwnResult && !one.parentId ? { reportAt: one.reportAt ?? now } : {}) },
     )
   })
   if (isCarried) await goOn($, id, e.reason === 'error' ? 'its step failed' : 'its step ended', true)
@@ -8507,6 +9094,8 @@ const chatHooks = (on: On) => {
     await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
     if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
+    afterLoad($, CATCH_UP_AFTER, () => startCatchUp($).catch(err => log($, `chats not caught up: ${String(err)}`)))
+    everyLoad($, CATCH_UP_EVERY, () => startCatchUp($).catch(err => log($, `chats not caught up: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
     await readAnswers($).catch(() => undefined)
     await readOthers($).catch(() => undefined)
@@ -8573,7 +9162,11 @@ const chatHooks = (on: On) => {
     if (e.isMeta || e.command || !dir) return next(e)
     const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text)
     const isPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || isPressed
-    if (!isPerson) return next(e)
+    if (!isPerson) {
+      const from = programFrom(e.origin)
+      if (from) await appendWords($, (await read($, me)).id, `## ${new Date().toISOString()} (${from})\n${e.text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
+      return next(e)
+    }
     const context = [...(e.context ?? []), ...(await reportsFor($))]
     const stillHeld = (await read($, todos)).filter(one => isHeld(one) && !one.parentId)
     if ((await read($, todos)).some(isHeld)) {
@@ -8605,7 +9198,7 @@ const chatHooks = (on: On) => {
       if (text.length > PASTE_CHARS) {
         const stamp = new Date().toISOString().replaceAll(':', '-')
         const path = `${dir}/pastes/${stamp}.md`
-        await $.fs.write(`${dir}/pastes/${stamp}.md`, text)
+        await $.fs.write(`${dir}/pastes/${stamp}.md`, hideKeys(text))
         text = `${text.slice(0, 600)}\n\n[${text.length - 1200} characters pasted here were saved to ${path} and left out of this chat]\n\n${text.slice(-600)}`
         context.push(PASTED)
       }
@@ -9153,7 +9746,7 @@ const isStoppedShort = (one: Todo | undefined, answer: string) =>
       !pressed.has(one.id) &&
       !one.flagged &&
       !one.carryOn?.gaveUp &&
-      !one.detached?.length,
+      !one.detached?.some(d => !isServerRun(d.cmd, d.what)),
   )
 const isPressedAtEnd = (rows: unknown) => {
   if (!Array.isArray(rows)) return false
@@ -9207,15 +9800,21 @@ const goOnNow = async ($: EngineInterface, id: string, how: string, isHeard: boo
   $.clock.after(CARRY_AFTER, () => void carryNow($, id, next.at).catch(err => log($, `work ${id} not started again: ${String(err)}`)))
 }
 const carryNow = async ($: EngineInterface, id: string, at: number) => {
-  const one = (await read($, todos)).find(card => card.id === id)
-  if (!one || one.status !== 'working' || one.carryOn?.at !== at || !isStoppedShort(one, '') || (await isReplaced($))) return
+  const stillStopped = async () => {
+    const card = (await read($, todos)).find(c => c.id === id)
+    return card && card.status === 'working' && card.carryOn?.at === at && isStoppedShort(card, '') && !(await isReplaced($)) ? card : undefined
+  }
+  const one = await stillStopped()
+  if (!one) return
   const status = (await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status
   if (WORKING.includes(String(status))) return void (await log($, `work ${id} was at work again before Claudopus started it: no note sent`))
   if (status === 'killed') return void (await log($, `work ${id} was stopped before Claudopus started it: no note sent`))
   if (carrySent.has(`${id}:${at}`)) return
   carrySent.add(`${id}:${at}`)
-  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  const isStill = async () => Boolean(await stillStopped()) && !WORKING.includes(String((await $.agent.list().catch(() => [])).find(agent => agent.id === id)?.status))
+  const r = await sendOwn($, { to: { agentId: id }, text: named(STOPPED_SHORT_GO_ON) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (r.isDelivered) return void (await log($, `work ${id} started again to carry on`))
+  if (!(await isStill())) return void (await log($, `work ${id} moved on before Claudopus started it: no note sent`))
   const now = await $.clock.now()
   await changeTodos($, list => list.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'stopped', now), carryOn: { ...(card.carryOn ?? nextCarry(card, now)), gaveUp: now, isLost: true } } : card)))
   redraw($)
@@ -9229,7 +9828,7 @@ const keepGoingWhy = (list: Todo[], id: string) => {
   const one = list.find(card => card.id === id)
   const open = openItems(one)
   if (!one || isOff || !dir || one.status !== 'working' || !open.length || handedBack.has(id) || one.mayHandBack !== undefined) return ''
-  if (!isStoppedShort(one, '') || !ownsNothing(list, id) || one.wakeWhen !== undefined || isTurnWaited(list, id)) return ''
+  if (!isStoppedShort(one, '') || wakesOf(list, one).isAny) return ''
   return named(KEEP_GOING(open.map(item => item.text)))
 }
 const keepGoing = async ($: EngineInterface, id: string): Promise<string> => {
@@ -10207,7 +10806,8 @@ const waitingNow = async ($: EngineInterface) => {
       continue
     }
     const helpers = runningHelpers(list, card.id).filter(one => listed.get(one.id) === 'running' || listed.get(one.id) === 'waiting').length
-    const wake = card.wakeWhen && card.wakeWhen.until > now ? card.wakeWhen.what : ''
+    const run = (card.detached ?? []).find(d => !isServerRun(d.cmd, d.what))
+    const wake = card.wakeWhen && card.wakeWhen.until > now ? card.wakeWhen.what : run ? `the end of its command "${runWords(run.what, run.cmd)}"` : ''
     if (helpers || wake) waiting.set(card.id, { title: titleOf(card), helpers, wake, ...(card.stuckTold !== undefined ? { stuck: card.id } : {}) })
   }
   return waiting
@@ -10488,7 +11088,7 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   for (const one of ids.filter(one => !stoppedHere.has(one) && !isHeld(heldNow.find(card => card.id === one)) && !isFinished(one))) {
     const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
     const hasHelpers = Object.keys(helpers).some(kid => rootOf(kid) === one)
-    const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy, hasHelpers)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    const r = isLive ? { isDelivered: true as const } : await sendOwn($, { to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy, hasHelpers)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     ;(r.isDelivered ? back : lost).push(one)
     if (!r.isDelivered) await log($, `cut-off work ${one} not started again: ${r.reason}`)
   }
@@ -10499,7 +11099,7 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
     for (let at = parent, hops = 0; isKept && at !== rootOf(one) && hops < 10; at = helpers[at] ?? rootOf(one), hops += 1) isKept = at in helpers && !stoppedHere.has(at) && !isHeld(heldNow.find(card => card.id === at))
     if (!isKept || stoppedHere.has(one) || isHeld(heldNow.find(card => card.id === one))) continue
     const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
-    const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    const r = isLive ? { isDelivered: true as const } : await sendOwn($, { to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     ;(r.isDelivered ? helpersBack : helpersLost).push(one)
     if (!r.isDelivered) await log($, `cut-off helper ${one} not started again: ${r.reason}`)
   }
@@ -11150,8 +11750,9 @@ const isAfterTaken = async ($: EngineInterface, id: string, call: string) => {
   return blocks.length > 0 && blocks.every(b => (b?.type === 'tool_result' && b.tool_use_id === call) || (b?.type === 'text' && String(b.text ?? '').includes(HANDBACK_PRESS)))
 }
 const waitsOnOwn = (list: Todo[], card: Todo) => {
-  const helpers = runningHelpers(list, card.id).length
-  const what = card.detached?.length ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : card.wakeWhen || isTurnWaited(list, card.id) ? 'it waits to be woken' : ''
+  const { helpers, isWoken } = wakesOf(list, card)
+  const isDetached = Boolean(card.detached?.some(d => !isServerRun(d.cmd, d.what)))
+  const what = isDetached ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : isWoken ? 'it waits to be woken' : ''
   return { what, helpers }
 }
 const NO_WAIT = (kind: WaitKind, isHelper = false) =>
@@ -11498,18 +12099,20 @@ const workHooks = (on: On) => {
         const now = await $.clock.now()
         const isKeeping = isTool(e.tool, 'todo') || isTool(e.tool, 'note')
         let nudge = ''
-        await changeTodos($, list =>
-          list.map(one => {
-            if (one.id !== id) return one
-            const base = { ...(one.status === 'working' ? one : resumed(one, now)), ...(one.carryOn?.gaveUp ? { carryOn: undefined } : {}), steps: (one.steps ?? 0) + 1, answeredAt: undefined, waitsSince: undefined, endedStepAt: undefined }
+        await changeTodos($, list => {
+          const top = topOf(list, id)
+          return list.map(one => {
+            if (one.id !== id) return one.id === top ? withWrote(one, e) : one
+            const own = { ...(one.status === 'working' ? one : resumed(one, now)), ...(one.carryOn?.gaveUp ? { carryOn: undefined } : {}), steps: (one.steps ?? 0) + 1, answeredAt: undefined, reportAt: undefined, waitsSince: undefined, endedStepAt: undefined }
+            const base = withWrote(own, e)
             if (isKeeping) return { ...base, quiet: 0, owes: isTool(e.tool, 'note') ? undefined : one.owes }
             const owes = one.owes === undefined ? undefined : one.owes + 1
             const quiet = (one.quiet ?? 0) + 1
             const isQuiet = !one.parentId && owes === undefined && quiet >= QUIET_STEPS
             nudge = owes === OWED_AFTER ? named(OWED) : isQuiet ? drifted(quiet) : ''
             return { ...base, owes, quiet: isQuiet ? 0 : quiet }
-          }),
-        )
+          })
+        })
         if (nudge) void tell($, id, nudge)
       }
     }
@@ -11525,6 +12128,8 @@ const workHooks = (on: On) => {
       if (hold) return { deny: hold }
       const unticked = await untickedAtHandback($, e.agentId, String((e as { message?: unknown }).message ?? '')).catch(() => '')
       if (unticked) return { deny: unticked }
+      const unrecorded = flowAgents.has(e.agentId) ? '' : await unrecordedAtHandback($, e.agentId, String((e as { message?: unknown }).message ?? '')).catch(() => '')
+      if (unrecorded) return { deny: unrecorded }
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       const taken = (await read($, todos)).find(one => one.id === e.agentId)
       if (dir && !isOff && taken && !taken.parentId && !flowAgents.has(e.agentId)) {
@@ -11596,6 +12201,7 @@ const workHooks = (on: On) => {
 
   on('session.measure', async ($, e, next) => {
     if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     const tokens = e.context.tokens
     if (tokens !== undefined) await update($, me, one => (one.tokens === tokens && one.window ? one : { ...one, tokens, window: one.window || e.context.window }))
 
@@ -11622,7 +12228,7 @@ const workHooks = (on: On) => {
       }
       await changeTodos($, list => list.map(one => (one.id === id ? { ...one, tookReport: undefined } : one)))
     }
-    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
+    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined, reportAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
     const waits = id !== undefined && card && !isOff && card.handedBackAt === undefined ? waitsOnOwn(await read($, todos), card) : undefined
@@ -11733,7 +12339,7 @@ const workHooks = (on: On) => {
     const from = fromReport || goesOn
     await changeTodos($, list => {
       const old = list.find(one => one.id === id)
-      const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}) }
+      const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}), kind: e.fork ? 'fork' : (e.subagentType ?? '') }
       return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(rules ? { rulesSent: hashOf(rules) } : {}), ...(old?.scratch || scratch ? { scratch: old?.scratch || scratch } : {}) }])
     })
     if (isOwn) await openList($)
@@ -11817,6 +12423,7 @@ const toolHooks = (on: On) => {
       .filter(Boolean)
       .map(line => line.replace(`${dir}/`, ''))
       .map(line => (archived.has(line.match(/^reports\/([^/]+)\//)?.[1] ?? '') ? `[archived] ${line}` : line).slice(0, 240))
+      .sort((a, b) => Number(a.startsWith('work/')) - Number(b.startsWith('work/')))
     if (!lines.length) return { result: `Nothing in ${dir} mentions "${query}".` }
     const more = lines.length > 40 ? `\n(${lines.length - 40} more lines; narrow the phrase)` : ''
 
@@ -12319,6 +12926,7 @@ const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     const drawBar = () => drawBarNow()
     if (e.surface !== 'desktop' || e.props.hasSurvey) return drawBar()
     const key = `bar|${e.requestId ?? ''}|${e.surface}|${e.props.bodyColumns}|${e.props.isCollapsed ? 1 : 0}`
@@ -12360,7 +12968,9 @@ const bandHooks = (on: On) => {
     }
     if (e.props.hasSurvey) return next(e)
     const working = cards.filter(one => !one.parentId && one.status === 'working')
-    const happy = isHappy(cards, await $.clock.now())
+    const bandAt = await $.clock.now()
+    const bandKept = await read($, reports)
+    const happy = isHappy(cards.filter(one => !openResultWaits(one, bandKept, bandAt).length), bandAt)
     if (happy) await read($, tick)
     const ui = uiOf($, e)
     const { Box, Button, Text } = ui
@@ -12563,6 +13173,7 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     if (paneId === LIST) ((listDrawing += 1), (listSurface = e.surface))
     if (paneId === LIST) await holdTest($)
     try {
@@ -12624,6 +13235,8 @@ const panelHooks = (on: On) => {
     }
     const all = (await read($, todos)).map(asPressed)
     const own = all.filter(one => !one.parentId)
+    const resultsKept = await read($, reports)
+    const resultWaits = (one: Todo) => openResultWaits(one, resultsKept, at)
     const otherChats = await read($, others)
     for (const one of cardsOf(otherChats)) if (one.ask?.replied && actingOn.get(`${one.id}:${one.ask.at}`) === one.ask.replied.text) actingOn.delete(`${one.id}:${one.ask.at}`)
     const elsewhere = cardsOf(otherChats).map(one => (one.ask && answeredHere.has(`${one.id}:${one.ask.at}`) ? { ...one, ask: undefined } : one))
@@ -12633,7 +13246,7 @@ const panelHooks = (on: On) => {
     const answeredOf = (list: Prompt[] | undefined) => (list ?? []).filter(p => !p.endedAt || at - p.endedAt < PROMPT_SHOWN)
     const promptsAnswered = answeredShown(at)
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
-    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD) || isLeftStopped(one, at))
+    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || resultWaits(one).length > 0 || one.admins?.length || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD) || isLeftStopped(one, at))
     let onCards = new Map<string, { at: number; key: string; what: string; node: JSX.Element }[]>()
     let doneOnCards = new Map<string, { at: number; key: string; node: JSX.Element }[]>()
     let promptsLoose = promptsAnswered
@@ -12641,12 +13254,12 @@ const panelHooks = (on: On) => {
     const ours = modelName(await $.session.model().catch(() => ''))
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
     const isAbovePrompt = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
-    const isFinishMoment = (one: Todo) => one.status === 'done' && !one.ask && lingers(one, at)
+    const isFinishMoment = (one: Todo) => one.status === 'done' && !one.ask && !resultWaits(one).length && lingers(one, at)
     const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
     const stood: Record<Todo['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
     const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `Claude Code moved it to ${one.moved}` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
     const glance = (one: Todo, count = '') =>
-      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [(one.ask && one.status === 'done' && !isActingOnReply(one)) || resultWaits(one).length ? 'Waiting for you' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one, at), modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     const { picking = '' } = await read($, view)
     const lead = e.surface === 'terminal' ? 0 : 'xs'
     const facts = (one: Todo, isWhole: boolean, count = '') => {
@@ -12673,7 +13286,7 @@ const panelHooks = (on: On) => {
             ))}
           </Box>
         )
-      const rest = [offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
+      const rest = [ownWorkWords(all, one, at), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
       return (
         <Box flexDirection="row" alignItems="flex-start">
           <Button
@@ -12852,6 +13465,30 @@ const panelHooks = (on: On) => {
       )
     }
 
+    const resultAskBlock = (one: Todo, key: string) => {
+      const open = resultWaits(one)
+      const [first] = open
+      if (!first) return null
+      const { r, wait, index } = first
+      return (
+        <Box key={key} flexDirection="column" gap={1}>
+          <Text wrap="wrap" color={NEEDS} bold>{`Result ready · ${cut(wait.text, Math.round(room * 1.6))}`}</Text>
+          {r ? (
+            <Box flexDirection="row" flexWrap="wrap" gap={1}>
+              {answersOf(wait).map((said, n) => (
+                <Button key={`${key}-say-${r.id}-${index}-${n}-${presses}`} label={said} variant={n === 0 ? 'primary' : undefined} {...(said === ANSWER_IN_WORDS ? { plain: true } : {})} onPress={() => void ((presses += 1), answerWait($, r, index, said, at).catch(err => log($, `answer not kept: ${String(err)}`)))} />
+              ))}
+            </Box>
+          ) : null}
+          {r && open.length > 1 ? (
+            <Box flexDirection="row" alignItems="center" gap={1}>
+              <Text dimColor>{`${open.length - 1} more ${open.length === 2 ? 'question' : 'questions'}`}</Text>
+              <Button key={`${key}-more-${r.id}-${presses}`} label="Result" plain onPress={() => void openReport($, r.id)} />
+            </Box>
+          ) : null}
+        </Box>
+      )
+    }
     let cardNo = 0
     let keyed = false
     const stepLine = (one: Todo, kept: Item[], done: number) => {
@@ -12911,6 +13548,12 @@ const panelHooks = (on: On) => {
               </Box>
               {facts(one, false, kept.length > 0 ? `${done} of ${kept.length} to-dos done` : '')}
             </Box>
+            {/* What it made so far, right under its title: side by side, each a press that opens it */}
+            {madeNow($, one)?.made.length || madeNow($, one)?.code ? (
+              <Box key={`made-lead-${one.id}`} paddingLeft={lead}>
+                {madeChips($, table, one, `made-${one.id}`, () => openWork($, one.id))}
+              </Box>
+            ) : null}
             {/* The to-do it is on, numbered by how many are done, as the edge's lighter part is, so the edge, the count and the row agree */}
             {stepLine(one, kept, done)}
             {/* Every part under the title starts at the title's own left edge (lead). What the card waits on, each in the order it
@@ -12920,6 +13563,11 @@ const panelHooks = (on: On) => {
               ...(one.ask ? [{ at: one.ask.at, node: (
                 <Box key={`ask-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
                   {askBlock(one, `ask-${one.id}`)}
+                </Box>
+              ) }] : []),
+              ...(resultWaits(one).length ? [{ at: one.endedAt, node: (
+                <Box key={`result-ask-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
+                  {resultAskBlock(one, `result-ask-${one.id}`)}
                 </Box>
               ) }] : []),
               ...(runningOn(one.id).length && !one.chat ? [{ at: Math.min(...runningOn(one.id).map(run => run.startedAt ?? 0)), node: (
@@ -12987,6 +13635,8 @@ const panelHooks = (on: On) => {
                 <Text dimColor wrap="wrap">{wakeLine(one)}</Text>
               </Box>
             ) : null}
+            {/* A result's question is all a card waiting for its answer says: no line of what Claude last did */}
+            {resultWaits(one).length ? null : (
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden" paddingLeft={lead}>
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -13004,6 +13654,7 @@ const panelHooks = (on: On) => {
                 )}
               </Box>
             </Box>
+            )}
             {/* A button's answer, while the card says it: a press to take it back, the question back on the card */}
             {canTakeBack(one, at) ? (
               <Box key={`take-back-${one.id}`} paddingLeft={lead} flexDirection="row">
@@ -13028,7 +13679,7 @@ const panelHooks = (on: On) => {
     const edge = (one: Todo, count: number, done: number, isDoing: boolean) => {
       if (one.status === 'failed') return <Box width={1} flexShrink={0} backgroundColor="error" />
       if (one.status !== 'working' && one.status !== 'done') return <Box width={1} flexShrink={0} />
-      const isNeeded = needsPerson(one) || (onCards.get(one.id)?.length ?? 0) > 0
+      const isNeeded = needsPerson(one) || (onCards.get(one.id)?.length ?? 0) > 0 || resultWaits(one).length > 0
       if (isNeeded || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={isNeeded ? NEEDS : one.status === 'working' || isActingOnReply(one) ? LIVE : DONE} />
       const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
       return count > EDGE_PARTS ? (
@@ -13790,6 +14441,8 @@ const panelHooks = (on: On) => {
               ) : null}
             </Box>
           </Box>
+          {/* What it made, right under its title, while it works and once it is done */}
+          {madeNow($, one)?.made.length || madeNow($, one)?.code ? part('part-files', 'Files', '', madeTiles($, table, madeNow($, one) ?? { made: [] }, paneId, `files-${one.id}`, e.surface) ?? <Box />) : null}
           {one.admins?.length || cardNotesOf(one.id, at).length ? (
             <Box key="part-gates" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
@@ -13914,7 +14567,7 @@ const panelHooks = (on: On) => {
     const endedElsewhere = elsewhere.filter(one => one.status !== 'working' && !one.ask && !lingers(one, at) && !isVanished(one.id))
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length || answeredOf(c.answeredPrompts).length)
-    const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at) && !one.ask && !isLeftStopped(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
+    const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at) && !one.ask && !resultWaits(one).length && !isLeftStopped(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
         <Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
@@ -14096,7 +14749,7 @@ const panelHooks = (on: On) => {
     const isAsking = (one: Todo) => Boolean(one.ask) && !isActingOnReply(one)
     const isWaitingPress = (one: Todo) => one.status === 'working' && Boolean(one.admins?.length)
     const ownCount = (one: Todo) => (one.chat ? 0 : (onCards.get(one.id)?.length ?? 0))
-    const waitsOn = (one: Todo) => (isAsking(one) ? 1 : 0) + (isWaitingPress(one) ? (one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).length : 0) + ownCount(one)
+    const waitsOn = (one: Todo) => (isAsking(one) ? 1 : 0) + resultWaits(one).length + (isWaitingPress(one) ? (one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).length : 0) + ownCount(one)
     const isOpen = (one: Todo) => waitsOn(one) > 0
     const answeredSince = (one: Todo) => {
       return heldAnswer(one, at)?.at ?? 0
@@ -14108,7 +14761,7 @@ const panelHooks = (on: On) => {
     const isKeptPlace = (one: Todo) => topPlaces.has(placeKey(one)) && (isOpenHere || at - (topClosed.get(placeKey(one)) ?? at) < KEPT_MOST)
     const isWaits = (one: Todo) => isOpen(one) || answeredSince(one) > 0 || (isAnyOpen && isKeptPlace(one))
     const isKeptUp = (one: Todo) => isWaits(one) || (!one.chat && cardNotesOf(one.id, at).length > 0 && isKeptPlace(one))
-    const cameAt = (one: Todo) => Math.min(isAsking(one) ? (one.ask?.at ?? Infinity) : Infinity, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : (onCards.get(one.id) ?? []).map(row => row.at)))
+    const cameAt = (one: Todo) => Math.min(isAsking(one) ? (one.ask?.at ?? Infinity) : Infinity, resultWaits(one).length ? one.endedAt : Infinity, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : (onCards.get(one.id) ?? []).map(row => row.at)))
     const placeOf = (one: Todo) => topPlaces.get(placeKey(one)) ?? (Number.isFinite(cameAt(one)) ? cameAt(one) : answeredPlace(one) || at)
     const isFinishing = (one: Todo) => !isWaits(one) && isFinishMoment(one)
     const finishFrom = (one: Todo) => (one.chat ? (endSeen.get(`${one.id}:${one.endedAt}`) ?? one.endedAt) : pauseFrom(one))
@@ -14134,7 +14787,7 @@ const panelHooks = (on: On) => {
     const restFlows = shownFlows.filter(f => !isFlowMoment(f))
     const begun = (one: Todo) => one.begunAt ?? one.startedAt
     const finishingFlows = shownFlows.filter(isFlowMoment)
-    const whatOf = (one: Todo) => (isAsking(one) ? oneLine(one.ask?.text ?? '') : (onCards.get(one.id)?.[0]?.what ?? (one.admins?.[0] ? gateWhat(one.admins[0]) : '')))
+    const whatOf = (one: Todo) => (isAsking(one) ? oneLine(one.ask?.text ?? '') : resultWaits(one)[0] ? oneLine(resultWaits(one)[0]?.wait.text ?? '') : (onCards.get(one.id)?.[0]?.what ?? (one.admins?.[0] ? gateWhat(one.admins[0]) : '')))
     const top = [
       ...notices.map(one => ({ rank: 0, at: one.at, what: one.what, draw: () => one.node })),
       ...askCards.map(one => (isKeptUp(one) ? { rank: 0, at: placeOf(one), what: isOpen(one) ? whatOf(one) : '', draw: () => small(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: () => small(one) } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: () => small(one) })),
@@ -14149,7 +14802,7 @@ const panelHooks = (on: On) => {
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
       asks: waitsCount,
-      isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
+      isDone: isHappy(own.filter(one => !resultWaits(one).length), at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
     }
     const mood = headMood(head)
     const isKeyed = e.surface === 'terminal' && !boxes.length
@@ -14274,6 +14927,7 @@ const tabHooks = (on: On) => {
       if (isTerminal) await tabMoves.finish(move => runTabMove($, move), ms => $.clock.sleep(ms))
     }
     if (e.plugin === 'claudopus' && (answersOnWay.size || wakes.length)) await sendWakes($, true).catch(err => log($, `answer not sent: ${String(err)}`))
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     return r
   })
   on('ui.input', async ($, e, next) => {
@@ -14281,6 +14935,7 @@ const tabHooks = (on: On) => {
     if (e.plugin !== 'claudopus' || e.kind !== 'submit') return r
     void log($, `reply submitted: ${answersOnWay.size} answer(s) and ${wakes.length} wake(s) on the way`)
     if (answersOnWay.size || wakes.length) await sendWakes($, true).catch(err => log($, `reply not sent: ${String(err)}`))
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     return r
   })
 
@@ -14353,7 +15008,7 @@ const tabHooks = (on: On) => {
     const picture = e.surface === 'terminal' ? null : RASTER.test(file) ? await thumbOf($, thumbPath(r, file)) : /\.svg$/i.test(file) ? await svgOf($, `${reportPath(r)}/${file}`) : null
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows)}
+        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows, e.surface === 'terminal' ? { made: [] } : madeOfReport($, r, reportText.get(r.id) ?? ''))}
       </Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))

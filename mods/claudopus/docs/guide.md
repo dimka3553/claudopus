@@ -262,7 +262,7 @@ The settings are in `~/.claude/claudopus/config.json`. Every key is optional:
 | `notifications` | `false` stops the notification that names a task when it's done, stopped or failed. |
 | `admin` | When you're asked before an admin command runs: `each` time, once for a task (`work`) and its helpers until it ends, or `never`. `work` and `never` count only when chosen in Config, which seals them (`adminSealed`). Written by hand, every command still asks. |
 | `models` | Which model runs most tasks, long searching and reading and helpers, and heavy tasks (`opus`, `sonnet`, `fable` or `haiku`). Checks of finished work run on the most-tasks or heavy-tasks model, never on the long-searching one. |
-| `macs` | Up to four other Macs, as `user@host` or a `Host` of `~/.ssh/config`, that this Mac's panel lists the chats of. It uses your own SSH, which must log in without asking. Each Mac needs Claudopus of this version or newer. That Mac's panels list this Mac's chats in turn, with nothing to set there: each visit hands it this Mac's chats, without the commands and texts their tasks run or send. Their questions are answered in their own chats. Results are saved the same on both, about every two minutes: each Mac gets the results it lacks, with paths moved onto its own home, and what you did to a result (archived, brought back, answered) reaches the other. Nothing is deleted or overwritten. |
+| `macs` | Up to four other Macs, as `user@host` or a `Host` of `~/.ssh/config`, that this Mac's panel lists the chats of. It uses your own SSH, which must log in without asking. Each Mac needs Claudopus of this version or newer. That Mac's panels list this Mac's chats in turn, with nothing to set there: each visit hands it this Mac's chats, without the commands and texts their tasks run or send. Their questions are answered in their own chats. Results are saved the same on both, about every two minutes: each Mac gets the results it lacks, with paths moved onto its own home, and what you did to a result (archived, brought back, answered) reaches the other. Nothing is deleted or overwritten. Saved chats stay on the Mac they ran on. |
 
 `name`, `agents` and `macs` are read when a chat starts. `sound` and `notifications` are read each time a task ends or needs you.
 
@@ -282,7 +282,9 @@ Everything Claudopus saves is in `~/.claude/claudopus`, as plain files:
 | --- | --- |
 | `index.md` | The topics of your tasks, one line each |
 | `streams/` | One set of instructions per topic |
-| `words/` | Your messages, word for word, and Claude's answers, one file per chat |
+| `words/` | Your messages, word for word, and Claude's answers, one file per chat. Messages a program, a schedule or Slack sent are saved too, marked. Chats Claudopus wasn't running in are saved 10 to 20 minutes after they go quiet, and the start of a chat it joined partway goes in `<chat>.before.md`. Keys and passwords are hidden here, in `work/`, `asks/` and `pastes/` |
+| `work/` | For each chat, what its helpers were asked and reported, what connected tools such as SBOS returned, the pages it fetched and the documents it wrote, keys hidden. `recall` lists these after everything else |
+| `caught/` | How far Claudopus has read each chat's record, and its log |
 | `asks/` | What you asked in each chat and what was done, one file per chat |
 | `reports/` | What finished tasks left for you, one dated folder each, with copies of the pictures it named and small thumbnails |
 | `finished/` | The Finished list of each chat |

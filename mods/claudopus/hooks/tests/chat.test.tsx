@@ -14,11 +14,15 @@ const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url)
 // (about twice as slow as a Mac) the longest scenarios, 4 to 8 seconds alone, passed or failed by the machine's load, not by the mod.
 // SLOW is that limit, kept for the tests that name it
 const SLOW = { timeoutMs: 60_000 }
+// The test now running, for the world's clock (below): the tests of a file run one after another
+let driver: Parameters<TestBody>[0] | undefined
 function test(name: string, body: TestBody): void
 function test(name: string, options: { timeoutMs?: number }, body: TestBody): void
 function test(name: string, options: TestBody | { timeoutMs?: number }, body?: TestBody) {
-  if (typeof options === 'function') kitTest(name, SLOW, options)
-  else kitTest(name, { ...SLOW, ...options }, body as TestBody)
+  const run = (typeof options === 'function' ? options : body) as TestBody
+  const kept: TestBody = ($, on) => ((driver = $), run($, on))
+  if (typeof options === 'function') kitTest(name, SLOW, kept)
+  else kitTest(name, { ...SLOW, ...options }, kept)
 }
 const MEMORY = `${HOME}/.claude/claudopus`
 // This Mac's keychain, there unless a test takes it away as a home of a trial chat's own has none
@@ -59,7 +63,7 @@ const prompts: string[] = []
 // the release
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -123,7 +127,31 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const admins: { command: string; grants: { host: string; command: string; seal: string; at: number; id: string }[] }[] = []
   // The kit's clock moves only as a test moves it: the mod's look at how late its timer comes is left out, unless a test asks for it
   mock.env(on, { HOME, CLAUDOPUS_TIMING: 'test', ...options.env })
-  const clock = mock.clock(on, { now: 1_700_000_000_000 })
+  const kitClock = mock.clock(on, { now: 1_700_000_000_000 })
+  // A hook of the mod follows each move of the clock, as in the app, where a drawing or a step of some task is never far: what the
+  // mod's timers leave for a hook to send (sendHeld) goes then. A test that names `unseen` moves the clock bare, and brings the
+  // hook itself, and every agent a message started while its clock moved is listed in `unseen`
+  let moving = 0
+  const bare = async (ms: number) => {
+    moving += 1
+    try {
+      return await kitClock.advance(ms)
+    } finally {
+      moving -= 1
+    }
+  }
+  const clock: typeof kitClock = options.unseen
+    ? { ...kitClock, advance: bare as never }
+    : {
+        ...kitClock,
+        // (in moves of half a minute at most, each followed by its hook: a long move with none would be a chat where nothing ran)
+        advance: (async (ms: number) => {
+          for (let left = ms; left > 0; left -= 30_000) {
+            await kitClock.advance(Math.min(left, 30_000))
+            await driver?.session.measure({ context: {}, rateLimits: [], changed: [] } as never).catch(() => undefined)
+          }
+        }) as never,
+      }
   // What the engine draws where the mod draws nothing
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
@@ -292,6 +320,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // What was handed to this Mac's keychain on security's stdin
     if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    // bin/catch-up, started in a session of its own
+    if (tool === '/bin/sh' && String(rest[4] ?? '').endsWith('/bin/catch-up')) return (own.push([...e.argv]), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
     if (tool?.endsWith('bin/notify')) {
       own.push([...e.argv])
@@ -407,6 +437,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       const path = `${rest[3]}/${rest[4]}/${rest[5]}`
       return files.has(path) ? ok(files.get(path)) : ok('', 1)
     }
+    // The lines a task added to and took from its files, as the test lays git:numstat
+    if (tool === 'sh' && String(rest[1]).includes('git diff --numstat')) return ok(files.get('git:numstat') ?? '')
     if (tool === 'sh' || tool === 'bash') {
       sshed.push([String(rest[1]), String(rest.slice(3).join(' '))])
       // A stream cut short lays half of what it carried and fails
@@ -473,7 +505,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
       : tool === 'grep'
-        ? `${MEMORY}/words/local_1.md:2:the nose is flawed\n`
+        ? `${MEMORY}/work/local_1.md:9:the nose model returned\n${MEMORY}/words/local_1.md:2:the nose is flawed\n`
         : tool === 'lsof' && rest.includes('-iTCP')
           ? `p635\nn*:7000\n${isGone ? '' : 'p700\nn127.0.0.1:3100\nn[::1]:3100\n'}`
           : tool === 'lsof'
@@ -511,6 +543,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   on('session.send', (_, e) => {
     if (options.unresumable?.has(e.to)) return { isDelivered: false, reason: 'no such agent' } as never
+    // `unseen`: the agents a message started from a timer of the mod's, as the clock moved with no hook around it: the engine
+    // leaves every hook of the mod out of such a run (seen in the kit: a hook of the mod's own answers its call from inside a hook,
+    // and is left out of the same call from a timer)
+    if (options.unseen && moving) options.unseen.push(e.to)
     resumed.push(`${e.to}: ${e.text}`)
     return { isDelivered: true } as never
   })
@@ -747,9 +783,18 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   expect(second.context?.length).toBe(1)
   expect(second.context?.[0]).toContain('start a fresh agent')
 
+  // A program's message is saved too, marked, a notice is not, and a key typed in is hidden
+  await $.prompt.submit({ text: 'review this change', wait: false, origin: { kind: 'sdk' } })
+  await $.prompt.submit({ text: 'pinged by slack', wait: false, origin: { kind: 'channel', server: 'slack' } })
+  await $.prompt.submit({ text: '<task-notification>ended</task-notification>', wait: false, origin: { kind: 'task-notification' } })
+  await $.prompt.submit({ text: 'use sk-ant-api03-abcdefgh1234567890XYZ and ghp_abcdefghijklmnopqrstuvwxyz0123456789 for it, KAGGLE_KEY=0123abcd4567ef89 at https://cdn.example.com/a.csv?Policy=eyJTdGF0ZW1lbnQiOlt7&Signature=Zm9vYmFy, GOCSPX-abcdefghijklmnopqrstuvwx12 and npm-run-build-2024-11', wait: false, origin: composer })
   const words = files.get(`${MEMORY}/words/engine-id.md`) ?? ''
   expect(words).toContain('fix the upload page')
   expect(words).toContain('and the nose')
+  expect(words).toMatch(/\(sent by a program\)\nreview this change/)
+  expect(words).toMatch(/\(from slack\)\npinged by slack/)
+  expect(words).not.toContain('task-notification')
+  expect(words).toContain('use [key hidden] and [key hidden] for it, KAGGLE_KEY=[hidden] at https://cdn.example.com/a.csv?Policy=[hidden]&Signature=[hidden], [key hidden] and npm-run-build-2024-11')
 
   // Words of a long chat, over the 4 MB the engine gives whole, are added to, never written again as only the newest
   const long = `## 2026-11-12T07:00:00.000Z\nthe first message\n\n${'x'.repeat(4_300_000)}\n\n`
@@ -1564,12 +1609,12 @@ test('the update tool records a subject and rewrites its brief', async ($, on) =
   expect(files.get(`${MEMORY}/streams/3d-heads.md`)).toBe('Nose fixed.\n')
 })
 
-test('recall returns matching lines without the folder prefix', async ($, on) => {
+test('recall returns matching lines without the folder prefix, what helpers and tools found after the chats\' own words', async ($, on) => {
   world(on)
   await $.session.start(start)
 
   const r = await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't1', query: 'nose' } as never)
-  expect(String(r.result)).toContain('words/local_1.md:2:the nose is flawed')
+  expect(String(r.result)).toContain('words/local_1.md:2:the nose is flawed\nwork/local_1.md:9:the nose model returned')
 })
 
 test('rarely used tools wait behind tool search', async ($, on) => {

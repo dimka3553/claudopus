@@ -295,7 +295,7 @@ const HELPER_NOT_PASSED = (helper: string, work: string, id: string, reason: str
 // tells the chat that work ended without its report and to ask it for one, which the work cannot give while its helpers run (16 Nov:
 // five tasks asked again and again, each refused at its report). Told in the same message as that notice, never on its own: added on
 // its own it reached the chat beside the notice, or rode into a later turn after the notice was left out (16 Nov evening: 27 turns).
-// Work that waits only on a command it started detached is not: its card ends as the engine ends it, and the command starts it again
+// Work that waits only on a command it started detached is told so too: its card stays at work, and the command's end starts it again
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`)
 // Once Claudopus told the chat the task is stuck, the chat may write to it
 const WAITS_ON = (work: string, helpers: number, wake: string, stuck?: string) =>
@@ -322,7 +322,9 @@ const waitingNow = async ($: EngineInterface) => {
       continue
     }
     const helpers = runningHelpers(list, card.id).filter(one => listed.get(one.id) === 'running' || listed.get(one.id) === 'waiting').length
-    const wake = card.wakeWhen && card.wakeWhen.until > now ? card.wakeWhen.what : ''
+    // (or the end of a command of its own that ends, detached or left going: never a server, which runs until stopped)
+    const run = (card.detached ?? []).find(d => !isServerRun(d.cmd, d.what))
+    const wake = card.wakeWhen && card.wakeWhen.until > now ? card.wakeWhen.what : run ? `the end of its command "${runWords(run.what, run.cmd)}"` : ''
     if (helpers || wake) waiting.set(card.id, { title: titleOf(card), helpers, wake, ...(card.stuckTold !== undefined ? { stuck: card.id } : {}) })
   }
   return waiting
