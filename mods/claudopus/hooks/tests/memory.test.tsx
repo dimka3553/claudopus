@@ -292,6 +292,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // What was handed to this Mac's keychain on security's stdin
     if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    // bin/catch-up, started in a session of its own
+    if (tool === '/bin/sh' && String(rest[4] ?? '').endsWith('/bin/catch-up')) return (own.push([...e.argv]), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
     if (tool?.endsWith('bin/notify')) {
       own.push([...e.argv])
@@ -782,4 +784,17 @@ test('Memory, beside Stats, opens the memory folder in Finder', async ($, on) =>
   expect((await keyed(pane, 'memory-open'))?.props.label).toBe('Memory')
   await pressed(pane, 'memory-open')
   expect(await until(async () => shown.find(argv => argv[1] === MEMORY))).toEqual(['open', MEMORY])
+})
+
+test('every chat starts the catch-up a minute after it loads and every ten minutes, with memory, its chat records and the other Macs', async ($, on) => {
+  const { files, own, clock } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  await $.session.start(start)
+  const runs = () => own.filter(one => String(one[5] ?? '').endsWith('/bin/catch-up'))
+  expect(runs()).toHaveLength(0)
+  await clock.advance(61_000)
+  expect(runs()).toHaveLength(1)
+  expect(runs()[0]?.slice(6)).toEqual([MEMORY, `${HOME}/.claude/projects`, 'sam@m4.local'])
+  await clock.advance(10 * 60_000)
+  expect(runs()).toHaveLength(2)
 })

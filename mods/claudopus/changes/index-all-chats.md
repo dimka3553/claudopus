@@ -1,0 +1,5 @@
+- Recall now finds every chat: Claudopus saves the words of chats it never saved itself (older chats, chats a program started), 10 to 20 minutes after they go quiet.
+- Messages a program, a schedule or a channel sent are saved too, marked with where they came from.
+- Recall now also finds what each chat's helpers were asked and reported, what connected tools such as SBOS returned, and the documents a chat wrote.
+- Your other Mac's saved chats come to this Mac, and this Mac's go there, so recall on either finds both.
+- Keys and passwords are hidden in the chats Claudopus saves, including those saved before.

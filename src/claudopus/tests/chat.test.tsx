@@ -17,9 +17,18 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   expect(second.context?.length).toBe(1)
   expect(second.context?.[0]).toContain('start a fresh agent')
 
+  // A program's message is saved too, marked, a notice is not, and a key typed in is hidden
+  await $.prompt.submit({ text: 'review this change', wait: false, origin: { kind: 'sdk' } })
+  await $.prompt.submit({ text: 'pinged by slack', wait: false, origin: { kind: 'channel', server: 'slack' } })
+  await $.prompt.submit({ text: '<task-notification>ended</task-notification>', wait: false, origin: { kind: 'task-notification' } })
+  await $.prompt.submit({ text: 'use sk-ant-api03-abcdefgh1234567890XYZ and ghp_abcdefghijklmnopqrstuvwxyz0123456789 for it, KAGGLE_KEY=0123abcd4567ef89 at https://cdn.example.com/a.csv?Policy=eyJTdGF0ZW1lbnQiOlt7&Signature=Zm9vYmFy, GOCSPX-abcdefghijklmnopqrstuvwx12 and npm-run-build-2024-11', wait: false, origin: composer })
   const words = files.get(`${MEMORY}/words/engine-id.md`) ?? ''
   expect(words).toContain('fix the upload page')
   expect(words).toContain('and the nose')
+  expect(words).toMatch(/\(sent by a program\)\nreview this change/)
+  expect(words).toMatch(/\(from slack\)\npinged by slack/)
+  expect(words).not.toContain('task-notification')
+  expect(words).toContain('use [key hidden] and [key hidden] for it, KAGGLE_KEY=[hidden] at https://cdn.example.com/a.csv?Policy=[hidden]&Signature=[hidden], [key hidden] and npm-run-build-2024-11')
 
   // Words of a long chat, over the 4 MB the engine gives whole, are added to, never written again as only the newest
   const long = `## 2026-11-12T07:00:00.000Z\nthe first message\n\n${'x'.repeat(4_300_000)}\n\n`

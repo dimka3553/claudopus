@@ -1,9 +1,9 @@
 """Onboarding, step 1: every old chat's messages and replies into the memory.
 
-Reads the transcripts under ~/.claude/projects. For each chat it writes
-~/.claude/claudopus/words/<session>.md (my messages word for word, each followed by
-what Claude answered, so `recall` finds both) and adds the chat to a digest for
-its project in <out dir>, which the stream analysis reads.
+Reads the transcripts under ~/.claude/projects and adds each chat to a digest for
+its project in <out dir>, which the stream analysis reads. Each chat's words are
+saved by Claudopus itself (bin/catch-up), never here, so nothing it saved is
+written over.
 
     python3 extract.py <out dir>
 
@@ -104,7 +104,6 @@ def project_of(cwd):
 
 def main(out):
     os.makedirs(out, exist_ok=True)
-    os.makedirs(WORDS, exist_ok=True)
     chats = []
     for path in glob.glob(f'{PROJECTS}/*/*.jsonl'):
         if any(part in path for part in SKIP):
@@ -118,14 +117,6 @@ def main(out):
     for chat in chats:
         first, last = chat['messages'][0][0][:10], chat['messages'][-1][0][:16]
         head = f"{chat['title'] or '(untitled)'}\nsession {chat['id']} · {chat['cwd']} · branch {chat['branch'] or '?'} · {first} to {last} · {len(chat['messages'])} messages"
-
-        # The transcript holds everything the mod saved as the chat went, so the file is written whole from it
-        with open(f"{WORDS}/{chat['id']}.md", 'w') as f:
-            f.write(f"{MARK}\n# {head}\ntranscript: {chat['path']}\n\n")
-            for at, text, answers in chat['messages']:
-                f.write(f'## {at}\n{text}\n\n')
-                for answered, answer in answers:
-                    f.write(f'### Claude {answered}\n{answer}\n\n')
 
         lines = [f'### {head}']
         lines += [f'- [{at[:16]}] {clip(text, MESSAGE_CHARS)}' for at, text, _ in chat['messages']]
