@@ -69,7 +69,7 @@ Claudopus never updates by itself. Every hour (or as often as Config says), it c
 
 ### The panel and its cards
 
-- Every task is a card. It shows the title, the model, how many to-dos are done, a line on how far it has got, and the to-dos as the coloured edge. Press the title to open **Details**: every to-do, every helper's steps and the last lines each command printed. Press the model name to move a running task to another model. The octopus moves while anything is running.
+- Every task is a card. It shows the title, the model, how many to-dos are done, what the task made (a file to press and open, or how many code files it changed), a line on how far it has got, and the to-dos as the coloured edge. Press the title to open **Details**: every to-do, every helper's steps and the last lines each command printed. Press the model name to move a running task to another model. The octopus moves while anything is running.
 - Helpers hang under their task's card as a tree, one row each. Every command a task runs for more than ten seconds (a server, a download, a long script, a wait) also gets a row. The row shows what the command is for and how long it has been running. Under it, one short plain line says what the command is doing and how far it has got, never raw output. A percent the command prints moves up on the line within seconds. If the command prints nothing for a minute, Claudopus tells Claude to look at it; after three minutes the line says so too, in amber. A command that runs past the time it was expected to take turns amber as well. **Stop** on the row ends the command, and Claudopus tells Claude the command was stuck. On a Mac, press a command to open its output in Terminal.
 - If a task makes no progress for 12 minutes, its card says so in amber, and Claudopus tells the chat.
 - **Stop** on a card stops the task for good. The card says "Stopped by you" and keeps what was done. Its helpers and background commands stop too, and the card names anything Claude started detached that is still running. The chat can't start the task again until you ask in a new message. Details has **Start again**.
@@ -101,7 +101,7 @@ The panel's header has these buttons (Results once there is a result):
 
 | Page | What it holds |
 | --- | --- |
-| **Results** | What finished tasks found, newest first, with what's waiting for you at the top (each with Yes, No and Not now). Each one opens with its finding and pictures. |
+| **Results** | What finished tasks found, newest first, with what's waiting for you at the top (each with Yes, No and Not now). Each one opens with a tile for each file its task made, then its finding. |
 | **Stats** | Tokens, cost at API prices, tasks done and time saved, from Claude Code's own records. |
 | **Memory** | Opens the memory folder `~/.claude/claudopus`: your messages word for word, results, notes on each topic, and a list of the keys you've given by name and where each is saved (never a value). |
 | **Config** | Every setting, and the rules (below). Each shows what is in force, and **Reset** puts it back to what shipped. |

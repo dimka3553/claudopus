@@ -142,7 +142,16 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   }
   const clock: typeof kitClock = options.unseen
     ? { ...kitClock, advance: bare as never }
-    : { ...kitClock, advance: async (ms: number) => (await kitClock.advance(ms), void (await driver?.session.measure({ context: {}, rateLimits: [], changed: [] } as never).catch(() => undefined))) as never }
+    : {
+        ...kitClock,
+        // (in moves of half a minute at most, each followed by its hook: a long move with none would be a chat where nothing ran)
+        advance: (async (ms: number) => {
+          for (let left = ms; left > 0; left -= 30_000) {
+            await kitClock.advance(Math.min(left, 30_000))
+            await driver?.session.measure({ context: {}, rateLimits: [], changed: [] } as never).catch(() => undefined)
+          }
+        }) as never,
+      }
   // What the engine draws where the mod draws nothing
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
@@ -428,6 +437,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       const path = `${rest[3]}/${rest[4]}/${rest[5]}`
       return files.has(path) ? ok(files.get(path)) : ok('', 1)
     }
+    // The lines a task added to and took from its files, as the test lays git:numstat
+    if (tool === 'sh' && String(rest[1]).includes('git diff --numstat')) return ok(files.get('git:numstat') ?? '')
     if (tool === 'sh' || tool === 'bash') {
       sshed.push([String(rest[1]), String(rest.slice(3).join(' '))])
       // A stream cut short lays half of what it carried and fails
@@ -858,7 +869,8 @@ test('the notice names each piece by its own title', SLOW, async ($, on) => {
   leftAtWork(files, ['a7', 'a8'])
   await $.session.start(start)
   await clock.advance(31_000)
-  const said = logged.find(line => line.includes('after the chat stopped at')) ?? ''
+  // (each is sent from a hook, a moment after the look)
+  const said = (await until(async () => logged.find(line => line.includes('after the chat stopped at')))) ?? ''
   // Only the task that could not be started again is said in the chat
   expect(said).toMatch(/^Claudopus couldn't start "Train the splats" again after the chat stopped at \d\d:\d\d\.$/)
 })

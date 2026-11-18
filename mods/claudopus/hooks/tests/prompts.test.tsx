@@ -142,7 +142,16 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   }
   const clock: typeof kitClock = options.unseen
     ? { ...kitClock, advance: bare as never }
-    : { ...kitClock, advance: async (ms: number) => (await kitClock.advance(ms), void (await driver?.session.measure({ context: {}, rateLimits: [], changed: [] } as never).catch(() => undefined))) as never }
+    : {
+        ...kitClock,
+        // (in moves of half a minute at most, each followed by its hook: a long move with none would be a chat where nothing ran)
+        advance: (async (ms: number) => {
+          for (let left = ms; left > 0; left -= 30_000) {
+            await kitClock.advance(Math.min(left, 30_000))
+            await driver?.session.measure({ context: {}, rateLimits: [], changed: [] } as never).catch(() => undefined)
+          }
+        }) as never,
+      }
   // What the engine draws where the mod draws nothing
   on('ui.render', ($, e) => {
     const { Text } = $.ui.resolve(e)
@@ -428,6 +437,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       const path = `${rest[3]}/${rest[4]}/${rest[5]}`
       return files.has(path) ? ok(files.get(path)) : ok('', 1)
     }
+    // The lines a task added to and took from its files, as the test lays git:numstat
+    if (tool === 'sh' && String(rest[1]).includes('git diff --numstat')) return ok(files.get('git:numstat') ?? '')
     if (tool === 'sh' || tool === 'bash') {
       sshed.push([String(rest[1]), String(rest.slice(3).join(' '))])
       // A stream cut short lays half of what it carried and fails
@@ -1120,7 +1131,8 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
 
 test("a command Claude Code refuses a task is shown whole on its card with where it runs and a Run it button; nothing runs but on that press (not words, not a task's own ask, not waiting), and the press changes no permission; the press runs exactly that command once, as the person's, shows only one quiet line while it runs, never the command again nor a drawing of the whole panel at each look at it (17 Nov, the box that flashed), and sends the task its output, an ended task started again only from a hook or the person's press, never a timer; a long one is stopped at its limit, and Stop stops it", async ($, on) => {
   const agents: Record<string, string> = { a1: 'running' }
-  const { files, clock, resumed, appended, pressRuns } = world(on, { agents })
+  // (its clock moves bare, with no hook of the mod after each move: what waits for a hook here waits for the person's press)
+  const { files, clock, resumed, appended, pressRuns } = world(on, { agents, unseen: [] })
   on('tool.check', (_, e, next) => (String((e as { tool_use_id?: unknown }).tool_use_id).startsWith('chk') ? ({ decision: 'ask' } as never) : next(e)))
   const redraws = { count: 0 }
   on('ui.invalidate', (_, e, next) => ((redraws.count += 1), next(e)))

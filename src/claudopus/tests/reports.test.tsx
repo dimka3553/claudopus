@@ -71,11 +71,13 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   await until(async () => opened.includes(id) || undefined)
   const one = await $.ui.mount({ ...LIST, requestId: id, props: { ...LIST.props, title: 'Weekly revenue', bodyColumns: 80 }, surface: 'desktop' } as never)
   const heads = (await one.findAll({ type: 'Text' })).filter(text => text.props.bold).map(text => text.text)
-  expect(heads).toEqual(['Weekly revenue', 'Waiting for you', 'Summary', 'Pictures', 'In full', 'Follow-up'])
+  // What its task made is right under its title, as tiles; its pictures are among them, so no Pictures part repeats them
+  expect(heads).toEqual(['Weekly revenue', 'Files', 'Waiting for you', 'Summary', 'In full', 'Follow-up'])
+  expect((await one.findAll({ type: 'Svg' })).map(svg => String(svg.props.alt))).toContain('revenue')
   expect((await one.find({ type: 'Markdown', text: /Revenue rose 12%/ }))?.props.text).toBe(`${report}\n`)
   // Its picture is shown in the pane, never handed to another app: where it cannot be drawn, its path is given as text
   expect(await keyed(one, 'report-page')).toBeUndefined()
-  expect(await one.find({ type: 'Text', text: `${folder}/revenue.png` })).toBeDefined()
+  expect(await one.find({ type: 'Text', text: `${folder}/revenue.png` })).toBeUndefined()
   await pressed(one, 'report-carry')
   expect(filled[0]).toContain(`${folder}/report.md`)
   // Each waiting item has its own answers; answering one clears that one alone
