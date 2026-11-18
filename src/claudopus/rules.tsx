@@ -2,8 +2,12 @@
 
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
-const BRIEF =
+// The chat that does jobs itself is told so with each message, and what goes to a task
+const BRIEF_ITSELF =
+  'A job of a few minutes: do it yourself, in this thread, in few steps. A bigger or longer one: one task, as your rules say. Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words.'
+const BRIEF_TASKS =
   'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
+const briefNow = () => (lean.chat === 'itself' ? BRIEF_ITSELF : BRIEF_TASKS)
 const REFUSED =
   'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a push, a fetch or a look with git or gh, `git -C <folder>` for a look into a topic\'s repo, an open of a file or page, a local curl status check, sent with `run_in_background: true`; a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>

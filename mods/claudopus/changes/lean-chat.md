@@ -1,0 +1,6 @@
+- The chat now does a short request itself (a change, a few fixes, a new part, a file to make, a push) in few steps, and starts a task only for a bigger one or one that runs long. Measured on 245 test chats, this scored higher than plain Claude Code, in less time and at lower cost.
+- No second agent checks and no rounds of pictures run unless you ask. Config's **Second check** now starts at **Only when I ask**.
+- Tasks get your words with no limit you didn't set, work in few steps, and fix what would leave the result unusable instead of only reporting it.
+- Results are text to read in the chat. A picture is for what you must see, never for a page of text.
+- Config has a new choice, **Short requests**: **The chat itself** (as shipped) or **A task each** (how it was before).
+- The principles Claudopus ships say the same. If you have your own copy, it stays as you wrote it.

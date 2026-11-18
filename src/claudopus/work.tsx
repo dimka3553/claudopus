@@ -348,7 +348,9 @@ const workHooks = (on: On) => {
     // or granted for a call that does not run
     const isChatHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat
     // A single command the chat runs itself: one command and nothing joined to it
-    const chatCommand = isChatHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
+    // (a chat that does jobs itself runs its commands as Claude Code does: joined, held open, and behind the same gates as a task's)
+    const isItself = isChatHere && lean.chat === 'itself'
+    const chatCommand = isChatHere && !isItself && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
     if (chatCommand && !isOneCommand(chatCommand) && !RUNNER_NAMED.test(chatCommand)) {
       await log($, "refused a chat's own command that is more than one command")
       return { deny: NOT_ONE_COMMAND }
@@ -357,7 +359,7 @@ const workHooks = (on: On) => {
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const places = /^\s*git\s+-C\s/.test(chatCommand) ? [cwd, ...(await readIndex($).catch(() => [])).map(s => s.repo).filter(repo => repo.startsWith('/'))] : []
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom, places) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
+    const isRefusedHere = isChatHere && !isItself && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
     // A call is never changed on its way: auto mode reviews it as written and refuses one a hook has changed since, so one that must
     // run in the background is refused with the same call to send that way, and the call sent again is reviewed as it runs
     if (dir && !isOff && e.agentId !== undefined && isLongHeld(e as never)) {
@@ -639,6 +641,7 @@ const workHooks = (on: On) => {
     const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
     const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
     if (READS.includes(e.tool) && !isPaste) return next(e)
+    if (isItself) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
     if (grants.length) await dropGrants($, grants).catch(() => undefined)
     // An open, a curl or a preview not in the shape the chat runs is told that shape, so it can be run that way or go to a task

@@ -33,7 +33,7 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 ## What you see
 
 - Claudopus is on in every chat you open from then on, in every folder.
-- You send a message. The chat answers in one line and starts a background task for it, then is free for your next message. If a few files can answer your question, such as what a function does, the chat reads them itself in its own thread (Read, Grep, Glob) and starts no task. If a request changes a file, runs a command or needs more than a few reads, the chat still starts a task for it.
+- You send a message. A request of a few minutes or less the chat does itself, in its own thread, in few steps, and tells you what changed and where to look. A bigger one, or one that runs long, gets one line from the chat and a background task, and the chat is free for your next message. With **Short requests** set to **A task each** in Config, every request that changes a file or runs a command goes to a task, and the chat only reads.
 - Each task uses its own tokens, so five tasks at once use tokens about five times as fast as one. On a subscription, that uses up your limits sooner. If you pay per token (an API key or other pay-per-use billing), it multiplies what you pay in that time.
 - If your message is about a task that's already running, the chat sends it to that task instead of starting a new one.
 

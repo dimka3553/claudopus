@@ -52,7 +52,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build what I asked for and what it plainly needs to work where I will use it, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n\n## Checking\n\n- Build it once and tell me where to look. No second agent and no rounds of pictures unless I ask.\n- A report is text I can read in the chat. A picture is for what I must see, never for a page of text.\n- After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -770,11 +770,23 @@ const otherChat = (at: number, chat = 'chat-b', title = 'Billing page') =>
 const SEC_NOW = 1_700_000_000_000
 
 test("F-001 · an admin command in the chat's own thread is refused before it is held: nothing asks, and no grant is left behind", async ($, on) => {
-  const { list, grants, admins } = await gated($, on)
+  const { list, grants, admins } = await gated($, on, { lean: { chat: 'tasks' } })
   const r = (await $.tool.call({ tool: 'Bash', tool_use_id: 'c1', command: `${ADMIN} here 'id -u'` } as never)) as { deny?: string }
   expect(r.deny).toContain('only reads')
   expect(await keyed(list, 'gate-c1-0-deny')).toBeUndefined()
   expect(grants()).toEqual([])
+  expect(admins).toEqual([])
+})
+
+test("F-001 · in a chat that does short requests itself, an admin command in its own thread is never run unasked: it is held for the person's press, as a task's is", async ($, on) => {
+  const { list, admins, press } = await gated($, on)
+  let ended = false
+  const call = $.tool.call({ tool: 'Bash', tool_use_id: 'c1', command: `${ADMIN} here 'id -u'` } as never).then(r => ((ended = true), r))
+  expect(await until(async () => await keyed(list, 'gate-c1-0-deny'))).toBeDefined()
+  expect(ended).toBe(false)
+  expect(admins).toEqual([])
+  await press('gate-c1-0-deny')
+  expect(((await call) as { deny?: string }).deny).toBeDefined()
   expect(admins).toEqual([])
 })
 

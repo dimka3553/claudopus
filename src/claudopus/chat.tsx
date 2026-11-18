@@ -585,7 +585,7 @@ const chatHooks = (on: On) => {
         .slice(-8)
         .map(one => `${one.title || 'task'} (${one.id}) ${one.isFork && m.window ? `${Math.round((one.tokens / m.window) * 100)}%` : thousands(one.tokens)}`)
       const told = reportsTold(await read($, reports), await $.clock.now())
-      context.push(`${BRIEF}${sizes.length ? `\nHow full each task's context is: ${sizes.join('; ')}.` : ''}${told ? `\n${told}` : ''}`)
+      context.push(`${briefNow()}${sizes.length ? `\nHow full each task's context is: ${sizes.join('; ')}.` : ''}${told ? `\n${told}` : ''}`)
       await update($, me, one => ({ ...one, isChat: true, needsContext: false, roleSent }))
 
       if (text.length > PASTE_CHARS) {

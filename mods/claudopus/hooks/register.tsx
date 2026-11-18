@@ -592,8 +592,11 @@ const recorderHooks = (on: On) => {
 }
 
 
-const BRIEF =
+const BRIEF_ITSELF =
+  'A job of a few minutes: do it yourself, in this thread, in few steps. A bigger or longer one: one task, as your rules say. Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words.'
+const BRIEF_TASKS =
   'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
+const briefNow = () => (lean.chat === 'itself' ? BRIEF_ITSELF : BRIEF_TASKS)
 const REFUSED =
   'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a push, a fetch or a look with git or gh, `git -C <folder>` for a look into a topic\'s repo, an open of a file or page, a local curl status check, sent with `run_in_background: true`; a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
@@ -9192,7 +9195,7 @@ const chatHooks = (on: On) => {
         .slice(-8)
         .map(one => `${one.title || 'task'} (${one.id}) ${one.isFork && m.window ? `${Math.round((one.tokens / m.window) * 100)}%` : thousands(one.tokens)}`)
       const told = reportsTold(await read($, reports), await $.clock.now())
-      context.push(`${BRIEF}${sizes.length ? `\nHow full each task's context is: ${sizes.join('; ')}.` : ''}${told ? `\n${told}` : ''}`)
+      context.push(`${briefNow()}${sizes.length ? `\nHow full each task's context is: ${sizes.join('; ')}.` : ''}${told ? `\n${told}` : ''}`)
       await update($, me, one => ({ ...one, isChat: true, needsContext: false, roleSent }))
 
       if (text.length > PASTE_CHARS) {
@@ -11956,7 +11959,8 @@ const workHooks = (on: On) => {
       return { deny: NO_RUNNER_MOVED }
     }
     const isChatHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat
-    const chatCommand = isChatHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
+    const isItself = isChatHere && lean.chat === 'itself'
+    const chatCommand = isChatHere && !isItself && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
     if (chatCommand && !isOneCommand(chatCommand) && !RUNNER_NAMED.test(chatCommand)) {
       await log($, "refused a chat's own command that is more than one command")
       return { deny: NOT_ONE_COMMAND }
@@ -11964,7 +11968,7 @@ const workHooks = (on: On) => {
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const places = /^\s*git\s+-C\s/.test(chatCommand) ? [cwd, ...(await readIndex($).catch(() => [])).map(s => s.repo).filter(repo => repo.startsWith('/'))] : []
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom, places) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
+    const isRefusedHere = isChatHere && !isItself && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
     if (dir && !isOff && e.agentId !== undefined && isLongHeld(e as never)) {
       await log($, `refused work ${e.agentId}'s long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
       return { deny: SEND_BACKGROUND(who()) }
@@ -12192,6 +12196,7 @@ const workHooks = (on: On) => {
     const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
     const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
     if (READS.includes(e.tool) && !isPaste) return next(e)
+    if (isItself) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
     if (grants.length) await dropGrants($, grants).catch(() => undefined)
     const kind = e.tool === 'Bash' ? (shellWords(chatCommand)[0]?.[0] ?? '') : (/__(preview_start)$/.exec(e.tool)?.[1] ?? '')
