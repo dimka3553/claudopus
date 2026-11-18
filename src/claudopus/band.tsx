@@ -139,6 +139,8 @@ const bandHooks = (on: On) => {
   // a newer drawing retires the buttons on screen, and a click on one already gone runs nothing. Never while its reply box is typed
   // into or holds the cursor: a bar with a box open keeps a drawing of its own (barHeld)
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    // A message that waits for a hook to start a task again goes from this drawing (sendHeld)
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     const drawBar = () => drawBarNow()
     if (e.surface !== 'desktop' || e.props.hasSurvey) return drawBar()
     const key = `bar|${e.requestId ?? ''}|${e.surface}|${e.props.bodyColumns}|${e.props.isCollapsed ? 1 : 0}`
