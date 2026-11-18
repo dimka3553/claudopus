@@ -1,0 +1,1 @@
+- On Linux, Stop it now stops everything a command you ran with Run it started. Before, some of it could keep running.

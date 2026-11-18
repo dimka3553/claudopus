@@ -937,9 +937,12 @@ test('while drawings of the panel are slow, as under seven tasks and their comma
     expect(await list.find({ type: 'Text', text: 'Step 0 of the ears.' })).toBeDefined()
     expect(await keys()).toBe(before)
   }
-  // The gap over, it is drawn afresh by itself, with the newest line
-  await clock.advance(1500)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Step 2 of the ears.' }))).toBeDefined()
+  // The gap over, it is drawn afresh by itself, with the newest line. (The gap is four times what the drawing took by the wall
+  // clock, longer than 300 ms on a busy Mac, so the test's clock moves on until it is over: a fixed 1.5 s failed under load. It
+  // moves 9 s at most, under CALM, so the calm redraw, which would show the line whatever the gap did, never comes first)
+  let moved = 0
+  const drawnBy = async () => (moved < 9000 && (await clock.advance(250), (moved += 250)), list.find({ type: 'Text', text: 'Step 2 of the ears.' }))
+  expect(await until(drawnBy)).toBeDefined()
   // A press of the person's is drawn at once, whatever the gap
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'f3', agentId: 'a2', text: 'Step 3 of the ears.' } as never)
   await $.agent.spawn({ ...spawn, description: 'Find more scans', prompt: 'more' } as never)

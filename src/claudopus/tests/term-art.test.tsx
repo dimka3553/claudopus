@@ -39,7 +39,7 @@ test('in the terminal the octopus and the marks of work are cells that move in p
 
   // The app's drawing is as it was: its Svg, and no cells
   const app = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect((await app.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Claudopus, working')).toBe(true)
+  expect((await app.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Claudopus, Claude is working')).toBe(true)
   expect(await app.findAll({ type: 'Raster' })).toEqual([])
   await app.unmount()
 })

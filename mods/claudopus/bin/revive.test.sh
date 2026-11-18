@@ -45,7 +45,8 @@ within '! kill -0 $second 2>/dev/null' 3 && kill -0 "$watcher" 2>/dev/null && ok
 stale s1
 within '[ "$(revived "$settings")" = 1 ]' 8 && ok "a quiet beat changes its own copy's setting" || no "a quiet beat changes its own copy's setting"
 grep -q '"theme": "dark"' "$settings" && grep -q '"other@else": true' "$settings" && grep -q '"hooks": {}' "$settings" && ! grep -A3 '"claudopus@other"' "$settings" | grep -q revived && ok "the other settings and copies are kept" || no "the other settings and copies are kept"
-grep -q "chat s1: quiet" "$mem/keep/revive.log" && ok "it says what it did" || no "it says what it did"
+# (its line is written after the change, so it is waited for: on a busy Mac it came after the test looked)
+within 'grep -q "chat s1: quiet" "$mem/keep/revive.log"' 3 && ok "it says what it did" || no "it says what it did"
 # Still quiet: tried again, then left for as long as it stays quiet, however long that is
 within '[ -e "$mem/keep/s1.gaveup" ]' 10 && ok "a chat that does not come back is left after its tries" || no "a chat that does not come back is left after its tries"
 n=$(tries s1); sleep 6
@@ -60,7 +61,9 @@ beatl() { printf '%s\t%s\t%s\n%s\n' "$1" "$2" "$3" "$5" > "$mem/keep/$4.beat"; }
 slowset=$tmp/slow.json
 printf '{ "enabledPlugins": { "claudopus@claudopus": true } }\n' > "$slowset"
 beatl "$chat" claudopus@claudopus "$slowset" s8 load-a; stale s8
-within '[ "$(revived "$slowset")" = 1 ]' 8 && ok "a quiet load is changed for once" || no "a quiet load is changed for once"
+# (counted once the change's own line is written, after the change: counted before it, on a busy Mac, it came later and looked
+# like a second change)
+within '[ "$(revived "$slowset")" = 1 ] && grep -q "chat s8: quiet" "$mem/keep/revive.log"' 8 && ok "a quiet load is changed for once" || no "a quiet load is changed for once"
 c1=$(grep -c "chat s8: quiet" "$mem/keep/revive.log")
 touch "$mem/keep/s8.beat"
 within 'grep -q "chat s8: beats again from the same load" "$mem/keep/revive.log"' 5 && ok "the same load beating again is seen as slow, not off" || no "the same load beating again is seen as slow, not off"

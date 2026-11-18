@@ -93,7 +93,9 @@ test('stats add up tokens by model once each, work and its helpers as one piece,
   expect([later.time.added, later.time.saved]).toEqual([10 * M, 0])
 })
 
-test('the timeline is one drawing the app takes whatever the history: each bar its own words while they fit, then each piece, then the bars alone', async () => {
+// (a minute, as world.tsx gives every area's test: it takes 1.5 to 4 seconds beside the other files, and 5.3 on GitHub's Mac once,
+// past the kit's 5)
+test('the timeline is one drawing the app takes whatever the history: each bar its own words while they fit, then each piece, then the bars alone', { timeoutMs: 60_000 }, async () => {
   const day = 1_800_000_000_000
   const models = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2']
   // `n` pieces of work over `days`, each in up to three stretches with gaps between, on one of three models

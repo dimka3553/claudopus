@@ -211,6 +211,6 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   expect((await term.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(label => label.startsWith('⤢')).length).toBe(7)
   expect(await term.find({ type: 'Text', text: /Making its pictures small/ })).toBeUndefined()
   await term.unmount()
-  // Only the ask's notice in the chat is logged: nothing failed
-  expect(logged.filter(line => !line.startsWith('"Pick a design" has a question for you'))).toEqual([])
+  // Only the ask's one line in the chat is logged: nothing failed
+  expect(logged.filter(line => !line.startsWith('"Pick a design" asks you: '))).toEqual([])
 })
