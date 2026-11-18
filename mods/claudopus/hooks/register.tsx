@@ -782,6 +782,13 @@ const NUDGED_IN_CHAT = (title: string, mins: number, isLast: boolean) =>
   `Nothing new from the helpers of "${title}" for ${minutesSaid(mins)}. Claudopus started Claude again and asked it ${isLast ? 'to send what it has now' : 'to check on them'}.`
 const RESTARTED_WORK = `From Claudopus, not {name}: you stopped partway through a step without a report (the app restarted, the Mac slept or a command was interrupted). First check what you already have, then continue from where you were; a command or helper you started may still be running, or may need starting again.`
 const STOPPED_SHORT_GO_ON = `From Claudopus, not {name}: your step ended without your report, without a question for {name}, and with nothing of yours running that starts you again, so you were left stopped partway. Carry on from where you were: check what you already have and whether something you started still runs, then go on with your to-dos. When all is done, hand back your report with SubagentHandback; when a step needs {name}, ask with the ask tool; to wait for something, run it in the background or call wake_me, then end your step.`
+const quotedItems = (items: string[]) => items.map(item => `"${item}"`).join('; ')
+const KEEP_GOING = (items: string[]) =>
+  `From Claudopus, not {name}: don't end here, your task isn't finished. Still to do: ${quotedItems(items)}. Nothing of yours is running that would start you again (no command in the background, no detached command started with \`echo $!\` after it, no helper at work, no wake_me, no question on your card), so if your step ends now this work stops undone. Carry on now with the first of them. If you expected something you started to be running, look at its log: it may have failed or ended. Tick each to-do as soon as it is done, and hand back your report with SubagentHandback once all are ticked. For one only {name} can do, ask with the ask tool and end your step.`
+const NOT_TICKED = (items: string[]) =>
+  `Not sent: ${items.length === 1 ? 'a to-do of yours is' : `${items.length} of your to-dos are`} still to do: ${quotedItems(items)}. Do ${items.length === 1 ? 'it' : 'each'} now, or tick it done if it is done already, then hand back your report. One that only {name} can do or decide stays as it is: name it in your report under what is not done, with what {name} needs to do, and send your report again. Claudopus then shows it as not done on your card and in your result.`
+const NOT_DONE_IN_CHAT = (title: string, items: string[]) =>
+  `From Claudopus: the task "${title}" handed back its result with ${items.length === 1 ? 'a to-do' : `${items.length} to-dos`} not done: ${quotedItems(items)}. When you pass its result on to {name}, say these are not done.`
 const CARRIED_IN_CHAT = (title: string) =>
   `From Claudopus: the task "${title}" stopped partway without its report, and Claudopus started it again to carry on. Claude Code may say it ended without delivering a report: there is nothing for you to do, and nothing to tell {name}.`
 const CARRY_GAVE_UP_IN_CHAT = (title: string, id: string) =>
@@ -1085,6 +1092,8 @@ const heldFor = (list: Todo[], parent: string, resume: string, title: string, pr
     : list.find(one => isHeld(one) && (one.parentId || '') === parent && isSameTask(one, title, prompt))
 const leftNothing = new Set<string>()
 const ownsNothing = (list: Todo[], id: string) => !list.find(one => one.id === id)?.bg?.length && !list.find(one => one.id === id)?.detached?.length && !list.some(kid => kid.parentId === id && kid.status === 'working')
+const openItems = (one: Todo | undefined) => (one?.items ?? []).filter(item => item.state === 'open' || item.state === 'doing')
+const isWordsReport = (one: Todo | undefined, answer: string, isHandback = false) => isHandback || (answer.trim().length >= REPORT_LEAST && !openItems(one).length)
 const keepStoppedReports = async ($: EngineInterface, now: number) => {
   for (const card of (await read($, todos)).filter(one => !one.parentId && one.status === 'done' && one.answeredAt && one.endedAt === now && one.answer.trim()))
     $.clock.after(5, () => void saveReport($, card, card.answer).catch(err => log($, `report of ${card.id} not kept: ${String(err)}`)))
@@ -1238,13 +1247,14 @@ const endedUnheardShort = async ($: EngineInterface, ids: Set<string>, live: { i
   for (const id of ids) {
     const card = (await read($, todos)).find(one => one.id === id)
     if (!card || card.status !== 'working' || carryTaken.has(carryKey(card))) continue
-    const f = folder ? await lastWordsOf($, folder, id, now) : { at: now, answer: '', isReport: false, isPressed: false }
-    if (!f.isReport && f.isPressed && isStoppedShort(card, f.answer)) {
+    const f = folder ? await lastWordsOf($, folder, id, now) : { at: now, answer: '', isReport: false, isHandback: false, isPressed: false }
+    const isReport = isWordsReport(card, f.answer, f.isHandback)
+    if (!isReport && f.isPressed && isStoppedShort(card, f.answer)) {
       await goOn($, id, 'its step ended while Claudopus was away')
       continue
     }
     const how = live.find(one => one.id === id)?.status === 'failed' ? 'failed' : 'done'
-    await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? { ...ended(one, how, now), answer: f.answer || one.answer, ...(f.isReport ? { answeredAt: one.answeredAt ?? now } : {}) } : one)))
+    await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? { ...ended(one, how, now), answer: f.answer || one.answer, ...(isReport ? { answeredAt: one.answeredAt ?? now } : {}) } : one)))
   }
 }
 
@@ -1267,7 +1277,7 @@ const lastWordsOf = async ($: EngineInterface, folder: string, agent: string, no
     if (answer === PRESS_ANSWER) answer = ''
     if (answer) break
   }
-  return { at, answer: answer.slice(0, ANSWER_CHARS), isReport: isHandback || answer.length >= REPORT_LEAST, isPressed }
+  return { at, answer: answer.slice(0, ANSWER_CHARS), isReport: isHandback || answer.length >= REPORT_LEAST, isHandback, isPressed }
 }
 const UNHEARD_LOOK = 60_000
 const UNHEARD_QUIET = 60_000
@@ -1281,7 +1291,7 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
   const due = list.filter(one => isUnlisted(one) && now - (unheardLooked.get(one.id) ?? -Infinity) >= UNHEARD_LOOK)
   if (!due.length) return
   const folder = await agentsFolder($, id)
-  const finished = new Map<string, { at: number; answer: string; isReport: boolean; isPressed: boolean }>()
+  const finished = new Map<string, { at: number; answer: string; isReport: boolean; isHandback: boolean; isPressed: boolean }>()
   for (const one of due) {
     unheardLooked.set(one.id, now)
     const meta = parsedOr<{ finished?: boolean }>(await readOr($, `${folder}/agent-${one.id}.meta.json`), {})
@@ -1300,12 +1310,12 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
       list = list.map(one => {
         const f = finished.get(one.id)
         if (!f || one.status !== 'working' || one.wakeWhen || isTurnWaited(list, one.id) || list.some(kid => kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id)))) return one
-        if (!one.parentId && !f.isReport && f.isPressed && isStoppedShort(one, f.answer)) return (short.add(one.id), one)
+        if (!one.parentId && !isWordsReport(one, f.answer, f.isHandback) && f.isPressed && isStoppedShort(one, f.answer)) return (short.add(one.id), one)
         gone.add(one.id)
         isMoved = true
         const isTop = !one.parentId
         const answer = f.answer || one.answer
-        return { ...ended(one, 'done', isTop ? now : Math.min(f.at, now)), answer, ...(isTop && f.isReport ? { answeredAt: one.answeredAt ?? now } : {}), stuckAt: undefined }
+        return { ...ended(one, 'done', isTop ? now : Math.min(f.at, now)), answer, ...(isTop && isWordsReport(one, f.answer, f.isHandback) ? { answeredAt: one.answeredAt ?? now } : {}), stuckAt: undefined }
       })
     }
     endedNow = [...gone]
@@ -2047,7 +2057,7 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
   const id = ids.find(name => !kept.some(r => r.id === name)) ?? `${base}-${mark(one.id + String(at)).replace(/\D/g, '').slice(-8)}`
   const into = `${reportsDir()}/${id}`
   const chat = await read($, me)
-  await $.fs.write(`${dir}/reports/${id}/report.md`, `${text.trim()}\n`)
+  await $.fs.write(`${dir}/reports/${id}/report.md`, `${text.trim()}${notDoneLines(one, text)}\n`)
   const files = await copyNamed($, text, into).catch(err => (void log($, `pictures of report ${id} not copied: ${String(err)}`), [] as string[]))
   await makeThumbs($, { id, files } as Report).catch(err => log($, `small copies of report ${id} not made: ${String(err)}`))
   const report: Report = {
@@ -8041,7 +8051,7 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   if (listed === 'running') $.clock.after(HELD_LOOK, () => void heldLook($, id).catch(err => log($, `work ${id} not looked at again: ${String(err)}`)))
   const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
   const isGoingOn = how === 'done' && isHeld && goesOn(await read($, todos), id)
-  const isReport = how === 'done' && isHeld && !isGoingOn && (handedBack.has(id) || answer.length >= REPORT_LEAST)
+  const isReport = how === 'done' && isHeld && !isGoingOn && (handedBack.has(id) || isWordsReport((await read($, todos)).find(one => one.id === id), answer))
   const isIdleReport = isReport && ownsNothing(await read($, todos), id)
   const isHandedBack = how === 'done' && (handedBack.has(id) || isIdleReport) && !isGoingOn
   if (isHandedBack) (ownsNothing(await read($, todos), id) ? leftNothing.add(id) : leftNothing.delete(id))
@@ -8903,7 +8913,7 @@ const isStoppedShort = (one: Todo | undefined, answer: string) =>
     one &&
       !one.parentId &&
       !one.chat &&
-      answer.trim().length < REPORT_LEAST &&
+      !isWordsReport(one, answer) &&
       one.handedBackAt === undefined &&
       !one.answeredAt &&
       !endedByHandback.has(one.id) &&
@@ -8981,6 +8991,54 @@ const carryNow = async ($: EngineInterface, id: string, at: number) => {
   redraw($)
   await log($, `work ${id} could not be started again to carry on: ${r.reason}`)
   await tellChat($, named(CARRY_LOST_IN_CHAT(titleOf(one), id)))
+}
+
+const KEEP_TRIES = 3
+const keepGoingWhy = (list: Todo[], id: string) => {
+  const one = list.find(card => card.id === id)
+  const open = openItems(one)
+  if (!one || isOff || !dir || one.status !== 'working' || !open.length || handedBack.has(id) || one.mayHandBack !== undefined) return ''
+  if (!isStoppedShort(one, '') || !ownsNothing(list, id) || one.wakeWhen !== undefined || isTurnWaited(list, id)) return ''
+  return named(KEEP_GOING(open.map(item => item.text)))
+}
+const keepGoing = async ($: EngineInterface, id: string): Promise<string> => {
+  let why = ''
+  await changeTodos($, list => {
+    why = keepGoingWhy(list, id)
+    return list.map(one => {
+      if (one.id !== id) return one
+      if (!why) return one.keptOn ? { ...one, keptOn: undefined } : one
+      const tries = one.keptOn && one.keptOn.steps === (one.steps ?? 0) ? one.keptOn.tries + 1 : 1
+      if (tries > KEEP_TRIES) why = ''
+      return { ...one, keptOn: { tries, steps: one.steps ?? 0 } }
+    })
+  })
+  if (why) await log($, `work ${id} ended its step with to-dos still to do and nothing of its own running: kept going`)
+  return why
+}
+const untickedAtHandback = async ($: EngineInterface, id: string): Promise<string> => {
+  const one = (await read($, todos)).find(card => card.id === id)
+  const open = openItems(one).map(item => item.text)
+  if (!one || isOff || !dir || one.parentId || one.chat || !open.length || one.flagged) return ''
+  const key = open.join('\n')
+  if (one.toldOpen === key) return ''
+  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldOpen: key } : card)))
+  await log($, `work ${id} handed back with ${open.length} to-dos still to do: refused once`)
+  return named(NOT_TICKED(open))
+}
+const keepNotDone = async ($: EngineInterface, id: string) => {
+  const one = (await read($, todos)).find(card => card.id === id)
+  if (!one || one.parentId) return
+  const open = openItems(one).map(item => item.text)
+  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, notDone: open.length ? open : undefined, toldOpen: undefined, keptOn: undefined } : card)))
+}
+const notDoneLine = (one: Todo) => {
+  const open = one.status === 'working' ? [] : openItems(one).map(item => item.text)
+  return open.length ? `${plural(open.length, 'a to-do', 'to-dos')} not done · ${open.join(' · ')}` : ''
+}
+const notDoneLines = (one: Todo, text: string) => {
+  const left = (one.notDone ?? []).filter(item => !text.includes(item))
+  return left.length ? `\n\nNot done:\n${left.map(item => `- ${item}`).join('\n')}` : ''
 }
 const isLeftStopped = (one: Todo, at: number) => Boolean(one.carryOn?.gaveUp && one.status !== 'working' && at - one.carryOn.gaveUp < CUT_OLD)
 const carryLine = (one: Todo, at: number) => {
@@ -11196,6 +11254,8 @@ const workHooks = (on: On) => {
     if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
       const hold = await holdAtHandback($, e.agentId).catch(() => '')
       if (hold) return { deny: hold }
+      const unticked = await untickedAtHandback($, e.agentId).catch(() => '')
+      if (unticked) return { deny: unticked }
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       handingBack.add(e.agentId)
       await wakeForHandback($, e.agentId).catch(err => log($, `task not started for its helper's hand-back: ${String(err)}`))
@@ -11204,6 +11264,11 @@ const workHooks = (on: On) => {
       if (isNotSent && wokenFor.delete(e.agentId)) await handbackRefused($, e.agentId).catch(err => log($, `task not told its helper's hand-back was refused: ${String(err)}`))
       if (r.deny || r.isError) handingBack.delete(e.agentId)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
+      if (!r.deny && !r.isError) {
+        await keepNotDone($, e.agentId).catch(err => log($, `to-dos not done of ${e.agentId} not kept: ${String(err)}`))
+        const card = (await read($, todos)).find(one => one.id === e.agentId)
+        if (card?.notDone?.length) await tellChat($, named(NOT_DONE_IN_CHAT(titleOf(card), card.notDone)))
+      }
       if (!r.deny && !r.isError) await noteHandback($, e.agentId).catch(err => log($, `chat not told of a helper's hand-back: ${String(err)}`))
       if (!r.deny && !r.isError && isLetGoNow) handedBackLetGo.add(e.agentId)
       if (!r.deny && !r.isError && isLetGoNow) await stopHelpers($, e.agentId, true).catch(err => log($, `helpers of ${e.agentId} not stopped: ${String(err)}`))
@@ -11269,7 +11334,7 @@ const workHooks = (on: On) => {
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
     const waits = id !== undefined && card && !isOff && card.handedBackAt === undefined ? waitsOnOwn(await read($, todos), card) : undefined
-    if (id !== undefined && waits?.what && (await isPressedForReport($, id, waits.helpers > 0 && card?.mayHandBack === undefined))) {
+    if (id !== undefined && waits?.what && (await isPressedForReport($, id, (waits.helpers > 0 && card?.mayHandBack === undefined) || openItems(card).length > 0))) {
       await log($, `work ${id} pressed by the engine for its report while ${waits.what}: let it end its step, saying nothing`)
       yield { kind: 'text', index: 0, text: PRESS_ANSWER }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
@@ -11327,7 +11392,8 @@ const workHooks = (on: On) => {
       const gone = ((await read($, todos)).find(one => one.id === e.agent_id)?.bg ?? []).filter(b => !ids.has(b.id)).map(b => b.id)
       if (gone.length) await dropBackground($, gone).catch(err => log($, `ended background work not let go: ${String(err)}`))
     }
-    return r
+    const why = dir && !r.block ? await keepGoing($, e.agent_id).catch(() => '') : ''
+    return why ? { ...r, block: why } : r
   })
 
   on('agent.spawn', async ($, asked, next) => {
@@ -12596,6 +12662,12 @@ const panelHooks = (on: On) => {
             {carryLine(one, at) && !one.chat ? (
               <Box key={`carry-${one.id}`} paddingLeft={lead}>
                 <Text color={one.carryOn?.gaveUp ? NEEDS : undefined} dimColor={!one.carryOn?.gaveUp} wrap="wrap">{carryLine(one, at)}</Text>
+              </Box>
+            ) : null}
+            {/* Ended with to-dos not done: which, in the colour of what needs the person, so nobody has to ask what was left */}
+            {notDoneLine(one) ? (
+              <Box key={`not-done-${one.id}`} paddingLeft={lead}>
+                <Text color={NEEDS} wrap="wrap">{notDoneLine(one)}</Text>
               </Box>
             ) : null}
             {/* Still at work, waiting for a command of its own it started in the background: that it waits, the command itself

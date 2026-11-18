@@ -255,7 +255,8 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
   const id = ids.find(name => !kept.some(r => r.id === name)) ?? `${base}-${mark(one.id + String(at)).replace(/\D/g, '').slice(-8)}`
   const into = `${reportsDir()}/${id}`
   const chat = await read($, me)
-  await $.fs.write(`${dir}/reports/${id}/report.md`, `${text.trim()}\n`)
+  // (with the to-dos its task left not done that it does not name itself)
+  await $.fs.write(`${dir}/reports/${id}/report.md`, `${text.trim()}${notDoneLines(one, text)}\n`)
   const files = await copyNamed($, text, into).catch(err => (void log($, `pictures of report ${id} not copied: ${String(err)}`), [] as string[]))
   await makeThumbs($, { id, files } as Report).catch(err => log($, `small copies of report ${id} not made: ${String(err)}`))
   const report: Report = {

@@ -1,0 +1,5 @@
+- A task no longer stops while its to-dos aren't done. When Claude tries to end with nothing of its own running that would start it again, Claudopus keeps it going in the same run and tells it what is still to do, so it carries on by itself instead of being started again later.
+- Claude can't send a task's result while to-dos are left: Claudopus tells it which are left, once, so it does them or ticks them. What only you can do stays on the list.
+- A task that ends with to-dos not done says which on its card, in amber, adds them to its result under "Not done", and the chat tells you they aren't done.
+- A long message from Claude about how far it has got is no longer kept as the task's result while its to-dos aren't done.
+- The rules tell Claude that ending a step only pauses a task, and to check that something of its own really runs before it does.

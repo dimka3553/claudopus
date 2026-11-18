@@ -533,7 +533,7 @@ const isStoppedShort = (one: Todo | undefined, answer: string) =>
     one &&
       !one.parentId &&
       !one.chat &&
-      answer.trim().length < REPORT_LEAST &&
+      !isWordsReport(one, answer) &&
       one.handedBackAt === undefined &&
       !one.answeredAt &&
       !endedByHandback.has(one.id) &&
@@ -621,6 +621,71 @@ const carryNow = async ($: EngineInterface, id: string, at: number) => {
   redraw($)
   await log($, `work ${id} could not be started again to carry on: ${r.reason}`)
   await tellChat($, named(CARRY_LOST_IN_CHAT(titleOf(one), id)))
+}
+// ---- A task goes on until its to-dos are done ----
+
+// A task that ends its step with to-dos still to do and nothing of its own running that starts it again would stop there: Claude
+// Code presses it three times for its report, and it hands back what it has or nothing (16-17 Nov: since tasks stopped waiting on
+// their helpers with a command, 83% of tasks were pressed, 27% handed back with to-dos not done and 8% ended without a result).
+// Claudopus keeps such a step from ending, as Claude Code lets a stop hook do: the task goes on in the same run, told what is still
+// to do and that nothing of its own would start it again. Kept this many times in a row with no call between, its step ends, and
+// carrying it on (above) is the net
+const KEEP_TRIES = 3
+// Why the task ending its step now should go on instead, or '' to let it end: one of this chat's tasks at work, with to-dos still to
+// do, that has not handed back, is not stopped partway for a reason of its own (isStoppedShort: a question for the person, their
+// Allow, their stop or hold, a safety flag, a detached command), and has nothing of its own that starts it again: no command in the
+// background, no helper at work, nothing it asked Claudopus to wake it for, and no command held for its turn
+const keepGoingWhy = (list: Todo[], id: string) => {
+  const one = list.find(card => card.id === id)
+  const open = openItems(one)
+  if (!one || isOff || !dir || one.status !== 'working' || !open.length || handedBack.has(id) || one.mayHandBack !== undefined) return ''
+  if (!isStoppedShort(one, '') || !ownsNothing(list, id) || one.wakeWhen !== undefined || isTurnWaited(list, id)) return ''
+  return named(KEEP_GOING(open.map(item => item.text)))
+}
+// Its step's end: kept from ending while it should go on, counting the times in a row with no call of its own between
+const keepGoing = async ($: EngineInterface, id: string): Promise<string> => {
+  let why = ''
+  await changeTodos($, list => {
+    why = keepGoingWhy(list, id)
+    return list.map(one => {
+      if (one.id !== id) return one
+      if (!why) return one.keptOn ? { ...one, keptOn: undefined } : one
+      const tries = one.keptOn && one.keptOn.steps === (one.steps ?? 0) ? one.keptOn.tries + 1 : 1
+      if (tries > KEEP_TRIES) why = ''
+      return { ...one, keptOn: { tries, steps: one.steps ?? 0 } }
+    })
+  })
+  if (why) await log($, `work ${id} ended its step with to-dos still to do and nothing of its own running: kept going`)
+  return why
+}
+// Its report handed back with to-dos not done: refused once, with what is still to do; the same report again, with the same to-dos
+// still to do, goes through, and those to-dos show as not done on its card and in its result
+const untickedAtHandback = async ($: EngineInterface, id: string): Promise<string> => {
+  const one = (await read($, todos)).find(card => card.id === id)
+  const open = openItems(one).map(item => item.text)
+  if (!one || isOff || !dir || one.parentId || one.chat || !open.length || one.flagged) return ''
+  const key = open.join('\n')
+  if (one.toldOpen === key) return ''
+  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldOpen: key } : card)))
+  await log($, `work ${id} handed back with ${open.length} to-dos still to do: refused once`)
+  return named(NOT_TICKED(open))
+}
+// What it handed back with still to do, kept once its report went through
+const keepNotDone = async ($: EngineInterface, id: string) => {
+  const one = (await read($, todos)).find(card => card.id === id)
+  if (!one || one.parentId) return
+  const open = openItems(one).map(item => item.text)
+  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, notDone: open.length ? open : undefined, toldOpen: undefined, keptOn: undefined } : card)))
+}
+// The card's line for a task that ended with to-dos not done
+const notDoneLine = (one: Todo) => {
+  const open = one.status === 'working' ? [] : openItems(one).map(item => item.text)
+  return open.length ? `${plural(open.length, 'a to-do', 'to-dos')} not done · ${open.join(' · ')}` : ''
+}
+// A result's lines for the to-dos its task left not done that it does not name itself
+const notDoneLines = (one: Todo, text: string) => {
+  const left = (one.notDone ?? []).filter(item => !text.includes(item))
+  return left.length ? `\n\nNot done:\n${left.map(item => `- ${item}`).join('\n')}` : ''
 }
 // A task Claudopus stopped starting again stays in its place, its line in sight, as a task cut off that could not be started again does
 const isLeftStopped = (one: Todo, at: number) => Boolean(one.carryOn?.gaveUp && one.status !== 'working' && at - one.carryOn.gaveUp < CUT_OLD)

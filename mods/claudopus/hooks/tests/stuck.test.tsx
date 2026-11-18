@@ -1162,3 +1162,65 @@ test('a task Claude Code pressed for its report that ended its step with none, a
   await clock.advance(6000)
   expect(await lines()).toEqual([])
 })
+
+test("a task ending its step with to-dos still to do and nothing of its own running goes on in the same run, told what is left, and its long word of how far it has got is never its result; with a helper at work it may end its step; kept three times in a row with no call between, it is let end; its report with to-dos still to do is refused once, then goes through with them shown as not done on its card, in its result and to the chat", SLOW, async ($, on) => {
+  const agents: Record<string, string> = {}
+  const PRESS = { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' }
+  const talk: unknown[] = []
+  const { clock, resumed, appended, files } = world(on, { agents, talk })
+  on('classic.SubagentStop', () => ({}) as never)
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Rebuild the head model', prompt: 'rebuild' } as never)
+  agents.a1 = 'running'
+  const call = (tool: string, input: object) => $.tool.call({ tool: `mcp__claudopus__${tool}`, tool_use_id: 't', agentId: 'a1', ...input } as never)
+  for (const item of ['Fit every scan', 'Draw new beside old', 'Second look']) await call('todo', { item })
+  await call('todo', { item: 'Fit every scan', state: 'done' })
+  const stop = async () => ((await ($ as unknown as { classic: { SubagentStop: (e: object) => Promise<{ block?: string }> } }).classic.SubagentStop({ hook_event_name: 'SubagentStop', agent_id: 'a1', background_tasks: [] })) ?? {}).block
+  // 18 Nov: it started its pictures detached with no `echo $!` after them, which failed at once, and ended its step with a long word
+  // of how far it had got: kept as its result, its card ended at 1 of 3 and nothing started it again for three and a half hours
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1', command: 'for p in a b; do nohup python3 pictures.py "$p" > pic.log 2>&1 & done; echo started', description: 'Run: draw the heads (about 5 min)' } as never)
+  const kept = await stop()
+  expect(kept).toContain('don\'t end here, your task isn\'t finished. Still to do: "Draw new beside old"; "Second look".')
+  expect(kept).toContain('look at its log')
+  // Kept three times in a row with no call of its own between, it is let end its step; a call counts from one again
+  expect([Boolean(await stop()), Boolean(await stop()), await stop()]).toEqual([true, true, undefined])
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', agentId: 'a1', command: 'tail -n 5 pic.log' } as never)
+  expect(Boolean(await stop())).toBe(true)
+  // Let end, its long word of how far it has got is no result: its card stays at work, nothing is kept, and it is carried on
+  const progress = `The final tests are done. ${'I am now drawing the kept-aside heads and continue when they end. '.repeat(10)}`
+  talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text: progress }] }, PRESS)
+  agents.a1 = 'completed'
+  await $.turn.complete({ answer: progress, durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(6000)
+  const reports = () => [...files.keys()].filter(path => path.endsWith('/report.md'))
+  expect(reports()).toEqual([])
+  expect(resumed.filter(line => line.startsWith('a1: From Claudopus, not ') && line.includes('Carry on from where you were'))).toHaveLength(1)
+  // With a helper of its own at work it may end its step: the helper's result starts it again
+  agents.a1 = 'running'
+  await $.agent.spawn({ ...spawn, description: 'Draw the heads', prompt: 'draw', parentAgentId: 'a1' } as never)
+  agents.a2 = 'running'
+  expect(await stop()).toBeUndefined()
+  agents.a2 = 'completed'
+  await $.turn.complete({ answer: 'Drawn.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
+  // Its report with to-dos still to do is refused, naming them; with one ticked, refused again for the one left; the same again
+  // goes through
+  // (a result as long as one Claudopus keeps)
+  const REPORT = `The new model is nearer on unseen heads.${' Each head kept aside is closer behind the ear.'.repeat(12)}`
+  const handback = async () => ((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h', agentId: 'a1', message: REPORT } as never)) as { deny?: string }).deny
+  expect(await handback()).toContain('Not sent: 2 of your to-dos are still to do: "Draw new beside old"; "Second look".')
+  await call('todo', { item: 'Draw new beside old', state: 'done' })
+  expect(await handback()).toContain('Not sent: a to-do of yours is still to do: "Second look".')
+  expect(await handback()).toBeUndefined()
+  expect(appended.filter(line => line.includes('handed back its result with a to-do not done: "Second look"'))).toHaveLength(1)
+  agents.a1 = 'completed'
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't3', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(1000)
+  expect(await until(async () => reports().length || undefined)).toBe(1)
+  expect(files.get(reports()[0])).toBe(`${REPORT}\n\nNot done:\n- Second look\n`)
+  // Its card, under Finished, says what is not done, in amber
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const fold = await until(async () => (await pane.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label))))
+  if (fold) await pane.press({ key: String(fold.key) })
+  const line = await until(async () => (await pane.find({ type: 'Text', text: /^Not done · / })) ?? undefined)
+  expect([line?.text, line?.props.color]).toEqual(['Not done · Second look', '#E5A50A'])
+})

@@ -156,6 +156,12 @@ export type Todo = {
   // Claudopus started again with a note to carry on: how many times in a row with little done between, how many in all, when
   // last, and its step count then; `gaveUp` when it stopped so too often, or could not be started again, and was left stopped
   carryOn?: { tries: number; total: number; at: number; steps: number; gaveUp?: number; isLost?: boolean }
+  // How many times in a row Claudopus kept it from ending its step while its to-dos were not done, and its step count then
+  keptOn?: { tries: number; steps: number }
+  // The to-dos not done it was told of when its report was refused, joined, so the same report again goes through
+  toldOpen?: string
+  // The to-dos it handed back its report with still not done: shown on its card and added to its result
+  notDone?: string[]
   // Work with helpers running: when the mod last looked in on them, how many ran and how many had shown nothing new for a while
   lookedIn?: { at: number; running: number; quiet: number }
   // A helper whose work was told it has shown nothing new: when it last had, so it is told once each quiet stretch

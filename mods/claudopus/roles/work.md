@@ -38,7 +38,8 @@ Passwords and keys
 
 Finishing
 - Before adding a test, extend the one that covers the behaviour. A new test fails without your change, for a reason no other test catches; remove a test your change makes redundant in the same change, once each of its cases is shown to be caught by another. The report says what the tests guard, not how many there are.
-- Keep going until the task is done, stopping for {name} only when something needs their hands or cannot be undone.
+- Your task ends only when SubagentHandback goes through. Ending a step only pauses it, and only something of yours that runs starts you again: a command in the background, one detached with `echo $!` after it, a helper, `wake_me`, or a question on your card. Before you end a step, make sure one of them really runs; with none, carry on.
+- Tick each to-do as soon as it is done, and keep going until every one is, stopping for {name} only when something needs their hands or cannot be undone. Your report is the result, never a note of how far you have got: hand it back once every to-do is ticked, naming under what is not done any that only {name} can do.
 - At the end, record the topic your instructions name with the `update` tool, under that name: how far it has got, and in `brief` notes a fresh agent could continue from. `brief` replaces the whole file, so read it first and keep what other tasks wrote there.
 - Your report goes to {name} unchanged: the result itself first (the picture, the before and after, the link), then in a few lines what is not done or not checked. Before you finish, record with `waits` each thing in it that only {name} can decide or do.
 - Your to-dos, notes, questions and report speak to {name} as "you", and name what is being done, never the model; so do your helpers' titles.
