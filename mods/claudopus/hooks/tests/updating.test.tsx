@@ -825,7 +825,7 @@ test('Update fetches the release and checks it against what the release publishe
 
 // The checkout on main, or left by a task on a commit its online main holds (18 Nov: every chat on that Mac was called a test copy
 // and offered no Update), which Install puts back on main once it is at the release
-for (const one of [{ name: 'its checkout', release: RELEASE }, { name: 'a checkout left on a released commit', release: { ...RELEASE, detached: true } }])
+for (const one of [{ name: 'its checkout', release: RELEASE }, { name: 'a checkout left on a released commit', release: { ...RELEASE, detached: true } }] as { name: string; release: Release }[])
 test(`Update is one press for a chat run from ${one.name}: the fetch, its check, then a fast-forward; then the header says, beside the version, to type /reload-plugins, and nothing reloads the chat`, SLOW, async ($, on) => {
   const { files, clock, gitRan } = world(on, { release: one.release })
   const reloads = reloadsOf(on)
