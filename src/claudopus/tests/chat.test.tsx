@@ -843,12 +843,12 @@ test('the update tool records a subject and rewrites its brief', async ($, on) =
   expect(files.get(`${MEMORY}/streams/3d-heads.md`)).toBe('Nose fixed.\n')
 })
 
-test('recall returns matching lines without the folder prefix', async ($, on) => {
+test('recall returns matching lines without the folder prefix, what helpers and tools found after the chats\' own words', async ($, on) => {
   world(on)
   await $.session.start(start)
 
   const r = await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't1', query: 'nose' } as never)
-  expect(String(r.result)).toContain('words/local_1.md:2:the nose is flawed')
+  expect(String(r.result)).toContain('words/local_1.md:2:the nose is flawed\nwork/local_1.md:9:the nose model returned')
 })
 
 test('rarely used tools wait behind tool search', async ($, on) => {

@@ -18,8 +18,6 @@ import sys
 
 HOME = os.path.expanduser('~')
 PROJECTS = f'{HOME}/.claude/projects'
-WORDS = f'{HOME}/.claude/claudopus/words'
-MARK = '<!-- from the transcript -->'
 # The folder that holds one folder per repo; GitHub Desktop's default unless CLAUDOPUS_REPOS names another
 REPOS = os.environ.get('CLAUDOPUS_REPOS', f'{HOME}/Documents/GitHub').rstrip('/')
 # Folders that hold no work of mine: test runs and the app's spare sessions

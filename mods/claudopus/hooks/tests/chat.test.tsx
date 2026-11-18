@@ -475,7 +475,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
       : tool === 'grep'
-        ? `${MEMORY}/words/local_1.md:2:the nose is flawed\n`
+        ? `${MEMORY}/work/local_1.md:9:the nose model returned\n${MEMORY}/words/local_1.md:2:the nose is flawed\n`
         : tool === 'lsof' && rest.includes('-iTCP')
           ? `p635\nn*:7000\n${isGone ? '' : 'p700\nn127.0.0.1:3100\nn[::1]:3100\n'}`
           : tool === 'lsof'
@@ -1575,12 +1575,12 @@ test('the update tool records a subject and rewrites its brief', async ($, on) =
   expect(files.get(`${MEMORY}/streams/3d-heads.md`)).toBe('Nose fixed.\n')
 })
 
-test('recall returns matching lines without the folder prefix', async ($, on) => {
+test('recall returns matching lines without the folder prefix, what helpers and tools found after the chats\' own words', async ($, on) => {
   world(on)
   await $.session.start(start)
 
   const r = await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't1', query: 'nose' } as never)
-  expect(String(r.result)).toContain('words/local_1.md:2:the nose is flawed')
+  expect(String(r.result)).toContain('words/local_1.md:2:the nose is flawed\nwork/local_1.md:9:the nose model returned')
 })
 
 test('rarely used tools wait behind tool search', async ($, on) => {

@@ -15,6 +15,7 @@ use Fcntl qw(SEEK_SET);
 use File::Basename qw(basename dirname);
 use File::Path qw(make_path remove_tree);
 use File::Temp qw(tempdir);
+use Digest::MD5 qw(md5_hex);
 
 my ($now, $hideExisting) = (0, 0);
 while (@ARGV && $ARGV[0] =~ /^--/) {
@@ -42,7 +43,9 @@ if (!mkdir $lock) {
   mkdir $lock or exit 0;
 }
 $isMine = 1;
-my $stamp = "$state_dir/last";
+# Each projects folder (a chat run under its own Claude settings folder has its own) is read on its own pause and kept apart
+my $folder = substr(md5_hex($projects), 0, 12);
+my $stamp = "$state_dir/last-$folder";
 exit 0 if !$now && -e $stamp && time - (stat $stamp)[9] < $EVERY;
 $| = 1;
 
@@ -51,19 +54,23 @@ $| = 1;
 sub hide {
   my $t = shift;
   $t =~ s/-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----/[key hidden]/gs;
-  $t =~ s/\b(?:ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|ya29\.)[A-Za-z0-9_.\-]{10,}/[key hidden]/g;
+  $t =~ s/\b(?:ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AIza|ya29\.)[A-Za-z0-9_.\-]{10,}/[key hidden]/g;
+  $t =~ s/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/[key hidden]/g;
   $t =~ s/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/[key hidden]/g;
-  $t =~ s/\b(?:GOCSPX-|ntn_|secret_|sbp_|lin_api_|r8_|glsa_|dop_v1_|shpat_|shpss_|xapp-)[A-Za-z0-9_-]{16,}/[key hidden]/g;
+  $t =~ s/\b(?:GOCSPX-|ntn_|sbp_|lin_api_|r8_|glsa_|dop_v1_|shpat_|shpss_|xapp-)[A-Za-z0-9_-]{16,}/[key hidden]/g;
+  $t =~ s/\bsecret_(?=[A-Za-z]*\d)[A-Za-z0-9]{32,}/[key hidden]/g;
   $t =~ s/\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/[key hidden]/g;
   $t =~ s/\b\d{8,10}:AA[A-Za-z0-9_-]{30,}/[key hidden]/g;
   $t =~ s/\bsk-(?:ant|proj|svcacct|admin)-[A-Za-z0-9_-]{16,}/[key hidden]/g;
   $t =~ s/\b(?:sk|pk|rk|hf|npm|vck|whsec)[-_](?:(?:live|test)_)?(?=[A-Za-z0-9]*\d[A-Za-z0-9]*\d)[A-Za-z0-9]{16,}/[key hidden]/g;
   $t =~ s/(\\?"(?:key|name)\\?"[ \t]*:[ \t]*\\?"[A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIALS?)\\?"[ \t]*,[ \t]*\\?"value\\?"[ \t]*:[ \t]*\\?")(?:[^"\\]|\\[^"])+(?=\\?")/$1\[hidden\]/g;
   $t =~ s/(\bAuthorization\\?["']?[ \t]*[:=][ \t]*\\?["']?[ \t]*(?:Basic|Bearer|token)[ \t]+)[^\s"'\\]{8,}/$1\[hidden\]/gi;
+  $t =~ s{(\{[^{}]*\\*"(?:key|name)\\*"[ \t]*:[ \t]*\\*"[A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?)\\*"[^{}]*\})}{ my $o = $1; $o =~ s/(\\*"value\\*"[ \t]*:[ \t]*\\*")(?:[^"\\]|\\[^"])+/$1\[hidden\]/g; $o }ge;
+  $t =~ s/(--password[ =]|\bcurl\b[^\n]*?\s-u[ \t]*[^\s:]+:)(?!\[(?:key )?hidden\])[^\s"'`]{4,}/$1\[hidden\]/g;
   $t =~ s{(\bhooks\.slack\.com/(?:services|workflows|triggers)/)[A-Za-z0-9/_-]+}{$1\[hidden\]}g;
   $t =~ s{(\b[a-z][a-z0-9+.-]*://[^/\s:@]+:)[^/\s@]+@}{$1\[hidden\]@}gi;
-  $t =~ s/(\b(?i:[A-Za-z0-9_]*(?:api[_-]?key|account[_-]?key|access[_-]?key|secret|token|password|passwd))\\?["']?[ \t]*[=:][ \t]*\\?["']?)(?!\[hidden\])[^\s"'`,;\\]{4,}/$1\[hidden\]/g;
-  $t =~ s/(\b[A-Z0-9_]*(?:_KEY|_PWD)\\?["']?[ \t]*[=:][ \t]*\\?["']?)(?!\[hidden\])(?![\/~.])[^\s"'`,;\\]{4,}/$1\[hidden\]/g;
+  $t =~ s/(\b(?i:[A-Za-z0-9_]*(?:api[_-]?key|account[_-]?key|access[_-]?key|private[_-]?key|secret|token|password|passwd))\\*["']?[ \t]*[=:][ \t]*\\*["']?)(?!\[(?:key )?hidden\])(?!(?:true|false|null|none|undefined)\b)(?!\d{1,7}\b)[^\s"'`,;\\]{4,}/$1\[hidden\]/g;
+  $t =~ s/(\b[A-Z0-9_]*(?:_KEY|_PWD|_PASS)\\*["']?[ \t]*[=:][ \t]*\\*["']?)(?!\[(?:key )?hidden\])(?![\/~.])[^\s"'`,;\\]{4,}/$1\[hidden\]/g;
   $t =~ s/([?&](?:Policy|Signature|X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token|sig|token|access_token|api_key|apikey|key)=)[^&\s"'<>),]+/$1\[hidden\]/gi;
   $t =~ s/(\bBearer[ \t]+)[A-Za-z0-9._~+\/=-]{16,}/$1\[hidden\]/g;
   return $t;
@@ -82,9 +89,9 @@ touch_file($stamp);
 
 # Every words and work file hidden once (and again on --hide-existing), each written only when it changed and nothing was added
 # to it meanwhile
-$hideExisting = 1 unless -e "$state_dir/hidden";
+$hideExisting = 1 unless -e "$state_dir/hidden-2";
 if ($hideExisting) {
-  for my $f (glob("$mem/words/*.md"), glob("$mem/work/*.md")) {
+  for my $f (map { glob("$mem/$_/*.md") } qw(words work asks pastes)) {
     my $before = size_of($f);
     open my $in, '<', $f or next;
     local $/;
@@ -97,7 +104,7 @@ if ($hideExisting) {
     close $out;
     if (size_of($f) == $before) { rename "$f.hiding", $f } else { unlink "$f.hiding" }
   }
-  touch_file("$state_dir/hidden");
+  touch_file("$state_dir/hidden-2");
 }
 
 # Without jq no record is read, but the other Macs' words still cross
@@ -116,9 +123,9 @@ def sender: .origin.kind // (if .promptSource == "sdk" or .turnOrigin == "sdk" t
 def origin_label: sender as $k
   | if $k == "human" or $k == "composer" then "" elif $k == "bridge" then " (from the phone)" elif $k == "sdk" then " (sent by a program)"
     elif $k == "channel" then " (from \(.origin.server // "a channel"))" elif $k == "scheduled-trigger" then " (scheduled)"
-    elif $k == "peer" or $k == "peer-send-message" then " (sent by another chat)" elif $k == "slack-ping" then " (from Slack)"
+    elif $k == "slack-ping" then " (from Slack)"
     elif $k == "coordinator" or $k == "projects-relay" then " (sent by the chat that runs this one)" else null end;
-inputs | fromjson? | select(type == "object" and .sessionId == $sid and (.isSidechain | not) and (.isMeta | not))
+inputs | fromjson? | select(type == "object" and .sessionId == $sid and (.isSidechain | not) and (.isMeta | not) and ($before == "" or (.timestamp // "") < $before))
 | if .type == "user" and (.isCompactSummary | not) and (origin_label != null) and (.message.content | has_result | not) then
     (.message.content | text_of) as $t
     | select(($t | test("\\S")) and ($t | test("^\\s*(<(command-|local-command|task-notification|system-reminder)|\\[Request interrupted)") | not))
@@ -201,7 +208,7 @@ sub jq {
 my %state;
 # Kept apart for each projects folder (a chat run under its own Claude settings folder has its own), so a run over one never
 # forgets what a run over another read
-my $state_file = "$state_dir/records-" . sprintf('%08x', unpack('%32C*', $projects)) . ".tsv";
+my $state_file = "$state_dir/records-$folder.tsv";
 if (open my $in, '<', $state_file) {
   while (<$in>) {
     chomp;
@@ -268,12 +275,19 @@ for my $path (@records) {
     $state{$key} = [$upto, 'helper', 0];
   } else {
     my $words = "$mem/words/$chat.md";
+    my $first = 0;
     # The first look decides whose words they are: a chat that saved its own keeps them, and one whose file grew since this last
     # wrote it is saved by Claudopus from then on
-    $mode = -e $words ? 'live' : 'caught' if !$mode;
+    $mode = -e $words ? 'live' : 'caught' if !$mode && ($first = 1);
+    # A chat that saved its own words from partway (it was typed in again before this first read it, or a program typed it while
+    # Claudopus saved only Claude's answers): what came before the file's first line goes beside it
+    if ($first && $mode eq 'live' && !-e "$mem/words/$chat.before.md") {
+      my ($t0) = do { open my $w, '<', $words; my $l = ''; while (<$w>) { if (/^#{2,3} (?:Claude )?(\d{4}-\d\d-\d\dT\S+)/) { $l = $1; last } } close $w; ($l) };
+      append("$mem/words/$chat.before.md", jq($JQ_WORDS, $tmp, '--arg', 'sid', $chat, '--arg', 'before', $t0)) if $t0;
+    }
     $mode = 'live' if $mode eq 'caught' && -e $words && size_of($words) != $wbytes;
     if ($mode eq 'caught') {
-      my $text = jq($JQ_WORDS, $tmp, '--arg', 'sid', $chat);
+      my $text = jq($JQ_WORDS, $tmp, '--arg', 'sid', $chat, '--arg', 'before', '');
       append($words, $text);
       $chats++ if length $text;
     }

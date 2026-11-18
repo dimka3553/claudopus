@@ -581,7 +581,7 @@ const chatHooks = (on: On) => {
       if (text.length > PASTE_CHARS) {
         const stamp = new Date().toISOString().replaceAll(':', '-')
         const path = `${dir}/pastes/${stamp}.md`
-        await $.fs.write(`${dir}/pastes/${stamp}.md`, text)
+        await $.fs.write(`${dir}/pastes/${stamp}.md`, hideKeys(text))
         text = `${text.slice(0, 600)}\n\n[${text.length - 1200} characters pasted here were saved to ${path} and left out of this chat]\n\n${text.slice(-600)}`
         context.push(PASTED)
       }

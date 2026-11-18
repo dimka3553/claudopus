@@ -42,7 +42,7 @@ a() { printf '{"type":"assistant","sessionId":"%s","timestamp":"%s","message":{"
   u c1 2026-11-02T00:00:05Z plugin '"a message the mod sent"'
   u c1 2026-11-02T00:00:05Z observer '"an observer digest"'
   u c1 2026-11-02T00:00:05Z slack-ping '"pinged from slack"'
-  u c1 2026-11-02T00:00:05Z human '"settings {\\\"key\\\":\\\"SESSION_SECRET\\\",\\\"value\\\":\\\"esc4ped99\\\"} env {\\\"DATABASE_PASSWORD\\\":\\\"hunter22hunter\\\"} header {\\\"Authorization\\\": \\\"Basic dXNlcjpwYXNzd29yZA==\\\"} hook https://hooks.slack.com/services/T0001/B0002/XyZ123abc password=abcd1 and kept: max_tokens=100000 input_tokens: 123456 PWD=/Users/sam primary_key: user_id tokenizer=bert-base-uncased {\\\"name\\\":\\\"monkey\\\",\\\"value\\\":\\\"banana\\\"}"'
+  u c1 2026-11-02T00:00:05Z human '"settings {\\\"key\\\":\\\"SESSION_SECRET\\\",\\\"value\\\":\\\"esc4ped99\\\"} env {\\\"DATABASE_PASSWORD\\\":\\\"hunter22hunter\\\"} header {\\\"Authorization\\\": \\\"Basic dXNlcjpwYXNzd29yZA==\\\"} hook https://hooks.slack.com/services/T0001/B0002/XyZ123abc password=abcd1 GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789 DB_PASS=hunter66hunter --password hunter44hunter curl -u admin:hunter55hunter x {\\\"value\\\":\\\"vbefore77key\\\",\\\"key\\\":\\\"SESSION_SECRET\\\"} {\\\"key\\\":\\\"API_SECRET\\\",\\\"target\\\":[\\\"production\\\"],\\\"value\\\":\\\"vercel88value\\\"} and kept: ASIA-PACIFIC-markets-2024 secret_management_module_v2 secret: true max_token=4096 max_tokens=100000 input_tokens: 123456 PWD=/Users/sam primary_key: user_id tokenizer=bert-base-uncased {\\\"name\\\":\\\"monkey\\\",\\\"value\\\":\\\"banana\\\"}"'
   a c1 2026-11-02T00:00:06Z '[{"type":"text","text":"The VAT owed is 4711 crowns."}]'
 } > "$projects/-p-app/c1.jsonl"
 # c2: a chat that saved its own words
@@ -69,7 +69,7 @@ k1=$(cat "$mem/work/c1.md" 2>/dev/null)
 check "a chat Claudopus never saved gets its words, as the chat writes them" '[[ "$w1" == *"## 2026-11-02T00:00:00Z"$'"'"'\n'"'"'"Please look at the VAT numbers."* && "$w1" == *"### Claude 2026-11-02T00:00:06Z"$'"'"'\n'"'"'"The VAT owed is 4711 crowns."* ]]'
 check "a program's message is saved and marked" '[[ "$w1" == *"(sent by a program)"$'"'"'\n'"'"'"a message a program sent"* ]]'
 check "a message from Slack is saved, marked" '[[ "$w1" == *"(from Slack)"$'"'"'\n'"'"'"pinged from slack"* ]]'
-check "keys in other shapes are hidden, ordinary words that look like them are kept" '[[ "$w1" != *"esc4ped99"* && "$w1" != *"hunter22hunter"* && "$w1" != *"dXNlcjpw"* && "$w1" != *"XyZ123abc"* && "$w1" != *"abcd1"* && "$w1" == *"max_tokens=100000 input_tokens: 123456 PWD=/Users/sam primary_key: user_id tokenizer=bert-base-uncased"* && "$w1" == *"monkey\\\",\\\"value\\\":\\\"banana"* ]]'
+check "keys in other shapes are hidden, ordinary words that look like them are kept" '[[ "$w1" != *"esc4ped99"* && "$w1" != *"hunter22hunter"* && "$w1" != *"dXNlcjpw"* && "$w1" != *"XyZ123abc"* && "$w1" != *"abcd1"* && "$w1" == *"GITHUB_TOKEN=[key hidden] DB_PASS=[hidden] --password [hidden] curl -u admin:[hidden]"* && "$w1" != *"vbefore77"* && "$w1" != *"vercel88"* && "$w1" == *"ASIA-PACIFIC-markets-2024 secret_management_module_v2 secret: true max_token=4096"* && "$w1" == *"max_tokens=100000 input_tokens: 123456 PWD=/Users/sam primary_key: user_id tokenizer=bert-base-uncased"* && "$w1" == *"monkey\\\",\\\"value\\\":\\\"banana"* ]]'
 check "notices, an observer's digest, the mod's own messages, tool results and the chat it was made from are not its words" '[[ "$w1" != *"task-notification"* && "$w1" != *"the mod sent"* && "$w1" != *"observer digest"* && "$w1" != *"bash output"* && "$w1" != *"copied from the chat"* && "$w1" != *"4711 crowns\""* ]]'
 check "keys and passwords in a chat are hidden" '[[ "$w1" != *"sk-ant-api03"* && "$w1" != *"hunter2"* && "$w1" == *"[key hidden]"* && "$w1" == *"password=[hidden]"* && "$w1" == *"KAGGLE_KEY=[hidden]"* && "$w1" == *"a.csv?Policy=[hidden]&Signature=[hidden]&Key-Pair-Id=K1"* && "$w1" != *"0123abcd"* && "$w1" != *"GOCSPX"* && "$w1" == *"npm-run-build-2024-11"* ]]'
 check "a chat that saved its words keeps them as they were" '[ "$(cat "$mem/words/c2.md")" = "$(printf "## 2026-11-03T00:00:00.000Z\ntyped in c2")" ]'
@@ -110,14 +110,24 @@ old "$projects/-p-app/c1.jsonl"
 run
 check "words the chat now writes itself are not written twice" '! grep -q "reply the chat saved" "$mem/words/c1.md"'
 
-# A run over another projects folder, or one that is missing, leaves what was read of this one as it was
-run_other() { "$here/catch-up" "$mem" "$tmp/no-projects" > "$tmp/out" 2>&1; }
+# A chat run under its own settings folder has its own records: each folder is read on its own, and neither makes the other read again
+mkdir -p "$tmp/projects2/-p-b"
+u c5 2026-11-09T00:00:00Z human '"in the second folder"' > "$tmp/projects2/-p-b/c5.jsonl"
+old "$tmp/projects2/-p-b/c5.jsonl"
 w_before=$(cat "$mem/work/c1.md")
-run_other
-old "$projects/-p-app/c1/subagents/agent-a1.jsonl"
-touch -t 202001010000 "$projects/-p-app/c1/subagents/agent-a1.jsonl"
 run
-check "a run over another projects folder makes no one read again" '[ "$(cat "$mem/work/c1.md")" = "$w_before" ]'
+"$here/catch-up" "$mem" "$tmp/projects2" > "$tmp/out" 2>&1
+run
+check "each settings folder's chats are read, and none twice" 'grep -q "in the second folder" "$mem/words/c5.md" && [ "$(cat "$mem/work/c1.md")" = "$w_before" ]'
+# A chat whose words file began partway gets its start beside it
+{
+  u c6 2026-11-10T00:00:00Z human '"the early part"'
+  u c6 2026-11-10T01:00:00Z human '"typed again later"'
+} > "$projects/-p-app/c6.jsonl"
+printf '## 2026-11-10T01:00:00.000Z\ntyped again later\n\n' > "$mem/words/c6.md"
+old "$projects/-p-app/c6.jsonl"
+run
+check "the start of a chat saved from partway goes beside it" 'grep -q "the early part" "$mem/words/c6.before.md" && ! grep -q "typed again later" "$mem/words/c6.before.md" && ! grep -q "the early part" "$mem/words/c6.md"'
 
 # The other Mac: its words come here, this Mac's go there, the longer copy wins, and no name a command could read crosses
 printf 'words of a chat on the other mac\n' > "$other/.claude/claudopus/words/theirs.md"
