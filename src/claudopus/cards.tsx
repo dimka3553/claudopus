@@ -23,7 +23,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // A reply its ask was held with has been acted on once the run it started ends: the ask waits on the person again, every answer back
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, newAt: at })
 // Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
 // a to-do of its is still being done. It is still at work; an answer it handed back on the way is no report. A watch it set is no
 // such command: it may run until stopped
@@ -72,6 +72,12 @@ const leftNothing = new Set<string>()
 // flight as work stops is the whole session's, every other work's too, so it says nothing of this work's own (what it lists that
 // this work started is let go of from its card as it ends, at its stop)
 const ownsNothing = (list: Todo[], id: string) => !list.find(one => one.id === id)?.bg?.length && !list.find(one => one.id === id)?.detached?.length && !list.some(kid => kid.parentId === id && kid.status === 'working')
+// What a task still has to do: its to-dos neither done nor dropped
+const openItems = (one: Todo | undefined) => (one?.items ?? []).filter(item => item.state === 'open' || item.state === 'doing')
+// Words at a step's end are its result only when it handed them back, or wrote them as long as a report with every to-do done: a
+// long word of how far it has got, with to-dos still to do, is no result (18 Nov: a task's progress note kept as its result while
+// 5 of its 7 to-dos were still to do, its card ended and nothing started it again for three and a half hours)
+const isWordsReport = (one: Todo | undefined, answer: string, isHandback = false) => isHandback || (answer.trim().length >= REPORT_LEAST && !openItems(one).length)
 // Work stopped after its report, so ended done just now, keeps that report for good, as work that finished outright does
 const keepStoppedReports = async ($: EngineInterface, now: number) => {
   for (const card of (await read($, todos)).filter(one => !one.parentId && one.status === 'done' && one.answeredAt && one.endedAt === now && one.answer.trim()))
@@ -262,13 +268,14 @@ const endedUnheardShort = async ($: EngineInterface, ids: Set<string>, live: { i
   for (const id of ids) {
     const card = (await read($, todos)).find(one => one.id === id)
     if (!card || card.status !== 'working' || carryTaken.has(carryKey(card))) continue
-    const f = folder ? await lastWordsOf($, folder, id, now) : { at: now, answer: '', isReport: false, isPressed: false }
-    if (!f.isReport && f.isPressed && isStoppedShort(card, f.answer)) {
+    const f = folder ? await lastWordsOf($, folder, id, now) : { at: now, answer: '', isReport: false, isHandback: false, isPressed: false }
+    const isReport = isWordsReport(card, f.answer, f.isHandback)
+    if (!isReport && (f.isPressed || isLetEnd(card)) && isStoppedShort(card, f.answer)) {
       await goOn($, id, 'its step ended while Claudopus was away')
       continue
     }
     const how = live.find(one => one.id === id)?.status === 'failed' ? 'failed' : 'done'
-    await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? { ...ended(one, how, now), answer: f.answer || one.answer, ...(f.isReport ? { answeredAt: one.answeredAt ?? now } : {}) } : one)))
+    await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? { ...ended(one, how, now), answer: f.answer || one.answer, ...(isReport ? { answeredAt: one.answeredAt ?? now } : {}) } : one)))
   }
 }
 
@@ -300,7 +307,7 @@ const lastWordsOf = async ($: EngineInterface, folder: string, agent: string, no
     if (answer === PRESS_ANSWER) answer = ''
     if (answer) break
   }
-  return { at, answer: answer.slice(0, ANSWER_CHARS), isReport: isHandback || answer.length >= REPORT_LEAST, isPressed }
+  return { at, answer: answer.slice(0, ANSWER_CHARS), isReport: isHandback || answer.length >= REPORT_LEAST, isHandback, isPressed }
 }
 const UNHEARD_LOOK = 60_000
 const UNHEARD_QUIET = 60_000
@@ -314,7 +321,7 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
   const due = list.filter(one => isUnlisted(one) && now - (unheardLooked.get(one.id) ?? -Infinity) >= UNHEARD_LOOK)
   if (!due.length) return
   const folder = await agentsFolder($, id)
-  const finished = new Map<string, { at: number; answer: string; isReport: boolean; isPressed: boolean }>()
+  const finished = new Map<string, { at: number; answer: string; isReport: boolean; isHandback: boolean; isPressed: boolean }>()
   for (const one of due) {
     unheardLooked.set(one.id, now)
     const meta = parsedOr<{ finished?: boolean }>(await readOr($, `${folder}/agent-${one.id}.meta.json`), {})
@@ -337,13 +344,13 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
         const f = finished.get(one.id)
         if (!f || one.status !== 'working' || one.wakeWhen || isTurnWaited(list, one.id) || list.some(kid => kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id)))) return one
         // (a task left stopped partway is started again to carry on, below)
-        if (!one.parentId && !f.isReport && f.isPressed && isStoppedShort(one, f.answer)) return (short.add(one.id), one)
+        if (!one.parentId && !isWordsReport(one, f.answer, f.isHandback) && (f.isPressed || isLetEnd(one)) && isStoppedShort(one, f.answer)) return (short.add(one.id), one)
         gone.add(one.id)
         isMoved = true
         // (its words count as a report only when it handed one back or wrote one as long, as at a heard end)
         const isTop = !one.parentId
         const answer = f.answer || one.answer
-        return { ...ended(one, 'done', isTop ? now : Math.min(f.at, now)), answer, ...(isTop && f.isReport ? { answeredAt: one.answeredAt ?? now } : {}), stuckAt: undefined }
+        return { ...ended(one, 'done', isTop ? now : Math.min(f.at, now)), answer, ...(isTop && isWordsReport(one, f.answer, f.isHandback) ? { answeredAt: one.answeredAt ?? now } : {}), stuckAt: undefined }
       })
     }
     endedNow = [...gone]

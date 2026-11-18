@@ -585,6 +585,12 @@ const panelHooks = (on: On) => {
                 <Text color={one.carryOn?.gaveUp ? NEEDS : undefined} dimColor={!one.carryOn?.gaveUp} wrap="wrap">{carryLine(one, at)}</Text>
               </Box>
             ) : null}
+            {/* Ended with to-dos not done: which, in the colour of what needs the person, so nobody has to ask what was left */}
+            {notDoneLine(one) ? (
+              <Box key={`not-done-${one.id}`} paddingLeft={lead}>
+                <Text color={NEEDS} wrap="wrap">{notDoneLine(one)}</Text>
+              </Box>
+            ) : null}
             {/* Still at work, waiting for a command of its own it started in the background: that it waits, the command itself
                 being a row on its tree */}
             {waitLine(one, at) ? (
