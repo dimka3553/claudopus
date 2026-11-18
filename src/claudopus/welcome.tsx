@@ -33,7 +33,7 @@ const closeWelcome = async ($: EngineInterface) => {
 const indexAsk = (root: string) =>
   [
     'Bring in my old chats (pressed in the Claudopus panel).',
-    `Run python3 "${root}/onboard/extract.py" "${dir}/onboard": it saves each past chat's messages under ${dir}/words and writes digests of them, one or more per project, into ${dir}/onboard.`,
+    `Run python3 "${root}/onboard/extract.py" "${dir}/onboard": it writes digests of your past chats, one or more per project, into ${dir}/onboard (Claudopus saves each chat's words under ${dir}/words itself).`,
     'If python3 is missing (macOS asks to install the Command Line Tools), say so with the command xcode-select --install and stop.',
     `Then for each digest file it wrote, have a helper follow ${root}/onboard/reader.md on it, writing its streams to ${dir}/onboard/streams/<the digest's file name>.`,
     'Last, record each stream found as a topic with the `update` tool (its name, folder, state and summary, and its section as `brief`), and list the topics you found in a few lines.',

@@ -459,6 +459,9 @@ const chatHooks = (on: On) => {
     await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
     if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
+    // What no chat on this Mac saved itself, caught up into memory a minute after the load and then every while
+    afterLoad($, CATCH_UP_AFTER, () => startCatchUp($).catch(err => log($, `chats not caught up: ${String(err)}`)))
+    everyLoad($, CATCH_UP_EVERY, () => startCatchUp($).catch(err => log($, `chats not caught up: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
     await readAnswers($).catch(() => undefined)
     await readOthers($).catch(() => undefined)
@@ -545,7 +548,13 @@ const chatHooks = (on: On) => {
     // A message the mod sent from a press or reply in the panel starts work as a message of the person's does
     const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text)
     const isPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || isPressed
-    if (!isPerson) return next(e)
+    if (!isPerson) {
+      // A message a program, a schedule or a channel sent is saved too, marked with where it came from, so recall finds every chat;
+      // notices and the mod's own messages are no one's words
+      const from = programFrom(e.origin)
+      if (from) await appendWords($, (await read($, me)).id, `## ${new Date().toISOString()} (${from})\n${e.text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
+      return next(e)
+    }
     // A report Claudopus took whose notice never came goes with their message, so it is never left unsaid
     const context = [...(e.context ?? []), ...(await reportsFor($))]
     // Their message lifts the hold on work they stopped: the chat is reminded it was stopped, and starts it again only if asked
@@ -582,7 +591,7 @@ const chatHooks = (on: On) => {
       if (text.length > PASTE_CHARS) {
         const stamp = new Date().toISOString().replaceAll(':', '-')
         const path = `${dir}/pastes/${stamp}.md`
-        await $.fs.write(`${dir}/pastes/${stamp}.md`, text)
+        await $.fs.write(`${dir}/pastes/${stamp}.md`, hideKeys(text))
         text = `${text.slice(0, 600)}\n\n[${text.length - 1200} characters pasted here were saved to ${path} and left out of this chat]\n\n${text.slice(-600)}`
         context.push(PASTED)
       }

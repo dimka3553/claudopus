@@ -292,6 +292,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // What was handed to this Mac's keychain on security's stdin
     if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    // bin/catch-up, started in a session of its own
+    if (tool === '/bin/sh' && String(rest[4] ?? '').endsWith('/bin/catch-up')) return (own.push([...e.argv]), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
     if (tool?.endsWith('bin/notify')) {
       own.push([...e.argv])
@@ -473,7 +475,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
       : tool === 'grep'
-        ? `${MEMORY}/words/local_1.md:2:the nose is flawed\n`
+        ? `${MEMORY}/work/local_1.md:9:the nose model returned\n${MEMORY}/words/local_1.md:2:the nose is flawed\n`
         : tool === 'lsof' && rest.includes('-iTCP')
           ? `p635\nn*:7000\n${isGone ? '' : 'p700\nn127.0.0.1:3100\nn[::1]:3100\n'}`
           : tool === 'lsof'

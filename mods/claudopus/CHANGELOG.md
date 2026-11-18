@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.196 · 18 November 2026
+- Recall now finds every chat: Claudopus saves the words of chats it never saved itself (older chats, chats a program started), 10 to 20 minutes after they go quiet.
+- Messages a program, a schedule or a channel sent are saved too, marked with where they came from.
+- Recall now also finds what each chat's helpers were asked and reported, what connected tools such as SBOS returned, and the documents a chat wrote.
+- Keys and passwords are hidden in the chats, asks and pastes Claudopus saves, including those saved before.
+
 ## 0.2.195 · 18 November 2026
 - A task's card shows Done only once Claudopus has its result. Commands ending, helpers finishing or Claude Code ending the task's run no longer make it Done, and you no longer get a notification that it's done before its result comes.
 - A task that stops with to-dos left while only a server it left running is still going is started again to carry on, instead of sitting there.

@@ -25,6 +25,8 @@ const toolHooks = (on: On) => {
       .filter(Boolean)
       .map(line => line.replace(`${dir}/`, ''))
       .map(line => (archived.has(line.match(/^reports\/([^/]+)\//)?.[1] ?? '') ? `[archived] ${line}` : line).slice(0, 240))
+      // What a chat's helpers and tools brought comes after the chats' own words, notes and results, so it never crowds them out
+      .sort((a, b) => Number(a.startsWith('work/')) - Number(b.startsWith('work/')))
     if (!lines.length) return { result: `Nothing in ${dir} mentions "${query}".` }
     const more = lines.length > 40 ? `\n(${lines.length - 40} more lines; narrow the phrase)` : ''
 

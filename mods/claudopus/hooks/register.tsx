@@ -305,8 +305,37 @@ const tidyLog = async ($: EngineInterface) => {
   const text = await readOr($, `${dir}/log.md`)
   if (text.includes('\u0000')) await $.fs.write(`${dir}/log.md`, text.replaceAll('\u0000', '')).catch(() => undefined)
 }
-const appendWords = async ($: EngineInterface, chatId: string, text: string) => appendTo($, `${dir}/words/${chatId}.md`, text)
-const appendAsks = async ($: EngineInterface, chatId: string, text: string) => appendTo($, `${dir}/asks/${chatId}.md`, text)
+const hideKeys = (text: string) =>
+  text
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[key hidden]')
+    .replace(/\b(?:ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AIza|ya29\.)[A-Za-z0-9_.-]{10,}/g, '[key hidden]')
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[key hidden]')
+    .replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[key hidden]')
+    .replace(/\b(?:GOCSPX-|ntn_|sbp_|lin_api_|r8_|glsa_|dop_v1_|shpat_|shpss_|xapp-)[A-Za-z0-9_-]{16,}/g, '[key hidden]')
+    .replace(/\bsecret_(?=[A-Za-z]*\d)[A-Za-z0-9]{32,}/g, '[key hidden]')
+    .replace(/\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/g, '[key hidden]')
+    .replace(/\b\d{8,10}:AA[A-Za-z0-9_-]{30,}/g, '[key hidden]')
+    .replace(/\bsk-(?:ant|proj|svcacct|admin)-[A-Za-z0-9_-]{16,}/g, '[key hidden]')
+    .replace(/\b(?:sk|pk|rk|hf|npm|vck|whsec)[-_](?:(?:live|test)_)?(?=[A-Za-z0-9]*\d[A-Za-z0-9]*\d)[A-Za-z0-9]{16,}/g, '[key hidden]')
+    .replace(/(\\?"(?:key|name)\\?"[ \t]*:[ \t]*\\?"[A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD|CREDENTIALS?)\\?"[ \t]*,[ \t]*\\?"value\\?"[ \t]*:[ \t]*\\?")(?:[^"\\]|\\[^"])+(?=\\?")/g, '$1[hidden]')
+    .replace(/(\bAuthorization\\?["']?[ \t]*[:=][ \t]*\\?["']?[ \t]*(?:Basic|Bearer|token)[ \t]+)[^\s"'\\]{8,}/gi, '$1[hidden]')
+    .replace(/(\{[^{}]*\\*"(?:key|name)\\*"[ \t]*:[ \t]*\\*"[A-Z0-9_]*(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASS|PWD|CREDENTIALS?)\\*"[^{}]*\})/g, (o: string) => o.replace(/(\\*"value\\*"[ \t]*:[ \t]*\\*")(?:[^"\\]|\\[^"])+/g, '$1[hidden]'))
+    .replace(/(--password[ =]|\bcurl\b[^\n]*?\s-u[ \t]*[^\s:]+:)(?!\[(?:key )?hidden\])[^\s"'`]{4,}/g, '$1[hidden]')
+    .replace(/(\bhooks\.slack\.com\/(?:services|workflows|triggers)\/)[A-Za-z0-9/_-]+/g, '$1[hidden]')
+    .replace(/(\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:)[^/\s@]+@/gi, '$1[hidden]@')
+    .replace(/(\b[A-Za-z0-9_]*(?:[Aa][Pp][Ii][_-]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Oo][Uu][Nn][Tt][_-]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss][_-]?[Kk][Ee][Yy]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee][_-]?[Kk][Ee][Yy])\\*["']?[ \t]*[=:][ \t]*\\*["']?)(?!\[(?:key )?hidden\])(?!(?:[Tt]rue|[Ff]alse|[Nn]ull|NULL|[Nn]one|undefined|TRUE|FALSE|NONE)\b)(?!\d{1,7}\b)[^\s"'`,;\\]{4,}/g, '$1[hidden]')
+    .replace(/(\b[A-Z0-9_]*(?:_KEY|_PWD|_PASS)\\*["']?[ \t]*[=:][ \t]*\\*["']?)(?!\[(?:key )?hidden\])(?![/~.])[^\s"'`,;\\]{4,}/g, '$1[hidden]')
+    .replace(/([?&](?:Policy|Signature|X-Amz-Signature|X-Amz-Credential|X-Amz-Security-Token|sig|token|access_token|api_key|apikey|key)=)(?!\[(?:key )?hidden\])[^&\s"'<>),]+/gi, '$1[hidden]')
+    .replace(/(\bBearer[ \t]+)[A-Za-z0-9._~+/=-]{16,}/g, '$1[hidden]')
+const appendWords = async ($: EngineInterface, chatId: string, text: string) => appendTo($, `${dir}/words/${chatId}.md`, hideKeys(text))
+const programFrom = (origin: { kind: string; server?: string }) =>
+  origin.kind === 'sdk' ? 'sent by a program'
+  : origin.kind === 'scheduled-trigger' ? 'scheduled'
+  : origin.kind === 'channel' ? `from ${origin.server || 'a channel'}`
+  : origin.kind === 'slack-ping' ? 'from Slack'
+  : origin.kind === 'coordinator' || origin.kind === 'projects-relay' ? 'sent by the chat that runs this one'
+  : ''
+const appendAsks = async ($: EngineInterface, chatId: string, text: string) => appendTo($, `${dir}/asks/${chatId}.md`, hideKeys(text))
 
 type Ui = ElementTable
 const alphaOf = (color: unknown) => (typeof color === 'string' && /^#[0-9a-f]{8}$/i.test(color) ? parseInt(color.slice(7), 16) : 255)
@@ -2341,7 +2370,7 @@ const closeWelcome = async ($: EngineInterface) => {
 const indexAsk = (root: string) =>
   [
     'Bring in my old chats (pressed in the Claudopus panel).',
-    `Run python3 "${root}/onboard/extract.py" "${dir}/onboard": it saves each past chat's messages under ${dir}/words and writes digests of them, one or more per project, into ${dir}/onboard.`,
+    `Run python3 "${root}/onboard/extract.py" "${dir}/onboard": it writes digests of your past chats, one or more per project, into ${dir}/onboard (Claudopus saves each chat's words under ${dir}/words itself).`,
     'If python3 is missing (macOS asks to install the Command Line Tools), say so with the command xcode-select --install and stop.',
     `Then for each digest file it wrote, have a helper follow ${root}/onboard/reader.md on it, writing its streams to ${dir}/onboard/streams/<the digest's file name>.`,
     'Last, record each stream found as a topic with the `update` tool (its name, folder, state and summary, and its section as `brief`), and list the topics you found in a few lines.',
@@ -2849,6 +2878,15 @@ const memoryButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
     <ui.Button key={`memory-open-${presses}`} label="Memory" hotkey={isKeyed ? 'm' : undefined} plain={isKeyed ? true : undefined} onPress={press => void showMemory($, press.surface).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
   </ui.Box>
 )
+
+const CATCH_UP_AFTER = 60_000
+const CATCH_UP_EVERY = 10 * 60_000
+const CATCH_UP_START = `d=$1; shift; l="$d/caught/log.txt"; mkdir -p "$d/caught" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
+const startCatchUp = async ($: EngineInterface) => {
+  if (!dir) return
+  const r = await $.process.run(['/bin/sh', '-c', CATCH_UP_START, 'sh', dir, `${$.plugin.root}/bin/catch-up`, dir, `${await configDir($)}/projects`])
+  if (r.exitCode !== 0) await log($, `chats not caught up: ${r.stderr.slice(0, 200)}`)
+}
 
 const memoryHooks = (on: On) => {
 
@@ -8602,6 +8640,8 @@ const chatHooks = (on: On) => {
     await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
     if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
+    afterLoad($, CATCH_UP_AFTER, () => startCatchUp($).catch(err => log($, `chats not caught up: ${String(err)}`)))
+    everyLoad($, CATCH_UP_EVERY, () => startCatchUp($).catch(err => log($, `chats not caught up: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
     await readAnswers($).catch(() => undefined)
     await readOthers($).catch(() => undefined)
@@ -8668,7 +8708,11 @@ const chatHooks = (on: On) => {
     if (e.isMeta || e.command || !dir) return next(e)
     const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text)
     const isPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || isPressed
-    if (!isPerson) return next(e)
+    if (!isPerson) {
+      const from = programFrom(e.origin)
+      if (from) await appendWords($, (await read($, me)).id, `## ${new Date().toISOString()} (${from})\n${e.text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
+      return next(e)
+    }
     const context = [...(e.context ?? []), ...(await reportsFor($))]
     const stillHeld = (await read($, todos)).filter(one => isHeld(one) && !one.parentId)
     if ((await read($, todos)).some(isHeld)) {
@@ -8700,7 +8744,7 @@ const chatHooks = (on: On) => {
       if (text.length > PASTE_CHARS) {
         const stamp = new Date().toISOString().replaceAll(':', '-')
         const path = `${dir}/pastes/${stamp}.md`
-        await $.fs.write(`${dir}/pastes/${stamp}.md`, text)
+        await $.fs.write(`${dir}/pastes/${stamp}.md`, hideKeys(text))
         text = `${text.slice(0, 600)}\n\n[${text.length - 1200} characters pasted here were saved to ${path} and left out of this chat]\n\n${text.slice(-600)}`
         context.push(PASTED)
       }
@@ -11914,6 +11958,7 @@ const toolHooks = (on: On) => {
       .filter(Boolean)
       .map(line => line.replace(`${dir}/`, ''))
       .map(line => (archived.has(line.match(/^reports\/([^/]+)\//)?.[1] ?? '') ? `[archived] ${line}` : line).slice(0, 240))
+      .sort((a, b) => Number(a.startsWith('work/')) - Number(b.startsWith('work/')))
     if (!lines.length) return { result: `Nothing in ${dir} mentions "${query}".` }
     const more = lines.length > 40 ? `\n(${lines.length - 40} more lines; narrow the phrase)` : ''
 
