@@ -45,9 +45,9 @@ A running command or helper is two lines:
 - A helper's line 2 is what it is doing now, in plain words: `Reading files`, `Rendering the song stills · 4m`, `Searching the web`, `Waiting for its commands`, or its own last note. Quiet for three minutes, it is `Last: Reading files · nothing new for 29m`.
 - A task's card says only its stage, the to-do marked doing (`To-do 5 of 7 · Mend the nose`), and its own last note as its line, plus in amber what needs you. A paused task is Working, and its card says nothing of the pause; a command that ended never takes the place of the task's own line.
 - Ended: `Done in 2m 05s`, `Failed after 2m 05s`, `Stopped after 1m`, `Ran out of time after 30m`.
-- A count that is full while the command still runs never says 100%: `7 of 7 heads · still running`.
+- A count that is full while the command still runs never says 100%, and nothing after it: `7 of 7 heads · still running`.
 - In Details the commands of a task or helper that ended are a group, last under it, headed by a row as its card's closing row: `3 commands ended · 1 failed`. A press on that row folds them away (`3 commands ended · show`). Each is a row under it: its name as it had it running, never its shell line, then how long it ran, `2m 41s`, or how it ended where it did not finish, `Failed after 20s`. A press opens its log, which says when it ended.
-- A command that failed keeps a row on its card, in red, until it is run again and finishes: its name, `Failed after 2m 05s`, and under it why, the last line it wrote that names a fault. The closing row names what else did not finish: `13 commands ended · 2 ran out of time: Watch the cloud jobs and 1 more`, `2 helpers ended · 1 helper failed: Read the scans`.
+- A card's closing row counts what ended and what did not finish, and names none: `13 commands ended · 1 failed, 2 ran out of time`, `2 helpers ended · 1 helper failed`. A failed command has no row of its own on the card: which one, how and why is in Details and its log.
 - A press on a command's name opens its log in a tab of the panel, running or ended: its name, how it stands, `Stop`, `Details`, `Open in Terminal`, then the end of what it wrote. Details repeats none of it under a command.
 
 ## Files a task changed
@@ -67,7 +67,7 @@ One mark for each kind of row, the same on a card and in Details; a ring moves a
 | ◆ green | server | `Serve …` | `Serving` |
 | ◇ grey | watch for something far away, such as a cloud job | `Watch …` | `Watching` |
 | ■ grey | the commands folded away | `3 more commands` | |
-| the same shape in red | a command that failed | its name | `Failed after 2m 05s` |
+| the same shape in red | a command that failed, in Details | its name | `Failed after 2m 05s` |
 | ○ grey | what has ended | `13 commands ended` | |
 
 ## Questions, notices, errors

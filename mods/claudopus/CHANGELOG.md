@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.219 · 19 November 2026
+- An ended command is named by its own words, whole. In 0.2.216 a command kept from before that version had its words cut to two, such as "Testing the" and "Run the".
+- A command that failed no longer keeps a red row on its card among what still runs, and the closing row no longer names it: it says `5 commands ended · 1 failed`. Which one, how and why is in Details and its log.
+- A full count on a command that still runs says only `12 of 12 heads · still running`, without the script's last words after it.
+
 ## 0.2.218 · 19 November 2026
 - Once you answer a question on a card, in words too, the question goes at once. One grey line says what you answered, cut to one row, and pressing it opens the task's Details, where the question and your answer are whole.
 - After a press on a card, the space the question took stays empty for three seconds under that line, so nothing below slides up under the pointer.
