@@ -1,2 +1,3 @@
-- When you answer a question in words, Attach and Paste picture sit under the box: Paste picture takes the picture or files you copied, Attach picks files, and each picture shows as a small copy you can take off before you send. The task gets each one and opens it.
-- Paste picture is under Message and Reply too, and Message on a result can take pictures and files as well.
+- When you answer a question in words, Attach and Paste sit under the box. Attach picks files of any kind, and Paste takes the picture or files you copied. The task gets each one with how to open it.
+- What you attach shows as tiles, the same as a task's files in its Details: a preview of a picture, video, PDF or document, else an icon for its kind. A press on a name opens the file, and its ✕ takes it off before you send.
+- Paste is under Message and Reply too, and Message on a result can take files as well.

@@ -533,33 +533,35 @@ const takeAttached = (id: string) => {
   attachSaid.delete(id)
   return files
 }
-// A small copy of each picture attached, by its path, drawn above its name under the box; made as it is attached
-const attachThumbs = new Map<string, { source: string; width: number; height: number }>()
-const ATTACH_THUMB = 160
-const ATTACH_THUMB_TALL = 56
-// What Paste picture said, by the box's id, when the clipboard held nothing to attach; it goes with the next file attached or sent
+// What Paste said, by the box's id, when the clipboard held nothing to attach; it goes with the next file attached or sent
 const attachSaid = new Map<string, string>()
-const NOTHING_TO_PASTE = "There's no picture to paste. Copy one first, then press Paste picture."
-// Where pasted pictures and the small copies are kept: the person's own memory folder, never the repo or a shared place
+const NOTHING_TO_PASTE = "There's nothing to paste. Copy a picture or a file first, then press Paste."
+// Where pasted pictures are kept: the person's own memory folder, never the repo or a shared place
 const attachedDir = () => `${dir}/attached`
+// A file attached as a tile is drawn: by its kind, as what a task made is (files.tsx)
+const attachedMade = (path: string): Made => ({ path, name: fileName(path), kind: madeKind(path).kind })
+// Each tile's small copy, where one is made, as a task's files have theirs: the picture, a PDF's first page, what Quick Look draws of a
+// video or a document; any other file keeps its icon
+const attachedFace = (path: string) => faces.get(faceKey(attachedMade(path))) ?? undefined
 // What the drawing of a box's files depends on, for the drawings given again while a box is typed in (barShape, paneBoxShape)
-const attachShape = (id: string) => JSON.stringify([attached.get(id) ?? [], (attached.get(id) ?? []).map(path => attachThumbs.has(path)), attachSaid.get(id) ?? ''])
-const thumbAttached = async ($: EngineInterface, path: string) => {
-  if (attachThumbs.has(path) || fileKind(path) !== 'picture' && fileKind(path) !== 'picture-other') return
-  const to = `${attachedDir()}/thumbs/${hashOf(path)}.jpg`
-  await $.process.run(['mkdir', '-p', `${attachedDir()}/thumbs`])
-  const made = await $.process.run([sips($), '-Z', String(ATTACH_THUMB), '-s', 'format', 'jpeg', '-s', 'formatOptions', '60', path, '--out', to]).catch(() => undefined)
-  if (made?.exitCode !== 0) return
-  const thumb = await thumbOf($, to)
-  if (thumb) attachThumbs.set(path, thumb)
-}
+const attachShape = (id: string) => JSON.stringify([attached.get(id) ?? [], (attached.get(id) ?? []).map(path => Boolean(attachedFace(path))), attachSaid.get(id) ?? ''])
+// The files go under the box at once, each with its icon; the small copies follow, one after another, and the box is drawn again
 const addAttached = async ($: EngineInterface, id: string, picked: string[]) => {
-  await Promise.all(picked.map(path => thumbAttached($, path).catch(err => log($, `small copy of an attached picture not made: ${String(err)}`))))
   attached.set(id, [...new Set([...(attached.get(id) ?? []), ...picked])].slice(0, ATTACH_MOST))
   attachSaid.delete(id)
   ;((presses += 1), (boxPresses += 1), drawAgain($, true))
+  const missing = picked.map(attachedMade).filter(one => !faces.has(faceKey(one)) && !facesLoading.has(faceKey(one)))
+  if (!missing.length) return
+  for (const one of missing) {
+    facesLoading.add(faceKey(one))
+    const face = await makeFace($, one).catch(err => (log($, `small copy of an attached file not made: ${String(err)}`), null))
+    faces.set(faceKey(one), face)
+    facesMade += 1
+    facesLoading.delete(faceKey(one))
+  }
+  ;((presses += 1), (boxPresses += 1), drawAgain($, true))
 }
-// Paste picture: what the computer's clipboard holds goes under the box. Files copied in the Finder go by their own paths; a picture
+// Paste: what the computer's clipboard holds goes under the box. Files of any kind copied in the Finder go by their own paths; a picture
 // copied (a screenshot taken to the clipboard, an image copied from a page) is saved as a PNG in the memory folder first. The box
 // itself takes only words: the app gives a mod's field no pasted picture, nor a dropped file (engine 2.1.326)
 const PASTE_MAC = `ObjC.import('AppKit')
@@ -628,27 +630,38 @@ const sendMessageFrom = ($: EngineInterface, id: string, value: string, isNow: b
   redraw($)
   void sendChange($, id, value, isNow).catch(err => log($, `message not sent: ${String(err)}`))
 }
-// What is attached under a box: each picture as a small copy above its name, each file by its name alone, a press on the name
-// taking it off; and what Paste picture said when the clipboard held nothing. The terminal draws no picture: names alone there
+// What is attached under a box: each file as a tile, as a task's files are in its Details, with its small copy or its kind's icon,
+// then its name, which opens it, and ✕, which takes it off; and what Paste said when the clipboard held nothing. The terminal
+// draws no picture: names alone there, a press taking one off
+const ATTACH_COLUMNS = 14
 const attachedRow = ($: EngineInterface, ui: Ui, id: string, key: string) => {
   const files = attached.get(id) ?? []
   const said = attachSaid.get(id)
   if (!files.length && !said) return null
   const canDraw = 'Svg' in ui && !('isTerminal' in ui)
+  let chars = 0
+  const faceOf = (path: string) => {
+    const face = attachedFace(path)
+    if (!face || chars + face.base64.length > TILE_CHARS) return undefined
+    chars += face.base64.length
+    return face
+  }
   return (
     <ui.Box key={`${key}-files`} flexDirection="column" gap={1} width="100%">
       {files.length ? (
-        <ui.Box flexDirection="row" flexWrap="wrap" alignItems="flex-end" columnGap={2} rowGap={1}>
+        <ui.Box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={1}>
           {files.map((path, n) => {
-            const thumb = canDraw ? attachThumbs.get(path) : undefined
-            const label = `📎 ${cut(path.split('/').pop() ?? path, 40)} ✕`
-            const chip = <ui.Button key={`${key}-file-${n}-${presses}`} label={label} plain dimColor onPress={() => unattach($, id, path)} />
-            if (!thumb || !('Svg' in ui)) return chip
-            const tall = Math.min(ATTACH_THUMB_TALL, thumb.height)
+            const one = attachedMade(path)
+            const remove = () => unattach($, id, path)
+            if (!canDraw || !('Svg' in ui)) return <ui.Button key={`${key}-file-${n}-remove-${presses}`} label={`📎 ${cut(one.name, 40)} ✕`} plain dimColor onPress={remove} />
+            const row = `${key}-file-${n}`
             return (
-              <ui.Box key={`${key}-pic-${n}`} flexDirection="column" alignItems="flex-start" gap={0}>
-                <ui.Svg key={`${key}-pic-${n}-svg`} source={thumb.source} alt={`Picture: ${path.split('/').pop() ?? path}`} width={Math.max(1, Math.round((thumb.width * tall) / thumb.height))} height={tall} />
-                {chip}
+              <ui.Box key={row} flexDirection="column" alignItems="flex-start" width={ATTACH_COLUMNS} flexShrink={0}>
+                <ui.Svg key={`${row}-svg`} source={oneTile(one, faceOf(path))} alt={`${madeKindOf(one.kind).one.replace(/^\w/, c => c.toUpperCase())}: ${one.name}`} width={TILE_SHOWN_W} height={TILE_SHOWN_H} />
+                <ui.Box flexDirection="row" alignItems="center" width="100%">
+                  <ui.Button key={`${row}-open-${presses}`} label={middleCut(one.name, ATTACH_COLUMNS - 2)} plain onPress={press => void ((presses += 1), openMade($, one, '', row, press.surface).catch(err => log($, `attached file not opened: ${String(err)}`)))} />
+                  <ui.Button key={`${row}-remove-${presses}`} label="✕" plain dimColor onPress={remove} />
+                </ui.Box>
               </ui.Box>
             )
           })}
@@ -658,15 +671,15 @@ const attachedRow = ($: EngineInterface, ui: Ui, id: string, key: string) => {
     </ui.Box>
   )
 }
-// Attach and Paste picture, where the computer's own picker and clipboard are this one's (canAttach)
+// Attach and Paste, where the computer's own picker and clipboard are this one's (canAttach)
 const attachButtons = ($: EngineInterface, ui: Ui, id: string, key: string) =>
   canAttach()
     ? [
         <ui.Button key={`${key}-attach-${presses}-${boxPresses}`} label="Attach" plain onPress={() => void pickFiles($, id).catch(err => log($, `files not picked: ${String(err)}`))} />,
-        <ui.Button key={`${key}-paste-${presses}-${boxPresses}`} label={PASTE_PICTURE} plain onPress={() => void pastePicture($, id).catch(err => log($, `picture not pasted: ${String(err)}`))} />,
+        <ui.Button key={`${key}-paste-${presses}-${boxPresses}`} label={PASTE} plain onPress={() => void pastePicture($, id).catch(err => log($, `nothing pasted: ${String(err)}`))} />,
       ]
     : null
-const PASTE_PICTURE = 'Paste picture'
+const PASTE = 'Paste'
 // The row under a message box, the same in the box above the chat and at the bottom of Details: the files picked, each taken off
 // with a press on its name; Attach; then, while the task is in the middle of a step, Send now, and Send, the big one; `close`,
 // the box above the chat's own Close

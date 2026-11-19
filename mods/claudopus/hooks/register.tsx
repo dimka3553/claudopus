@@ -3729,8 +3729,8 @@ const askPicturesOf = ($: EngineInterface, one: Todo): Pic[] | undefined => {
 
 
 const MADE_KINDS: { kind: MadeKind; test: RegExp; one: string; many: string; badge: string; color: string }[] = [
-  { kind: 'picture', test: /\.(png|jpe?g|gif|webp|svg|heic)$/i, one: 'picture', many: 'pictures', badge: 'IMG', color: '#3A78C9' },
-  { kind: 'video', test: /\.(mp4|mov|webm|m4v)$/i, one: 'video', many: 'videos', badge: 'VID', color: '#8B5CF6' },
+  { kind: 'picture', test: /\.(png|jpe?g|gif|webp|svg|heic|heif|tiff?|bmp)$/i, one: 'picture', many: 'pictures', badge: 'IMG', color: '#3A78C9' },
+  { kind: 'video', test: /\.(mp4|mov|webm|m4v|mkv|avi)$/i, one: 'video', many: 'videos', badge: 'VID', color: '#8B5CF6' },
   { kind: 'pdf', test: /\.pdf$/i, one: 'PDF', many: 'PDFs', badge: 'PDF', color: '#D0473E' },
   { kind: 'sheet', test: /\.(xlsx?|csv|numbers)$/i, one: 'spreadsheet', many: 'spreadsheets', badge: 'XLS', color: '#23955A' },
   { kind: 'doc', test: /\.(docx?|pages|pptx?|key|md|txt|html?)$/i, one: 'document', many: 'documents', badge: 'DOC', color: '#6B6A65' },
@@ -3946,7 +3946,7 @@ const pageIcon = (badge: string, color: string) =>
 const LINK_ICON = '<rect x="2.5" y="4.5" width="23" height="23" rx="5" fill="#3b3b39" stroke="#9a9890" stroke-width="1.2"/><path d="M11 13.5h-1.5a3.5 3.5 0 0 0 0 7H11M17 13.5h1.5a3.5 3.5 0 0 1 0 7H17M11.5 17h5" fill="none" stroke="#C9A7FF" stroke-width="1.6" stroke-linecap="round"/>'
 const CODE_ICON = '<circle cx="9" cy="8" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="9" cy="24" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="19" cy="12" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><path d="M9 10.6v10.8M19 14.6c0 4-10 3-10 6.8" fill="none" stroke="#9a9890" stroke-width="1.5"/>'
 const endingOf = (path = '') => (/\.([a-z0-9]{1,4})$/i.exec(path)?.[1] ?? '').toUpperCase()
-const ENDING_COLORS: Record<string, string> = { TS: '#3178C6', TSX: '#3178C6', JS: '#B8A11E', JSX: '#B8A11E', MJS: '#B8A11E', PY: '#3572A5', SH: '#4E9A2A', JSON: '#8A7A2E', CSS: '#663399', HTML: '#D24E2B', MD: '#6B6A65', SWIFT: '#E0583A', GO: '#00879A', RS: '#B7410E', RB: '#B22222', C: '#555BA8', H: '#555BA8', CPP: '#555BA8' }
+const ENDING_COLORS: Record<string, string> = { TS: '#3178C6', TSX: '#3178C6', JS: '#B8A11E', JSX: '#B8A11E', MJS: '#B8A11E', PY: '#3572A5', SH: '#4E9A2A', JSON: '#8A7A2E', CSS: '#663399', HTML: '#D24E2B', MD: '#6B6A65', SWIFT: '#E0583A', GO: '#00879A', RS: '#B7410E', RB: '#B22222', C: '#555BA8', H: '#555BA8', CPP: '#555BA8', ZIP: '#8A6D3B', MP3: '#C2416B', WAV: '#C2416B', M4A: '#C2416B' }
 const iconOf = (kind: MadeKind | 'code', path?: string) =>
   kind === 'code' ? CODE_ICON : kind === 'link' ? LINK_ICON : pageIcon(kind === 'file' ? endingOf(path) : madeKindOf(kind).badge, kind === 'file' ? (ENDING_COLORS[endingOf(path)] ?? madeKindOf(kind).color) : madeKindOf(kind).color)
 const svgOfIcon = (kind: MadeKind | 'code', width: number, height: number, path?: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 28 32">${iconOf(kind, path)}</svg>`
@@ -5858,26 +5858,25 @@ const takeAttached = (id: string) => {
   attachSaid.delete(id)
   return files
 }
-const attachThumbs = new Map<string, { source: string; width: number; height: number }>()
-const ATTACH_THUMB = 160
-const ATTACH_THUMB_TALL = 56
 const attachSaid = new Map<string, string>()
-const NOTHING_TO_PASTE = "There's no picture to paste. Copy one first, then press Paste picture."
+const NOTHING_TO_PASTE = "There's nothing to paste. Copy a picture or a file first, then press Paste."
 const attachedDir = () => `${dir}/attached`
-const attachShape = (id: string) => JSON.stringify([attached.get(id) ?? [], (attached.get(id) ?? []).map(path => attachThumbs.has(path)), attachSaid.get(id) ?? ''])
-const thumbAttached = async ($: EngineInterface, path: string) => {
-  if (attachThumbs.has(path) || fileKind(path) !== 'picture' && fileKind(path) !== 'picture-other') return
-  const to = `${attachedDir()}/thumbs/${hashOf(path)}.jpg`
-  await $.process.run(['mkdir', '-p', `${attachedDir()}/thumbs`])
-  const made = await $.process.run([sips($), '-Z', String(ATTACH_THUMB), '-s', 'format', 'jpeg', '-s', 'formatOptions', '60', path, '--out', to]).catch(() => undefined)
-  if (made?.exitCode !== 0) return
-  const thumb = await thumbOf($, to)
-  if (thumb) attachThumbs.set(path, thumb)
-}
+const attachedMade = (path: string): Made => ({ path, name: fileName(path), kind: madeKind(path).kind })
+const attachedFace = (path: string) => faces.get(faceKey(attachedMade(path))) ?? undefined
+const attachShape = (id: string) => JSON.stringify([attached.get(id) ?? [], (attached.get(id) ?? []).map(path => Boolean(attachedFace(path))), attachSaid.get(id) ?? ''])
 const addAttached = async ($: EngineInterface, id: string, picked: string[]) => {
-  await Promise.all(picked.map(path => thumbAttached($, path).catch(err => log($, `small copy of an attached picture not made: ${String(err)}`))))
   attached.set(id, [...new Set([...(attached.get(id) ?? []), ...picked])].slice(0, ATTACH_MOST))
   attachSaid.delete(id)
+  ;((presses += 1), (boxPresses += 1), drawAgain($, true))
+  const missing = picked.map(attachedMade).filter(one => !faces.has(faceKey(one)) && !facesLoading.has(faceKey(one)))
+  if (!missing.length) return
+  for (const one of missing) {
+    facesLoading.add(faceKey(one))
+    const face = await makeFace($, one).catch(err => (log($, `small copy of an attached file not made: ${String(err)}`), null))
+    faces.set(faceKey(one), face)
+    facesMade += 1
+    facesLoading.delete(faceKey(one))
+  }
   ;((presses += 1), (boxPresses += 1), drawAgain($, true))
 }
 const PASTE_MAC = `ObjC.import('AppKit')
@@ -5937,25 +5936,35 @@ const sendMessageFrom = ($: EngineInterface, id: string, value: string, isNow: b
   redraw($)
   void sendChange($, id, value, isNow).catch(err => log($, `message not sent: ${String(err)}`))
 }
+const ATTACH_COLUMNS = 14
 const attachedRow = ($: EngineInterface, ui: Ui, id: string, key: string) => {
   const files = attached.get(id) ?? []
   const said = attachSaid.get(id)
   if (!files.length && !said) return null
   const canDraw = 'Svg' in ui && !('isTerminal' in ui)
+  let chars = 0
+  const faceOf = (path: string) => {
+    const face = attachedFace(path)
+    if (!face || chars + face.base64.length > TILE_CHARS) return undefined
+    chars += face.base64.length
+    return face
+  }
   return (
     <ui.Box key={`${key}-files`} flexDirection="column" gap={1} width="100%">
       {files.length ? (
-        <ui.Box flexDirection="row" flexWrap="wrap" alignItems="flex-end" columnGap={2} rowGap={1}>
+        <ui.Box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={1}>
           {files.map((path, n) => {
-            const thumb = canDraw ? attachThumbs.get(path) : undefined
-            const label = `📎 ${cut(path.split('/').pop() ?? path, 40)} ✕`
-            const chip = <ui.Button key={`${key}-file-${n}-${presses}`} label={label} plain dimColor onPress={() => unattach($, id, path)} />
-            if (!thumb || !('Svg' in ui)) return chip
-            const tall = Math.min(ATTACH_THUMB_TALL, thumb.height)
+            const one = attachedMade(path)
+            const remove = () => unattach($, id, path)
+            if (!canDraw || !('Svg' in ui)) return <ui.Button key={`${key}-file-${n}-remove-${presses}`} label={`📎 ${cut(one.name, 40)} ✕`} plain dimColor onPress={remove} />
+            const row = `${key}-file-${n}`
             return (
-              <ui.Box key={`${key}-pic-${n}`} flexDirection="column" alignItems="flex-start" gap={0}>
-                <ui.Svg key={`${key}-pic-${n}-svg`} source={thumb.source} alt={`Picture: ${path.split('/').pop() ?? path}`} width={Math.max(1, Math.round((thumb.width * tall) / thumb.height))} height={tall} />
-                {chip}
+              <ui.Box key={row} flexDirection="column" alignItems="flex-start" width={ATTACH_COLUMNS} flexShrink={0}>
+                <ui.Svg key={`${row}-svg`} source={oneTile(one, faceOf(path))} alt={`${madeKindOf(one.kind).one.replace(/^\w/, c => c.toUpperCase())}: ${one.name}`} width={TILE_SHOWN_W} height={TILE_SHOWN_H} />
+                <ui.Box flexDirection="row" alignItems="center" width="100%">
+                  <ui.Button key={`${row}-open-${presses}`} label={middleCut(one.name, ATTACH_COLUMNS - 2)} plain onPress={press => void ((presses += 1), openMade($, one, '', row, press.surface).catch(err => log($, `attached file not opened: ${String(err)}`)))} />
+                  <ui.Button key={`${row}-remove-${presses}`} label="✕" plain dimColor onPress={remove} />
+                </ui.Box>
               </ui.Box>
             )
           })}
@@ -5969,10 +5978,10 @@ const attachButtons = ($: EngineInterface, ui: Ui, id: string, key: string) =>
   canAttach()
     ? [
         <ui.Button key={`${key}-attach-${presses}-${boxPresses}`} label="Attach" plain onPress={() => void pickFiles($, id).catch(err => log($, `files not picked: ${String(err)}`))} />,
-        <ui.Button key={`${key}-paste-${presses}-${boxPresses}`} label={PASTE_PICTURE} plain onPress={() => void pastePicture($, id).catch(err => log($, `picture not pasted: ${String(err)}`))} />,
+        <ui.Button key={`${key}-paste-${presses}-${boxPresses}`} label={PASTE} plain onPress={() => void pastePicture($, id).catch(err => log($, `nothing pasted: ${String(err)}`))} />,
       ]
     : null
-const PASTE_PICTURE = 'Paste picture'
+const PASTE = 'Paste'
 const SEND_NOW = 'Stop and send'
 const messageFoot = ($: EngineInterface, ui: Ui, one: Todo, key: string, close: JSX.Element | null = null) => {
   const typed = () => drafts.get(messageDraft(one.id)) ?? ''

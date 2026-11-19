@@ -31,7 +31,7 @@ Every word Claudopus shows you (panel, cards, the bar, questions, notices, resul
 - The panel's header counts by stage: `1 waiting for you · 2 working`, `2 working · 1 delivered`, `1 delivered`, `Just finished`, `Nothing waits for you`.
 - **Time running** `29m 40s`, over an hour `1h 05m`. Never a guessed time: no "of about", no "over". **Ago** `2m ago`. **Left**, only when the command itself prints one: `1m left`. **Dates** `11 Nov, 14:20`.
 - **Counts** `<n> of <total> <what>`: `2 of 6 stills`, `2 of 5 to-dos`.
-- **Buttons** are a verb of one to three words, the same word for the same act: Allow, Don't allow, Type it, Paste it, Don't give it, Answer in words, Release it, Send, Stop and send, Attach, Paste picture, Close, Stop, Message, Reply, Give feedback, Mark as done, Dismiss, Details, Result, Open chat, Open in Terminal.
+- **Buttons** are a verb of one to three words, the same word for the same act: Allow, Don't allow, Type it, Paste it, Don't give it, Answer in words, Release it, Send, Stop and send, Attach, Paste, Close, Stop, Message, Reply, Give feedback, Mark as done, Dismiss, Details, Result, Open chat, Open in Terminal.
 - **Headings** are a noun: To-dos, Helpers and commands, Finished, Result.
 
 ## Every running thing has a progress line

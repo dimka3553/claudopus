@@ -343,7 +343,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     if (tool === 'osascript') osa.push([...e.argv])
     // The file picker Attach opens: what the test lays as picker:chosen is picked, else the person cancels it
     if (tool === 'osascript' && e.argv.some(one => String(one).includes('choose file'))) return files.has('picker:chosen') ? ok(files.get('picker:chosen') ?? '') : ok('', 1)
-    // What Paste picture finds on the clipboard: files copied, by their paths, as the test lays clipboard:files; a picture copied
+    // What Paste finds on the clipboard: files copied, by their paths, as the test lays clipboard:files; a picture copied
     // (clipboard:picture), saved where the mod asks; else nothing
     if (tool === 'osascript' && e.argv.some(one => String(one).includes('NSPasteboard'))) {
       const to = String(e.argv.at(-1))
