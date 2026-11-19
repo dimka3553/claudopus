@@ -42,10 +42,15 @@ const askNeed = ($: EngineInterface, one: Todo, surface: string, now: number): N
   const base = { id, at: ask.at, text: ask.text, ...(ask.details ? { details: ask.details } : {}), ...(ask.copy ? { command: ask.copy } : {}), card: one, ...(line ? { line, wholeLine: sentLine(one, now, Infinity) } : {}) }
   // Another chat's is answered only in its own chat: no file carries an answer there
   const elsewhere = one.chat ? `Answer it in its own chat, “${one.chat.title || 'another chat'}”${one.chat.host ? `, on ${one.chat.host}` : ''}.` : ''
+  const inBar = repliesInBar(surface)
   if (ask.refused) {
     const run = offeredRun(one)
+    const talk = talkText(ask.talk)
+    // Words go to the task, which answers inside this block; only Allow runs the command
+    const words = wordsOn($, `${id}-words`, one.id, inBar, isReplyOpen(one), { kind: 'answer', id: one.id, one }, value => void sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
     return {
       ...base,
+      ...(talk ? { details: [ask.details, talk].filter(Boolean).join('\n\n') } : {}),
       kind: 'permission',
       ...(elsewhere ? { where: elsewhere } : {}),
       buttons: elsewhere
@@ -53,13 +58,14 @@ const askNeed = ($: EngineInterface, one: Todo, surface: string, now: number): N
         : [
             ...(run ? [{ key: `${id}-allow-${ask.at}-${loadMark}`, label: ALLOW, onPress: () => void runIt($, one).catch(err => log($, `refused command not run: ${String(err)}`)) }] : []),
             { key: `${id}-deny-${ask.at}-${loadMark}`, label: DONT_ALLOW, onPress: () => void ((presses += 1), answerAsk($, one, DONT_ALLOW).catch(err => log($, `answer not sent: ${String(err)}`))) },
+            ...words.buttons,
           ],
+      ...(elsewhere || !words.field ? {} : { field: words.field }),
     }
   }
   if (isActingOnReply(one)) return { ...base, kind: 'question', isActing: true, buttons: [] }
   if (elsewhere) return { ...base, kind: 'question', where: elsewhere, buttons: [] }
   const mark = askMark(ask)
-  const inBar = repliesInBar(surface)
   const send = (value: string) => void (value.trim() && (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`))))
   return {
     ...base,
@@ -84,19 +90,49 @@ const askNeed = ($: EngineInterface, one: Todo, surface: string, now: number): N
   }
 }
 
+// What the person and the task said on a permission, under what it is about: the person's words, then the task's answer to them
+const talkText = (talk: { by: 'you' | 'task'; text: string }[] | undefined) =>
+  (talk ?? []).map(one => (one.by === 'you' ? `**You asked:** ${one.text}` : `**The answer:** ${one.text}`)).join('\n\n')
+// Answer in words on a permission: the button that opens the box above the chat for it, or, where that bar draws no field (the
+// terminal), the block's own field. What is typed goes to the task and allows nothing
+const wordsOn = ($: EngineInterface, key: string, draft: string, inBar: boolean, isOpen: boolean, to: { kind: BarKind; id: string; one?: Todo }, send: (value: string) => void): { buttons: NeedButton[]; field?: Need['field'] } =>
+  inBar
+    ? { buttons: [isOpen ? { key: `${key}-close-${presses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) } : { key: `${key}-open-${presses}`, label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, to, press.surface) }] }
+    : {
+        buttons: [],
+        field: {
+          key: `${key}-field-${replies.get(draft) ?? 0}`,
+          placeholder: ANSWER_IN_WORDS,
+          onInput: () => void holdTimes($),
+          onSubmit: (value: string) => void (value.trim() && (replies.set(draft, (replies.get(draft) ?? 0) + 1), freeTimes($), send(value))),
+        },
+      }
+// What a release puts on main, in plain words: the task's own line for it, else that it gave none; the subjects of its commits; then
+// how many commits and files, its branch and where from
+const releaseAbout = (gate: Gate) => {
+  const count = (gate.commits?.length ?? 0) + (gate.more ?? 0)
+  const commits = gate.commits?.length ? [...gate.commits.map(one => `- ${one}`), ...(gate.more ? [`- and ${gate.more} more`] : [])].join('\n') : ''
+  const facts = [count ? `${count} ${count === 1 ? 'commit' : 'commits'}` : '', gate.files ? `${gate.files} changed ${gate.files === 1 ? 'file' : 'files'}` : '', `branch ${gate.branch ?? ''}`, gate.folder ? `from ${shortPath(gate.folder)}` : '']
+    .filter(Boolean)
+    .join(' · ')
+  return [gate.reason ?? (commits ? 'Claude gave no reason for it. Its commits say:' : ''), commits, `${facts.charAt(0).toUpperCase()}${facts.slice(1)}`].filter(Boolean).join('\n\n')
+}
 // A permission the admin gate holds: an admin command, a release, a change to a file of the person's, or one it undid
-const gateNeed = ($: EngineInterface, gate: Gate, card: string, elsewhere: boolean, from = ''): Need => {
+const gateNeed = ($: EngineInterface, gate: Gate, card: string, elsewhere: boolean, from = '', surface = ''): Need => {
   const id = `gate-${gate.id}`
-  const isHeld = gateHeld.has(gate.id) && !elsewhere
-  const details = gate.isUndone
+  const isHeld = (gateHeld.has(gate.id) || gateParked.has(gate.id)) && !elsewhere
+  const about = gate.isUndone
     ? `${gate.isOutside ? 'Something outside the panel changed this file, maybe you in an editor' : 'A command wrote to this file'}, so the change was undone. ${ALLOW} makes it again. Either way the changed text is kept beside the file as a .put-back copy.`
     : gate.kind === 'release'
-      ? `Branch ${gate.branch ?? ''}${gate.folder ? ` · from ${shortPath(gate.folder)}` : ''}`
+      ? releaseAbout(gate)
       : gate.isWork
         ? `${ALLOW} also covers this task's next admin commands.`
         : !gate.command
           ? 'Its details show only on its own Mac.'
           : ''
+  const details = [about, talkText(gate.talk)].filter(Boolean).join('\n\n')
+  // Words on a task's own gate go to that task; the chat's own thread, and one Claudopus undid, have none to answer them
+  const words = isHeld && card && !gate.isUndone ? wordsOn($, `${id}-words`, `gate:${gate.id}`, repliesInBar(surface), isBarOpen('permission', gate.id), { kind: 'permission', id: gate.id }, value => void wordsOnGate($, card, gate.id, value)) : undefined
   return {
     id,
     kind: 'permission',
@@ -112,8 +148,10 @@ const gateNeed = ($: EngineInterface, gate: Gate, card: string, elsewhere: boole
           { key: `${id}-deny-${loadMark}`, label: DONT_ALLOW, onPress: () => answerGate($, gate, 'deny', card) },
           // (a release and a change to a file are asked each time)
           ...(gate.kind ? [] : [{ key: `${id}-always-${loadMark}`, label: ALWAYS_ALLOW, isPlain: true, onPress: () => answerGate($, gate, 'always', card) }]),
+          ...(words?.buttons ?? []),
         ]
       : [],
+    ...(words?.field ? { field: words.field } : {}),
   }
 }
 
@@ -201,7 +239,7 @@ const firstBox = () => [...boxes.filter(box => box.chat === boxChat), ...boxes.f
 const needsOf = ($: EngineInterface, one: Todo, surface: string, now: number, canFocus = false): Need[] => {
   const ask = askNeed($, one, surface, now)
   const own = one.chat ? [] : [...waiting.filter(p => p.card === one.id).map(p => promptNeed($, p, undefined, true)), ...boxes.filter(box => box.card === one.id).map(box => boxNeed($, box, surface, canFocus && box === firstBox()))]
-  const gates = (one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).map(gate => gateNeed($, gate, one.chat ? '' : one.id, Boolean(one.chat)))
+  const gates = (one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).map(gate => gateNeed($, gate, one.chat ? '' : one.id, Boolean(one.chat), '', surface))
   return [...(ask ? [ask] : []), ...gates, ...own].sort((a, b) => a.at - b.at)
 }
 // The needs that belong to no card drawn here: the chat's own thread's, a task's whose card is not shown, and other chats' prompts

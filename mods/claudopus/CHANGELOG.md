@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.232 · 19 November 2026
+- Every permission on a task's card (an admin command, a release, a change to your files, a command Claude Code blocked) has Answer in words. Your words go to the task, which answers inside that permission; the permission stays until you press Allow or Don't allow, and words never allow anything.
+- A release permission says what it puts on main: Claude's one line on what it changes and why, the subjects of its commits, and how many commits and files, not only the branch and folder.
+
 ## 0.2.231 · 19 November 2026
 - When you answer a question on a card, the card closes up at once under the grey line of your answer. No empty space is left under it or under the list, scrolled or not, by a button, Answer in words, Allow or Release it.
 

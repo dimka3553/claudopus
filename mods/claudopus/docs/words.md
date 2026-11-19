@@ -73,7 +73,7 @@ One mark for each kind of row, the same on a card and in Details; a ring moves a
 
 ## Questions, notices, errors
 - **Everything that waits for you is one block**, the same on the card, in Details and at the top of the panel: a small label (Permission, Question, Password, Key, Disk space), the question in amber ending in "?", then what it is about in short lines, the command whole, and the buttons.
-- **Permission**: `Allow`, `Don't allow`; an admin command also has `Always allow this command`. `Run this as admin on this Mac?` `Release <branch> to main?` `Claude Code blocked this command. Run it anyway?`
+- **Permission**: `Allow`, `Don't allow`; an admin command also has `Always allow this command`; a task's own also has `Answer in words`, whose words go to the task, which answers inside the block, and allow nothing. `Run this as admin on this Mac?` `Release <branch> to main?` `Claude Code blocked this command. Run it anyway?` A release says what it puts on main: the task's own line for it, else `Claude gave no reason for it. Its commits say:`, its commits, then `3 commits · 12 changed files · branch <branch> · from <folder>`.
 - **Disk space**, at the top of the panel while the disk has less than 20 GB left: `Your Mac has 12 GB of disk space left. Free up space?`, what waits below 5 GB and what the press removes, then `Free up space`. While it runs: `Freeing up space`; then `Freed 9 GB`.
 - **Password**: `Type it`, `Don't allow`. **Key**: `Paste it`, `Don't give it`, `Answer in words`.
 - **Question**: the task's own buttons, then `Answer in words`. No button is added, and every button is an answer that carries the task on: there is no `Not now`, as not pressing leaves it open.

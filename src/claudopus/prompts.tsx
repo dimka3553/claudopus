@@ -315,6 +315,10 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
 const REFUSAL_ANSWERED = (command: string, said: string, isReply: boolean) =>
   `${isReply ? `${who(true)} replied, in their own words, when asked whether to run the command Claude Code refused you (${cut(oneLine(command), 200)}): ${said}` : `${who(true)} pressed "${DONT_ALLOW}" when asked whether to run the command Claude Code refused you (${cut(oneLine(command), 200)}).`} What Claude Code refused stays refused: do not do it, nor reach its result by other means. Carry on without it, and say in your report what was left out.`
 
+// What the task is told of the person's words on that card: the command waits there for their press, and words run nothing
+const REFUSAL_WORDS = (command: string, said: string) =>
+  `${who(true)} wrote to you, in their own words, about the command Claude Code refused you (${cut(oneLine(command), 200)}), which waits on your card for their Allow: “${said}”\nAnswer them with the \`ask\` tool: your answer in \`text\` (one plain line) and \`details\` (what it does and why, in everyday words), with no \`choices\`. Claudopus shows it inside that permission, which keeps Allow and Don't allow: only their press runs the command, once, as theirs. Do not run it, or another way to the same end, yourself. With nothing else to do, end your step.`
+
 const OWN_CALLS = ['SendMessage', 'TaskStop']
 const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
 
