@@ -214,27 +214,17 @@ const endedLine = (run: Pick<EndedRun, 'how' | 'code'>, ran: string) =>
 // which one (19 Nov "13 commands ended · 1 failed" named nothing); not one that has a row of its own above (`shown`, its id)
 // An ended command's name, as its row had it while it ran: its own words, or else what it ran in a few words, never its shell
 // line (19 Nov: "cd /Users/…; S=/private/tmp/…" and "until [ -f /private/…" stood as names under Commands ended)
-const runLabel = (run: Pick<EndedRun, 'what' | 'cmd'>) => labelOf(describedOf(String(run.what ?? '')).text, run.cmd ?? String(run.what ?? '')) || 'A command'
-const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how' | 'what' | 'cmd' | 'id' | 'endedAt'>[], shown = '', lost: string[] = []) => {
+const runLabel = (run: Pick<EndedRun, 'what' | 'cmd'>) => endedName(String(run.what ?? ''), run.cmd)
+// (counts only, never which: a name on the row was more than it needs, and which one is a press away in Details, 19 Nov;
+// `lost`: how many helpers failed, said as helpers so their count is never taken for the commands')
+const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[], lost = 0) => {
   const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
   const head = helpers && runs.length ? `${n(helpers, 'helper')} and ${n(runs.length, 'command')} ended` : helpers ? `${n(helpers, 'helper')} ended` : `${n(runs.length, 'command')} ended`
   const bad = (['failed', 'killed', 'timed out'] as const).flatMap(how => {
-    const of = runs.filter(r => r.how === how)
-    if (!of.length) return []
-    const newest = of.reduce((a, b) => (b.endedAt >= a.endedAt ? b : a))
-    // (nor where its rows stand right under it, which gives it no name to say)
-    const name = of.some(r => r.id === shown) || (!String(newest.what ?? '').trim() && !newest.cmd) ? '' : runLabel(newest)
-    return [`${of.length} ${endedWord({ how })}${name ? `: ${name}${of.length > 1 ? ` and ${of.length - 1} more` : ''}` : ''}`]
+    const count = runs.filter(r => r.how === how).length
+    return count ? [`${count} ${endedWord({ how })}`] : []
   })
-  // (a helper that failed is named as a helper, so its name is never taken for a command's)
-  const helpersBad = lost.length ? [`${n(lost.length, 'helper')} failed: ${lost.at(-1)}${lost.length > 1 ? ` and ${lost.length - 1} more` : ''}`] : []
-  return [head, ...helpersBad, ...bad].join(' · ')
-}
-// The command that failed last and was not run again since with the same words and finished well: it has a row of its own on
-// its card, with why, until it is
-const failureOf = (runs: EndedRun[]) => {
-  const failed = runs.filter(r => r.how === 'failed').reduce<EndedRun | undefined>((a, b) => (!a || b.endedAt >= a.endedAt ? b : a), undefined)
-  return failed && !runs.some(r => r.how === 'finished' && r.endedAt >= failed.endedAt && r.what === failed.what) ? failed : undefined
+  return [head, ...(lost ? [`${n(lost, 'helper')} failed`] : []), ...(bad.length ? [bad.join(', ')] : [])].join(' · ')
 }
 // The runs a card has had end, kept so its summary row and Details can say how each ended, the newest last
 const keepEnded = (one: Todo, runs: EndedRun[]) => (runs.length ? { endedRuns: [...(one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id)), ...runs].slice(-BG_KEPT) } : {})

@@ -23,7 +23,7 @@ let firstAtTop = ''
 // Where each card that waits stands at the top of the list: the moment it first came up there, kept while it stays, so what comes
 // later goes under it and nothing moves by itself (by chat and card: placeKey)
 const topPlaces = new Map<string, number>()
-// When each placed card stopped waiting (answered): kept in its place while something else still waits (only KEPT_MOST while what
+// When each placed card stopped waiting (answered): kept up, under what waits, while something else still waits (only KEPT_MOST while what
 // waits is all another chat's); one that asks again after that goes to the end, as anything new does
 const topClosed = new Map<string, number>()
 const KEPT_MOST = 10 * 60_000
@@ -389,12 +389,42 @@ const panelHooks = (on: On) => {
     }
     // A card's blocks, one under the other in the order they came; a newer one goes under the older, so nothing already on the
     // card moves. Each is the one drawing (needBlock), on the small card as in Details
-    const needBlocks = (one: Todo, isWhole = false) =>
-      needsFor(one).map(need => {
+    // A question the person answered, by a press or in their own words, is gone from the small card at once: one grey line says
+    // the answer in its place (answeredRow), and Details keeps the question whole (19 Nov, the person: "when I answer, there is no
+    // need to keep showing the question")
+    const cardNeeds = (one: Todo, isWhole = false) => needsFor(one).filter(need => isWhole || !need.isActing)
+    // The rows a block just pressed on this small card took, held under its grey line for a moment (foldOf)
+    const heldFold = (one: Todo) => (e.surface === 'desktop' ? foldOf(one.id, at, cardNeeds(one).map(need => need.id)) : undefined)
+    const needBlocks = (one: Todo, isWhole = false) => {
+      const fold = isWhole ? undefined : heldFold(one)
+      const blocks = cardNeeds(one, isWhole).map(need => {
         const isOwnField = Boolean(need.field && need.card)
         const autoFocus = isOwnField && e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : false
-        return needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(one, need.id, isWhole) : null, autoFocus })
+        const node = needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(one, need.id, isWhole) : null, autoFocus })
+        // (on the small card each block starts at the title's left edge; the grey line is a press, which the app moves in itself)
+        return { at: need.at, node: isWhole ? node : <Box key={`lead-${need.id}`} flexDirection="column" paddingLeft={lead}>{node}</Box> }
       })
+      // where the block stood among the others, its grey line at the top of the rows it held
+      const held = fold ? [{ at: fold.came, node: <Box key={`fold-${one.id}`} flexDirection="column" height={fold.rows} flexShrink={0}>{answeredRow(one) ?? null}</Box> }] : []
+      return [...blocks, ...held].sort((a, b) => a.at - b.at).map(block => block.node)
+    }
+    // What the person last pressed or answered on a small card, in one grey line cut to one row, with the press that takes a
+    // button's answer back. The line opens the card's Details, where the question and the answer are whole
+    const answeredRow = (one: Todo) =>
+      (!one.ask || isActingOnReply(one)) && sentLine(one, at) ? (
+        <Box key={`pressed-${one.id}`} flexDirection="row" gap={2} height={1} overflow="hidden">
+          <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
+            <Button key={`answered-${one.id}-${presses}`} plain dimColor hover={{ scope: `answered-${one.id}`, underline: true }} onPress={() => openWork($, one.id)}>
+              <Text dimColor wrap="truncate-end">{sentLine(one, at)}</Text>
+            </Button>
+          </Box>
+          {canTakeBack(one, at) ? (
+            <Box flexShrink={0}>
+              <Button key={`take-back-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label="Take back" plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} />
+            </Box>
+          ) : null}
+        </Box>
+      ) : null
     // The small card: its title, which opens its Details, with Stop at the far end of that row; where it stands and how many
     // to-dos are done; the to-do marked doing, while one is; the line the work last wrote beside the three dots; its helpers. Each
     // part has a fixed number of rows and is clipped to them, so a card changes height only as that to-do row comes and goes
@@ -507,8 +537,8 @@ const panelHooks = (on: On) => {
             {stepLine(one, kept, done)}
             {/* Every part under the title starts at the title's own left edge (lead). What the card waits on, each a block, in
                 the order it came */}
-            {needsFor(one).length ? (
-              <Box key={`needs-lead-${one.id}`} flexDirection="column" gap={1} paddingLeft={lead}>
+            {cardNeeds(one).length || heldFold(one) ? (
+              <Box key={`needs-lead-${one.id}`} flexDirection="column" gap={1}>
                 {needBlocks(one)}
               </Box>
             ) : null}
@@ -519,19 +549,8 @@ const panelHooks = (on: On) => {
               </Box>
             ) : null}
             {/* A card says its stage, its to-do and what it does now, and in amber only what waits for the person */}
-            {/* What the person last pressed or answered here, in one grey line, with the press that takes a button's answer back */}
-            {!one.ask && sentLine(one, at) ? (
-              <Box key={`pressed-${one.id}`} flexDirection="row" gap={2} paddingLeft={lead} height={1} overflow="hidden">
-                <Box flexShrink={1} minWidth={0}>
-                  <Text dimColor wrap="truncate-end">{sentLine(one, at)}</Text>
-                </Box>
-                {canTakeBack(one, at) ? (
-                  <Box flexShrink={0}>
-                    <Button key={`take-back-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label="Take back" plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} />
-                  </Box>
-                ) : null}
-              </Box>
-            ) : null}
+            {/* What the person last pressed or answered here, in one grey line, where no block just pressed holds it */}
+            {heldFold(one) ? null : answeredRow(one)}
             {/* A card that waits says so with its block alone: no line of what the task last did under it. A delivered card's line is
                 one row: what it asks and its presses come right under it */}
             {needsPerson(one) ? null : (
@@ -751,7 +770,8 @@ const panelHooks = (on: On) => {
       // a count without its unit, for the narrowest line, so how far it is stays beside how long is left
       const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
       // Its own plain words for what it does now; a watch's are its last event
-      const words = plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, job.label)
+      // (none beside a full count: what a script said as it counted its last thing, "command finished", read against "still running")
+      const words = isFull ? '' : plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, job.label)
       const hasSaid = Boolean(words || full.length || pct.length)
       // Silent, whether its programs still use the processor: still busy, or idle (stuck, or waiting on something far away)
       const live = job.live === 'busy' ? ' · still busy' : job.live === 'idle' ? ' · idle' : ''
@@ -916,47 +936,11 @@ const panelHooks = (on: On) => {
     }
     const endedGroupRow = (t: Twig) => {
       const id = t.one?.id ?? ''
-      const text = `${endedSummary(0, (t.ended ?? []).map(run => ({ ...run, what: '', cmd: '' })))}${endedFolded.has(id) ? ' · show' : ''}`
+      const text = `${endedSummary(0, t.ended ?? [])}${endedFolded.has(id) ? ' · show' : ''}`
       return twigRowOf(t, `ended-group-${id}`, text, true, '', () => ((endedFolded.has(id) ? endedFolded.delete(id) : endedFolded.add(id)), (presses += 1), redraw($)))
     }
     // (every helper with what it has running, then its own helpers, then what of its has ended)
     const withAll = (branches: Branch[]): Branch[] => branches.map(b => (b.job || b.run || b.ended ? b : { ...b, kids: [...jobBranches(b.one, true), ...withAll(b.kids), ...endedBranches(b.one)] }))
-    const failedRow = (t: Twig, run: EndedRun, owner: string) => {
-      const key = `failed-${owner}-${run.id}`
-      const width = perRow - 4 - t.depth * 2
-      const side = endedLine(run, took(run.endedAt - run.at))
-      const name = cut(runLabel(run), Math.max(12, width))
-      return (
-        <Box key={`job-${key}`} flexDirection="column" flexShrink={0}>
-          <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
-            {endedLines(t, `twig-lines-${key}`, run)}
-            <Box flexGrow={1} flexShrink={1} minWidth={0}>
-              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openEnded(run, owner)} />
-            </Box>
-          </Box>
-          {/* (that it failed and after how long, in red, then why, as a running row's second line says how it stands) */}
-          {twigUnder(
-            t,
-            `why-${key}`,
-            <Box flexDirection="row" flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-              <Box flexShrink={0}>
-                <Text color="error">{side}</Text>
-              </Box>
-              {run.why ? (
-                <Box flexShrink={0}>
-                  <Text dimColor>{' · '}</Text>
-                </Box>
-              ) : null}
-              {run.why ? (
-                <Box flexShrink={1} minWidth={0}>
-                  <Text dimColor wrap="truncate-end">{run.why}</Text>
-                </Box>
-              ) : null}
-            </Box>,
-          )}
-        </Box>
-      )
-    }
     // Each branch with the jobs its helper has running first, under it, as the card's own come first under the card
     // At most JOBS_SHOWN each, the newest; the rest one row that says how many more run and opens the card's Details
     // In Details every one is shown
@@ -989,13 +973,12 @@ const panelHooks = (on: On) => {
       const rest = under.length - twigs.filter(t => !t.job).length
       if (!rest && !runs.length) return twigsOf(branches).map(rowOf)
       const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
-      // The command that failed last, not yet run again and finished, has its own row over the closing one: what it was, that it
-      // failed and after how long, and why under it
-      const failed = failureOf(runs)
-      // (and the helpers that failed and have left the tree, by name)
+      // A command that failed is counted on the closing row with the others that ended, never a row of its own (one stood among
+      // what still ran long after it failed) and never by name: which one, how and why is in Details and its log (19 Nov)
+      // (and the helpers that failed and have left the tree, counted too)
       const onTree = new Set(twigs.flatMap(t => (!t.job && t.one ? [t.one.id] : [])))
       const lost = under.filter(kid => kid.status === 'failed' && !onTree.has(kid.id)).map(kid => titleOf(kid))
-      return [...twigs.map(rowOf), ...(failed ? [failedRow({ ...closing, isLast: false }, failed, one.id)] : []), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs, failed?.id, lost), true, '', () => openWork($, one.id))]
+      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs, lost.length), true, '', () => openWork($, one.id))]
     }
 
     // ---- A workflow's card, in blue: its stages in order with the one being run, who is in it, and its rounds ----
@@ -1550,10 +1533,18 @@ const panelHooks = (on: On) => {
               {runBlock($, table, one, `runs-big-${one.id}`, at)}
             </Box>
           ) : null}
+          {/* The question just answered, whole, and the answer whole under it (what the small card's grey line opens) */}
           {!one.ask && sentLine(one, at) ? (
-            <Box key="part-answered" flexDirection="row" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
+            <Box key="part-answered" flexDirection="column" gap={1} backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
+              {sentReplies.get(one.id)?.ask && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (
+                <Box key="answered-question" flexDirection="column" gap={1} minWidth={0}>
+                  <Text dimColor>Question</Text>
+                  <Text wrap="wrap" bold>{sentReplies.get(one.id)?.ask ?? ''}</Text>
+                  {sentReplies.get(one.id)?.details ? <Markdown text={sentReplies.get(one.id)?.details ?? ''} /> : null}
+                </Box>
+              ) : null}
               <Box flexDirection="row" gap={2} minWidth={0}>
-                <Text dimColor wrap="wrap">{sentLine(one, at)}</Text>
+                <Text dimColor wrap="wrap">{sentLine(one, at, Infinity)}</Text>
                 {canTakeBack(one, at) ? <Button key={`take-back-big-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label="Take back" plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} /> : null}
               </Box>
             </Box>
@@ -1788,11 +1779,11 @@ const panelHooks = (on: On) => {
     const answeredSince = (one: Todo) => {
       return heldAnswer(one, at)?.at ?? 0
     }
-    // An answered card keeps the place its ask had among what waits, so nothing still waiting slides into the spot just pressed
+    // An answered card keeps the place its ask had, among the answered ones under what still waits
     const answeredPlace = (one: Todo) => (answeredSince(one) ? (sentReplies.get(one.id)?.askAt ?? answeredSince(one)) : 0)
     const placeKey = (one: Todo) => `${one.chat?.host ?? ''}/${one.chat?.id ?? ''}/${one.id}`
-    // While anything still waits, a card that waited keeps its place at the top, answered or not: only once nothing waits do the
-    // answered ones go back among the rest, so working down the list never moves what is still to answer
+    // While anything still waits, a card that waited stays up at the top once answered, under all that still waits: only once nothing
+    // waits do the answered ones go back among the rest
     // (for KEPT_MOST at most after a card's own answer, so a request nobody here can answer, another chat's, never pins it for long)
     const isAnyOpen = notices.length > 0 || shownWork.some(isOpen) || listedChats.some(c => shownOf(c).some(isOpen))
     // Something the person can answer here: while it waits, an answered card keeps its place however long; only while all that waits
@@ -1835,14 +1826,16 @@ const panelHooks = (on: On) => {
     const restFlows = shownFlows.filter(f => !isFlowMoment(f))
     // Each card keeps the place it began in: work started again (Release it on an ended ask) never moves to the end
     const begun = (one: Todo) => one.begunAt ?? one.startedAt
-    // What waits first, notices and cards in the order they came; under it what just finished, the newest first; then cards that only
-    // say what was allowed or left something running. A card is drawn when the panel is
+    // What waits first, notices and cards in the order they came; under every one of them the cards kept up once answered, in the
+    // places they had, so nothing still waiting is ever under a card that only works (19 Nov, the person: "a yellow task is below a
+    // purple one, so that shouldn't happen"); under those what just finished, the newest first; then cards that only say what was
+    // allowed or left something running. A card is drawn when the panel is
     const finishingFlows = shownFlows.filter(isFlowMoment)
     // What the first thing waiting on a card asks, under its task's name, for the line above the chat
     const whatOf = (one: Todo) => (waiting2(one)[0] ? `${cut(titleOf(one), 40)}: ${oneLine(waiting2(one)[0]?.text ?? '')}` : '')
     const top = [
       ...notices.map(one => ({ rank: 0, at: one.at, what: one.what, draw: () => one.node })),
-      ...askCards.map(one => (isKeptUp(one) ? { rank: 0, at: placeOf(one), what: isOpen(one) ? whatOf(one) : '', draw: () => small(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: () => small(one) } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: () => small(one) })),
+      ...askCards.map(one => (isKeptUp(one) ? { rank: isOpen(one) ? 0 : 0.5, at: placeOf(one), what: isOpen(one) ? whatOf(one) : '', draw: () => small(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: () => small(one) } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: () => small(one) })),
       ...finishingFlows.map(f => ({ rank: 1, at: -pauseFrom(f), what: '', draw: () => flowSmall(f) })),
     ].sort((a, b) => a.rank - b.rank || a.at - b.at)
     const waitsCount = notices.length + askCards.reduce((n, one) => n + waitsOn(one), 0)

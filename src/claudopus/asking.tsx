@@ -359,7 +359,7 @@ const readDrafts = async ($: EngineInterface) => {
 // what came of it when it came to nothing); the rest an answer to a question on its way
 // ('sending'), written into or sent to its task ('work', 'read'), not sent ('failed', 'lost') or left for the chat ('chat')
 // A button's answer keeps the ask it answered and the work it went to (asked, target), so it can be taken back (takeBack)
-type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'pressed' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; isPress?: boolean; said?: string; whole?: string; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
+type Sent = { text: string; ask: string; details?: string; to: 'sending' | 'work' | 'read' | 'chat' | 'pressed' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; isPress?: boolean; said?: string; whole?: string; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
 // The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
 const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
 // How long the card says what was answered, unless the work writes a newer line first
@@ -724,7 +724,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   // Its reply box in the bar goes with the answer, and is closed when the same work asks again
   if (isBarOpen('answer', one.id)) closeBarOf(one.id)
   const line = lineOf(one)
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at: Infinity, line, isCard: true, askAt: ask.at })
+  sentReplies.set(one.id, { text: said, ask: ask.text, ...(ask.details ? { details: ask.details } : {}), to: 'sending', at: Infinity, line, isCard: true, askAt: ask.at })
   if (isReply) freeTimes($)
   redraw($)
   let isCleared = false
@@ -767,7 +767,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   const run = ask.refused && !isReply && said === ALLOW ? runAsked.get(one.id) : undefined
   const isRun = Boolean(run && run.askAt === ask.at && run.command === ask.copy)
   const back = isReply || isRelease || ask.refused ? {} : { asked: ask, target }
-  const sent = { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at, ...(ask.refused && !isReply ? { isPress: true } : {}), ...back }
+  const sent = { text: said, ask: ask.text, ...(ask.details ? { details: ask.details } : {}), at, line, isCard: true, askAt: ask.at, ...(ask.refused && !isReply ? { isPress: true } : {}), ...back }
   sentReplies.set(one.id, { ...sent, to: 'sending' })
   redraw($)
   // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
@@ -1045,21 +1045,45 @@ const heldAnswer = (one: Todo, now: number) => {
 }
 // The one grey line a card says of what the person last pressed or answered on it, for ANSWER_SHOWN after: what was pressed, and
 // nothing of who reads it. A reply that left its question open says so under it; an answer that could not be sent says so too
-const sentLine = (one: Todo, now: number) => {
+// A reply that holds its ask is said for as long as the card carries it, as it stands in place of the question there. `most`: how
+// many of the person's letters it gives (Details gives them all)
+const sentLine = (one: Todo, now: number, most = 60) => {
   const sent = sentReplies.get(one.id)
   // A held reply this copy did not send (before a reload, or from another chat) is still said under its ask
   const replied = one.ask?.replied
-  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You answered “${cut(replied.text, 60)}”${isActingOnReply(one) ? '' : ' · the question is still open'}`
+  const heldLine = replied ? `✓ You answered “${cut(replied.text, most)}”${isActingOnReply(one) ? '' : ' · the question is still open'}` : ''
+  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return heldLine
   if (!sent) return ''
-  if (sent.to === 'failed') return one.ask?.text === sent.ask ? `Couldn't send “${cut(sent.text, 60)}” · press it again` : ''
-  if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Couldn't reach that Mac with “${cut(sent.text, 60)}” · answer in its own chat` : ''
-  if (now - sent.at > ANSWER_SHOWN) return ''
+  if (sent.to === 'failed') return one.ask?.text === sent.ask ? `Couldn't send “${cut(sent.text, most)}” · press it again` : ''
+  if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Couldn't reach that Mac with “${cut(sent.text, most)}” · answer in its own chat` : ''
+  if (now - sent.at > ANSWER_SHOWN) return heldLine
   if (sent.to === 'pressed') return `✓ ${sent.whole || `You pressed “${sent.text}”`}${sent.said ? ` · ${sent.said}` : ''}`
   const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text))
   if (one.ask && !isHeld) return ''
-  if (sent.to === 'chat') return `✓ You answered “${cut(sent.text, 60)}” · it couldn't reach the task, so it goes with your next message`
-  if (sent.isPress) return `✓ You pressed “${cut(sent.text, 60)}”`
-  return `✓ You ${sent.ask === CHANGE_WHAT ? 'wrote' : 'answered'} “${cut(sent.text, 60)}”${isHeld && !isActingOnReply(one) ? ' · the question is still open' : ''}`
+  if (sent.to === 'chat') return `✓ You answered “${cut(sent.text, most)}” · it couldn't reach the task, so it goes with your next message`
+  if (sent.isPress) return `✓ You pressed “${cut(sent.text, most)}”`
+  return `✓ You ${sent.ask === CHANGE_WHAT ? 'wrote' : 'answered'} “${cut(sent.text, most)}”${isHeld && !isActingOnReply(one) ? ' · the question is still open' : ''}`
+}
+// A block a press answered on a small card, by card: the card holds the rows it took (foldRows) under the grey line that takes its
+// place, for FOLD_HELD from the press, then closes up. `need`: the block's id and when it came, so the rows stand where it stood
+// among the card's other blocks
+const answerFolds = new Map<string, { need: string; came: number; rows: number; at: number }>()
+const FOLD_HELD = 3000
+const holdFold = ($: EngineInterface, card: string, need: string, came: number, rows: number) => {
+  const fold = { need, came, rows, at: Infinity }
+  answerFolds.set(card, fold)
+  void $.clock
+    .now()
+    .then(at => {
+      if (answerFolds.get(card) === fold) answerFolds.set(card, { ...fold, at })
+      $.clock.after(FOLD_HELD + 50, () => (answerFolds.get(card)?.need === need && answerFolds.delete(card), drawAgain($)))
+    })
+    .catch(() => undefined)
+}
+// The rows a card holds now for a block just answered, while that block is no longer drawn
+const foldOf = (card: string, now: number, drawn: string[]) => {
+  const fold = answerFolds.get(card)
+  return fold && now - fold.at < FOLD_HELD && !drawn.includes(fold.need) ? fold : undefined
 }
 // What was pressed on a block, said in one grey line where the block was: on its task's card (sentLine), or at the top of the
 // panel for a block that belonged to no task (loosePressed). Drawn from the press itself, before anything is awaited
