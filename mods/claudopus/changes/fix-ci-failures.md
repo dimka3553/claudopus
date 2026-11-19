@@ -1,0 +1,1 @@
+- When you press Message on a card right after typing in its Details box, the box above the chat now opens at once. Before, it could wait up to half a minute.

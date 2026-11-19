@@ -494,6 +494,8 @@ const openBar = ($: EngineInterface, to: { kind: BarKind; id: string; one?: Todo
   barKeyTyped.clear()
   if (next && isBoxKind(next.kind)) (boxHeldReply.delete(next.id), boxSaid.delete(next.id))
   barBoxAt = 0
+  // (and the box in a Details tab: the press was on a button elsewhere, so the cursor has left it)
+  paneBoxAt = 0
   isBarSettling = false
   presses += 1
   boxPresses += 1

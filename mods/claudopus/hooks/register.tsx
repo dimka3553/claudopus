@@ -5943,6 +5943,7 @@ const openBar = ($: EngineInterface, to: { kind: BarKind; id: string; one?: Todo
   barKeyTyped.clear()
   if (next && isBoxKind(next.kind)) (boxHeldReply.delete(next.id), boxSaid.delete(next.id))
   barBoxAt = 0
+  paneBoxAt = 0
   isBarSettling = false
   presses += 1
   boxPresses += 1
