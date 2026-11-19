@@ -1,0 +1,2 @@
+- Once you answer a question on a card, in words too, the question goes at once. One grey line says what you answered, cut to one row, and pressing it opens the task's Details, where the question and your answer are whole.
+- After a press on a card, the space the question took stays empty for three seconds under that line, so nothing below slides up under the pointer.

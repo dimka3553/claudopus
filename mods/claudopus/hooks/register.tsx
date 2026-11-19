@@ -5420,7 +5420,7 @@ const readDrafts = async ($: EngineInterface) => {
   for (const [key, value] of live) if (!drafts.has(key)) drafts.set(key, value)
   if (live.length !== Object.keys(kept).length) await update($, draftsKept, () => Object.fromEntries(live))
 }
-type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'pressed' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; isPress?: boolean; said?: string; whole?: string; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
+type Sent = { text: string; ask: string; details?: string; to: 'sending' | 'work' | 'read' | 'chat' | 'pressed' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; isPress?: boolean; said?: string; whole?: string; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
 const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
 const ANSWER_SHOWN = 60_000
 const ASK_TEXT = 300
@@ -5695,7 +5695,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   askPressed.set(one.id, mark)
   if (isBarOpen('answer', one.id)) closeBarOf(one.id)
   const line = lineOf(one)
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at: Infinity, line, isCard: true, askAt: ask.at })
+  sentReplies.set(one.id, { text: said, ask: ask.text, ...(ask.details ? { details: ask.details } : {}), to: 'sending', at: Infinity, line, isCard: true, askAt: ask.at })
   if (isReply) freeTimes($)
   redraw($)
   let isCleared = false
@@ -5729,7 +5729,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   const run = ask.refused && !isReply && said === ALLOW ? runAsked.get(one.id) : undefined
   const isRun = Boolean(run && run.askAt === ask.at && run.command === ask.copy)
   const back = isReply || isRelease || ask.refused ? {} : { asked: ask, target }
-  const sent = { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at, ...(ask.refused && !isReply ? { isPress: true } : {}), ...back }
+  const sent = { text: said, ask: ask.text, ...(ask.details ? { details: ask.details } : {}), at, line, isCard: true, askAt: ask.at, ...(ask.refused && !isReply ? { isPress: true } : {}), ...back }
   sentReplies.set(one.id, { ...sent, to: 'sending' })
   redraw($)
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
@@ -5934,20 +5934,38 @@ const heldAnswer = (one: Todo, now: number) => {
   const sent = one.chat ? undefined : sentReplies.get(one.id)
   return sent?.isCard && sent.to !== 'lost' && now - sent.at < ANSWER_SHOWN ? sent : undefined
 }
-const sentLine = (one: Todo, now: number) => {
+const sentLine = (one: Todo, now: number, most = 60) => {
   const sent = sentReplies.get(one.id)
   const replied = one.ask?.replied
-  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You answered “${cut(replied.text, 60)}”${isActingOnReply(one) ? '' : ' · the question is still open'}`
+  const heldLine = replied ? `✓ You answered “${cut(replied.text, most)}”${isActingOnReply(one) ? '' : ' · the question is still open'}` : ''
+  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return heldLine
   if (!sent) return ''
-  if (sent.to === 'failed') return one.ask?.text === sent.ask ? `Couldn't send “${cut(sent.text, 60)}” · press it again` : ''
-  if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Couldn't reach that Mac with “${cut(sent.text, 60)}” · answer in its own chat` : ''
-  if (now - sent.at > ANSWER_SHOWN) return ''
+  if (sent.to === 'failed') return one.ask?.text === sent.ask ? `Couldn't send “${cut(sent.text, most)}” · press it again` : ''
+  if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Couldn't reach that Mac with “${cut(sent.text, most)}” · answer in its own chat` : ''
+  if (now - sent.at > ANSWER_SHOWN) return heldLine
   if (sent.to === 'pressed') return `✓ ${sent.whole || `You pressed “${sent.text}”`}${sent.said ? ` · ${sent.said}` : ''}`
   const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text))
   if (one.ask && !isHeld) return ''
-  if (sent.to === 'chat') return `✓ You answered “${cut(sent.text, 60)}” · it couldn't reach the task, so it goes with your next message`
-  if (sent.isPress) return `✓ You pressed “${cut(sent.text, 60)}”`
-  return `✓ You ${sent.ask === CHANGE_WHAT ? 'wrote' : 'answered'} “${cut(sent.text, 60)}”${isHeld && !isActingOnReply(one) ? ' · the question is still open' : ''}`
+  if (sent.to === 'chat') return `✓ You answered “${cut(sent.text, most)}” · it couldn't reach the task, so it goes with your next message`
+  if (sent.isPress) return `✓ You pressed “${cut(sent.text, most)}”`
+  return `✓ You ${sent.ask === CHANGE_WHAT ? 'wrote' : 'answered'} “${cut(sent.text, most)}”${isHeld && !isActingOnReply(one) ? ' · the question is still open' : ''}`
+}
+const answerFolds = new Map<string, { need: string; came: number; rows: number; at: number }>()
+const FOLD_HELD = 3000
+const holdFold = ($: EngineInterface, card: string, need: string, came: number, rows: number) => {
+  const fold = { need, came, rows, at: Infinity }
+  answerFolds.set(card, fold)
+  void $.clock
+    .now()
+    .then(at => {
+      if (answerFolds.get(card) === fold) answerFolds.set(card, { ...fold, at })
+      $.clock.after(FOLD_HELD + 50, () => (answerFolds.get(card)?.need === need && answerFolds.delete(card), drawAgain($)))
+    })
+    .catch(() => undefined)
+}
+const foldOf = (card: string, now: number, drawn: string[]) => {
+  const fold = answerFolds.get(card)
+  return fold && now - fold.at < FOLD_HELD && !drawn.includes(fold.need) ? fold : undefined
 }
 let loosePressed: { text: string; at: number }[] = []
 const pressedLine = ($: EngineInterface, card: string, label: string, said = '', whole = '') => {
@@ -8301,7 +8319,7 @@ const stepLine = async ($: EngineInterface, id: string, text: string) => {
 
 
 type NeedKind = 'permission' | 'question' | 'password' | 'key'
-type NeedButton = { key: string; label: string; onPress: (press: { surface: string }) => void; isPlain?: boolean; hotkey?: string }
+type NeedButton = { key: string; label: string; onPress: (press: { surface: string }) => void; isPlain?: boolean; hotkey?: string; isOpener?: boolean }
 type Need = {
   id: string
   kind: NeedKind
@@ -8314,6 +8332,7 @@ type Need = {
   where?: string
   said?: string
   line?: string
+  wholeLine?: string
   buttons: NeedButton[]
   extra?: (ui: Ui) => JSX.Element | null
   field?: { key: string; placeholder: string; value?: string; isFocused?: boolean; onInput: (value: string) => void; onSubmit: (value: string) => void }
@@ -8326,7 +8345,7 @@ const askNeed = ($: EngineInterface, one: Todo, surface: string, now: number): N
   if (!ask) return undefined
   const id = `ask-${one.id}`
   const line = sentLine(one, now)
-  const base = { id, at: ask.at, text: ask.text, ...(ask.details ? { details: ask.details } : {}), ...(ask.copy ? { command: ask.copy } : {}), card: one, ...(line ? { line } : {}) }
+  const base = { id, at: ask.at, text: ask.text, ...(ask.details ? { details: ask.details } : {}), ...(ask.copy ? { command: ask.copy } : {}), card: one, ...(line ? { line, wholeLine: sentLine(one, now, Infinity) } : {}) }
   const elsewhere = one.chat ? `Answer it in its own chat, “${one.chat.title || 'another chat'}”${one.chat.host ? `, on ${one.chat.host}` : ''}.` : ''
   if (ask.refused) {
     const run = offeredRun(one)
@@ -8352,7 +8371,7 @@ const askNeed = ($: EngineInterface, one: Todo, surface: string, now: number): N
     kind: 'question',
     buttons: [
       ...(ask.choices ?? []).map((choice, n) => ({ key: `${id}-choice-${n}-${mark}-${loadMark}`, label: choice, onPress: () => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`))) })),
-      ...(inBar ? [isReplyOpen(one) ? { key: `${id}-inbar-close-${presses}`, label: 'Close', isPlain: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) } : { key: `${id}-inbar-${presses}`, label: ANSWER_IN_WORDS, isPlain: true, onPress: (press: { surface: string }) => openBar($, { kind: 'answer', id: one.id, one }, press.surface) }] : []),
+      ...(inBar ? [isReplyOpen(one) ? { key: `${id}-inbar-close-${presses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) } : { key: `${id}-inbar-${presses}`, label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, { kind: 'answer', id: one.id, one }, press.surface) }] : []),
     ],
     ...(inBar
       ? {}
@@ -8424,7 +8443,7 @@ const promptNeed = ($: EngineInterface, p: Prompt, c?: Shared, isOnCard = false)
           { key: `${id}-no-${presses}`, label: DONT_ALLOW, onPress: press('no') },
         ]
       : c && url
-        ? [{ key: `${id}-open-${presses}`, label: 'Open chat', onPress: () => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`))) }]
+        ? [{ key: `${id}-open-${presses}`, label: 'Open chat', isOpener: true, onPress: () => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`))) }]
         : [],
   }
 }
@@ -8435,7 +8454,7 @@ const boxNeed = ($: EngineInterface, one: Asked, surface: string, canFocus = fal
   const isKey = one.kind === 'key'
   const mode: BoxMode = (inBar ? undefined : boxModes.get(one.id)) ?? 'key'
   const isOpen = Boolean(barOpen && isBoxKind(barOpen.kind) && barOpen.id === one.id)
-  const close = { key: `${id}-close-${boxPresses}`, label: 'Close', isPlain: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) }
+  const close = { key: `${id}-close-${boxPresses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) }
   const refuse = { key: `${id}-cancel-${boxPresses}`, label: isKey ? DONT_GIVE : DONT_ALLOW, onPress: () => void cancelBox($, one.id) }
   const command = isKey ? '' : (adminCalls(one.command ?? '', $.plugin.root)[0]?.command ?? '')
   return {
@@ -8451,13 +8470,13 @@ const boxNeed = ($: EngineInterface, one: Asked, surface: string, canFocus = fal
       ? isOpen
         ? [close, refuse]
         : [
-            { key: `${id}-paste-${boxPresses}`, label: isKey && one.name ? PASTE_IT : TYPE_IT, onPress: (press: { surface: string }) => openBar($, { kind: barKindOf(one, 'key'), id: one.id }, press.surface) },
+            { key: `${id}-paste-${boxPresses}`, label: isKey && one.name ? PASTE_IT : TYPE_IT, isOpener: true, onPress: (press: { surface: string }) => openBar($, { kind: barKindOf(one, 'key'), id: one.id }, press.surface) },
             refuse,
-            ...(isKey ? [{ key: `${id}-respond-${boxPresses}`, label: ANSWER_IN_WORDS, isPlain: true, onPress: (press: { surface: string }) => openBar($, { kind: 'words', id: one.id }, press.surface) }] : []),
+            ...(isKey ? [{ key: `${id}-respond-${boxPresses}`, label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, { kind: 'words', id: one.id }, press.surface) }] : []),
           ]
       : [
           refuse,
-          ...(isKey ? [{ key: `${id}-mode-${boxPresses}`, label: mode === 'reply' ? (one.name ? PASTE_IT : TYPE_IT) : ANSWER_IN_WORDS, isPlain: true, onPress: () => void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($)) }] : []),
+          ...(isKey ? [{ key: `${id}-mode-${boxPresses}`, label: mode === 'reply' ? (one.name ? PASTE_IT : TYPE_IT) : ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: () => void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($)) }] : []),
         ],
     ...(inBar
       ? {}
@@ -8489,8 +8508,25 @@ const looseNeeds = ($: EngineInterface, surface: string, shown: (card: string | 
   ].sort((a, b) => a.at - b.at)
 }
 
+const foldRows = (need: Need, room: number) => {
+  const per = Math.max(20, Math.floor(room / 2.4))
+  const lines = (text: string, each = per) => text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / each)), 0)
+  const details = need.details ? lines(need.details.length <= DETAILS_ON_CARD ? need.details : `${cut(need.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`) * FOLD_LINE : 0
+  const pictures = Math.ceil((need.card?.ask?.pictures?.length ?? 0) / 2) * (ASK_PIC_TALL + FOLD_LINE + 8)
+  const command = need.command ? lines(need.command) * FOLD_LINE + 16 : 0
+  const buttons = need.buttons.length ? Math.ceil(need.buttons.reduce((n, button) => n + button.label.length + 6, 0) / (per * 1.4)) * FOLD_BUTTONS : 0
+  const parts = [FOLD_LINE, lines(cut(need.text, Math.round(room * 1.6)), Math.floor(per * 0.9)) * FOLD_LINE, details, pictures, command, need.where ? lines(need.where) * FOLD_LINE : 0, need.said ? lines(need.said) * FOLD_LINE : 0, buttons, need.line ? FOLD_LINE : 0].filter(Boolean)
+  return Math.ceil((parts.reduce((n, part) => n + part, 0) + (parts.length - 1) * FOLD_GAP + FOLD_EDGE) / FOLD_ROW)
+}
+const FOLD_LINE = 24
+const FOLD_GAP = 12
+const FOLD_BUTTONS = 44
+const FOLD_EDGE = 26
+const FOLD_ROW = 24
+
 const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boolean; isCompact?: boolean; room?: number; surface?: string; pictures?: JSX.Element | null; autoFocus?: boolean } = {}) => {
   const { isWhole = false, room = 80 } = opts
+  const isFolding = !isWhole && !opts.isCompact && opts.surface === 'desktop'
   const one = need.card
   const ask = one?.ask
   const Link = (ui as Ui & { Link: ElementTable['Link'] }).Link
@@ -8547,12 +8583,18 @@ const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boo
       {need.buttons.length ? (
         <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
           {need.buttons.map((button, n) => (
-            <ui.Button key={button.key} label={button.label} {...(button.isPlain ? { plain: true } : n === 0 ? { variant: 'primary' as const } : {})} {...(button.hotkey ? { hotkey: button.hotkey } : {})} onPress={button.onPress} />
+            <ui.Button
+              key={button.key}
+              label={button.label}
+              {...(button.isPlain ? { plain: true } : n === 0 ? { variant: 'primary' as const } : {})}
+              {...(button.hotkey ? { hotkey: button.hotkey } : {})}
+              onPress={isFolding && !button.isOpener && one ? press => (holdFold($, one.id, need.id, need.at, foldRows(need, room)), button.onPress(press)) : button.onPress}
+            />
           ))}
         </ui.Box>
       ) : null}
       {/* What was last pressed or typed for it, while it is still there: a reply that left it open, an answer that did not go */}
-      {need.line ? <ui.Text key={`${need.id}-sent`} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{need.line}</ui.Text> : null}
+      {need.line ? <ui.Text key={`${need.id}-sent`} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{isWhole ? (need.wholeLine ?? need.line) : need.line}</ui.Text> : null}
     </ui.Box>
   )
 }
@@ -11896,12 +11938,34 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
-    const needBlocks = (one: Todo, isWhole = false) =>
-      needsFor(one).map(need => {
+    const cardNeeds = (one: Todo, isWhole = false) => needsFor(one).filter(need => isWhole || !need.isActing)
+    const heldFold = (one: Todo) => (e.surface === 'desktop' ? foldOf(one.id, at, cardNeeds(one).map(need => need.id)) : undefined)
+    const needBlocks = (one: Todo, isWhole = false) => {
+      const fold = isWhole ? undefined : heldFold(one)
+      const blocks = cardNeeds(one, isWhole).map(need => {
         const isOwnField = Boolean(need.field && need.card)
         const autoFocus = isOwnField && e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : false
-        return needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(one, need.id, isWhole) : null, autoFocus })
+        const node = needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(one, need.id, isWhole) : null, autoFocus })
+        return { at: need.at, node: isWhole ? node : <Box key={`lead-${need.id}`} flexDirection="column" paddingLeft={lead}>{node}</Box> }
       })
+      const held = fold ? [{ at: fold.came, node: <Box key={`fold-${one.id}`} flexDirection="column" height={fold.rows} flexShrink={0}>{answeredRow(one) ?? null}</Box> }] : []
+      return [...blocks, ...held].sort((a, b) => a.at - b.at).map(block => block.node)
+    }
+    const answeredRow = (one: Todo) =>
+      (!one.ask || isActingOnReply(one)) && sentLine(one, at) ? (
+        <Box key={`pressed-${one.id}`} flexDirection="row" gap={2} height={1} overflow="hidden">
+          <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
+            <Button key={`answered-${one.id}-${presses}`} plain dimColor hover={{ scope: `answered-${one.id}`, underline: true }} onPress={() => openWork($, one.id)}>
+              <Text dimColor wrap="truncate-end">{sentLine(one, at)}</Text>
+            </Button>
+          </Box>
+          {canTakeBack(one, at) ? (
+            <Box flexShrink={0}>
+              <Button key={`take-back-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label="Take back" plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} />
+            </Box>
+          ) : null}
+        </Box>
+      ) : null
     let cardNo = 0
     let keyed = false
     const stepLine = (one: Todo, kept: Item[], done: number) => {
@@ -11996,8 +12060,8 @@ const panelHooks = (on: On) => {
             {stepLine(one, kept, done)}
             {/* Every part under the title starts at the title's own left edge (lead). What the card waits on, each a block, in
                 the order it came */}
-            {needsFor(one).length ? (
-              <Box key={`needs-lead-${one.id}`} flexDirection="column" gap={1} paddingLeft={lead}>
+            {cardNeeds(one).length || heldFold(one) ? (
+              <Box key={`needs-lead-${one.id}`} flexDirection="column" gap={1}>
                 {needBlocks(one)}
               </Box>
             ) : null}
@@ -12008,19 +12072,8 @@ const panelHooks = (on: On) => {
               </Box>
             ) : null}
             {/* A card says its stage, its to-do and what it does now, and in amber only what waits for the person */}
-            {/* What the person last pressed or answered here, in one grey line, with the press that takes a button's answer back */}
-            {!one.ask && sentLine(one, at) ? (
-              <Box key={`pressed-${one.id}`} flexDirection="row" gap={2} paddingLeft={lead} height={1} overflow="hidden">
-                <Box flexShrink={1} minWidth={0}>
-                  <Text dimColor wrap="truncate-end">{sentLine(one, at)}</Text>
-                </Box>
-                {canTakeBack(one, at) ? (
-                  <Box flexShrink={0}>
-                    <Button key={`take-back-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label="Take back" plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} />
-                  </Box>
-                ) : null}
-              </Box>
-            ) : null}
+            {/* What the person last pressed or answered here, in one grey line, where no block just pressed holds it */}
+            {heldFold(one) ? null : answeredRow(one)}
             {/* A card that waits says so with its block alone: no line of what the task last did under it. A delivered card's line is
                 one row: what it asks and its presses come right under it */}
             {needsPerson(one) ? null : (
@@ -12897,10 +12950,18 @@ const panelHooks = (on: On) => {
               {runBlock($, table, one, `runs-big-${one.id}`, at)}
             </Box>
           ) : null}
+          {/* The question just answered, whole, and the answer whole under it (what the small card's grey line opens) */}
           {!one.ask && sentLine(one, at) ? (
-            <Box key="part-answered" flexDirection="row" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
+            <Box key="part-answered" flexDirection="column" gap={1} backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
+              {sentReplies.get(one.id)?.ask && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (
+                <Box key="answered-question" flexDirection="column" gap={1} minWidth={0}>
+                  <Text dimColor>Question</Text>
+                  <Text wrap="wrap" bold>{sentReplies.get(one.id)?.ask ?? ''}</Text>
+                  {sentReplies.get(one.id)?.details ? <Markdown text={sentReplies.get(one.id)?.details ?? ''} /> : null}
+                </Box>
+              ) : null}
               <Box flexDirection="row" gap={2} minWidth={0}>
-                <Text dimColor wrap="wrap">{sentLine(one, at)}</Text>
+                <Text dimColor wrap="wrap">{sentLine(one, at, Infinity)}</Text>
                 {canTakeBack(one, at) ? <Button key={`take-back-big-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label="Take back" plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} /> : null}
               </Box>
             </Box>
