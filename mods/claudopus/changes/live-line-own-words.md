@@ -1,0 +1,3 @@
+- The line beside a working task's three dots now only says what the task itself is doing. When a command you allowed on its card ends, that line keeps the task's own words: the command's end is a grey line where it ran for a minute, and a row under the card's ended commands.
+- Before a task writes its first note, that line says what it is doing right now, such as Reading files, instead of Starting or Working.
+- A task whose card hasn't said what it's doing for three minutes is asked to say it at its next step.

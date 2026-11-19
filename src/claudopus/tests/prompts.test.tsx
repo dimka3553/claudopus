@@ -524,6 +524,7 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   expect(await until(async () => ((await list.find({ type: 'Text', text: "Your command's output is kept for the task's next step" })) ? undefined : true))).toBe(true)
   // One sent to the background runs an hour at most; Stop on its line stops it, and the task, at a step, is told at once
   await $.tool.call({ tool: 'Read', agentId: 'a1', file_path: '/repo/notes.md', tool_use_id: 'r1' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__note', agentId: 'a1', tool_use_id: 'n1', text: 'Checking the name servers answer' } as never)
   await refuse('b2', { command: 'npm run soak', description: 'Run the soak test', run_in_background: true })
   expect(await until(async () => (await details()).find(one => /^Runs once in \S+, for at most 1 hour · blocked as /.test(one)))).toBeDefined()
   await pressOn('-allow-')
@@ -533,6 +534,17 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   await clock.advance(5000)
   expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('npm run soak') && one.includes('was stopped by the person')))).toBeDefined()
   expect(await list.find({ type: 'Text', text: "Your command's output is kept for the task's next step" })).toBeUndefined()
+  // Its end is never the card's line beside the dots, which keeps the task's own words (19 Nov, "Your command ended after 20s"
+  // stood there until the task wrote again): it is a row of the card's ended commands, and a grey line for a minute where it ran
+  expect((await until(async () => list.find({ type: 'Text', text: /^You stopped your command after / })))?.props.dimColor).toBe(true)
+  expect(await list.find({ type: 'Text', text: 'Checking the name servers answer' })).toBeDefined()
+  expect((await textsOf(list)).filter(t => /^(Your command (ended|failed|stopped|didn't)|You stopped)/.test(t) && !/^You stopped your command after \d/.test(t))).toEqual([])
+  expect((await labelsOf(list)).filter(one => /commands? ended/.test(one))).toEqual(['2 commands ended'])
+  // (a minute on, the next drawing has it no more)
+  await clock.advance(61_000)
+  await $.tool.call({ tool: 'Read', agentId: 'a1', file_path: '/repo/soak.log', tool_use_id: 'r2' } as never)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: /^You stopped your command/ })) ? undefined : true))).toBe(true)
+  expect(await list.find({ type: 'Text', text: 'Checking the name servers answer' })).toBeDefined()
   // One held open with its own timeout of a minute is stopped by Claudopus at that limit
   await refuse('b3', { command: 'npm run slow', description: 'Run the slow check', timeout: 60_000 })
   await pressOn('-allow-')

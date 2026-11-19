@@ -68,7 +68,7 @@ var shareable = function (list, now) {
     return list
         .filter(function (one) { return !one.parentId && !one.chat; })
         .filter(function (one, _, all) { var _a, _b; return one.status === 'working' || Boolean((_b = (_a = one.ask) === null || _a === void 0 ? void 0 : _a.choices) === null || _b === void 0 ? void 0 : _b.length) || (one.endedAt > now - exports.ENDED_FOR && all.filter(function (other) { return other.status !== 'working' && other.endedAt > one.endedAt; }).length < exports.ENDED_SHARED); })
-        .map(function (one) { return (__assign(__assign({}, one), { words: one.words.slice(0, WORDS_SHARED), items: one.items.slice(-ITEMS_SHARED), entries: __spreadArray([], one.entries, true).reverse().filter(function (entry) { return entry.kind !== 'steer'; }).slice(0, 1), answer: upTo(one.answer, ANSWER_SHARED) })); });
+        .map(function (one) { return (__assign(__assign({}, one), { words: one.words.slice(0, WORDS_SHARED), items: one.items.slice(-ITEMS_SHARED), entries: __spreadArray([], one.entries, true).reverse().filter(function (entry) { return entry.kind !== 'steer' && entry.kind !== 'event'; }).slice(0, 1), answer: upTo(one.answer, ANSWER_SHARED) })); });
 };
 exports.shareable = shareable;
 // The helpers under the work a chat shares, however deep, cut as their work is: another chat's Details lists them, and opens each
@@ -89,7 +89,7 @@ var shareableHelpers = function (list, shared) {
         // Those at work first, so a busy chat never drops a running helper behind ended ones
         .sort(function (a, b) { return Number(b.status === 'working') - Number(a.status === 'working') || b.startedAt - a.startedAt; })
         .slice(0, HELPERS_SHARED)
-        .map(function (one) { return (__assign(__assign({}, one), { words: '', items: one.items.slice(-HELPER_ITEMS), entries: __spreadArray([], one.entries, true).reverse().filter(function (entry) { return entry.kind !== 'steer'; }).slice(0, 1), answer: upTo(one.answer, ANSWER_SHARED / 2) })); });
+        .map(function (one) { return (__assign(__assign({}, one), { words: '', items: one.items.slice(-HELPER_ITEMS), entries: __spreadArray([], one.entries, true).reverse().filter(function (entry) { return entry.kind !== 'steer' && entry.kind !== 'event'; }).slice(0, 1), answer: upTo(one.answer, ANSWER_SHARED / 2) })); });
 };
 exports.shareableHelpers = shareableHelpers;
 // What tells one shared state from another, the running times aside: a file is written again when it changes or its beat is due

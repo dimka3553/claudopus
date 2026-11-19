@@ -17,9 +17,10 @@ export type Me = {
 // One line of ~/.claude/claudopus/index.md: a subject of work and where it stands
 export type Stream = { name: string; repo: string; session: string; state: string; summary: string }
 
-// One line kept under a to-do: where the work said it stood, or what the person said to steer it. The card shows the last of the first kind.
+// One line kept under a to-do: where the work said it stood, or what the person said to steer it, or what became of something
+// pressed on its card ('event', Claudopus's words, never the work's). The card's line shows the last the work wrote itself.
 // In the work's chat a steer goes before the line the work wrote next
-export type Entry = { at: number; kind: 'note' | 'decision' | 'steer'; text: string; step?: number }
+export type Entry = { at: number; kind: 'note' | 'decision' | 'steer' | 'event'; text: string; step?: number }
 
 // One thing the work set out to do under its to-do; `doing` is the one it is on now, at most one at a time
 export type Item = { text: string; state: 'open' | 'doing' | 'done' | 'dropped' }
