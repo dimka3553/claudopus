@@ -266,7 +266,7 @@ test("while the person types a reply into an ask, work finishing here and in ano
   await list.input({ key: box?.key ?? '', text: 'Not y', kind: 'change' } as never)
   // The cards that say Done, and those in their moment at the top, outlined green
   const doneCards = async () => (await list.findAll({ type: 'Text' })).filter(one => (one.text === '◐ Delivered' && one.props.color === '#4C9AFF') || (one.text === '✓ Done' && one.props.color === 'success')).length
-  const outlined = async () => (await list.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.borderColor === '#4C9AFF').length
+  const outlined = async () => (await list.findAll({ type: 'Box' })).filter(b => b.key === 'outline-top' && b.props.backgroundColor === '#4C9AFF').length
   // This chat's task hands in its result mid-typing: green and happy at once; after its pause the moment is over and its card is
   // still among the cards, done, the times still held
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'a2', message: 'Done.' } as never)

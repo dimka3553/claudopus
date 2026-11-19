@@ -23,7 +23,7 @@ let firstAtTop = ''
 // Where each card that waits stands at the top of the list: the moment it first came up there, kept while it stays, so what comes
 // later goes under it and nothing moves by itself (by chat and card: placeKey)
 const topPlaces = new Map<string, number>()
-// When each placed card stopped waiting (answered): kept in its place while something else still waits (only KEPT_MOST while what
+// When each placed card stopped waiting (answered): kept up, under what waits, while something else still waits (only KEPT_MOST while what
 // waits is all another chat's); one that asks again after that goes to the end, as anything new does
 const topClosed = new Map<string, number>()
 const KEPT_MOST = 10 * 60_000
@@ -487,8 +487,8 @@ const panelHooks = (on: On) => {
       const isMoment = isMomentNow && !isAbovePrompt
       // (read as it is drawn)
       const isMarkedNow = isDoneMoment(one, at)
-      return (
-        <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isMoment ? { borderStyle: 'round' as const, borderColor: stageColor(stage(one)) ?? DONE, paddingX: 0, paddingY: 0 } : {})}>
+      return squareOutline(Box, isMoment ? stageColor(stage(one)) ?? DONE : undefined, `todo-${one.id}`, (
+        <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
           {edge(one, kept.length, done, kept.some(item => item.state === 'doing'))}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
             <Box flexDirection="column">
@@ -595,7 +595,7 @@ const panelHooks = (on: On) => {
             ) : null}
           </Box>
         </Box>
-      )
+      ))
     }
     // The card's coloured edge is its stage: purple while it works, amber while it waits for the person, green once done, red
     // when it failed, none when it was stopped. While it works the edge is also its to-dos, one part each from the top down:
@@ -1143,8 +1143,8 @@ const panelHooks = (on: On) => {
       const count = Math.max(rounds.length, f.cap ?? 0)
       const isPassed = f.status === 'done' && flowPassed(f, rounds) === true
       const scope = `flow-${f.id}`
-      return (
-        <Box key={`flow-${f.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isFlowMoment(f) && !isAbovePrompt ? { borderStyle: 'round' as const, borderColor: DONE } : {})}>
+      return squareOutline(Box, isFlowMoment(f) && !isAbovePrompt ? DONE : undefined, `flow-${f.id}`, (
+        <Box key={`flow-${f.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
           {/* Blue while it runs, green only when it finished and its last round did not fail */}
           {f.status === 'working' || (f.status === 'done' && flowPassed(f, rounds) !== false) ? <Box width={1} flexShrink={0} backgroundColor={f.status === 'working' ? FLOW : DONE} /> : <Box width={1} flexShrink={0} />}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
@@ -1182,7 +1182,7 @@ const panelHooks = (on: On) => {
             {flowEnd(f, rounds)}
           </Box>
         </Box>
-      )
+      ))
     }
 
     // The work this Details tab is for, if it is one; a workflow's tab folds each of its agents' chats apart
@@ -1791,11 +1791,11 @@ const panelHooks = (on: On) => {
     const answeredSince = (one: Todo) => {
       return heldAnswer(one, at)?.at ?? 0
     }
-    // An answered card keeps the place its ask had among what waits, so nothing still waiting slides into the spot just pressed
+    // An answered card keeps the place its ask had, among the answered ones under what still waits
     const answeredPlace = (one: Todo) => (answeredSince(one) ? (sentReplies.get(one.id)?.askAt ?? answeredSince(one)) : 0)
     const placeKey = (one: Todo) => `${one.chat?.host ?? ''}/${one.chat?.id ?? ''}/${one.id}`
-    // While anything still waits, a card that waited keeps its place at the top, answered or not: only once nothing waits do the
-    // answered ones go back among the rest, so working down the list never moves what is still to answer
+    // While anything still waits, a card that waited stays up at the top once answered, under all that still waits: only once nothing
+    // waits do the answered ones go back among the rest
     // (for KEPT_MOST at most after a card's own answer, so a request nobody here can answer, another chat's, never pins it for long)
     const isAnyOpen = notices.length > 0 || shownWork.some(isOpen) || listedChats.some(c => shownOf(c).some(isOpen))
     // Something the person can answer here: while it waits, an answered card keeps its place however long; only while all that waits
@@ -1838,14 +1838,16 @@ const panelHooks = (on: On) => {
     const restFlows = shownFlows.filter(f => !isFlowMoment(f))
     // Each card keeps the place it began in: work started again (Release it on an ended ask) never moves to the end
     const begun = (one: Todo) => one.begunAt ?? one.startedAt
-    // What waits first, notices and cards in the order they came; under it what just finished, the newest first; then cards that only
-    // say what was allowed or left something running. A card is drawn when the panel is
+    // What waits first, notices and cards in the order they came; under every one of them the cards kept up once answered, in the
+    // places they had, so nothing still waiting is ever under a card that only works (19 Nov, the person: "a yellow task is below a
+    // purple one, so that shouldn't happen"); under those what just finished, the newest first; then cards that only say what was
+    // allowed or left something running. A card is drawn when the panel is
     const finishingFlows = shownFlows.filter(isFlowMoment)
     // What the first thing waiting on a card asks, under its task's name, for the line above the chat
     const whatOf = (one: Todo) => (waiting2(one)[0] ? `${cut(titleOf(one), 40)}: ${oneLine(waiting2(one)[0]?.text ?? '')}` : '')
     const top = [
       ...notices.map(one => ({ rank: 0, at: one.at, what: one.what, draw: () => one.node })),
-      ...askCards.map(one => (isKeptUp(one) ? { rank: 0, at: placeOf(one), what: isOpen(one) ? whatOf(one) : '', draw: () => small(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: () => small(one) } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: () => small(one) })),
+      ...askCards.map(one => (isKeptUp(one) ? { rank: isOpen(one) ? 0 : 0.5, at: placeOf(one), what: isOpen(one) ? whatOf(one) : '', draw: () => small(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: () => small(one) } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: () => small(one) })),
       ...finishingFlows.map(f => ({ rank: 1, at: -pauseFrom(f), what: '', draw: () => flowSmall(f) })),
     ].sort((a, b) => a.rank - b.rank || a.at - b.at)
     const waitsCount = notices.length + askCards.reduce((n, one) => n + waitsOn(one), 0)

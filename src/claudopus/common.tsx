@@ -57,6 +57,24 @@ const STEP_CHARS = 160
 // What a to-do's box is filled with: a grey so faint it reads on a dark and on a light theme. The app rounds the corners of every
 // border it draws, so a box with square corners is a filled one
 const FILL = '#80808024'
+// A card's outline. The app rounds the corners of every border it draws, and a card's edge of to-dos is square and stuck out past
+// them, so the outline is four thin filled strips round the card instead, whose corners are square. It takes no room of the card's
+// own beyond the strips; with no colour the card is drawn as it is
+const OUTLINE = 0.15
+const squareOutline = (Box: Ui['Box'], color: string | undefined, key: string, card: JSX.Element) =>
+  color ? (
+    <Box key={`outline-${key}`} flexDirection="column" flexShrink={0}>
+      <Box key="outline-top" height={OUTLINE} flexShrink={0} backgroundColor={color} />
+      <Box key="outline-row" flexDirection="row" flexShrink={0}>
+        <Box key="outline-left" width={OUTLINE} flexShrink={0} backgroundColor={color} />
+        <Box key="outline-card" flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>{card}</Box>
+        <Box key="outline-right" width={OUTLINE} flexShrink={0} backgroundColor={color} />
+      </Box>
+      <Box key="outline-bottom" height={OUTLINE} flexShrink={0} backgroundColor={color} />
+    </Box>
+  ) : (
+    card
+  )
 // A card's edge shows each to-do as a part of its own up to this many; more are one edge filled as far as they are done
 const EDGE_PARTS = 14
 // How long a line of the log may be

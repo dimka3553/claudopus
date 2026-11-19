@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.221 · 19 November 2026
+- A card's outline, such as the green one on Mark as done, now has square corners, so the to-do bar on its left edge sits flush inside it instead of sticking out past a rounded corner.
+
+## 0.2.220 · 19 November 2026
+- A card that waits for you is always above every card that only works. A card you just answered goes under all that still waits, instead of keeping its old place above them.
+
 ## 0.2.219 · 19 November 2026
 - An ended command is named by its own words, whole. In 0.2.216 a command kept from before that version had its words cut to two, such as "Testing the" and "Run the".
 - A command that failed no longer keeps a red row on its card among what still runs, and the closing row no longer names it: it says `5 commands ended · 1 failed`. Which one, how and why is in Details and its log.
