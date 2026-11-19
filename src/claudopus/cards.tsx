@@ -320,14 +320,29 @@ const dismissedNow = new Map<string, number>()
 const dismiss = async ($: EngineInterface, id: string) => {
   // (marked from the press's own time, so the card's green moment is drawn from the press itself, in the place it stood)
   const at = await $.clock.now()
+  // (a second press on a card already marked, as a double click or a press on a drawing from before, changes nothing)
+  const card = (await read($, todos)).find(one => one.id === id)
+  if (!card || card.status === 'working' || card.closedAt || dismissedNow.has(id)) return
   dismissedNow.set(id, at)
+  doneMoments.set(id, { pressedAt: at, shownAt: 0 })
   redraw($)
-  // Its moment over, it is drawn again, under Finished
-  $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
+  // Its moment never drawn, as in a panel closed meanwhile, it is drawn again under Finished
+  $.clock.after(DONE_UNSEEN + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
   // (dismissed, it is done with: a question of its own on the card goes with it, and it is drawn at once, before it is kept)
   await changeTodos($, list => list.map(one => (one.id === id && one.status !== 'working' && !one.closedAt ? { ...one, closedAt: at, ask: undefined } : one))).finally(() => dismissedNow.delete(id))
   redraw($)
   await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
+}
+// The panel's first drawing made that shows a card marked done begins its moment: its two seconds, the happy octopus and the sound
+// start together, as the person sees it, and it is drawn again under Finished once they are over
+const beginDoneMoment = ($: EngineInterface, one: Todo, at: number) => {
+  const moment = doneMoments.get(one.id)
+  if (!moment || moment.shownAt || !isDoneMoment(one, at)) return
+  moment.shownAt = at
+  $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
+  void playDone($)
+  // (how long the person waited for it, so a slow panel shows in the log)
+  void log($, `marked done: drawn green ${at - moment.pressedAt} ms after the press`)
 }
 // Writes a line into a piece of work's own chat, which it reads at its next step
 const tell = ($: EngineInterface, id: string, text: string) =>

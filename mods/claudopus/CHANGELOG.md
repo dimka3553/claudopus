@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.211 · 19 November 2026
+- Mark as done always shows its green moment, with the happy octopus and the chime, even when the panel is slow to draw, as it is right after an update: its two seconds now start when you first see the card turn green, not at the press.
+- Through that moment the card keeps its shape and its presses, which do nothing then, so a second click can't land on another button or link; a second press on Mark as done changes nothing.
+- A card marked done during the update's moment shows the happy octopus instead of the update's blue one.
+
 ## 0.2.210 · 19 November 2026
 - A card no longer flickers between an older and a newer look after you press a button on it, such as Release it: once the panel has shown a card as it is now, it never shows it as it was before.
 - The same holds for the tabs and for the bar above the chat box.

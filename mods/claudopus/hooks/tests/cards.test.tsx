@@ -1803,13 +1803,19 @@ test('the stop button of a to-do stops its work, and its card stays among the ca
   await pane.unmount()
 })
 
-test("work that finishes comes to the top, outlined for two seconds, and stays there over what works, the newest first, blue and Delivered, until the person marks it done: two at once, through an hour and another task's end, one ended while the panel was closed; delivered, its only presses are at its bottom, Give feedback and Mark as done; marked done, it is green where it stood for two seconds, then under Finished; a message to it makes the same card work again, and delivered again when it hands in, what its last note left open listed on it with Reply", async ($, on) => {
+test("work that finishes comes to the top, outlined for two seconds, and stays there over what works, the newest first, blue and Delivered, until the person marks it done: two at once, through an hour and another task's end, one ended while the panel was closed; delivered, its only presses are at its bottom, Give feedback and Mark as done; marked done, it is green where it stood for two seconds from the first drawing that shows it, with the happy octopus and the sound, its shape and presses kept, then under Finished; a message to it makes the same card work again, and delivered again when it hands in, what its last note left open listed on it with Reply", async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}
-  const { clock } = world(on, { agents, kinds })
+  const { clock, played } = world(on, { agents, kinds, art: true })
+  // (a drawing that reads the model before slowUntil takes until then)
+  let slowUntil = 0
+  on('session.model', async () => {
+    if (clock.now() < slowUntil) await clock.advance(slowUntil - clock.now())
+    return { value: 'claude-opus-5-5' } as never
+  })
   await $.session.start(start)
   // (the bar above the prompt is drawn, which takes the box Message opens)
-  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  let band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
   await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
   await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' } as never)
@@ -1857,14 +1863,30 @@ test("work that finishes comes to the top, outlined for two seconds, and stays t
   expect(await again.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
 
   // Dismiss puts it under Finished, and it stays there: an hour on, and as other work goes on and ends
-  // Marked done, it turns green where it stood, outlined, for two seconds, the octopus happy: nothing moves and nothing is
-  // under Finished yet; then it is there
+  // Marked done, it turns green where it stood, outlined, for two seconds, the octopus happy and the sound of work done: nothing
+  // moves and nothing is under Finished yet; then it is there. The two seconds count from the first drawing that shows it, never
+  // from the press: right after an update the app drew the panel seconds after the press, the moment was over unseen, and the card
+  // went under Finished with no green, octopus or sound while the next one slid into its place, so the press seemed to do nothing
+  // (19 Nov, the person: "I clicked Mark as done two times, and the animation didn't play. The sound didn't play"). Here the
+  // panel's drawing after the press takes 2.1 s, and the panel is drawn afresh a second after it
   const before = await titles(again)
+  const sounds = played.length
+  await band.unmount()
+  slowUntil = clock.now() + 2_100
   await pressed(again, 'dismiss-a1')
+  expect(await until(async () => (clock.now() >= slowUntil ? true : undefined))).toBe(true)
+  band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await clock.advance(1_000)
+  await again.redraw()
   const greens = async () => [(await again.findAll({ type: 'Text', text: '✓ Done' })).map(one => one.props.color), (await again.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.borderColor === 'success').length]
-  expect([await until(async () => ((await greens())[1] ? titles(again) : undefined)), await greens(), await fold(again), await offered(again, 'a1')]).toEqual([before, [['success'], 1], undefined, ['Message']])
-  await clock.advance(1_900)
-  expect([await titles(again), await greens(), await fold(again)]).toEqual([before, [['success'], 1], undefined])
+  const isHappyNow = async () => (await again.findAll({ type: 'Svg' })).some(one => /<title>happy<\/title>/.test(String(one.props.source)))
+  // Through its moment it keeps its delivered shape, its line one row and its two presses at its bottom, which do nothing then, so a
+  // second click lands where the first did (19 Nov: the card shrank as its presses went, and the next click opened its helpers)
+  expect([await until(async () => ((await greens())[1] ? titles(again) : undefined)), await greens(), await fold(again), await offered(again, 'a1'), await isHappyNow(), played.slice(sounds)]).toEqual([before, [['success'], 1], undefined, ['Give feedback', 'Mark as done'], true, ['sounds/ready.wav']])
+  await pressed(again, 'dismiss-a1')
+  await pressed(again, 'change-a1')
+  await clock.advance(900)
+  expect([await titles(again), await greens(), await fold(again), await offered(again, 'a1'), await band.find({ type: 'Text', text: /^↳ / }), played.slice(sounds)]).toEqual([before, [['success'], 1], undefined, ['Give feedback', 'Mark as done'], undefined, ['sounds/ready.wav']])
   await clock.advance(200)
   expect(await until(() => fold(again))).toBe('▸ Finished 1')
   expect(await titles(again)).toEqual(['Check the ears', 'Draw the eyes'])
