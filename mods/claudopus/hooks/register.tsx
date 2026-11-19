@@ -6184,8 +6184,8 @@ const sentList = (ui: Ui, one: Todo, now: number) => {
           const same = all.slice(0, n - 1).findIndex(other => plainWords(other.text) === plainWords(entry.text))
           const state = [entry.isUnread ? 'Not read yet' : `✓ Read ${clockAt(entry.readAt ?? 0)}`, same >= 0 ? `the same words as ${same + 1}` : '', entry.isNow ? 'you stopped its step to send it' : ''].filter(Boolean).join(' · ')
           return (
-            <ui.Box key={`sent-${one.id}-${entry.at}`} flexDirection="row" gap={1} width="100%">
-              <ui.Box flexShrink={0}>
+            <ui.Box key={`sent-${one.id}-${entry.at}`} flexDirection="row" alignItems="flex-start" gap={1} width="100%">
+              <ui.Box flexShrink={0} width={String(all.length).length + 7}>
                 <ui.Text dimColor wrap="truncate-end">{`${n}  ${clockAt(entry.at)}`}</ui.Text>
               </ui.Box>
               <ui.Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
