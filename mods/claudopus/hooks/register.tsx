@@ -2527,6 +2527,15 @@ const reportsButton = ($: EngineInterface, ui: Ui, all: Report[], isKeyed = fals
 const RECENT = 5
 let isEarlierOpen = false
 let isArchivedOpen = false
+const RESULTS_PAGE = 50
+let earlierMost = RESULTS_PAGE
+let archivedMost = RESULTS_PAGE
+const fewerResults = () => {
+  if (earlierMost <= RESULTS_PAGE && archivedMost <= RESULTS_PAGE) return false
+  earlierMost = Math.max(RESULTS_PAGE, earlierMost - RESULTS_PAGE)
+  archivedMost = Math.max(RESULTS_PAGE, archivedMost - RESULTS_PAGE)
+  return true
+}
 const when = (at: number, now: number) => (day(at, now) === day(now, now) ? time(at, now) : new Date(at).getFullYear() === new Date(now).getFullYear() ? day(at, now) : String(new Date(at).getFullYear()))
 const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, line: number, height = 0) => {
   const { Box, Button, Text } = ui
@@ -2536,7 +2545,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
   const entries = entriesOf(shown)
   const fresh = entriesOf(list).length - entries.length
   const [recent, earlier] = [entries.slice(0, RECENT), entries.slice(RECENT)]
-  const gen = drawingMark(REPORTS_PANE, [presses, line, height, fresh, isEarlierOpen, isArchivedOpen, 'isTerminal' in ui, ...[recent, earlier, gone].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))])
+  const gen = drawingMark(REPORTS_PANE, [presses, line, height, fresh, isEarlierOpen, isArchivedOpen, earlierMost, archivedMost, 'isTerminal' in ui, ...[recent, earlier, gone].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))])
   const fold = (key: string, label: string, isOpen: boolean, onPress: () => void) => (
     <Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" alignItems="flex-start" flexShrink={0}>
       {/* In the rows' title column */}
@@ -2571,6 +2580,13 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
       {group.map(row)}
     </Box>
   )
+  const more = (key: string, left: number, onPress: () => void) =>
+    left > 0 ? (
+      <Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" alignItems="flex-start" flexShrink={0}>
+        <Box width={1} flexShrink={0} />
+        <Button key={`${key}-${gen}`} label={`Show ${Math.min(RESULTS_PAGE, left)} more`} plain dimColor onPress={() => void ((presses += 1), onPress(), redraw($))} />
+      </Box>
+    ) : null
   return (
     <Box key="reports" flexDirection="column" gap={1} flexGrow={1}>
       <Box key="reports-head" flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
@@ -2584,11 +2600,12 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
       {recent.length ? band(ui, 'reports-recent', 'Newest', '', rows(recent)) : null}
       {earlier.length || gone.length ? (
         <Box key="reports-folded" flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-          {earlier.length ? fold('earlier-fold', `Earlier ${earlier.length}`, isEarlierOpen, () => (isEarlierOpen = !isEarlierOpen)) : null}
-          {earlier.length && isEarlierOpen ? rows(earlier) : null}
-          {gone.length ? fold('archived-fold', `Archived ${gone.length}`, isArchivedOpen, () => (isArchivedOpen = !isArchivedOpen)) : null}
+          {earlier.length ? fold('earlier-fold', `Earlier ${earlier.length}`, isEarlierOpen, () => ((isEarlierOpen = !isEarlierOpen), (earlierMost = RESULTS_PAGE))) : null}
+          {earlier.length && isEarlierOpen ? rows(earlier.slice(0, earlierMost)) : null}
+          {isEarlierOpen ? more('earlier-more', earlier.length - earlierMost, () => (earlierMost += RESULTS_PAGE)) : null}
+          {gone.length ? fold('archived-fold', `Archived ${gone.length}`, isArchivedOpen, () => ((isArchivedOpen = !isArchivedOpen), (archivedMost = RESULTS_PAGE))) : null}
           {gone.length && isArchivedOpen
-            ? gone.map(entry => {
+            ? gone.slice(0, archivedMost).map(entry => {
                 const r = entry[0]
                 if (!r) return null
                 return (
@@ -2605,6 +2622,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
                 )
               })
             : null}
+          {isArchivedOpen ? more('archived-more', gone.length - archivedMost, () => (archivedMost += RESULTS_PAGE)) : null}
         </Box>
       ) : null}
     </Box>
@@ -14426,11 +14444,15 @@ const tabHooks = (on: On) => {
     const { Box } = uiOf($, e)
     const kept = await read($, reports)
     const line = Math.max(24, Math.floor((e.props.bodyColumns - 8) * (e.surface === 'terminal' ? 1 : 1.25)))
-    return (
+    const now = await $.clock.now()
+    const drawn = () => (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportsView($, uiOf($, e), kept, await $.clock.now(), line, e.props.scroll.bodyRows)}
+        {reportsView($, uiOf($, e), kept, now, line, e.props.scroll.bodyRows)}
       </Box>
     )
+    let drawing = drawn()
+    while (!drawingFits(drawing) && fewerResults()) drawing = drawn()
+    return drawing
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   on('ui.render', { component: 'Pane', requestId: STATS_PANE }, async ($, e) => {

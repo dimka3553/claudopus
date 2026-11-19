@@ -246,32 +246,6 @@ test('a tab left open as the mod loads, after an update or a reload, is drawn ag
   expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/tab [^\n]* not asked for in 40s after this code loaded in chat engine-id: drawn again/)?.[0])).toBeDefined()
 })
 
-// A drawing past what the app draws (2000 parts, 32 deep, 262144 characters) is thrown away whole by the app, with no word to the
-// mod, and the tab says "Nothing to show yet" for good (19 Nov: Details of a task with 22 helpers and 206 ended commands). The
-// app's own check, as it runs before it draws a tab
-const appDraws = (tree: unknown) => {
-  let parts = 0
-  let deepest = 0
-  const plain = (n: unknown): unknown => {
-    if (n === null || n === undefined || typeof n === 'boolean') return null
-    if (typeof n === 'string' || typeof n === 'number') return String(n)
-    if (Array.isArray(n)) return n.map(plain).filter(one => one !== null)
-    const el = n as { type?: string; key?: string; props?: Record<string, unknown>; children?: unknown[] }
-    const props: Record<string, unknown> = {}
-    for (const [k, v] of Object.entries(el.props ?? {})) if (typeof v !== 'function' && k !== 'children' && v !== undefined) props[k] = v
-    return { type: el.type, props: { ...props, key: el.key }, children: (el.children ?? []).map(plain).filter(one => one !== null) }
-  }
-  const walk = (n: unknown, depth: number) => {
-    if (typeof n === 'string') return void (parts += 1)
-    const el = n as { children?: unknown[] }
-    parts += 1
-    deepest = Math.max(deepest, depth + 1)
-    for (const child of el.children ?? []) walk(child, depth + 1)
-  }
-  const sent = plain(tree)
-  walk(sent, 0)
-  return { parts, deepest, chars: JSON.stringify(sent).length, isDrawn: parts <= 2000 && deepest <= 32 && JSON.stringify(sent).length <= 262_144 }
-}
 test("a Details tab too big for the app is drawn with less in it, its ended commands folded; one too big even so says so, with the way back", async ($, on) => {
   const { files, clock, opened } = world(on)
   await $.session.start(start)

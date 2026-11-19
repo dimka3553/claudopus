@@ -488,6 +488,44 @@ test('the results list is one line a row, newest first with no group of what wai
   expect((await keyed(list, 'archived-fold'))?.props.label).toBe('▸ Archived 1')
 })
 
+// 20 Nov: with about a thousand results, Earlier unfolded every one of them, past what the app draws: the tab said only that it
+// couldn't be shown, and Earlier seemed to do nothing
+test('Earlier and Archived unfold a page of results at a time, with a row that shows more, so the tab is always drawn', async ($, on) => {
+  const { files } = world(on)
+  const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [], gist: 'Done.' }
+  for (let n = 0; n < 700; n++) {
+    const r = { ...base, id: `2026111${n % 10}-${String(1000 + n)}-result-${n}`, title: `Result number ${n} with a title of a usual length`, at: 1_700_000_000_000 - n * 60_000, agent: `w${n}`, ...(n >= 600 ? { archived: true } : {}) }
+    files.set(`${MEMORY}/reports/${r.id}/meta.json`, JSON.stringify(r))
+    files.set(`${MEMORY}/reports/${r.id}/report.md`, 'Done.\n')
+  }
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Results', bodyColumns: 80 }, surface: 'desktop' } as never)
+  const titles = async () => (await list.findAll({ type: 'Button' })).filter(one => /^report-/.test(one.key ?? '')).length
+  expect(await until(async () => keyed(list, 'earlier-fold'))).toBeDefined()
+  expect((await keyed(list, 'earlier-fold'))?.props.label).toBe('▸ Earlier 595')
+  await pressed(list, 'earlier-fold')
+  expect(await until(async () => ((await titles()) === 55 ? true : undefined))).toBe(true)
+  expect(appDraws(await list.drawn()).isDrawn).toBe(true)
+  expect((await keyed(list, 'earlier-more'))?.props.label).toBe('Show 50 more')
+  await pressed(list, 'earlier-more')
+  expect(await until(async () => ((await titles()) === 105 ? true : undefined))).toBe(true)
+  // Shown past what the app draws, it takes pages back until it fits, never the tab's message alone
+  for (let n = 0; n < 12; n++) await pressed(list, 'earlier-more')
+  expect(await until(async () => ((await titles()) > 105 ? true : undefined))).toBe(true)
+  expect(appDraws(await list.drawn()).isDrawn).toBe(true)
+  expect(await list.find({ type: 'Text', text: "Claudopus couldn't show this tab" })).toBeUndefined()
+  // Folded and unfolded again, it starts at one page
+  await pressed(list, 'earlier-fold')
+  await pressed(list, 'earlier-fold')
+  expect(await until(async () => ((await titles()) === 55 ? true : undefined))).toBe(true)
+  // Archived the same way
+  await pressed(list, 'archived-fold')
+  expect(await until(async () => ((await titles()) === 105 ? true : undefined))).toBe(true)
+  expect((await keyed(list, 'archived-more'))?.props.label).toBe('Show 50 more')
+  expect(appDraws(await list.drawn()).isDrawn).toBe(true)
+  await list.unmount()
+})
+
 test('work whose brief names one result on what it is about is a round of that work; one naming several, or one on something else, is not', async ($, on) => {
   const { files, clock } = world(on)
   const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [], gist: 'Done.', agent: 'w0' }
