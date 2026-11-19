@@ -99,16 +99,10 @@ var firstAtTop = '';
 // Where each card that waits stands at the top of the list: the moment it first came up there, kept while it stays, so what comes
 // later goes under it and nothing moves by itself (by chat and card: placeKey)
 var topPlaces = new Map();
-// When each placed card stopped waiting (answered): kept in its place while something else still waits (only KEPT_MOST while what
+// When each placed card stopped waiting (answered): kept up, under what waits, while something else still waits (only KEPT_MOST while what
 // waits is all another chat's); one that asks again after that goes to the end, as anything new does
 var topClosed = new Map();
 var KEPT_MOST = 10 * 60000;
-// When each card's admin commands first came, kept once they are answered, so its answered note stays where the box was
-var gatePartAt = new Map();
-// How far apart two admin commands of a card come for the second to be a part of its own: more than any batch of one step
-var GATE_PART_GAP = 60000;
-// The last drawing made of each pane on each surface, what a press under way keeps on screen (isPressHeld)
-var lastShown = new Map();
 // Each pane's drawings made afresh are numbered as they are asked for: one that finishes after a newer one (the engine dropped its
 // reply, as a newer ask overtook it) is never kept as the one on screen. Kept anyway, a press hold or the gap gave that stale
 // drawing again, and an answered card came back and went under the pointer (16 Nov recording: 4 drawings late, 5 flips back)
@@ -118,6 +112,21 @@ var shownKept = new Map();
 // drawing held for their use is next drawn afresh
 var shownSigns = new Map();
 var shownAts = new Map();
+// One line of pictures for each pane on each surface: the newest picture made for it, with the size, place and scroll it was made
+// for. A picture kept from before is given again only when it is that newest one. The app asks for the same pane with the view at
+// the top and scrolled down in turn as a card under the pointer changes its height, and each of those once kept a picture of its
+// own, of its own age: a card just answered was drawn as it is now, then as it was, then as it is now (17 Nov, recorded: three
+// pictures of 317, 264 and 301 parts in turn within 200 ms; 19 Nov, the person after Release it: "it first went big, then it went
+// small, then it went big again"). An ask the newest picture was not made for is drawn afresh, so a card only ever moves on. It is also what a press under way keeps on screen
+// (isPressHeld), and the tabs and the bar above the prompt keep theirs the same way
+// (the newest picture serves the view at the top and scrolled down alike: kept for one of them only, every ask for the other was drawn
+// afresh, and none of the holds below gave it, through a press or while a drawing was under way. On 19 Nov, a scroll to the top on a
+// loaded Mac started a fresh drawing at each ask for 8 s, up to nine at once, each taking 7-12 s, and Mark as done and Close
+// pressed meanwhile showed nothing for as long; recorded)
+var paneNewest = new Map();
+var newestFor = function (line, key) { var _a, _b; return (((_a = paneNewest.get(line)) === null || _a === void 0 ? void 0 : _a.key) === key ? (_b = paneNewest.get(line)) === null || _b === void 0 ? void 0 : _b.drawing : undefined); };
+// A pane's size and place, the key without its last part, whether the view is scrolled
+var withoutScroll = function (key) { return key.replace(/\|[01]$/, ''); };
 // The mod's tabs drawn on the desktop, whose buttons a click holds the drawing for (holdForPress)
 var heldTabs = new Set();
 var usedUntil = 0;
@@ -127,51 +136,53 @@ var panelHooks = function (on) {
     // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
     // tab of the mod's but the panel has a first row whose Close, pressed or keyed x, closes it and hands the keys back to the panel
     on('ui.render', { component: 'Pane' }, function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
-        var id, isTab, key, at, recent, askedNo, madeFrom, made, drawing, _a, Box, Button, Text, body;
-        var _b, _c, _d, _e;
-        return __generator(this, function (_f) {
-            switch (_f.label) {
+        var id, isTab, key, at, line, place, recent, askedNo, madeFrom, made, drawing, _a, Box, Button, Text, body;
+        var _b, _c, _d, _e, _f;
+        return __generator(this, function (_g) {
+            switch (_g.label) {
                 case 0:
                     id = (_b = e.requestId) !== null && _b !== void 0 ? _b : '';
                     // Every ask for a tab's drawing passes here first, and is noted (watchTabs)
                     return [4 /*yield*/, noteTabAsked($, id)];
                 case 1:
                     // Every ask for a tab's drawing passes here first, and is noted (watchTabs)
-                    _f.sent();
-                    isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, 'report-'].some(function (start) { return id.startsWith(start); });
+                    _g.sent();
+                    isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, LOG_PANE, DIFF_PANE, 'report-'].some(function (start) { return id.startsWith(start); });
                     if (!(e.surface === 'desktop' && isTab && !id.startsWith(WORK_PANE) && !id.startsWith(FLOW_PANE))) return [3 /*break*/, 6];
                     heldTabs.add(id);
                     key = "".concat(id, "|").concat(e.surface, "|").concat(e.props.scroll.bodyRows, "|").concat((_c = e.props.bodyColumns) !== null && _c !== void 0 ? _c : '', "|").concat(e.props.scroll.offset > 0 ? 1 : 0);
                     return [4 /*yield*/, $.clock.now()];
                 case 2:
-                    at = _f.sent();
-                    recent = lastShown.get(key);
+                    at = _g.sent();
+                    line = "".concat(id, "|").concat(e.surface);
+                    place = withoutScroll(key);
+                    recent = newestFor(line, place);
                     if (recent && isPressHeld(at))
                         return [2 /*return*/, ((isPressMissed = true), recent)
                             // (a tab is often quick to draw on its own: slow or not, it is given again while the panel's drawings are slow, as the bar is)
                         ];
                     // (a tab is often quick to draw on its own: slow or not, it is given again while the panel's drawings are slow, as the bar is)
-                    if (recent && !isTyping && isFreshTooSoon($, key, at, isPanelSlow(at)))
+                    if (recent && !isTyping && isFreshTooSoon($, place, at, isPanelSlow(at)))
                         return [2 /*return*/, recent];
-                    freshBegins(key);
-                    askedNo = ((_d = shownAsked.get(key)) !== null && _d !== void 0 ? _d : 0) + 1;
-                    shownAsked.set(key, askedNo);
+                    freshBegins(place, at);
+                    askedNo = ((_d = shownAsked.get(line)) !== null && _d !== void 0 ? _d : 0) + 1;
+                    shownAsked.set(line, askedNo);
                     madeFrom = Date.now();
                     made = void 0;
-                    _f.label = 3;
+                    _g.label = 3;
                 case 3:
-                    _f.trys.push([3, , 5, 6]);
+                    _g.trys.push([3, , 5, 6]);
                     return [4 /*yield*/, next(e)];
                 case 4:
-                    drawing = _f.sent();
-                    if (((_e = shownKept.get(key)) !== null && _e !== void 0 ? _e : 0) > askedNo && lastShown.has(key))
-                        return [2 /*return*/, lastShown.get(key)];
-                    shownKept.set(key, askedNo);
-                    lastShown.set(key, drawing);
+                    drawing = _g.sent();
+                    if (((_e = shownKept.get(line)) !== null && _e !== void 0 ? _e : 0) > askedNo && paneNewest.has(line))
+                        return [2 /*return*/, (_f = paneNewest.get(line)) === null || _f === void 0 ? void 0 : _f.drawing];
+                    shownKept.set(line, askedNo);
+                    paneNewest.set(line, { key: place, drawing: drawing });
                     made = { at: at, ms: Date.now() - madeFrom, fresh: freshness };
                     return [2 /*return*/, drawing];
                 case 5:
-                    freshEnds($, key, made);
+                    freshEnds($, place, made);
                     return [7 /*endfinally*/];
                 case 6:
                     if (e.surface !== 'terminal' || !isTab)
@@ -179,7 +190,7 @@ var panelHooks = function (on) {
                     _a = uiOf($, e), Box = _a.Box, Button = _a.Button, Text = _a.Text;
                     return [4 /*yield*/, next(__assign(__assign({}, e), { props: __assign(__assign({}, e.props), { scroll: __assign(__assign({}, e.props.scroll), { bodyRows: Math.max(1, e.props.scroll.bodyRows - 2) }) }) }))];
                 case 7:
-                    body = _f.sent();
+                    body = _g.sent();
                     return [2 /*return*/, (<Box flexDirection="column" gap={1}>
         <Box key="tab-back-row" flexDirection="row" gap={2} height={1} flexShrink={0} paddingX={2}>
           <Button key="tab-back" label="Close" plain hotkey="x" onPress={function () { return void backToPanel($, id).catch(function (err) { return log($, "not back to the panel: ".concat(String(err))); }); }}/>
@@ -194,11 +205,11 @@ var panelHooks = function (on) {
     // Beside the chat: one small card per piece of work under way, as wide as the panel, every card the same height whatever the work
     // writes. Work that has ended leaves the panel. A card's Details is a tab of its own, drawn here too: all its to-dos, then its own chat
     on('ui.render', { component: 'Pane' }, function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
-        var paneId, heldKey, heldAt, shownKey, recent, sign, _a, until_1, askedNo, madeFrom, isMade, shape, content, held_1, drawing, _b, _c;
+        var paneId, heldKey, heldAt, boxHeld, shownKey, paneLine, place, recent, sign, _a, until_1, askedNo, madeFrom, isMade, doneDrawn_2, shape, content, held_1, drawing, newestMade, _b, _c, id, madeAt, _i, doneDrawn_1, one;
         var _this = this;
-        var _d, _e, _f, _g, _h, _j;
-        return __generator(this, function (_k) {
-            switch (_k.label) {
+        var _d, _e, _f, _g, _h, _j, _k;
+        return __generator(this, function (_l) {
+            switch (_l.label) {
                 case 0:
                     paneId = (_d = e.requestId) !== null && _d !== void 0 ? _d : '';
                     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE))
@@ -208,26 +219,34 @@ var panelHooks = function (on) {
                     if (!heldSends.length) return [3 /*break*/, 2];
                     return [4 /*yield*/, sendHeld($).catch(function (err) { return log($, "message not sent: ".concat(String(err))); })];
                 case 1:
-                    _k.sent();
-                    _k.label = 2;
+                    _l.sent();
+                    _l.label = 2;
                 case 2:
                     if (paneId === LIST)
                         ((listDrawing += 1), (listSurface = e.surface));
                     if (!(paneId === LIST)) return [3 /*break*/, 4];
                     return [4 /*yield*/, holdTest($)];
                 case 3:
-                    _k.sent();
-                    _k.label = 4;
+                    _l.sent();
+                    _l.label = 4;
                 case 4:
-                    _k.trys.push([4, , 19, 20]);
+                    _l.trys.push([4, , 23, 24]);
                     heldKey = "".concat(paneId, "|").concat(e.surface, "|").concat((_e = e.props.placement) !== null && _e !== void 0 ? _e : '', "|").concat(e.props.scroll.bodyRows, "|").concat((_f = e.props.bodyColumns) !== null && _f !== void 0 ? _f : '', "|").concat(e.props.isFocused ? 1 : 0, "|").concat(e.props.scroll.offset > 0 ? 1 : 0);
                     return [4 /*yield*/, $.clock.now()];
                 case 5:
-                    heldAt = _k.sent();
+                    heldAt = _l.sent();
                     if (paneId === LIST)
                         drawnNow = heldAt;
+                    boxHeld = paneId.startsWith(WORK_PANE) ? paneBoxHeld.get("".concat(paneId, "|").concat(e.surface)) : undefined;
+                    if (boxHeld && isPaneBoxHeld(paneId, heldAt) && boxHeld.shape === paneBoxShape(boxHeld.id))
+                        return [2 /*return*/, boxHeld.drawing
+                            // Drawn afresh moments ago: given again as it was, at once, and drawn afresh when the gap is over (FRESH_GAP). Never while the
+                            // person types, whose box keeps its own drawing below
+                        ];
                     shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1');
-                    recent = lastShown.get(shownKey);
+                    paneLine = "".concat(paneId, "|").concat(e.surface);
+                    place = withoutScroll(shownKey);
+                    recent = newestFor(paneLine, place);
                     // A press under way: the drawing on screen, the one last made for this pane on this surface, focused or not
                     // (of this size and place: a pane resized or scrolled meanwhile is drawn afresh). Given before anything is read, so it is
                     // answered at once: given after the pane's reads, it came too late under load and a newer ask dropped it
@@ -238,11 +257,11 @@ var panelHooks = function (on) {
                     if (!(paneId === LIST && e.surface === 'desktop')) return [3 /*break*/, 7];
                     return [4 /*yield*/, personSign($)];
                 case 6:
-                    _a = _k.sent();
+                    _a = _l.sent();
                     return [3 /*break*/, 8];
                 case 7:
                     _a = '';
-                    _k.label = 8;
+                    _l.label = 8;
                 case 8:
                     sign = _a;
                     // (only a drawing made during this use: one kept from before, as of a scroll down after minutes at the top, is long out of date)
@@ -252,28 +271,29 @@ var panelHooks = function (on) {
                             ((usedUntil = until_1), $.clock.after(until_1 - heldAt + 20, function () { return void (usedUntil === until_1 && drawFresh($)); }));
                         return [2 /*return*/, ((listHeldAt = heldAt), recent)];
                     }
-                    if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt, false, false))
+                    if (recent && !isTyping && isFreshTooSoon($, place, heldAt, false, false))
                         return [2 /*return*/, ((paneId === LIST && (listHeldAt = heldAt)), recent)
                             // (counted from the drawing's end: a call for a drawing it made itself, as its own count of what waits at the top, is in it)
                         ];
                     // (counted from the drawing's end: a call for a drawing it made itself, as its own count of what waits at the top, is in it)
-                    freshBegins(shownKey);
-                    askedNo = ((_h = shownAsked.get(shownKey)) !== null && _h !== void 0 ? _h : 0) + 1;
-                    shownAsked.set(shownKey, askedNo);
+                    freshBegins(place, heldAt);
+                    askedNo = ((_h = shownAsked.get(paneLine)) !== null && _h !== void 0 ? _h : 0) + 1;
+                    shownAsked.set(paneLine, askedNo);
                     madeFrom = Date.now();
                     isMade = false;
-                    _k.label = 9;
+                    doneDrawn_2 = [];
+                    _l.label = 9;
                 case 9:
-                    _k.trys.push([9, , 17, 18]);
+                    _l.trys.push([9, , 21, 22]);
                     return [4 /*yield*/, paneShape($, paneId)];
                 case 10:
-                    shape = _k.sent();
+                    shape = _l.sent();
                     return [4 /*yield*/, paneContent($)];
                 case 11:
-                    content = _k.sent();
+                    content = _l.sent();
                     held_1 = heldDrawings.get(heldKey);
                     // While the mod is behind (lookHold), the pane is given as it was, so the drawing adds nothing to what holds Claude's helper
-                    if (held_1 && held_1.shape === shape && (isTyping || (held_1.fresh === freshness && ((isBehind() && heldAt - held_1.at < BEHIND_HELD) || (held_1.content === content && heldAt - held_1.at < CALM)))))
+                    if (held_1 && held_1.drawing === recent && held_1.shape === shape && (isTyping || (held_1.fresh === freshness && ((isBehind() && heldAt - held_1.at < BEHIND_HELD) || (held_1.content === content && heldAt - held_1.at < CALM)))))
                         return [2 /*return*/, ((paneId === LIST && (listHeldAt = heldAt)), held_1.drawing)];
                     if (paneId === LIST)
                         drawnFiles.clear();
@@ -281,13 +301,13 @@ var panelHooks = function (on) {
                     if (!(paneId === LIST)) return [3 /*break*/, 13];
                     return [4 /*yield*/, read($, tick)];
                 case 12:
-                    _k.sent();
-                    _k.label = 13;
+                    _l.sent();
+                    _l.label = 13;
                 case 13: return [4 /*yield*/, (function () { return __awaiter(_this, void 0, void 0, function () {
-                        var _a, Box, Button, Markdown, Text, large, back, from, _i, lateFrom_1, _b, key, value, _c, isFinishedOpen, from, _d, _e, _f, _g, one, key, shownKept, shownAt, all, _h, own, resultsKept, resultWaits, otherChats, _j, _k, one, elsewhere, helpersThere, chat, at, answeredOf, promptsAnswered, working, shownWork, onCards, doneOnCards, promptsLoose, keptUpNow, ours, _l, windowOf, isAbovePrompt, isFinishMoment, isFlowMoment, stood, offModel, glance, _m, picking, lead, facts, now, noteOf, table, room, perRow, live, askFocused, askChars, askPictures, askBlock, resultAskBlock, cardNo, keyed, stepLine, gatesAt, canDismiss, small, edge, twigLines, twigRowOf, twigRow, jobLines, twigRails, twigUnder, guessLeft, jobTime, jobStand, jobRow, jobBranches, withJobs, rowOf, endedRunsOf, treeUnder, flowMine, flowList, runningFlows, shownFlows, endedFlows, flowShown, agentsWord, flowGlance, roundsLabel, verdict, squaresRow, stateWord, flowModel, flowFacts, atWork, flowDots, roundRow, flowPassed, flowEnd, flowSmall, flowOpen, workId, open, fold, part, row, opener, askPart, todoPart, underTwig, helpersPart, endedRunsPart, talk, theirChat, openTheirs, resultPart, big, promptButtons, isHeldHere, promptCard, answerHere, saidOf, answeredCard, chatHead, left, endedElsewhere, shownOf, listedChats, finished, finishedPart, flowBig, picked, lines, _o, alone, talked, kept, ui, isInline, shownIds, cardOfAgent, keysHeld, putOnCard, _p, _q, row_1, startedCard, _r, promptsAnswered_1, p, card, _s, _t, p, notices, isAsking, isWaitingPress, ownCount, waitsOn, isOpen, answeredSince, answeredPlace, placeKey, isAnyOpen, isOpenHere, isKeptPlace, isWaits, isKeptUp, cameAt, placeOf, isFinishing, finishFrom, isLeftUp, isUp, upSince, askingHere, askingThere, askCards, waitingNow_1, _u, askCards_1, one, key, _v, _w, one, _x, _y, key, restHere, restFlows, begun, finishingFlows, whatOf, top, waitsCount, runningThere, head, mood, isKeyed, versions, _z, screen, _0, was, count, finishedNow, first, updated, _1, outCard, _2, _3, _4, heldRows;
-                        var _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17;
-                        return __generator(this, function (_18) {
-                            switch (_18.label) {
+                        var _a, Box, Button, Markdown, Text, large, back, from, _i, lateFrom_1, _b, key, value, _c, isFinishedOpen, from, _d, _e, _f, _g, one, key, all, own, stage, otherChats, _h, _j, one, elsewhere, helpersThere, chat, at, working, shownWork, keysHeldNow, shownIds, needsFor, keptUpNow, ours, _k, windowOf, isAbovePrompt, isFinishMoment, isFlowMoment, stood, offModel, glance, _l, picking, lead, facts, now, noteOf, stepNow, table, room, perRow, live, askFocused, askChars, askPictures, cardNeeds, heldFold, needBlocks, answeredRow, cardNo, keyed, stepLine, canDismiss, questionLines, looksDelivered, small, edge, twigLines, twigRowOf, twigRow, isMore, MORE_COLOR, jobLines, twigRails, twigUnder, nowWord, jobStand, jobRow, endedMark, endedLines, canOpenEnded, openEnded, endedRow, endedBranches, endedGroupRow, withAll, jobBranches, withJobs, rowOf, endedRunsOf, treeUnder, flowMine, flowList, runningFlows, shownFlows, endedFlows, flowShown, agentsWord, flowGlance, roundsLabel, verdict, squaresRow, stateWord, flowModel, flowFacts, atWork, flowDots, roundRow, flowPassed, flowEnd, flowSmall, flowOpen, workId, open, fold, part, row, opener, askPart, todoPart, underTwig, helpersPart, talk, theirChat, openTheirs, resultPart, big, chatHead, left, endedElsewhere, shownOf, listedChats, finished, finishedPart, flowBig, picked, lines, _m, alone, talked, kept, ui, isInline, notices, isAsking, waiting2, waitsOn, isOpen, answeredSince, answeredPlace, placeKey, isAnyOpen, isOpenHere, isKeptPlace, isWaits, isKeptUp, cameAt, placeOf, isFinishing, finishFrom, isLeftUp, isUp, upSince, askingHere, askingThere, askCards, waitingNow, _o, askCards_1, one, key, _p, _q, one, _r, _s, key, restHere, isHandedIn, restFlows, begun, finishingFlows, whatOf, top, waitsCount, runningThere, head, mood, isKeyed, versions, _t, screen, _u, was, count, finishedNow, first, updated, _v, outCard, _w, _x, _y, heldRows;
+                        var _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10;
+                        return __generator(this, function (_11) {
+                            switch (_11.label) {
                                 case 0:
                                     _a = uiOf($, e), Box = _a.Box, Button = _a.Button, Markdown = _a.Markdown, Text = _a.Text;
                                     large = pictureIn.get(paneId);
@@ -296,30 +316,30 @@ var panelHooks = function (on) {
                                     return [4 /*yield*/, pictureView($, e, large.path)];
                                 case 1: return [2 /*return*/, (<Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
           {back('pic-back-top')}
-          {_18.sent()}
+          {_11.sent()}
           {back('pic-back-end')}
         </Box>)];
                                 case 2:
                                     if (!(paneId === LIST)) return [3 /*break*/, 4];
                                     return [4 /*yield*/, read($, tick)];
                                 case 3:
-                                    _18.sent();
-                                    _18.label = 4;
+                                    _11.sent();
+                                    _11.label = 4;
                                 case 4:
                                     if (!(paneId === LIST)) return [3 /*break*/, 6];
                                     return [4 /*yield*/, $.clock.now()
                                         // The first drawing after a load begins the pauses of work that ended while it reloaded, and draws again as they end
                                     ];
                                 case 5:
-                                    drawnNow = _18.sent();
-                                    _18.label = 6;
+                                    drawnNow = _11.sent();
+                                    _11.label = 6;
                                 case 6:
                                     if (!(paneId === LIST && __spreadArray([], lateFrom.values(), true).includes(Infinity))) return [3 /*break*/, 8];
                                     return [4 /*yield*/, $.clock.now()
                                         // Only while the reload is recent: a panel first opened long after shows no finish of then
                                     ];
                                 case 7:
-                                    from = _18.sent();
+                                    from = _11.sent();
                                     // Only while the reload is recent: a panel first opened long after shows no finish of then
                                     for (_i = 0, lateFrom_1 = lateFrom; _i < lateFrom_1.length; _i++) {
                                         _b = lateFrom_1[_i], key = _b[0], value = _b[1];
@@ -327,104 +347,96 @@ var panelHooks = function (on) {
                                             from - Number(key.split(':').at(-1)) < RELOAD_GRACE * 2 ? lateFrom.set(key, from) : lateFrom.delete(key);
                                     }
                                     $.clock.after(LINGER + 20, function () { return void (drawAgain($), update($, tick, function (n) { return n + 1; })); });
-                                    _18.label = 8;
+                                    _11.label = 8;
                                 case 8: return [4 /*yield*/, read($, view)
                                     // Work that ended while the list was held (an older drawing given again) was not seen ended: its moment at the top begins with
                                     // this drawing, the first to show it, never before
                                 ];
                                 case 9:
-                                    _c = (_18.sent()).isFinishedOpen, isFinishedOpen = _c === void 0 ? false : _c;
+                                    _c = (_11.sent()).isFinishedOpen, isFinishedOpen = _c === void 0 ? false : _c;
                                     if (!(paneId === LIST)) return [3 /*break*/, 16];
                                     return [4 /*yield*/, $.clock.now()];
                                 case 10:
-                                    from = _18.sent();
+                                    from = _11.sent();
                                     _d = 0;
                                     _f = [[]];
                                     return [4 /*yield*/, read($, flows)];
                                 case 11:
-                                    _g = [__spreadArray.apply(void 0, _f.concat([(_18.sent()), true]))];
+                                    _g = [__spreadArray.apply(void 0, _f.concat([(_11.sent()), true]))];
                                     return [4 /*yield*/, read($, todos)];
                                 case 12:
-                                    _e = __spreadArray.apply(void 0, _g.concat([(_18.sent()).filter(function (card) { return !card.parentId; }), true]));
-                                    _18.label = 13;
+                                    _e = __spreadArray.apply(void 0, _g.concat([(_11.sent()).filter(function (card) { return !card.parentId; }), true]));
+                                    _11.label = 13;
                                 case 13:
                                     if (!(_d < _e.length)) return [3 /*break*/, 15];
                                     one = _e[_d];
                                     key = "".concat(one.id, ":").concat(one.endedAt);
                                     if (one.status !== 'working' && one.endedAt > listFreshAt && one.endedAt < listHeldAt && !lateFrom.has(key) && from - one.endedAt < RELOAD_GRACE * 2)
                                         (lateFrom.set(key, from), $.clock.after(LINGER + 20, function () { return void (drawAgain($), update($, tick, function (n) { return n + 1; })); }));
-                                    _18.label = 14;
+                                    _11.label = 14;
                                 case 14:
                                     _d++;
                                     return [3 /*break*/, 13];
                                 case 15:
                                     listFreshAt = from;
-                                    _18.label = 16;
-                                case 16: return [4 /*yield*/, read($, reports)];
+                                    _11.label = 16;
+                                case 16: return [4 /*yield*/, read($, todos)];
                                 case 17:
-                                    shownKept = _18.sent();
-                                    return [4 /*yield*/, $.clock.now()];
-                                case 18:
-                                    shownAt = _18.sent();
-                                    _h = shownAs;
-                                    return [4 /*yield*/, read($, todos)];
-                                case 19:
-                                    all = _h.apply(void 0, [(_18.sent()).map(asPressed), function (one) { return openResultWaits(one, shownKept, shownAt).length > 0; }]);
+                                    all = (_11.sent()).map(asPressed);
                                     own = all.filter(function (one) { return !one.parentId; });
-                                    return [4 /*yield*/, read($, reports)];
-                                case 20:
-                                    resultsKept = _18.sent();
-                                    resultWaits = function (one) { return openResultWaits(one, resultsKept, at); };
+                                    stage = function (one) { return stageOf(all, one); };
                                     return [4 /*yield*/, read($, others)
                                         // A reply in words left here holds its ask as acted on until that chat's own file carries it; from then its file says
                                     ];
-                                case 21:
-                                    otherChats = _18.sent();
+                                case 18:
+                                    otherChats = _11.sent();
                                     // A reply in words left here holds its ask as acted on until that chat's own file carries it; from then its file says
-                                    for (_j = 0, _k = cardsOf(otherChats); _j < _k.length; _j++) {
-                                        one = _k[_j];
-                                        if (((_5 = one.ask) === null || _5 === void 0 ? void 0 : _5.replied) && actingOn.get("".concat(one.id, ":").concat(one.ask.at)) === one.ask.replied.text)
+                                    for (_h = 0, _j = cardsOf(otherChats); _h < _j.length; _h++) {
+                                        one = _j[_h];
+                                        if (((_z = one.ask) === null || _z === void 0 ? void 0 : _z.replied) && actingOn.get("".concat(one.id, ":").concat(one.ask.at)) === one.ask.replied.text)
                                             actingOn.delete("".concat(one.id, ":").concat(one.ask.at));
                                     }
                                     elsewhere = cardsOf(otherChats).map(function (one) { return (one.ask && answeredHere.has("".concat(one.id, ":").concat(one.ask.at)) ? __assign(__assign({}, one), { ask: undefined }) : one); });
                                     helpersThere = helpersOf(otherChats);
                                     return [4 /*yield*/, read($, me)];
-                                case 22:
-                                    chat = _18.sent();
+                                case 19:
+                                    chat = _11.sent();
                                     return [4 /*yield*/, $.clock.now()
-                                        // Prompts answered here and in other chats, for a minute after their call ended
+                                        // A card marked done begins its green moment once this drawing, the first to show it, is made (beginDoneMoment)
                                     ];
-                                case 23:
-                                    at = _18.sent();
-                                    answeredOf = function (list) { return (list !== null && list !== void 0 ? list : []).filter(function (p) { return !p.endedAt || at - p.endedAt < PROMPT_SHOWN; }); };
-                                    promptsAnswered = answeredShown(at);
+                                case 20:
+                                    at = _11.sent();
+                                    // A card marked done begins its green moment once this drawing, the first to show it, is made (beginDoneMoment)
+                                    if (paneId === LIST)
+                                        doneDrawn_2.push.apply(doneDrawn_2, own.filter(function (one) { return isDoneMoment(one, at); }));
                                     working = own.filter(function (one) { return one.status === 'working'; }).sort(function (a, b) { return a.startedAt - b.startedAt; });
-                                    shownWork = own.filter(function (one) { return !isDismissed(one); }).filter(function (one) { var _a; return one.status === 'working' || isLingering(one, at) || one.ask || resultWaits(one).length > 0 || ((_a = one.admins) === null || _a === void 0 ? void 0 : _a.length) || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD) || isLeftStopped(one, at) || isLeftOpen(one, at); });
-                                    onCards = new Map();
-                                    doneOnCards = new Map();
-                                    promptsLoose = promptsAnswered;
+                                    shownWork = own.filter(function (one) { return !isDismissed(one) || isDoneMoment(one, at); }).filter(function (one) { return stage(one) === 'working' || stage(one) === 'waiting' || staysUp(one) || isLingering(one, at) || isDoneMoment(one, at) || runningOn(one.id).length > 0; });
+                                    keysHeldNow = function () { return e.surface === 'terminal' && Boolean(keysAsk && hasDraft(keysAsk)); };
+                                    shownIds = new Set(shownWork.map(function (one) { return one.id; }));
+                                    needsFor = function (one) { return needsOf($, one, e.surface, at, !keysHeldNow()).filter(function (need) { return one.chat || shownIds.has(one.id) || !/^(?:box|prompt)-/.test(need.id); }); };
                                     keptUpNow = new Set();
-                                    _l = modelName;
+                                    _k = modelName;
                                     return [4 /*yield*/, $.session.model().catch(function () { return ''; })];
-                                case 24:
-                                    ours = _l.apply(void 0, [_18.sent()]);
+                                case 21:
+                                    ours = _k.apply(void 0, [_11.sent()]);
                                     windowOf = function (one) { var _a; return (!one.chat && (one.isFork || (ours && modelName((_a = one.model) !== null && _a !== void 0 ? _a : '') === ours)) ? chat.window : 0); };
                                     isAbovePrompt = e.surface === 'terminal' && e.props.placement === 'inline';
-                                    isFinishMoment = function (one) { return one.status === 'done' && !one.leftOpen && !one.ask && !resultWaits(one).length && lingers(one, at); };
+                                    isFinishMoment = function (one) { return hasResult(stage(one)) && lingers(one, at); };
                                     isFlowMoment = function (f) { return f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false; };
                                     stood = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' };
-                                    offModel = function (one) { var _a; return (one.flagged ? "a safety check stopped it, so it doesn't continue on ".concat(one.flagged) : one.moved ? "Claude Code moved it to ".concat(one.moved) : rightModel((_a = one.model) !== null && _a !== void 0 ? _a : '') ? "Claudopus doesn't run tasks on this model" : ''); };
-                                    glance = function (one, count) {
+                                    offModel = function (one) { var _a; return (one.flagged ? "a safety check stopped it, so it doesn't continue on ".concat(one.flagged) : one.moved ? "It was moved to ".concat(one.moved) : rightModel((_a = one.model) !== null && _a !== void 0 ? _a : '') ? "Tasks don't run on this model" : ''); };
+                                    glance = function (one, count, isWhole) {
                                         var _a;
                                         if (count === void 0) { count = ''; }
-                                        return [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.leftOpen ? 'Not done' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status] || ownWorkWords(all, one), modelName((_a = one.model) !== null && _a !== void 0 ? _a : ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ');
+                                        if (isWhole === void 0) { isWhole = false; }
+                                        return [isWhole && stage(one) !== 'working' ? "".concat(STAGE_WORD[stage(one)]).concat(stage(one) === 'failed' && one.why ? " \u00B7 ".concat(one.why) : '') : '', modelName((_a = one.model) !== null && _a !== void 0 ? _a : ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ');
                                     };
                                     return [4 /*yield*/, read($, view)
                                         // A desktop draws a plain Button's label inside its smallest padding step, so a line a small card starts with text is moved in
                                         // by that same step: the title, the line of facts and the lines under them share one left edge. A terminal draws the label alone
                                     ];
-                                case 25:
-                                    _m = (_18.sent()).picking, picking = _m === void 0 ? '' : _m;
+                                case 22:
+                                    _l = (_11.sent()).picking, picking = _l === void 0 ? '' : _l;
                                     lead = e.surface === 'terminal' ? 0 : 'xs';
                                     facts = function (one, isWhole, count) {
                                         var _a;
@@ -433,14 +445,14 @@ var panelHooks = function (on) {
                                         // Another chat's work is moved to another model in that chat
                                         if (one.status !== 'working' || !name || one.chat)
                                             return (<Box paddingLeft={isWhole ? 0 : lead}>
-            <Text dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{glance(one, count)}</Text>
+            <Text dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{glance(one, count, isWhole)}</Text>
           </Box>);
                                         var scope = "model-".concat(one.id);
                                         if (picking === one.id)
                                             return (<Box flexDirection="row" flexWrap="wrap" columnGap={2}>
             {MODELS.map(function (model) { return (<Button key={"pick-".concat(one.id, "-").concat(model, "-").concat(presses)} label={"".concat(modelName(model) === name ? '✓ ' : '').concat(modelName(model))} plain dimColor={modelName(model) !== name} hover={{ scope: "".concat(scope, "-").concat(model), underline: true }} onPress={function () { return ((presses += 1), void choose($, one.id, model)); }}/>); })}
           </Box>);
-                                        var rest = [ownWorkWords(all, one), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ');
+                                        var rest = [offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ');
                                         return (<Box flexDirection="row" alignItems="flex-start">
           <Button key={"model-".concat(one.id, "-").concat(presses)} label={name} plain dimColor hover={{ scope: scope, underline: true }} onPress={function () { return ((presses += 1), void update($, view, function (v) { return (__assign(__assign({}, v), { picking: one.id })); })); }}/>
           <Box flexShrink={1} minWidth={0}>
@@ -448,16 +460,12 @@ var panelHooks = function (on) {
           </Box>
         </Box>);
                                     };
-                                    now = function (one) {
-                                        var _a, _b;
-                                        var entry = __spreadArray([], one.entries, true).reverse().find(function (one) { return one.kind !== 'steer'; });
-                                        // (nor what one command left going while other programs of it still work)
-                                        var runs = one.status === 'working' && !one.ask ? ((_a = one.endedRuns) !== null && _a !== void 0 ? _a : []).filter(function (r) { var _a, _b, _c; return r.endedAt > ((_a = entry === null || entry === void 0 ? void 0 : entry.at) !== null && _a !== void 0 ? _a : 0) && r.how !== 'timed out' && String((_b = r.what) !== null && _b !== void 0 ? _b : '').trim() && !((_c = one.detached) === null || _c === void 0 ? void 0 : _c.some(function (d) { return d.from === r.id || (leftCommandOf(r.id) !== '' && leftCommandOf(d.id) === leftCommandOf(r.id)); })); }) : [];
-                                        var said = { finished: 'done', failed: 'failed', killed: 'stopped', stopped: 'stopped', ended: 'ended' };
-                                        var _c = runs.map(function (r) { var _a; return "".concat(runWords(String(r.what)), ": ").concat((_a = said[r.how]) !== null && _a !== void 0 ? _a : 'ended'); }), _d = _c[0], first = _d === void 0 ? '' : _d, _e = _c[1], second = _e === void 0 ? '' : _e;
-                                        return !first ? ((_b = entry === null || entry === void 0 ? void 0 : entry.text) !== null && _b !== void 0 ? _b : '') : !second ? first : runs.length === 2 ? "".concat(first, " \u00B7 ").concat(second) : "".concat(first, " \u00B7 ").concat(second, " \u00B7 ").concat(runs.length - 2, " more ended");
+                                    now = function (one) { var _a, _b; return (_b = (_a = ownNote(one)) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : ''; };
+                                    noteOf = function (one) { var _a, _b; return (_b = (_a = ownNote(one)) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : ''; };
+                                    stepNow = function (one) {
+                                        var call = one.status === 'working' ? lastCall.get(one.id) : undefined;
+                                        return !call ? '' : !call.endedAt ? cut(call.what, room) : at - call.endedAt < 60000 ? 'Thinking' : '';
                                     };
-                                    noteOf = function (one) { var _a, _b; return (_b = (_a = __spreadArray([], one.entries, true).reverse().find(function (entry) { return entry.kind !== 'steer'; })) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : ''; };
                                     table = uiOf($, e);
                                     room = Math.max(40, Math.floor((e.props.bodyColumns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)));
                                     perRow = Math.max(24, Math.floor(room / 2));
@@ -504,88 +512,39 @@ var panelHooks = function (on) {
                                             })}
         </Box>);
                                     };
-                                    askBlock = function (one, key, isWhole) {
-                                        var _a, _b;
+                                    cardNeeds = function (one, isWhole) {
                                         if (isWhole === void 0) { isWhole = false; }
-                                        var ask = one.ask;
-                                        if (!ask)
-                                            return null;
-                                        // The card's own box: how many lines tall it is drawn, and its send
-                                        // (the terminal keeps its one line, Enter sending: how a terminal draws a box of rows is not known here)
-                                        var rows = e.surface === 'terminal' ? undefined : BOX_ROWS;
-                                        var sendCard = function (value) { var _a; return void (value.trim() && (dropDrafts($, one.id), replies.set(one.id, ((_a = replies.get(one.id)) !== null && _a !== void 0 ? _a : 0) + 1), freeTimes($), answerAsk($, one, value, true).catch(function (err) { return log($, "reply not sent: ".concat(String(err))); }))); };
-                                        var answers = ((_a = ask.choices) === null || _a === void 0 ? void 0 : _a.length) ? ask.choices : DEFAULT_ANSWERS;
-                                        var lost = sentLine(one, at);
-                                        // Answered in the person's own words and acted on: its question, with their reply under it, and nothing to press or type
-                                        if (isActingOnReply(one))
-                                            return (<Box key={key} flexDirection="column" gap={1}>
-            <Text wrap="wrap" color={LIVE} bold>{withLinks(table.Link, isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6)), "".concat(key, "-text"), ask.text)}</Text>
-            {lost ? <Text key={"".concat(key, "-sent")} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{lost}</Text> : null}
-          </Box>);
-                                        return (<Box key={key} flexDirection="column" gap={1}>
-          {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
-          <Text wrap="wrap" color={needsPerson(one) ? NEEDS : LIVE} bold>{withLinks(table.Link, isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6)), "".concat(key, "-text"), ask.text)}</Text>
-          {/* What the ask is about, under its question: whole in Details, and on the small card up to DETAILS_ON_CARD */}
-          {ask.details ? (<Box key={"".concat(key, "-details")} flexDirection="column" minWidth={0}>
-              <Markdown text={isWhole || ask.details.length <= DETAILS_ON_CARD ? ask.details : "".concat(cut(ask.details, DETAILS_ON_CARD), "\n\nThe rest is in its Details.")}/>
-            </Box>) : null}
-          {/* The pictures it is about, each drawn small with a row that opens it large, so it is decided here */}
-          {askPictures(one, key, isWhole)}
-          {ask.copy ? (<Box flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingLeft={2}>
-              <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                <Text mono wrap="wrap">{withLinks(table.Link, ask.copy, "".concat(key, "-copy"))}</Text>
-              </Box>
-              <Button key={"ask-".concat(one.id, "-copy-").concat(presses)} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={function (press) { var _a; return copyAsk($, one.id, (_a = ask.copy) !== null && _a !== void 0 ? _a : '', press.surface); }}/>
-            </Box>) : null}
-          {/* A command Claude Code refused, to run on the person's press: where and for how long at most */}
-          {runWhere(table, one, key)}
-          {/* A command to type: Terminal opens with it typed, not run, only on this press; not beside Run it */}
-          {canOpenTerminal(one) && !offeredRun(one) ? (<Box flexDirection="row">
-              <Button key={"".concat(key, "-terminal-").concat(presses)} label={openedKey === "".concat(one.id, ":").concat(ask.at, ":").concat(ask.copy) ? '✓ Typed into Terminal, not run yet' : 'Open in Terminal'} onPress={function () { return void openTerminal($, one).catch(function (err) { return log($, "terminal not opened: ".concat(String(err))); }); }}/>
-            </Box>) : null}
-          {/* Another chat's ask is answered only in its own chat: no file carries an answer there */}
-          {one.chat ? (<Text key={"".concat(key, "-elsewhere")} dimColor wrap="wrap">{"Answer it in its own chat, \u201C".concat(one.chat.title || 'another chat', "\u201D").concat(one.chat.host ? ", on ".concat(one.chat.host) : '', ".")}</Text>) : null}
-          {one.chat ? null : (<Box flexDirection="row" flexWrap="wrap" gap={1}>
-            {runButton($, table, one, key)}
-            {answers.map(function (choice, n) { return (<Button key={"".concat(key, "-choice-").concat(n, "-").concat(askMark(ask), "-").concat(loadMark)} label={choice} variant={n === 0 ? 'primary' : undefined} onPress={function () { return void ((presses += 1), answerAsk($, one, choice).catch(function (err) { return log($, "answer not sent: ".concat(String(err))); })); }}/>); })}
-            {/* Where the bar above the prompt holds the reply box, the last answer opens it there for this card, and closes it again */}
-            {'Input' in table && repliesInBar(e.surface) ? (isReplyOpen(one) ? (<Button key={"".concat(key, "-inbar-close-").concat(presses)} label="Close" onPress={function (press) { return openReply($, undefined, press.surface); }}/>) : (<Button key={"".concat(key, "-inbar-").concat(presses)} label="Answer in words" plain onPress={function (press) { return openReply($, one, press.surface); }}/>)) : null}
-          </Box>)}
-          {/* Where the bar above the prompt holds the reply box, the card has none: a box typed in here is what the app drags the
-                                                panel to. Once opened it says where to type: the app puts the cursor there only on the person's own click */}
-          {'Input' in table && !one.chat && repliesInBar(e.surface) ? (isReplyOpen(one) ? (<Text key={"".concat(key, "-inbar")} dimColor wrap="wrap">✎ Type it in the box above the chat</Text>) : null) : 'Input' in table && !one.chat ? (
-                                            // The card's own box, where the bar takes none (the terminal, a folded bar, a survey): as wide as the card and as tall as
-                                            // BOX_ROWS lines whatever it holds; on the desktop with Send under it, a gap between, and no submitLabel, which the app draws
-                                            // as a small send button and with which a box of several lines sends only on Cmd+Enter
-                                            <Box width="100%" flexDirection="column">
-              <table.Input key={"".concat(key, "-reply-").concat((_b = replies.get(one.id)) !== null && _b !== void 0 ? _b : 0, "-").concat(askMark(ask))} autoFocus={e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined} placeholder="Or answer in words" value={draftShown(one.id, ask)} rows={rows} submitLabel={e.surface === 'terminal' ? 'send' : undefined} onInput={function (value) { return void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($)); }} onSubmit={function (value) { return sendCard(value); }}/>
-              {e.surface === 'terminal' ? null : (<Box flexDirection="row" alignItems="center" gap={2} marginTop={1}>
-                  <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                    <Text dimColor wrap="truncate-end">Shift+Enter: new line</Text>
-                  </Box>
-                  <Button key={"".concat(key, "-send-").concat(presses)} label="Send" variant="primary" onPress={function () { var _a; return sendCard((_a = drafts.get(draftOf(one.id, ask))) !== null && _a !== void 0 ? _a : ''); }}/>
-                </Box>)}
-            </Box>) : null}
-          {/* An answer that could not be left for another Mac says so, under the ask that is back */}
-          {lost ? <Text key={"".concat(key, "-sent")} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{lost}</Text> : null}
-        </Box>);
+                                        return needsFor(one).filter(function (need) { return isWhole || !need.isActing; });
                                     };
-                                    resultAskBlock = function (one, key) {
-                                        var open = resultWaits(one);
-                                        var first = open[0];
-                                        if (!first)
-                                            return null;
-                                        var r = first.r, wait = first.wait, index = first.index;
-                                        return (<Box key={key} flexDirection="column" gap={1}>
-          <Text wrap="wrap" color={one.leftOpen ? NEEDS : undefined} bold>{"Result ready \u00B7 ".concat(cut(wait.text, Math.round(room * 1.6)))}</Text>
-          {r ? (<Box flexDirection="row" flexWrap="wrap" gap={1}>
-              {answersOf(wait).map(function (said, n) { return (<Button key={"".concat(key, "-say-").concat(r.id, "-").concat(index, "-").concat(n, "-").concat(presses)} label={said} variant={n === 0 ? 'primary' : undefined} {...(said === ANSWER_IN_WORDS ? { plain: true } : {})} onPress={function () { return void ((presses += 1), answerWait($, r, index, said, at).catch(function (err) { return log($, "answer not kept: ".concat(String(err))); })); }}/>); })}
+                                    heldFold = function (one) { return (e.surface === 'desktop' ? foldOf($, one.id, at, cardNeeds(one).map(function (need) { return need.id; })) : undefined); };
+                                    needBlocks = function (one, isWhole) {
+                                        var _a;
+                                        if (isWhole === void 0) { isWhole = false; }
+                                        var fold = isWhole ? undefined : heldFold(one);
+                                        var blocks = cardNeeds(one, isWhole).map(function (need) {
+                                            var isOwnField = Boolean(need.field && need.card);
+                                            var autoFocus = isOwnField && e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : false;
+                                            var node = needBlock($, table, need, { isWhole: isWhole, room: room, surface: e.surface, pictures: need.card ? askPictures(one, need.id, isWhole) : null, autoFocus: autoFocus });
+                                            // (on the small card each block starts at the title's left edge; the grey line is a press, which the app moves in itself)
+                                            return { at: need.at, node: isWhole ? node : <Box key={"lead-".concat(need.id)} flexDirection="column" paddingLeft={lead}>{node}</Box> };
+                                        });
+                                        // where the block stood among the others, its grey line at the top of the rows it held: never more than the pane shows, as the
+                                        // pointer that pressed was within it
+                                        var held = fold ? [{ at: fold.came, node: <Box key={"fold-".concat(one.id)} flexDirection="column" height={Math.min(fold.rows, Math.max(4, e.props.scroll.bodyRows))} flexShrink={0}>{(_a = answeredRow(one)) !== null && _a !== void 0 ? _a : null}</Box> }] : [];
+                                        return __spreadArray(__spreadArray([], blocks, true), held, true).sort(function (a, b) { return a.at - b.at; }).map(function (block) { return block.node; });
+                                    };
+                                    answeredRow = function (one) {
+                                        var _a, _b;
+                                        return (!one.ask || isActingOnReply(one)) && sentLine(one, at) ? (<Box key={"pressed-".concat(one.id)} flexDirection="row" gap={2} height={1} overflow="hidden">
+          <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
+            <Button key={"answered-".concat(one.id, "-").concat(presses)} plain dimColor hover={{ scope: "answered-".concat(one.id), underline: true }} onPress={function () { return openWork($, one.id); }}>
+              <Text dimColor wrap="truncate-end">{sentLine(one, at)}</Text>
+            </Button>
+          </Box>
+          {canTakeBack(one, at) ? (<Box flexShrink={0}>
+              <Button key={"take-back-".concat(one.id, "-").concat((_b = (_a = heldAnswer(one, at)) === null || _a === void 0 ? void 0 : _a.at) !== null && _b !== void 0 ? _b : 0)} label="Take back" plain onPress={function () { var _a, _b; return void ((presses += 1), takeBack($, one, (_b = (_a = heldAnswer(one, at)) === null || _a === void 0 ? void 0 : _a.at) !== null && _b !== void 0 ? _b : 0).catch(function (err) { return log($, "answer not taken back: ".concat(String(err))); })); }}/>
             </Box>) : null}
-          {r && open.length > 1 ? (<Box flexDirection="row" alignItems="center" gap={1}>
-              <Text dimColor>{"".concat(open.length - 1, " more ").concat(open.length === 2 ? 'question' : 'questions')}</Text>
-              <Button key={"".concat(key, "-more-").concat(r.id, "-").concat(presses)} label="Result" plain onPress={function () { return void openReport($, r.id); }}/>
-            </Box>) : null}
-        </Box>);
+        </Box>) : null;
                                     };
                                     cardNo = 0;
                                     keyed = false;
@@ -604,22 +563,26 @@ var panelHooks = function (on) {
           </Box>
         </Box>);
                                     };
-                                    gatesAt = function (one) {
-                                        var _a, _b, _c, _d;
-                                        var open = Math.min.apply(Math, __spreadArray(__spreadArray([], ((_a = one.admins) !== null && _a !== void 0 ? _a : []).filter(function (gate) { return !gatePressed.has(gate.id); }).map(function (gate) { return gate.at; }), false), [Infinity], false));
-                                        // a new admin command after the earlier ones were answered: where it came, not where they did
-                                        if (Number.isFinite(open) && (!gatePartAt.has(one.id) || ((_b = gatePartAt.get(one.id)) !== null && _b !== void 0 ? _b : 0) < open - GATE_PART_GAP))
-                                            gatePartAt.set(one.id, open);
-                                        if (!((_c = one.admins) === null || _c === void 0 ? void 0 : _c.length) && !cardNotesOf(one.id, at).length)
-                                            gatePartAt.delete(one.id);
-                                        return (_d = gatePartAt.get(one.id)) !== null && _d !== void 0 ? _d : open;
+                                    canDismiss = function (one) { var _a; return !one.chat && !one.parentId && one.status !== 'working' && !isDismissed(one) && shownWork.some(function (up) { return up.id === one.id; }) && !isActingOnReply(one) && !((_a = one.admins) === null || _a === void 0 ? void 0 : _a.length) && !needsFor(one).some(function (need) { return need.kind !== 'question'; }); };
+                                    questionLines = function (one, key, left) {
+                                        var _a;
+                                        var asked = (_a = one.questions) !== null && _a !== void 0 ? _a : [];
+                                        if (!asked.length)
+                                            return null;
+                                        return (<Box key={key} flexDirection="column" paddingLeft={left}>
+          <Text dimColor>{asked.length === 1 ? 'It asks' : "It asks ".concat(asked.length, " things")}</Text>
+          {asked.map(function (text, n) { return (<Box key={"".concat(key, "-").concat(n)} flexDirection="row" gap={1} alignItems="flex-start">
+              {asked.length > 1 ? <Box flexShrink={0}><Text dimColor>{"".concat(n + 1, ".")}</Text></Box> : null}
+              <Box flexGrow={1} flexShrink={1} minWidth={0}><Text wrap="wrap">{text}</Text></Box>
+            </Box>); })}
+        </Box>);
                                     };
-                                    canDismiss = function (one) { var _a; return !one.chat && !one.parentId && one.status !== 'working' && shownWork.some(function (up) { return up.id === one.id; }) && !isActingOnReply(one) && !((_a = one.admins) === null || _a === void 0 ? void 0 : _a.length); };
+                                    looksDelivered = function (one) { return stage(one) === 'delivered' || isDoneMoment(one, at); };
                                     small = function (one) {
-                                        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+                                        var _a, _b, _c, _d;
                                         // In the terminal, while the letters are keys, the first nine cards are numbered and the number opens the card's Details
                                         // A card in its moment at the top is not numbered, so the others keep their numbers through it
-                                        var isMomentNow = isFinishMoment(one) && !keptUpNow.has(one.id) && !isDismissed(one);
+                                        var isMomentNow = (isFinishMoment(one) && !keptUpNow.has(one.id) && !isDismissed(one)) || isDoneMoment(one, at);
                                         if (!isMomentNow)
                                             cardNo += 1;
                                         var digit = keyed && cardNo <= 9 && !isMomentNow ? String(cardNo) : undefined;
@@ -627,9 +590,12 @@ var panelHooks = function (on) {
                                         var done = kept.filter(function (item) { return item.state === 'done'; }).length;
                                         var tree = treeUnder(one);
                                         var scope = "card-".concat(one.id);
-                                        // Just finished, in its moment at the top: outlined in the green of what is done, as an allowed notice is
+                                        // Just finished, in its moment at the top: outlined in the green of what is done, as an allowed notice is. The outline takes
+                                        // none of the card's room (the app pads a box with a border by 12 by 16 px of its own), so nothing in it moves under the pointer
                                         var isMoment = isMomentNow && !isAbovePrompt;
-                                        return (<Box key={"todo-".concat(one.id)} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isMoment ? { borderStyle: 'round', borderColor: DONE } : {})}>
+                                        // (read as it is drawn)
+                                        var isMarkedNow = isDoneMoment(one, at);
+                                        return squareOutline(Box, isMoment ? (_a = stageColor(stage(one))) !== null && _a !== void 0 ? _a : DONE : undefined, "todo-".concat(one.id), (<Box key={"todo-".concat(one.id)} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
           {edge(one, kept.length, done, kept.some(function (item) { return item.state === 'doing'; }))}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
             <Box flexDirection="column">
@@ -640,101 +606,86 @@ var panelHooks = function (on) {
                   </Button>
                 </Box>
                 <Box flexGrow={1}/>
-                {one.status === 'working' && !one.chat && (!one.wasDone || one.leftSince) ? (<Box flexShrink={0}>
+                {one.status === 'working' && !one.chat ? (<Box flexShrink={0}>
                     <Button key={"stop-".concat(one.id)} label="Stop" plain dimColor hover={{ scope: "stop-".concat(one.id), underline: true }} onPress={function () { return void stop($, one.id); }}/>
                   </Box>) : null}
                 {/* Done, at the top or under Finished: a press opens the box above the chat for what to change, where that bar
                                                 takes a box; the same task then carries on with what is typed */}
-                {(canChange(one) && !resultWaits(one).length) && 'Input' in table && repliesInBar(e.surface) ? (<Box flexShrink={0}>
-                    <Button key={"change-".concat(one.id, "-").concat(presses)} label="Change something" plain dimColor hover={{ scope: "change-".concat(one.id), underline: true }} onPress={function (press) { return openChange($, one, press.surface); }}/>
+                {canChange(one) && !looksDelivered(one) && 'Input' in table && repliesInBar(e.surface) ? (<Box flexShrink={0}>
+                    <Button key={"change-".concat(one.id, "-").concat(presses)} label={isBarOpen('change', one.id) ? 'Close' : 'Message'} plain dimColor hover={{ scope: "change-".concat(one.id), underline: true }} onPress={function (press) { return openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface); }}/>
                   </Box>) : null}
-                {/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again */}
-                {canDismiss(one) ? (<Box flexShrink={0}>
+                {/* Failed, or stopped by the person: only their press starts it again */}
+                {!one.chat && (stage(one) === 'failed' || (stage(one) === 'stopped' && one.byYou)) ? (<Box flexShrink={0}>
+                    <Button key={"again-small-".concat(one.id, "-").concat(presses)} label="Start again" plain dimColor hover={{ scope: "again-".concat(one.id), underline: true }} onPress={function () { return ((presses += 1), void startAgain($, one.id)); }}/>
+                  </Box>) : null}
+                {/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again. A
+                                                delivered card has its two presses at its bottom instead, and none up here */}
+                {canDismiss(one) && stage(one) !== 'delivered' ? (<Box flexShrink={0}>
                     <Button key={"dismiss-".concat(one.id, "-").concat(presses)} label="Dismiss" plain dimColor hover={{ scope: "dismiss-".concat(one.id), underline: true }} onPress={function () { return void ((presses += 1), dismiss($, one.id).catch(function (err) { return log($, "card not dismissed: ".concat(String(err))); })); }}/>
                   </Box>) : null}
               </Box>
               {facts(one, false, kept.length > 0 ? "".concat(done, " of ").concat(kept.length, " to-dos done") : '')}
             </Box>
             {/* What it made so far, right under its title: side by side, each a press that opens it */}
-            {((_a = madeNow($, one)) === null || _a === void 0 ? void 0 : _a.made.length) || ((_b = madeNow($, one)) === null || _b === void 0 ? void 0 : _b.code) ? (<Box key={"made-lead-".concat(one.id)} paddingLeft={lead}>
+            {((_b = madeNow($, one)) === null || _b === void 0 ? void 0 : _b.made.length) || ((_c = madeNow($, one)) === null || _c === void 0 ? void 0 : _c.code) ? (<Box key={"made-lead-".concat(one.id)} paddingLeft={lead}>
                 {madeChips($, table, one, "made-".concat(one.id), function () { return openWork($, one.id); })}
               </Box>) : null}
             {/* The to-do it is on, numbered by how many are done, as the edge's lighter part is, so the edge, the count and the row agree */}
             {stepLine(one, kept, done)}
-            {/* Every part under the title starts at the title's own left edge (lead). What the card waits on, each in the order it
-                                                came: its question, its admin commands, the key box and the app's prompt its own commands raised. A newer one goes
-                                                under the older, so nothing already on the card moves */}
-            {__spreadArray(__spreadArray(__spreadArray(__spreadArray(__spreadArray([], (one.ask ? [{ at: one.ask.at, node: (<Box key={"ask-lead-".concat(one.id)} flexDirection="column" paddingLeft={lead}>
-                  {askBlock(one, "ask-".concat(one.id))}
-                </Box>) }] : []), true), (resultWaits(one).length ? [{ at: one.endedAt, node: (<Box key={"result-ask-lead-".concat(one.id)} flexDirection="column" paddingLeft={lead}>
-                  {resultAskBlock(one, "result-ask-".concat(one.id))}
-                </Box>) }] : []), true), (runningOn(one.id).length && !one.chat ? [{ at: Math.min.apply(Math, runningOn(one.id).map(function (run) { var _a; return (_a = run.startedAt) !== null && _a !== void 0 ? _a : 0; })), node: (<Box key={"run-lead-".concat(one.id)} flexDirection="column" paddingLeft={lead}>
-                  {runBlock($, table, one, "runs-".concat(one.id), at)}
-                </Box>) }] : []), true), (((_c = one.admins) === null || _c === void 0 ? void 0 : _c.length) || cardNotesOf(one.id, at).length ? [{ at: gatesAt(one), node: (<Box key={"gate-lead-".concat(one.id)} flexDirection="column" paddingLeft={lead}>
-                  {adminBlock($, table, one, "gates-".concat(one.id), at)}
-                </Box>) }] : []), true), __spreadArray(__spreadArray([], ((_d = onCards.get(one.id)) !== null && _d !== void 0 ? _d : []), true), ((_e = doneOnCards.get(one.id)) !== null && _e !== void 0 ? _e : []), true).map(function (row) { return ({ at: row.at, node: (<Box key={"own-lead-".concat(row.key)} flexDirection="column" paddingLeft={lead}>
-                  {row.node}
-                </Box>) }); }), true).sort(function (a, b) { return a.at - b.at; }).map(function (part) { return part.node; })}
-            {/* A card says its stage, its to-do and what it does now, and in amber what needs the person. What Claudopus did on the
-                                                way (started it again after the chat stopped or after it stopped partway, the command it waits for, the time it starts
-                                                it again, the helpers it was told to check on) is never on the card (18 Nov) */}
-            {/* Nothing new has come back under it for a while, and no helper of its is at work: amber */}
-            {stuckLine(all, one, at) && one.status === 'working' && !one.chat ? (<Box key={"stuck-".concat(one.id)} paddingLeft={lead}>
-                <Text color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
+            {/* Every part under the title starts at the title's own left edge (lead). What the card waits on, each a block, in
+                                                the order it came */}
+            {cardNeeds(one).length || heldFold(one) ? (<Box key={"needs-lead-".concat(one.id)} flexDirection="column" gap={1}>
+                {needBlocks(one)}
               </Box>) : null}
-            {/* Cut off as the chat's process ended, and Claudopus could not start it again: amber, as it needs the person */}
-            {cutLine(one) && !one.chat ? (<Box key={"cut-".concat(one.id)} paddingLeft={lead}>
-                <Text color={NEEDS} wrap="wrap">{cutLine(one)}</Text>
+            {/* A command the person allowed, while it runs or its output is kept for the task's next step */}
+            {runsShownOn(one, at).length && !one.chat ? (<Box key={"run-lead-".concat(one.id)} flexDirection="column" paddingLeft={lead}>
+                {runBlock($, table, one, "runs-".concat(one.id), at)}
               </Box>) : null}
-            {/* Stopped partway without a result, and Claudopus stopped starting it again: amber */}
-            {carryLine(one) && !one.chat ? (<Box key={"carry-".concat(one.id)} paddingLeft={lead}>
-                <Text color={NEEDS} wrap="wrap">{carryLine(one)}</Text>
-              </Box>) : null}
-            {/* Ended with to-dos not done: which, in the colour of what needs the person, so nobody has to ask what was left */}
-            {notDoneLine(one) ? (<Box key={"not-done-".concat(one.id)} paddingLeft={lead}>
-                <Text color={NEEDS} wrap="wrap">{notDoneLine(one)}</Text>
-              </Box>) : null}
-            {/* A result's question is all a card waiting for its answer says: no line of what Claude last did */}
-            {resultWaits(one).length ? null : (<Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden" paddingLeft={lead}>
+            {/* A card says its stage, its to-do and what it does now, and in amber only what waits for the person */}
+            {/* What the person last pressed or answered here, in one grey line, where no block just pressed holds it */}
+            {heldFold(one) ? null : answeredRow(one)}
+            {/* A card that waits says so with its block alone: no line of what the task last did under it. A delivered card's line is
+                                                one row: what it asks and its presses come right under it */}
+            {needsPerson(one) ? null : (<Box flexDirection="row" alignItems="flex-start" gap={1} height={looksDelivered(one) ? 1 : 2} overflow="hidden" paddingLeft={lead}>
               {one.status === 'working' ? live("live-".concat(one.id)) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                {/* In its pause after ending, the line says in a word how it ended: green when it finished, plain when it was stopped */}
-                {(!one.ask && lingers(one, at)) || leftLine(one, at) ? (<Text wrap="truncate-end" color={one.leftOpen ? NEEDS : one.status === 'done' ? DONE : one.status === 'failed' ? 'error' : undefined} dimColor={one.status !== 'done' && one.status !== 'failed'}>
-                    {one.leftOpen ? 'Not done' : one.status === 'done' ? '✓ Done' : one.status === 'failed' ? '✕ Failed' : one.byYou ? 'Stopped by you' : 'Stopped'}
-                  </Text>) : (<Box flexDirection="column" minWidth={0}>
-                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(noteOf(one), room) || (one.status === 'working' ? (one.ask ? 'Waiting for you' : at - one.startedAt < 60000 ? 'Starting' : 'Working') : "Claude hasn't said what it's doing")}</Text>
-                    {/* Held where it was after an answer, once a newer line of the work's took the answer's place: why it is still up there */}
-                    {!one.ask && !sentLine(one, at) && heldAnswer(one, at) && ((_f = heldAnswer(one, at)) === null || _f === void 0 ? void 0 : _f.to) !== 'ran' && !((_g = heldAnswer(one, at)) === null || _g === void 0 ? void 0 : _g.isRun) ? <Text key={"held-answer-".concat(one.id)} dimColor wrap="truncate-end">{"\u2713 You answered \u201C".concat(cut((_j = (_h = heldAnswer(one, at)) === null || _h === void 0 ? void 0 : _h.text) !== null && _j !== void 0 ? _j : '', 60), "\u201D")}</Text> : null}
-                  </Box>)}
+                {/* Ended, the line begins with its stage, in its colour: green done, grey stopped, red failed with why; then what
+                                                    it last said */}
+                {hasResult(stage(one)) || stage(one) === 'stopped' || stage(one) === 'failed' ? (<Box flexDirection="row" minWidth={0}>
+                    {/* (the stage's own word is never the part cut short: on a narrow panel a long note beside it left "✓ …") */}
+                    <Box flexShrink={stage(one) === 'failed' ? 1 : 0} minWidth={0}>
+                      <Text wrap="truncate-end" color={stageColor(stage(one))} dimColor={stage(one) === 'stopped'}>
+                        {stage(one) === 'delivered' ? '◐ Delivered' : stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? "\u2715 Failed".concat(one.why ? " \u00B7 ".concat(one.why) : '') : 'Stopped'}
+                      </Text>
+                    </Box>
+                    {noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{" \u00B7 ".concat(cut(noteOf(one), room))}</Text></Box> : null}
+                  </Box>) : (<Text wrap="wrap">{cut(noteOf(one), room) || stepNow(one) || (at - one.startedAt < 60000 ? 'Starting' : 'Working')}</Text>)}
               </Box>
             </Box>)}
-            {/* A button's answer, while the card says it: a press to take it back, the question back on the card */}
-            {canTakeBack(one, at) ? (<Box key={"take-back-".concat(one.id)} paddingLeft={lead} flexDirection="row">
-                <Button key={"take-back-".concat(one.id, "-").concat((_l = (_k = heldAnswer(one, at)) === null || _k === void 0 ? void 0 : _k.at) !== null && _l !== void 0 ? _l : 0)} label={"\u21B6 Take back \u201C".concat(cut((_o = (_m = heldAnswer(one, at)) === null || _m === void 0 ? void 0 : _m.text) !== null && _o !== void 0 ? _o : '', 30), "\u201D")} plain onPress={function () { var _a, _b; return void ((presses += 1), takeBack($, one, (_b = (_a = heldAnswer(one, at)) === null || _a === void 0 ? void 0 : _a.at) !== null && _b !== void 0 ? _b : 0).catch(function (err) { return log($, "answer not taken back: ".concat(String(err))); })); }}/>
-              </Box>) : null}
-            {/* Finished, with something it started still running: what, how long, and a way to stop it */}
-            {leftLine(one, at) && !one.chat ? (<Box key={"left-".concat(one.id)} flexDirection="column" gap={1} paddingLeft={lead}>
-                <Text color={NEEDS} wrap="wrap">{leftLine(one, at)}</Text>
-                <Box flexDirection="row">
-                  <Button key={"left-stop-".concat(one.id, "-").concat(presses)} label="Stop it" onPress={function () { return void stop($, one.id); }}/>
-                </Box>
-              </Box>) : null}
             {/* Its helpers, inside the card: its coloured edge runs down beside them */}
             {tree.length ? <Box key={"tree-".concat(one.id)} flexDirection="column" paddingLeft={lead}>{tree}</Box> : null}
+            {/* Delivered: what its result leaves open, numbered, with no press of their own, and at the card's bottom its only two
+                                                presses (19 Nov, the person: "buttons at the bottom to mark as done, provide feedback", "it makes the most sense
+                                                to just send one message for both the questions"). The reply is typed in the box above the chat, as every
+                                                message is, and puts the task back to work; Mark as done puts the card under Finished */}
+            {looksDelivered(one) ? questionLines(one, "asks-".concat(one.id), lead) : null}
+            {/* Marked done, its presses go at once, the choice made: an empty row of their height holds the card's shape through its
+                                                green moment (19 Nov, the person: "As soon as I click a button, the buttons should immediately disappear") */}
+            {isMarkedNow ? <Box key={"delivered-".concat(one.id)} height={1}/> : null}
+            {!isMarkedNow && looksDelivered(one) && (canDismiss(one) || (canChange(one) && 'Input' in table && repliesInBar(e.surface))) ? (<Box key={"delivered-".concat(one.id)} flexDirection="row" flexWrap="wrap" gap={1} paddingLeft={lead}>
+                {canChange(one) && 'Input' in table && repliesInBar(e.surface) ? (<Button key={"change-".concat(one.id, "-").concat(presses)} label={isBarOpen('change', one.id) ? 'Close' : ((_d = one.questions) === null || _d === void 0 ? void 0 : _d.length) ? 'Reply' : 'Give feedback'} variant={isBarOpen('change', one.id) ? undefined : 'primary'} onPress={function (press) { return openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface); }}/>) : null}
+                {canDismiss(one) ? <Button key={"dismiss-".concat(one.id, "-").concat(presses)} label="Mark as done" onPress={function () { return void ((presses += 1), dismiss($, one.id).catch(function (err) { return log($, "card not marked done: ".concat(String(err))); })); }}/> : null}
+              </Box>) : null}
           </Box>
-        </Box>);
+        </Box>));
                                     };
                                     edge = function (one, count, done, isDoing) {
-                                        var _a, _b;
-                                        // An error that stopped it is said in red, on its edge too
-                                        if (one.status === 'failed')
-                                            return <Box width={1} flexShrink={0} backgroundColor="error"/>;
-                                        if (one.status !== 'working' && one.status !== 'done')
+                                        // (what waits for the person on its card, a question, a permission, a key box or a prompt its command raised, is amber)
+                                        var now = stage(one);
+                                        if (now === 'stopped')
                                             return <Box width={1} flexShrink={0}/>;
-                                        // (amber for one that waits on the person to go on, or that left to-dos; a done one whose result asks something more is green)
-                                        var isNeeded = needsPerson(one) || ((_b = (_a = onCards.get(one.id)) === null || _a === void 0 ? void 0 : _a.length) !== null && _b !== void 0 ? _b : 0) > 0 || Boolean(one.leftOpen);
-                                        if (isNeeded || one.status === 'done' || !count || e.surface === 'terminal')
-                                            return <Box width={1} flexShrink={0} backgroundColor={isNeeded ? NEEDS : one.status === 'working' || isActingOnReply(one) ? LIVE : DONE}/>;
+                                        if (now !== 'working' || !count || e.surface === 'terminal')
+                                            return <Box width={1} flexShrink={0} backgroundColor={isActingOnReply(one) ? LIVE : stageColor(now)}/>;
                                         var shade = function (n) { return (n < done ? LIVE : n === done && isDoing ? "".concat(LIVE, "AD") : "".concat(LIVE, "5C")); };
                                         return count > EDGE_PARTS ? (<Box key={"edge-".concat(one.id)} width={1} flexShrink={0} flexDirection="column">
           {/* Too many to-dos for a part each: one bar in the same three shades, done, the one being done, and what is left */}
@@ -780,7 +731,7 @@ var panelHooks = function (on) {
                                         var row = twigRowOf(t, "".concat(scope, "-").concat(one.id), cut(titleOf(one), Math.max(12, width - side.length)), one.status !== 'working', side, function () { return openWork($, one.id); }, one.status);
                                         // Under a helper at work, what it is doing now in plain words, as a command's second line says how it goes (17 Nov: a
                                         // helper's row said only its model, tokens and time, nothing of what it did)
-                                        var doing = one.status === 'working' && !one.chat ? helperNow(one, at, jobsOf(one, at).length, Math.max(12, width)) : '';
+                                        var doing = one.status === 'working' && !one.chat ? helperNow(one, at, jobsOf(one).length, Math.max(12, width)) : '';
                                         if (!doing)
                                             return row;
                                         return (<Box key={"twig-pair-".concat(scope, "-").concat(one.id)} flexDirection="column" flexShrink={0}>
@@ -793,12 +744,14 @@ var panelHooks = function (on) {
           </Box>
         </Box>);
                                     };
+                                    isMore = function (job) { return job.id.startsWith('more-'); };
+                                    MORE_COLOR = '#9A9A9A';
                                     jobLines = function (t, key, job) {
                                         return 'Svg' in table && e.surface !== 'terminal' ? (<Box key={key} flexShrink={0}>
-          <table.Svg key={"".concat(key, "-svg")} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !job.isPaused && job.kind !== 'wait' && !(job.isEmpty ? at - job.at >= JOB_QUIET : job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive/>
+          <table.Svg key={"".concat(key, "-svg")} source={twigSvg(t, LINE, isMore(job) ? MORE_COLOR : JOB_COLOR[job.kind], !isMore(job) && !(job.isEmpty ? at - job.at >= JOB_QUIET : job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={isMore(job) ? 'More commands running' : JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive/>
         </Box>) : (<Box key={key} flexDirection="row" flexShrink={0}>
           <Text dimColor>{twigText(t)}</Text>
-          <Text color={JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
+          <Text color={isMore(job) ? MORE_COLOR : JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
         </Box>);
                                     };
                                     twigRails = function (t, key) {
@@ -817,27 +770,16 @@ var panelHooks = function (on) {
         </Box>
       </Box>);
                                     };
-                                    guessLeft = function (job, ran) {
-                                        var _a;
-                                        var share = Number.parseFloat((_a = job.pct) !== null && _a !== void 0 ? _a : '') / 100;
-                                        return !job.left && job.isOwn && !job.isEarlier && job.kind !== 'wait' && share >= 0.01 && share < 1 && ran >= 20000 ? timeLeftText((ran / 1000) * ((1 - share) / share)) : undefined;
-                                    };
-                                    jobTime = function (job, ran) {
-                                        var _a, _b, _c, _d;
-                                        if (!job.expectText || !job.expect)
-                                            return { time: took(ran), isPast: false };
-                                        if (ran <= job.expect)
-                                            return { time: "".concat(took(ran), " of about ").concat(job.expectText), isPast: false };
-                                        var isFresh = !job.isPaused && Boolean(job.wroteAt) && at - ((_a = job.wroteAt) !== null && _a !== void 0 ? _a : 0) < 60000;
-                                        // the time left is as of when it was printed, so it adds to the time it had run then
-                                        var printedAt = Math.min(ran, Math.max(0, ((_b = job.wroteAt) !== null && _b !== void 0 ? _b : 0) - job.at));
-                                        var left = isFresh ? leftSeconds((_c = job.left) !== null && _c !== void 0 ? _c : guessLeft(job, printedAt)) : undefined;
-                                        var fresh = left ? (_d = timeLeftText(Math.max(ran / 1000, printedAt / 1000 + left))) === null || _d === void 0 ? void 0 : _d.replace(/ left$/, '') : undefined;
-                                        return fresh ? { time: "".concat(took(ran), " of about ").concat(fresh), isPast: false } : { time: "".concat(took(ran), " \u00B7 ").concat(shortAgo(ran - job.expect), " over"), isPast: true };
+                                    nowWord = function (label) {
+                                        var _a, _b;
+                                        var first = (_a = doingOf(label).split(/\s+/)[0]) !== null && _a !== void 0 ? _a : '';
+                                        return /ing$/.test(first) && first.toLowerCase() !== ((_b = label.trim().split(/\s+/)[0]) !== null && _b !== void 0 ? _b : '').toLowerCase() ? first : '';
                                     };
                                     jobStand = function (job, width) {
-                                        var _a;
-                                        var pct = job.pct ? [job.pct] : [];
+                                        // A count that is full while the command still runs says so in place of its percent: 100% beside a running row read as
+                                        // done (19 Nov "7 of 7 heads · 100% · started, finishing", from a script that counted what it had started)
+                                        var isFull = job.pct === '100%' || Boolean(job.done && job.total && job.done === job.total);
+                                        var pct = isFull ? ['still running'] : job.pct ? [job.pct] : [];
                                         var quiet = job.wroteAt && !job.isEmpty ? at - job.wroteAt : undefined;
                                         var ran = at - job.at;
                                         // (to ten seconds past a minute, so the line moves at each drawing however long it has been)
@@ -849,45 +791,40 @@ var panelHooks = function (on) {
                                         // Quiet for three minutes, in amber: a server or a watch speaks only when there is something to say, so its quiet is no
                                         // fault, and one whose output has not been read yet is not known to be silent until a minute has passed. Before three
                                         // minutes nothing is said of when: a count of seconds beside a still percent told nothing (16 Nov)
-                                        var isSilent = !job.isPaused && !job.target && job.kind !== 'server' && job.kind !== 'watch' && !(quiet === undefined && !job.isEmpty && ran < SILENT_WARN) && still >= SILENT_AFTER;
+                                        var isSilent = job.kind !== 'server' && job.kind !== 'watch' && !(quiet === undefined && !job.isEmpty && ran < SILENT_WARN) && still >= SILENT_AFTER;
                                         // its speed and time left only while it prints: ten seconds old, they are no longer how it goes
                                         var isFresh = quiet !== undefined && quiet < 10000;
-                                        var guess = guessLeft(job, ran);
-                                        var left = isFresh ? (job.left ? [job.left] : guess ? ["about ".concat(guess)] : []) : [];
+                                        // (a time left only where the command's own line says one, its `eta`: none is worked out here)
+                                        var left = isFresh && job.left ? [job.left] : [];
                                         var rate = job.rate && isFresh ? [job.rate] : [];
                                         var full = job.done ? [job.total ? "".concat(job.done, " of ").concat(job.total) : job.done] : [];
                                         var compact = job.done ? [job.total ? "".concat(job.done, "/").concat(job.total) : job.done] : [];
                                         // a count without its unit, for the narrowest line, so how far it is stays beside how long is left
                                         var bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? ["".concat(job.done, "/").concat(job.total.split(' ')[0])] : compact;
-                                        // The memory it holds only where it is a gigabyte or more, said as memory, as it counts against what this Mac may hold; a few
-                                        // megabytes say nothing to a person (16 Nov a row led with "35 MB"), and it goes first when the line has no room
-                                        var mem = job.mem && /\b[GT]B\b/.test(job.mem) ? ["".concat(job.mem, " memory")] : [];
                                         // Its own plain words for what it does now; a watch's are its last event
-                                        var words = plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, "".concat(job.label, " ").concat((_a = job.waitsFor) !== null && _a !== void 0 ? _a : ''));
+                                        // (none beside a full count: what a script said as it counted its last thing, "command finished", read against "still running")
+                                        var words = isFull ? '' : plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, job.label);
                                         var hasSaid = Boolean(words || full.length || pct.length);
+                                        // Silent, whether its programs still use the processor: still busy, or idle (stuck, or waiting on something far away)
+                                        var live = job.live === 'busy' ? ' · still busy' : job.live === 'idle' ? ' · idle' : '';
                                         // Quiet never stands alone (17 Nov "nothing printed for 29m 30s" said nothing of what it did): the last thing it said stays,
-                                        // marked as the last, or that it has shown no output or no progress at all; and once Claude was told of it, that too
-                                        var told = isSilent && silentTold.has(job.id) ? 'Claude was told to check it' : '';
-                                        var _b = job.isPaused ? ['Paused', 'Paused']
-                                            : job.target ? [job.target, job.target.replace(/^What it waits for hasn't changed for /, 'No change for ').replace(/^What it waits for /, 'Its target ')]
-                                                : job.kind === 'server' || job.kind === 'watch' ? ['', '']
-                                                    : !isSilent ? ['', '']
-                                                        : hasSaid ? ["nothing new for ".concat(ago(still)), "nothing new for ".concat(shortAgo(still))]
-                                                            : !job.wroteAt || job.isEmpty ? ["No output yet \u00B7 started ".concat(shortAgo(ran), " ago"), "No output yet \u00B7 ".concat(shortAgo(ran))]
-                                                                : ["No progress shown \u00B7 nothing new for ".concat(ago(still)), "No progress for ".concat(shortAgo(still))], state = _b[0], short = _b[1];
-                                        var isWarn = job.isPaused || Boolean(job.target) || isSilent;
+                                        // marked as the last, or that it has shown no output or no progress at all
+                                        var _a = job.kind === 'server' || job.kind === 'watch' ? ['', '']
+                                            : !isSilent ? ['', '']
+                                                : hasSaid ? ["nothing new for ".concat(ago(still)).concat(live), "nothing new for ".concat(shortAgo(still)).concat(live)]
+                                                    : !job.wroteAt || job.isEmpty ? ["No output yet \u00B7 started ".concat(shortAgo(ran), " ago").concat(live), "No output yet \u00B7 ".concat(shortAgo(ran)).concat(live)]
+                                                        : ["No progress shown \u00B7 nothing new for ".concat(ago(still)).concat(live), "No progress for ".concat(shortAgo(still)).concat(live)], state = _a[0], short = _a[1];
+                                        // (in amber only where nothing says it still works)
+                                        var isWarn = isSilent && job.live !== 'busy';
                                         // A server or a watch leads with what it does, then the last thing it said
                                         var lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving · ') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching · ') : isSilent && hasSaid ? 'Last: ' : '';
-                                        // (what one command left going, when it is several programs, says how many: its row names the command once)
-                                        // (a narrow row drops the "about" of a time left worked out from its percent)
-                                        var near = left.map(function (one) { return one.replace(/^about /, ''); });
-                                        var programs = leftCommandOf(job.id) && job.count && job.count > 1 ? ["".concat(job.count, " programs")] : [];
-                                        var numbers = __spreadArray(__spreadArray(__spreadArray(__spreadArray([__spreadArray(__spreadArray(__spreadArray(__spreadArray(__spreadArray(__spreadArray([], full, true), pct, true), rate, true), left, true), programs, true), mem, true), __spreadArray(__spreadArray(__spreadArray(__spreadArray(__spreadArray([], full, true), pct, true), rate, true), left, true), programs, true), __spreadArray(__spreadArray(__spreadArray(__spreadArray([], full, true), pct, true), left, true), programs, true), __spreadArray(__spreadArray(__spreadArray([], full, true), pct, true), left, true)], (near.length ? [__spreadArray(__spreadArray([], full, true), near, true)] : []), true), [__spreadArray(__spreadArray(__spreadArray([], compact, true), pct, true), left, true)], false), (left.length ? [__spreadArray(__spreadArray([], compact, true), left, true), __spreadArray(__spreadArray([], compact, true), near, true), __spreadArray(__spreadArray([], bare, true), near, true)] : []), true), [__spreadArray(__spreadArray([], compact, true), pct, true), __spreadArray(__spreadArray([], bare, true), pct, true), __spreadArray([], pct, true), []], false);
-                                        var tails = [[state, told], [state], [short, told], [short]].map(function (t) { return t.filter(Boolean); });
-                                        // How far it is comes first, then its sign of life, then whether Claude was told: the fullest counts with each tail, then any
-                                        var tries = __spreadArray(__spreadArray([], numbers.slice(0, 3).flatMap(function (nums) { return tails.map(function (tail) { return ({ nums: nums, tail: tail }); }); }), true), tails.flatMap(function (tail) { return numbers.map(function (nums) { return ({ nums: nums, tail: tail }); }); }), true);
+                                        var near = left;
+                                        var numbers = __spreadArray(__spreadArray(__spreadArray(__spreadArray([__spreadArray(__spreadArray(__spreadArray(__spreadArray([], full, true), pct, true), rate, true), left, true), __spreadArray(__spreadArray(__spreadArray([], full, true), pct, true), left, true)], (near.length ? [__spreadArray(__spreadArray([], full, true), near, true)] : []), true), [__spreadArray(__spreadArray(__spreadArray([], compact, true), pct, true), left, true)], false), (left.length ? [__spreadArray(__spreadArray([], compact, true), left, true), __spreadArray(__spreadArray([], compact, true), near, true), __spreadArray(__spreadArray([], bare, true), near, true)] : []), true), [__spreadArray(__spreadArray([], compact, true), pct, true), __spreadArray(__spreadArray([], bare, true), pct, true), __spreadArray([], pct, true), []], false);
+                                        var tails = [[state], [short]].map(function (t) { return t.filter(Boolean); });
+                                        // How far it is comes first, then its sign of life: the fullest counts with each tail, then any
+                                        var tries = __spreadArray(__spreadArray([], numbers.slice(0, 2).flatMap(function (nums) { return tails.map(function (tail) { return ({ nums: nums, tail: tail }); }); }), true), tails.flatMap(function (tail) { return numbers.map(function (nums) { return ({ nums: nums, tail: tail }); }); }), true);
                                         for (var _i = 0, tries_1 = tries; _i < tries_1.length; _i++) {
-                                            var _c = tries_1[_i], nums = _c.nums, tail = _c.tail;
+                                            var _b = tries_1[_i], nums = _b.nums, tail = _b.tail;
                                             var fixed = __spreadArray(__spreadArray([], nums, true), tail, true).join(' · ');
                                             if (lead.length + fixed.length > width)
                                                 continue;
@@ -904,7 +841,7 @@ var panelHooks = function (on) {
                                             var kindLead = job.kind === 'server' ? 'Serving' : job.kind === 'watch' ? 'Watching' : '';
                                             var shownLead = kindLead ? "".concat(kindLead, " \u00B7 ").concat(said_1 ? 'last: ' : '') : lead && (nums.length || said_1) ? lead : '';
                                             var line = "".concat(shownLead).concat(text);
-                                            return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : kindLead || (job.kind === 'wait' ? 'Waiting' : job.kind === 'download' ? 'Downloading' : 'Working'), isWarn: isWarn };
+                                            return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : (job.kind === 'script' && job.isNamed ? nowWord(job.label) : '') || JOB_NOW[job.kind], isWarn: isWarn };
                                         }
                                         return { text: short, isWarn: isWarn };
                                     };
@@ -916,20 +853,20 @@ var panelHooks = function (on) {
                                         var key = "".concat(scope, "-job-").concat(job.id);
                                         var width = perRow - 4 - t.depth * 2;
                                         var ran = at - job.at;
-                                        var _c = jobTime(job, ran), time = _c.time, isLong = _c.isPast;
+                                        var time = took(ran);
                                         // Stop, at its end, where it can be stopped from here: it ends the run and tells the work it was stuck
                                         var owner = (_b = (_a = t.one) === null || _a === void 0 ? void 0 : _a.id) !== null && _b !== void 0 ? _b : '';
-                                        // (not on a row too narrow to say how far it is beside it; Details, wider, has it)
-                                        var isStoppable = Boolean(owner) && canStopJob(job) && !job.id.startsWith('more-') && width >= 44;
+                                        // (every row has it, down to the narrowest that still has room for a word of how far it is beside it)
+                                        var isStoppable = Boolean(owner) && canStopJob(job) && !job.id.startsWith('more-') && width >= 24;
                                         var name = cut(jobHead(job), Math.max(12, width - time.length - 1));
                                         var head = (<Box key={"twig-".concat(key)} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
           {jobLines(t, "twig-lines-".concat(key), job)}
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
             {/* A press shows its output whole in a Terminal window, where this Mac can open one */}
-            {canOpenJob(job) ? (<Button key={"output-".concat(key, "-").concat(presses)} label={name} plain hover={{ scope: "twig-".concat(key), underline: true }} onPress={function () { return void openJobOutput($, job).catch(function (err) { return log($, "output not opened: ".concat(String(err))); }); }}/>) : (<Text wrap="truncate-end">{name}</Text>)}
+            {isMore(job) && owner ? (<Button key={"more-".concat(key, "-").concat(presses)} label={name} plain hover={{ scope: "twig-".concat(key), underline: true }} onPress={function () { return openWork($, owner); }}/>) : canOpenJob(job) ? (<Button key={"output-".concat(key, "-").concat(presses)} label={name} plain hover={{ scope: "twig-".concat(key), underline: true }} onPress={function () { return openLog($, job.id, job.label); }}/>) : (<Text wrap="truncate-end">{name}</Text>)}
           </Box>
           <Box flexShrink={0}>
-            <Text dimColor={!isLong} color={isLong ? NEEDS : undefined}>{time}</Text>
+            <Text dimColor>{time}</Text>
           </Box>
         </Box>);
                                         if (job.id.startsWith('more-'))
@@ -938,9 +875,9 @@ var panelHooks = function (on) {
                                         var stopButton = isStoppable ? (<Box key={"stop-box-".concat(key)} flexShrink={0}>
           <Button key={"stop-".concat(key, "-").concat(presses)} label={stoppingJobs.has(job.id) ? 'Stopping' : 'Stop'} plain hover={{ scope: "stop-".concat(key), underline: true }} onPress={function () { return void stopJob($, owner, job).catch(function (err) { return log($, "run not stopped: ".concat(String(err))); }); }}/>
         </Box>) : null;
-                                        var _d = jobStand(job, width - (isStoppable ? 10 : 0)), stand = _d.text, isWarn = _d.isWarn;
+                                        var _c = jobStand(job, width - (isStoppable ? 10 : 0)), stand = _c.text, isWarn = _c.isWarn;
                                         // Its percent, in blue, where the line says it as a part of its own
-                                        var pctAt = job.pct && !isWarn ? (stand.startsWith("".concat(job.pct, " \u00B7 ")) || stand === job.pct ? 0 : stand.includes(" \u00B7 ".concat(job.pct)) ? stand.indexOf(" \u00B7 ".concat(job.pct)) + 3 : -1) : -1;
+                                        var pctAt = job.pct && !isWarn && !/still running/i.test(stand) ? (stand.startsWith("".concat(job.pct, " \u00B7 ")) || stand === job.pct ? 0 : stand.includes(" \u00B7 ".concat(job.pct)) ? stand.indexOf(" \u00B7 ".concat(job.pct)) + 3 : -1) : -1;
                                         // (its plain words are in the line itself, which every run has)
                                         var detail = '';
                                         return (<Box key={"job-".concat(key)} flexDirection="column" flexShrink={0}>
@@ -964,14 +901,62 @@ var panelHooks = function (on) {
           </Box>
         </Box>);
                                     };
+                                    endedMark = function (run) {
+                                        var _a;
+                                        return (<Text color={run.how === 'failed' ? 'error' : run.how === 'finished' ? DONE : undefined} dimColor={run.how !== 'failed' && run.how !== 'finished'}>
+        {JOB_GLYPH[(_a = run.kind) !== null && _a !== void 0 ? _a : 'script']}
+      </Text>);
+                                    };
+                                    endedLines = function (t, key, run) {
+                                        var _a;
+                                        return 'Svg' in table && e.surface !== 'terminal' ? (<Box key={key} flexShrink={0}>
+          <table.Svg key={"".concat(key, "-svg")} source={twigSvg(t, LINE, run.how === 'failed' ? TWIG_FAILED : '#808080', false, JOB_SHAPE[(_a = run.kind) !== null && _a !== void 0 ? _a : 'script'])} alt={endedWord(run)} width={twigWidth(t)} height={LINE} isInteractive/>
+        </Box>) : (<Box key={key} flexDirection="row" flexShrink={0}>
+          <Text dimColor>{twigText(t)}</Text>
+          {endedMark(run)}
+        </Box>);
+                                    };
+                                    canOpenEnded = function (run, owner) { return !isRunFromAfar && (Boolean(run.file) || !(owner === null || owner === void 0 ? void 0 : owner.chat)); };
+                                    openEnded = function (run, owner) { return (canOpenEnded(run, all.find(function (one) { return one.id === owner; })) ? openLog($, run.id, runLabel(run)) : openWork($, owner)); };
+                                    endedRow = function (t) {
+                                        var run = t.run;
+                                        if (!run)
+                                            return null;
+                                        var key = "ended-".concat(run.id);
+                                        // (one that finished says only how long it ran, as a running row does, so its name keeps the room: the row over them says
+                                        // they ended, and its mark that it went well; one that did not says how it ended too. When is in its log's tab)
+                                        var side = run.how === 'finished' ? took(run.endedAt - run.at) : endedLine(run, took(run.endedAt - run.at));
+                                        var name = cut(runLabel(run), Math.max(12, perRow - 4 - t.depth * 2 - side.length - 1));
+                                        return (<Box key={"twig-".concat(key)} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+          {endedLines(t, "twig-lines-".concat(key), run)}
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+            <Button key={"ended-open-".concat(run.id, "-").concat(presses)} label={name} plain dimColor hover={{ scope: "twig-".concat(key), underline: true }} onPress={function () { var _a, _b; return openEnded(run, (_b = (_a = t.one) === null || _a === void 0 ? void 0 : _a.id) !== null && _b !== void 0 ? _b : ''); }}/>
+          </Box>
+          <Box flexShrink={0}>
+            <Text dimColor={run.how !== 'failed'} color={run.how === 'failed' ? 'error' : undefined}>{side}</Text>
+          </Box>
+        </Box>);
+                                    };
+                                    endedBranches = function (card) {
+                                        var _a;
+                                        var runs = __spreadArray([], ((_a = card.endedRuns) !== null && _a !== void 0 ? _a : []), true).sort(function (a, b) { return b.endedAt - a.endedAt; });
+                                        return runs.length ? [{ one: card, ended: runs, kids: endedFolded.has(card.id) ? [] : runs.map(function (run) { return ({ one: card, run: run, kids: [] }); }) }] : [];
+                                    };
+                                    endedGroupRow = function (t) {
+                                        var _a, _b, _c;
+                                        var id = (_b = (_a = t.one) === null || _a === void 0 ? void 0 : _a.id) !== null && _b !== void 0 ? _b : '';
+                                        var text = "".concat(endedSummary(0, (_c = t.ended) !== null && _c !== void 0 ? _c : [])).concat(endedFolded.has(id) ? ' · show' : '');
+                                        return twigRowOf(t, "ended-group-".concat(id), text, true, '', function () { return ((endedFolded.has(id) ? endedFolded.delete(id) : endedFolded.add(id)), (presses += 1), redraw($)); });
+                                    };
+                                    withAll = function (branches) { return branches.map(function (b) { return (b.job || b.run || b.ended ? b : __assign(__assign({}, b), { kids: __spreadArray(__spreadArray(__spreadArray([], jobBranches(b.one, true), true), withAll(b.kids), true), endedBranches(b.one), true) })); }); };
                                     jobBranches = function (card, isAll) {
                                         if (isAll === void 0) { isAll = false; }
-                                        var jobs = jobsOf(card, at);
+                                        var jobs = jobsOf(card);
                                         if (isAll || jobs.length <= JOBS_SHOWN)
                                             return jobs.map(function (job) { return ({ one: card, job: job, kids: [] }); });
                                         var more = jobs.length - JOBS_SHOWN + 1;
                                         var shown = jobs.slice(-(JOBS_SHOWN - 1));
-                                        var rest = { id: "more-".concat(card.id), label: "".concat(jobs.slice(0, more).reduce(function (n, job) { var _a; return n + (leftCommandOf(job.id) ? 1 : ((_a = job.count) !== null && _a !== void 0 ? _a : 1)); }, 0), " more commands"), cmd: '', kind: 'watch', at: Math.min.apply(Math, jobs.slice(0, more).map(function (job) { return job.at; })) };
+                                        var rest = { id: "more-".concat(card.id), label: "".concat(jobs.slice(0, more).reduce(function (n, job) { var _a; return n + ((_a = job.count) !== null && _a !== void 0 ? _a : 1); }, 0), " more commands"), cmd: '', kind: 'script', at: Math.min.apply(Math, jobs.slice(0, more).map(function (job) { return job.at; })) };
                                         return __spreadArray(__spreadArray([], shown, true), [rest], false).map(function (job) { return ({ one: card, job: job, kids: [] }); });
                                     };
                                     withJobs = function (branches, isAll) {
@@ -981,7 +966,7 @@ var panelHooks = function (on) {
                                     rowOf = function (t) { return (t.job ? jobRow(t, 'list') : twigRow(t, 'list')); };
                                     endedRunsOf = function (one, list) {
                                         if (list === void 0) { list = all; }
-                                        return __spreadArray([one], underOf(list, one.id), true).flatMap(function (kid) { var _a; return ((_a = kid.endedRuns) !== null && _a !== void 0 ? _a : []).filter(function (r) { var _a; return !leftCommandOf(r.id) || !((_a = kid.detached) === null || _a === void 0 ? void 0 : _a.some(function (d) { return leftCommandOf(d.id) === leftCommandOf(r.id); })); }); }).sort(function (a, b) { return a.endedAt - b.endedAt; });
+                                        return __spreadArray([one], underOf(list, one.id), true).flatMap(function (kid) { var _a; return (_a = kid.endedRuns) !== null && _a !== void 0 ? _a : []; }).sort(function (a, b) { return a.endedAt - b.endedAt; });
                                     };
                                     treeUnder = function (one) {
                                         var under = underOf(all, one.id);
@@ -989,20 +974,25 @@ var panelHooks = function (on) {
                                         var runs = endedRunsOf(one, one.chat ? helpersThere : all);
                                         if (!under.length && !own.length && !runs.length)
                                             return [];
-                                        var branches = __spreadArray(__spreadArray([], own, true), withJobs(branchesOf(all, one.id, function (kid) { return kid.status === 'working' || isLingering(kid, at) || jobsOf(kid, at).length > 0; })), true);
+                                        var branches = __spreadArray(__spreadArray([], own, true), withJobs(branchesOf(all, one.id, function (kid) { return kid.status === 'working' || isLingering(kid, at) || jobsOf(kid).length > 0; })), true);
                                         var twigs = twigsOf(branches, true);
                                         var rest = under.length - twigs.filter(function (t) { return !t.job; }).length;
                                         if (!rest && !runs.length)
                                             return twigsOf(branches).map(rowOf);
                                         var closing = { depth: 1, rails: [], isLast: true, hasKids: false };
-                                        return __spreadArray(__spreadArray([], twigs.map(rowOf), true), [twigRowOf(closing, "rest-".concat(one.id), endedSummary(rest, runs), true, '', function () { return openWork($, one.id); })], false);
+                                        // A command that failed is counted on the closing row with the others that ended, never a row of its own (one stood among
+                                        // what still ran long after it failed) and never by name: which one, how and why is in Details and its log (19 Nov)
+                                        // (and the helpers that failed and have left the tree, counted too)
+                                        var onTree = new Set(twigs.flatMap(function (t) { return (!t.job && t.one ? [t.one.id] : []); }));
+                                        var lost = under.filter(function (kid) { return kid.status === 'failed' && !onTree.has(kid.id); }).map(function (kid) { return titleOf(kid); });
+                                        return __spreadArray(__spreadArray([], twigs.map(rowOf), true), [twigRowOf(closing, "rest-".concat(one.id), endedSummary(rest, runs, lost.length), true, '', function () { return openWork($, one.id); })], false);
                                     };
                                     return [4 /*yield*/, sessionName($)];
-                                case 26:
-                                    flowMine = _18.sent();
+                                case 23:
+                                    flowMine = _11.sent();
                                     return [4 /*yield*/, read($, flows)];
-                                case 27:
-                                    flowList = (_18.sent()).filter(function (f) { return isFlowShown(f, flowMine); });
+                                case 24:
+                                    flowList = (_11.sent()).filter(function (f) { return isFlowShown(f, flowMine); });
                                     runningFlows = flowList.filter(function (f) { return f.status === 'working'; });
                                     shownFlows = flowList.filter(function (f) { return f.status === 'working' || isLingering(f, at); });
                                     endedFlows = flowList.filter(function (f) { return f.status !== 'working' && !isLingering(f, at); });
@@ -1045,7 +1035,7 @@ var panelHooks = function (on) {
                                         var round = rounds.at(-1);
                                         if (f.status === 'working') {
                                             var one = round ? __spreadArray([], round.agents, true).reverse().find(function (agent) { return agent.status === 'working'; }) : undefined;
-                                            return one ? doing(one.phase || stageOf(f) || 'Working') : round ? 'Between stages' : 'Starting';
+                                            return one ? doing(one.phase || flowStageOf(f) || 'Working') : round ? 'Between stages' : 'Starting';
                                         }
                                         if (f.status === 'stopped')
                                             return 'Stopped';
@@ -1061,7 +1051,7 @@ var panelHooks = function (on) {
                                     };
                                     atWork = function (f, r) {
                                         var one = __spreadArray([], r.agents, true).reverse().find(function (agent) { return agent.status === 'working'; });
-                                        var phase = (one === null || one === void 0 ? void 0 : one.phase) || stageOf(f);
+                                        var phase = (one === null || one === void 0 ? void 0 : one.phase) || flowStageOf(f);
                                         if (!one)
                                             return 'between stages';
                                         if (phase === 'Make')
@@ -1141,7 +1131,7 @@ var panelHooks = function (on) {
                                         var count = Math.max(rounds.length, (_a = f.cap) !== null && _a !== void 0 ? _a : 0);
                                         var isPassed = f.status === 'done' && flowPassed(f, rounds) === true;
                                         var scope = "flow-".concat(f.id);
-                                        return (<Box key={"flow-".concat(f.id)} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isFlowMoment(f) && !isAbovePrompt ? { borderStyle: 'round', borderColor: DONE } : {})}>
+                                        return squareOutline(Box, isFlowMoment(f) && !isAbovePrompt ? DONE : undefined, "flow-".concat(f.id), (<Box key={"flow-".concat(f.id)} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
           {/* Blue while it runs, green only when it finished and its last round did not fail */}
           {f.status === 'working' || (f.status === 'done' && flowPassed(f, rounds) !== false) ? <Box width={1} flexShrink={0} backgroundColor={f.status === 'working' ? FLOW : DONE}/> : <Box width={1} flexShrink={0}/>}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
@@ -1174,11 +1164,11 @@ var panelHooks = function (on) {
             </Box>
             {flowEnd(f, rounds)}
           </Box>
-        </Box>);
+        </Box>));
                                     };
                                     flowOpen = flowShown ? pickedOf(flowShown) : undefined;
-                                    workId = paneId === LIST ? '' : flowShown ? "".concat(flowShown.id, ":").concat((_6 = flowOpen === null || flowOpen === void 0 ? void 0 : flowOpen.id) !== null && _6 !== void 0 ? _6 : '') : ((_8 = (_7 = __spreadArray(__spreadArray(__spreadArray([], all, true), elsewhere, true), helpersThere, true).find(function (one) { return workPaneOf(one.id) === paneId; })) === null || _7 === void 0 ? void 0 : _7.id) !== null && _8 !== void 0 ? _8 : '');
-                                    open = (_9 = folds.get(workId)) !== null && _9 !== void 0 ? _9 : [];
+                                    workId = paneId === LIST ? '' : flowShown ? "".concat(flowShown.id, ":").concat((_0 = flowOpen === null || flowOpen === void 0 ? void 0 : flowOpen.id) !== null && _0 !== void 0 ? _0 : '') : ((_2 = (_1 = __spreadArray(__spreadArray(__spreadArray([], all, true), elsewhere, true), helpersThere, true).find(function (one) { return workPaneOf(one.id) === paneId; })) === null || _1 === void 0 ? void 0 : _1.id) !== null && _2 !== void 0 ? _2 : '');
+                                    open = (_3 = folds.get(workId)) !== null && _3 !== void 0 ? _3 : [];
                                     fold = function (at) {
                                         var _a;
                                         presses += 1;
@@ -1253,10 +1243,14 @@ var panelHooks = function (on) {
         </Box>);
                                     };
                                     underTwig = function (t) {
-                                        var _a, _b, _c;
+                                        var _a, _b;
+                                        if (t.run || t.ended)
+                                            return null;
                                         if (t.job) {
                                             // (its row says it in plain words, so the last line is here as it was printed too)
-                                            var tail = t.job.id.startsWith('more-') ? [] : ((_a = t.job.tail) !== null && _a !== void 0 ? _a : []).slice(-OUTPUT_LINES);
+                                            // (a command's row says how it stands, and its log is a press on its name away: its last lines under it said the same
+                                            // thing twice, 19 Nov)
+                                            var tail = [];
                                             if (!tail.length)
                                                 return null;
                                             var inset_1 = canOpenJob(t.job) ? lead : 0;
@@ -1276,7 +1270,7 @@ var panelHooks = function (on) {
                                             return null;
                                         var kept = kid.items.filter(function (item) { return item.state !== 'dropped'; });
                                         var doing = kept.findIndex(function (item) { return item.state === 'doing'; });
-                                        var lines = [doing >= 0 ? "To-do ".concat(doing + 1, " of ").concat(kept.length, " \u00B7 ").concat((_c = (_b = kept[doing]) === null || _b === void 0 ? void 0 : _b.text) !== null && _c !== void 0 ? _c : '') : '', now(kid)].filter(Boolean);
+                                        var lines = [doing >= 0 ? "To-do ".concat(doing + 1, " of ").concat(kept.length, " \u00B7 ").concat((_b = (_a = kept[doing]) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : '') : '', now(kid)].filter(Boolean);
                                         if (!lines.length)
                                             return null;
                                         return (<Box key={"under-".concat(kid.id)} flexDirection="column" flexShrink={0}>
@@ -1291,33 +1285,19 @@ var panelHooks = function (on) {
                                         // Another chat's work has its helpers from that chat's file
                                         var list = one.chat ? helpersThere : all;
                                         var under = underOf(list, one.id);
-                                        var branches = __spreadArray(__spreadArray([], jobBranches(one, true), true), withJobs(branchesOf(list, one.id, function () { return true; }), true), true);
+                                        var branches = __spreadArray(__spreadArray(__spreadArray([], jobBranches(one, true), true), withAll(branchesOf(list, one.id, function () { return true; })), true), endedBranches(one), true);
                                         // (what one command left going counts as that one command, however many programs it is)
-                                        var jobs = __spreadArray([one], under, true).reduce(function (n, kid) { return n + jobsOf(kid, at).reduce(function (sum, job) { var _a; return sum + (leftCommandOf(job.id) ? 1 : ((_a = job.count) !== null && _a !== void 0 ? _a : 1)); }, 0); }, 0);
-                                        if (!under.length && !jobs)
+                                        var jobs = __spreadArray([one], under, true).reduce(function (n, kid) { return n + jobsOf(kid).reduce(function (sum, job) { var _a; return sum + ((_a = job.count) !== null && _a !== void 0 ? _a : 1); }, 0); }, 0);
+                                        var runs = endedRunsOf(one, list);
+                                        if (!under.length && !jobs && !runs.length)
                                             return null;
                                         var running = under.filter(function (kid) { return kid.status === 'working'; }).length;
                                         // Beside the jobs, the helpers are named, so neither count reads as the other's
                                         var helpers = running === under.length ? "".concat(running, " ").concat(running === 1 ? 'helper' : 'helpers', " working") : running ? "".concat(running, " of ").concat(under.length, " helpers working") : "".concat(under.length, " ").concat(under.length === 1 ? 'helper' : 'helpers');
-                                        var side = [jobs ? "".concat(jobs, " ").concat(jobs === 1 ? 'command' : 'commands', " running") : '', under.length ? helpers : ''].filter(Boolean).join(' · ');
-                                        return part('part-helpers', !jobs ? 'Helpers' : under.length ? 'Helpers and commands' : 'Commands', side, <Box flexDirection="column">{twigsOf(branches).flatMap(function (t) { return [t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)]; })}</Box>);
-                                    };
-                                    endedRunsPart = function (one) {
-                                        var runs = endedRunsOf(one, one.chat ? helpersThere : all).reverse();
-                                        if (!runs.length)
-                                            return null;
-                                        var isBad = function (run) { return run.how === 'failed' || run.how === 'killed' || run.how === 'timed out'; };
-                                        var bad = runs.filter(isBad).length;
-                                        return part('part-ended-runs', 'Commands ended', endedSummary(0, runs), <Box flexDirection="column">
-          {runs.map(function (run) { return (<Box key={"ended-".concat(run.id)} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
-              <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                <Text wrap="truncate-end">{describedOf(run.what).text || run.what || 'A command'}</Text>
-              </Box>
-              <Box flexShrink={0}>
-                <Text dimColor={!isBad(run)} color={isBad(run) ? NEEDS : undefined}>{"".concat(endedLine(run, took(run.endedAt - run.at)), " \u00B7 ").concat(shortAgo(at - run.endedAt), " ago")}</Text>
-              </Box>
-            </Box>); })}
-        </Box>);
+                                        // (and the commands that ended, with how many of them failed: each is a row under the one that started it)
+                                        var failed = runs.filter(function (run) { return run.how === 'failed'; }).length;
+                                        var side = [jobs ? "".concat(jobs, " ").concat(jobs === 1 ? 'command' : 'commands', " running") : '', failed ? "".concat(failed, " failed") : '', under.length ? helpers : ''].filter(Boolean).join(' · ');
+                                        return part('part-helpers', !jobs && !runs.length ? 'Helpers' : under.length ? 'Helpers and commands' : 'Commands', side, <Box flexDirection="column">{twigsOf(branches).flatMap(function (t) { return [t.ended ? endedGroupRow(t) : t.run ? endedRow(t) : t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)]; })}</Box>);
                                     };
                                     talk = function (one, lines, shots) {
                                         // The pictures a run of steps made, under its row whether it is open or not: each drawn small where the panel can, with
@@ -1376,7 +1356,7 @@ var panelHooks = function (on) {
                                                 // The long brief the work began with is one quiet row until pressed: "Started from" above already gives the person's words
                                                 if (i === 0 && (first === null || first === void 0 ? void 0 : first.kind) === 'told' && isLong && !isOpen)
                                                     return (<Box key={"talk-".concat(i)} alignItems="flex-start">
-                  <Button key={"told-".concat(at, "-").concat(presses)} label="▸ The instructions Claude was given" plain dimColor onPress={function () { return fold(-at - 1); }}/>
+                  <Button key={"told-".concat(at, "-").concat(presses)} label="▸ The task's instructions" plain dimColor onPress={function () { return fold(-at - 1); }}/>
                 </Box>);
                                                 return (<Box key={"talk-".concat(i)} flexDirection="column" alignItems="flex-start" backgroundColor={FILL} paddingX={2} paddingY={1}>
                 {(first === null || first === void 0 ? void 0 : first.kind) === 'steer' ? <Text dimColor>{first.isWaiting ? 'You · not yet answered' : 'You'}</Text> : null}
@@ -1404,7 +1384,7 @@ var panelHooks = function (on) {
         </Box>);
                                     };
                                     big = function (one, lines) {
-                                        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+                                        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s;
                                         var showing = lines ? newest(lines).length : 0;
                                         var parent = one.parentId ? __spreadArray(__spreadArray(__spreadArray([], all, true), elsewhere, true), helpersThere, true).find(function (card) { return card.id === one.parentId; }) : undefined;
                                         return (<Box key={"todo-".concat(one.id)} flexDirection="column" gap={1} flexGrow={1}>
@@ -1422,98 +1402,50 @@ var panelHooks = function (on) {
                   <Text dimColor wrap="wrap">{"From the chat \"".concat(chatName(one.chat), "\"").concat(chatSide(one.chat, selfName()) ? ", ".concat(chatSide(one.chat, selfName())) : '')}</Text>
                   {openTheirs(one, one.chat)}
                 </Box>) : null}
-              {(one.status === 'working' && !one.chat) || left(one) || (one.status === 'stopped' && one.byYou && !one.chat) ? (<Box flexDirection="row" flexWrap="wrap" gap={1}>
+              {(one.status === 'working' && !one.chat) || left(one) || ((one.status === 'failed' || (one.status === 'stopped' && one.byYou)) && !one.chat) ? (<Box flexDirection="row" flexWrap="wrap" gap={1}>
                   {one.status === 'working' && !one.chat ? <Button key={"stop-".concat(one.id)} label="Stop" onPress={function () { return void stop($, one.id); }}/> : null}
-                  {/* Work the person stopped stays stopped until they start it again from here or ask in a message */}
-                  {one.status === 'stopped' && one.byYou && !one.chat ? <Button key={"again-".concat(one.id, "-").concat(presses)} label="Start again" onPress={function () { return ((presses += 1), void startAgain($, one.id)); }}/> : null}
+                  {/* Work the person stopped, or that failed, stays so until they start it again from here or ask in a message */}
+                  {(one.status === 'failed' || (one.status === 'stopped' && one.byYou)) && !one.chat ? <Button key={"again-".concat(one.id, "-").concat(presses)} label="Start again" onPress={function () { return ((presses += 1), void startAgain($, one.id)); }}/> : null}
                   {left(one) ? <Button key={"artifact-".concat(one.id, "-").concat(presses)} label="Result" onPress={function () { var _a, _b; return void openReport($, (_b = (_a = left(one)) === null || _a === void 0 ? void 0 : _a.id) !== null && _b !== void 0 ? _b : ''); }}/> : null}
                 </Box>) : null}
             </Box>
           </Box>
           {/* What it made, right under its title, while it works and once it is done */}
-          {((_a = madeNow($, one)) === null || _a === void 0 ? void 0 : _a.made.length) || ((_b = madeNow($, one)) === null || _b === void 0 ? void 0 : _b.code) ? part('part-files', 'Files', '', (_d = madeTiles($, table, (_c = madeNow($, one)) !== null && _c !== void 0 ? _c : { made: [] }, paneId, "files-".concat(one.id), e.surface)) !== null && _d !== void 0 ? _d : <Box />) : null}
-          {((_e = one.admins) === null || _e === void 0 ? void 0 : _e.length) || cardNotesOf(one.id, at).length ? (<Box key="part-gates" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-              <Box width={1} flexShrink={0} backgroundColor={NEEDS}/>
-              <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-                <Text bold dimColor>Waiting for you</Text>
-                {adminBlock($, table, one, "gates-big-".concat(one.id), at)}
-              </Box>
-            </Box>) : null}
-          {runningOn(one.id).length && !one.chat ? (<Box key="part-runs" flexDirection="column" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
-              {runBlock($, table, one, "runs-big-".concat(one.id), at)}
-            </Box>) : null}
-          {one.ask ? (<Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
+          {((_a = madeNow($, one)) === null || _a === void 0 ? void 0 : _a.made.length) || ((_b = madeNow($, one)) === null || _b === void 0 ? void 0 : _b.code) ? part('part-files', 'Files', '', (_d = madeTiles($, table, (_c = madeNow($, one)) !== null && _c !== void 0 ? _c : { made: [] }, paneId, "files-".concat(one.id), one.id, e.surface)) !== null && _d !== void 0 ? _d : <Box />) : null}
+          {needsFor(one).length ? (<Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE}/>
               <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-                <Text bold dimColor>{needsPerson(one) ? 'Waiting for you' : 'Claude is working on your reply'}</Text>
-                {askBlock(one, "ask-big-".concat(one.id), true)}
+                {needBlocks(one, true)}
               </Box>
-            </Box>) : sentLine(one, at) ? (<Box key="part-answered" flexDirection="row" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
-              <Box flexDirection="column" gap={1} minWidth={0}>
-                <Text dimColor wrap="wrap">{sentLine(one, at)}</Text>
-                {canTakeBack(one, at) ? <Button key={"take-back-big-".concat(one.id, "-").concat((_g = (_f = heldAnswer(one, at)) === null || _f === void 0 ? void 0 : _f.at) !== null && _g !== void 0 ? _g : 0)} label={"\u21B6 Take back \u201C".concat(cut((_j = (_h = heldAnswer(one, at)) === null || _h === void 0 ? void 0 : _h.text) !== null && _j !== void 0 ? _j : '', 30), "\u201D")} plain onPress={function () { var _a, _b; return void ((presses += 1), takeBack($, one, (_b = (_a = heldAnswer(one, at)) === null || _a === void 0 ? void 0 : _a.at) !== null && _b !== void 0 ? _b : 0).catch(function (err) { return log($, "answer not taken back: ".concat(String(err))); })); }}/> : null}
+            </Box>) : null}
+          {runsShownOn(one, at).length && !one.chat ? (<Box key="part-runs" flexDirection="column" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
+              {runBlock($, table, one, "runs-big-".concat(one.id), at)}
+            </Box>) : null}
+          {/* The question just answered, whole, and the answer whole under it (what the small card's grey line opens) */}
+          {!one.ask && sentLine(one, at) ? (<Box key="part-answered" flexDirection="column" gap={1} backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
+              {((_e = sentReplies.get(one.id)) === null || _e === void 0 ? void 0 : _e.ask) && ((_f = sentReplies.get(one.id)) === null || _f === void 0 ? void 0 : _f.ask) !== CHANGE_WHAT ? (<Box key="answered-question" flexDirection="column" gap={1} minWidth={0}>
+                  <Text dimColor>Question</Text>
+                  <Text wrap="wrap" bold>{(_h = (_g = sentReplies.get(one.id)) === null || _g === void 0 ? void 0 : _g.ask) !== null && _h !== void 0 ? _h : ''}</Text>
+                  {((_j = sentReplies.get(one.id)) === null || _j === void 0 ? void 0 : _j.details) ? <Markdown text={(_l = (_k = sentReplies.get(one.id)) === null || _k === void 0 ? void 0 : _k.details) !== null && _l !== void 0 ? _l : ''}/> : null}
+                </Box>) : null}
+              <Box flexDirection="row" gap={2} minWidth={0}>
+                <Text dimColor wrap="wrap">{sentLine(one, at, Infinity)}</Text>
+                {canTakeBack(one, at) ? <Button key={"take-back-big-".concat(one.id, "-").concat((_o = (_m = heldAnswer(one, at)) === null || _m === void 0 ? void 0 : _m.at) !== null && _o !== void 0 ? _o : 0)} label="Take back" plain onPress={function () { var _a, _b; return void ((presses += 1), takeBack($, one, (_b = (_a = heldAnswer(one, at)) === null || _a === void 0 ? void 0 : _a.at) !== null && _b !== void 0 ? _b : 0).catch(function (err) { return log($, "answer not taken back: ".concat(String(err))); })); }}/> : null}
               </Box>
             </Box>) : null}
           {resultPart(one)}
+          {stage(one) === 'delivered' && ((_p = one.questions) === null || _p === void 0 ? void 0 : _p.length) ? part('part-questions', 'Questions', '', (_q = questionLines(one, 'asks-whole', 0)) !== null && _q !== void 0 ? _q : <Box />) : null}
           {one.words ? askPart(one) : null}
           {todoPart(one)}
           {helpersPart(one)}
-          {endedRunsPart(one)}
           {one.chat && !lines && (talks.has(one.id) || one.chat.host)
                                                 ? part('part-chat', 'Conversation', '', theirChat(one, one.chat))
-                                                : part('part-chat', 'Conversation', lines && showing < lines.length ? "last ".concat(showing, " lines") : '', talks.has(one.id) ? talk(one, lines, (_l = (_k = shots.get(one.id)) === null || _k === void 0 ? void 0 : _k.shots) !== null && _l !== void 0 ? _l : new Map()) : <Text dimColor>Reading the conversation…</Text>)}
+                                                : part('part-chat', 'Conversation', lines && showing < lines.length ? "last ".concat(showing, " lines") : '', talks.has(one.id) ? talk(one, lines, (_s = (_r = shots.get(one.id)) === null || _r === void 0 ? void 0 : _r.shots) !== null && _s !== void 0 ? _s : new Map()) : <Text dimColor>Reading the conversation…</Text>)}
+          {/* At the bottom, under its conversation, a box to write to it, for a task of this chat's that works or has finished and
+                                                asks nothing (one that asks is answered in its block above): the same message as the box Message opens above the chat */}
+          {canChange(one) && 'Input' in table ? <Box key="message-gap" flexGrow={1}/> : null}
+          {canChange(one) && 'Input' in table ? part('part-message', 'Message', '', messageBox($, table, one, paneId)) : null}
         </Box>);
-                                    };
-                                    promptButtons = function (p, key) {
-                                        var press = function (said) { return function () { return void (answerPrompt($, p.id, said), redraw($)); }; };
-                                        return (<Box key={"prompt-buttons-".concat(key)} flexDirection="row" gap={1}>
-          <Button key={"prompt-yes-".concat(key, "-").concat(presses)} label="Yes" variant="primary" onPress={press('yes')}/>
-          <Button key={"prompt-no-".concat(key, "-").concat(presses)} label="No" onPress={press('no')}/>
-        </Box>);
-                                    };
-                                    isHeldHere = function (p, c) { return Boolean(!c && p.isHeld && promptHeld.has(p.id)); };
-                                    promptCard = function (p, key, where, c, isOnCard) {
-                                        if (isOnCard === void 0) { isOnCard = false; }
-                                        return (<Box key={"prompt-".concat(key)} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
-        <Box flexDirection="column">
-          <Text dimColor wrap="truncate-end">{"".concat(p.kind === 'question' ? 'Question' : p.kind === 'plan' ? 'Plan' : 'Permission', " \u00B7 ").concat(isHeldHere(p, c) || !c ? 'waiting for you' : 'waiting in another chat')}</Text>
-          {isOnCard ? null : <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>}
-          {/* At the top, away from its chat's name: which chat it is */}
-          {c ? <Text key={"prompt-".concat(key, "-chat")} dimColor wrap="truncate-end">{"In the chat \u201C".concat(chatName(c), "\u201D").concat(c.host ? " on ".concat(macName(c.host)) : '')}</Text> : null}
-          <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Has a question for you' : p.kind === 'plan' ? 'Wants you to approve its plan' : 'Needs your permission'}</Text>
-        </Box>
-        <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
-        {p.detail ? (<Box backgroundColor={FILL} paddingLeft={2} paddingRight={1}>
-            <Text mono wrap="wrap">{p.detail}</Text>
-          </Box>) : null}
-        {p.yes || p.no ? (<Box flexDirection="column">
-            {p.yes ? <Text wrap="wrap">{p.yes}</Text> : null}
-            {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
-          </Box>) : null}
-        {isHeldHere(p, c) ? promptButtons(p, key) : <Text dimColor wrap="wrap">{where}</Text>}
-        {c && pressOf(c) && !isHeldHere(p, c) ? (<Box flexDirection="row">
-            <Button key={"prompt-open-".concat(key, "-").concat(presses)} label="Open that chat" onPress={function () { return void ((presses += 1), openChat($, c).catch(function (err) { return log($, "chat not opened: ".concat(String(err))); })); }}/>
-          </Box>) : null}
-      </Box>);
-                                    };
-                                    answerHere = function (p) { return (p.kind === 'question' ? 'Pick your answer in the box at the bottom of this chat.' : 'Answer Yes or No in the box at the bottom of this chat.'); };
-                                    saidOf = function (p) {
-                                        var _a;
-                                        if (p.answered === 'stopped')
-                                            return 'It ended before you answered · nothing happened';
-                                        if (p.answered === 'no')
-                                            return p.kind === 'question' ? 'You skipped it · Claude got no answer and is waiting for you' : p.kind === 'plan' ? 'You said no · Claude keeps planning' : p.title ? "You said no · it didn't run, and Claudopus told Claude" : "You said no · it didn't run, and Claude is waiting for what you say next";
-                                        if (p.kind === 'question')
-                                            return p.isRunning ? 'You answered · Claude has your answer' : 'You answered · Claude is continuing with your answer';
-                                        if (p.kind === 'plan')
-                                            return 'You approved the plan · Claude is carrying it out';
-                                        if (p.isCut)
-                                            return 'You allowed it · it stopped before it finished';
-                                        return p.isRunning ? 'You allowed it · it is running now' : "You allowed it \u00B7 ".concat((_a = p.done) !== null && _a !== void 0 ? _a : 'it ran and is done');
-                                    };
-                                    answeredCard = function (p, key, c, isOnCard) {
-                                        if (isOnCard === void 0) { isOnCard = false; }
-                                        return reportLine(table, "answered-".concat(key), p.answered !== 'no' && p.answered !== 'stopped' && !p.isCut, saidOf(p), isOnCard ? [p.text] : [p.title || (c ? 'That chat itself' : 'This chat itself'), p.text]);
                                     };
                                     chatHead = function (key, name, side, c) {
                                         var url = c ? pressOf(c) : '';
@@ -1533,10 +1465,10 @@ var panelHooks = function (on) {
         </Box>);
                                     };
                                     left = function (one) { return kept.filter(function (r) { return r.agent === one.id; }).sort(function (a, b) { return b.at - a.at; })[0]; };
-                                    endedElsewhere = elsewhere.filter(function (one) { return one.status !== 'working' && !one.ask && !lingers(one, at) && !isVanished(one.id); });
-                                    shownOf = function (c) { return elsewhere.filter(function (one) { var _a; return ((_a = one.chat) === null || _a === void 0 ? void 0 : _a.id) === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)); }); };
-                                    listedChats = otherChats.filter(function (c) { var _a; return shownOf(c).length || ((_a = c.prompts) === null || _a === void 0 ? void 0 : _a.length) || answeredOf(c.answeredPrompts).length; });
-                                    finished = __spreadArray(__spreadArray([], own.filter(function (one) { return isDismissed(one) || (one.status !== 'working' && !isLingering(one, at) && !one.ask && !resultWaits(one).length && !isLeftStopped(one, at) && !isLeftOpen(one, at)); }), true), endedElsewhere, true).sort(function (a, b) { return b.endedAt - a.endedAt; });
+                                    endedElsewhere = elsewhere.filter(function (one) { return stageOf(elsewhere, one) !== 'working' && stageOf(elsewhere, one) !== 'waiting' && !lingers(one, at) && !isVanished(one.id); });
+                                    shownOf = function (c) { return elsewhere.filter(function (one) { var _a; return ((_a = one.chat) === null || _a === void 0 ? void 0 : _a.id) === c.chat && one.chat.host === c.host && (stageOf(elsewhere, one) === 'working' || stageOf(elsewhere, one) === 'waiting' || lingers(one, at)); }); };
+                                    listedChats = otherChats.filter(function (c) { var _a; return shownOf(c).length || ((_a = c.prompts) === null || _a === void 0 ? void 0 : _a.length); });
+                                    finished = __spreadArray(__spreadArray([], own.filter(function (one) { return one.status !== 'working' && !shownWork.some(function (up) { return up.id === one.id; }); }), true), endedElsewhere, true).sort(function (a, b) { return b.endedAt - a.endedAt; });
                                     finishedPart = function (isOpen) {
                                         return finished.length || endedFlows.length ? (<Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
           <Box flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1}>
@@ -1553,7 +1485,7 @@ var panelHooks = function (on) {
                                     flowBig = function (f, picked, lines) {
                                         var _a, _b, _c, _d;
                                         var rounds = roundsOf(f);
-                                        var current = stageOf(f);
+                                        var current = flowStageOf(f);
                                         var agentRow = function (one) {
                                             var _a;
                                             var isPicked = (picked === null || picked === void 0 ? void 0 : picked.id) === one.id;
@@ -1626,24 +1558,24 @@ var panelHooks = function (on) {
           {f.status !== 'working' && f.result ? part('part-result', 'Result', '', <Markdown text={f.result}/>) : null}
         </Box>);
                                     };
-                                    if (!paneId.startsWith(FLOW_PANE)) return [3 /*break*/, 31];
+                                    if (!paneId.startsWith(FLOW_PANE)) return [3 /*break*/, 28];
                                     if (!flowShown)
                                         return [2 /*return*/, <Text dimColor>This workflow is no longer available.</Text>];
                                     picked = pickedOf(flowShown);
-                                    if (!picked) return [3 /*break*/, 29];
+                                    if (!picked) return [3 /*break*/, 26];
                                     return [4 /*yield*/, flowTalkOf($, flowShown, picked).catch(function () { return undefined; })];
-                                case 28:
-                                    _o = _18.sent();
-                                    return [3 /*break*/, 30];
-                                case 29:
-                                    _o = undefined;
-                                    _18.label = 30;
-                                case 30:
-                                    lines = _o;
+                                case 25:
+                                    _m = _11.sent();
+                                    return [3 /*break*/, 27];
+                                case 26:
+                                    _m = undefined;
+                                    _11.label = 27;
+                                case 27:
+                                    lines = _m;
                                     return [2 /*return*/, (<Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
           {flowBig(flowShown, picked, lines)}
         </Box>)];
-                                case 31:
+                                case 28:
                                     alone = __spreadArray(__spreadArray(__spreadArray([], all, true), elsewhere, true), helpersThere, true).find(function (one) { return one.id === workId; });
                                     if (paneId !== LIST && !alone)
                                         return [2 /*return*/, <Text dimColor>{paneId.startsWith("".concat(WORK_PANE, "r-")) ? 'This task is done, or its chat is closed. Open that chat to see it.' : 'This task is no longer available.'}</Text>
@@ -1658,51 +1590,14 @@ var panelHooks = function (on) {
                                         void (alone.chat ? loadTheirs($, alone) : loadWork($, alone.id)).catch(function () { return undefined; });
                                     talked = alone ? talks.get(alone.id) : undefined;
                                     return [4 /*yield*/, read($, reports)];
-                                case 32:
-                                    kept = _18.sent();
+                                case 29:
+                                    kept = _11.sent();
                                     ui = uiOf($, e);
                                     isInline = e.surface === 'terminal' && e.props.placement === 'inline';
-                                    shownIds = new Set(shownWork.map(function (one) { return one.id; }));
-                                    cardOfAgent = function (agent) {
-                                        var id = agent ? topOf(all, agent) : '';
-                                        return id && shownIds.has(id) ? id : '';
-                                    };
-                                    keysHeld = e.surface === 'terminal' && Boolean(keysAsk && hasDraft(keysAsk));
-                                    onCards = new Map();
-                                    putOnCard = function (card, row) { var _a; return void onCards.set(card, __spreadArray(__spreadArray([], ((_a = onCards.get(card)) !== null && _a !== void 0 ? _a : []), true), [row], false)); };
-                                    for (_p = 0, _q = boxRows($, ui, keysHeld, e.surface, function (one) { return Boolean(cardOfAgent(one.agent)); }, true); _p < _q.length; _p++) {
-                                        row_1 = _q[_p];
-                                        putOnCard(cardOfAgent(row_1.one.agent), { at: row_1.at, key: "box-".concat(row_1.one.id), what: boxHead(row_1.one.text), node: row_1.node });
-                                    }
-                                    startedCard = function (p) {
-                                        var _a, _b, _c, _d;
-                                        if (p.agent || (p.tool !== 'Agent' && p.tool !== 'Task') || p.answered === 'no' || p.answered === 'stopped')
-                                            return '';
-                                        var words = oneLine((_b = (_a = p.input) === null || _a === void 0 ? void 0 : _a.description) !== null && _b !== void 0 ? _b : '');
-                                        var begun = shownWork.filter(function (one) { return !one.chat && oneLine(titleOf(one)) === words && one.startedAt >= p.at - 5000; }).sort(function (a, b) { return a.startedAt - b.startedAt; });
-                                        return (_d = (_c = begun[0]) === null || _c === void 0 ? void 0 : _c.id) !== null && _d !== void 0 ? _d : '';
-                                    };
-                                    doneOnCards = new Map();
-                                    for (_r = 0, promptsAnswered_1 = promptsAnswered; _r < promptsAnswered_1.length; _r++) {
-                                        p = promptsAnswered_1[_r];
-                                        card = cardOfAgent(p.agent) || startedCard(p);
-                                        if (card)
-                                            doneOnCards.set(card, __spreadArray(__spreadArray([], ((_10 = doneOnCards.get(card)) !== null && _10 !== void 0 ? _10 : []), true), [{ at: p.at, key: "answered-".concat(p.id), node: answeredCard(p, "this-".concat(p.id), undefined, true) }], false));
-                                    }
-                                    promptsLoose = promptsAnswered.filter(function (p) { return !cardOfAgent(p.agent) && !startedCard(p); });
-                                    for (_s = 0, _t = waiting.filter(function (p) { return cardOfAgent(p.agent); }); _s < _t.length; _s++) {
-                                        p = _t[_s];
-                                        putOnCard(cardOfAgent(p.agent), { at: p.at, key: "prompt-".concat(p.id), what: p.text, node: promptCard(p, "this-".concat(p.id), answerHere(p), undefined, true) });
-                                    }
-                                    notices = __spreadArray(__spreadArray(__spreadArray(__spreadArray([], boxRows($, ui, keysHeld, e.surface, function (one) { return !cardOfAgent(one.agent); }).map(function (row) { return ({ at: row.at, what: boxHead(row.one.text), node: row.node }); }), true), looseGates.map(function (gate) { return ({ at: gate.at, what: gateWhat(gate), node: gateRow($, ui, gate, "gate-".concat(gate.id), false) }); }), true), waiting.filter(function (p) { return !cardOfAgent(p.agent); }).map(function (p) { return ({ at: p.at, what: p.text, node: promptCard(p, "this-".concat(p.id), answerHere(p)) }); }), true), otherChats.flatMap(function (c) {
-                                        var _a;
-                                        var url = pressOf(c);
-                                        return ((_a = c.prompts) !== null && _a !== void 0 ? _a : []).map(function (p) { return ({ at: p.at, what: p.text, node: promptCard(p, "".concat(c.host, "-").concat(c.chat, "-").concat(p.id), c.host && !url ? "Answer it in that chat, on ".concat(macName(c.host)) : c.host ? "Answer it in that chat, which runs on ".concat(macName(c.host)) : 'Answer it in that chat', c) }); });
-                                    }), true);
+                                    notices = looseNeeds($, e.surface, function (card) { return Boolean(card && shownIds.has(card)); }, otherChats, !keysHeldNow()).map(function (need) { return ({ at: need.at, what: need.text, node: needBlock($, ui, need, { room: room, surface: e.surface }) }); });
                                     isAsking = function (one) { return Boolean(one.ask) && !isActingOnReply(one); };
-                                    isWaitingPress = function (one) { var _a; return one.status === 'working' && Boolean((_a = one.admins) === null || _a === void 0 ? void 0 : _a.length); };
-                                    ownCount = function (one) { var _a, _b; return (one.chat ? 0 : ((_b = (_a = onCards.get(one.id)) === null || _a === void 0 ? void 0 : _a.length) !== null && _b !== void 0 ? _b : 0)); };
-                                    waitsOn = function (one) { var _a; return (isAsking(one) ? 1 : 0) + resultWaits(one).length + (isWaitingPress(one) ? ((_a = one.admins) !== null && _a !== void 0 ? _a : []).filter(function (gate) { return !gatePressed.has(gate.id); }).length : 0) + ownCount(one); };
+                                    waiting2 = function (one) { return needsFor(one).filter(function (need) { return !need.isActing; }); };
+                                    waitsOn = function (one) { return waiting2(one).length; };
                                     isOpen = function (one) { return waitsOn(one) > 0; };
                                     answeredSince = function (one) {
                                         var _a, _b;
@@ -1714,22 +1609,22 @@ var panelHooks = function (on) {
                                     isOpenHere = notices.length > otherChats.reduce(function (n, c) { var _a, _b; return n + ((_b = (_a = c.prompts) === null || _a === void 0 ? void 0 : _a.length) !== null && _b !== void 0 ? _b : 0); }, 0) || shownWork.some(isOpen);
                                     isKeptPlace = function (one) { var _a; return topPlaces.has(placeKey(one)) && (isOpenHere || at - ((_a = topClosed.get(placeKey(one))) !== null && _a !== void 0 ? _a : at) < KEPT_MOST); };
                                     isWaits = function (one) { return isOpen(one) || answeredSince(one) > 0 || (isAnyOpen && isKeptPlace(one)); };
-                                    isKeptUp = function (one) { return isWaits(one) || (!one.chat && cardNotesOf(one.id, at).length > 0 && isKeptPlace(one)); };
-                                    cameAt = function (one) { var _a, _b, _c, _d; return Math.min.apply(Math, __spreadArray(__spreadArray([isAsking(one) ? ((_b = (_a = one.ask) === null || _a === void 0 ? void 0 : _a.at) !== null && _b !== void 0 ? _b : Infinity) : Infinity, resultWaits(one).length ? one.endedAt : Infinity], (isWaitingPress(one) ? (_c = one.admins) !== null && _c !== void 0 ? _c : [] : []).map(function (gate) { return gate.at; }), false), (one.chat ? [] : ((_d = onCards.get(one.id)) !== null && _d !== void 0 ? _d : []).map(function (row) { return row.at; })), false)); };
+                                    isKeptUp = function (one) { return isWaits(one); };
+                                    cameAt = function (one) { return Math.min.apply(Math, __spreadArray(__spreadArray([], waiting2(one).map(function (need) { return need.at; }), false), [Infinity], false)); };
                                     placeOf = function (one) { var _a; return (_a = topPlaces.get(placeKey(one))) !== null && _a !== void 0 ? _a : (Number.isFinite(cameAt(one)) ? cameAt(one) : answeredPlace(one) || at); };
                                     isFinishing = function (one) { return !isWaits(one) && isFinishMoment(one); };
                                     finishFrom = function (one) { var _a; return (one.chat ? ((_a = endSeen.get("".concat(one.id, ":").concat(one.endedAt))) !== null && _a !== void 0 ? _a : one.endedAt) : pauseFrom(one)); };
-                                    isLeftUp = function (one) { return !one.chat && one.status !== 'working' && Boolean(one.leftSince) && !isWaits(one) && !isFinishing(one); };
-                                    isUp = function (one) { return isWaits(one) || isFinishing(one) || isLeftUp(one) || (!one.chat && (cardNotesOf(one.id, at).length > 0 || runningOn(one.id).length > 0)); };
-                                    upSince = function (one) { return Math.max.apply(Math, __spreadArray(__spreadArray(__spreadArray([], (one.chat ? [] : runningOn(one.id).map(function (run) { var _a; return (_a = run.startedAt) !== null && _a !== void 0 ? _a : 0; })), false), (one.chat ? [] : cardNotesOf(one.id, at).map(function (note) { return note.at; })), false), [0], false)); };
+                                    isLeftUp = function (one) { var _a; return !one.chat && hasResult(stage(one)) && Boolean((_a = one.bg) === null || _a === void 0 ? void 0 : _a.length) && !isWaits(one) && !isFinishing(one); };
+                                    isUp = function (one) { return isWaits(one) || isFinishing(one) || isLeftUp(one) || (!one.chat && runningOn(one.id).length > 0); };
+                                    upSince = function (one) { return Math.max.apply(Math, __spreadArray(__spreadArray([], (one.chat ? [] : runningOn(one.id).map(function (run) { var _a; return (_a = run.startedAt) !== null && _a !== void 0 ? _a : 0; })), false), [0], false)); };
                                     askingHere = shownWork.filter(isUp);
                                     askingThere = listedChats.flatMap(function (c) { return shownOf(c).filter(isUp); });
                                     askCards = __spreadArray(__spreadArray([], askingHere, true), askingThere, true);
                                     // The places kept: set as a card comes up among what waits, dropped as it leaves
                                     if (paneId === LIST) {
-                                        waitingNow_1 = new Set(askCards.filter(isKeptUp).map(placeKey));
-                                        for (_u = 0, askCards_1 = askCards; _u < askCards_1.length; _u++) {
-                                            one = askCards_1[_u];
+                                        waitingNow = new Set(askCards.filter(isKeptUp).map(placeKey));
+                                        for (_o = 0, askCards_1 = askCards; _o < askCards_1.length; _o++) {
+                                            one = askCards_1[_o];
                                             key = placeKey(one);
                                             if (!topPlaces.has(key))
                                                 continue;
@@ -1738,100 +1633,103 @@ var panelHooks = function (on) {
                                                     topClosed.set(key, at);
                                             }
                                             else if (topClosed.has(key))
-                                                (((_11 = topClosed.get(key)) !== null && _11 !== void 0 ? _11 : 0) <= cameAt(one) ? topPlaces.set(key, cameAt(one)) : undefined, topClosed.delete(key));
+                                                (((_4 = topClosed.get(key)) !== null && _4 !== void 0 ? _4 : 0) <= cameAt(one) ? topPlaces.set(key, cameAt(one)) : undefined, topClosed.delete(key));
                                         }
-                                        for (_v = 0, _w = askCards.filter(isWaits); _v < _w.length; _v++) {
-                                            one = _w[_v];
+                                        for (_p = 0, _q = askCards.filter(isWaits); _p < _q.length; _p++) {
+                                            one = _q[_p];
                                             if (!topPlaces.has(placeKey(one)))
                                                 topPlaces.set(placeKey(one), placeOf(one));
                                         }
-                                        for (_x = 0, _y = __spreadArray([], topPlaces.keys(), true); _x < _y.length; _x++) {
-                                            key = _y[_x];
-                                            if (!waitingNow_1.has(key))
+                                        for (_r = 0, _s = __spreadArray([], topPlaces.keys(), true); _r < _s.length; _r++) {
+                                            key = _s[_r];
+                                            if (!waitingNow.has(key))
                                                 (topPlaces.delete(key), topClosed.delete(key));
                                         }
                                     }
                                     restHere = shownWork.filter(function (one) { return !isUp(one); });
+                                    isHandedIn = function (one) { return stage(one) === 'delivered' || isDoneMoment(one, at); };
                                     restFlows = shownFlows.filter(function (f) { return !isFlowMoment(f); });
                                     begun = function (one) { var _a; return (_a = one.begunAt) !== null && _a !== void 0 ? _a : one.startedAt; };
                                     finishingFlows = shownFlows.filter(isFlowMoment);
-                                    whatOf = function (one) { var _a, _b, _c, _d, _e, _f, _g, _h; return (isAsking(one) ? oneLine((_b = (_a = one.ask) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : '') : resultWaits(one)[0] ? oneLine((_d = (_c = resultWaits(one)[0]) === null || _c === void 0 ? void 0 : _c.wait.text) !== null && _d !== void 0 ? _d : '') : ((_g = (_f = (_e = onCards.get(one.id)) === null || _e === void 0 ? void 0 : _e[0]) === null || _f === void 0 ? void 0 : _f.what) !== null && _g !== void 0 ? _g : (((_h = one.admins) === null || _h === void 0 ? void 0 : _h[0]) ? gateWhat(one.admins[0]) : ''))); };
-                                    top = __spreadArray(__spreadArray(__spreadArray([], notices.map(function (one) { return ({ rank: 0, at: one.at, what: one.what, draw: function () { return one.node; } }); }), true), askCards.map(function (one) { return (isKeptUp(one) ? { rank: 0, at: placeOf(one), what: isOpen(one) ? whatOf(one) : '', draw: function () { return small(one); } } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: function () { return small(one); } } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: function () { return small(one); } }); }), true), finishingFlows.map(function (f) { return ({ rank: 1, at: -pauseFrom(f), what: '', draw: function () { return flowSmall(f); } }); }), true).sort(function (a, b) { return a.rank - b.rank || a.at - b.at; });
+                                    whatOf = function (one) { var _a, _b; return (waiting2(one)[0] ? "".concat(cut(titleOf(one), 40), ": ").concat(oneLine((_b = (_a = waiting2(one)[0]) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : '')) : ''); };
+                                    top = __spreadArray(__spreadArray(__spreadArray([], notices.map(function (one) { return ({ rank: 0, at: one.at, what: one.what, draw: function () { return one.node; } }); }), true), askCards.map(function (one) { return (isKeptUp(one) ? { rank: isOpen(one) ? 0 : 0.5, at: placeOf(one), what: isOpen(one) ? whatOf(one) : '', draw: function () { return small(one); } } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: function () { return small(one); } } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: function () { return small(one); } }); }), true), finishingFlows.map(function (f) { return ({ rank: 1, at: -pauseFrom(f), what: '', draw: function () { return flowSmall(f); } }); }), true).sort(function (a, b) { return a.rank - b.rank || a.at - b.at; });
                                     waitsCount = notices.length + askCards.reduce(function (n, one) { return n + waitsOn(one); }, 0);
                                     keptUpNow = new Set(askCards.filter(isKeptUp).map(function (one) { return one.id; }));
                                     // The terminal's keys stay with the ask they were on while it waits
                                     if (keysAsk && !askingHere.some(function (one) { return one.id === keysAsk && isAsking(one); }))
                                         keysAsk = '';
-                                    runningThere = elsewhere.filter(function (one) { return one.status === 'working' && !needsPerson(one); });
+                                    runningThere = elsewhere.filter(function (one) { return stageOf(elsewhere, one) === 'working'; });
                                     head = {
-                                        here: working.filter(function (one) { return !needsPerson(one); }).length + runningFlows.length,
+                                        here: own.filter(function (one) { return stage(one) === 'working'; }).length + runningFlows.length,
+                                        // (what was handed in and waits for the person's look, counted after what works)
+                                        delivered: shownWork.filter(function (one) { return stage(one) === 'delivered'; }).length,
                                         there: runningThere.length,
                                         chats: new Set(runningThere.map(function (one) { var _a, _b; return "".concat((_a = one.chat) === null || _a === void 0 ? void 0 : _a.host, "/").concat((_b = one.chat) === null || _b === void 0 ? void 0 : _b.id); })).size,
                                         // Each thing at the top counts once, as the line above the prompt counts them
                                         asks: waitsCount,
-                                        isDone: isHappy(own.filter(function (one) { return !one.leftOpen && !resultWaits(one).length; }), at) || elsewhere.some(function (one) { return one.status === 'done' && lingers(one, at); }) || flowList.some(isFlowMoment),
+                                        isDone: isHappy(own, at) || elsewhere.some(function (one) { return hasResult(stageOf(elsewhere, one)) && lingers(one, at); }) || flowList.some(isFlowMoment),
                                     };
                                     mood = headMood(head);
                                     isKeyed = e.surface === 'terminal' && !boxes.length;
                                     keyed = isKeyed;
-                                    if (!alone) return [3 /*break*/, 33];
-                                    _z = { version: '', installed: '', isWaiting: false };
-                                    return [3 /*break*/, 35];
-                                case 33: return [4 /*yield*/, versionsOf($)
+                                    if (!alone) return [3 /*break*/, 30];
+                                    _t = { version: '', installed: '', isWaiting: false };
+                                    return [3 /*break*/, 32];
+                                case 30: return [4 /*yield*/, versionsOf($)
                                     // Just moved to a newer version whose changes the person has not seen: one quiet line in the header, with What's new, until closed
                                 ];
-                                case 34:
-                                    _z = _18.sent();
-                                    _18.label = 35;
-                                case 35:
-                                    versions = _z;
-                                    if (!alone) return [3 /*break*/, 36];
-                                    _0 = undefined;
-                                    return [3 /*break*/, 38];
-                                case 36: return [4 /*yield*/, updateScreen($, ui, versions.version, head.asks, e.surface)
+                                case 31:
+                                    _t = _11.sent();
+                                    _11.label = 32;
+                                case 32:
+                                    versions = _t;
+                                    if (!alone) return [3 /*break*/, 33];
+                                    _u = undefined;
+                                    return [3 /*break*/, 35];
+                                case 33: return [4 /*yield*/, updateScreen($, ui, versions.version, head.asks, e.surface)
                                     // A password or key box stays above it: the runner waits on it
                                 ];
-                                case 37:
-                                    _0 = _18.sent();
-                                    _18.label = 38;
-                                case 38:
-                                    screen = _0;
+                                case 34:
+                                    _u = _11.sent();
+                                    _11.label = 35;
+                                case 35:
+                                    screen = _u;
                                     // A password or key box stays above it: the runner waits on it
                                     if (paneId === LIST && !alone) {
-                                        was = (_12 = listOffsets.get(e.surface)) !== null && _12 !== void 0 ? _12 : 0;
+                                        was = (_5 = listOffsets.get(e.surface)) !== null && _5 !== void 0 ? _5 : 0;
                                         listOffsets.set(e.surface, Math.max(0, e.props.scroll.offset));
                                         count = waitsCount;
                                         finishedNow = __spreadArray(__spreadArray([], askCards.filter(isFinishing).map(titleOf), true), finishingFlows.map(function (f) { return f.title; }), true);
                                         if (finishedNow.join('\n') !== finishedAtTop.join('\n'))
                                             ((finishedAtTop = finishedNow), drawAgain($));
-                                        first = (_14 = (_13 = top.find(function (one) { return one.rank === 0 && one.what; })) === null || _13 === void 0 ? void 0 : _13.what) !== null && _14 !== void 0 ? _14 : '';
-                                        if (count !== waitsAtTop || first !== firstAtTop || (was > 0) !== (((_15 = listOffsets.get(e.surface)) !== null && _15 !== void 0 ? _15 : 0) > 0))
+                                        first = (_7 = (_6 = top.find(function (one) { return one.rank === 0 && one.what; })) === null || _6 === void 0 ? void 0 : _6.what) !== null && _7 !== void 0 ? _7 : '';
+                                        if (count !== waitsAtTop || first !== firstAtTop || (was > 0) !== (((_8 = listOffsets.get(e.surface)) !== null && _8 !== void 0 ? _8 : 0) > 0))
                                             ((waitsAtTop = count), (firstAtTop = first), drawAgain($));
                                     }
-                                    if (!(alone || !versions.version)) return [3 /*break*/, 39];
-                                    _1 = undefined;
-                                    return [3 /*break*/, 41];
-                                case 39: return [4 /*yield*/, updatedPieces($, versions.version)
+                                    if (!(alone || !versions.version)) return [3 /*break*/, 36];
+                                    _v = undefined;
+                                    return [3 /*break*/, 38];
+                                case 36: return [4 /*yield*/, updatedPieces($, versions.version)
                                     // Where updating stands for this chat: a small box under the header's lines, its steps each a press
                                 ];
-                                case 40:
-                                    _1 = _18.sent();
-                                    _18.label = 41;
-                                case 41:
-                                    updated = _1;
-                                    if (!alone) return [3 /*break*/, 42];
-                                    _2 = null;
-                                    return [3 /*break*/, 45];
-                                case 42:
-                                    _3 = noticeCard;
-                                    _4 = [$, ui];
+                                case 37:
+                                    _v = _11.sent();
+                                    _11.label = 38;
+                                case 38:
+                                    updated = _v;
+                                    if (!alone) return [3 /*break*/, 39];
+                                    _w = null;
+                                    return [3 /*break*/, 42];
+                                case 39:
+                                    _x = noticeCard;
+                                    _y = [$, ui];
                                     return [4 /*yield*/, noticeNow($, versions.version, versions.installed).catch(function () { return undefined; })];
-                                case 43: return [4 /*yield*/, _3.apply(void 0, _4.concat([_18.sent(), versions.version])).catch(function () { return null; })];
-                                case 44:
-                                    _2 = (_17 = (_16 = (_18.sent())) !== null && _16 !== void 0 ? _16 : screen) !== null && _17 !== void 0 ? _17 : null;
-                                    _18.label = 45;
-                                case 45:
-                                    outCard = _2;
+                                case 40: return [4 /*yield*/, _x.apply(void 0, _y.concat([_11.sent(), versions.version])).catch(function () { return null; })];
+                                case 41:
+                                    _w = (_10 = (_9 = (_11.sent())) !== null && _9 !== void 0 ? _9 : screen) !== null && _10 !== void 0 ? _10 : null;
+                                    _11.label = 42;
+                                case 42:
+                                    outCard = _w;
                                     heldRows = paneId === LIST && e.surface === 'desktop' && isInUse(at, e.props.scroll.offset) && presses !== foldPress ? e.props.scroll.offset + e.props.scroll.bodyRows : 0;
                                     return [2 /*return*/, (<Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={Math.max(e.props.scroll.bodyRows, heldRows)}>
         {!alone ? (
@@ -1841,7 +1739,7 @@ var panelHooks = function (on) {
             <Box flexDirection="row" alignItems="center" gap={2}>
               {/* Just moved to a newer version: the octopus turns blue and jumps for the moment. Above the prompt in a narrow terminal the
                                                     panel is a few rows tall, so it keeps them for the work and leaves the octopus to the line above the prompt */}
-              {isInline ? null : updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, "Claudopus, updated to ".concat(versions.version), $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, waiting for you', happy: 'Claudopus, a task is done', working: 'Claudopus, Claude is working', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
+              {isInline ? null : updated && !own.some(function (one) { return isDoneMoment(one, at); }) ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, "Claudopus, updated to ".concat(versions.version), $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, waiting for you', happy: 'Claudopus, a task is done', working: 'Claudopus, Claude is working', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* The version this chat loaded beside the name, and a newer one when the Mac has it, so two Macs on different ones are told apart */}
                 {/* Just moved to a newer version: "Claudopus updated" in blue, then the new version, for the moment */}
@@ -1852,7 +1750,13 @@ var panelHooks = function (on) {
                     {/* The Mac has a newer copy than this chat runs: said beside the version, with what to type to switch to it */}
                     {versions.version ? (<Text key="head-version" dimColor wrap={versions.isWaiting ? 'wrap' : 'truncate-end'}>{"v".concat(versions.version).concat(versions.isWaiting ? " \u00B7 v".concat(versions.installed, " is ready: type /reload-plugins to use it") : '')}</Text>) : null}
                   </Box>)}
-                <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head)}</Text>
+                {/* (what waits is amber, what was delivered is its own blue, on the one line) */}
+                <Box flexDirection="row" minWidth={0}>
+                  {headLine(head).length > deliveredSaid(head).length ? (<Box flexShrink={1} minWidth={0}>
+                      <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head).slice(0, headLine(head).length - deliveredSaid(head).length)}</Text>
+                    </Box>) : null}
+                  {head.delivered ? <Box flexShrink={0}><Text color={DELIVERED} dimColor={false}>{deliveredSaid(head)}</Text></Box> : null}
+                </Box>
                 {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 && chat.window ? "This chat is ".concat(fill(chat.tokens, chat.window)) : chat.tokens > 0 ? 'This chat has started' : 'This chat has just begun'}</Text>}
               </Box>
             </Box>
@@ -1873,15 +1777,17 @@ var panelHooks = function (on) {
               </Text>) : null}
           </Box>) : null}
         {!alone ? top.map(function (one) { return one.draw(); }) : null}
-        {!alone ? doneNotesPart(ui, at) : null}
+        {/* What was pressed on a block that belonged to no task, in one grey line where it was */}
+        {!alone ? loosePressedShown(at).map(function (one, n) { return (<Box key={"pressed-loose-".concat(n)} paddingX={2} flexShrink={0}>
+            <Text dimColor wrap="wrap">{one.text}</Text>
+          </Box>); }) : null}
         {!alone ? afarPart(ui) : null}
         {!alone && isWelcomeOpen ? welcomeCard($, ui) : null}
         {alone
                                                 ? big(alone, talked === null || talked === void 0 ? void 0 : talked.lines)
-                                                : __spreadArray(__spreadArray(__spreadArray(__spreadArray([], (listedChats.length && (restHere.length || restFlows.length || promptsLoose.length) ? [chatHead('this', 'This chat', selfName() ? "on ".concat(selfName()) : '')] : []), true), promptsLoose.map(function (p) { return answeredCard(p, "this-".concat(p.id)); }), true), __spreadArray(__spreadArray([], restHere.map(function (one) { return ({ at: begun(one), card: function () { return small(one); } }); }), true), restFlows.map(function (f) { return ({ at: f.startedAt, card: function () { return flowSmall(f); } }); }), true).sort(function (a, b) { return a.at - b.at; }).map(function (one) { return one.card(); }), true), listedChats.flatMap(function (c) {
+                                                : __spreadArray(__spreadArray(__spreadArray([], (listedChats.length && (restHere.length || restFlows.length) ? [chatHead('this', 'This chat', selfName() ? "on ".concat(selfName()) : '')] : []), true), __spreadArray(__spreadArray([], restHere.map(function (one) { return (isHandedIn(one) ? { rank: 0, at: -one.endedAt, card: function () { return small(one); } } : { rank: 1, at: begun(one), card: function () { return small(one); } }); }), true), restFlows.map(function (f) { return ({ rank: 1, at: f.startedAt, card: function () { return flowSmall(f); } }); }), true).sort(function (a, b) { return a.rank - b.rank || a.at - b.at; }).map(function (one) { return one.card(); }), true), listedChats.flatMap(function (c) {
                                                     var cards = shownOf(c).filter(function (one) { return !isUp(one); }).sort(function (a, b) { return begun(a) - begun(b); });
-                                                    var answered = answeredOf(c.answeredPrompts).map(function (p) { return answeredCard(p, "".concat(c.host, "-").concat(c.chat, "-").concat(p.id), c); });
-                                                    return cards.length || answered.length ? __spreadArray(__spreadArray([chatHead("".concat(c.host, "-").concat(c.chat), chatName(c), chatSide(c, selfName()), c)], answered, true), cards.map(function (one) { return small(one); }), true) : [];
+                                                    return cards.length ? __spreadArray([chatHead("".concat(c.host, "-").concat(c.chat), chatName(c), chatSide(c, selfName()), c)], cards.map(function (one) { return small(one); }), true) : [];
                                                 }), true)}
         {/* The Finished row sits at the pane's bottom edge, under everything else */}
         {!alone && (finished.length || endedFlows.length) ? <Box key="finished-gap" flexGrow={1}/> : null}
@@ -1894,42 +1800,60 @@ var panelHooks = function (on) {
                     // ones the engine holds, and this one is made again once the click is over (holdForPress)
                 ];
                 case 14:
-                    drawing = _k.sent();
-                    _b = recent && paneId === LIST;
+                    drawing = _l.sent();
+                    newestMade = paneNewest.get(paneLine);
+                    _b = (newestMade === null || newestMade === void 0 ? void 0 : newestMade.key) === place && paneId === LIST;
                     if (!_b) return [3 /*break*/, 16];
                     _c = isPressHeld;
                     return [4 /*yield*/, $.clock.now()];
                 case 15:
-                    _b = _c.apply(void 0, [_k.sent()]);
-                    _k.label = 16;
+                    _b = _c.apply(void 0, [_l.sent()]);
+                    _l.label = 16;
                 case 16:
-                    // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
-                    // ones the engine holds, and this one is made again once the click is over (holdForPress)
                     if (_b)
-                        return [2 /*return*/, ((isPressMissed = true), recent)
+                        return [2 /*return*/, ((isPressMissed = true), newestMade.drawing)
                             // Overtaken by a newer drawing that is already made: not kept, and the newer one is given in its place
                         ];
                     // Overtaken by a newer drawing that is already made: not kept, and the newer one is given in its place
-                    if (((_j = shownKept.get(shownKey)) !== null && _j !== void 0 ? _j : 0) > askedNo && recent !== undefined)
-                        return [2 /*return*/, lastShown.get(shownKey)];
-                    shownKept.set(shownKey, askedNo);
+                    if (((_j = shownKept.get(paneLine)) !== null && _j !== void 0 ? _j : 0) > askedNo && newestMade)
+                        return [2 /*return*/, newestMade.drawing];
+                    shownKept.set(paneLine, askedNo);
                     shownSigns.set(shownKey, sign);
                     shownAts.set(shownKey, heldAt);
                     heldDrawings.set(heldKey, { shape: shape, content: content, at: heldAt, fresh: freshness, drawing: drawing });
-                    lastShown.set(shownKey, drawing);
+                    if (!paneId.startsWith(WORK_PANE)) return [3 /*break*/, 18];
+                    return [4 /*yield*/, read($, todos)];
+                case 17:
+                    id = (_k = (_l.sent()).find(function (one) { return workPaneOf(one.id) === paneId && canChange(asPressed(one)); })) === null || _k === void 0 ? void 0 : _k.id;
+                    if (id)
+                        paneBoxHeld.set("".concat(paneId, "|").concat(e.surface), { id: id, shape: paneBoxShape(id), drawing: drawing });
+                    else
+                        paneBoxHeld.delete("".concat(paneId, "|").concat(e.surface));
+                    _l.label = 18;
+                case 18:
+                    paneNewest.set(paneLine, { key: place, drawing: drawing });
                     drawnPanes.set(paneId, { shape: shape, content: content, at: heldAt, side: sideSign() });
                     isMade = true;
-                    return [2 /*return*/, drawing];
-                case 17:
-                    // (a drawing given again from heldDrawings, or one that threw, counts as none made)
-                    freshEnds($, shownKey, isMade ? { at: heldAt, ms: Date.now() - madeFrom, fresh: freshness } : undefined);
-                    return [7 /*endfinally*/];
-                case 18: return [3 /*break*/, 20];
+                    if (!doneDrawn_2.length) return [3 /*break*/, 20];
+                    return [4 /*yield*/, $.clock.now()];
                 case 19:
+                    madeAt = _l.sent();
+                    for (_i = 0, doneDrawn_1 = doneDrawn_2; _i < doneDrawn_1.length; _i++) {
+                        one = doneDrawn_1[_i];
+                        beginDoneMoment($, one, madeAt);
+                    }
+                    _l.label = 20;
+                case 20: return [2 /*return*/, drawing];
+                case 21:
+                    // (a drawing given again from heldDrawings, or one that threw, counts as none made)
+                    freshEnds($, place, isMade ? { at: heldAt, ms: Date.now() - madeFrom, fresh: freshness } : undefined);
+                    return [7 /*endfinally*/];
+                case 22: return [3 /*break*/, 24];
+                case 23:
                     if (paneId === LIST)
                         listDrawing -= 1;
                     return [7 /*endfinally*/];
-                case 20: return [2 /*return*/];
+                case 24: return [2 /*return*/];
             }
         });
     }); }).catch(function ($, e, next) { return (next.called ? next(e) : tabFailed($, e, next.error)); });

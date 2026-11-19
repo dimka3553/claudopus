@@ -26,8 +26,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     return to.concat(ar || Array.prototype.slice.call(from));
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isPausedProc = exports.heldShellOf = exports.treeOf = exports.procsOf = exports.PS_COLUMNS = exports.foldJobs = exports.leftCommandOf = exports.isWaiterTree = exports.waiterLeavesOf = exports.watcherOf = exports.waitingOf = exports.waitOf = exports.commandName = exports.labelOf = exports.isWaitOnly = exports.isPid = exports.pidOf = exports.detachedOf = exports.latestOf = exports.tailOf = exports.OUTPUT_LINES = exports.leftSeconds = exports.expiresIn = exports.isOutputEnded = exports.endOf = exports.progressOf = exports.leftText = exports.reportsOf = exports.plainOf = exports.PLAIN_MOST = exports.portOf = exports.heavyOf = exports.jobKindOf = exports.isKindSaid = exports.describedOf = exports.DOWNLOAD_CMD = exports.SERVER_CMD = exports.JOB_UNREAD = exports.SILENT_WARN = exports.SILENT_AFTER = exports.JOB_QUIET = exports.JOB_SHAPE = exports.JOB_HEAD = exports.JOB_WORD = exports.JOB_GLYPH = exports.JOB_COLOR = exports.JOB_TAIL = exports.JOBS_SHOWN = exports.JOB_NEWS = exports.JOB_LOOK = void 0;
-exports.memOf = exports.isNamedBy = exports.leftoversOf = exports.groupsOf = exports.shellsOf = void 0;
+exports.foldJobs = exports.watcherOf = exports.waitingOf = exports.waitOf = exports.commandName = exports.endedName = exports.labelOf = exports.isWaitOnly = exports.latestOf = exports.tailOf = exports.OUTPUT_LINES = exports.leftSeconds = exports.expiresIn = exports.whyOf = exports.WHY_MOST = exports.logLines = exports.isOutputEnded = exports.endOf = exports.progressOf = exports.leftText = exports.isOwnLongScript = exports.plainOf = exports.PLAIN_MOST = exports.portOf = exports.heavyOf = exports.jobKindOf = exports.isKindSaid = exports.describedOf = exports.DOWNLOAD_CMD = exports.SERVER_CMD = exports.JOB_UNREAD = exports.SILENT_WARN = exports.SILENT_AFTER = exports.JOB_QUIET = exports.JOB_SHAPE = exports.JOB_NOW = exports.JOB_HEAD = exports.JOB_WORD = exports.JOB_GLYPH = exports.JOB_COLOR = exports.JOB_TAIL = exports.JOBS_SHOWN = exports.JOB_NEWS = exports.JOB_LOOK = void 0;
 // How often the jobs' output is read, and how often a job that wrote something new counts as news for its card
 exports.JOB_LOOK = 5000;
 exports.JOB_NEWS = 60000;
@@ -36,12 +35,16 @@ exports.JOBS_SHOWN = 4;
 // Only the end of each job's output is read
 exports.JOB_TAIL = 4000;
 // Purple and a round dot are a helper's alone: a job has its own colour and shape, and its kind in words at the head of its row
-exports.JOB_COLOR = { server: '#4EBA65', download: '#5AA7E6', script: '#36B5A8', watch: '#9A9A9A', wait: '#9A9A9A' };
-exports.JOB_GLYPH = { server: '◆', download: '▼', script: '■', watch: '◇', wait: '◇' };
-exports.JOB_WORD = { server: 'Server running', download: 'Downloading', script: 'Command running', watch: 'Watching', wait: 'Waiting' };
-exports.JOB_HEAD = { server: 'Server', download: 'Download', script: 'Command', watch: 'Watch', wait: 'Wait' };
+// (a download and an upload share their blue: the arrow says which way it goes)
+// (and a command that runs on another computer is a command's square, hollow: the work is not on this Mac)
+exports.JOB_COLOR = { server: '#4EBA65', download: '#5AA7E6', upload: '#5AA7E6', script: '#36B5A8', remote: '#36B5A8', watch: '#9A9A9A' };
+exports.JOB_GLYPH = { server: '◆', download: '▼', upload: '▲', script: '■', remote: '□', watch: '◇' };
+exports.JOB_WORD = { server: 'Server running', download: 'Downloading', upload: 'Uploading', script: 'Command running', remote: 'Running on another computer', watch: 'Watching' };
+exports.JOB_HEAD = { server: 'Server', download: 'Download', upload: 'Upload', script: 'Command', remote: 'Remote command', watch: 'Watch' };
+// What a row says while its command gives no plain word of its own: its kind, as a doing word
+exports.JOB_NOW = { server: 'Serving', download: 'Downloading', upload: 'Uploading', script: 'Running', remote: 'Running on another computer', watch: 'Watching' };
 // Its mark on the tree, drawn: a square, a diamond, a down arrow, an open diamond, never a helper's round dot
-exports.JOB_SHAPE = { server: 'diamond', download: 'down', script: 'square', watch: 'open', wait: 'open' };
+exports.JOB_SHAPE = { server: 'diamond', download: 'down', upload: 'up', script: 'square', remote: 'hollow', watch: 'open' };
 // A job whose output has not changed for this long says, in amber, that it has gone quiet, and one that has printed nothing at all
 // says so: work is told to print progress at least every 10 seconds, so a few minutes of nothing is worth a look
 exports.JOB_QUIET = 3 * 60000;
@@ -72,25 +75,23 @@ var isFetching = function (step) {
     return true;
 };
 // The work's own words for a run, in the one form it is told to write them, so its card reads them as they are and guesses
-// nothing from the command: its kind first (Download, Upload, Wait for, Watch, Serve, Run), what it does, and how long it
-// should take in brackets: `Download the CT scans (about 3 min)`
+// nothing from the command: its kind first (Download, Upload, Watch, Serve, Run), then what it does: `Download the CT scans`
 var KIND_WORDS = [
-    [/^(download|upload|fetch|copy|sync|clone)\b/i, 'download'],
-    [/^(wait(ing)?|poll(ing)?)\b/i, 'wait'],
-    [/^watch\b/i, 'watch'],
+    [/^upload\b/i, 'upload'],
+    [/^(download|fetch|copy|sync|clone|install)\b/i, 'download'],
+    [/^(watch|wait(ing)?|poll(ing)?)\b/i, 'watch'],
     [/^serve\b/i, 'server'],
-    [/^run\b/i, 'script'],
+    // (the plain verb for what a command does says its kind as Run does: its row leads with it, and says Building, Testing while it goes)
+    [/^(run|build|test|render|train|deploy|make|convert|compute|fit|check|verify|draw|measure|export|index|compress|extract)\b/i, 'script'],
 ];
 var describedOf = function (what) {
-    var _a, _b, _c;
-    // only a time in the brackets, never a count (about 120 scans): a range is taken at its end (about 2-3 min)
-    var m = what.match(new RegExp(String.raw(templateObject_1 || (templateObject_1 = __makeTemplateObject(["s*((?:about|around|roughly|up to|~)?s*(?:d+(?:.d+)?s*[-\u2013]s*)?", ")s*$"], ["\\s*\\((?:about|around|roughly|up to|~)?\\s*(?:\\d+(?:\\.\\d+)?\\s*[-\u2013]\\s*)?", "\\)\\s*$"])), TIME), 'i'));
-    var seconds = m ? secondsIn(((_a = m[1]) !== null && _a !== void 0 ? _a : '').trim()) : undefined;
-    var text = m ? what.slice(0, m.index).trim() : what.trim();
-    return __assign({ text: text, kind: (_b = KIND_WORDS.find(function (_a) {
+    var _a;
+    // (a time in brackets at its end, as descriptions once carried, is no part of what it does: a row never says a guessed time)
+    var text = what.replace(new RegExp(String.raw(templateObject_1 || (templateObject_1 = __makeTemplateObject(["s*((?:about|around|roughly|up to|~)?s*(?:d+(?:.d+)?s*[-\u2013]s*)?", ")s*$"], ["\\s*\\((?:about|around|roughly|up to|~)?\\s*(?:\\d+(?:\\.\\d+)?\\s*[-\u2013]\\s*)?", "\\)\\s*$"])), TIME), 'i'), '').trim();
+    return { text: text, kind: (_a = KIND_WORDS.find(function (_a) {
             var re = _a[0];
             return re.test(text);
-        })) === null || _b === void 0 ? void 0 : _b[1] }, (seconds ? { expect: seconds * 1000, expectText: ((_c = (0, exports.leftText)(seconds)) !== null && _c !== void 0 ? _c : '').replace(/ left$/, '') } : {}));
+        })) === null || _a === void 0 ? void 0 : _a[1] };
 };
 exports.describedOf = describedOf;
 // Words that lead a run's own name and say its kind already, so its row does not say it twice
@@ -103,7 +104,20 @@ exports.isKindSaid = isKindSaid;
 var LOCAL_TOOL = /^(?:\/\S*\/)?(?:find|fd|grep|egrep|rg|ag|ls|cat|head|tail|less|open|mdfind|stat|file|du|wc|sed|awk|sort|tree|cp|mv|rm|mkdir|touch|cd|echo|printf|test|pwd|code|unzip|tar|shasum)\b/;
 var isLocalTool = function (step) { return LOCAL_TOOL.test(step); };
 // Else, for words written another way or none, its kind is told from its command
-var jobKindOf = function (cmd, label) { var _a; return (_a = (0, exports.describedOf)(label).kind) !== null && _a !== void 0 ? _a : (exports.SERVER_CMD.test(cmd) || /\bserver\b/i.test(label) ? 'server' : !CHECKS.test(label.trim()) && (stepsOf(cmd).some(isFetching) || (/\bdownload(?:ing|ed)?\b/i.test(label) && !stepsOf(cmd).every(isLocalTool))) ? 'download' : 'script'); };
+// A command whose own program runs the work on another computer (ssh, a cloud job it starts or follows, a cluster's queue) is a
+// remote command, whatever verb its words lead with: what it does is not on this Mac
+var REMOTE_CMD = /^(?:\S*\/)?(?:ssh\s+(?!-V\b)|az\s+(?:ml\s+job\s+(?:create|stream)|batch\s|vm\s+run-command|container\s+exec|acr\s+build)|gcloud\s+(?:compute\s+ssh|ai\s|run\s+jobs|builds\s+submit|batch\s)|aws\s+(?:batch|sagemaker|ssm\s+start-session)\s|kubectl\s+(?:exec|run)\s|modal\s+run\s|sbatch\b|srun\b)/;
+var isRemote = function (cmd) { return stepsOf(cmd).some(function (step) { return REMOTE_CMD.test(step); }); };
+var jobKindOf = function (cmd, label) {
+    var said = (0, exports.describedOf)(label).kind;
+    if (said)
+        return said === 'script' && isRemote(cmd) ? 'remote' : said;
+    if (exports.SERVER_CMD.test(cmd) || /\bserver\b/i.test(label))
+        return 'server';
+    if (!CHECKS.test(label.trim()) && (stepsOf(cmd).some(isFetching) || (/\bdownload(?:ing|ed)?\b/i.test(label) && !stepsOf(cmd).every(isLocalTool))))
+        return 'download';
+    return isRemote(cmd) ? 'remote' : 'script';
+};
 exports.jobKindOf = jobKindOf;
 // Each step of a shell line with what only sets it up taken off its head (a variable, env, nohup, time, sudo, exec), never a `cd`
 var SETUP = /^(?:(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)|env|nohup|setsid|exec|sudo|command|(?:\/usr\/bin\/)?time(?:\s+-\w+)*|timeout\s+\S+|caffeinate(?:\s+-\w+)*)\s+)+/;
@@ -179,6 +193,8 @@ exports.PLAIN_MOST = 60;
 // A line that names a password, key, token, code or login, says who is signed in, or echoes what was typed at a prompt is never
 // shown, not even in part
 var SECRETISH = /\b(pass(?:word|phrase|wd|code)?s?|secrets?|tokens?|api[-_ ]?keys?|keys?|bearer|authori[sz]ation|credentials?|codes?|pins?|verification|verify|otp|2fa|mfa|ssh-(?:rsa|ed25519)|log(?:s|ging|ged)?[ -]?in|sign(?:s|ing|ed)?[ -]?in|authenticat\w*|user ?names?|accounts?|e-?mail)\b|\b(?:sk|pk|ghp|gho|xox[abp])[-_][A-Za-z0-9]{8,}|\S@\S|\(\w*\):\s*\S|[?:]\s*$/i;
+// (a failure's reason is shown as written, so only what names a secret itself is kept out of it)
+var SECRETISH_WHY = /\b(pass(?:word|phrase|wd|code)?s?|secrets?|tokens?|api[-_ ]?keys?|bearer|authori[sz]ation|credentials?|otp|2fa|mfa|ssh-(?:rsa|ed25519))\b|\b(?:sk|pk|ghp|gho|xox[abp])[-_][A-Za-z0-9]{8,}/i;
 var PROGRAMS = /\b(?:curl|wget|python3?(?:\.\d+)?|node|npm|npx|pnpm|yarn|pip3?|git|az|aws|gcloud|gsutil|azcopy|rsync|scp|ssh|bash|zsh|sh|sudo|docker|kubectl|make|tar|unzip|ffmpeg|brew|uv|conda|apt(?:-get)?)\b:?/gi;
 var FILES = /\b[\w.-]+\.(?:py|sh|js|mjs|ts|tsx|json|jsonl|log|txt|csv|tsv|zip|tar|gz|tgz|png|jpe?g|webp|gif|mp4|nii|dcm|ply|obj|stl|pkl|pt|pth|ckpt|safetensors|bin|h5|npz|npy|ya?ml|toml|md|html|out|err|lock|rs|go|java|c|cpp|h)\b/gi;
 // A line that is a command or a build step, not news of how a run goes
@@ -261,39 +277,19 @@ var plainOf = function (line, title) {
     return "".concat(cut.slice(0, cut.lastIndexOf(' ') > 30 ? cut.lastIndexOf(' ') : cut.length).replace(/[\s,;:]+$/, ''), "\u2026");
 };
 exports.plainOf = plainOf;
-// A long command that would give no word of how far it is: a wait loop, or a script of the work's own (a file it runs, as read),
-// run in the background, detached, or said to take a minute or more, that prints no progress line and runs no tool with a meter of
-// its own. '' for any other: a short one, one that reports, or a program whose words the mod reads as they come (its row then
-// says when it last gave a sign of life). The mod's own runners report for themselves
-var METER = /\b(?:curl|wget|rsync|azcopy|pip3?|git\s+clone|hf\s+download|huggingface-cli|tqdm|rich\.progress|aria2c|docker\s+pull)\b/;
-var SILENCED = /\bcurl\b[^|;&\n]*\s(?:-[a-zA-Z]*s[a-zA-Z]*|--silent)\b|\bwget\b[^|;&\n]*\s(?:-q\b|--quiet\b|-[a-zA-Z]*q[a-zA-Z]*O\b)|\btqdm\([^)\n]*disable\s*=\s*True/;
-// A line it prints that the card reads as how far it is: a count of a total (`{i}/{n}`, `$i/$n`, `%d/%d`) or a percent
-var PRINTS_COUNT = /\b(?:print|echo|printf|log\w*|console\.log|write)\b[^\n]*(?:\{[^}\n]*\}\s*\/\s*\{|\$\{?\w+\}?\s*\/\s*\$|%[ds]\s*\/\s*%[ds]|\{[^}\n]*:\.?\d*%\}|%%)/;
-// The word progress, once what only turns it off is taken out (# no progress bar, --no-progress, progress_bar=False)
-var saysProgress = function (text) { return /\bprogress\b/i.test(text.replace(/\bno[-_ ]progress[\w-]*|progress[-_ ]?bar\s*=\s*(?:False|off|0|None)\b/gi, ' ')); };
-var reportsOf = function (command, description, isBackground, scripts, timeoutMs) {
-    var _a;
+// A long command of the work's own script: a file it runs, as read, asked for with a long time limit. False for any other: a short
+// one, a watch or a server, or a program that is no script of its own (a long time limit alone says nothing: most such calls are a
+// push, a short test or a look). The mod's own runners are never told from here. What the script prints is not looked at
+var isOwnLongScript = function (command, description, scripts, timeoutMs) {
     if (timeoutMs === void 0) { timeoutMs = 0; }
     if (/\bbin\/(?:helpers|admin|secret|release|keyring)\b/.test(command))
-        return '';
+        return false;
     var said = (0, exports.describedOf)(description);
-    // A server or a watch never says how far it is: its row says when it was last asked or its last event
     if (said.kind === 'server' || said.kind === 'watch' || exports.SERVER_CMD.test(command))
-        return '';
-    var isDetached = Boolean((0, exports.detachedOf)(command));
-    var isLongSaid = ((_a = said.expect) !== null && _a !== void 0 ? _a : 0) >= 60000 || timeoutMs > 2 * 60000;
-    var all = __spreadArray([command], scripts, true);
-    if (all.some(saysProgress))
-        return '';
-    // A wait loop sent off or held open for long: every loop that sleeps between its tries
-    if ((isBackground || isDetached || isLongSaid) && /\b(?:until|while|for)\b[\s\S]*?\bdo\b[\s\S]*?\bsleep\b/.test(command))
-        return 'wait';
-    // A script of its own said to take a minute or more, or started detached (sent to the background alone it may be short)
-    if (!(isDetached || isLongSaid) || !scripts.length)
-        return '';
-    return all.some(function (text) { return (METER.test(text) && !SILENCED.test(text)) || PRINTS_COUNT.test(text); }) ? '' : 'script';
+        return false;
+    return timeoutMs > 2 * 60000 && scripts.length > 0;
 };
-exports.reportsOf = reportsOf;
+exports.isOwnLongScript = isOwnLongScript;
 // The plain words after the numbers of a work's own progress line, without the time left it gives (said on its own)
 var ownWords = function (rest) {
     return (0, exports.plainOf)(rest.replace(new RegExp(String.raw(templateObject_3 || (templateObject_3 = __makeTemplateObject([",?s*\beta:?s*", "|,?s*\b", "s*(?:left|remaining|to go)\b"], [",?\\s*\\beta:?\\s*", "|,?\\s*\\b", "\\s*(?:left|remaining|to go)\\b"])), TIME, TIME), 'gi'), ' ').replace(/^\s*(?:[KMGTP]i?B|B|bytes?)\b/i, ' ')) || undefined;
@@ -368,6 +364,8 @@ var HELD = /\b(mem(ory)?|ram|vram|gpu|disk|used|free|avail(able)?|alloc(ated)?|r
 // A percent that is a score, not progress
 var SCORE = /\b(acc(uracy)?|score|coverage|precision|recall|f1|auc|iou|map|top-?\d|pass(ed)?|win|rate|util(i[sz]ation)?|cpu|gpu|mem(ory)?|load)\b[^%]{0,16}$/i;
 // What follows the work's own `progress:` on a line (after a log's time or level), or undefined; "no progress:" is none
+// A unit of time: a `progress:` line counts things done, never seconds or minutes, and a row ignores one that counts time
+var TIME_UNIT = /^(?:s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|ms)$/i;
 var ownOf = function (line) {
     var _a;
     var m = line.match(/(?:^|[\s\]|[])progress:\s*(.*)$/i);
@@ -375,7 +373,7 @@ var ownOf = function (line) {
 };
 // The progress one line shows, or undefined
 var lineProgress = function (line) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6;
     // The work's own line: progress: done/total [unit] [words], or progress: N%, anywhere on a line (after a log's time or level)
     var own = ownOf(line);
     if (own !== undefined) {
@@ -387,7 +385,9 @@ var lineProgress = function (line) {
         var m = rest.match(/^(\d[\d,]*(?:\.\d+)?)\s*([A-Za-z]+)?\s*(?:\/|of)\s*(\d[\d,]*(?:\.\d+)?)\s*([A-Za-z]+)?/);
         if (m) {
             // Its own numbers and unit, as written; a word after the total is its unit only when it is a size or a thing counted
-            var _6 = m[1], a = _6 === void 0 ? '' : _6, _7 = m[2], u1 = _7 === void 0 ? '' : _7, _8 = m[3], b = _8 === void 0 ? '' : _8, _9 = m[4], u2 = _9 === void 0 ? '' : _9;
+            var _7 = m[1], a = _7 === void 0 ? '' : _7, _8 = m[2], u1 = _8 === void 0 ? '' : _8, _9 = m[3], b = _9 === void 0 ? '' : _9, _10 = m[4], u2 = _10 === void 0 ? '' : _10;
+            if (TIME_UNIT.test(u1) || TIME_UNIT.test(u2))
+                return undefined;
             var na = Number(a.replace(/,/g, ''));
             var nb = Number(b.replace(/,/g, ''));
             var isSizeUnit = function (u) { return /^([KMGTP]i?B|B|bytes?)$/i.test(u); };
@@ -398,13 +398,15 @@ var lineProgress = function (line) {
         }
         // A count with no end known, as a wait counts its tries: progress: 7 tries waiting for the deploy
         var so = rest.match(/^(\d[\d,]*)\s+([a-z]{3,})\b/i);
+        if (so && TIME_UNIT.test((_a = so[2]) !== null && _a !== void 0 ? _a : ''))
+            return undefined;
         if (so)
-            return { done: "".concat(countText(Number((_a = so[1]) === null || _a === void 0 ? void 0 : _a.replace(/,/g, ''))), " ").concat((_b = so[2]) === null || _b === void 0 ? void 0 : _b.toLowerCase()), isOwn: true, words: ownWords(rest.slice(so[0].length)) };
+            return { done: "".concat(countText(Number((_b = so[1]) === null || _b === void 0 ? void 0 : _b.replace(/,/g, ''))), " ").concat((_c = so[2]) === null || _c === void 0 ? void 0 : _c.toLowerCase()), isOwn: true, words: ownWords(rest.slice(so[0].length)) };
     }
     // curl's meter: % Total % Received % Xferd Average-speeds Times Current-speed, sizes in 1024s
     var curl = line.match(/^\s*(\d{1,3})\s+(\d[\d.]*[kMGTP]?)\s+(\d{1,3})\s+(\d[\d.]*[kMGTP]?)\s+\d{1,3}\s+\d[\d.]*[kMGTP]?\s+\d[\d.]*[kMGTP]?\s+\d[\d.]*[kMGTP]?\s+[-\d:]+\s+[-\d:]+\s+([-\d:]+)\s+(\d[\d.]*[kMGTP]?)\s*$/);
     if (curl) {
-        var _10 = curl[2], total = _10 === void 0 ? '' : _10, _11 = curl[3], pct = _11 === void 0 ? '' : _11, _12 = curl[4], done = _12 === void 0 ? '' : _12, _13 = curl[5], timeLeft = _13 === void 0 ? '' : _13, _14 = curl[6], speed = _14 === void 0 ? '' : _14;
+        var _11 = curl[2], total = _11 === void 0 ? '' : _11, _12 = curl[3], pct = _12 === void 0 ? '' : _12, _13 = curl[4], done = _13 === void 0 ? '' : _13, _14 = curl[5], timeLeft = _14 === void 0 ? '' : _14, _15 = curl[6], speed = _15 === void 0 ? '' : _15;
         var of = function (text) { var _a, _b, _c; return (_c = sizeOf(text.replace(/[kMGTP]$/, ''), (_b = (_a = text.match(/[kMGTP]$/)) === null || _a === void 0 ? void 0 : _a[0]) !== null && _b !== void 0 ? _b : '')) !== null && _c !== void 0 ? _c : { bytes: 0, base: 1024 }; };
         var t = of(total);
         return __assign(__assign({ done: sizeText(of(done)) }, (t.bytes > 0 ? { total: sizeText(t), pct: "".concat(pct, "%"), left: /\d/.test(timeLeft) ? (0, exports.leftText)(secondsIn(timeLeft)) : undefined } : {})), { rate: "".concat(sizeText(of(speed)), "/s") });
@@ -416,15 +418,15 @@ var lineProgress = function (line) {
     // wget, dot style: 460800K .......... .......... 45% 10.2M 55s
     var dots = line.match(/^\s*(\d+)K\s+[.\s]+\s(\d{1,3})%\s+([\d.]+[KMG])\s/);
     if (dots)
-        return { done: sizeText({ bytes: Number(dots[1]) * 1024, base: 1024 }), pct: "".concat(dots[2], "%"), rate: "".concat(sizeText((_f = sizeOf((_d = (_c = dots[3]) === null || _c === void 0 ? void 0 : _c.slice(0, -1)) !== null && _d !== void 0 ? _d : '0', (_e = dots[3]) === null || _e === void 0 ? void 0 : _e.slice(-1))) !== null && _f !== void 0 ? _f : { bytes: 0, base: 1024 }), "/s"), wget: true };
+        return { done: sizeText({ bytes: Number(dots[1]) * 1024, base: 1024 }), pct: "".concat(dots[2], "%"), rate: "".concat(sizeText((_g = sizeOf((_e = (_d = dots[3]) === null || _d === void 0 ? void 0 : _d.slice(0, -1)) !== null && _e !== void 0 ? _e : '0', (_f = dots[3]) === null || _f === void 0 ? void 0 : _f.slice(-1))) !== null && _g !== void 0 ? _g : { bytes: 0, base: 1024 }), "/s"), wget: true };
     // wget, bar style: big.bin   45%[=====>      ] 460.12M  10.2MB/s    eta 55s
     var wget = line.match(/\s(\d{1,3})%\[[=> ]*\]\s+([\d.,]+)([KMGT]?)\s+([\d.]+\s?[KMG]?B\/s)/);
     if (wget)
-        return { done: sizeText((_h = sizeOf((_g = wget[2]) !== null && _g !== void 0 ? _g : '0', wget[3])) !== null && _h !== void 0 ? _h : { bytes: 0, base: 1024 }), pct: "".concat(wget[1], "%"), rate: rateOf((_j = wget[4]) !== null && _j !== void 0 ? _j : '', 1024), wget: true };
+        return { done: sizeText((_j = sizeOf((_h = wget[2]) !== null && _h !== void 0 ? _h : '0', wget[3])) !== null && _j !== void 0 ? _j : { bytes: 0, base: 1024 }), pct: "".concat(wget[1], "%"), rate: rateOf((_k = wget[4]) !== null && _k !== void 0 ? _k : '', 1024), wget: true };
     // rsync: 1,234,567,890  45%   10.21MB/s    0:00:55
     var rsync = line.match(/^\s*(\d[\d,]*)\s+(\d{1,3})%\s+([\d.]+[kKMGT]?B\/s)\s+\d+:\d\d:\d\d/);
     if (rsync)
-        return { done: sizeText({ bytes: Number((_k = rsync[1]) === null || _k === void 0 ? void 0 : _k.replace(/,/g, '')), base: 1000 }), pct: "".concat(rsync[2], "%"), rate: rateOf((_l = rsync[3]) !== null && _l !== void 0 ? _l : '') };
+        return { done: sizeText({ bytes: Number((_l = rsync[1]) === null || _l === void 0 ? void 0 : _l.replace(/,/g, '')), base: 1000 }), pct: "".concat(rsync[2], "%"), rate: rateOf((_m = rsync[3]) !== null && _m !== void 0 ? _m : '') };
     var seen = pctOf(line);
     var pctSeen = seen && !SCORE.test(line.slice(0, line.indexOf(seen))) ? seen : undefined;
     var hasBar = /[█▉▊▋▌▍▎▏░▒▓━]|#{3,}|\[[=#>.\s-]{3,}\]/.test(line);
@@ -432,19 +434,19 @@ var lineProgress = function (line) {
     var barCount = line.match(/%\|(?:[^|]{0,80}\|)?\s*(\d[\d,]*)\/(\d[\d,]*)\b/);
     // A size done of a size in all (tqdm, pip, aws, gsutil, docker, hf): 1.41G/3.00G, 460.1/1024.0 MB, 460.0 MiB/  1.0 GiB, where a
     // percent, a bar or a speed says it moves and it is not how full a memory or a disk is
-    var sizes = (_m = line.match(new RegExp(String.raw(templateObject_9 || (templateObject_9 = __makeTemplateObject(["", "s*(?:/|of)s*", ""], ["", "\\s*(?:\\/|of)\\s*", ""])), SIZE, SIZE)))) !== null && _m !== void 0 ? _m : line.match(new RegExp(String.raw(templateObject_10 || (templateObject_10 = __makeTemplateObject(["(d[d,]*(?:.d+)?)()s*/s*", ""], ["(\\d[\\d,]*(?:\\.\\d+)?)()\\s*\\/\\s*", ""])), SIZE)));
-    var ahead = line.slice(0, (_o = sizes === null || sizes === void 0 ? void 0 : sizes.index) !== null && _o !== void 0 ? _o : 0);
+    var sizes = (_o = line.match(new RegExp(String.raw(templateObject_9 || (templateObject_9 = __makeTemplateObject(["", "s*(?:/|of)s*", ""], ["", "\\s*(?:\\/|of)\\s*", ""])), SIZE, SIZE)))) !== null && _o !== void 0 ? _o : line.match(new RegExp(String.raw(templateObject_10 || (templateObject_10 = __makeTemplateObject(["(d[d,]*(?:.d+)?)()s*/s*", ""], ["(\\d[\\d,]*(?:\\.\\d+)?)()\\s*\\/\\s*", ""])), SIZE)));
+    var ahead = line.slice(0, (_p = sizes === null || sizes === void 0 ? void 0 : sizes.index) !== null && _p !== void 0 ? _p : 0);
     var isCountAhead = __spreadArray([], ahead.matchAll(/(\d[\d,]*)\s?(?:\/|of)\s?(\d[\d,]*)\b/g), true).some(function (m) { return COUNTED.test(ahead.slice(0, m.index)); });
     if (sizes && (pctSeen || hasBar || RATE.test(line)) && !HELD.test(ahead) && !isCountAhead) {
-        var _15 = sizes[1], a = _15 === void 0 ? '' : _15, _16 = sizes[2], ua = _16 === void 0 ? '' : _16, _17 = sizes[3], b = _17 === void 0 ? '' : _17, _18 = sizes[4], ub = _18 === void 0 ? '' : _18;
+        var _16 = sizes[1], a = _16 === void 0 ? '' : _16, _17 = sizes[2], ua = _17 === void 0 ? '' : _17, _18 = sizes[3], b = _18 === void 0 ? '' : _18, _19 = sizes[4], ub = _19 === void 0 ? '' : _19;
         var d = sizeOf(a, ua || ub, 1000);
         var t = sizeOf(b, ub, 1000);
         if (d && t && t.bytes > 0 && d.bytes <= t.bytes * 1.001)
-            return { done: sizeText(d), total: sizeText(t), pct: pctSeen !== null && pctSeen !== void 0 ? pctSeen : percentOf(d.bytes, t.bytes), rate: rateOf(line.slice(((_p = sizes.index) !== null && _p !== void 0 ? _p : 0) + sizes[0].length)) };
+            return { done: sizeText(d), total: sizeText(t), pct: pctSeen !== null && pctSeen !== void 0 ? pctSeen : percentOf(d.bytes, t.bytes), rate: rateOf(line.slice(((_q = sizes.index) !== null && _q !== void 0 ? _q : 0) + sizes[0].length)) };
     }
     if (barCount) {
-        var a = Number((_q = barCount[1]) === null || _q === void 0 ? void 0 : _q.replace(/,/g, ''));
-        var b = Number((_r = barCount[2]) === null || _r === void 0 ? void 0 : _r.replace(/,/g, ''));
+        var a = Number((_r = barCount[1]) === null || _r === void 0 ? void 0 : _r.replace(/,/g, ''));
+        var b = Number((_s = barCount[2]) === null || _s === void 0 ? void 0 : _s.replace(/,/g, ''));
         if (b > 0 && a <= b)
             return { done: countText(a), total: countText(b), pct: pctSeen !== null && pctSeen !== void 0 ? pctSeen : percentOf(a, b), rate: rateOf(line) };
     }
@@ -453,19 +455,19 @@ var lineProgress = function (line) {
     var count = line.match(/(?:^|[\s[(:#])(\d[\d,]*)\s?(?:\/|of)\s?(\d[\d,]*)\b(?![/.:]\d)/);
     // (none on a line whose percent is a score: accuracy 95% on 1000/1000 samples)
     if (count && !(seen && !pctSeen)) {
-        var before = line.slice(0, ((_s = count.index) !== null && _s !== void 0 ? _s : 0) + (count[0].match(/^[\s[(:#]/) ? 1 : 0));
-        var after_1 = line.slice(((_t = count.index) !== null && _t !== void 0 ? _t : 0) + count[0].length);
-        var a = Number((_u = count[1]) === null || _u === void 0 ? void 0 : _u.replace(/,/g, ''));
-        var b = Number((_v = count[2]) === null || _v === void 0 ? void 0 : _v.replace(/,/g, ''));
-        var isBracketed = /[[(]\s*$/.test(before) && /^\s*[\])]/.test(after_1);
-        var around = line.slice(Math.max(0, ((_w = count.index) !== null && _w !== void 0 ? _w : 0) - 12), ((_x = count.index) !== null && _x !== void 0 ? _x : 0) + count[0].length + 12);
+        var before = line.slice(0, ((_t = count.index) !== null && _t !== void 0 ? _t : 0) + (count[0].match(/^[\s[(:#]/) ? 1 : 0));
+        var after = line.slice(((_u = count.index) !== null && _u !== void 0 ? _u : 0) + count[0].length);
+        var a = Number((_v = count[1]) === null || _v === void 0 ? void 0 : _v.replace(/,/g, ''));
+        var b = Number((_w = count[2]) === null || _w === void 0 ? void 0 : _w.replace(/,/g, ''));
+        var isBracketed = /[[(]\s*$/.test(before) && /^\s*[\])]/.test(after);
+        var around = line.slice(Math.max(0, ((_x = count.index) !== null && _x !== void 0 ? _x : 0) - 12), ((_y = count.index) !== null && _y !== void 0 ? _y : 0) + count[0].length + 12);
         var isBeside = Boolean(pctSeen) && !around.includes('|') && pctOf(around) === pctSeen;
         // or with what it counts after it (Copied 3/6 files), or a bar of brackets after it (Keras: 450/1000 [=====>....])
-        var isProgress = isBracketed || isBeside || COUNTED.test(before) || /^\s*(steps?|frames?|epochs?|batch(es)?|files?|items?|chunks?|parts?|samples?|images?|scans?|cases?|jobs?|tasks?|runs?|shards?|pages?|rows?|records?|subjects?|volumes?|layers?|objects?|blobs?|videos?|clips?|meshes|fits?)\b/i.test(after_1) || /^\s*\[[=>.#\s-]{4,}\]/.test(after_1);
+        var isProgress = isBracketed || isBeside || COUNTED.test(before) || /^\s*(steps?|frames?|epochs?|batch(es)?|files?|items?|chunks?|parts?|samples?|images?|scans?|cases?|jobs?|tasks?|runs?|shards?|pages?|rows?|records?|subjects?|volumes?|layers?|objects?|blobs?|videos?|clips?|meshes|fits?)\b/i.test(after) || /^\s*\[[=>.#\s-]{4,}\]/.test(after);
         // with what it counts, said after the count or before it (Processed 9 of 20 files, frame 81/120)
-        var unit = (_1 = (_z = (_y = after_1.match(/^\s*([a-z]{3,}s)\b/i)) === null || _y === void 0 ? void 0 : _y[1]) !== null && _z !== void 0 ? _z : (_0 = before.match(/\b([a-z]{3,}s)\s*[:#]?\s*$/i)) === null || _0 === void 0 ? void 0 : _0[1]) !== null && _1 !== void 0 ? _1 : '';
+        var unit = (_2 = (_0 = (_z = after.match(/^\s*([a-z]{3,}s)\b/i)) === null || _z === void 0 ? void 0 : _z[1]) !== null && _0 !== void 0 ? _0 : (_1 = before.match(/\b([a-z]{3,}s)\s*[:#]?\s*$/i)) === null || _1 === void 0 ? void 0 : _1[1]) !== null && _2 !== void 0 ? _2 : '';
         // (or said once before it, as a log says step 1200/5000)
-        var one = (_3 = (_2 = before.match(/\b([a-z]{3,})\s*[:#]?\s*$/i)) === null || _2 === void 0 ? void 0 : _2[1]) !== null && _3 !== void 0 ? _3 : '';
+        var one = (_4 = (_3 = before.match(/\b([a-z]{3,})\s*[:#]?\s*$/i)) === null || _3 === void 0 ? void 0 : _3[1]) !== null && _4 !== void 0 ? _4 : '';
         var named_1 = unit && COUNTED.test(unit) ? " ".concat(unit.toLowerCase()) : one && !one.endsWith('s') && COUNTED.test("".concat(one, "s")) ? " ".concat(one.toLowerCase(), "s") : '';
         if (isProgress && b > 0 && a <= b)
             return { done: countText(a), total: "".concat(countText(b)).concat(named_1), pct: isBeside ? pctSeen : percentOf(a, b), rate: rateOf(line) };
@@ -473,7 +475,7 @@ var lineProgress = function (line) {
     // Else a percent alone, with any size it says is done (git: Receiving objects: 45% (450/1000), 460.00 MiB | 10.20 MiB/s)
     if (pctSeen) {
         var size = line.match(new RegExp(String.raw(templateObject_11 || (templateObject_11 = __makeTemplateObject(["", "(?!s?/s|ps)"], ["", "(?!\\s?/s|ps)"])), SIZE)));
-        var d = size && /[KMGTP]/i.test((_4 = size[2]) !== null && _4 !== void 0 ? _4 : '') ? sizeOf((_5 = size[1]) !== null && _5 !== void 0 ? _5 : '', size[2]) : undefined;
+        var d = size && /[KMGTP]/i.test((_5 = size[2]) !== null && _5 !== void 0 ? _5 : '') ? sizeOf((_6 = size[1]) !== null && _6 !== void 0 ? _6 : '', size[2]) : undefined;
         return __assign(__assign({ pct: pctSeen }, (d ? { done: sizeText(d) } : {})), { rate: rateOf(line) });
     }
     return undefined;
@@ -515,6 +517,44 @@ var endOf = function (text) {
 exports.endOf = endOf;
 var isOutputEnded = function (text) { return Boolean((0, exports.endOf)(text)); };
 exports.isOutputEnded = isOutputEnded;
+// A log's lines as its tab shows them: no colour codes, a line redrawn in place as it last stood, and without the engine's own
+// last line or the blank lines before it
+var logLines = function (text) {
+    var _a, _b;
+    var lines = text
+        .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+        .replace(/\x1b\][^\x07]*\x07/g, '')
+        .replace(/\n?\[(?:exited with code [^\]\n]*|killed)\]\s*$/, '')
+        .split('\n')
+        .map(function (line) { var _a; return ((_a = line.split('\r').filter(function (part) { return part.trim(); }).at(-1)) !== null && _a !== void 0 ? _a : '').replace(/\s+$/, ''); });
+    while (lines.length && !((_a = lines.at(-1)) === null || _a === void 0 ? void 0 : _a.trim()))
+        lines.pop();
+    while (lines.length && !((_b = lines[0]) === null || _b === void 0 ? void 0 : _b.trim()))
+        lines.shift();
+    return lines;
+};
+exports.logLines = logLines;
+// Why a command failed, from the end of its output: the last line that names an error, or else the last line it wrote, as it
+// wrote it and cut short. Nothing for a line that names a password, key or login, or where it wrote nothing
+var FAULT = /\b(?:error|errno|exception|traceback|fatal|failed|failure|cannot|can't|couldn't|could not|unable|denied|refused|not found|no such|missing|invalid|unexpected|timed? ?out|killed|out of memory|oom|panic|abort(?:ed)?|segmentation)\b/i;
+exports.WHY_MOST = 120;
+var whyOf = function (text) {
+    var _a, _b;
+    var lines = text
+        .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+        .replace(/\[exited with code [^\]\n]*\]\s*$/, '')
+        .split('\n')
+        .map(function (line) { var _a; return ((_a = line.split('\r').map(function (part) { return part.trim(); }).filter(Boolean).at(-1)) !== null && _a !== void 0 ? _a : '').replace(/\s+/g, ' '); })
+        .filter(function (line) { return /[A-Za-z]{3}/.test(line); })
+        .slice(-12);
+    // (a traceback's own heading, or a line that only points at code, says nothing of why)
+    var said = lines.filter(function (line) { return !/^Traceback \(most recent call last\)|^\s*at\s+\S+\s+\(|^File "|^\^+$/.test(line); });
+    var line = (_b = (_a = __spreadArray([], said, true).reverse().find(function (one) { return FAULT.test(one); })) !== null && _a !== void 0 ? _a : said.at(-1)) !== null && _b !== void 0 ? _b : '';
+    if (!line || SECRETISH_WHY.test(line))
+        return '';
+    return line.length > exports.WHY_MOST ? "".concat(line.slice(0, exports.WHY_MOST - 1).replace(/\s+\S*$/, ''), "\u2026") : line;
+};
+exports.whyOf = whyOf;
 // How long a watch runs before the engine ends it, as the engine said when it started it ("expires in 30m"), in ms
 var expiresIn = function (said) {
     var _a;
@@ -558,47 +598,6 @@ var latestOf = function (text) {
     return __assign(__assign({ latest: line.replace(/\s+/g, ' ').trim().slice(0, 240) }, progress), { port: (0, exports.portOf)(clean) });
 };
 exports.latestOf = latestOf;
-// A command started detached, with nohup or setsid and its output sent to a file: the command itself, the log as written, and the
-// folder a leading `cd` moved it to; undefined for any other command
-var detachedOf = function (command) {
-    var _a, _b, _c, _d, _e, _f;
-    // Started on another Mac over ssh, its log and process are there, not here
-    if (/^\s*(\S*\/)?ssh\b/.test(command))
-        return undefined;
-    // nohup or setsid at the head of a command, sent off with a lone &
-    if (!/(^|&&|;|\|\||\n)\s*(nohup|setsid)\s/.test(command) || !/(?<![>&<])&(?![&>\d])/.test(command))
-        return undefined;
-    var written = (_b = (_a = command.match(/(?:^|[^0-9&2])>>?\s*("[^"]+"|'[^']+'|[^\s;&|]+)/)) === null || _a === void 0 ? void 0 : _a[1]) === null || _b === void 0 ? void 0 : _b.replace(/^["']|["']$/g, '');
-    if (!written || written === '/dev/null')
-        return undefined;
-    // A log or folder named by a shell variable the command sets itself (S=/tmp/x && nohup ... > $S/run.log) is named whole; one
-    // named by any other variable is not followed, as a wrong file would leave its card blank for as long as the run lasts
-    var vars = new Map(__spreadArray([], command.matchAll(/(?:^|&&|;|\n)\s*(?:export\s+)?([A-Za-z_]\w*)=("[^"$`]*"|'[^']*'|[^\s;&|$`]+)(?=\s*(?:&&|;|\n))/g), true).map(function (m) { var _a, _b; return [(_a = m[1]) !== null && _a !== void 0 ? _a : '', ((_b = m[2]) !== null && _b !== void 0 ? _b : '').replace(/^["']|["']$/g, '')]; }));
-    var expand = function (text) { return text.replace(/\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))/g, function (all, braced, bare) {
-        var _a, _b;
-        var name = (_a = braced !== null && braced !== void 0 ? braced : bare) !== null && _a !== void 0 ? _a : '';
-        return name === 'HOME' ? '~' : ((_b = vars.get(name)) !== null && _b !== void 0 ? _b : all);
-    }); };
-    var log = expand(written);
-    var cd = (_d = (_c = command.match(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)\s*&&/)) === null || _c === void 0 ? void 0 : _c[1]) === null || _d === void 0 ? void 0 : _d.replace(/^["']|["']$/g, '');
-    if (log.includes('$') || (cd === null || cd === void 0 ? void 0 : cd.includes('$')))
-        return undefined;
-    var core = ((_f = (_e = command.match(/\b(?:nohup|setsid)\s+(.*?)\s*(?:>|$)/)) === null || _e === void 0 ? void 0 : _e[1]) !== null && _f !== void 0 ? _f : command).trim();
-    return { log: log, cd: cd, core: core };
-};
-exports.detachedOf = detachedOf;
-// The process id a detached start printed, as `echo $!` does
-// (never 0 or a number with a leading zero: on 15 Nov a curl's "000" in the same output was taken for one, and `kill -0 0` always
-// succeeds, so a run long ended stayed on its card for hours)
-// Only when it is the one number printed: a status code another command printed beside it could be taken for it
-var pidOf = function (stdout) {
-    var _a, _b;
-    var numbers = stdout.split('\n').filter(function (line) { return /^\s*\d+\s*$/.test(line); });
-    return numbers.length === 1 ? (_b = (_a = numbers[0]) === null || _a === void 0 ? void 0 : _a.match(/^\s*([1-9]\d{1,6})\s*$/)) === null || _b === void 0 ? void 0 : _b[1] : undefined;
-};
-exports.pidOf = pidOf;
-var isPid = function (pid) { return /^[1-9]\d{1,6}$/.test(pid); };
-exports.isPid = isPid;
 // A call that only waits (a sleep, a wait) is no job of its own
 var isWaitOnly = function (cmd) { return /^\s*(sleep\s|wait\b|python3? -c ['"]import time; ?time\.sleep)/.test(cmd); };
 exports.isWaitOnly = isWaitOnly;
@@ -615,6 +614,18 @@ var labelOf = function (what, cmd) {
     return head !== what && first && what.slice(head.length + 2).startsWith(first.slice(0, 6)) ? head : what;
 };
 exports.labelOf = labelOf;
+// An ended command's name: its own words whole, as its row had them while it ran, or what it ran in a few words where it gave
+// none. One kept without its command has only `what`, its words or else the head of its shell line: words stay as they are, and
+// only what reads as a shell line is named by what it runs (19 Nov: every kept name was read as a shell line, so "Testing the card
+// tests" stood as "Testing the" and "Run the full check" as "Run the")
+var SHELLISH = /&&|\|\||[;|$=<>`]|\s-{1,2}\w|(?:^|\s)(?:\.{0,2}|~)\/\S|^(?:cd|until|while|for|if|export|source|bash|sh|zsh|python3?|node|npm|npx|pnpm|git|curl|az|ssh)\s/;
+var endedName = function (what, cmd) {
+    var words = (0, exports.describedOf)(what).text;
+    if (cmd === null || cmd === void 0 ? void 0 : cmd.trim())
+        return (0, exports.labelOf)(words, cmd) || 'A command';
+    return (SHELLISH.test(words) ? (0, exports.commandName)(words) : words) || words || 'A command';
+};
+exports.endedName = endedName;
 // What a shell line runs, in a few words: its first step that does more than move or set up, as its program and the file or word
 // it works on, each without its folders
 var LEAD = /^(cd|pushd|popd|export|source|\.|mkdir|set|unset|umask|ulimit|echo|printf|true|sleep|wait|clear)\b/;
@@ -856,30 +867,11 @@ var watcherOf = function (cmd) {
     return isLoneGrep ? { isFollow: false } : undefined;
 };
 exports.watcherOf = watcherOf;
-// A command's processes as they run, whatever its words: it only waits when every process at the end of its tree (one that started
-// no other) is one that only passes time or follows something (a sleep, a log followed, a tool made to wait), so a loop of any shape,
-// a function, a nested shell or a script that sleeps between its looks is seen for what it is while it runs
-var WAITER_PROC = /^(?:\S*\/)?(?:g?sleep|inotifywait|fswatch|wait4path|wait-on)(?:\s|$)|^(?:\S*\/)?u?grep\s+(?:-\S+\s+)*(?:-m\s?\d+|--max-count=\d+)(?:\s+-\S+)*\s+\S+$|^(?:\S*\/)?(?:docker|kubectl)\s+(?:\S+\s+)*logs\s.*(?:-f|--follow)\b|^(?:\S*\/)?journalctl\s.*(?:-f|--follow)\b|^(?:\S*\/)?kubectl\s+rollout\s+status\b|^(?:\S*\/)?gh\s+run\s+watch\b|^(?:\S*\/)?node\s+\S*wait-on\b/;
-// (a lone grep sifting a pipe is no waiter: it may be what a training's output goes through; only one that stops at a line is)
-var waiterLeavesOf = function (procs, top) {
-    var tree = (0, exports.treeOf)(procs, top);
-    var leaves = tree.filter(function (p) { return !tree.some(function (child) { return child.ppid === p.pid; }) && p.pid !== top; });
-    return leaves.length > 0 && leaves.every(function (p) { var _a; return WAITER_PROC.test(p.command) || ((_a = (0, exports.watcherOf)(p.command)) === null || _a === void 0 ? void 0 : _a.isFollow); }) ? leaves : undefined;
-};
-exports.waiterLeavesOf = waiterLeavesOf;
-var isWaiterTree = function (procs, top) { return (0, exports.waiterLeavesOf)(procs, top) !== undefined; };
-exports.isWaiterTree = isWaiterTree;
-// Jobs alike (the same kind, words and command, or the same wait) are one row that says how many they are, from the first one's
-// start; the newest one's output stands for them
-// Memory in KB added up, said as memOf says it
-var memAdded = function (kb) { return (kb ? { memKb: kb, mem: kb >= 1024 * 1024 ? "".concat((kb / 1024 / 1024).toFixed(1), " GB") : "".concat(Math.max(1, Math.round(kb / 1024)), " MB") } : {}); };
-// The command a run left going came from, by its id (`left-<process>-<command>`); '' for any other run
-var leftCommandOf = function (id) { var _a, _b; return (_b = (_a = id.match(/^left-\d+-(.+)$/)) === null || _a === void 0 ? void 0 : _a[1]) !== null && _b !== void 0 ? _b : ''; };
-exports.leftCommandOf = leftCommandOf;
+// Jobs alike (the same kind, words and command) are one row that says how many they are, from the first one's start; the newest
+// one's output stands for them
 var foldJobs = function (jobs) {
     var _a;
-    // (what one command left going is one row, whatever programs it is: a browser and its helpers are one test, not 12 rows)
-    var keyOf = function (job) { var _a, _b; return (job.kind === 'wait' ? "wait|".concat(job.label, "|").concat((_a = job.waitsFor) !== null && _a !== void 0 ? _a : '', "|").concat((_b = job.waitFile) !== null && _b !== void 0 ? _b : '') : (0, exports.leftCommandOf)(job.id) ? "left|".concat(job.label, "|").concat((0, exports.leftCommandOf)(job.id)) : "".concat(job.kind, "|").concat(job.label, "|").concat(job.cmd)); };
+    var keyOf = function (job) { return "".concat(job.kind, "|").concat(job.label, "|").concat(job.cmd); };
     var groups = new Map();
     for (var _i = 0, jobs_1 = jobs; _i < jobs_1.length; _i++) {
         var job = jobs_1[_i];
@@ -890,238 +882,8 @@ var foldJobs = function (jobs) {
         if (group.length === 1)
             return newest;
         var wrote = group.flatMap(function (job) { return (job.wroteAt ? [job.wroteAt] : []); });
-        return __assign(__assign(__assign(__assign(__assign({}, newest), { at: Math.min.apply(Math, group.map(function (job) { return job.at; })), count: group.length }), ((0, exports.leftCommandOf)(newest.id) && group.some(function (job) { return job.memKb; }) ? memAdded(group.reduce(function (sum, job) { var _a; return sum + ((_a = job.memKb) !== null && _a !== void 0 ? _a : 0); }, 0)) : {})), { isPaused: group.every(function (job) { return job.isPaused; }) }), (wrote.length ? { wroteAt: Math.max.apply(Math, wrote) } : {}));
+        return __assign(__assign(__assign({}, newest), { at: Math.min.apply(Math, group.map(function (job) { return job.at; })), count: group.length }), (wrote.length ? { wroteAt: Math.max.apply(Math, wrote) } : {}));
     });
 };
 exports.foldJobs = foldJobs;
-var secondsOf = function (etime) {
-    var _a = etime.includes('-') ? etime.split('-') : ['0', etime], days = _a[0], _b = _a[1], rest = _b === void 0 ? '' : _b;
-    return Number(days) * 86400 + rest.split(':').reduce(function (sum, part) { return sum * 60 + Number(part); }, 0);
-};
-exports.PS_COLUMNS = 'pid=,ppid=,pgid=,stat=,etime=,rss=,command=';
-var procsOf = function (text, now) {
-    return text.split('\n').flatMap(function (line) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
-        var full = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+((?:\d+-)?[\d:]+)\s+(\d+)\s+(.*)$/);
-        if (full)
-            return [{ pid: (_a = full[1]) !== null && _a !== void 0 ? _a : '', ppid: (_b = full[2]) !== null && _b !== void 0 ? _b : '', pgid: (_c = full[3]) !== null && _c !== void 0 ? _c : '', stat: (_d = full[4]) !== null && _d !== void 0 ? _d : '', startAt: now - secondsOf((_e = full[5]) !== null && _e !== void 0 ? _e : '0') * 1000, rss: Number((_f = full[6]) !== null && _f !== void 0 ? _f : 0), command: (_g = full[7]) !== null && _g !== void 0 ? _g : '' }];
-        var m = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+((?:\d+-)?[\d:]+)\s+(.*)$/);
-        return m ? [{ pid: (_h = m[1]) !== null && _h !== void 0 ? _h : '', ppid: (_j = m[2]) !== null && _j !== void 0 ? _j : '', stat: (_k = m[3]) !== null && _k !== void 0 ? _k : '', startAt: now - secondsOf((_l = m[4]) !== null && _l !== void 0 ? _l : '0') * 1000, command: (_m = m[5]) !== null && _m !== void 0 ? _m : '' }] : [];
-    });
-};
-exports.procsOf = procsOf;
-// A process and everything it started
-var treeOf = function (procs, pid) {
-    var top = procs.find(function (p) { return p.pid === pid; });
-    if (!top)
-        return [];
-    var out = [top];
-    var _loop_1 = function (n) {
-        out.push.apply(out, procs.filter(function (p) { var _a; return p.ppid === ((_a = out[n]) === null || _a === void 0 ? void 0 : _a.pid) && !out.includes(p); }));
-    };
-    for (var n = 0; n < out.length; n++) {
-        _loop_1(n);
-    }
-    return out;
-};
-exports.treeOf = treeOf;
-// The shell a command held open runs in, found by the command itself as the engine hands it to the shell (eval '...', its own
-// quotes written '"'"' and its new lines as ps writes them) and by when it started; undefined when none is. A command's words
-// alone are too few to tell most commands by (python3 train.py), so the command is matched whole, from its start
-var flat = function (text) { return text.replace(/\s+/g, ' ').replaceAll(' | ', ' / ').trim(); };
-// What the engine handed a shell to run, as ps writes it; '' where the process is no shell of the engine's
-var evalBodyOf = function (p) {
-    if (!/shell-snapshots\/snapshot-/.test(p.command) || p.ppid === '1')
-        return '';
-    var start = p.command.indexOf(" eval '");
-    if (start < 0)
-        return '';
-    var end = p.command.lastIndexOf("' < /dev/null");
-    return flat(p.command.slice(start + 7, end > start ? end : undefined).replaceAll("'\"'\"'", "'").replaceAll("'\\''", "'").replace(/\\012/g, '\n'));
-};
-var heldShellOf = function (procs, cmd, at) {
-    var _a;
-    var want = flat(cmd).slice(0, 200);
-    if (!want)
-        return undefined;
-    return (_a = procs
-        .filter(function (p) { return /shell-snapshots\/snapshot-/.test(p.command) && p.ppid !== '1' && Math.abs(p.startAt - at) <= 20000; })
-        .filter(function (p) {
-        if (!p.command.includes(" eval '"))
-            return false;
-        var body = evalBodyOf(p);
-        return body.startsWith(want) || want.startsWith(body.slice(0, 200));
-    })
-        .sort(function (a, b) { return Math.abs(a.startAt - at) - Math.abs(b.startAt - at); })[0]) === null || _a === void 0 ? void 0 : _a.pid;
-};
-exports.heldShellOf = heldShellOf;
-// Stopped (paused) as ps writes it
-var isPausedProc = function (p) { return p.stat.startsWith('T'); };
-exports.isPausedProc = isPausedProc;
-// The words of a command that stay as they are however the engine quotes it to run it: the longest few, to find its shell by
-var fragmentsOf = function (cmd) {
-    return __spreadArray([], new Set(cmd.replace(/\s+\S*$/, '').split(/[\s'"\\$`;|&()<>]+/).filter(function (word) { return word.length >= 6 && /^[\w./:=,@%+-]+$/.test(word); })), true).sort(function (a, b) { return b.length - a.length; })
-        .slice(0, 3);
-};
-// The shells the engine runs background commands in, matched to the commands by their words and by when they started: each shell to
-// the command kept nearest its start (a command kept as it went to the background may have started up to its time limit before).
-// A command left without a shell when some other shell still holds its words is taken as running (true), as is one whose words
-// are too few to tell it by (not listed); only one no shell holds is missing (null)
-var SHELL_BEFORE = 11 * 60000;
-var SHELL_AFTER = 15000;
-var shellsOf = function (procs, jobs) {
-    var shells = procs.filter(function (p) { return /shell-snapshots\/snapshot-/.test(p.command) && /\beval\b/.test(p.command) && p.ppid !== '1'; });
-    var found = new Map();
-    var told = jobs.map(function (job) { return ({ job: job, words: fragmentsOf(job.cmd) }); }).filter(function (one) { return one.words.length >= 2; });
-    var pairs = told
-        .flatMap(function (_a) {
-        var job = _a.job, words = _a.words;
-        return shells.filter(function (p) { return words.every(function (word) { return p.command.includes(word); }) && p.startAt >= job.at - SHELL_BEFORE && p.startAt <= job.at + SHELL_AFTER; }).map(function (p) { return ({ id: job.id, pid: p.pid, gap: Math.abs(job.at - p.startAt) }); });
-    })
-        .sort(function (a, b) { return a.gap - b.gap; });
-    var taken = new Set();
-    for (var _i = 0, pairs_1 = pairs; _i < pairs_1.length; _i++) {
-        var pair = pairs_1[_i];
-        if (!found.has(pair.id) && !taken.has(pair.pid))
-            (found.set(pair.id, pair.pid), taken.add(pair.pid));
-    }
-    var _loop_2 = function (job, words) {
-        if (!found.has(job.id))
-            found.set(job.id, shells.some(function (p) { return !taken.has(p.pid) && words.every(function (word) { return p.command.includes(word); }); }) ? true : null);
-    };
-    for (var _a = 0, told_1 = told; _a < told_1.length; _a++) {
-        var _b = told_1[_a], job = _b.job, words = _b.words;
-        _loop_2(job, words);
-    }
-    return found;
-};
-exports.shellsOf = shellsOf;
-// Process numbers wrap round past this on macOS
-var PID_MOST = 99999;
-// (numbers handed out after one, counted round the wrap)
-var after = function (n, from) { return (n - from + PID_MOST + 1) % (PID_MOST + 1); };
-// The groups a command still running is seen to hold, as the processes are listed now: its shell's first, then those of all under
-// it, added to what was seen before. Its shell is the engine's shell that runs the command itself (the same words), handed its number after the
-// command began and started no earlier, and no other command's (`taken`); the one handed its number soonest where several fit.
-// undefined while no shell of its own has been seen
-var groupsOf = function (procs, call, taken) {
-    var _a, _b, _c, _d;
-    if (taken === void 0) { taken = new Set(); }
-    var want = flat(call.cmd).slice(0, 200);
-    var isIts = function (p) {
-        var body = evalBodyOf(p);
-        var n = Number(p.pid);
-        return Boolean(body) && (p.pgid === undefined || p.pgid === p.pid) && !taken.has(p.pid) && p.startAt >= call.at - 2000 && after(n, call.from) > 0 && after(n, call.from) < 50000 && body.slice(0, 200) === want;
-    };
-    var shell = (_b = (_a = call.groups) === null || _a === void 0 ? void 0 : _a[0]) !== null && _b !== void 0 ? _b : (want ? (_c = procs.filter(isIts).sort(function (a, b) { return after(Number(a.pid), call.from) - after(Number(b.pid), call.from); })[0]) === null || _c === void 0 ? void 0 : _c.pid : undefined);
-    if (!shell)
-        return undefined;
-    // (its shell gone from the list, or its number handed to another program since: nothing new is learnt)
-    var top = procs.find(function (p) { return p.pid === shell; });
-    if (!top || (!call.groups && !isIts(top)) || (call.groups && !evalBodyOf(top)))
-        return call.groups;
-    return __spreadArray([], new Set(__spreadArray(__spreadArray([shell], ((_d = call.groups) !== null && _d !== void 0 ? _d : []), true), (0, exports.treeOf)(procs, shell).flatMap(function (p) { return (p.pgid ? [p.pgid] : []); }), true)), true);
-};
-exports.groupsOf = groupsOf;
-var inSpan = function (pid, span) { return (span.to >= span.from ? pid > span.from && pid < span.to : pid > span.from || (pid < span.to && pid <= PID_MOST)); };
-// The system's own programs, which launchd starts in sessions of their own whenever it likes, are never a command's
-// (and an app's own updaters and helpers in a Library folder, the person's own as well: GoogleUpdater, 17 Nov)
-var SYSTEM_PROG = /^(\/System\/|\/usr\/libexec\/|\/usr\/sbin\/|\/sbin\/|\/Library\/Apple\/|\/Applications\/|(\/Users\/[^/]+|\/home\/[^/]+|~)?\/Library\/Application Support\/)/;
-// An app's own helper, updater or crash reporter: inside its bundle's frameworks or helpers, or in a Library folder of its own
-var APP_HELPER = /\.app\/Contents\/(Frameworks|Helpers|Library)\/|\/Library\/Application Support\/|crashpad_handler/;
-// What each command left running: the topmost of each group whose shell has gone (or a session it started of its own), with all it
-// started under it; never one already followed (`known`), nor what runs under one
-// A process counts only when it started while its command ran (or, for one sent to the background, after it began): app helpers
-// orphaned long ago keep a dead leader's group, and process numbers come round again within minutes, so a number alone proves
-// nothing (a second look on 15 Nov found Claude, Telegram and Discord helpers 20 hours old claimed by a fresh command)
-var leftoversOf = function (procs, spans, known, open) {
-    var _a;
-    if (known === void 0) { known = new Set(); }
-    if (open === void 0) { open = []; }
-    if (!spans.length)
-        return [];
-    var pids = new Set(procs.map(function (p) { return p.pid; }));
-    var byPid = new Map(procs.map(function (p) { return [p.pid, p]; }));
-    // The groups of runs already followed: the rest of a pipeline sent off with `& echo $!` is that run's
-    var knownGroups = new Set(procs.filter(function (p) { return known.has(p.pid) && p.pgid; }).map(function (p) { return p.pgid; }));
-    var isTimely = function (p, s) { return p.startAt >= s.at - 2000 && (s.until === undefined || p.startAt <= s.until + 2000); };
-    // One a command still running may have started waits for that command to end: one in a group that command is seen to hold, and,
-    // where its shell is not yet seen or the process leads a group of its own, one handed its number after that command began
-    var isOpenOnes = function (n, p, isOwnSession) {
-        return open.some(function (o) { var _a, _b, _c; return ((_a = o.groups) === null || _a === void 0 ? void 0 : _a.includes((_b = p.pgid) !== null && _b !== void 0 ? _b : '')) || ((isOwnSession || !((_c = o.groups) === null || _c === void 0 ? void 0 : _c.length)) && after(n, o.from) > 0 && after(n, o.from) < 50000 && p.startAt >= o.at - 2000); });
-    };
-    // The command seen to hold the process's group while it ran: the newest, should the number have come round
-    var holderOf = function (p) { return spans.filter(function (s) { var _a, _b; return ((_a = s.groups) === null || _a === void 0 ? void 0 : _a.includes((_b = p.pgid) !== null && _b !== void 0 ? _b : '')) && isTimely(p, s); }).reduce(function (a, b) { return (a && a.at > b.at ? a : b); }, undefined); };
-    // A process under one already followed is that one's
-    var isUnderKnown = function (p) {
-        for (var at = p, n = 0; at && n < 64; at = byPid.get(at.ppid), n++)
-            if (known.has(at.pid))
-                return true;
-        return false;
-    };
-    // Where no command was seen to hold its group: the command a number was handed out under that names the process, among those
-    // whose shell was never seen (any, for a process that leads its own group); where two ran at once, the one that holds the
-    // process's own words (its script or its arguments), else the one whose first number is nearest below
-    var spanOf = function (pid, p, isOwnSession) {
-        // A command sent to the background that still runs goes on being handed numbers after the one it had as it went there: every
-        // number since its first is in its range, so what another task's running command starts is never given to a short command
-        // beside it by its number alone (17 Nov: another task's screenshot script, sent to the background, started headless Chrome
-        // while a git push ran, and the push's card took its crash reporters)
-        // (as long as it runs, however far the numbers have gone: process numbers go round in minutes on a busy Mac. So a short command's
-        // own leftover that it does not name, started while another task's background command runs, goes to neither: a card shows
-        // nothing rather than another task's programs)
-        var fits = spans.filter(function (s) { var _a; return (isOwnSession || !((_a = s.groups) === null || _a === void 0 ? void 0 : _a.length)) && (inSpan(pid, s) || (s.until === undefined && after(pid, s.from) > 0)) && isTimely(p, s) && (0, exports.isNamedBy)(p.command, s.cmd); });
-        if (fits.length <= 1)
-            return fits[0];
-        // The process's own words, past its program: a command that holds them started it. A session of its own also goes by the
-        // command's words it holds
-        var own = p.command.trim().split(/\s+/).slice(1).filter(function (word) { return word.length >= 6 && !word.startsWith('-') && /^[\w./:=,@%+-]+$/.test(word); });
-        var worded = fits.filter(function (s) { return own.some(function (word) { return s.cmd.includes(word); }) || (isOwnSession && fragmentsOf(s.cmd).some(function (word) { var _a; return p.command.includes((_a = word.split('/').at(-1)) !== null && _a !== void 0 ? _a : word); })); });
-        // Where no command names it and the commands are different tasks', it is no one's: a task's card shows nothing rather than a
-        // run another task started at the same moment (16 Nov a code search's row read another task's "0 of 2 heads · 2.0 GB memory")
-        if (!worded.length && new Set(fits.map(function (s) { var _a; return (_a = s.agent) !== null && _a !== void 0 ? _a : ''; })).size > 1)
-            return undefined;
-        // A group's leader is its command's own shell, handed its number just after that command's first one: the command whose first
-        // number is nearest below is it
-        return (worded.length ? worded : fits).reduce(function (a, b) { return (after(pid, b.from) < after(pid, a.from) ? b : a); });
-    };
-    var out = [];
-    for (var _i = 0, procs_1 = procs; _i < procs_1.length; _i++) {
-        var p = procs_1[_i];
-        if (p.ppid !== '1' || !p.pgid || known.has(p.pid) || knownGroups.has(p.pgid) || isUnderKnown(p))
-            continue;
-        var isOwnSession = p.pgid === p.pid;
-        // (nor one ps can only name in brackets, as it does a process that is ending or not this person's: on 16 Nov the system's
-        // own indexer, "(mdworker_shared)", was taken for runs of four tasks)
-        // (nor an app's own helper in a group whose leader has gone: an app's crash reporter forks away from the app that started it, as
-        // Chrome's did on 17 Nov; an app's own program a script drives, such as Blender, still counts)
-        if (/^\(/.test(p.command.trim()) || (isOwnSession ? SYSTEM_PROG.test(p.command) : pids.has(p.pgid) || (SYSTEM_PROG.test(p.command) && APP_HELPER.test(p.command))))
-            continue;
-        var n = Number(isOwnSession ? p.pid : p.pgid);
-        if (isOpenOnes(n, p, isOwnSession))
-            continue;
-        var span = (_a = holderOf(p)) !== null && _a !== void 0 ? _a : spanOf(n, p, isOwnSession);
-        if (span)
-            out.push({ span: span.id, top: p, tree: (0, exports.treeOf)(procs, p.pid) });
-    }
-    return out;
-};
-exports.leftoversOf = leftoversOf;
-// Whether a command names a process: its program, or a word of its own past its program (a script, a file it works on)
-var isNamedBy = function (command, cmd) {
-    var _a, _b;
-    var words = command.trim().split(/\s+/);
-    var program = (_b = ((_a = words[0]) !== null && _a !== void 0 ? _a : '').split('/').filter(Boolean).at(-1)) !== null && _b !== void 0 ? _b : '';
-    var own = words.slice(1).filter(function (word) { return word.length >= 6 && !word.startsWith('-') && /^[\w./:=,@%+-]+$/.test(word); }).map(function (word) { var _a; return (_a = word.split('/').filter(Boolean).at(-1)) !== null && _a !== void 0 ? _a : word; });
-    return __spreadArray([program], own, true).some(function (word) { return word.length >= 2 && new RegExp("(^|[\\s/'\"=])".concat(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "($|[\\s'\";|&)<>])")).test(cmd); });
-};
-exports.isNamedBy = isNamedBy;
-// The memory a process and all it started hold, in words (`7.1 GB`); undefined where ps gave none
-var memOf = function (tree) {
-    var kb = tree.reduce(function (sum, p) { var _a; return sum + ((_a = p.rss) !== null && _a !== void 0 ? _a : 0); }, 0);
-    if (!kb)
-        return undefined;
-    return kb >= 1024 * 1024 ? "".concat((kb / 1024 / 1024).toFixed(1), " GB") : "".concat(Math.max(1, Math.round(kb / 1024)), " MB");
-};
-exports.memOf = memOf;
 var templateObject_1, templateObject_2, templateObject_3, templateObject_4, templateObject_5, templateObject_6, templateObject_7, templateObject_8, templateObject_9, templateObject_10, templateObject_11;

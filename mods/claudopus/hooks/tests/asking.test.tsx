@@ -2439,7 +2439,7 @@ test('while the person uses the panel its running times stand still, and move ag
 
 // One line of pictures for a pane: the app asks for the panel with the view at the top and scrolled down in turn as a card changes
 // its height, and each once kept a picture of its own age
-test('a card never goes back to an older picture once a newer one was shown, however the view moves between the top and scrolled down: the 19 Nov card that "went big, then small, then big again" after Release it', async ($, on) => {
+test('a card never goes back to an older picture once a newer one was shown, however the view moves between the top and scrolled down, and the space its answered question held closes while the person uses it: the 19 Nov card that "went big, then small, then big again" after Release it, and the space after Release it that never closed', async ($, on) => {
   const { files, appended, clock } = world(on)
   files.set('/repo/wt/.release', 'mods/claudopus/bin/release')
   files.set('git:top', '/repo/wt')
@@ -2462,6 +2462,8 @@ test('a card never goes back to an older picture once a newer one was shown, how
   await pane.press({ key: release?.key ?? '' })
   expect(await until(async () => appended.find(line => line.includes('pressed "Release it"')))).toBeDefined()
   expect(await until(async () => pane.find({ type: 'Text', text: '✓ You answered “Release it”' }))).toBeDefined()
+  // with the space the question took held under it for a moment
+  expect(Number((await pane.find({ type: 'Box', key: 'fold-a1' } as never))?.props.height ?? 0)).toBeGreaterThan(0)
   await clock.advance(1000)
   const answered = await card()
   expect(answered).toContain('Built and tested.')
@@ -2470,6 +2472,11 @@ test('a card never goes back to an older picture once a newer one was shown, how
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n2', agentId: 'a1', text: 'Releasing the nose fix.' } as never)
   // Scrolled down and in use, the picture on screen stays as it was
   expect(await card()).toEqual(answered)
+  // but for the held space, which closes after its moment while the person still uses the panel (19 Nov: the space after Release it
+  // never closed while they moved about the panel)
+  await ($.ui as any).scroll({ component: 'Pane', requestId: LIST.requestId, offset: 6, by: 1, bodyRows: 20, contentRows: 40, origin: { kind: 'person' } }).catch(() => undefined)
+  await clock.advance(2_100)
+  expect(await until(async () => ((await pane.find({ type: 'Box', key: 'fold-a1' } as never)) ? undefined : true))).toBe(true)
   // The view comes to the top, as when the list gets shorter under it: the card as it is now
   await viewAt(TOP)
   const now = await card()

@@ -46,17 +46,6 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
         if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
     }
 };
-var __rest = (this && this.__rest) || function (s, e) {
-    var t = {};
-    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
-        t[p] = s[p];
-    if (s != null && typeof Object.getOwnPropertySymbols === "function")
-        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
-            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
-                t[p[i]] = s[p[i]];
-        }
-    return t;
-};
 var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
         if (ar || !(i in from)) {
@@ -70,13 +59,19 @@ var _this = this;
 var GATE_SERVICE = 'claudopus-admin-gate';
 // The gates this copy of the mod holds a call for, and what was pressed for each: both only in memory
 var gateHeld = new Set();
-var gateSaid = new Map();
+// What each held gate's wait ends with: the press on its block, or 'gone' as its call was aborted or this copy replaced
+var gateWaits = new Map();
+// A hook has ten seconds of its own time, and only time spent in a call on the engine is not counted: so while a hook waits for a
+// press, one sleep run by the engine is in flight, and the wait itself is the promise the press resolves, raced with it. The press
+// ends the wait at once; the sleep only keeps the clock stopped, and is started again each HELD_STEP while nothing is pressed
+var HELD_STEP = 60;
+var heldStep = function ($) { return $.process.run(['/bin/sleep', String(HELD_STEP)], { timeoutMs: (HELD_STEP + 10) * 1000 }).then(function () { return undefined; }, function () { return undefined; }); };
 // A gate of the chat's own thread, which has no card (a chat that does its own work): drawn at the top of the panel
 var looseGates = [];
 // The pieces of work allowed under "work", by card: taken out as the work ends (ended, in cards), so one that comes back asks again
 var workAllowed = new Set();
 var GATE_DENIED = function (gate) {
-    return named("Refused by {name}: {name} pressed Deny on this ".concat((gate === null || gate === void 0 ? void 0 : gate.kind) === 'release' ? "release, so nothing was released. Don't try to release it another way" : (gate === null || gate === void 0 ? void 0 : gate.kind) === 'file' ? "change, so the file was not changed. Don't try to change it another way" : "admin command, so it didn't run. Don't try to run it another way", ". Continue without it, or say what it is needed for and ask again."));
+    return named("Refused by {name}: {name} pressed Don't allow on this ".concat((gate === null || gate === void 0 ? void 0 : gate.kind) === 'release' ? "release, so nothing was released. Don't try to release it another way" : (gate === null || gate === void 0 ? void 0 : gate.kind) === 'file' ? "change, so the file was not changed. Don't try to change it another way" : "admin command, so it didn't run. Don't try to run it another way", ". Continue without it, or say what it is needed for and ask again."));
 };
 var gateThing = function (gate) { return ((gate === null || gate === void 0 ? void 0 : gate.kind) === 'release' ? 'This release did not run' : (gate === null || gate === void 0 ? void 0 : gate.kind) === 'file' ? 'This change was not made' : 'This admin command did not run'); };
 var GATE_GONE = function (gate) { return named("".concat(gateThing(gate), ": the wait for {name} to allow it was interrupted. Run it again if it is still needed.")); };
@@ -86,11 +81,13 @@ var GATE_UNSEALED = function () { return "This admin command did not run: Claudo
 var NO_GATE_TOUCH = function () {
     return named('Claude never reads or writes the list of admin commands {name} always allows, what {name} allowed, or the key that locks them. Only {name} adds to them, with a press on a card or in Config.');
 };
-// What a gate asks, in words, by its kind: the act, and the question on its card
+// What a gate asks, in words, by its kind: the act, for a notification, and the one amber line of its block
 var gateAct = function (gate) {
     return gate.isUndone ? "Make the change to ".concat(gate.host, " again") : gate.kind === 'release' ? "Release ".concat(gate.host, " to main") : gate.kind === 'file' ? "Change ".concat(gate.host) : "Run an admin command on ".concat(gate.host === 'here' ? thisMac() : gate.host);
 };
-var gateWhat = function (gate) { return "".concat(gateAct(gate), "?"); };
+var gateWhat = function (gate) {
+    return gate.isUndone ? "Make the change to ".concat(gate.host, " again?") : gate.kind === 'release' ? "Release ".concat(gate.branch || gate.host, " to main?") : gate.kind === 'file' ? "Change ".concat(gate.host, "?") : "Run this as admin on ".concat(gate.host === 'here' ? 'this Mac' : gate.host, "?");
+};
 // The admin commands a Bash command runs, as the shell splits it: bin/admin by any spelling of its path, after what runs a
 // command it is handed, and inside a shell's -c or an eval. What the shell would build (a variable, a substitution) is read as
 // written, so the grant names what was shown and bin/admin refuses what differs
@@ -476,135 +473,110 @@ var clearGates = function ($) { return __awaiter(_this, void 0, void 0, function
         }
     });
 }); };
-// Holds the call until the person presses. A hook's own time is bounded, and time spent in a call on the engine is not counted:
-// the wait is a one-second sleep run by the engine, again and again, the press read from memory between them
+// Holds the call until the person presses: the wait is a promise the press resolves (answerGate), ended also by the call's
+// abort and by this copy of the mod being replaced, with no loop that looks for the press (heldStep)
 var holdGate = function ($, next, gate, top) { return __awaiter(_this, void 0, void 0, function () {
-    var card, _a, text, act, said, _b, pressed;
-    var _c, _d, _e;
-    return __generator(this, function (_f) {
-        switch (_f.label) {
+    var wait, end, pressed, stop, card, _a, text, act, _b, said, press;
+    var _c, _d, _e, _f, _g, _h, _j;
+    return __generator(this, function (_k) {
+        switch (_k.label) {
             case 0: return [4 /*yield*/, $.session.surfaces().catch(function () { return []; })];
             case 1:
-                if (!(_f.sent()).length)
+                if (!(_k.sent()).length)
                     return [2 /*return*/, 'blind'];
+                wait = {};
+                end = function () { return undefined; };
+                pressed = new Promise(function (resolve) { return (end = function (said) { return void (wait.said === undefined && ((wait.said = said), resolve())); }); });
+                stop = function () { return end('gone'); };
                 gateHeld.add(gate.id);
+                gateWaits.set(gate.id, end);
                 // A gate held afresh waits for a press of its own: a mark an earlier one of the same id left never hides it
                 gatePressed.delete(gate.id);
-                return [4 /*yield*/, setGates($, top, function (list) { return __spreadArray(__spreadArray([], list.filter(function (one) { return one.id !== gate.id; }), true), [gate], false); })];
+                (_c = next.signal) === null || _c === void 0 ? void 0 : _c.addEventListener('abort', stop, { once: true });
+                whenLeft.add(stop);
+                _k.label = 2;
             case 2:
-                _f.sent();
-                return [4 /*yield*/, openList($).catch(function () { return undefined; })];
+                _k.trys.push([2, , 18, 20]);
+                return [4 /*yield*/, setGates($, top, function (list) { return __spreadArray(__spreadArray([], list.filter(function (one) { return one.id !== gate.id; }), true), [gate], false); })];
             case 3:
-                _f.sent();
-                if (!top) return [3 /*break*/, 5];
-                return [4 /*yield*/, read($, todos)];
+                _k.sent();
+                return [4 /*yield*/, openList($).catch(function () { return undefined; })];
             case 4:
-                _a = (_f.sent()).find(function (one) { return one.id === top; });
-                return [3 /*break*/, 6];
+                _k.sent();
+                if (!top) return [3 /*break*/, 6];
+                return [4 /*yield*/, read($, todos)];
             case 5:
-                _a = undefined;
-                _f.label = 6;
+                _a = (_k.sent()).find(function (one) { return one.id === top; });
+                return [3 /*break*/, 7];
             case 6:
+                _a = undefined;
+                _k.label = 7;
+            case 7:
                 card = _a;
                 text = "".concat(gateAct(gate), ": ").concat(cut(oneLine(gate.command), 200));
                 return [4 /*yield*/, (card ? askAloud($, card, text) : aloud($, 'ask', 'This chat has a question for you', text, "gate-".concat(gate.id))).catch(function (err) { return log($, "admin command not told: ".concat(String(err))); })];
-            case 7:
-                _f.sent();
+            case 8:
+                _k.sent();
                 act = gateAct(gate);
                 // The press is on the card or at the top of the panel, which the notification above points to: the chat shows nothing of it, and
                 // its model is told only so it knows, should the person ask (18 Nov: a line in the chat for each release was "garbage I don't need")
                 return [4 /*yield*/, tellChat($, named(GATE_IN_CHAT(card ? titleOf(card) : '', "".concat(act.charAt(0).toLowerCase()).concat(act.slice(1)), cut(oneLine(gate.command), 120))))];
-            case 8:
+            case 9:
                 // The press is on the card or at the top of the panel, which the notification above points to: the chat shows nothing of it, and
                 // its model is told only so it knows, should the person ask (18 Nov: a line in the chat for each release was "garbage I don't need")
-                _f.sent();
-                _f.label = 9;
-            case 9:
-                _f.trys.push([9, , 16, 18]);
-                _f.label = 10;
+                _k.sent();
+                _k.label = 10;
             case 10:
-                said = gateSaid.get(gate.id);
-                if (said)
-                    return [3 /*break*/, 15];
-                _b = ((_c = next.signal) === null || _c === void 0 ? void 0 : _c.aborted);
+                if (!(wait.said === undefined)) return [3 /*break*/, 17];
+                _b = ((_d = next.signal) === null || _d === void 0 ? void 0 : _d.aborted);
                 if (_b) return [3 /*break*/, 12];
                 return [4 /*yield*/, isReplaced($)];
             case 11:
-                _b = (_f.sent());
-                _f.label = 12;
+                _b = (_k.sent());
+                _k.label = 12;
             case 12:
-                if (_b)
-                    said = 'gone';
-                else if (((_e = (_d = next.budget) === null || _d === void 0 ? void 0 : _d.remainingMs) !== null && _e !== void 0 ? _e : Infinity) < 1500)
-                    said = 'late';
-                if (said)
-                    return [3 /*break*/, 15];
-                return [4 /*yield*/, $.process.run(['/bin/sleep', '1'], { timeoutMs: 10000 }).catch(function () { return undefined; })];
+                if (!_b) return [3 /*break*/, 13];
+                (_e = wait.said) !== null && _e !== void 0 ? _e : (wait.said = 'gone');
+                return [3 /*break*/, 16];
             case 13:
-                _f.sent();
-                _f.label = 14;
-            case 14: return [3 /*break*/, 10];
-            case 15: return [3 /*break*/, 18];
-            case 16:
-                gateHeld.delete(gate.id);
-                gateSaid.delete(gate.id);
-                return [4 /*yield*/, setGates($, top, function (list) { return list.filter(function (one) { return one.id !== gate.id; }); }).catch(function () { return undefined; })];
-            case 17:
-                _f.sent();
-                return [7 /*endfinally*/];
+                if (!(((_g = (_f = next.budget) === null || _f === void 0 ? void 0 : _f.remainingMs) !== null && _g !== void 0 ? _g : Infinity) < 1500)) return [3 /*break*/, 14];
+                (_h = wait.said) !== null && _h !== void 0 ? _h : (wait.said = 'late');
+                return [3 /*break*/, 16];
+            case 14: return [4 /*yield*/, Promise.race([pressed, heldStep($)])];
+            case 15:
+                _k.sent();
+                _k.label = 16;
+            case 16: return [3 /*break*/, 10];
+            case 17: return [3 /*break*/, 20];
             case 18:
-                pressed = gatePressed.get(gate.id);
-                gatePressed.delete(gate.id);
-                if (!(pressed && pressed !== said)) return [3 /*break*/, 20];
-                return [4 /*yield*/, gateNoteFailed($, gate, top, "It had stopped waiting when you pressed. ".concat(gate.kind === 'release' ? 'Nothing was released.' : gate.kind === 'file' ? 'Nothing changed.' : "It didn't run."))];
+                whenLeft.delete(stop);
+                gateHeld.delete(gate.id);
+                if (gateWaits.get(gate.id) === end)
+                    gateWaits.delete(gate.id);
+                return [4 /*yield*/, setGates($, top, function (list) { return list.filter(function (one) { return one.id !== gate.id; }); }).catch(function () { return undefined; })];
             case 19:
-                _f.sent();
-                _f.label = 20;
-            case 20: return [4 /*yield*/, log($, "".concat(gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on', " ").concat(gate.host, ": ").concat(said === 'once' ? 'allowed once' : said === 'always' ? 'always allowed' : said === 'deny' ? 'denied' : 'not answered'))];
+                _k.sent();
+                return [7 /*endfinally*/];
+            case 20:
+                said = (_j = wait.said) !== null && _j !== void 0 ? _j : 'gone';
+                press = gatePressed.get(gate.id);
+                gatePressed.delete(gate.id);
+                if (press && press !== said)
+                    pressedLine($, top, gateLabel(press), "it had stopped waiting, so ".concat(gateNothing(gate)));
+                return [4 /*yield*/, log($, "".concat(gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on', " ").concat(gate.host, ": ").concat(said === 'once' ? 'allowed once' : said === 'always' ? 'always allowed' : said === 'deny' ? 'not allowed' : 'not answered'))];
             case 21:
-                _f.sent();
+                _k.sent();
                 return [2 /*return*/, said];
         }
     });
 }); };
-// What a gate's note heads with: the kind of thing it let through, and where
-var gateHead = function (gate) { var _a; return (gate.kind === 'release' ? "Release of ".concat((_a = gate.branch) !== null && _a !== void 0 ? _a : gate.host) : gate.kind === 'file' ? "Change to ".concat(gate.host) : "Admin command on ".concat(gate.host === 'here' ? thisMac() : gate.host)); };
-var gateWhatLine = function (gate) { return (gate.kind === 'release' && gate.folder ? "from ".concat(shortPath(gate.folder)) : gate.kind === 'file' ? '' : cut(oneLine(gate.command), 200)); };
-// The gates pressed and not yet let go by their wait, with what was pressed: the panel draws each answered from the press itself,
-// before the wait (a one-second sleep the engine runs) reads it, which kept the amber box and its buttons up to a second after the
-// press (15 Nov). Only the first press counts: a second, on a drawing a moment old, sends nothing
+// The words of each press on a gate's block, and what did not happen when one came to nothing
+var gateLabel = function (said) { return (said === 'deny' ? DONT_ALLOW : said === 'always' ? ALWAYS_ALLOW : ALLOW); };
+var gateNothing = function (gate) { return (gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing changed' : "it didn't run"); };
+// The gates pressed and not yet let go by their wait, with what was pressed: the panel draws each answered from the press itself.
+// Only the first press counts: a second, on a drawing a moment old, sends nothing
 var gatePressed = new Map();
-// What a gate's note says when what it said was allowed did not come about, in the same place, grey: never a false "allowed"
-var gateNoteFailed = function ($, gate, card, said) {
-    return doneNotes.some(function (one) { return one.id === "gate-".concat(gate.id); })
-        ? noteDone($, __assign(__assign(__assign({ id: "gate-".concat(gate.id) }, (gate.call ? { call: gate.call } : {})), (card ? { card: card } : {})), { endedAt: 0, head: gateHead(gate), said: said, what: gateWhatLine(gate), isOn: false })).catch(function () { return undefined; })
-        : Promise.resolve();
-};
-// A call refused after a press, by another of its commands denied or not let through: nothing in it runs, so a gate of it already
-// allowed says so in grey, never green
-var callRefused = function ($, call) { return __awaiter(_this, void 0, void 0, function () {
-    var _i, _a, one, _at, rest;
-    return __generator(this, function (_b) {
-        switch (_b.label) {
-            case 0:
-                _i = 0, _a = doneNotes.filter(function (note) { return note.call === call && note.isOn && note.id.startsWith('gate-'); });
-                _b.label = 1;
-            case 1:
-                if (!(_i < _a.length)) return [3 /*break*/, 4];
-                one = _a[_i];
-                _at = one.at, rest = __rest(one, ["at"]);
-                return [4 /*yield*/, noteDone($, __assign(__assign({}, rest), { endedAt: 0, isOn: false, said: "It didn't run: another part of the same command was denied, so none of it ran." })).catch(function () { return undefined; })];
-            case 2:
-                _b.sent();
-                _b.label = 3;
-            case 3:
-                _i++;
-                return [3 /*break*/, 1];
-            case 4: return [2 /*return*/];
-        }
-    });
-}); };
-// `card` names the work whose card the gate is on: what was done is said in that card, where the gate was
+// `card` names the work whose card the gate is on: one grey line there says what was pressed, where the block was
 var answerGate = function ($, gate, said, card) {
     if (card === void 0) { card = ''; }
     presses += 1;
@@ -614,135 +586,107 @@ var answerGate = function ($, gate, said, card) {
         if (gatePressed.has(id))
             return;
         gatePressed.set(id, said);
+        pressedLine($, card, gateLabel(said));
         redraw($);
         return void answerUndone($, gate, said)
             .catch(function (err) { return log($, "undone change not answered: ".concat(String(err))); })
             .finally(function () { return (gatePressed.delete(id), redraw($)); });
     }
-    if (gateHeld.has(id) && !gatePressed.has(id)) {
+    var end = gateWaits.get(id);
+    if (gateHeld.has(id) && !gatePressed.has(id) && end) {
         gatePressed.set(id, said);
-        gateSaid.set(id, said);
-        void noteDone($, __assign(__assign(__assign(__assign({ id: "gate-".concat(id) }, (gate.call ? { call: gate.call } : {})), (card ? { card: card } : {})), (said === 'deny' ? { endedAt: 0 } : {})), { head: gateHead(gate), said: said === 'deny'
-                ? "You denied it. ".concat(gate.kind === 'release' ? 'Nothing was released' : gate.kind === 'file' ? 'Nothing changed' : "It didn't run", ", and Claudopus told Claude.")
-                : gate.kind
-                    ? "You allowed it. ".concat(gate.kind === 'release' ? 'Claude is releasing it now.' : 'Claude is making the change now.')
-                    : said === 'always'
-                        ? "You always allow this command. It runs now, and Claudopus won't ask again."
-                        : gate.isWork
-                            ? 'You allowed admin commands for this task. This one runs now.'
-                            : 'You allowed it. It runs now.', what: gateWhatLine(gate), isOn: said !== 'deny' })).catch(function () { return undefined; });
+        pressedLine($, card, gateLabel(said));
+        end(said);
     }
     redraw($);
 };
 // Before a Bash call runs: each admin command in it is allowed already (never asked, this work allowed, the command always
 // allowed) or waits for the press; allowed, it gets its grant. Refused, the call does not run
 var gateAdmin = function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
-    var calls, gate, list, top, card, grants, _loop_1, _i, _a, _b, n, call, state_1;
+    var calls, gate, list, top, card, grants, _i, _a, _b, n, call, isWork, isCovered, _c, said_1, _d, _e, grant;
+    var _f;
     var _this = this;
-    var _c;
-    return __generator(this, function (_d) {
-        switch (_d.label) {
+    var _g;
+    return __generator(this, function (_h) {
+        switch (_h.label) {
             case 0:
-                calls = adminCalls(String((_c = e.command) !== null && _c !== void 0 ? _c : ''), $.plugin.root);
+                calls = adminCalls(String((_g = e.command) !== null && _g !== void 0 ? _g : ''), $.plugin.root);
                 if (!calls.length || !dir)
                     return [2 /*return*/, { grants: [] }];
                 return [4 /*yield*/, gateOf($)];
             case 1:
-                gate = _d.sent();
+                gate = _h.sent();
                 if (gate.mode === 'never')
                     return [2 /*return*/, { grants: [] }];
                 return [4 /*yield*/, read($, todos)];
             case 2:
-                list = _d.sent();
+                list = _h.sent();
                 top = e.agentId === undefined ? '' : topOf(list, e.agentId);
                 card = list.find(function (one) { return one.id === top; });
                 grants = [];
-                _loop_1 = function (n, call) {
-                    var isWork, isCovered, _e, said_1, _f, _g, grant;
-                    var _h;
-                    return __generator(this, function (_j) {
-                        switch (_j.label) {
-                            case 0:
-                                isWork = gate.mode === 'work' && Boolean(card);
-                                _e = (isWork && workAllowed.has(top));
-                                if (_e) return [3 /*break*/, 2];
-                                return [4 /*yield*/, isAllowed($, call)];
-                            case 1:
-                                _e = (_j.sent());
-                                _j.label = 2;
-                            case 2:
-                                isCovered = _e;
-                                if (!!isCovered) return [3 /*break*/, 9];
-                                _f = holdGate;
-                                _g = [$, next];
-                                _h = { id: "".concat(e.tool_use_id, "-").concat(n), call: e.tool_use_id, host: call.host, command: call.command };
-                                return [4 /*yield*/, $.clock.now()];
-                            case 3: return [4 /*yield*/, _f.apply(void 0, _g.concat([__assign.apply(void 0, [__assign.apply(void 0, [(_h.at = _j.sent(), _h), (e.agentId ? { from: e.agentId } : {})]), (isWork ? { isWork: true } : {})]), card ? top : '']))];
-                            case 4:
-                                said_1 = _j.sent();
-                                if (!(said_1 !== 'once' && said_1 !== 'always')) return [3 /*break*/, 6];
-                                return [4 /*yield*/, dropGrants($, grants)];
-                            case 5:
-                                _j.sent();
-                                return [2 /*return*/, { value: { deny: said_1 === 'deny' ? GATE_DENIED() : said_1 === 'late' ? GATE_LATE() : said_1 === 'blind' ? GATE_BLIND() : GATE_GONE(), grants: [] } }];
-                            case 6:
-                                if (!(said_1 === 'always')) return [3 /*break*/, 8];
-                                return [4 /*yield*/, allowAlways($, call).catch(function (err) { return __awaiter(_this, void 0, void 0, function () {
-                                        var gate;
-                                        return __generator(this, function (_a) {
-                                            switch (_a.label) {
-                                                case 0: return [4 /*yield*/, log($, "admin command not always allowed: ".concat(String(err)))];
-                                                case 1:
-                                                    _a.sent();
-                                                    gate = { id: "".concat(e.tool_use_id, "-").concat(n), call: e.tool_use_id, host: call.host, command: call.command, at: 0 };
-                                                    if (!doneNotes.some(function (one) { return one.id === "gate-".concat(gate.id); })) return [3 /*break*/, 3];
-                                                    return [4 /*yield*/, noteDone($, __assign(__assign({ id: "gate-".concat(gate.id), call: e.tool_use_id }, (card ? { card: top } : {})), { head: gateHead(gate), said: "You allowed it. It runs now, but Claudopus couldn't save it as always allowed.", what: gateWhatLine(gate), isOn: true }))];
-                                                case 2:
-                                                    _a.sent();
-                                                    _a.label = 3;
-                                                case 3: return [2 /*return*/];
-                                            }
-                                        });
-                                    }); })];
-                            case 7:
-                                _j.sent();
-                                _j.label = 8;
-                            case 8:
-                                if (isWork)
-                                    workAllowed.add(top);
-                                _j.label = 9;
-                            case 9: return [4 /*yield*/, issueGrant($, "".concat(e.tool_use_id, "-").concat(n), call)];
-                            case 10:
-                                grant = _j.sent();
-                                if (!!grant) return [3 /*break*/, 13];
-                                return [4 /*yield*/, gateNoteFailed($, { id: "".concat(e.tool_use_id, "-").concat(n), call: e.tool_use_id, host: call.host, command: call.command, at: 0 }, card ? top : '', "Claudopus couldn't use its keychain key. It didn't run, and Claudopus told Claude.")];
-                            case 11:
-                                _j.sent();
-                                return [4 /*yield*/, dropGrants($, grants)];
-                            case 12:
-                                _j.sent();
-                                return [2 /*return*/, { value: { deny: GATE_UNSEALED(), grants: [] } }];
-                            case 13:
-                                grants.push(grant);
-                                return [2 /*return*/];
-                        }
-                    });
-                };
                 _i = 0, _a = calls.entries();
-                _d.label = 3;
+                _h.label = 3;
             case 3:
-                if (!(_i < _a.length)) return [3 /*break*/, 6];
+                if (!(_i < _a.length)) return [3 /*break*/, 17];
                 _b = _a[_i], n = _b[0], call = _b[1];
-                return [5 /*yield**/, _loop_1(n, call)];
+                isWork = gate.mode === 'work' && Boolean(card);
+                _c = (isWork && workAllowed.has(top));
+                if (_c) return [3 /*break*/, 5];
+                return [4 /*yield*/, isAllowed($, call)];
             case 4:
-                state_1 = _d.sent();
-                if (typeof state_1 === "object")
-                    return [2 /*return*/, state_1.value];
-                _d.label = 5;
+                _c = (_h.sent());
+                _h.label = 5;
             case 5:
+                isCovered = _c;
+                if (!!isCovered) return [3 /*break*/, 12];
+                _d = holdGate;
+                _e = [$, next];
+                _f = { id: "".concat(e.tool_use_id, "-").concat(n), call: e.tool_use_id, host: call.host, command: call.command };
+                return [4 /*yield*/, $.clock.now()];
+            case 6: return [4 /*yield*/, _d.apply(void 0, _e.concat([__assign.apply(void 0, [__assign.apply(void 0, [(_f.at = _h.sent(), _f), (e.agentId ? { from: e.agentId } : {})]), (isWork ? { isWork: true } : {})]), card ? top : '']))];
+            case 7:
+                said_1 = _h.sent();
+                if (!(said_1 !== 'once' && said_1 !== 'always')) return [3 /*break*/, 9];
+                return [4 /*yield*/, dropGrants($, grants)];
+            case 8:
+                _h.sent();
+                return [2 /*return*/, { deny: said_1 === 'deny' ? GATE_DENIED() : said_1 === 'late' ? GATE_LATE() : said_1 === 'blind' ? GATE_BLIND() : GATE_GONE(), grants: [] }];
+            case 9:
+                if (!(said_1 === 'always')) return [3 /*break*/, 11];
+                return [4 /*yield*/, allowAlways($, call).catch(function (err) { return __awaiter(_this, void 0, void 0, function () {
+                        return __generator(this, function (_a) {
+                            switch (_a.label) {
+                                case 0: return [4 /*yield*/, log($, "admin command not always allowed: ".concat(String(err)))];
+                                case 1:
+                                    _a.sent();
+                                    pressedLine($, card ? top : '', ALWAYS_ALLOW, "it runs now, but it couldn't be saved as always allowed");
+                                    return [2 /*return*/];
+                            }
+                        });
+                    }); })];
+            case 10:
+                _h.sent();
+                _h.label = 11;
+            case 11:
+                if (isWork)
+                    workAllowed.add(top);
+                _h.label = 12;
+            case 12: return [4 /*yield*/, issueGrant($, "".concat(e.tool_use_id, "-").concat(n), call)];
+            case 13:
+                grant = _h.sent();
+                if (!!grant) return [3 /*break*/, 15];
+                pressedLine($, card ? top : '', ALLOW, "the keychain key couldn't be used, so it didn't run");
+                return [4 /*yield*/, dropGrants($, grants)];
+            case 14:
+                _h.sent();
+                return [2 /*return*/, { deny: GATE_UNSEALED(), grants: [] }];
+            case 15:
+                grants.push(grant);
+                _h.label = 16;
+            case 16:
                 _i++;
                 return [3 /*break*/, 3];
-            case 6: return [2 /*return*/, { grants: grants }];
+            case 17: return [2 /*return*/, { grants: grants }];
         }
     });
 }); };
@@ -802,8 +746,53 @@ var releaseCalls = function (command, root, from) {
     }
     return found;
 };
+// What a press on a task's own go-ahead allows (asking.tsx, answerCleared): that card's next run of the release runner for that
+// worktree and its branch, once, within RELEASE_ALLOWED of the press and only until the card ends (state.tsx). Kept only in this
+// code's memory, as every press is: no file, message or typed reply allows a release
+var RELEASE_ALLOWED = 60 * 60000;
+var RELEASE_IT = 'Release it';
+var releaseAllowed = new Map();
+var allowRelease = function ($, card, folder) { return __awaiter(_this, void 0, void 0, function () {
+    var git, repo, branch, _a, _b, _c, _d;
+    var _e;
+    var _f;
+    return __generator(this, function (_g) {
+        switch (_g.label) {
+            case 0:
+                git = function (args) { return $.process.run(__spreadArray(['git', '-C', folder], args, true), { timeoutMs: 15000 }).then(function (r) { return (r.exitCode === 0 ? r.stdout.trim() : ''); }).catch(function () { return ''; }); };
+                return [4 /*yield*/, git(['rev-parse', '--show-toplevel'])];
+            case 1:
+                repo = _g.sent();
+                return [4 /*yield*/, git(['rev-parse', '--abbrev-ref', 'HEAD'])
+                    // Only a worktree on a branch, of a repo that says how it is released
+                ];
+            case 2:
+                branch = _g.sent();
+                _a = !repo || !branch || branch === 'HEAD';
+                if (_a) return [3 /*break*/, 4];
+                return [4 /*yield*/, $.fs.stat("".concat(repo, "/.release")).catch(function () { return undefined; })];
+            case 3:
+                _a = ((_f = (_g.sent())) === null || _f === void 0 ? void 0 : _f.kind) !== 'file';
+                _g.label = 4;
+            case 4:
+                // Only a worktree on a branch, of a repo that says how it is released
+                if (_a)
+                    return [2 /*return*/, false];
+                _c = (_b = releaseAllowed).set;
+                _d = [card];
+                _e = { folder: repo, branch: branch };
+                return [4 /*yield*/, $.clock.now()];
+            case 5:
+                _c.apply(_b, _d.concat([(_e.at = _g.sent(), _e)]));
+                return [4 /*yield*/, log($, "release of ".concat(branch, " from ").concat(repo, " allowed once for ").concat(card, " by ").concat(who(), "'s press on its go-ahead"))];
+            case 6:
+                _g.sent();
+                return [2 /*return*/, true];
+        }
+    });
+}); };
 var gateRelease = function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
-    var calls, list, top, card, grants, _loop_2, _i, _a, _b, n, call, state_2;
+    var calls, list, top, card, grants, _loop_1, _i, _a, _b, n, call, state_1;
     var _c;
     return __generator(this, function (_d) {
         switch (_d.label) {
@@ -817,22 +806,21 @@ var gateRelease = function ($, e, next) { return __awaiter(_this, void 0, void 0
                 top = e.agentId === undefined ? '' : topOf(list, e.agentId);
                 card = list.find(function (one) { return one.id === top; });
                 grants = [];
-                _loop_2 = function (n, call) {
-                    var git, repo, branch, _e, id, common, name_3, said_3, _f, _g, gate, grant;
-                    var _h;
-                    return __generator(this, function (_j) {
-                        switch (_j.label) {
+                _loop_1 = function (n, call) {
+                    var git, repo, branch, _e, id, common, name_3, now, allowed, isPressed, said_3, _f, gate, grant;
+                    return __generator(this, function (_g) {
+                        switch (_g.label) {
                             case 0:
                                 git = function (args) { return $.process.run(__spreadArray(['git', '-C', call.folder], args, true), { timeoutMs: 15000 }).then(function (r) { return (r.exitCode === 0 ? r.stdout.trim() : ''); }).catch(function () { return ''; }); };
                                 return [4 /*yield*/, git(['rev-parse', '--show-toplevel'])];
                             case 1:
-                                repo = _j.sent();
+                                repo = _g.sent();
                                 _e = call.branch;
                                 if (_e) return [3 /*break*/, 3];
                                 return [4 /*yield*/, git(['rev-parse', '--abbrev-ref', 'HEAD'])];
                             case 2:
-                                _e = (_j.sent());
-                                _j.label = 3;
+                                _e = (_g.sent());
+                                _g.label = 3;
                             case 3:
                                 branch = _e;
                                 // Not a repo, or no branch: the runner itself says what is wrong, and it releases nothing without a grant
@@ -841,33 +829,46 @@ var gateRelease = function ($, e, next) { return __awaiter(_this, void 0, void 0
                                 id = "".concat(e.tool_use_id, "-r").concat(n);
                                 return [4 /*yield*/, git(['rev-parse', '--path-format=absolute', '--git-common-dir'])];
                             case 4:
-                                common = _j.sent();
+                                common = _g.sent();
                                 name_3 = (/\/\.git$/.test(common) ? common.replace(/\/\.git$/, '') : repo).split('/').pop() || repo;
-                                _f = holdGate;
-                                _g = [$, next];
-                                _h = { id: id, call: e.tool_use_id, kind: 'release', host: name_3, command: "".concat(branch, " from ").concat(repo), folder: repo, branch: branch };
                                 return [4 /*yield*/, $.clock.now()];
-                            case 5: return [4 /*yield*/, _f.apply(void 0, _g.concat([__assign.apply(void 0, [(_h.at = _j.sent(), _h), (e.agentId ? { from: e.agentId } : {})]), card ? top : '']))];
+                            case 5:
+                                now = _g.sent();
+                                allowed = card ? releaseAllowed.get(top) : undefined;
+                                isPressed = Boolean(allowed && allowed.folder === repo && allowed.branch === branch && now - allowed.at < RELEASE_ALLOWED);
+                                if (allowed && (isPressed || now - allowed.at >= RELEASE_ALLOWED))
+                                    releaseAllowed.delete(top);
+                                if (!isPressed) return [3 /*break*/, 7];
+                                return [4 /*yield*/, log($, "release of ".concat(branch, " in ").concat(name_3, ": allowed by the press on its task's go-ahead"))];
                             case 6:
-                                said_3 = _j.sent();
-                                if (!(said_3 !== 'once')) return [3 /*break*/, 8];
-                                return [4 /*yield*/, dropGrants($, grants)];
+                                _g.sent();
+                                _g.label = 7;
                             case 7:
-                                _j.sent();
-                                gate = { kind: 'release' };
-                                return [2 /*return*/, { value: { deny: said_3 === 'deny' ? GATE_DENIED(gate) : said_3 === 'late' ? GATE_LATE(gate) : said_3 === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate), grants: [] } }];
-                            case 8: return [4 /*yield*/, issueGrant($, id, { host: 'release', command: "".concat(repo, "\n").concat(branch) }, 'release-grant')];
+                                if (!isPressed) return [3 /*break*/, 8];
+                                _f = 'once';
+                                return [3 /*break*/, 10];
+                            case 8: return [4 /*yield*/, holdGate($, next, __assign({ id: id, call: e.tool_use_id, kind: 'release', host: name_3, command: "".concat(branch, " from ").concat(repo), folder: repo, branch: branch, at: now }, (e.agentId ? { from: e.agentId } : {})), card ? top : '')];
                             case 9:
-                                grant = _j.sent();
-                                if (!!grant) return [3 /*break*/, 12];
-                                return [4 /*yield*/, gateNoteFailed($, { id: id, call: e.tool_use_id, kind: 'release', host: name_3, command: "".concat(branch, " from ").concat(repo), folder: repo, branch: branch, at: 0 }, card ? top : '', "Claudopus couldn't use its keychain key. Nothing was released, and Claudopus told Claude.")];
+                                _f = _g.sent();
+                                _g.label = 10;
                             case 10:
-                                _j.sent();
+                                said_3 = _f;
+                                if (!(said_3 !== 'once')) return [3 /*break*/, 12];
                                 return [4 /*yield*/, dropGrants($, grants)];
                             case 11:
-                                _j.sent();
+                                _g.sent();
+                                gate = { kind: 'release' };
+                                return [2 /*return*/, { value: { deny: said_3 === 'deny' ? GATE_DENIED(gate) : said_3 === 'late' ? GATE_LATE(gate) : said_3 === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate), grants: [] } }];
+                            case 12: return [4 /*yield*/, issueGrant($, id, { host: 'release', command: "".concat(repo, "\n").concat(branch) }, 'release-grant')];
+                            case 13:
+                                grant = _g.sent();
+                                if (!!grant) return [3 /*break*/, 15];
+                                pressedLine($, card ? top : '', isPressed ? RELEASE_IT : ALLOW, "the keychain key couldn't be used, so nothing was released");
+                                return [4 /*yield*/, dropGrants($, grants)];
+                            case 14:
+                                _g.sent();
                                 return [2 /*return*/, { value: { deny: GATE_UNSEALED(), grants: [] } }];
-                            case 12:
+                            case 15:
                                 grants.push(grant);
                                 return [2 /*return*/];
                         }
@@ -878,11 +879,11 @@ var gateRelease = function ($, e, next) { return __awaiter(_this, void 0, void 0
             case 2:
                 if (!(_i < _a.length)) return [3 /*break*/, 5];
                 _b = _a[_i], n = _b[0], call = _b[1];
-                return [5 /*yield**/, _loop_2(n, call)];
+                return [5 /*yield**/, _loop_1(n, call)];
             case 3:
-                state_2 = _d.sent();
-                if (typeof state_2 === "object")
-                    return [2 /*return*/, state_2.value];
+                state_1 = _d.sent();
+                if (typeof state_1 === "object")
+                    return [2 /*return*/, state_1.value];
                 _d.label = 4;
             case 4:
                 _i++;
@@ -1216,7 +1217,7 @@ var personCheck = function ($, by) { return __awaiter(_this, void 0, void 0, fun
     });
 }); };
 var personLook = function ($, by) { return __awaiter(_this, void 0, void 0, function () {
-    var sealedKnown, key, _a, now, known, undone, _loop_3, _i, now_1, _b, name_5, is, _c, PERSON_FILES_2, name_6, _d, undone_1, name_7;
+    var sealedKnown, key, _a, now, known, undone, _loop_2, _i, now_1, _b, name_5, is, _c, PERSON_FILES_2, name_6, _d, undone_1, name_7;
     var _e, _f;
     return __generator(this, function (_g) {
         switch (_g.label) {
@@ -1288,7 +1289,7 @@ var personLook = function ($, by) { return __awaiter(_this, void 0, void 0, func
                 _g.label = 14;
             case 14:
                 undone = [];
-                _loop_3 = function (name_5, is) {
+                _loop_2 = function (name_5, is) {
                     var was;
                     return __generator(this, function (_h) {
                         switch (_h.label) {
@@ -1327,7 +1328,7 @@ var personLook = function ($, by) { return __awaiter(_this, void 0, void 0, func
             case 15:
                 if (!(_i < now_1.length)) return [3 /*break*/, 18];
                 _b = now_1[_i], name_5 = _b[0], is = _b[1];
-                return [5 /*yield**/, _loop_3(name_5, is)];
+                return [5 /*yield**/, _loop_2(name_5, is)];
             case 16:
                 _g.sent();
                 _g.label = 17;
@@ -1454,7 +1455,7 @@ var PERSON_UNDONE = function (names) {
 // The change undone, on the card of the work whose command made it, else at the top: Allow makes it again. One card for each file:
 // a later change to it replaces the one shown
 var offerUndone = function ($, by, name, text) { return __awaiter(_this, void 0, void 0, function () {
-    var list, top, card, what, at, id, _loop_4, _i, undoneOffers_1, _a, other, offer;
+    var list, top, card, what, at, id, _loop_3, _i, undoneOffers_1, _a, other, offer;
     return __generator(this, function (_b) {
         switch (_b.label) {
             case 0: return [4 /*yield*/, read($, todos)];
@@ -1467,7 +1468,7 @@ var offerUndone = function ($, by, name, text) { return __awaiter(_this, void 0,
             case 2:
                 at = _b.sent();
                 id = "".concat(by ? by.tool_use_id : "seen".concat(at.toString(36)), "-u-").concat(name.replace(/[^A-Za-z0-9]/g, ''));
-                _loop_4 = function (other, offer) {
+                _loop_3 = function (other, offer) {
                     return __generator(this, function (_c) {
                         switch (_c.label) {
                             case 0:
@@ -1487,7 +1488,7 @@ var offerUndone = function ($, by, name, text) { return __awaiter(_this, void 0,
             case 3:
                 if (!(_i < undoneOffers_1.length)) return [3 /*break*/, 6];
                 _a = undoneOffers_1[_i], other = _a[0], offer = _a[1];
-                return [5 /*yield**/, _loop_4(other, offer)];
+                return [5 /*yield**/, _loop_3(other, offer)];
             case 4:
                 _b.sent();
                 _b.label = 5;
@@ -1505,7 +1506,7 @@ var offerUndone = function ($, by, name, text) { return __awaiter(_this, void 0,
                 return [4 /*yield*/, openList($).catch(function () { return undefined; })];
             case 8:
                 _b.sent();
-                $.ui.log("".concat(card ? "A command of \"".concat(titleOf(card), "\" changed") : by ? 'A command changed' : 'Something outside Claudopus changed', " ").concat(what, ", so Claudopus undid it. To make the change again, press Allow once ").concat(card ? 'on its card in' : 'at the top of', " the Claudopus panel. Deny keeps it undone."));
+                $.ui.log("".concat(card ? "A command of \"".concat(titleOf(card), "\" changed") : by ? 'A command changed' : 'Something outside Claudopus changed', " ").concat(what, ", so Claudopus undid it. To make the change again, press Allow ").concat(card ? 'on its card in' : 'at the top of', " the Claudopus panel. Don't allow keeps it undone."));
                 return [2 /*return*/];
         }
     });
@@ -1541,51 +1542,6 @@ var answerUndone = function ($, gate, said) { return __awaiter(_this, void 0, vo
         }
     });
 }); };
-// On the card: what it wants to run, whole, and the three presses. Another chat's panel shows it with no buttons: only the chat
-// that holds the call allows it
-// Drawn as Claude Code draws its own permission asks: an outlined box with the kind of ask at its top, never a filled card with an
-// edge as work's cards are, so an ask is not taken for one more piece of work
-var gateKind = function (gate) { return (gate.isUndone ? 'Change undone' : gate.kind === 'release' ? 'Release' : gate.kind === 'file' ? 'Change to your files' : 'Admin command'); };
-var gateRow = function ($, ui, gate, key, isElsewhere, card) {
-    var _a;
-    if (card === void 0) { card = ''; }
-    return (<ui.Box key={key} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
-    <ui.Text wrap="truncate-end" dimColor>{"".concat(gateKind(gate), " \u00B7 ").concat(gateHeld.has(gate.id) && !isElsewhere ? 'waiting for you' : isElsewhere ? 'waiting in another chat' : 'no longer waiting')}</ui.Text>
-    <ui.Text wrap="wrap" color={NEEDS} bold>{gateWhat(gate)}</ui.Text>
-    {gate.kind === 'release' && gate.folder ? (<ui.Box flexDirection="column">
-        <ui.Text wrap="truncate-end">{"Branch ".concat((_a = gate.branch) !== null && _a !== void 0 ? _a : '')}</ui.Text>
-        <ui.Text dimColor wrap="truncate-start">{"from ".concat(shortPath(gate.folder))}</ui.Text>
-      </ui.Box>) : gate.command ? (<ui.Box backgroundColor={FILL} paddingLeft={2}>
-        <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
-      </ui.Box>) : (<ui.Text dimColor wrap="wrap">Its details show only on its own Mac.</ui.Text>)}
-    <ui.Text wrap="wrap">
-      {gate.kind === 'release'
-            ? 'Allow once: Claude merges this branch into main, checks it and pushes it with its version and tag. Deny: nothing is released, and Claudopus tells Claude.'
-            : gate.isUndone && gate.isOutside
-                ? 'Something outside Claudopus changed this file, maybe you in an editor or a program a command left running, so Claudopus undid it. Allow once: Claudopus makes the change again. If you made it, allow it. Deny: the file stays as it was. Either way Claudopus keeps the changed text beside it as a .put-back copy.'
-                : gate.isUndone
-                    ? 'A command wrote to this file, so Claudopus undid it: Claude changes it only with Edit or Write, which ask you first. Allow once: Claudopus makes the change again. If you made it, allow it. Deny: the file stays as it was. Either way Claudopus keeps the changed text beside it as a .put-back copy.'
-                    : gate.kind === 'file'
-                        ? 'Allow once: Claude makes this change to your file. Deny: the file stays as it is, and Claudopus tells Claude.'
-                        : "".concat(gate.isWork ? "Allow for this task: it runs as admin, and so do this task's next admin commands, without asking" : 'Allow once: it runs as admin', ". Deny: it doesn't run, and Claudopus tells Claude.")}
-    </ui.Text>
-    {gateHeld.has(gate.id) && !isElsewhere ? (<ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-        <ui.Button key={"".concat(key, "-once-").concat(loadMark)} label={gate.isWork ? 'Allow for this task' : 'Allow once'} variant="primary" onPress={function () { return answerGate($, gate, 'once', card); }}/>
-        {gate.kind ? null : <ui.Button key={"".concat(key, "-always-").concat(loadMark)} label="Always allow this command" onPress={function () { return answerGate($, gate, 'always', card); }}/>}
-        <ui.Button key={"".concat(key, "-deny-").concat(loadMark)} label="Deny" onPress={function () { return answerGate($, gate, 'deny', card); }}/>
-      </ui.Box>) : (<ui.Text dimColor wrap="wrap">{isElsewhere ? 'Allow or deny it on its card in its own chat.' : "It's no longer waiting for you."}</ui.Text>)}
-  </ui.Box>);
-};
-// The gates on a work's card, and once one is answered, what was done in the same place, outlined green (grey once refused)
-var adminBlock = function ($, ui, one, key, at) {
-    var _a, _b;
-    return ((_a = one.admins) === null || _a === void 0 ? void 0 : _a.some(function (gate) { return !gatePressed.has(gate.id); })) || cardNotesOf(one.id, at).length ? (<ui.Box key={key} flexDirection="column" gap={1}>
-      {((_b = one.admins) !== null && _b !== void 0 ? _b : []).filter(function (gate) { return !gatePressed.has(gate.id); }).map(function (gate) { return gateRow($, ui, gate, "gate-".concat(gate.id), Boolean(one.chat), one.chat ? '' : one.id); })}
-      {cardNotesPart(ui, one.id, at)}
-    </ui.Box>) : null;
-};
-// A gate with no card, at the top of the panel
-var gatesPart = function ($, ui) { return looseGates.filter(function (gate) { return !gatePressed.has(gate.id); }).map(function (gate) { return gateRow($, ui, gate, "gate-".concat(gate.id), false); }); };
 // A path in one line: the home folder as ~, and the middle left out past `room` characters, keeping its last folders
 var shortPath = function (path, room) {
     var _a;

@@ -146,7 +146,7 @@ var readLink = function ($, id) { return __awaiter(_this, void 0, void 0, functi
     });
 }); };
 var shareMine = function ($) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, id, title, now, list, withSeen, sharedKept, cards, helpers, jobsSign, shareOf, prompts, answeredNow, helpersSign, core, sign, s, isLive, ended, text;
+    var _a, id, title, now, list, withSeen, cards, helpers, jobsSign, shareOf, prompts, helpersSign, core, sign, s, isLive, ended, text;
     return __generator(this, function (_b) {
         switch (_b.label) {
             case 0: return [4 /*yield*/, read($, me)];
@@ -169,43 +169,39 @@ var shareMine = function ($) { return __awaiter(_this, void 0, void 0, function 
             case 5:
                 list = _b.sent();
                 withSeen = function (one) {
-                    var _a, _b;
-                    var seen = Object.fromEntries(__spreadArray(__spreadArray([], ((_a = one.bg) !== null && _a !== void 0 ? _a : []), true), ((_b = one.detached) !== null && _b !== void 0 ? _b : []), true).flatMap(function (job) {
+                    var _a;
+                    var seen = Object.fromEntries(((_a = one.bg) !== null && _a !== void 0 ? _a : []).flatMap(function (job) {
                         var _a;
                         var s = jobLog.get(job.id);
-                        return s ? [[job.id, __assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign({ latest: s.latest }, (s.pct ? { pct: s.pct } : {})), (s.done ? { done: s.done } : {})), (s.total ? { total: s.total } : {})), (s.wroteAt ? { wroteAt: s.wroteAt } : {})), (((_a = s.tail) === null || _a === void 0 ? void 0 : _a.length) ? { tail: s.tail } : {})), (s.words ? { words: s.words } : {})), (s.isOwn ? { isOwn: true } : {})), (s.isEarlier ? { isEarlier: true } : {})), (s.isEmpty ? { isEmpty: true } : {})), (s.target ? { target: s.target } : {}))]] : [];
+                        return s ? [[job.id, __assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign({ latest: s.latest }, (s.pct ? { pct: s.pct } : {})), (s.done ? { done: s.done } : {})), (s.total ? { total: s.total } : {})), (s.wroteAt ? { wroteAt: s.wroteAt } : {})), (((_a = s.tail) === null || _a === void 0 ? void 0 : _a.length) ? { tail: s.tail } : {})), (s.words ? { words: s.words } : {})), (s.isOwn ? { isOwn: true } : {})), (s.isEarlier ? { isEarlier: true } : {})), (s.isEmpty ? { isEmpty: true } : {}))]] : [];
                     }));
                     return Object.keys(seen).length ? __assign(__assign({}, one), { seenJobs: seen }) : one;
                 };
-                return [4 /*yield*/, read($, reports)];
-            case 6:
-                sharedKept = _b.sent();
-                cards = shareable(shownAs(list, function (one) { return openResultWaits(one, sharedKept, now).length > 0; }), now).map(withSeen);
+                cards = shareable(list, now).map(withSeen);
                 helpers = shareableHelpers(list, cards).map(withSeen);
-                jobsSign = __spreadArray(__spreadArray([], cards, true), helpers, true).map(function (one) { var _a; return Object.values((_a = one.seenJobs) !== null && _a !== void 0 ? _a : {}).map(function (s) { var _a, _b, _c, _d; return "".concat(s.latest, ":").concat((_b = (_a = s.tail) === null || _a === void 0 ? void 0 : _a.at(-1)) !== null && _b !== void 0 ? _b : '', ":").concat(Math.floor(((_c = s.wroteAt) !== null && _c !== void 0 ? _c : 0) / 30000), ":").concat((_d = s.target) !== null && _d !== void 0 ? _d : ''); }).join('|'); }).join(' ');
+                jobsSign = __spreadArray(__spreadArray([], cards, true), helpers, true).map(function (one) { var _a; return Object.values((_a = one.seenJobs) !== null && _a !== void 0 ? _a : {}).map(function (s) { var _a, _b, _c; return "".concat(s.latest, ":").concat((_b = (_a = s.tail) === null || _a === void 0 ? void 0 : _a.at(-1)) !== null && _b !== void 0 ? _b : '', ":").concat(Math.floor(((_c = s.wroteAt) !== null && _c !== void 0 ? _c : 0) / 30000)); }).join('|'); }).join(' ');
                 shareOf = function (_a) {
-                    var _tool = _a.tool, _agent = _a.agent, _snippet = _a.snippet, _seen = _a.seen, _told = _a.isTold, _input = _a.input, p = __rest(_a, ["tool", "agent", "snippet", "seen", "isTold", "input"]);
+                    var _tool = _a.tool, _agent = _a.agent, _snippet = _a.snippet, _seen = _a.seen, _told = _a.isTold, _input = _a.input, _card = _a.card, p = __rest(_a, ["tool", "agent", "snippet", "seen", "isTold", "input", "card"]);
                     return p;
                 };
                 prompts = waiting.map(shareOf);
-                answeredNow = answeredShown(now).map(shareOf);
                 helpersSign = JSON.stringify(helpers.map(function (one) { var _a, _b; return [one.id, one.status, one.items, (_b = (_a = one.entries.at(-1)) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : '']; }));
-                core = "".concat(title, "\n").concat(JSON.stringify(myLink !== null && myLink !== void 0 ? myLink : null), "\n").concat(signOf(cards), "\n").concat(prompts.map(function (one) { return one.id; }).join(' '), "\n").concat(answeredNow.map(function (one) { return "".concat(one.id, ":").concat(one.answered, ":").concat(one.isRunning ? 1 : 0); }).join(' '));
+                core = "".concat(title, "\n").concat(JSON.stringify(myLink !== null && myLink !== void 0 ? myLink : null), "\n").concat(signOf(cards), "\n").concat(prompts.map(function (one) { return one.id; }).join(' '));
                 sign = "".concat(core, "\n").concat(helpersSign, "\n").concat(jobsSign);
                 if (sign === sharedSign && now - sharedAt < BEAT)
                     return [2 /*return*/];
                 if (core === sharedCore && now - sharedAt < LOOK_EVERY)
                     return [2 /*return*/];
-                s = __assign(__assign(__assign(__assign({ chat: id, title: title, folder: cwd, host: '', at: now, cards: cards }, (helpers.length ? { helpers: helpers } : {})), (prompts.length ? { prompts: prompts } : {})), (answeredNow.length ? { answeredPrompts: answeredNow } : {})), (myLink ? { link: myLink } : {}));
+                s = __assign(__assign(__assign({ chat: id, title: title, folder: cwd, host: '', at: now, cards: cards }, (helpers.length ? { helpers: helpers } : {})), (prompts.length ? { prompts: prompts } : {})), (myLink ? { link: myLink } : {}));
                 isLive = function (one) { return one.status === 'working' || Boolean(one.ask); };
                 ended = cards.filter(function (one) { return !isLive(one); });
                 return [4 /*yield*/, hiddenJson($, JSON.stringify(__assign(__assign(__assign({}, s), { cards: cards.filter(isLive) }), (ended.length ? { ended: ended } : {}))))];
-            case 7:
+            case 6:
                 text = _b.sent();
                 if (text === undefined)
                     return [2 /*return*/, void log($, "this chat's file not shared: it could not be checked for kept keys")];
                 return [4 /*yield*/, $.fs.write(ownLive(id), text)];
-            case 8:
+            case 7:
                 _b.sent();
                 sharedSign = sign;
                 sharedCore = core;
@@ -457,7 +453,7 @@ var readOthers = function ($) { return __awaiter(_this, void 0, void 0, function
                     s = found_1[_v];
                     for (_w = 0, _x = s.cards.filter(function (one) { return one.status === 'working'; }); _w < _x.length; _w++) {
                         card = _x[_w];
-                        lastRunning.set(remoteId(s, card.id), { chat: chatKey(s), card: card, at: now, of: __assign(__assign({}, s), { cards: [], prompts: undefined, answeredPrompts: undefined }) });
+                        lastRunning.set(remoteId(s, card.id), { chat: chatKey(s), card: card, at: now, of: __assign(__assign({}, s), { cards: [], prompts: undefined }) });
                     }
                 }
                 _loop_3 = function (key, one) {

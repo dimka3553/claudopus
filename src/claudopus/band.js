@@ -1,4 +1,15 @@
 // Above the prompt: the small octopus while work runs, and how Claude uses this computer
+var __assign = (this && this.__assign) || function () {
+    __assign = Object.assign || function(t) {
+        for (var s, i = 1, n = arguments.length; i < n; i++) {
+            s = arguments[i];
+            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
+                t[p] = s[p];
+        }
+        return t;
+    };
+    return __assign.apply(this, arguments);
+};
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -82,7 +93,7 @@ var markerSign = function ($, surface) { return __awaiter(_this, void 0, void 0,
 }); }); };
 var markerWords = function (surface) {
     return waitsAtTop > 0
-        ? "\u25CF ".concat(waitsAtTop, " ").concat(waitsAtTop === 1 ? 'question' : 'questions', " waiting for you").concat(firstAtTop ? " \u00B7 first: ".concat(firstAtTop) : '').concat(isScrolled(surface) && finishedAtTop.length ? " \u00B7 ".concat(finishedAtTop.length, " done") : '')
+        ? "\u25CF ".concat(waitsAtTop, " waiting for you").concat(firstAtTop ? " \u00B7 ".concat(firstAtTop) : '').concat(isScrolled(surface) && finishedAtTop.length ? " \u00B7 ".concat(finishedAtTop.length, " done") : '')
         : "\u2191 ".concat(finishedAtTop.length === 1 ? "".concat(finishedAtTop[0], " is done") : "".concat(finishedAtTop.length, " tasks are done"), ", at the top of the panel");
 };
 var waitMarker = function ($, ui, surface) { return __awaiter(_this, void 0, void 0, function () {
@@ -97,60 +108,95 @@ var waitMarker = function ($, ui, surface) { return __awaiter(_this, void 0, voi
           <ui.Button key={"band-waits-".concat(presses)} label="Show" plain onPress={function () { return ((presses += 1), void (recordEvent($, 'scroll-call', { to: 'start' }), $.ui.scroll({ in: LIST, to: 'start', block: 'start' })).catch(function () { return undefined; })); }}/>
         </ui.Box>) : null}
     </ui.Box>) : null
-                // The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: the work the reply goes to on a
-                // line of its own, the box under it as wide as the bar and BOX_ROWS lines tall whatever it holds, and under it, a gap below it
-                // what Enter does beside Send, the big one, and Close, small, which takes the box away again with what was typed kept for its card
-                // (17 Nov, the person: the box was "very small" and "doesn't extend taller"; one row of a field drawn as narrow as the app makes
-                // one, beside the title and buttons). The box names no submitLabel: the desktop app draws one as a second, small send button
-                // beside it, and with one a box of several lines sends only on Cmd+Enter; without it Enter sends and Shift+Enter makes a new line.
-                // Nothing in it follows the panel's scrolling. The box is the card's own: the same answer, and the same box through a new question
-                // of its work, until the person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
-                // Opened by Change something on a Done card (isChange), it is the same box for a card that asks nothing: what to change, sent to
-                // that task, and Cancel in place of Close
+                // The one box above the chat, for everything that is typed for the panel (asking.tsx, barOpen): an answer in words, a key, a
+                // password, a change to a done task, what to do next from a result. One heading line says what it is for; the field under it is as
+                // wide as the bar and BOX_ROWS lines tall whatever it holds; under it, a gap between, what Enter does beside Send, the big one,
+                // and Close, small, which takes the box away again (17 Nov, the person: the box was "very small" and "doesn't extend taller").
+                // The field names no submitLabel: the desktop app draws one as a second, small send button beside it, and with one a box of
+                // several lines sends only on Cmd+Enter; without it Enter sends. Nothing in it follows the panel's scrolling. It takes the cursor
+                // when the person clicks anywhere in the bar (autoFocus)
+                // `draft`: where what is typed and not sent is kept (an answer, a change, a result); a key or a password is kept nowhere but in
+                // barKeyTyped while the box is open, for its Send button. `said`: what went wrong with what was last sent from it
+                // `message`: the task a message goes to, whose box has the message's own row under it (messageFoot): its files, Attach, Send now
+                // and Send, as at the bottom of its Details
             ];
         }
     });
 }); };
-// The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: the work the reply goes to on a
-// line of its own, the box under it as wide as the bar and BOX_ROWS lines tall whatever it holds, and under it, a gap below it
-// what Enter does beside Send, the big one, and Close, small, which takes the box away again with what was typed kept for its card
-// (17 Nov, the person: the box was "very small" and "doesn't extend taller"; one row of a field drawn as narrow as the app makes
-// one, beside the title and buttons). The box names no submitLabel: the desktop app draws one as a second, small send button
-// beside it, and with one a box of several lines sends only on Cmd+Enter; without it Enter sends and Shift+Enter makes a new line.
-// Nothing in it follows the panel's scrolling. The box is the card's own: the same answer, and the same box through a new question
-// of its work, until the person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
-// Opened by Change something on a Done card (isChange), it is the same box for a card that asks nothing: what to change, sent to
-// that task, and Cancel in place of Close
-var barReply = function ($, ui, one, isChange) {
-    if (isChange === void 0) { isChange = false; }
-    var draft = isChange ? changeDraft(one.id) : barDraft(one.id);
-    var send = isChange ? function (value) { var _a; return void (value.trim() && ((barBoxAt = 0), (changeTo = ''), dropDrafts($, one.id), replies.set(one.id, ((_a = replies.get(one.id)) !== null && _a !== void 0 ? _a : 0) + 1), freeTimes($), sendChange($, one.id, value).catch(function (err) { return log($, "change not sent: ".concat(String(err))); }))); } : function (value) { var _a; return void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, ((_a = replies.get(one.id)) !== null && _a !== void 0 ? _a : 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(function (err) { return log($, "reply not sent: ".concat(String(err))); })); };
-    return (<ui.Box key="band-reply" flexDirection="column" flexShrink={0} width="100%">
+// The card the box was opened on by Message, while it works or has finished and asks nothing: asking, its box goes
+var changeTarget = function (cards) { return ((barOpen === null || barOpen === void 0 ? void 0 : barOpen.kind) === 'change' ? cards.find(function (one) { return one.id === (barOpen === null || barOpen === void 0 ? void 0 : barOpen.id) && canChange(asPressed(one)); }) : undefined); };
+// What the open box is for, as it stands now; none once that is answered, gone or no longer open to it, and the box goes with it
+var barBoxOf = function ($, ui, cards, kept) {
+    var _a, _b;
+    var open = barOpen;
+    if (!open)
+        return undefined;
+    var sent = function (id) { var _a; return void ((barBoxAt = 0), dropDrafts($, id), replies.set(id, ((_a = replies.get(id)) !== null && _a !== void 0 ? _a : 0) + 1), freeTimes($)); };
+    var forTask = function (card) {
+        var one = card ? cards.find(function (other) { return other.id === card; }) : undefined;
+        return one ? " for \u201C".concat(cut(titleOf(one), 50), "\u201D") : '';
+    };
+    if (open.kind === 'answer') {
+        var one_1 = barTarget(cards);
+        return one_1 && { head: "\u21B3 Your answer to \u201C".concat(cut(titleOf(one_1), 60), "\u201D"), placeholder: 'Type your answer', draft: barDraft(), send: function (value) { return void (sent(one_1.id), sendFromBar($, one_1.id, value).catch(function (err) { return log($, "reply not sent: ".concat(String(err))); })); } };
+    }
+    if (open.kind === 'change') {
+        var one_2 = changeTarget(cards);
+        return one_2 && { head: "\u21B3 ".concat(stageOf(cards, one_2) === 'delivered' && ((_a = one_2.questions) === null || _a === void 0 ? void 0 : _a.length) ? 'Reply' : 'Message', " to \u201C").concat(cut(titleOf(one_2), 50), "\u201D"), placeholder: 'Type your message', draft: messageDraft(one_2.id), message: one_2, send: function (value) { return sendMessageFrom($, one_2.id, value, false); } };
+    }
+    if (open.kind === 'continue') {
+        var r_1 = kept.find(function (one) { return one.id === open.id; });
+        return r_1 && { head: "\u21B3 Message to \u201C".concat(cut(r_1.title, 50), "\u201D"), placeholder: 'Type your message', draft: barDraft(), send: function (value) { return void (sent(r_1.id), (barOpen = undefined), redraw($), continueFrom($, r_1.id, value).catch(function (err) { return log($, "message from a result not sent: ".concat(String(err))); })); } };
+    }
+    var box = boxes.find(function (one) { return one.id === open.id; });
+    if (!box)
+        return undefined;
+    var mode = open.kind === 'words' ? 'reply' : 'key';
+    var head = open.kind === 'words'
+        ? "\u21B3 Your answer in place of ".concat((_b = box.name) !== null && _b !== void 0 ? _b : (isNameBox(box) ? 'the name' : 'the key'))
+        : open.kind === 'password'
+            ? "\u21B3 ".concat(box.host === 'here' || !box.host ? "".concat(thisMac().replace(/^t/, 'T'), "'s password") : "The password of ".concat(box.host)).concat(forTask(box.card))
+            : box.name
+                ? "\u21B3 ".concat(box.name).concat(forTask(box.card))
+                : "\u21B3 The key's name";
+    return __assign(__assign({ head: head, placeholder: open.kind === 'words' ? 'Type your answer' : open.kind === 'password' || !box.name ? 'Type it here' : 'Paste it here', secret: box.id }, (boxSaid.get(box.id) ? { said: boxSaid.get(box.id) } : {})), { extra: heldReplyButtons($, ui, box.id, 'band-key'), 
+        // (a pasted key often ends in a line break, which is no part of it)
+        send: function (value) { return submitBox($, box.id, mode, mode === 'reply' ? value : value.replace(/[\r\n]+$/, '')); } });
+};
+var barBox = function ($, ui, box) {
+    var _a;
+    var typed = function () { var _a, _b; return (box.draft ? ((_a = drafts.get(box.draft)) !== null && _a !== void 0 ? _a : '') : box.secret ? ((_b = barKeyTyped.get(box.secret)) !== null && _b !== void 0 ? _b : '') : ''); };
+    var send = function (value) { return void (value.trim() && box.send(value)); };
+    return (<ui.Box key="band-box" flexDirection="column" flexShrink={0} width="100%">
       <ui.Box flexDirection="row" height={1} overflow="hidden">
-        <ui.Text color={isChange ? undefined : NEEDS} bold wrap="truncate-end">{isChange ? "".concat(cut(titleOf(one), 60), " \u00B7 ").concat(CHANGE_WHAT) : "\u21B3 Your answer to \u201C".concat(cut(titleOf(one), 60), "\u201D")}</ui.Text>
+        <ui.Text color={NEEDS} bold wrap="truncate-end">{box.head}</ui.Text>
       </ui.Box>
       {'Input' in ui ? (<ui.Box flexDirection="column" width="100%" flexShrink={0}>
-          <ui.Input key={isChange ? changeBoxKey(one.id) : barBoxKey(one.id)} placeholder={isChange ? 'Type what to change' : 'Type your reply'} value={draftDrawn(draft)} rows={BOX_ROWS} autoFocus onInput={function (value) { return void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(function (at) { return (barBoxAt = at); })); }} onSubmit={send}/>
+          <ui.Input key={barBoxKey()} placeholder={box.placeholder} {...(box.draft ? { value: draftDrawn(box.draft) } : {})} rows={BOX_ROWS} autoFocus onInput={function (value) {
+                var draft = box.draft, secret = box.secret;
+                if (draft)
+                    (drafts.set(draft, value), keepDraft($, draft, value));
+                else if (secret)
+                    ((value ? boxTyped.add(secret) : boxTyped.delete(secret)), barKeyTyped.set(secret, value));
+                holdTimes($);
+                void $.clock.now().then(function (at) { return (barBoxAt = at); });
+            }} onSubmit={send}/>
         </ui.Box>) : null}
-      {barFoot($, ui, isChange ? 'band-change' : 'band-reply', presses, function () { var _a, _b; return void (((_a = drafts.get(draft)) !== null && _a !== void 0 ? _a : '').trim() && send((_b = drafts.get(draft)) !== null && _b !== void 0 ? _b : '')); }, function (press) { return (isChange ? openChange($, undefined, press.surface) : openReply($, undefined, press.surface)); }, true, isChange ? 'Cancel' : 'Close')}
+      {box.said ? <ui.Text key="band-box-said" color={NEEDS} wrap="wrap">{box.said}</ui.Text> : null}
+      {(_a = box.extra) !== null && _a !== void 0 ? _a : null}
+      {box.message ? (<ui.Box key="band-box-message" flexShrink={0} marginTop={1} width="100%">
+          {messageFoot($, ui, box.message, 'band-box', <ui.Button key={"band-box-close-".concat(presses, "-").concat(boxPresses)} label="Close" plain dimColor onPress={function (press) { return openBar($, undefined, press.surface); }}/>)}
+        </ui.Box>) : null}
+      {box.message ? null : <ui.Box key="band-box-foot" flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
+        <ui.Box flexGrow={1} flexShrink={1} minWidth={0}/>
+        <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
+          <ui.Button key={"band-box-send-".concat(presses, "-").concat(boxPresses)} label="Send" variant="primary" onPress={function () { return send(typed()); }}/>
+          <ui.Button key={"band-box-close-".concat(presses, "-").concat(boxPresses)} label="Close" plain dimColor onPress={function (press) { return openBar($, undefined, press.surface); }}/>
+        </ui.Box>
+      </ui.Box>}
     </ui.Box>);
 };
-// Under a box in the bar: what Enter does, and Send, the big one, then Close, small
-var BOX_KEYS = 'Enter sends · Shift+Enter for a new line';
-var barFoot = function ($, ui, where, mark, onSend, onClose, isLines, close) {
-    if (isLines === void 0) { isLines = true; }
-    if (close === void 0) { close = 'Close'; }
-    return (<ui.Box key={"".concat(where, "-foot")} flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
-    <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
-      <ui.Text dimColor wrap="truncate-end">{isLines ? BOX_KEYS : 'Enter sends'}</ui.Text>
-    </ui.Box>
-    <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-      <ui.Button key={"".concat(where, "-send-").concat(mark)} label="Send" variant="primary" onPress={onSend}/>
-      <ui.Button key={"".concat(where, "-close-").concat(mark)} label={close} plain dimColor onPress={onClose}/>
-    </ui.Box>
-  </ui.Box>);
-};
-// The bar as last drawn on each surface while a reply box was in it: while the person types, and for as long as the box holds the
+// The bar as last drawn on each surface while its box was in it: while the person types, and for as long as the box holds the
 // cursor (barBoxAt), it is drawn as it was, whole, but for a change in what it holds, as a pane is (heldDrawings): each drawing is
 // a new box under the cursor, its ring drawn again and a selection or a half-composed letter lost
 // (17 Nov: the bar was drawn anew, and the box with it, each time any work wrote its cards, several times a second, as the bar
@@ -161,26 +207,15 @@ var barFoot = function ($, ui, where, mark, onSend, onClose, isLines, close) {
 // written. The cards are looked at once a second instead (lookBar), and the bar is drawn again when what it shows of them moved
 var barHeld = new Map();
 // What a bar with a box open is drawn for, from the mod's own memory alone: which box, and what is said beside it
-var barShape = function () {
-    var _a;
-    var keyBox = barKeyTarget();
-    if (boxOpen && keyBox)
-        return "key|".concat(barKeyBoxKey(keyBox.id, boxOpen.mode), "|").concat((_a = boxSaid.get(keyBox.id)) !== null && _a !== void 0 ? _a : '', "|").concat(boxHeldReply.has(keyBox.id));
-    if (changeTo)
-        return "change|".concat(changeBoxKey(changeTo), "|").concat(barCardsDrawn);
-    return replyTo ? "reply|".concat(barBoxKey(replyTo), "|").concat(barCardsDrawn) : '';
-};
-// What the cards say of the box open in the bar as last looked at: its card, still asking, under its title. Part of the held shape,
-// so a card that stops asking (answered elsewhere, its question withdrawn, the work stopped) takes its box away within a second
+var barShape = function () { var _a, _b; return (barOpen ? "".concat(barOpen.kind, "|").concat(barBoxKey(), "|").concat(JSON.stringify((_a = attached.get(barOpen.id)) !== null && _a !== void 0 ? _a : []), "|").concat(isBoxKind(barOpen.kind) ? "".concat((_b = boxSaid.get(barOpen.id)) !== null && _b !== void 0 ? _b : '', "|").concat(boxHeldReply.has(barOpen.id)) : barCardsDrawn) : ''); };
+// What the cards say of the box open in the bar as last looked at: its card, still asking or still done, under its title. Part
+// of the held shape, so a card that stops asking (answered elsewhere, its question withdrawn, the task stopped) takes its box
+// away within a second
 var barCardsDrawn = '';
-// The Done card the box was opened on by Change something, while it is still done: at work again, or asking, its box goes
-var changeTarget = function (cards) { return (changeTo ? cards.find(function (one) { return one.id === changeTo && canChange(asPressed(one)); }) : undefined); };
 var barCardsSign = function (cards) {
-    var changing = changeTarget(cards);
-    if (changing)
-        return "".concat(changing.id, "|").concat(titleOf(changing));
-    var target = barTarget(cards);
-    return (target === null || target === void 0 ? void 0 : target.ask) ? "".concat(target.id, "|").concat(titleOf(target)) : '';
+    var _a;
+    var one = (_a = changeTarget(cards)) !== null && _a !== void 0 ? _a : barTarget(cards);
+    return one ? "".concat(one.id, "|").concat(titleOf(one)) : (barOpen === null || barOpen === void 0 ? void 0 : barOpen.kind) === 'continue' ? "result|".concat(barOpen.id) : '';
 };
 // Once a second while a bar holds a box (chat.tsx): the cards it shows moved, so it is drawn again, once for each change
 var lookBar = function ($) { return __awaiter(_this, void 0, void 0, function () {
@@ -199,7 +234,7 @@ var lookBar = function ($) { return __awaiter(_this, void 0, void 0, function ()
                 // A redraw put off while the box held the cursor is made once it no longer does (drawFresh)
                 if (_a)
                     drawAgain($);
-                if (!barHeld.size || !(replyTo || changeTo))
+                if (!barHeld.size || !barOpen || isBoxKind(barOpen.kind))
                     return [2 /*return*/];
                 _c = barCardsSign;
                 return [4 /*yield*/, read($, todos)];
@@ -239,11 +274,11 @@ var bandHooks = function (on) {
         // Above the prompt, while work runs: a small mark that it does, and how Claude uses the computer, never what the work is doing
         function drawBarNow() {
             return __awaiter(this, void 0, void 0, function () {
-                var canBox, flipAt, kept, isHeldNow, _a, _b, cards, open_1, bandAt, bandKept, shown, working, happy, ui, Box, Button, Text, asking, first_1, ask_1, answers, id_1, picked_1, press_1, _c, _d, _e, _f, keyBox, shape, marker_1, row, drawing_1, _g, _h, _j, changing, target, shape, marker_2, reply, drawing_2, _k, _l, _m, isPanelAway, _o, figures, _p, marker, drawn, drawing;
-                var _q, _r;
-                var _s, _t, _u, _v, _w;
-                return __generator(this, function (_x) {
-                    switch (_x.label) {
+                var canBox, flipAt, kept, isHeldNow, _a, _b, cards, open_1, bandAt, bandKept, working, happy, ui, Box, Button, Text, asking, first_1, ask_1, answers, id_1, picked_1, press_1, more, need, _c, _d, _e, _f, box, shape, marker_1, row, drawing_1, _g, _h, _j, isPanelAway, _k, figures, _l, marker, drawn, drawing;
+                var _m, _o;
+                var _p, _q, _r, _s, _t;
+                return __generator(this, function (_u) {
+                    switch (_u.label) {
                         case 0:
                             canBox = e.surface === 'desktop' && 'Input' in uiOf($, e) && !e.props.hasSurvey && !e.props.isCollapsed;
                             if (e.requestId)
@@ -252,59 +287,58 @@ var bandHooks = function (on) {
                                 // A box open and drawn as it is: given again as it was, reading no cards (barHeld)
                             ];
                         case 1:
-                            flipAt = _x.sent();
+                            flipAt = _u.sent();
                             kept = barHeld.get(e.surface);
-                            if (!(kept && canBox && barBoxes.has(e.surface) && (replyTo || boxOpen || changeTo) && kept.shape === barShape())) return [3 /*break*/, 4];
+                            if (!(kept && canBox && barBoxes.has(e.surface) && barOpen && kept.shape === barShape())) return [3 /*break*/, 4];
                             isHeldNow = isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD);
                             _a = isHeldNow;
                             if (_a) return [3 /*break*/, 3];
                             _b = kept.mark;
                             return [4 /*yield*/, markerSign($, e.surface)];
                         case 2:
-                            _a = _b === (_x.sent());
-                            _x.label = 3;
+                            _a = _b === (_u.sent());
+                            _u.label = 3;
                         case 3:
                             if (_a)
                                 return [2 /*return*/, ((isBarSettling = false), kept.drawing)];
-                            _x.label = 4;
+                            _u.label = 4;
                         case 4: return [4 /*yield*/, read($, todos)];
                         case 5:
-                            cards = _x.sent();
+                            cards = _u.sent();
                             if (canBox !== barBoxes.has(e.surface)) {
                                 if (canBox)
                                     barBoxes.add(e.surface);
                                 else
                                     barBoxes.delete(e.surface);
-                                open_1 = canBox ? undefined : cards.find(function (one) { return one.id === replyTo; });
+                                open_1 = canBox || (barOpen === null || barOpen === void 0 ? void 0 : barOpen.kind) !== 'answer' ? undefined : cards.find(function (one) { return one.id === (barOpen === null || barOpen === void 0 ? void 0 : barOpen.id); });
                                 if (open_1)
-                                    (carryDraft($, open_1, barDraft(open_1.id)), freeTimes($));
+                                    (carryDraft($, open_1, barDraft()), freeTimes($));
                                 if (!canBox)
-                                    ((replyTo = ''), (replyMark = ''), (changeTo = ''), (boxOpen = undefined), barHeld.delete(e.surface));
+                                    ((barOpen = undefined), barHeld.delete(e.surface));
                                 barBoxAt = 0;
                                 // Only a card that asks is drawn differently for it
                                 // and a key box, whose buttons or field are drawn by it too
-                                // and a Done card, whose Change something is there only with the box
-                                if ((asksForBar(cards).length || boxes.some(function (one) { return !one.key; }) || cards.some(function (one) { return canChange(asPressed(one)); })) && flipAt - barFlipAt >= 1000)
+                                // and a Done card, whose Message is there only with the box (a working card's comes with its own next drawing)
+                                if ((asksForBar(cards).length || boxes.length || barOpen || cards.some(function (one) { return one.status !== 'working' && canChange(asPressed(one)); })) && flipAt - barFlipAt >= 1000)
                                     ((barFlipAt = flipAt), drawAgain($));
                             }
                             if (e.props.hasSurvey)
                                 return [2 /*return*/, next(e)];
                             return [4 /*yield*/, $.clock.now()];
                         case 6:
-                            bandAt = _x.sent();
+                            bandAt = _u.sent();
                             return [4 /*yield*/, read($, reports)
-                                // (each card as it is shown: never done while something of its own runs or to-dos are left)
+                                // (each card by its stage: at work from its start until its result, waiting only while something of its own waits for the person)
                             ];
                         case 7:
-                            bandKept = _x.sent();
-                            shown = shownAs(cards, function (one) { return openResultWaits(one, bandKept, bandAt).length > 0; });
-                            working = shown.filter(function (one) { return !one.parentId && one.status === 'working'; });
-                            happy = isHappy(shown.filter(function (one) { return !one.leftOpen && !openResultWaits(one, bandKept, bandAt).length; }), bandAt);
+                            bandKept = _u.sent();
+                            working = cards.filter(function (one) { return !one.parentId && (stageOf(cards, one) === 'working' || stageOf(cards, one) === 'waiting'); });
+                            happy = isHappy(cards, bandAt);
                             if (!happy) return [3 /*break*/, 9];
                             return [4 /*yield*/, read($, tick)];
                         case 8:
-                            _x.sent();
-                            _x.label = 9;
+                            _u.sent();
+                            _u.label = 9;
                         case 9:
                             ui = uiOf($, e);
                             Box = ui.Box, Button = ui.Button, Text = ui.Text;
@@ -313,7 +347,7 @@ var bandHooks = function (on) {
                             first_1 = asking[0];
                             ask_1 = first_1 === null || first_1 === void 0 ? void 0 : first_1.ask;
                             if (!(first_1 && ask_1)) return [3 /*break*/, 14];
-                            answers = (((_s = ask_1.choices) === null || _s === void 0 ? void 0 : _s.length) ? ask_1.choices : DEFAULT_ANSWERS).slice(0, 9);
+                            answers = ((_p = ask_1.choices) !== null && _p !== void 0 ? _p : []).slice(0, 9);
                             id_1 = "".concat(first_1.id, ":").concat(ask_1.at);
                             picked_1 = (bandPick === null || bandPick === void 0 ? void 0 : bandPick.id) === id_1 ? bandPick.n : -1;
                             press_1 = function (n, choice) {
@@ -324,126 +358,89 @@ var bandHooks = function (on) {
                                 // Left alone, the pick is let go
                                 $.clock.after(BAND_PICK, function () { return void (bandPick === pick && ((bandPick = undefined), $.ui.invalidate('ui.render'))); });
                             };
-                            return [4 /*yield*/, waitMarker($, ui, e.surface)];
-                        case 10:
-                            if (!isActingOnReply(first_1)) return [3 /*break*/, 12];
-                            _d = "    ".concat;
+                            more = asking.filter(needsPerson).length - Number(needsPerson(first_1));
+                            _c = [__assign(__assign({ id: "band-ask-".concat(first_1.id), kind: ask_1.refused ? 'permission' : 'question', at: ask_1.at, from: titleOf(first_1), text: cut(oneLine(ask_1.text), Math.max(80, e.props.bodyColumns * 3)) }, (ask_1.copy ? { command: oneLine(ask_1.copy) } : {})), { isActing: isActingOnReply(first_1) })];
+                            if (!isActingOnReply(first_1)) return [3 /*break*/, 11];
+                            _m = {};
                             _e = sentLine;
                             _f = [first_1];
                             return [4 /*yield*/, $.clock.now()];
+                        case 10:
+                            _d = (_m.line = _e.apply(void 0, _f.concat([_u.sent()])) || "\u2713 You answered \u201C".concat(cut((_r = (_q = ask_1.replied) === null || _q === void 0 ? void 0 : _q.text) !== null && _r !== void 0 ? _r : '', 60), "\u201D"), _m);
+                            return [3 /*break*/, 12];
                         case 11:
-                            _c = (<Text key="band-ask-replied" dimColor wrap="truncate-end">{_d.apply("    ", [_e.apply(void 0, _f.concat([_x.sent()])) || "\u2713 You replied \u201C".concat(cut((_u = (_t = ask_1.replied) === null || _t === void 0 ? void 0 : _t.text) !== null && _u !== void 0 ? _u : '', 60), "\u201D")])}</Text>);
-                            return [3 /*break*/, 13];
+                            _d = { where: "".concat(ask_1.details ? 'The details are on its card · ' : '').concat(picked_1 >= 0 ? "Type ".concat(picked_1 + 1, " again to answer \u201C").concat((_s = answers[picked_1]) !== null && _s !== void 0 ? _s : '', "\u201D") : "".concat(answers.length ? 'Type its number twice in an empty box · ' : '').concat(more > 0 ? "".concat(more, " more waiting \u00B7 ") : '', "/claudopus to answer in words")) };
+                            _u.label = 12;
                         case 12:
-                            _c = (<Box flexDirection="column">
-                {/* The chat's notice is the question alone: what it is about is on its card */}
-                {ask_1.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{'    The details are on its card'}</Text> : null}
-                {ask_1.copy ? <Text key="band-ask-copy" wrap="truncate-end">{"    ".concat(oneLine(ask_1.copy))}</Text> : null}
-                <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
-                  {answers.map(function (choice, n) { return (<Button key={"band-ask-".concat(first_1.id, "-").concat(ask_1.at, "-").concat(n)} label={choice} plain hotkey={String(n + 1)} onPress={function () { return press_1(n, choice); }}/>); })}
-                  <Text dimColor={picked_1 < 0} color={picked_1 < 0 ? undefined : needsPerson(first_1) ? NEEDS : LIVE}>
-                    {picked_1 >= 0 ? "Type ".concat(picked_1 + 1, " again to answer \u201C").concat((_v = answers[picked_1]) !== null && _v !== void 0 ? _v : '', "\u201D") : "Type its number twice in an empty box".concat(asking.filter(needsPerson).length > Number(needsPerson(first_1)) ? " \u00B7 ".concat(asking.filter(needsPerson).length - Number(needsPerson(first_1)), " more waiting") : '', " \u00B7 /claudopus to answer in words")}
-                  </Text>
-                </Box>
-              </Box>);
-                            _x.label = 13;
+                            need = __assign.apply(void 0, [__assign.apply(void 0, _c.concat([(_d)])), { buttons: isActingOnReply(first_1) || ask_1.refused ? [] : answers.map(function (choice, n) { return ({ key: "band-ask-".concat(first_1.id, "-").concat(ask_1.at, "-").concat(n), label: choice, hotkey: String(n + 1), isPlain: true, onPress: function () { return press_1(n, choice); } }); }) }]);
+                            return [4 /*yield*/, waitMarker($, ui, e.surface)];
                         case 13: return [2 /*return*/, (<Box flexDirection="column">
-            {_x.sent()}
+            {_u.sent()}
             <Box flexDirection="row" gap={1}>
-              {octopus(ui, 'band-mark', needsPerson(first_1) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first_1) ? 'Claudopus, waiting for you' : 'Claudopus, Claude is working on your reply', $, { surface: e.surface, requestId: e.requestId })}
-              <Box flexShrink={1} minWidth={0}>
-                <Text wrap="wrap">
-                  <Text dimColor>{"".concat(titleOf(first_1), ": ")}</Text>
-                  <Text color={needsPerson(first_1) ? NEEDS : LIVE} bold>{cut(oneLine(ask_1.text), Math.max(80, e.props.bodyColumns * 3))}</Text>
-                </Text>
+              {octopus(ui, 'band-mark', needsPerson(first_1) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first_1) ? 'Claudopus, waiting for you' : 'Claudopus, working on your answer', $, { surface: e.surface, requestId: e.requestId })}
+              <Box flexShrink={1} minWidth={0} flexDirection="column">
+                {needBlock($, ui, need, { isCompact: true, surface: e.surface })}
               </Box>
             </Box>
-            {/* Acted on after the person's reply in words: that reply, and nothing to press */}
-            {_c}
           </Box>)];
                         case 14:
-                            keyBox = canBox ? barKeyTarget() : undefined;
-                            if (boxOpen && canBox && !keyBox)
-                                boxOpen = undefined;
-                            if (!(keyBox && boxOpen)) return [3 /*break*/, 17];
+                            box = canBox ? barBoxOf($, ui, cards, bandKept) : undefined;
+                            if (barOpen && canBox && !box)
+                                barOpen = undefined;
+                            if (!box) return [3 /*break*/, 17];
+                            // Drawn as it was while the box is typed in or holds the cursor: only what it is for draws it anew, so neither the panel
+                            // scrolled under the cursor nor work starting or ending puts a new box under it. The box takes the place of the figures
+                            // while it is open: figures drawn under a held box would stand still, and a row that came and went would move the box
+                            barCardsDrawn = barCardsSign(cards);
                             shape = barShape();
                             return [4 /*yield*/, waitMarker($, ui, e.surface)];
                         case 15:
-                            marker_1 = _x.sent();
-                            row = barKeyRow($, ui, keyBox, boxOpen.mode);
+                            marker_1 = _u.sent();
+                            row = barBox($, ui, box);
                             drawing_1 = marker_1 ? (<Box flexDirection="column">
           {marker_1}
           {row}
         </Box>) : (row);
                             _h = (_g = barHeld).set;
                             _j = [e.surface];
-                            _q = { shape: shape };
+                            _o = { shape: shape };
                             return [4 /*yield*/, markerSign($, e.surface)];
                         case 16:
-                            _h.apply(_g, _j.concat([(_q.mark = _x.sent(), _q.drawing = drawing_1, _q)]));
+                            _h.apply(_g, _j.concat([(_o.mark = _u.sent(), _o.drawing = drawing_1, _o)]));
                             settleBar($);
                             return [2 /*return*/, drawing_1];
                         case 17:
-                            changing = canBox ? changeTarget(cards) : undefined;
-                            if (changeTo && canBox && !changing)
-                                changeTo = '';
-                            target = changing !== null && changing !== void 0 ? changing : (canBox ? barTarget(cards) : undefined);
-                            if (replyTo && canBox && !target)
-                                ((replyTo = ''), (replyMark = ''));
-                            if (!(changing || (target === null || target === void 0 ? void 0 : target.ask))) return [3 /*break*/, 20];
-                            // Drawn as it was while the box is typed in or holds the cursor: only the card it is for draws it anew, so neither the panel
-                            // scrolled under the cursor nor work starting or ending puts a new box under it. The row takes the place of the figures
-                            // while it is open: figures drawn under a held box would stand still, and a row that came and went would move the box
-                            barCardsDrawn = barCardsSign(cards);
-                            shape = barShape();
-                            return [4 /*yield*/, waitMarker($, ui, e.surface)];
-                        case 18:
-                            marker_2 = _x.sent();
-                            reply = barReply($, ui, target, Boolean(changing));
-                            drawing_2 = marker_2 ? (<Box flexDirection="column">
-          {marker_2}
-          {reply}
-        </Box>) : (reply);
-                            _l = (_k = barHeld).set;
-                            _m = [e.surface];
-                            _r = { shape: shape };
-                            return [4 /*yield*/, markerSign($, e.surface)];
-                        case 19:
-                            _l.apply(_k, _m.concat([(_r.mark = _x.sent(), _r.drawing = drawing_2, _r)]));
-                            settleBar($);
-                            return [2 /*return*/, drawing_2];
-                        case 20:
                             barHeld.delete(e.surface);
-                            if (!(!working.length && !happy)) return [3 /*break*/, 22];
+                            if (!(!working.length && !happy)) return [3 /*break*/, 19];
                             return [4 /*yield*/, waitMarker($, ui, e.surface)];
-                        case 21: return [2 /*return*/, (_w = (_x.sent())) !== null && _w !== void 0 ? _w : next(e)
+                        case 18: return [2 /*return*/, (_t = (_u.sent())) !== null && _t !== void 0 ? _t : next(e)
                             // A narrow terminal seats no panel until it is asked for: the band says how
                         ];
-                        case 22:
-                            _o = e.surface === 'terminal';
-                            if (!_o) return [3 /*break*/, 24];
+                        case 19:
+                            _k = e.surface === 'terminal';
+                            if (!_k) return [3 /*break*/, 21];
                             return [4 /*yield*/, $.ui.panes().catch(function () { return []; })];
-                        case 23:
-                            _o = !(_x.sent()).some(function (pane) { return pane.id === LIST && pane.isPlaced; });
-                            _x.label = 24;
-                        case 24:
-                            isPanelAway = _o;
+                        case 20:
+                            _k = !(_u.sent()).some(function (pane) { return pane.id === LIST && pane.isPlaced; });
+                            _u.label = 21;
+                        case 21:
+                            isPanelAway = _k;
                             // How Claude uses this computer: memory in use and Claude's part, how busy the processor is and Claude's part, the disk's and the
                             // network's speed, looked at every few seconds while work runs. New figures redraw it
                             return [4 /*yield*/, read($, figuresAt)];
-                        case 25:
+                        case 22:
                             // How Claude uses this computer: memory in use and Claude's part, how busy the processor is and Claude's part, the disk's and the
                             // network's speed, looked at every few seconds while work runs. New figures redraw it
-                            _x.sent();
-                            _p = usageNow;
+                            _u.sent();
+                            _l = usageNow;
                             return [4 /*yield*/, $.clock.now()];
-                        case 26:
-                            figures = _p.apply(void 0, [_x.sent()]);
+                        case 23:
+                            figures = _l.apply(void 0, [_u.sent()]);
                             if (!figures)
                                 void lookUsage($).catch(function (err) { return log($, "usage not looked at: ".concat(String(err))); });
                             return [4 /*yield*/, waitMarker($, ui, e.surface)];
-                        case 27:
-                            marker = _x.sent();
+                        case 24:
+                            marker = _u.sent();
                             drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null;
                             drawing = function (spacers) {
                                 var _a;
@@ -468,16 +465,16 @@ var bandHooks = function (on) {
                 });
             });
         }
-        var drawBar, key, at, recent, isBarHeld, madeFrom, made, drawing, _a, _b;
-        var _c;
-        return __generator(this, function (_d) {
-            switch (_d.label) {
+        var drawBar, key, at, line, recent, isBarHeld, madeFrom, made, drawing, _a, _b;
+        var _c, _d;
+        return __generator(this, function (_e) {
+            switch (_e.label) {
                 case 0:
                     if (!heldSends.length) return [3 /*break*/, 2];
                     return [4 /*yield*/, sendHeld($).catch(function (err) { return log($, "message not sent: ".concat(String(err))); })];
                 case 1:
-                    _d.sent();
-                    _d.label = 2;
+                    _e.sent();
+                    _e.label = 2;
                 case 2:
                     drawBar = function () { return drawBarNow(); };
                     if (e.surface !== 'desktop' || e.props.hasSurvey)
@@ -485,35 +482,36 @@ var bandHooks = function (on) {
                     key = "bar|".concat((_c = e.requestId) !== null && _c !== void 0 ? _c : '', "|").concat(e.surface, "|").concat(e.props.bodyColumns, "|").concat(e.props.isCollapsed ? 1 : 0);
                     return [4 /*yield*/, $.clock.now()];
                 case 3:
-                    at = _d.sent();
-                    recent = lastShown.get(key);
+                    at = _e.sent();
+                    line = "bar|".concat((_d = e.requestId) !== null && _d !== void 0 ? _d : '', "|").concat(e.surface);
+                    recent = newestFor(line, key);
                     isBarHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD);
                     if (recent && !isBarHeld && isPressHeld(at))
                         return [2 /*return*/, ((isPressMissed = true), recent)];
                     if (recent && !isBarHeld && isFreshTooSoon($, key, at, isPanelSlow(at)))
                         return [2 /*return*/, recent];
-                    freshBegins(key);
+                    freshBegins(key, at);
                     madeFrom = Date.now();
-                    _d.label = 4;
+                    _e.label = 4;
                 case 4:
-                    _d.trys.push([4, , 8, 9]);
+                    _e.trys.push([4, , 8, 9]);
                     return [4 /*yield*/, drawBar()
                         // A click begun while it was made: the bar on screen is given instead, and this one made again once the click is over
                     ];
                 case 5:
-                    drawing = _d.sent();
+                    drawing = _e.sent();
                     _a = recent && !isBarHeld;
                     if (!_a) return [3 /*break*/, 7];
                     _b = isPressHeld;
                     return [4 /*yield*/, $.clock.now()];
                 case 6:
-                    _a = _b.apply(void 0, [_d.sent()]);
-                    _d.label = 7;
+                    _a = _b.apply(void 0, [_e.sent()]);
+                    _e.label = 7;
                 case 7:
                     // A click begun while it was made: the bar on screen is given instead, and this one made again once the click is over
                     if (_a)
                         return [2 /*return*/, ((isPressMissed = true), recent)];
-                    lastShown.set(key, drawing);
+                    paneNewest.set(line, { key: key, drawing: drawing });
                     made = { at: at, ms: Date.now() - madeFrom, fresh: freshness };
                     return [2 /*return*/, drawing];
                 case 8:

@@ -264,7 +264,7 @@ var lastLine = function (out) { var _a, _b; return (_b = (_a = "".concat(out.std
 // Says clear when the git folder it is handed holds no bisect or rebase under way
 exports.MID_WAY = 'for f in BISECT_LOG rebase-merge rebase-apply; do [ -e "$1/$f" ] && exit 0; done; echo clear';
 var folderReady = function (io, folder) { return __awaiter(void 0, void 0, void 0, function () {
-    var git, _a, _b, gitDir, _c, commonDir, named, branch, _d, upstream_1, _e, clear, isMidWay, isReleased_1, _f, _g, upstream, _h;
+    var git, _a, _b, gitDir, _c, commonDir, named, branch, _d, upstream_1, _e, clear, isMidWay, isReleased, _f, _g, upstream, _h;
     return __generator(this, function (_j) {
         switch (_j.label) {
             case 0:
@@ -311,8 +311,8 @@ var folderReady = function (io, folder) { return __awaiter(void 0, void 0, void 
                 _f = (_j.sent()).exitCode === 0;
                 _j.label = 10;
             case 10:
-                isReleased_1 = _f;
-                return [2 /*return*/, isReleased_1 ? { ok: true, branch: 'main', upstream: upstream_1, detached: true } : { ok: false, what: 'a test copy of Claudopus', why: 'Update leaves it alone' }];
+                isReleased = _f;
+                return [2 /*return*/, isReleased ? { ok: true, branch: 'main', upstream: upstream_1, detached: true } : { ok: false, what: 'a test copy of Claudopus', why: 'Update leaves it alone' }];
             case 11:
                 _h = named;
                 return [4 /*yield*/, git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])];

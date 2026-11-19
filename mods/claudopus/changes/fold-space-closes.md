@@ -1,0 +1,2 @@
+- The empty space under your answer on a card now closes after three seconds, also while you keep using a panel that is scrolled down. Before, it could stay until you left the panel alone.
+- That space is never taller than the panel's visible height.

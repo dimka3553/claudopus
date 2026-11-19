@@ -134,317 +134,203 @@ var afterReply = function ($, text, answer) { return __awaiter(_this, void 0, vo
         }
     });
 }); };
-// Work the engine still listed as running as its turn ended is looked at again this long after: one whose run was over by then is
-// listed as completed, and the look ends its card (sync) and passes on a reply it never read, as the turn's end would have
+// As a turn ends the engine may still list its run as running for a moment: it is looked at again this long after
 var HELD_LOOK = 1500;
-var heldLook = function ($, id) { return __awaiter(_this, void 0, void 0, function () {
-    var wasWorking, listed, now_1, one, isShort, _a, _b, _c, _d, _e, card;
-    var _f, _g, _h, _j;
-    return __generator(this, function (_k) {
-        switch (_k.label) {
-            case 0: return [4 /*yield*/, read($, todos)];
-            case 1:
-                wasWorking = ((_f = (_k.sent()).find(function (one) { return one.id === id; })) === null || _f === void 0 ? void 0 : _f.status) === 'working';
-                return [4 /*yield*/, sync($)
-                    // Listed as idle, or no longer listed, its run is over too: nothing holds it
-                ];
-            case 2:
-                _k.sent();
-                return [4 /*yield*/, $.agent.list().catch(function () { return undefined; })];
-            case 3:
-                listed = (_h = (_g = (_k.sent())) === null || _g === void 0 ? void 0 : _g.find(function (one) { return one.id === id; })) === null || _h === void 0 ? void 0 : _h.status;
-                if (!(listed === 'idle' || listed === undefined)) return [3 /*break*/, 15];
-                return [4 /*yield*/, $.clock.now()
-                    // (a task left stopped partway is started again to carry on, not ended)
-                ];
-            case 4:
-                now_1 = _k.sent();
-                return [4 /*yield*/, read($, todos)];
-            case 5:
-                one = (_k.sent()).find(function (card) { return card.id === id; });
-                _c = (one === null || one === void 0 ? void 0 : one.status) === 'working' && isStoppedShort(one, '');
-                if (!_c) return [3 /*break*/, 7];
-                _d = ownsNothing;
-                return [4 /*yield*/, read($, todos)];
-            case 6:
-                _c = _d.apply(void 0, [_k.sent(), id]);
-                _k.label = 7;
-            case 7:
-                _b = _c && !one.wakeWhen;
-                if (!_b) return [3 /*break*/, 9];
-                _e = isTurnWaited;
-                return [4 /*yield*/, read($, todos)];
-            case 8:
-                _b = !_e.apply(void 0, [_k.sent(), id]);
-                _k.label = 9;
-            case 9:
-                _a = _b;
-                if (!_a) return [3 /*break*/, 11];
-                return [4 /*yield*/, pressedAtEnd($, id)];
-            case 10:
-                _a = (_k.sent());
-                _k.label = 11;
-            case 11:
-                isShort = _a;
-                if (!isShort) return [3 /*break*/, 13];
-                return [4 /*yield*/, goOn($, id, 'its step ended', true)];
-            case 12:
-                _k.sent();
-                return [3 /*break*/, 15];
-            case 13: return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (one) { return (one.id === id && one.status === 'working' ? ended(one, 'done', now_1) : one); }); })];
-            case 14:
-                _k.sent();
-                _k.label = 15;
-            case 15: return [4 /*yield*/, read($, todos)];
-            case 16:
-                card = (_k.sent()).find(function (one) { return one.id === id; });
-                if ((card === null || card === void 0 ? void 0 : card.status) === 'working')
-                    return [2 /*return*/];
-                return [4 /*yield*/, replyUnread($, id)];
-            case 17:
-                _k.sent();
-                if (!wakes.length) return [3 /*break*/, 19];
-                return [4 /*yield*/, sendWakes($)
-                    // A helper the engine still listed as running as its turn ended, ended now: its result is passed on as at a heard end. Read as at
-                    // work before the look, as the look itself ends it; one the look for work that ended unheard passed on is not passed on again
-                    // (passOnHelper)
-                ];
-            case 18:
-                _k.sent();
-                _k.label = 19;
-            case 19:
-                if (!(wasWorking && (card === null || card === void 0 ? void 0 : card.parentId) && card.parentId !== HELPER)) return [3 /*break*/, 21];
-                return [4 /*yield*/, passOnHelper($, id, (_j = card.answer) !== null && _j !== void 0 ? _j : '', card.status)];
-            case 20:
-                _k.sent();
-                _k.label = 21;
-            case 21: return [2 /*return*/];
-        }
-    });
-}); };
 // The notices with nothing new let in since the chat's last turn started, each whole; the turns to answer with no model
 var quietHeld = new Set();
 var quietTurns = new Set();
-// A turn of a task or helper ends: its card follows what it ended with (chatHooks' turn.complete)
+// A turn of a task or helper ends (chatHooks' turn.complete). A turn that ends is a pause, not the end: a task ends only by
+// handing in its result, which made its card done as the hand-back went through (workHooks' tool.call). Stopped, its card is
+// stopped; ended by an error, it failed and says so. Any other stays at work: Claude Code starts its next step when a command or
+// a helper of its own ends, or when the person's answer or words reach it. A run that is over with nothing of its own running and
+// nothing waiting for the person is ended by lookOver
 var agentTurnEnded = function ($, e, id, done) { return __awaiter(_this, void 0, void 0, function () {
-    var now, said, answer, listed, isHeld, how, isOwnResult, _a, _b, isGoingOn, _c, _d, isReport, _e, _f, _g, isIdleReport, _h, _j, isTop, isHandedBack, _k, isReceived, isShortHow, mayBeShort, _l, _m, _o, isCarried, card, report;
-    var _p, _q, _r, _s, _t;
-    return __generator(this, function (_u) {
-        switch (_u.label) {
+    var now, said, answer, isHanded, how, look, _a;
+    var _this = this;
+    var _b, _c, _d;
+    return __generator(this, function (_e) {
+        switch (_e.label) {
             case 0: return [4 /*yield*/, $.clock.now()
-                // A turn that handed back its report with SubagentHandback and says nothing after has that report as its answer; the line
-                // Claudopus answered Claude Code's press with is no answer of its own (its card keeps what it said before)
+                // A turn that handed in its result and says nothing after has that result as its answer; the line Claude Code's press was
+                // answered with is no answer of its own (its card keeps what it said before)
             ];
             case 1:
-                now = _u.sent();
-                said = ((_p = e.answer) !== null && _p !== void 0 ? _p : '').trim();
+                now = _e.sent();
+                said = ((_b = e.answer) !== null && _b !== void 0 ? _b : '').trim();
                 answer = ((said === PRESS_ANSWER ? '' : said) || handedBack.get(id) || '').slice(0, ANSWER_CHARS);
-                return [4 /*yield*/, $.agent.list().catch(function () { return []; })];
-            case 2:
-                listed = (_q = (_u.sent()).find(function (one) { return one.id === id; })) === null || _q === void 0 ? void 0 : _q.status;
-                isHeld = listed === 'waiting' || listed === 'running';
-                if (listed === 'running')
-                    $.clock.after(HELD_LOOK, function () { return void heldLook($, id).catch(function (err) { return log($, "work ".concat(id, " not looked at again: ").concat(String(err))); }); });
+                isHanded = handedBack.delete(id);
                 how = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done';
-                _b = how === 'done';
-                if (!_b) return [3 /*break*/, 4];
-                return [4 /*yield*/, read($, todos)];
-            case 3:
-                _b = !((_r = (_u.sent()).find(function (one) { return one.id === id; })) === null || _r === void 0 ? void 0 : _r.parentId);
-                _u.label = 4;
-            case 4:
-                _a = _b;
-                if (!_a) return [3 /*break*/, 6];
-                return [4 /*yield*/, isUnpressed($, id)];
-            case 5:
-                _a = (_u.sent());
-                _u.label = 6;
-            case 6:
-                isOwnResult = _a;
-                _c = how === 'done' && isHeld;
-                if (!_c) return [3 /*break*/, 8];
-                _d = goesOn;
-                return [4 /*yield*/, read($, todos)];
-            case 7:
-                _c = _d.apply(void 0, [_u.sent(), id]);
-                _u.label = 8;
-            case 8:
-                isGoingOn = _c;
-                _e = how === 'done' && isHeld && !isGoingOn;
-                if (!_e) return [3 /*break*/, 11];
-                _f = handedBack.has(id);
-                if (_f) return [3 /*break*/, 10];
-                _g = isWordsReport;
-                return [4 /*yield*/, read($, todos)];
-            case 9:
-                _f = _g.apply(void 0, [(_u.sent()).find(function (one) { return one.id === id; }), answer]);
-                _u.label = 10;
-            case 10:
-                _e = (_f);
-                _u.label = 11;
-            case 11:
-                isReport = _e;
-                _h = isReport;
-                if (!_h) return [3 /*break*/, 13];
-                _j = ownsNothing;
-                return [4 /*yield*/, read($, todos)];
-            case 12:
-                _h = _j.apply(void 0, [_u.sent(), id]);
-                _u.label = 13;
-            case 13:
-                isIdleReport = _h;
-                return [4 /*yield*/, read($, todos)];
-            case 14:
-                isTop = !((_s = (_u.sent()).find(function (one) { return one.id === id; })) === null || _s === void 0 ? void 0 : _s.parentId);
-                isHandedBack = how === 'done' && (handedBack.has(id) || (isIdleReport && (isOwnResult || !isTop))) && !isGoingOn;
-                if (!isHandedBack) return [3 /*break*/, 16];
-                _k = ownsNothing;
-                return [4 /*yield*/, read($, todos)];
-            case 15:
-                (_k.apply(void 0, [_u.sent(), id]) ? leftNothing.add(id) : leftNothing.delete(id));
-                _u.label = 16;
-            case 16:
-                isReceived = isHandedBack && isTop;
-                handedBack.delete(id);
-                if (isHandedBack)
-                    endedByHandback.add(id);
-                if (!isHandedBack) return [3 /*break*/, 18];
-                return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (one) { return (one.id === id ? __assign(__assign(__assign({}, one), { handedBackAt: now, wakeWhen: undefined }), (isReceived ? { reportAt: now } : {})) : one); }); })
-                    // Work nothing holds any more has nothing of its own left running in the background
-                ];
-            case 17:
-                _u.sent();
-                _u.label = 18;
-            case 18:
-                if (!!isHeld) return [3 /*break*/, 20];
-                return [4 /*yield*/, changeTodos($, function (list) { return (list.some(function (one) { return one.id === id && one.bg; }) ? list.map(function (one) { return (one.id === id ? __assign(__assign({}, one), { bg: undefined, waitsSince: undefined }) : one); }) : list); })
-                    // A task of this chat's whose step ended with no result, no question and nothing of its own that starts it again is not
-                    // finished: it stays at work, and Claudopus starts it again to carry on (carryOn). Not one that was stopped, nor one refused
-                ];
-            case 19:
-                _u.sent();
-                _u.label = 20;
-            case 20:
-                isShortHow = how === 'done' || (how === 'failed' && e.reason === 'error');
-                _m = isShortHow && !isHandedBack;
-                if (!_m) return [3 /*break*/, 22];
-                _o = isStoppedShort;
-                return [4 /*yield*/, read($, todos)];
-            case 21:
-                _m = _o.apply(void 0, [(_u.sent()).find(function (one) { return one.id === id; }), answer]);
-                _u.label = 22;
-            case 22:
-                _l = _m;
-                if (!_l) return [3 /*break*/, 24];
-                return [4 /*yield*/, pressedAtEnd($, id)];
-            case 23:
-                _l = (_u.sent());
-                _u.label = 24;
-            case 24:
-                mayBeShort = _l;
-                isCarried = false;
                 return [4 /*yield*/, changeTodos($, function (list) {
-                        isCarried = false;
-                        // (or for what it asked Claudopus to start it again for)
-                        // (or for a command of its own that ends and starts it again, detached or left going: wakesOf)
-                        var self = list.find(function (one) { return one.id === id; });
-                        var isWaiting = how === 'done' && !isHandedBack && (isHeld || isTurnWaited(list, id) || list.some(function (one) { return (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined); }) || Boolean(self && !self.parentId && wakesOf(list, self).isAny));
-                        // What it waits on of its own, since when: the card says so, and a long wait for it is not taken for being stuck
-                        // Work that gave its report waits on nothing it means to finish
-                        var waitsSince = function (one) { var _a, _b; return (isHeld && !isReport && ((_a = one.bg) === null || _a === void 0 ? void 0 : _a.some(function (b) { return !b.isWatch; })) ? ((_b = one.waitsSince) !== null && _b !== void 0 ? _b : now) : undefined); };
-                        // An aborted turn's own text is not kept over the report the work gave before it was stopped
                         return list.map(function (one) {
-                            var _a;
-                            return one.id !== id
-                                ? one
-                                : // Work that had ended, woken by what it left running, that ends a turn of words alone has not worked again: it stays
-                                    // as it ended, with its report, and is not announced a second time
-                                    one.status !== 'working' && how === 'done' && !isHandedBack && endedByHandback.has(id)
-                                        ? one
-                                        : isWaiting
-                                            ? __assign(__assign({}, one), { answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt, waitsSince: waitsSince(one), endedStepAt: now }) : how === 'stopped'
-                                            ? one.status === 'working'
-                                                ? ended(one, stoppedAs(one), now)
-                                                : one
-                                            : mayBeShort && one.status === 'working' && isStoppedShort(one, answer)
-                                                ? ((isCarried = true), __assign(__assign({}, one), { answer: answer || one.answer }))
-                                                : __assign(__assign(__assign({}, ended(one, how, now)), { answer: answer || one.answer }), (isOwnResult && !one.parentId ? { reportAt: (_a = one.reportAt) !== null && _a !== void 0 ? _a : now } : {}));
+                            // (a task whose result went through is done already, and one ended meanwhile stays as it ended)
+                            if (one.id !== id || one.status !== 'working')
+                                return one;
+                            // (stopped for a message the person sent with Stop and send, which starts it again: it stays at work)
+                            if (how === 'stopped' && interrupting.has(id))
+                                return one;
+                            if (how === 'stopped')
+                                return ended(one, stoppedAs(one), now);
+                            if (how === 'failed')
+                                return __assign(__assign({}, ended(one, 'failed', now)), { answer: answer || one.answer, why: WHY_ERROR });
+                            // A helper's hand-back ends it: its result went to its task
+                            if (isHanded && one.parentId)
+                                return __assign(__assign({}, ended(one, 'done', now)), { answer: answer || one.answer });
+                            return answer ? __assign(__assign({}, one), { answer: answer }) : one;
                         });
-                    })];
-            case 25:
-                _u.sent();
-                if (!isCarried) return [3 /*break*/, 27];
-                return [4 /*yield*/, goOn($, id, e.reason === 'error' ? 'its step failed' : 'its step ended', true)];
-            case 26:
-                _u.sent();
-                _u.label = 27;
-            case 27:
-                if (!(how === 'stopped')) return [3 /*break*/, 29];
-                return [4 /*yield*/, keepStoppedReports($, now)];
-            case 28:
-                _u.sent();
-                _u.label = 29;
-            case 29: return [4 /*yield*/, lookEnds($)
-                // A reply it never read goes to the chat; work that waits for its helpers reads it at its next step
-            ];
-            case 30:
-                _u.sent();
+                    })
+                    // Its run may be over: with nothing of its own running and nothing waiting for the person, it is (lookOver), now or once the
+                    // engine no longer lists it as running
+                ];
+            case 2:
+                _e.sent();
+                look = function () { return __awaiter(_this, void 0, void 0, function () { var _a, _b; return __generator(this, function (_c) {
+                    switch (_c.label) {
+                        case 0:
+                            _a = lookOver;
+                            _b = [$];
+                            return [4 /*yield*/, $.agent.list().catch(function () { return []; })];
+                        case 1:
+                            _b = _b.concat([_c.sent()]);
+                            return [4 /*yield*/, $.clock.now()];
+                        case 2: return [2 /*return*/, _a.apply(void 0, _b.concat([_c.sent(), id]))];
+                    }
+                }); }); };
+                if (!(how === 'done')) return [3 /*break*/, 4];
+                return [4 /*yield*/, look().catch(function (err) { return log($, "work ".concat(id, " not looked at as its turn ended: ").concat(String(err))); })];
+            case 3:
+                _e.sent();
+                _e.label = 4;
+            case 4:
+                _a = how === 'done';
+                if (!_a) return [3 /*break*/, 6];
                 return [4 /*yield*/, read($, todos)];
-            case 31:
-                if (!(((_t = (_u.sent()).find(function (one) { return one.id === id; })) === null || _t === void 0 ? void 0 : _t.status) !== 'working')) return [3 /*break*/, 33];
-                return [4 /*yield*/, replyUnread($, id).catch(function (err) { return log($, "reply not passed on: ".concat(String(err))); })
-                    // A go-ahead pressed during this turn does its last step now, before the wakes go, so its small task starts from this hook
+            case 5:
+                _a = ((_c = (_e.sent()).find(function (one) { return one.id === id; })) === null || _c === void 0 ? void 0 : _c.status) === 'working';
+                _e.label = 6;
+            case 6:
+                if (_a)
+                    $.clock.after(HELD_LOOK, function () { return void look().catch(function (err) { return log($, "work ".concat(id, " not looked at again: ").concat(String(err))); }); });
+                return [4 /*yield*/, lookEnds($)
+                    // A reply it never read goes to the chat; work still at work reads it at its next step
                 ];
-            case 32:
-                _u.sent();
-                _u.label = 33;
-            case 33: 
-            // A go-ahead pressed during this turn does its last step now, before the wakes go, so its small task starts from this hook
-            return [4 /*yield*/, stepsAtEnd($).catch(function (err) { return log($, "last step not done: ".concat(String(err))); })];
-            case 34:
-                // A go-ahead pressed during this turn does its last step now, before the wakes go, so its small task starts from this hook
-                _u.sent();
-                if (!wakes.length) return [3 /*break*/, 36];
-                return [4 /*yield*/, sendWakes($).catch(function (err) { return log($, "answer not sent: ".concat(String(err))); })
-                    // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
-                    // held on its own background work leaves it once it ends (keepStoppedReports)
-                ];
-            case 35:
-                _u.sent();
-                _u.label = 36;
-            case 36: return [4 /*yield*/, read($, todos)];
-            case 37:
-                card = (_u.sent()).find(function (one) { return one.id === id; });
-                report = (said === PRESS_ANSWER ? '' : said) || answer;
-                if (!((card === null || card === void 0 ? void 0 : card.parentId) && card.status !== 'working')) return [3 /*break*/, 39];
-                return [4 /*yield*/, passOnHelper($, id, report, card.status).catch(function (err) { return log($, "helper's result not passed on: ".concat(String(err))); })
-                    // One that handed back while a command or helper of its own still runs stays at work on its card, but its hand-back reached the
-                    // chat, which was told it is passed on: it is passed on now
-                ];
-            case 38:
-                _u.sent();
-                return [3 /*break*/, 41];
-            case 39:
-                if (!((card === null || card === void 0 ? void 0 : card.parentId) && notedAtHandback.has(id))) return [3 /*break*/, 41];
-                return [4 /*yield*/, passOnHelper($, id, report, 'done').catch(function (err) { return log($, "helper's result not passed on: ".concat(String(err))); })];
-            case 40:
-                _u.sent();
-                _u.label = 41;
-            case 41:
-                if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
-                    $.clock.after(5, function () { return void saveReport($, card, report).catch(function (err) { return log($, "report of ".concat(id, " not kept: ").concat(String(err))); }); });
-                }
-                // What is at work is kept for a restart at once: a task that just finished is never brought back by a quit seconds later
-                return [4 /*yield*/, saveKeep($).catch(function (err) { return log($, "work at work not kept for the keeper: ".concat(String(err))); })];
-            case 42:
-                // What is at work is kept for a restart at once: a task that just finished is never brought back by a quit seconds later
-                _u.sent();
+            case 7:
+                _e.sent();
+                return [4 /*yield*/, read($, todos)];
+            case 8:
+                if (!(((_d = (_e.sent()).find(function (one) { return one.id === id; })) === null || _d === void 0 ? void 0 : _d.status) !== 'working')) return [3 /*break*/, 10];
+                return [4 /*yield*/, replyUnread($, id).catch(function (err) { return log($, "reply not passed on: ".concat(String(err))); })];
+            case 9:
+                _e.sent();
+                _e.label = 10;
+            case 10:
+                if (!wakes.length) return [3 /*break*/, 12];
+                return [4 /*yield*/, sendWakes($).catch(function (err) { return log($, "answer not sent: ".concat(String(err))); })];
+            case 11:
+                _e.sent();
+                _e.label = 12;
+            case 12: return [4 /*yield*/, saveKeep($).catch(function (err) { return log($, "work at work not kept: ".concat(String(err))); })];
+            case 13:
+                _e.sent();
                 return [2 /*return*/, done];
         }
     });
 }); };
 // The tasks and helpers whose turn's end is being taken up now: the list's look leaves them to it
 var turnEnding = new Set();
+var RULES_KEPT_FOR = 30 * 24 * 3600000;
+var RULES_CHAT = /^[A-Za-z0-9_-]{1,80}$/;
+var rulesDir = function () { return "".concat(dir, "/live/rules"); };
+var rulesKept;
+var rulesKeeping = Promise.resolve();
+var keptRule = function ($, key, make) {
+    // One at a time, so two requests of a chat never keep two texts
+    var run = rulesKeeping.then(function () { return __awaiter(_this, void 0, void 0, function () {
+        var id, text, kept, value, held, made;
+        var _a;
+        return __generator(this, function (_b) {
+            switch (_b.label) {
+                case 0: return [4 /*yield*/, $.session.id()];
+                case 1:
+                    id = _b.sent();
+                    if (!dir || !RULES_CHAT.test(id))
+                        return [2 /*return*/, make()];
+                    if (!((rulesKept === null || rulesKept === void 0 ? void 0 : rulesKept.id) !== id)) return [3 /*break*/, 3];
+                    return [4 /*yield*/, readOr($, "".concat(rulesDir(), "/").concat(id, ".json"))];
+                case 2:
+                    text = _b.sent();
+                    kept = {};
+                    try {
+                        value = JSON.parse(text || '{}');
+                        if (value && typeof value === 'object' && !Array.isArray(value))
+                            kept = value;
+                    }
+                    catch (_c) {
+                        // A file that does not parse keeps nothing: the texts are made again, once
+                    }
+                    rulesKept = { id: id, kept: kept };
+                    _b.label = 3;
+                case 3:
+                    held = rulesKept.kept[key];
+                    if (held !== undefined)
+                        return [2 /*return*/, held];
+                    return [4 /*yield*/, make()];
+                case 4:
+                    made = _b.sent();
+                    rulesKept = { id: id, kept: __assign(__assign({}, rulesKept.kept), (_a = {}, _a[key] = made, _a)) };
+                    return [4 /*yield*/, $.fs.write("".concat(rulesDir(), "/").concat(id, ".json"), JSON.stringify(rulesKept.kept))];
+                case 5:
+                    _b.sent();
+                    return [2 /*return*/, made];
+            }
+        });
+    }); });
+    rulesKeeping = run.catch(function () { return undefined; });
+    return run;
+};
+// As a chat loads: its own kept rules count as used now, and those of chats not opened for a month go
+var tidyKeptRules = function ($, id) { return __awaiter(_this, void 0, void 0, function () {
+    var now, _i, _a, entry, path, text;
+    return __generator(this, function (_b) {
+        switch (_b.label) {
+            case 0:
+                if (!dir)
+                    return [2 /*return*/];
+                return [4 /*yield*/, $.clock.now()];
+            case 1:
+                now = _b.sent();
+                _i = 0;
+                return [4 /*yield*/, $.fs.list(rulesDir()).catch(function () { return []; })];
+            case 2:
+                _a = _b.sent();
+                _b.label = 3;
+            case 3:
+                if (!(_i < _a.length)) return [3 /*break*/, 9];
+                entry = _a[_i];
+                if (entry.kind !== 'file' || !entry.name.endsWith('.json'))
+                    return [3 /*break*/, 8];
+                path = "".concat(rulesDir(), "/").concat(entry.name);
+                if (!(entry.name === "".concat(id, ".json"))) return [3 /*break*/, 6];
+                return [4 /*yield*/, readOr($, path)];
+            case 4:
+                text = _b.sent();
+                if (!text) return [3 /*break*/, 6];
+                return [4 /*yield*/, $.fs.write(path, text)];
+            case 5:
+                _b.sent();
+                _b.label = 6;
+            case 6:
+                if (!(entry.name !== "".concat(id, ".json") && entry.mtimeMs && now - entry.mtimeMs > RULES_KEPT_FOR)) return [3 /*break*/, 8];
+                return [4 /*yield*/, $.process.run(['rm', '-f', path]).catch(function () { return undefined; })];
+            case 7:
+                _b.sent();
+                _b.label = 8;
+            case 8:
+                _i++;
+                return [3 /*break*/, 3];
+            case 9: return [2 /*return*/];
+        }
+    });
+}); };
 var chatHooks = function (on) {
     on('session.start', function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
         var begun, home, _a, _b, _i, _c, _d, art, file, text, _e, id, title, isNew, isRunning, choice, _f, _g, _h, now, last, _j, _k, _l, _m, one, seconds, _o;
@@ -531,17 +417,14 @@ var chatHooks = function (on) {
                     return [4 /*yield*/, loadSettings($)];
                 case 16:
                     _w.sent();
-                    return [4 /*yield*/, clearGates($).catch(function (err) { return log($, "admin holds not cleared: ".concat(String(err))); })];
-                case 17:
-                    _w.sent();
-                    return [4 /*yield*/, clearHeld($).catch(function (err) { return log($, "held commands not cleared: ".concat(String(err))); })
+                    return [4 /*yield*/, clearGates($).catch(function (err) { return log($, "admin holds not cleared: ".concat(String(err))); })
                         // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
                     ];
-                case 18:
+                case 17:
                     _w.sent();
                     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
                     return [4 /*yield*/, closeUndrawn($)];
-                case 19:
+                case 18:
                     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
                     _w.sent();
                     $.clock.after(3000, function () { return closeUndrawn($); });
@@ -549,32 +432,35 @@ var chatHooks = function (on) {
                     return [4 /*yield*/, watchLoaded($).catch(function (err) { return log($, "tabs not watched: ".concat(String(err))); })
                         // The engine's id names this chat's files, as its transcript is named
                     ];
-                case 20:
+                case 19:
                     // and every tab left open is drawn, though the app asked for it while this code was away (watchTabs)
                     _w.sent();
                     return [4 /*yield*/, $.session.id()];
-                case 21:
+                case 20:
                     id = _w.sent();
                     heldChat = id;
                     return [4 /*yield*/, appTitle($)
                         // The first load of a session sends the role text; a reload keeps what stands
                     ];
-                case 22:
+                case 21:
                     title = _w.sent();
                     // The first load of a session sends the role text; a reload keeps what stands
-                    return [4 /*yield*/, update($, me, function (m) { return (__assign(__assign({}, m), { id: id, title: title !== null && title !== void 0 ? title : m.title, needsContext: m.id ? m.needsContext : true })); })
-                        // What was at work when this chat's process last ended is read before this load writes its own: work no longer at work was cut off
-                    ];
-                case 23:
+                    return [4 /*yield*/, update($, me, function (m) { return (__assign(__assign({}, m), { id: id, title: title !== null && title !== void 0 ? title : m.title, needsContext: m.id === id ? m.needsContext : true })); })];
+                case 22:
                     // The first load of a session sends the role text; a reload keeps what stands
                     _w.sent();
-                    // What was at work when this chat's process last ended is read before this load writes its own: work no longer at work was cut off
-                    return [4 /*yield*/, noteCut($, id).catch(function (err) { return log($, "cut-off work not looked for: ".concat(String(err))); })
+                    return [4 /*yield*/, tidyKeptRules($, id).catch(function (err) { return log($, "kept rules not tidied: ".concat(String(err))); })
+                        // What was at work when this chat's process last ended is read before this load writes its own: it ended with that process
+                    ];
+                case 23:
+                    _w.sent();
+                    // What was at work when this chat's process last ended is read before this load writes its own: it ended with that process
+                    return [4 /*yield*/, noteClosed($, id).catch(function (err) { return log($, "work the app closed on not looked for: ".concat(String(err))); })
                         // The other chats, on this Mac and the others, are read before the panel is drawn: a chat that starts, or comes back, showed
                         // its panel without them until the rest of its start was done, and they seemed to drop out of it for a while
                     ];
                 case 24:
-                    // What was at work when this chat's process last ended is read before this load writes its own: work no longer at work was cut off
+                    // What was at work when this chat's process last ended is read before this load writes its own: it ended with that process
                     _w.sent();
                     // The other chats, on this Mac and the others, are read before the panel is drawn: a chat that starts, or comes back, showed
                     // its panel without them until the rest of its start was done, and they seemed to drop out of it for a while
@@ -632,6 +518,7 @@ var chatHooks = function (on) {
                                 type: 'object',
                                 properties: {
                                     text: { type: 'string' },
+                                    questions: { type: 'array', items: { type: 'string' }, description: named('Only with your last note before you hand in, and only when your result leaves something open that {name} may want to decide on seeing it: each as one short plain question. Your delivered card lists them, and {name} answers them all in one reply, which starts you again. Never what holds you up: that is a question you ask before you finish') },
                                     task: { type: 'string', description: named('Only after a message from {name} that is a new task of its own, which you do not do: that request in one line. The chat starts it as a task of its own') },
                                 },
                                 required: ['text'],
@@ -642,19 +529,18 @@ var chatHooks = function (on) {
                     _w.sent();
                     return [4 /*yield*/, $.tool.register({
                             name: 'ask',
-                            description: named("For background tasks: when a step needs {name}'s own hands or go-ahead now (a code to paste, a box to fill, a key or button to press, an approval), puts your question at the top of the panel on your card and in the chat as a notice; {Name} answers with a button or in their own words. {Name} sees it before your report, so it must carry everything needed to decide and never point at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile continue with what does not depend on it, or end your step saying what you are waiting for. Ask again if the answer leaves something open; call it with empty `text` only once you have seen it done. Never open a terminal for a command yourself."),
+                            description: named("For background tasks: when a step needs {name}'s own hands or go-ahead now (a code to paste, a box to fill, a key or button to press, an approval), puts your question at the top of the panel on your card and in the chat as a notice; {Name} answers with one of the buttons you give in `choices`, or in their own words. {Name} sees it before your report, so it must carry everything needed to decide and never point at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile continue with what does not depend on it, or end your step saying what you are waiting for. Ask again if the answer leaves something open; call it with empty `text` only once you have seen it done. Never open a terminal for a command yourself."),
                             inputSchema: {
                                 type: 'object',
                                 properties: {
                                     text: { type: 'string', description: 'What to do, in one plain line, speaking to them as "you"; empty once it is done' },
                                     details: { type: 'string', description: 'What it is about, in full: what changes, what it costs, what is not done. Short plain lines and "- " lists with a blank line after, no tables or bold: the card is narrow and the chat shows plain text' },
                                     copy: { type: 'string', description: 'Only text they must paste elsewhere, such as a one-time code or a link' },
-                                    choices: { type: 'array', items: { type: 'string' }, description: 'Buttons to answer with, such as Approve and Not now (Done and Not now when left out)' },
+                                    choices: { type: 'array', items: { type: 'string' }, description: 'The buttons to answer with, in your words for this question, such as Approve and Keep it: give them, as none are added. Every button is an answer that reaches you and carries you on: never Not now, Later, Skip or Cancel, which are left out, as {name} leaves a question open by not pressing. Answer in words is always there' },
                                     command: { type: 'string', description: 'A command only they can run, never one you can run yourself: one line, whole, shown with a Copy button' },
                                     cwd: { type: 'string', description: 'The full path of the folder the command runs in, when it has relative paths' },
                                     pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the pictures the question is about, shown with it on the card and in the chat' },
-                                    last_step: { type: 'string', description: 'For a go-ahead to finish (the first choice, such as Release it): what you would do on it, in one sentence for this repo, or `release` for the release runner. Claudopus does it on the press without starting you again' },
-                                    folder: { type: 'string', description: 'With last_step: the full path of your worktree, where it is done' },
+                                    release: { type: 'string', description: 'Only when you ask for the go-ahead to release, with the single choice Release it: the full path of your worktree. That press reaches you as the answer and allows your next run of the release runner from that folder, once, with no second question' },
                                 },
                                 required: ['text'],
                             },
@@ -662,91 +548,41 @@ var chatHooks = function (on) {
                         })];
                 case 30:
                     _w.sent();
-                    return [4 /*yield*/, $.tool.register({
-                            name: 'wake_me',
-                            description: named('For a file, a page or a time that nothing of yours makes (a file another program writes, a page that comes up, a moment to look again): Claudopus looks for it and starts you again the moment it is there, so you end your step instead of waiting with a command. Your own commands, in the background or detached, and your helpers wake you by themselves: never use this for them. Name a file, a line in it, a page, or only minutes; Claudopus looks for at most an hour, and not again for the same once a look ran out. A new call replaces the last one.'),
-                            inputSchema: {
-                                type: 'object',
-                                properties: {
-                                    what: { type: 'string', description: 'What you wait for, in a few plain words read at a glance on your card' },
-                                    file: { type: 'string', description: 'The full path of a file to appear (with `text`, a file to hold that text)' },
-                                    text: { type: 'string', description: 'A line of text to appear in `file`' },
-                                    url: { type: 'string', description: 'A page to answer without an error' },
-                                    minutes: { type: 'number', description: 'With nothing else: start you after this many minutes. With a file or page: the longest to look, after which you are started with word that it never came (15 when left out, at most 60). Should it never come, you are started again and hand back what you have' },
-                                },
-                                required: ['what'],
-                            },
-                            isDeferred: false,
-                        })];
+                    return [4 /*yield*/, $.command.register({ name: 'claudopus', description: "Open the Claudopus panel: this chat's tasks, questions and results" })];
                 case 31:
                     _w.sent();
-                    return [4 /*yield*/, $.tool.register({
-                            name: 'waits',
-                            description: named("For background tasks, before you finish: records what in your report waits on {name}, each as one short question. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. Each call lists everything still waiting: once you finish, it replaces what your earlier results waited on, and [] says nothing does. The panel answers each with Yes / No, or the answers you name in `choices` when it is not yes or no, and always with Not now and Answer in words. Mark a question you also asked on your card with the `ask` tool with `asked: true`: answering it there answers it here. In the chat: once {name}'s own words have answered what a result waits on, call it with that result's report.md path as `result` and the numbers of the questions they answered as `answered`."),
-                            inputSchema: {
-                                type: 'object',
-                                properties: {
-                                    items: {
-                                        type: 'array',
-                                        items: {
-                                            anyOf: [
-                                                { type: 'string', description: 'A yes-or-no question of at most 140 characters, in plain words, speaking to them as "you"' },
-                                                {
-                                                    type: 'object',
-                                                    properties: {
-                                                        text: { type: 'string', description: 'The question, at most 140 characters, in plain words, speaking to them as "you"' },
-                                                        choices: { type: 'array', items: { type: 'string' }, description: 'Its answers when it is not yes or no, a few words each (at most 4)' },
-                                                        asked: { type: 'boolean', description: 'true when it is the question you asked on your card with the `ask` tool' },
-                                                    },
-                                                    required: ['text'],
-                                                },
-                                            ],
-                                        },
-                                    },
-                                    answered: { type: 'array', items: { type: 'number' }, description: named("Only in the chat: the numbers of the result's questions {name}'s words answered") },
-                                    result: { type: 'string', description: named("Only in the chat: the report.md path of the result whose questions {name}'s words answered") },
-                                },
-                                required: [],
-                            },
-                            isDeferred: false,
-                        })];
-                case 32:
-                    _w.sent();
-                    return [4 /*yield*/, $.command.register({ name: 'claudopus', description: "Open the Claudopus panel: this chat's tasks, questions and results" })];
-                case 33:
-                    _w.sent();
                     return [4 /*yield*/, $.command.register({ name: 'servers', description: 'Open the Servers panel: the servers running on this Mac, a link to each and the chat that started it' })];
-                case 34:
+                case 32:
                     _w.sent();
                     void $.ui.close({ id: OLD_PANE }).catch(function () { return undefined; });
                     return [4 /*yield*/, $.fs.exists("".concat(dir, "/index.md"))];
-                case 35:
+                case 33:
                     isNew = !(_w.sent());
-                    if (!isNew) return [3 /*break*/, 37];
+                    if (!isNew) return [3 /*break*/, 35];
                     return [4 /*yield*/, $.fs.write("".concat(dir, "/index.md"), INDEX_HEAD)];
+                case 34:
+                    _w.sent();
+                    _w.label = 35;
+                case 35: return [4 /*yield*/, settleWelcome($, isNew, id).catch(function (err) { return log($, "welcome not settled: ".concat(String(err))); })];
                 case 36:
                     _w.sent();
-                    _w.label = 37;
-                case 37: return [4 /*yield*/, settleWelcome($, isNew, id).catch(function (err) { return log($, "welcome not settled: ".concat(String(err))); })];
-                case 38:
-                    _w.sent();
                     return [4 /*yield*/, measure($).catch(function () { return undefined; })];
-                case 39:
+                case 37:
                     _w.sent();
                     during('load: read finished work');
                     return [4 /*yield*/, loadFinished($).catch(function (err) { return log($, "finished work not read: ".concat(String(err))); })];
-                case 40:
+                case 38:
                     _w.sent();
                     void recoverEnded($).catch(function (err) { return log($, "ended work not read back: ".concat(String(err))); });
                     during('load: sync the memory');
                     return [4 /*yield*/, sync($).catch(function () { return undefined; })];
-                case 41:
+                case 39:
                     _w.sent();
                     during('load: read the results');
                     return [4 /*yield*/, loadReports($).catch(function () { return undefined; })
                         // What the person had typed into a reply box before a reload of the mod is in its box again
                     ];
-                case 42:
+                case 40:
                     _w.sent();
                     // What the person had typed into a reply box before a reload of the mod is in its box again
                     return [4 /*yield*/, readDrafts($).catch(function () { return undefined; })
@@ -754,58 +590,58 @@ var chatHooks = function (on) {
                         // and comes back after a reload of the mod (which closes it) if it was open or work is running
                         // Once the person has opened or closed the panel, every chat follows that choice instead, as it loads and every PANEL_EVERY
                     ];
-                case 43:
+                case 41:
                     // What the person had typed into a reply box before a reload of the mod is in its box again
                     _w.sent();
                     return [4 /*yield*/, read($, todos)];
-                case 44:
+                case 42:
                     isRunning = (_w.sent()).some(function (one) { return !one.parentId && one.status === 'working'; });
                     panelSeen = '';
                     return [4 /*yield*/, followPanel($).catch(function () { return undefined; })];
-                case 45:
+                case 43:
                     choice = _w.sent();
-                    if (!(!choice && (isRunning || isWelcomeOpen))) return [3 /*break*/, 47];
+                    if (!(!choice && (isRunning || isWelcomeOpen))) return [3 /*break*/, 45];
                     return [4 /*yield*/, openList($)];
-                case 46:
+                case 44:
                     _w.sent();
+                    _w.label = 45;
+                case 45:
+                    _g = !choice;
+                    if (!_g) return [3 /*break*/, 47];
+                    return [4 /*yield*/, read($, paneShown)];
+                case 46:
+                    _g = ((_w.sent()) || isRunning);
                     _w.label = 47;
                 case 47:
-                    _g = !choice;
-                    if (!_g) return [3 /*break*/, 49];
-                    return [4 /*yield*/, read($, paneShown)];
+                    _f = _g;
+                    if (!_f) return [3 /*break*/, 49];
+                    return [4 /*yield*/, $.ui.panes().catch(function () { return []; })];
                 case 48:
-                    _g = ((_w.sent()) || isRunning);
+                    _f = !(_w.sent()).some(function (pane) { return pane.id === LIST; });
                     _w.label = 49;
                 case 49:
-                    _f = _g;
                     if (!_f) return [3 /*break*/, 51];
-                    return [4 /*yield*/, $.ui.panes().catch(function () { return []; })];
-                case 50:
-                    _f = !(_w.sent()).some(function (pane) { return pane.id === LIST; });
-                    _w.label = 51;
-                case 51:
-                    if (!_f) return [3 /*break*/, 53];
                     return [4 /*yield*/, $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS }).catch(function (err) { return log($, "panel not opened again: ".concat(String(err))); })
                         // Someone whose panel was open before chats shared it (as when this version is installed, which reloads every chat) has it
                         // open in every chat from now on
                     ];
-                case 52:
+                case 50:
                     _w.sent();
+                    _w.label = 51;
+                case 51:
+                    _h = !choice;
+                    if (!_h) return [3 /*break*/, 53];
+                    return [4 /*yield*/, $.ui.panes().catch(function () { return []; })];
+                case 52:
+                    _h = (_w.sent()).some(function (pane) { return pane.id === LIST; });
                     _w.label = 53;
                 case 53:
-                    _h = !choice;
                     if (!_h) return [3 /*break*/, 55];
-                    return [4 /*yield*/, $.ui.panes().catch(function () { return []; })];
+                    return [4 /*yield*/, choosePanel($, true)];
                 case 54:
-                    _h = (_w.sent()).some(function (pane) { return pane.id === LIST; });
+                    _w.sent();
                     _w.label = 55;
                 case 55:
-                    if (!_h) return [3 /*break*/, 57];
-                    return [4 /*yield*/, choosePanel($, true)];
-                case 56:
-                    _w.sent();
-                    _w.label = 57;
-                case 57:
                     everyLoad($, PANEL_EVERY, function () { return followPanel($).catch(function (err) { return log($, "panel not followed: ".concat(String(err))); }); });
                     everyLoad($, FOLLOW_EVERY, function () { return follow($).catch(function (err) { return log($, "work not followed: ".concat(String(err))); }); });
                     // Each second the running times on the small cards move on, while any work runs. A Details tab does not read the tick: it is
@@ -815,31 +651,31 @@ var chatHooks = function (on) {
                     return [4 /*yield*/, $.clock.now()
                         // Only work that ended after the panel was last drawn: what it already showed ended is not shown again
                     ];
-                case 58:
+                case 56:
                     now = _w.sent();
                     return [4 /*yield*/, read($, lastDrawn)];
-                case 59:
+                case 57:
                     last = _w.sent();
                     lateFrom.clear();
                     _j = 0;
                     _l = [[]];
                     return [4 /*yield*/, read($, flows)];
-                case 60:
+                case 58:
                     _m = [__spreadArray.apply(void 0, _l.concat([(_w.sent()), true]))];
                     return [4 /*yield*/, read($, todos)];
-                case 61:
+                case 59:
                     _k = __spreadArray.apply(void 0, _m.concat([(_w.sent()).filter(function (card) { return !card.parentId; }), true]));
-                    _w.label = 62;
-                case 62:
-                    if (!(_j < _k.length)) return [3 /*break*/, 64];
+                    _w.label = 60;
+                case 60:
+                    if (!(_j < _k.length)) return [3 /*break*/, 62];
                     one = _k[_j];
                     if (one.status !== 'working' && one.endedAt > last && one.endedAt <= now && now - one.endedAt < RELOAD_GRACE)
                         lateFrom.set("".concat(one.id, ":").concat(one.endedAt), Infinity);
-                    _w.label = 63;
-                case 63:
+                    _w.label = 61;
+                case 61:
                     _j++;
-                    return [3 /*break*/, 62];
-                case 64:
+                    return [3 /*break*/, 60];
+                case 62:
                     seconds = 0;
                     everyLoad($, 1000, function () { return __awaiter(_this, void 0, void 0, function () {
                         var _a, isFlowing, calmNow, isMoving, _b, _c, _i, heldDrawings_1, _d, key, held_1, _e, now, _loop_1, _f, _g, _h, _j, one;
@@ -991,26 +827,18 @@ var chatHooks = function (on) {
                     waiting = [];
                     asked = [];
                     return [4 /*yield*/, unshare($, true).catch(function () { return undefined; })];
-                case 65:
+                case 63:
                     _w.sent();
                     if (macs.length)
                         everyLoad($, FETCH_EVERY, function () { return fetchMacs($).catch(function (err) { return log($, "other Macs not fetched: ".concat(String(err))); }); });
                     _o = Boolean;
                     return [4 /*yield*/, $.env.get('CLAUDE_SSH_DAEMON_CHILD')];
-                case 66:
+                case 64:
                     isRunFromAfar = _o.apply(void 0, [_w.sent()]);
-                    if (!isRunFromAfar) return [3 /*break*/, 68];
-                    return [4 /*yield*/, startKeeper($, id).catch(function (err) { return log($, "keeper not started: ".concat(String(err))); })
-                        // and every chat a watcher that brings Claudopus back should Claude switch it off
-                    ];
-                case 67:
-                    _w.sent();
-                    _w.label = 68;
-                case 68: 
-                // and every chat a watcher that brings Claudopus back should Claude switch it off
-                return [4 /*yield*/, startReviver($, id).catch(function (err) { return log($, "the watcher that brings Claudopus back was not started: ".concat(String(err))); })];
-                case 69:
-                    // and every chat a watcher that brings Claudopus back should Claude switch it off
+                    // Every chat has a watcher that brings Claudopus back should Claude switch it off
+                    return [4 /*yield*/, startReviver($, id).catch(function (err) { return log($, "the watcher that brings Claudopus back was not started: ".concat(String(err))); })];
+                case 65:
+                    // Every chat has a watcher that brings Claudopus back should Claude switch it off
                     _w.sent();
                     if (macs.length)
                         everyLoad($, OPEN_EVERY, function () { return takeOpens($).catch(function (err) { return log($, "presses on other Macs not taken: ".concat(String(err))); }); });
@@ -1020,53 +848,53 @@ var chatHooks = function (on) {
                     afterLoad($, CATCH_UP_AFTER, function () { return startCatchUp($).catch(function (err) { return log($, "chats not caught up: ".concat(String(err))); }); });
                     everyLoad($, CATCH_UP_EVERY, function () { return startCatchUp($).catch(function (err) { return log($, "chats not caught up: ".concat(String(err))); }); });
                     return [4 /*yield*/, shareMine($).catch(function () { return undefined; })];
-                case 70:
+                case 66:
                     _w.sent();
                     return [4 /*yield*/, readAnswers($).catch(function () { return undefined; })];
-                case 71:
+                case 67:
                     _w.sent();
                     return [4 /*yield*/, readOthers($).catch(function () { return undefined; })
                         // The workflows kept, read back, and followed while they run
                     ];
-                case 72:
+                case 68:
                     _w.sent();
                     // The workflows kept, read back, and followed while they run
                     return [4 /*yield*/, knowSession($)];
-                case 73:
+                case 69:
                     // The workflows kept, read back, and followed while they run
                     _w.sent();
                     during('load: read back workflows');
                     return [4 /*yield*/, loadFlows($).catch(function (err) { return log($, "workflows not read back: ".concat(String(err))); })];
-                case 74:
+                case 70:
                     _w.sent();
                     everyLoad($, FLOW_EVERY, function () { return followFlows($).catch(function (err) { return log($, "workflows not followed: ".concat(String(err))); }); });
                     // Every hour one chat looks at the version page, and only looks: an update is installed, and a chat reloaded to it, only by a press
                     afterLoad($, UPDATE_AFTER, function () { return void lookForNew($).catch(function (err) { return log($, "update not looked for: ".concat(String(err))); }); });
                     everyLoad($, UPDATE_LOOK, function () { return lookForNew($).catch(function (err) { return log($, "update not looked for: ".concat(String(err))); }); });
-                    if (!isRunFromAfar) return [3 /*break*/, 76];
+                    if (!isRunFromAfar) return [3 /*break*/, 72];
                     return [4 /*yield*/, holdOldCopies($).catch(function () { return undefined; })];
-                case 75:
+                case 71:
                     _w.sent();
                     everyLoad($, HOLD_EVERY, function () { return holdOldCopies($).catch(function (err) { return log($, "old copies not held: ".concat(String(err))); }); });
-                    _w.label = 76;
-                case 76: return [4 /*yield*/, tidyLog($)];
-                case 77:
+                    _w.label = 72;
+                case 72: return [4 /*yield*/, tidyLog($)];
+                case 73:
                     _w.sent();
                     return [4 /*yield*/, log($, "start ".concat(id, " in ").concat(e.cwd).concat(isOff ? ' (handing over is off)' : ''))
                         // This load takes charge in this chat once all it runs is started: the copies before it see the mark change and stop
                     ];
-                case 78:
+                case 74:
                     _w.sent();
                     // This load takes charge in this chat once all it runs is started: the copies before it see the mark change and stop
                     return [4 /*yield*/, takeCharge($)
                         // A move to a newer version has its moment begin now that the load has started whole
                     ];
-                case 79:
+                case 75:
                     // This load takes charge in this chat once all it runs is started: the copies before it see the mark change and stop
                     _w.sent();
                     // A move to a newer version has its moment begin now that the load has started whole
                     return [4 /*yield*/, readyUpdated($).catch(function () { return undefined; })];
-                case 80:
+                case 76:
                     // A move to a newer version has its moment begin now that the load has started whole
                     _w.sent();
                     return [2 /*return*/, begun];
@@ -1096,209 +924,176 @@ var chatHooks = function (on) {
         });
     }); });
     on('prompt.submit', function ($, given, next) { return __awaiter(_this, void 0, void 0, function () {
-        var e, waitingWork_1, ids_1, reports_1, quiet, _a, _b, _c, waits, held_3, told, _i, held_2, one, ended_1, _d, _e, one, isPressed, isPerson, from, _f, _g, context, _h, stillHeld, board, text, m, role, _j, _k, roleSent_1, subjects, sizes, told, _l, _m, stamp, path, _o, _p, _q, how;
-        var _r, _s, _t, _u, _v, _w, _x, _y;
-        return __generator(this, function (_z) {
-            switch (_z.label) {
+        var e, ids_1, reports_1, cards, atWork, quiet, held_2, ended_1, _i, _a, one, isPressed, isPerson, from, _b, _c, context, _d, stillHeld, board, text, m, role, subjects, told, _e, _f, _g, _h, _j, stamp, path, how;
+        var _this = this;
+        var _k, _l, _m, _o, _p, _q;
+        return __generator(this, function (_r) {
+            switch (_r.label) {
                 case 0:
                     e = given;
                     return [4 /*yield*/, holdTest($)
                         // The texts a message is answered with are the ones known: a change made since is put back first
                     ];
                 case 1:
-                    _z.sent();
+                    _r.sent();
                     if (!dir) return [3 /*break*/, 3];
-                    return [4 /*yield*/, personCheck($).catch(function (err) { return log($, "files not compared as a message came: ".concat(String(err))); })];
-                case 2:
-                    _z.sent();
-                    _z.label = 3;
-                case 3:
-                    if (!wakes.length) return [3 /*break*/, 5];
-                    return [4 /*yield*/, sendWakes($).catch(function (err) { return log($, "answer not sent: ".concat(String(err))); })
+                    return [4 /*yield*/, personCheck($).catch(function (err) { return log($, "files not compared as a message came: ".concat(String(err))); })
                         // The notice that a workflow ended ends its card
                     ];
-                case 4:
-                    _z.sent();
-                    _z.label = 5;
-                case 5:
-                    if (!(dir && e.origin.kind === 'task-notification' && e.text.includes('<task-notification'))) return [3 /*break*/, 7];
+                case 2:
+                    _r.sent();
+                    _r.label = 3;
+                case 3:
+                    if (!(dir && e.origin.kind === 'task-notification' && e.text.includes('<task-notification'))) return [3 /*break*/, 5];
                     return [4 /*yield*/, flowEnded($, e.text).catch(function (err) { return log($, "workflow end not read: ".concat(String(err))); })
                         // The engine's notice that work the person stopped has ended says it was stopped "by Claude": the chat is told it was them
                     ];
-                case 6:
-                    _z.sent();
-                    _z.label = 7;
-                case 7:
-                    if (!(dir && !isOff && e.origin.kind === 'task-notification' && e.text.includes('<task-notification'))) return [3 /*break*/, 15];
-                    return [4 /*yield*/, waitingNow($)];
-                case 8:
-                    waitingWork_1 = _z.sent();
+                case 4:
+                    _r.sent();
+                    _r.label = 5;
+                case 5:
+                    if (!(dir && !isOff && e.origin.kind === 'task-notification' && e.text.includes('<task-notification'))) return [3 /*break*/, 10];
                     ids_1 = __spreadArray([], e.text.matchAll(/<task-id>([^<]+)<\/task-id>/g), true).map(function (m) { var _a; return (_a = m[1]) !== null && _a !== void 0 ? _a : ''; });
                     return [4 /*yield*/, reportsFor($, ids_1)];
-                case 9:
-                    reports_1 = _z.sent();
+                case 6:
+                    reports_1 = _r.sent();
                     if (reports_1.length)
-                        e = __assign(__assign({}, e), { context: __spreadArray(__spreadArray([], ((_r = e.context) !== null && _r !== void 0 ? _r : []), true), reports_1, true) });
-                    _a = quietNotices;
-                    _b = [e.text, new Set(waitingWork_1.keys())];
-                    _c = Set.bind;
-                    return [4 /*yield*/, read($, todos)];
-                case 10:
-                    quiet = _a.apply(void 0, _b.concat([new (_c.apply(Set, [void 0, (_z.sent()).filter(function (one) { return one.reportGiven && !reports_1.length; }).map(function (one) { return one.id; })]))()]));
-                    waits = quiet.waits.map(function (id) { return waitsText(waitingWork_1.get(id)); });
-                    return [4 /*yield*/, read($, todos)];
-                case 11:
-                    held_3 = (_z.sent()).filter(function (one) { return !one.parentId && isHeld(one) && ids_1.includes(one.id); });
-                    if (held_3.length) {
-                        told = held_3.map(function (one) { var _a; return named(STOPPED_BY_YOU(titleOf(one), one.id, (_a = stopLeft.get(one.id)) !== null && _a !== void 0 ? _a : [])); });
-                        for (_i = 0, held_2 = held_3; _i < held_2.length; _i++) {
-                            one = held_2[_i];
-                            stopLeft.delete(one.id);
-                        }
-                        return [2 /*return*/, next(__assign(__assign({}, e), { context: __spreadArray(__spreadArray(__spreadArray([], ((_s = e.context) !== null && _s !== void 0 ? _s : []), true), told, true), waits, true) }))];
-                    }
+                        e = __assign(__assign({}, e), { context: __spreadArray(__spreadArray([], ((_k = e.context) !== null && _k !== void 0 ? _k : []), true), reports_1, true) });
+                    return [4 /*yield*/, read($, todos)
+                        // (nor is such a notice of a helper: its result goes to its task, taken at its hand-back, and is never the chat's)
+                    ];
+                case 7:
+                    cards = _r.sent();
+                    atWork = new Set(cards.filter(function (one) { return !one.chat && (one.parentId ? one.parentId !== HELPER || one.tookReport : one.status === 'working'); }).map(function (one) { return one.id; }));
+                    quiet = quietNotices(e.text, atWork, new Set(cards.filter(function (one) { return one.reportGiven && !reports_1.length; }).map(function (one) { return one.id; })));
+                    held_2 = cards.filter(function (one) { return !one.parentId && isHeld(one) && ids_1.includes(one.id); });
+                    if (held_2.length)
+                        return [2 /*return*/, next(__assign(__assign({}, e), { context: __spreadArray(__spreadArray([], ((_l = e.context) !== null && _l !== void 0 ? _l : []), true), held_2.map(function (one) { return named(STOPPED_BY_YOU(titleOf(one), one.id)); }), true) }))
+                            // The chat's own command ended: how it ended and its last lines go with the notice
+                        ];
                     return [4 /*yield*/, chatCommandEnded($, e.text).catch(function () { return []; })];
-                case 12:
-                    ended_1 = _z.sent();
+                case 8:
+                    ended_1 = _r.sent();
                     if (ended_1.length)
-                        return [2 /*return*/, next(__assign(__assign({}, e), { context: __spreadArray(__spreadArray(__spreadArray([], ((_t = e.context) !== null && _t !== void 0 ? _t : []), true), ended_1, true), waits, true) }))
-                            // Notices with nothing new (a report already given, a task still at work) cost the chat no turn of the model's: a turn made of
+                        return [2 /*return*/, next(__assign(__assign({}, e), { context: __spreadArray(__spreadArray([], ((_m = e.context) !== null && _m !== void 0 ? _m : []), true), ended_1, true) }))
+                            // Notices with nothing new (a report already given, a task that paused) cost the chat no turn of the model's: a turn made of
                             // nothing else is answered with no model (turn.start below, workHooks' turn.step), and one that comes while the chat is at
                             // work goes into that turn, or makes such a turn should that turn end first. None is dropped, which Claude Code shows as a
-                            // warning card. The word that a task still waits goes with it, so the chat, reading it later, does not take the task for ended
+                            // warning card
                         ];
-                    if (!(quiet.isQuiet && !reports_1.length)) return [3 /*break*/, 14];
-                    for (_d = 0, _e = noticesOf(e.text); _d < _e.length; _d++) {
-                        one = _e[_d];
+                    if (!(quiet.isQuiet && !reports_1.length)) return [3 /*break*/, 10];
+                    for (_i = 0, _a = noticesOf(e.text); _i < _a.length; _i++) {
+                        one = _a[_i];
                         quietHeld.add(one);
                     }
-                    return [4 /*yield*/, log($, quiet.isRepeat ? 'let in the notice that repeats a report already given, with no turn of the model\'s' : 'let in notices with nothing new, with no turn of the model\'s: tasks still at work')];
-                case 13:
-                    _z.sent();
-                    return [2 /*return*/, next(waits.length ? __assign(__assign({}, e), { context: __spreadArray(__spreadArray([], ((_u = e.context) !== null && _u !== void 0 ? _u : []), true), waits, true) }) : e)];
-                case 14:
-                    if (waits.length)
-                        return [2 /*return*/, next(__assign(__assign({}, e), { context: __spreadArray(__spreadArray([], ((_v = e.context) !== null && _v !== void 0 ? _v : []), true), waits, true) }))];
-                    _z.label = 15;
-                case 15: return [4 /*yield*/, isQuietHandback($, e.origin, e.text).catch(function (err) { return (void log($, "hand-back not looked at: ".concat(String(err))), false); })];
-                case 16:
-                    if (!_z.sent()) return [3 /*break*/, 18];
-                    quietHeld.add(e.text);
-                    return [4 /*yield*/, log($, 'let in a helper\'s result that Claudopus passes on to its task, with no turn of the model\'s')];
-                case 17:
-                    _z.sent();
+                    return [4 /*yield*/, log($, quiet.isRepeat ? 'let in the notice that repeats a report already given, with no turn of the model\'s' : 'let in notices with nothing new, with no turn of the model\'s: tasks that paused')];
+                case 9:
+                    _r.sent();
                     return [2 /*return*/, next(e)];
-                case 18:
+                case 10:
                     if (e.isMeta || e.command || !dir)
                         return [2 /*return*/, next(e)
                             // A message the mod sent from a press or reply in the panel starts work as a message of the person's does
                         ];
                     isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text);
                     isPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || isPressed;
-                    if (!!isPerson) return [3 /*break*/, 22];
+                    if (!!isPerson) return [3 /*break*/, 14];
                     from = programFrom(e.origin);
-                    if (!from) return [3 /*break*/, 21];
-                    _f = appendWords;
-                    _g = [$];
+                    if (!from) return [3 /*break*/, 13];
+                    _b = appendWords;
+                    _c = [$];
                     return [4 /*yield*/, read($, me)];
-                case 19: return [4 /*yield*/, _f.apply(void 0, _g.concat([(_z.sent()).id, "## ".concat(new Date().toISOString(), " (").concat(from, ")\n").concat(e.text, "\n\n")])).catch(function (err) { return log($, "message not saved: ".concat(String(err))); })];
-                case 20:
-                    _z.sent();
-                    _z.label = 21;
-                case 21: return [2 /*return*/, next(e)];
-                case 22:
-                    _h = [__spreadArray([], ((_w = e.context) !== null && _w !== void 0 ? _w : []), true)];
+                case 11: return [4 /*yield*/, _b.apply(void 0, _c.concat([(_r.sent()).id, "## ".concat(new Date().toISOString(), " (").concat(from, ")\n").concat(e.text, "\n\n")])).catch(function (err) { return log($, "message not saved: ".concat(String(err))); })];
+                case 12:
+                    _r.sent();
+                    _r.label = 13;
+                case 13: return [2 /*return*/, next(e)];
+                case 14:
+                    _d = [__spreadArray([], ((_o = e.context) !== null && _o !== void 0 ? _o : []), true)];
                     return [4 /*yield*/, reportsFor($)];
-                case 23:
-                    context = __spreadArray.apply(void 0, _h.concat([(_z.sent()), true]));
+                case 15:
+                    context = __spreadArray.apply(void 0, _d.concat([(_r.sent()), true]));
                     return [4 /*yield*/, read($, todos)];
-                case 24:
-                    stillHeld = (_z.sent()).filter(function (one) { return isHeld(one) && !one.parentId; });
+                case 16:
+                    stillHeld = (_r.sent()).filter(function (one) { return isHeld(one) && !one.parentId; });
                     return [4 /*yield*/, read($, todos)];
-                case 25:
-                    if (!(_z.sent()).some(isHeld)) return [3 /*break*/, 27];
+                case 17:
+                    if (!(_r.sent()).some(isHeld)) return [3 /*break*/, 19];
                     return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (one) { return (isHeld(one) && one.byYou ? __assign(__assign({}, one), { byYou: __assign(__assign({}, one.byYou), { isLifted: true }) }) : one); }); })];
-                case 26:
-                    _z.sent();
+                case 18:
+                    _r.sent();
                     if (stillHeld.length)
                         context.push(named(STOPPED_EARLIER(stillHeld.map(function (one) { return "\"".concat(titleOf(one), "\" (").concat(one.id, ")"); }))));
-                    _z.label = 27;
-                case 27:
-                    if (!!isOff) return [3 /*break*/, 29];
+                    _r.label = 19;
+                case 19:
+                    if (!!isOff) return [3 /*break*/, 21];
                     return [4 /*yield*/, cardsNow($).catch(function (err) { return (void log($, "cards not told to the chat: ".concat(String(err))), ''); })];
-                case 28:
-                    board = _z.sent();
+                case 20:
+                    board = _r.sent();
                     if (board)
                         context.push(named(board));
-                    _z.label = 29;
-                case 29:
+                    _r.label = 21;
+                case 21:
                     text = e.text;
                     return [4 /*yield*/, read($, me)];
-                case 30:
-                    m = _z.sent();
-                    if (!!isOff) return [3 /*break*/, 39];
-                    _j = named;
-                    _k = fillModels;
-                    return [4 /*yield*/, inForce($, $.plugin.root, dir, 'roles/chat.md')];
-                case 31:
-                    role = _j.apply(void 0, [_k.apply(void 0, [(_z.sent()).text, models, lean])]);
-                    roleSent_1 = mark(role);
-                    if (!(!m.isChat || m.needsContext || roleSent_1 !== m.roleSent)) return [3 /*break*/, 33];
+                case 22:
+                    m = _r.sent();
+                    if (!!isOff) return [3 /*break*/, 31];
+                    return [4 /*yield*/, keptRule($, 'role', function () { return __awaiter(_this, void 0, void 0, function () { var _a, _b; return __generator(this, function (_c) {
+                            switch (_c.label) {
+                                case 0:
+                                    _a = named;
+                                    _b = fillModels;
+                                    return [4 /*yield*/, inForce($, $.plugin.root, dir, 'roles/chat.md')];
+                                case 1: return [2 /*return*/, _a.apply(void 0, [_b.apply(void 0, [(_c.sent()).text, models, lean])])];
+                            }
+                        }); }); })];
+                case 23:
+                    role = _r.sent();
+                    if (!(!m.isChat || m.needsContext)) return [3 /*break*/, 25];
                     return [4 /*yield*/, readIndex($)];
-                case 32:
-                    subjects = (_z.sent()).map(function (s) { return "- ".concat([s.name, s.repo, s.session, s.state, s.summary, "streams/".concat(slug(s.name), ".md")].join(' | ')); }).join('\n');
+                case 24:
+                    subjects = (_r.sent()).map(function (s) { return "- ".concat([s.name, s.repo, s.session, s.state, s.summary, "streams/".concat(slug(s.name), ".md")].join(' | ')); }).join('\n');
                     context.push("".concat(role, "\nThis chat's saved words: ").concat(dir, "/words/").concat(m.id, ".md\nTopics so far (name | folder | session | state | summary | its notes, under ").concat(dir, "):\n").concat(subjects || '(none yet)'));
-                    _z.label = 33;
-                case 33: return [4 /*yield*/, read($, todos)];
-                case 34:
-                    sizes = (_z.sent())
-                        .filter(function (one) { return !one.parentId && one.tokens > 0; })
-                        .slice(-8)
-                        .map(function (one) { return "".concat(one.title || 'task', " (").concat(one.id, ") ").concat(one.isFork && m.window ? "".concat(Math.round((one.tokens / m.window) * 100), "%") : thousands(one.tokens)); });
-                    _l = reportsTold;
+                    _r.label = 25;
+                case 25:
+                    _e = reportsTold;
                     return [4 /*yield*/, read($, reports)];
-                case 35:
-                    _m = [_z.sent()];
+                case 26:
+                    _f = [_r.sent()];
                     return [4 /*yield*/, $.clock.now()];
-                case 36:
-                    told = _l.apply(void 0, _m.concat([_z.sent()]));
-                    context.push("".concat(briefNow()).concat(sizes.length ? "\nHow full each task's context is: ".concat(sizes.join('; '), ".") : '').concat(told ? "\n".concat(told) : ''));
-                    return [4 /*yield*/, update($, me, function (one) { return (__assign(__assign({}, one), { isChat: true, needsContext: false, roleSent: roleSent_1 })); })];
-                case 37:
-                    _z.sent();
-                    if (!(text.length > PASTE_CHARS)) return [3 /*break*/, 39];
+                case 27:
+                    told = _e.apply(void 0, _f.concat([_r.sent()]));
+                    _h = (_g = context).push;
+                    _j = "".concat;
+                    return [4 /*yield*/, keptRule($, 'each', function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                            return [2 /*return*/, BRIEF];
+                        }); }); })];
+                case 28:
+                    _h.apply(_g, [_j.apply("", [_r.sent()]).concat(told ? "\n".concat(told) : '')]);
+                    return [4 /*yield*/, update($, me, function (one) { return (__assign(__assign({}, one), { isChat: true, needsContext: false })); })];
+                case 29:
+                    _r.sent();
+                    if (!(text.length > PASTE_CHARS)) return [3 /*break*/, 31];
                     stamp = new Date().toISOString().replaceAll(':', '-');
                     path = "".concat(dir, "/pastes/").concat(stamp, ".md");
                     return [4 /*yield*/, $.fs.write("".concat(dir, "/pastes/").concat(stamp, ".md"), hideKeys(text))];
-                case 38:
-                    _z.sent();
+                case 30:
+                    _r.sent();
                     text = "".concat(text.slice(0, 600), "\n\n[").concat(text.length - 1200, " characters pasted here were saved to ").concat(path, " and left out of this chat]\n\n").concat(text.slice(-600));
-                    context.push(pastedNow());
-                    _z.label = 39;
-                case 39:
+                    context.push(PASTED);
+                    _r.label = 31;
+                case 31:
                     said = text;
                     heard = __spreadArray(__spreadArray([], heard, true), [text], false);
                     return [4 /*yield*/, read($, reports)];
-                case 40:
+                case 32:
                     // A message that names a report starts work from it: that work's own report is kept linked to it
-                    fromReport = (_y = (_x = (_z.sent()).find(function (r) { return text.includes("".concat(reportPath(r), "/")) || text.includes("reports/".concat(r.id)); })) === null || _x === void 0 ? void 0 : _x.id) !== null && _y !== void 0 ? _y : '';
-                    _p = 
-                    // One that names a result and quotes what in it waits answers that, as "Answer in words" on the result starts it
-                    // (and goes to the task that asked, which carries on with it: the chat is told so with the message)
-                    (_o = context.push).apply;
-                    _q = [
-                        // One that names a result and quotes what in it waits answers that, as "Answer in words" on the result starts it
-                        // (and goes to the task that asked, which carries on with it: the chat is told so with the message)
-                        context];
-                    return [4 /*yield*/, answeredInMessage($, text).catch(function (err) { return (void log($, "results answered in words not marked: ".concat(String(err))), []); })];
-                case 41:
-                    // One that names a result and quotes what in it waits answers that, as "Answer in words" on the result starts it
-                    // (and goes to the task that asked, which carries on with it: the chat is told so with the message)
-                    _p.apply(_o, _q.concat([(_z.sent())]));
+                    fromReport = (_q = (_p = (_r.sent()).find(function (r) { return text.includes("".concat(reportPath(r), "/")) || text.includes("reports/".concat(r.id)); })) === null || _p === void 0 ? void 0 : _p.id) !== null && _q !== void 0 ? _q : '';
                     how = "".concat(e.turnId ? ' (sent while Claude was working)' : '').concat(e.origin.kind === 'bridge' ? ' (from the phone)' : '').concat(isPressed ? ' (pressed or replied in the panel)' : '');
                     return [4 /*yield*/, appendWords($, m.id, "## ".concat(new Date().toISOString()).concat(how, "\n").concat(text, "\n\n")).catch(function (err) { return log($, "message not saved: ".concat(String(err))); })];
-                case 42:
-                    _z.sent();
+                case 33:
+                    _r.sent();
                     return [2 /*return*/, next(context.length ? __assign(__assign({}, e), { text: text, context: context }) : __assign(__assign({}, e), { text: text }))];
             }
         });
@@ -1338,32 +1133,19 @@ var chatHooks = function (on) {
                     _a.label = 3;
                 case 3:
                     if (!dir)
-                        return [2 /*return*/, done
-                            // A piece of work ended its turn: it has ended and leaves the panel, since the chat passes its answer on.
-                            // One that only waits for its helpers goes on working
-                            // A turn the lapsed sign-in of the app ended hands the chat to this Mac's keeper
-                        ];
-                    // A piece of work ended its turn: it has ended and leaves the panel, since the chat passes its answer on.
-                    // One that only waits for its helpers goes on working
-                    // A turn the lapsed sign-in of the app ended hands the chat to this Mac's keeper
-                    return [4 /*yield*/, lapsedSignIn($, e).catch(function (err) { return log($, "lapsed sign-in not handed over: ".concat(String(err))); })];
-                case 4:
-                    // A piece of work ended its turn: it has ended and leaves the panel, since the chat passes its answer on.
-                    // One that only waits for its helpers goes on working
-                    // A turn the lapsed sign-in of the app ended hands the chat to this Mac's keeper
-                    _a.sent();
-                    if (!(e.agentId !== undefined)) return [3 /*break*/, 8];
+                        return [2 /*return*/, done];
+                    if (!(e.agentId !== undefined)) return [3 /*break*/, 7];
                     id = e.agentId;
                     turnEnding.add(id);
-                    _a.label = 5;
-                case 5:
-                    _a.trys.push([5, , 7, 8]);
+                    _a.label = 4;
+                case 4:
+                    _a.trys.push([4, , 6, 7]);
                     return [4 /*yield*/, agentTurnEnded($, e, id, done)];
-                case 6: return [2 /*return*/, _a.sent()];
-                case 7:
+                case 5: return [2 /*return*/, _a.sent()];
+                case 6:
                     turnEnding.delete(id);
                     return [7 /*endfinally*/];
-                case 8:
+                case 7:
                     // A turn answered with no model is no reply: nothing is saved or logged for it
                     if (quietTurns.delete(e.turnId))
                         return [2 /*return*/, done];
@@ -1378,38 +1160,31 @@ var chatHooks = function (on) {
     }); });
     // A compaction keeps what the person asked for, and the role text goes out again after it
     on('session.compact', function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
-        var isChat, r, agent;
+        var isChat, r;
         return __generator(this, function (_a) {
             switch (_a.label) {
                 case 0: return [4 /*yield*/, read($, me)];
                 case 1:
                     isChat = (_a.sent()).isChat && !isOff;
-                    return [4 /*yield*/, next(__assign(__assign({}, e), { instructions: [e.instructions, KEEP, isChat ? KEEP_AGENTS : ''].filter(Boolean).join('\n') }))];
+                    return [4 /*yield*/, next(__assign(__assign({}, e), { instructions: [e.instructions, KEEP, e.agentId !== undefined && dir && !isOff ? KEEP_RULES : '', isChat ? KEEP_AGENTS : ''].filter(Boolean).join('\n') }))];
                 case 2:
                     r = _a.sent();
                     if (!(e.agentId === undefined && e.trigger !== 'precompute')) return [3 /*break*/, 4];
-                    return [4 /*yield*/, update($, me, function (m) { return (__assign(__assign({}, m), { needsContext: true })); })
-                        // A piece of work compacted loses the rules it was handed after its brief: it is handed them again at its next step
-                    ];
+                    return [4 /*yield*/, update($, me, function (m) { return (__assign(__assign({}, m), { needsContext: true })); })];
                 case 3:
                     _a.sent();
                     _a.label = 4;
-                case 4:
-                    agent = e.agentId;
-                    if (!(agent !== undefined && e.trigger !== 'precompute' && dir)) return [3 /*break*/, 6];
-                    return [4 /*yield*/, changeTodos($, function (list) { return (list.some(function (one) { return one.id === agent && !one.parentId; }) ? list.map(function (one) { return (one.id === agent ? __assign(__assign({}, one), { rulesDue: true }) : one); }) : list); })];
-                case 5:
-                    _a.sent();
-                    _a.label = 6;
-                case 6: return [2 /*return*/, r];
+                case 4: return [2 /*return*/, r];
             }
         });
     }); });
     // The person's principles and working rules ship with the mod: every conversation, a chat's and each piece of work's, carries them
     // word for word as an instruction file of the person's own, and the same text loaded from elsewhere is not sent twice. In a chat
-    // the app runs on another Mac over ssh they end with the rule for what needs the person's hands there
+    // the app runs on another Mac over ssh they end with the rule for what needs the person's hands there. They are the ones the chat
+    // started with (keptRule), for the chat and its tasks alike: this event does not say whose conversation it is
     on('prompt.context', function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
         var r, files, _a, path, content, others, at, isAfar, _b, ours;
+        var _this = this;
         var _c;
         return __generator(this, function (_d) {
             switch (_d.label) {
@@ -1417,9 +1192,19 @@ var chatHooks = function (on) {
                 case 1:
                     r = _d.sent();
                     files = (_c = r.instructionFiles) !== null && _c !== void 0 ? _c : e.instructionFiles;
-                    return [4 /*yield*/, inForce($, $.plugin.root, dir, 'rules/CLAUDE.md')];
+                    return [4 /*yield*/, keptRule($, 'principles', function () { return __awaiter(_this, void 0, void 0, function () {
+                            var now;
+                            return __generator(this, function (_a) {
+                                switch (_a.label) {
+                                    case 0: return [4 /*yield*/, inForce($, $.plugin.root, dir, 'rules/CLAUDE.md')];
+                                    case 1:
+                                        now = _a.sent();
+                                        return [2 /*return*/, { path: now.path, content: now.text }];
+                                }
+                            });
+                        }); })];
                 case 2:
-                    _a = _d.sent(), path = _a.path, content = _a.text;
+                    _a = _d.sent(), path = _a.path, content = _a.content;
                     if (!files || !content.trim())
                         return [2 /*return*/, r
                             // Another copy of the mod loaded beside this one sends the same principles, with the rule for afar after them or not

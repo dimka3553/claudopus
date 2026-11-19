@@ -190,7 +190,7 @@ var withSteers = function (lines, entries) {
             from = Math.max(from, at_1 + 1);
             return;
         }
-        var later = entries.slice(i + 1).filter(function (one) { return one.kind !== 'steer'; }).map(function (one) { return one.text; });
+        var later = entries.slice(i + 1).filter(isOwnEntry).map(function (one) { return one.text; });
         var at = all.findIndex(function (line, n) { return n >= from && line.kind === 'said' && later.includes(oneLine(line.text).slice(0, NOTE_CHARS)); });
         while (at > from && isTool((_g = all[at - 1]) === null || _g === void 0 ? void 0 : _g.tool, 'todo'))
             at -= 1;

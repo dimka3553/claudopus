@@ -1,4 +1,4 @@
-// The mod's own tools: update, recall, todo, waits, ask and note
+// The mod's own tools: update, recall, todo, ask and note
 var __assign = (this && this.__assign) || function () {
     __assign = Object.assign || function(t) {
         for (var s, i = 1, n = arguments.length; i < n; i++) {
@@ -119,7 +119,8 @@ var toolHooks = function (on) {
             }
         });
     }); });
-    // The work lists what it sets out to do under its to-do, ticks it, rewords it or marks it dropped
+    // The work lists what it sets out to do under its to-do, ticks it, rewords it or marks it dropped. A helper's list is its own,
+    // on its own row: never added to the list of the task that started it, whose count is of its own to-dos
     on('tool.call', { tool: 'mcp__claudopus__todo' }, function ($, e) { return __awaiter(_this, void 0, void 0, function () {
         var input, text, state, old, items;
         var _a, _b;
@@ -141,148 +142,19 @@ var toolHooks = function (on) {
                             // One thing is being done at a time: what was being done before waits again
                             items = state === 'doing' ? next.map(function (item) { return (item.state === 'doing' && item.text !== text ? __assign(__assign({}, item), { state: 'open' }) : item); }) : next;
                             return __assign(__assign({}, one), { items: items });
-                        })];
+                        }, true)];
                 case 1:
                     _c.sent();
                     return [2 /*return*/, { result: items.map(function (item) { return "".concat(item.state === 'done' ? '[x]' : item.state === 'dropped' ? '[dropped]' : item.state === 'doing' ? '[doing]' : '[ ]', " ").concat(item.text); }).join('\n') }];
             }
         });
     }); });
-    // A file, a page or a time nothing of the work's own makes is looked for by Claudopus, which starts the work again when it is
-    // there: no command of the work's ever only waits (lookWakes)
-    on('tool.call', { tool: 'mcp__claudopus__wake_me' }, function ($, e) { return __awaiter(_this, void 0, void 0, function () {
-        var input, what, file, url, text, minutes, missed, at, agent, isCard;
-        var _a, _b, _c;
-        return __generator(this, function (_d) {
-            switch (_d.label) {
-                case 0:
-                    input = e;
-                    if (e.agentId === undefined)
-                        return [2 /*return*/, { result: 'Only a background task is started again this way; the chat is started by the next message.' }
-                            // A helper that ends its step has ended: it hands back what it found and what it waits for, and its task asks to be woken
-                        ];
-                    return [4 /*yield*/, read($, todos)];
-                case 1:
-                    if (!!(_d.sent()).some(function (one) { return one.id === e.agentId; })) return [3 /*break*/, 3];
-                    return [4 /*yield*/, sync($)];
-                case 2:
-                    _d.sent();
-                    _d.label = 3;
-                case 3: return [4 /*yield*/, read($, todos)];
-                case 4:
-                    if ((_a = (_d.sent()).find(function (one) { return one.id === e.agentId; })) === null || _a === void 0 ? void 0 : _a.parentId)
-                        return [2 /*return*/, { result: 'A helper is not started again this way: hand back your result now, saying what you were waiting for, and the task that started you asks Claudopus to wake it.' }];
-                    what = cut(oneLine(String((_b = input.what) !== null && _b !== void 0 ? _b : '')), 80);
-                    if (!what)
-                        return [2 /*return*/, { result: 'Say in a few words what you wait for.' }];
-                    file = typeof input.file === 'string' && input.file.trim() ? input.file.trim() : undefined;
-                    url = typeof input.url === 'string' && /^https?:\/\/\S+$/.test(input.url.trim()) ? input.url.trim() : undefined;
-                    text = file && typeof input.text === 'string' && input.text.trim() ? input.text.trim().slice(0, 200) : undefined;
-                    if (typeof input.url === 'string' && input.url.trim() && !url)
-                        return [2 /*return*/, { result: 'A page is named by its whole web address, starting http:// or https://.' }];
-                    if (file && !file.startsWith('/') && !file.startsWith('~/'))
-                        return [2 /*return*/, { result: 'Name the file by its full path.' }];
-                    minutes = Math.min(WAKE_MOST, Math.max(0.25, Number(input.minutes) > 0 ? Number(input.minutes) : file || url ? WAKE_LONGEST : 0));
-                    if (!file && !url && !(Number(input.minutes) > 0))
-                        return [2 /*return*/, { result: 'Name a file, a page, or the minutes after which to start you again.' }
-                            // A look for the same file, line or page ran out already: it is not coming, and the work hands back what it has
-                        ];
-                    return [4 /*yield*/, read($, todos)];
-                case 5:
-                    missed = (_c = (_d.sent()).find(function (one) { return one.id === e.agentId; })) === null || _c === void 0 ? void 0 : _c.wakeMissed;
-                    if ((file || url) && (missed === null || missed === void 0 ? void 0 : missed.key) === wakeKey({ file: file, text: text, url: url }))
-                        return [2 /*return*/, { result: "Refused by Claudopus: the look for ".concat(missed.what, " ran out already. Hand back your report now with what you have, saying what never came and why.") }];
-                    return [4 /*yield*/, $.clock.now()
-                        // (its own card: a helper's is its own, not its work's)
-                    ];
-                case 6:
-                    at = _d.sent();
-                    agent = e.agentId;
-                    return [4 /*yield*/, read($, todos)];
-                case 7:
-                    if (!!(_d.sent()).some(function (one) { return one.id === agent; })) return [3 /*break*/, 9];
-                    return [4 /*yield*/, sync($)];
-                case 8:
-                    _d.sent();
-                    _d.label = 9;
-                case 9:
-                    isCard = false;
-                    return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (one) { return (one.id === agent ? ((isCard = true), __assign(__assign({}, one), { wakeWhen: __assign(__assign(__assign(__assign({ what: what }, (file ? { file: file } : {})), (text ? { text: text } : {})), (url ? { url: url } : {})), { at: at, until: at + minutes * 60000 }) })) : one); }); })];
-                case 10:
-                    _d.sent();
-                    if (!isCard)
-                        return [2 /*return*/, { result: 'Claudopus has no card for you here, so it cannot start you again: carry on with what you can do now.' }];
-                    redraw($);
-                    return [2 /*return*/, { result: "Claudopus looks ".concat(file ? "for ".concat(text ? "\"".concat(text, "\" in ") : '').concat(file) : url ? "at ".concat(url) : "at the clock", " and starts you again ").concat(file || url ? "the moment it is there, or after ".concat(Math.round(minutes), " min with word that it never came") : "in ".concat(Math.round(minutes), " min")).concat(Number(input.minutes) > minutes ? " (at most ".concat(WAKE_MOST, " min)") : '', ". End your step now, or carry on with what needs nothing from it.") }];
-            }
-        });
-    }); });
-    // The work says what in its report waits on the person: it knows best. Its next report takes them, one item each, each with its own
-    // answers when it is not yes or no: 16 Nov "settled by hand, or left behind?" came with Yes / No / Not now, which cannot answer it.
-    // Each call lists everything still waiting; one that repeats the question on the work's card is tied to that ask
-    on('tool.call', { tool: 'mcp__claudopus__waits' }, function ($, e) { return __awaiter(_this, void 0, void 0, function () {
-        var input, given_1, numbers_1, r_1, answered, now, open_1, unknown, asked, items, tied, isTied;
-        var _a, _b;
-        return __generator(this, function (_c) {
-            switch (_c.label) {
-                case 0:
-                    input = e;
-                    if (!(e.agentId === undefined)) return [3 /*break*/, 4];
-                    given_1 = typeof input.result === 'string' ? input.result.trim() : '';
-                    numbers_1 = (Array.isArray(input.answered) ? input.answered : []).map(Number).filter(function (n) { return Number.isInteger(n) && n > 0; });
-                    if (!given_1)
-                        return [2 /*return*/, { result: "Only a background task records what its result waits on. In the chat, once ".concat(who(), "'s own words have answered what a result waits on, name it as `result` (its report.md path) and give the numbers of the questions they answered as `answered`.") }];
-                    return [4 /*yield*/, loadReports($)];
-                case 1:
-                    r_1 = (_c.sent()).find(function (one) { return given_1.includes("".concat(reportPath(one), "/")) || given_1 === reportPath(one) || given_1 === one.id; });
-                    if (!r_1)
-                        return [2 /*return*/, { result: "No result is \"".concat(cut(given_1, 120), "\": give its report.md path from the results list.") }];
-                    return [4 /*yield*/, settleWaits($, r_1, function (_, index) { return (numbers_1.includes(index + 1) ? { answer: IN_WORDS } : undefined); })];
-                case 2:
-                    answered = _c.sent();
-                    redraw($);
-                    return [4 /*yield*/, read($, reports)];
-                case 3:
-                    now = (_a = (_c.sent()).find(function (one) { return one.id === r_1.id; })) !== null && _a !== void 0 ? _a : r_1;
-                    open_1 = waitsOf(now).flatMap(function (one, n) { return (one.answer ? [] : ["(".concat(n + 1, ") ").concat(one.text)]); });
-                    unknown = numbers_1.filter(function (n) { var _a; return !waitsOf(r_1)[n - 1] || ((_a = waitsOf(r_1)[n - 1]) === null || _a === void 0 ? void 0 : _a.answer); });
-                    return [2 /*return*/, {
-                            result: "\"".concat(r_1.title, "\": ").concat(answered ? "".concat(answered, " answered in ").concat(who(), "'s words") : 'nothing answered', "; ").concat(open_1.length ? "still waiting: ".concat(open_1.join(' ')).replace(/([^.?!])$/, '$1.') : 'nothing waits on them now.').concat(unknown.length ? " Not an open question there, so not marked: ".concat(unknown.join(', '), ".") : ''),
-                        }];
-                case 4: return [4 /*yield*/, read($, todos)];
-                case 5:
-                    // A helper's answer is no report: the work it answers to records what waits
-                    if ((_b = (_c.sent()).find(function (one) { return one.id === e.agentId; })) === null || _b === void 0 ? void 0 : _b.parentId)
-                        return [2 /*return*/, { result: 'A helper records nothing here: say what waits in your answer, and the task that started you records it.' }];
-                    if (!Array.isArray(input.items))
-                        return [2 /*return*/, { result: "Nothing recorded: give `items`, everything still waiting on ".concat(who(), ", or [] when nothing does.") }];
-                    asked = (Array.isArray(input.items) ? input.items : []).flatMap(function (one) {
-                        var item = typeof one === 'string' ? { text: one } : one && typeof one === 'object' ? one : {};
-                        var text = typeof item.text === 'string' ? cut(oneLine(item.text), 200) : '';
-                        var choices = Array.isArray(item.choices) ? __spreadArray([], new Set(item.choices.filter(function (c) { return typeof c === 'string'; }).map(function (c) { return cut(oneLine(c), 40); }).filter(function (c) { return c && plainWords(c) !== 'not now' && plainWords(c) !== plainWords(ANSWER_IN_WORDS); })), true).slice(0, 4) : undefined;
-                        return text ? [__assign(__assign({ text: text }, ((choices === null || choices === void 0 ? void 0 : choices.length) ? { choices: choices } : {})), ('asked' in item && item.asked === true ? { isAsked: true } : {}))] : [];
-                    });
-                    items = asked.filter(function (one, n) { return asked.findIndex(function (other) { return other.text === one.text; }) === n; }).slice(0, 12);
-                    tied = 0;
-                    return [4 /*yield*/, change($, e.agentId, function (one) {
-                            var waits = items.map(function (wait) { return tiedTo(wait, one); });
-                            tied = waits.filter(function (wait) { return wait.ask; }).length;
-                            return __assign(__assign({}, one), { waits: waits.length ? waits : undefined, waitsSet: true });
-                        })];
-                case 6:
-                    _c.sent();
-                    redraw($);
-                    isTied = tied ? " ".concat(tied === 1 ? 'One is' : "".concat(tied, " are"), " the question on your card, and answering it there answers ").concat(tied === 1 ? 'it' : 'them', " here.") : '';
-                    return [2 /*return*/, { result: "".concat(items.length ? "Recorded ".concat(items.length, " waiting on ").concat(who(), "; the panel shows them with your result.") : "Nothing waits on ".concat(who(), ".")).concat(isTied, " Once you finish, this replaces what your earlier results waited on.") }];
-            }
-        });
-    }); });
     // Work that needs the person's hands now: its card stands out with the ask and its Copy, until they answer or the work clears it
     on('tool.call', { tool: 'mcp__claudopus__ask' }, function ($, e) { return __awaiter(_this, void 0, void 0, function () {
-        var input, asked, text, given1, whole, details, given0, hasFolder, command, given, isProse, copy, folder, choices, givenPics, pictures, _i, givenPics_1, path, _a, at, before, was, stepGiven, stepFolder, isStepped, _b, _c, list, card, terminal, shown, lost, long, tooLong, bare, seen, missing;
-        var _d, _e, _f, _g;
-        return __generator(this, function (_h) {
-            switch (_h.label) {
+        var input, asked, text, given1, whole, details, given0, hasFolder, command, given, isProse, copy, folder, choices, givenPics, pictures, _i, givenPics_1, path, _a, at, before, was, releaseGiven, release, _b, list, card, terminal, shown, lost, long, tooLong, plain, leftOut, released, bare, seen, missing;
+        var _c, _d, _e, _f;
+        return __generator(this, function (_g) {
+            switch (_g.label) {
                 case 0:
                     input = e;
                     if (e.agentId === undefined)
@@ -311,11 +183,11 @@ var toolHooks = function (on) {
                     isProse = given.split(/\s+/).length > 8 && /[a-z]{3,} [a-z]{3,} [a-z]{3,}/i.test(given) && !/[\/=_$`@]|https?:/.test(given);
                     copy = command || (isProse || flat(text).includes(flat(given)) ? '' : given);
                     folder = typeof input.cwd === 'string' && input.cwd.startsWith('/') ? input.cwd : cwd;
-                    choices = __spreadArray([], new Set((Array.isArray(input.choices) ? input.choices : []).filter(function (one) { return typeof one === 'string'; }).map(function (one) { return oneLine(one).slice(0, 40); }).filter(Boolean)), true).slice(0, 4);
+                    choices = __spreadArray([], new Set((Array.isArray(input.choices) ? input.choices : []).filter(function (one) { return typeof one === 'string'; }).map(function (one) { return oneLine(one).slice(0, 40); }).filter(Boolean)), true).filter(function (one) { return !LEAVES_OPEN.test(plainWords(one)); }).slice(0, 4);
                     givenPics = __spreadArray([], new Set((Array.isArray(input.pictures) ? input.pictures : []).filter(function (one) { return typeof one === 'string'; }).map(function (one) { return one.trim(); }).filter(function (one) { return IMAGE.test(one); })), true).slice(0, 8);
                     pictures = [];
                     _i = 0, givenPics_1 = givenPics;
-                    _h.label = 1;
+                    _g.label = 1;
                 case 1:
                     if (!(_i < givenPics_1.length)) return [3 /*break*/, 5];
                     path = givenPics_1[_i];
@@ -323,94 +195,91 @@ var toolHooks = function (on) {
                     if (!_a) return [3 /*break*/, 3];
                     return [4 /*yield*/, $.fs.stat(path).catch(function () { return undefined; })];
                 case 2:
-                    _a = ((_d = (_h.sent())) === null || _d === void 0 ? void 0 : _d.kind) === 'file';
-                    _h.label = 3;
+                    _a = ((_c = (_g.sent())) === null || _c === void 0 ? void 0 : _c.kind) === 'file';
+                    _g.label = 3;
                 case 3:
                     if (_a)
                         pictures.push(path);
-                    _h.label = 4;
+                    _g.label = 4;
                 case 4:
                     _i++;
                     return [3 /*break*/, 1];
                 case 5: return [4 /*yield*/, $.clock.now()];
                 case 6:
-                    at = _h.sent();
+                    at = _g.sent();
                     return [4 /*yield*/, read($, todos)];
                 case 7:
-                    before = _h.sent();
-                    was = (_e = before.find(function (one) { var _a; return one.id === topOf(before, (_a = e.agentId) !== null && _a !== void 0 ? _a : ''); })) === null || _e === void 0 ? void 0 : _e.ask;
-                    stepGiven = typeof input.last_step === 'string' ? oneLine(input.last_step).slice(0, 400) : '';
-                    stepFolder = typeof input.folder === 'string' ? input.folder.trim() : '';
-                    _b = Boolean;
-                    _c = stepGiven && choices.length && stepFolder.startsWith('/') && !((_f = before.find(function (one) { return one.id === e.agentId; })) === null || _f === void 0 ? void 0 : _f.parentId);
-                    if (!_c) return [3 /*break*/, 9];
-                    return [4 /*yield*/, $.fs.stat(stepFolder).catch(function () { return undefined; })];
+                    before = _g.sent();
+                    was = (_d = before.find(function (one) { var _a; return one.id === topOf(before, (_a = e.agentId) !== null && _a !== void 0 ? _a : ''); })) === null || _d === void 0 ? void 0 : _d.ask;
+                    releaseGiven = typeof input.release === 'string' ? input.release.trim() : '';
+                    _b = releaseGiven.startsWith('/') && choices.length && !((_e = before.find(function (one) { return one.id === e.agentId; })) === null || _e === void 0 ? void 0 : _e.parentId);
+                    if (!_b) return [3 /*break*/, 9];
+                    return [4 /*yield*/, $.fs.stat(releaseGiven).catch(function () { return undefined; })];
                 case 8:
-                    _c = ((_g = (_h.sent())) === null || _g === void 0 ? void 0 : _g.kind) === 'dir';
-                    _h.label = 9;
+                    _b = ((_f = (_g.sent())) === null || _f === void 0 ? void 0 : _f.kind) === 'dir';
+                    _g.label = 9;
                 case 9:
-                    isStepped = _b.apply(void 0, [_c]);
-                    return [4 /*yield*/, change($, e.agentId, function (was) {
-                            var _a;
-                            var one = __assign(__assign({}, was), { ask: text ? __assign(__assign(__assign(__assign(__assign(__assign(__assign({ text: text }, (isStepped ? { lastStep: stepGiven, folder: stepFolder } : {})), (details ? { details: details } : {})), (copy ? { copy: copy } : {})), (command ? { isCommand: true, cwd: folder } : {})), (choices.length ? { choices: choices, from: e.agentId } : {})), (pictures.length ? { pictures: pictures } : {})), { at: at }) : undefined });
-                            // An item recorded as the question on the card, or the same line as it, is tied to this ask
-                            return one.ask ? __assign(__assign({}, one), (((_a = one.waits) === null || _a === void 0 ? void 0 : _a.length) ? { waits: one.waits.map(askedWait).map(function (wait) { return tiedTo(wait, one); }) } : {})) : one;
-                        })];
+                    release = _b ? releaseGiven : '';
+                    return [4 /*yield*/, change($, e.agentId, function (one) { return (__assign(__assign({}, one), { ask: text ? __assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign({ text: text }, (release ? { release: release } : {})), (details ? { details: details } : {})), (copy ? { copy: copy } : {})), (command ? { isCommand: true, cwd: folder } : {})), (choices.length ? { choices: choices } : {})), { from: e.agentId }), (pictures.length ? { pictures: pictures } : {})), { at: at }) : undefined })); })];
                 case 10:
-                    _h.sent();
+                    _g.sent();
                     return [4 /*yield*/, read($, todos)];
                 case 11:
-                    list = _h.sent();
+                    list = _g.sent();
                     card = list.find(function (one) { var _a; return one.id === topOf(list, (_a = e.agentId) !== null && _a !== void 0 ? _a : ''); });
                     if (!!text) return [3 /*break*/, 14];
                     if (!(card && was)) return [3 /*break*/, 13];
                     return [4 /*yield*/, askGone($, card)];
                 case 12:
-                    _h.sent();
-                    _h.label = 13;
+                    _g.sent();
+                    _g.label = 13;
                 case 13: return [2 /*return*/, { result: 'Cleared: your card no longer has a question.' }];
                 case 14:
                     if (!(card && (was === null || was === void 0 ? void 0 : was.text) !== text)) return [3 /*break*/, 16];
                     return [4 /*yield*/, askAloud($, card, text).catch(function (err) { return log($, "ask not told: ".concat(String(err))); })];
                 case 15:
-                    _h.sent();
-                    _h.label = 16;
+                    _g.sent();
+                    _g.label = 16;
                 case 16:
                     if (!card) return [3 /*break*/, 18];
                     return [4 /*yield*/, askInChat($, card)
                         // A command for the person opens in a terminal only on their press of the card's button: nothing opens by itself
                     ];
                 case 17:
-                    _h.sent();
-                    _h.label = 18;
+                    _g.sent();
+                    _g.label = 18;
                 case 18:
                     terminal = command ? (isRunFromAfar ? " ".concat(who(true), " is on another device: they type it in their own session to this Mac, and nothing opens a terminal here.") : isLinux ? " Do not open a terminal for it: on Linux the card gives it with a Copy button, and ".concat(who(), " runs it in a terminal of their own.") : " Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ".concat(who(), " presses it.")) : '';
-                    shown = [command ? "the whole command".concat(command === given0 ? '' : " (".concat(command, ")"), ", a Copy button").concat(isRunFromAfar ? '' : ' and an Open in Terminal button') : copy ? 'a Copy button for the text' : '', "the buttons ".concat((choices.length ? choices : DEFAULT_ANSWERS).join(', '), " and a box for a reply in their own words")].filter(Boolean).join(' and ');
+                    shown = [command ? "the whole command".concat(command === given0 ? '' : " (".concat(command, ")"), ", a Copy button").concat(isRunFromAfar ? '' : ' and an Open in Terminal button') : copy ? 'a Copy button for the text' : '', "".concat(choices.length ? "the buttons ".concat(choices.join(', '), " and ") : '', "Answer in words")].filter(Boolean).join(' and ');
                     lost = givenPics.length - pictures.length;
                     long = text === asked ? '' : " The question was longer than one line: the card shows it cut at a word, and it is whole at the top of its details.";
                     tooLong = whole.length > ASK_DETAILS ? " Its details were longer than ".concat(ASK_DETAILS, " letters and were cut at a word: put what matters first.") : '';
+                    plain = choices.length ? '' : " It has no buttons, so ".concat(who(), " can only answer in words: give `choices` when a press would answer it.");
+                    leftOut = (Array.isArray(input.choices) ? input.choices : []).some(function (one) { return typeof one === 'string' && LEAVES_OPEN.test(plainWords(one)); }) ? ' A choice that only leaves the question open (Not now, Later, Skip, Cancel) was left out: not pressing does that, and every button is an answer.' : '';
+                    released = release ? " A press on ".concat(choices[0], " also allows your next run of the release runner for ").concat(release, ", once, with no second question: run it then, in your background.") : releaseGiven ? ' `release` was left out: it needs buttons, and the full path of a folder that is there.' : '';
                     bare = choices.length && !details && !copy ? " It carries no details: if deciding it needs more than this one line (what goes out, what it changes), ask it again with that in `details`; ".concat(who(), " sees the ask before your report.") : '';
                     seen = pictures.length ? " Its ".concat(pictures.length === 1 ? 'picture is' : "".concat(pictures.length, " pictures are"), " drawn small on the card, each opening large on a press, and the chat shows ").concat(pictures.length === 1 ? 'it' : 'them', " in its next reply.") : '';
                     missing = lost ? " ".concat(lost, " of the pictures given ").concat(lost === 1 ? 'is' : 'are', " no picture file found here, by full path, and ").concat(lost === 1 ? 'was' : 'were', " left out.") : '';
-                    return [2 /*return*/, { result: "Shown on your card with ".concat(details ? 'what it is about under it, ' : '').concat(shown, ", and shown in the chat as a notice from the panel").concat(details ? ' with what it is about' : '', ", where ").concat(who(), " can answer it too.").concat(seen).concat(missing).concat(long).concat(tooLong).concat(bare, " It stays until ").concat(who(), " answers, even after you finish; an answer comes back to you as a message the moment it is given, and starts you again if you have finished. Never wait for it with a command or a timer: with nothing else to do, end your step. Ask again if the answer leaves something waiting. Clear it with empty text only once you have seen it done.").concat(terminal) }];
+                    return [2 /*return*/, { result: "Shown on your card with ".concat(details ? 'what it is about under it, ' : '').concat(shown, ", and shown in the chat as a notice from the panel").concat(details ? ' with what it is about' : '', ", where ").concat(who(), " can answer it too.").concat(seen).concat(missing).concat(long).concat(tooLong).concat(bare).concat(plain).concat(leftOut).concat(released, " It stays until ").concat(who(), " answers; the answer comes back to you as a message the moment it is given, at your next step or to you paused. Never wait for it with a command or a timer: with nothing else to do, end your step. Ask again if the answer leaves something waiting. Clear it with empty text only once you have seen it done.").concat(terminal) }];
             }
         });
     }); });
     // The work writes its own log, on purpose, in plain words: what it starts and what it decides
     on('tool.call', { tool: 'mcp__claudopus__note' }, function ($, e) { return __awaiter(_this, void 0, void 0, function () {
-        var input, text, kind, task, list, card, words, handed;
+        var input, asked, text, kind, task, list, card, words, handed;
         var _a, _b, _c, _d, _e;
         return __generator(this, function (_f) {
             switch (_f.label) {
                 case 0:
                     input = e;
+                    asked = Array.isArray(input.questions) ? input.questions.map(function (one) { return oneLine(typeof one === 'string' ? one : '').slice(0, QUESTION_CHARS); }).filter(Boolean).slice(0, QUESTIONS_KEPT) : undefined;
                     text = oneLine((_a = input.text) !== null && _a !== void 0 ? _a : '').slice(0, NOTE_CHARS);
                     if (!text)
                         return [2 /*return*/, { result: 'A note needs its text.' }];
                     if (e.agentId === undefined)
                         return [2 /*return*/, { result: "Only a background task keeps a log in the panel; the chat has none." }];
                     kind = input.decision ? 'decision' : 'note';
-                    return [4 /*yield*/, change($, e.agentId, function (one, at) { return (__assign(__assign({}, one), { entries: __spreadArray(__spreadArray([], one.entries, true), [{ at: at, kind: kind, text: text }], false).slice(-ENTRIES_KEPT) })); })
+                    return [4 /*yield*/, change($, e.agentId, function (one, at) { return (__assign(__assign(__assign({}, one), { entries: __spreadArray(__spreadArray([], one.entries, true), [{ at: at, kind: kind, text: text }], false).slice(-ENTRIES_KEPT) }), (asked && one.id === e.agentId ? { questions: asked.length ? asked : undefined } : {}))); })
                         // A steer the work found to be a new task of its own goes back to the chat, which starts it. The work sends it itself, as a
                         // message to the chat: it arrives as the work's and wakes the chat, where a prompt the mod submitted would show as the person's own.
                         // A session cannot send to itself, so the mod cannot send it for the work

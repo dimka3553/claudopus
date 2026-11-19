@@ -10,17 +10,6 @@ var __assign = (this && this.__assign) || function () {
     };
     return __assign.apply(this, arguments);
 };
-var __rest = (this && this.__rest) || function (s, e) {
-    var t = {};
-    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
-        t[p] = s[p];
-    if (s != null && typeof Object.getOwnPropertySymbols === "function")
-        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
-            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
-                t[p[i]] = s[p[i]];
-        }
-    return t;
-};
 var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
         if (ar || !(i in from)) {
@@ -32,7 +21,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BRIDGE_ID = exports.macName = exports.isMac = exports.clockOf = exports.opensOf = exports.openTake = exports.OPEN_MARK = exports.OPEN_KEPT = exports.OPEN_EVERY = exports.tripOf = exports.stuckOf = exports.APP_LOG_LOOK = exports.offOf = exports.OFF_LOOK = exports.trip = exports.pushHead = exports.pushOf = exports.isAnswerName = exports.keyOf = exports.isKey = exports.ANSWER_MARK = exports.OUTBOX = exports.PUSHED = exports.fetchedOf = exports.MARK = exports.answerOf = exports.ANSWER_KEPT = exports.chatSide = exports.chatName = exports.ordered = exports.helpersOf = exports.cardsOf = exports.remoteId = exports.REMOTE = exports.fetchedOpen = exports.openChatOf = exports.sharedOf = exports.promptsOf = exports.signOf = exports.shareableHelpers = exports.shareable = exports.ENDED_FOR = exports.ENDED_SHARED = exports.FETCH_EVERY = exports.LOOK_EVERY = exports.STALE = exports.BEAT = exports.MACS = exports.ANSWERS = exports.LIVE_DIR = void 0;
-exports.headMood = exports.headLine = exports.openUrl = exports.linkOf = exports.APP_ID = void 0;
+exports.headMood = exports.headLine = exports.deliveredSaid = exports.openUrl = exports.linkOf = exports.APP_ID = void 0;
 // ---- Every chat's work in every panel: each chat keeps its running work in a small file of its own, the others read it ----
 // ~/.claude/claudopus/live/<chat id>.json, written only by that chat; an answer to one of its asks from another chat's panel is
 // left for it in live/answers/<chat id>/, which it reads and acts on as if pressed in its own panel
@@ -109,7 +98,7 @@ var promptsOf = function (list) {
             var _a;
             return (typeof one[key] === 'string' && plain(one[key]) ? (_a = {}, _a[key] = plain(one[key]).slice(0, max), _a) : {});
         };
-        return __assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign({ id: one.id.slice(0, 80), text: plain(one.text).slice(0, 200) }, (typeof one.title === 'string' && plain(one.title) ? { title: plain(one.title).slice(0, 120) } : {})), { at: one.at }), (one.kind === 'allow' || one.kind === 'question' || one.kind === 'plan' ? { kind: one.kind } : {})), words('detail', 400)), words('yes', 200)), words('no', 200)), words('done', 60)), (one.answered === 'yes' || one.answered === 'no' || one.answered === 'stopped' ? { answered: one.answered } : {})), (one.isRunning === true ? { isRunning: true } : {})), (one.isCut === true ? { isCut: true } : {})), (one.isHeld === true ? { isHeld: true } : {})), (typeof one.endedAt === 'number' ? { endedAt: one.endedAt } : {}));
+        return __assign(__assign(__assign(__assign(__assign(__assign({ id: one.id.slice(0, 80), text: plain(one.text).slice(0, 200) }, (typeof one.title === 'string' && plain(one.title) ? { title: plain(one.title).slice(0, 120) } : {})), { at: one.at }), (one.kind === 'allow' || one.kind === 'question' || one.kind === 'plan' ? { kind: one.kind } : {})), words('about', 300)), words('detail', 400)), (one.isHeld === true ? { isHeld: true } : {}));
     });
 };
 exports.promptsOf = promptsOf;
@@ -132,16 +121,11 @@ var sharedOf = function (text, now, host) {
         // Their helpers apart, under `helpers`, so a version that reads `cards` alone never lists a helper as work of its own
         var helpers = (Array.isArray(one.helpers) ? one.helpers : []).filter(isCard).filter(function (card) { return typeof card.parentId === 'string' && Boolean(card.parentId); });
         // A chat waiting on its own prompt is listed whether or not it has work
-        var prompts = (0, exports.promptsOf)(one.prompts).map(function (_a) {
-            var _answered = _a.answered, _running = _a.isRunning, _cut = _a.isCut, _ended = _a.endedAt, open = __rest(_a, ["answered", "isRunning", "isCut", "endedAt"]);
-            return open;
-        });
-        // Prompts answered there lately, said for a minute, so a chat is listed for them too
-        var answeredPrompts = (0, exports.promptsOf)(one.answeredPrompts).filter(function (p) { return p.answered; });
-        if (!cards.length && !prompts.length && !answeredPrompts.length)
+        var prompts = (0, exports.promptsOf)(one.prompts);
+        if (!cards.length && !prompts.length)
             return undefined;
         var link = (0, exports.linkOf)(one.link);
-        return __assign(__assign(__assign(__assign({ chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards: cards }, (helpers.length ? { helpers: helpers } : {})), (prompts.length ? { prompts: prompts } : {})), (answeredPrompts.length ? { answeredPrompts: answeredPrompts } : {})), (link ? { link: link } : {}));
+        return __assign(__assign(__assign({ chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards: cards }, (helpers.length ? { helpers: helpers } : {})), (prompts.length ? { prompts: prompts } : {})), (link ? { link: link } : {}));
     }
     catch (_a) {
         return undefined;
@@ -405,20 +389,26 @@ var openUrl = function (c, held) {
     return app ? "claude://code/continue?session=".concat(app) : ((_c = c.link) === null || _c === void 0 ? void 0 : _c.bridge) ? "claude://code/".concat(c.link.bridge) : '';
 };
 exports.openUrl = openUrl;
-var tasks = function (n) { return (n === 1 ? '1 task' : "".concat(n, " tasks")); };
-var headLine = function (_a) {
-    var here = _a.here, there = _a.there, chats = _a.chats, asks = _a.asks, isDone = _a.isDone;
+// (what was delivered and is not yet marked done comes last, and alone when nothing waits or works)
+var deliveredSaid = function (_a) {
+    var here = _a.here, there = _a.there, asks = _a.asks, _b = _a.delivered, delivered = _b === void 0 ? 0 : _b;
+    return (delivered ? "".concat(asks || here || there ? ' · ' : '').concat(delivered, " delivered") : '');
+};
+exports.deliveredSaid = deliveredSaid;
+var headLine = function (head) {
+    var here = head.here, there = head.there, chats = head.chats, asks = head.asks, isDone = head.isDone;
     var running = here + there;
-    if (asks)
-        return "".concat(asks, " ").concat(asks === 1 ? 'question' : 'questions', " waiting for you").concat(running ? " \u00B7 ".concat(running, " working") : '');
     var others = chats === 1 ? '1 other chat' : "".concat(chats, " other chats");
-    if (here && there)
-        return "".concat(tasks(running), " working, here and in ").concat(others);
-    if (there)
-        return "".concat(tasks(there), " working in ").concat(chats === 1 ? 'another chat' : others);
-    if (here)
-        return "".concat(tasks(here), " working");
-    return isDone ? 'Just finished' : 'Nothing running';
+    var first = asks
+        ? "".concat(asks, " waiting for you").concat(running ? " \u00B7 ".concat(running, " working") : '')
+        : here && there
+            ? "".concat(running, " working, here and in ").concat(others)
+            : there
+                ? "".concat(there, " working in ").concat(chats === 1 ? 'another chat' : others)
+                : here
+                    ? "".concat(here, " working")
+                    : '';
+    return first || head.delivered ? "".concat(first).concat((0, exports.deliveredSaid)(head)) : isDone ? 'Just finished' : 'Nothing waits for you';
 };
 exports.headLine = headLine;
 // The octopus beside it: happy for the moment work finishes, whatever else goes on, so no finish passes unseen; else amber while

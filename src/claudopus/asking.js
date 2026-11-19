@@ -233,35 +233,35 @@ var draftDrawn = function (key) {
 // tab's own to-dos
 var paneShape = function ($, paneId) { return __awaiter(_this, void 0, void 0, function () {
     var at, card, own, chats, theirs, flowsNow, mine, _a, _b, _c, _d;
-    var _e;
-    return __generator(this, function (_f) {
-        switch (_f.label) {
+    var _e, _f, _g, _h;
+    return __generator(this, function (_j) {
+        switch (_j.label) {
             case 0: return [4 /*yield*/, $.clock.now()];
             case 1:
-                at = _f.sent();
-                card = function (one) { var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o; return [one.id, one.status, (_b = (_a = one.ask) === null || _a === void 0 ? void 0 : _a.at) !== null && _b !== void 0 ? _b : 0, (_e = (_d = (_c = one.ask) === null || _c === void 0 ? void 0 : _c.replied) === null || _d === void 0 ? void 0 : _d.at) !== null && _e !== void 0 ? _e : 0, (_f = one.parentId) !== null && _f !== void 0 ? _f : '', lingers(one, at), ((_g = one.admins) !== null && _g !== void 0 ? _g : []).map(function (gate) { return gate.id; }), (_h = one.leftSince) !== null && _h !== void 0 ? _h : 0, (_j = one.cutAt) !== null && _j !== void 0 ? _j : 0, (_k = one.stuckAt) !== null && _k !== void 0 ? _k : 0, (_l = one.waitsSince) !== null && _l !== void 0 ? _l : 0, (_o = (_m = one.running) === null || _m === void 0 ? void 0 : _m.at) !== null && _o !== void 0 ? _o : 0, jobsOf(one, at).length]; };
+                at = _j.sent();
+                card = function (one) { var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k; return [one.id, one.status, (_b = (_a = one.ask) === null || _a === void 0 ? void 0 : _a.at) !== null && _b !== void 0 ? _b : 0, (_e = (_d = (_c = one.ask) === null || _c === void 0 ? void 0 : _c.replied) === null || _d === void 0 ? void 0 : _d.at) !== null && _e !== void 0 ? _e : 0, (_f = one.parentId) !== null && _f !== void 0 ? _f : '', lingers(one, at), isDoneMoment(one, at), ((_g = one.admins) !== null && _g !== void 0 ? _g : []).map(function (gate) { return gate.id; }), (_h = one.stuckAt) !== null && _h !== void 0 ? _h : 0, (_k = (_j = one.running) === null || _j === void 0 ? void 0 : _j.at) !== null && _k !== void 0 ? _k : 0, jobsOf(one).length]; };
                 return [4 /*yield*/, read($, todos)];
             case 2:
-                own = _f.sent();
+                own = _j.sent();
                 return [4 /*yield*/, read($, others)];
             case 3:
-                chats = _f.sent();
-                theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(function (c) { var _a, _b, _c, _d; return [c.host, c.chat, (_b = (_a = c.prompts) === null || _a === void 0 ? void 0 : _a.length) !== null && _b !== void 0 ? _b : 0, (_d = (_c = c.answeredPrompts) === null || _c === void 0 ? void 0 : _c.length) !== null && _d !== void 0 ? _d : 0]; })];
+                chats = _j.sent();
+                theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(function (c) { var _a, _b; return [c.host, c.chat, (_b = (_a = c.prompts) === null || _a === void 0 ? void 0 : _a.length) !== null && _b !== void 0 ? _b : 0]; })];
                 return [4 /*yield*/, read($, flows)];
             case 4:
-                flowsNow = (_f.sent()).map(function (f) { return [f.id, f.status, isLingering(f, at), f.agents.length]; });
+                flowsNow = (_j.sent()).map(function (f) { return [f.id, f.status, isLingering(f, at), f.agents.length]; });
                 mine = paneId === LIST ? null : (_e = own.find(function (other) { return paneId.endsWith(other.id); })) === null || _e === void 0 ? void 0 : _e.items.map(function (item) { return item.state; });
                 _b = (_a = JSON).stringify;
                 _c = [own.map(card), theirs, flowsNow, __spreadArray([], lastRunning.keys(), true), boxes.map(function (one) { return one.id; }), __spreadArray([], boxSaid.keys(), true), looseGates.map(function (one) { return one.id; }), mine];
                 if (!(paneId === LIST)) return [3 /*break*/, 6];
                 return [4 /*yield*/, updateShape($)];
             case 5:
-                _d = _f.sent();
+                _d = _j.sent();
                 return [3 /*break*/, 7];
             case 6:
                 _d = '';
-                _f.label = 7;
-            case 7: return [2 /*return*/, _b.apply(_a, [_c.concat([_d, __spreadArray([], gatePressed.keys(), true), __spreadArray([], askPressed, true), __spreadArray([], barBoxes, true), replyTo, replyMark])])];
+                _j.label = 7;
+            case 7: return [2 /*return*/, _b.apply(_a, [_c.concat([_d, __spreadArray([], gatePressed.keys(), true), __spreadArray([], askPressed, true), __spreadArray([], barBoxes, true), (_f = barOpen === null || barOpen === void 0 ? void 0 : barOpen.kind) !== null && _f !== void 0 ? _f : '', (_g = barOpen === null || barOpen === void 0 ? void 0 : barOpen.id) !== null && _g !== void 0 ? _g : '', (_h = barOpen === null || barOpen === void 0 ? void 0 : barOpen.mark) !== null && _h !== void 0 ? _h : '', __spreadArray([], attached, true), __spreadArray([], replies, true)])])];
         }
     });
 }); };
@@ -321,7 +321,7 @@ var freeTimes = function ($) {
 var isRedrawOwed = false;
 // Only the bar's box: a box in a pane is drawn again with its pane as before. The hold ends TYPING after the last letter or focus,
 // as the app may say nothing when the cursor leaves; a letter typed after that holds it again at once
-var isBoxHeld = function (at) { return Boolean(replyTo || boxOpen || changeTo) && barBoxAt > 0 && at - barBoxAt < TYPING; };
+var isBoxHeld = function (at) { return (Boolean(barOpen) && barBoxAt > 0 && at - barBoxAt < TYPING) || (paneBoxAt > 0 && at - paneBoxAt < TYPING); };
 var drawFresh = function ($_1) {
     var args_1 = [];
     for (var _i = 1; _i < arguments.length; _i++) {
@@ -361,14 +361,14 @@ var drawnPanes = new Map();
 // pictures, the update and the presses hold. A change in it draws the panel again within a second
 var sideSign = function () {
     return JSON.stringify([
-        waiting.map(function (one) { var _a, _b; return [one.agent, one.tool, (_a = one.seen) !== null && _a !== void 0 ? _a : 0, (_b = one.isPressedNo) !== null && _b !== void 0 ? _b : false]; }), asked.length, answeredPrompts.length,
-        __spreadArray([], promptSaid, true),
+        waiting.map(function (one) { var _a; return [one.agent, one.tool, (_a = one.seen) !== null && _a !== void 0 ? _a : 0]; }), asked.length,
+        __spreadArray([], promptWaits.keys(), true),
         __spreadArray([], promptHeld, true),
         __spreadArray([], gateHeld, true),
-        __spreadArray([], gateSaid.keys(), true),
+        __spreadArray([], gateWaits.keys(), true),
         looseGates.map(function (one) { return one.id; }),
         __spreadArray([], undoneOffers.keys(), true),
-        boxes.map(function (one) { return one.id; }), doneNotes.length,
+        boxes.map(function (one) { return one.id; }), loosePressed.length,
         __spreadArray([], boxSaid, true),
         __spreadArray([], boxSent, true),
         boxPresses,
@@ -391,7 +391,7 @@ var isEngaged = function (at) { return engagedAt > 0 && at - engagedAt < ENGAGED
 // what work did (a card that finishes comes up green, one stopped leaves after its pause) shows as before
 var isInUse = function (at, offset) { return isEngaged(at) && offset > 0; };
 var personSign = function ($) { return __awaiter(_this, void 0, void 0, function () {
-    var chats, cards, asks, own, _a, _b, _c, _d, _e, _f;
+    var chats, cards, asks, momentAt, own, _a, _b, _c, _d, _e, _f;
     return __generator(this, function (_g) {
         switch (_g.label) {
             case 0: return [4 /*yield*/, read($, others)
@@ -403,32 +403,38 @@ var personSign = function ($) { return __awaiter(_this, void 0, void 0, function
             case 2:
                 cards = _g.sent();
                 asks = __spreadArray(__spreadArray(__spreadArray([], cards, true), cardsOf(chats), true), helpersOf(chats), true).filter(function (one) { var _a; return one.ask || ((_a = one.admins) === null || _a === void 0 ? void 0 : _a.length); }).map(function (one) { var _a, _b, _c, _d, _e, _f; return [one.id, (_b = (_a = one.ask) === null || _a === void 0 ? void 0 : _a.at) !== null && _b !== void 0 ? _b : 0, (_e = (_d = (_c = one.ask) === null || _c === void 0 ? void 0 : _c.replied) === null || _d === void 0 ? void 0 : _d.at) !== null && _e !== void 0 ? _e : 0, ((_f = one.admins) !== null && _f !== void 0 ? _f : []).map(function (gate) { return gate.id; })]; });
-                own = [cards.filter(function (one) { return one.closedAt; }).map(function (one) { return one.id; }), __spreadArray([], dismissedNow, true), __spreadArray([], answering, true), __spreadArray([], resultWaking.keys(), true)];
+                return [4 /*yield*/, $.clock.now()];
+            case 3:
+                momentAt = _g.sent();
+                own = [cards.filter(function (one) { return one.closedAt; }).map(function (one) { return one.id; }), __spreadArray([], dismissedNow.keys(), true), cards.filter(function (one) { return isDoneMoment(one, momentAt); }).map(function (one) { return one.id; })];
                 _b = (_a = JSON).stringify;
-                _c = [presses, asks, own, chats.map(function (c) { var _a, _b, _c, _d; return [c.host, c.chat, (_b = (_a = c.prompts) === null || _a === void 0 ? void 0 : _a.length) !== null && _b !== void 0 ? _b : 0, (_d = (_c = c.answeredPrompts) === null || _c === void 0 ? void 0 : _c.length) !== null && _d !== void 0 ? _d : 0]; }), waiting.map(function (one) { var _a; return [one.agent, one.tool, (_a = one.isPressedNo) !== null && _a !== void 0 ? _a : false]; }), asked.length, __spreadArray([], promptSaid, true), __spreadArray([], promptHeld, true), __spreadArray([], gateHeld, true), __spreadArray([], gateSaid.keys(), true), __spreadArray([], gatePressed.keys(), true), looseGates.map(function (one) { return one.id; }), __spreadArray([], askPressed, true), __spreadArray([], undoneOffers.keys(), true), boxes.map(function (one) { return one.id; }), __spreadArray([], boxSaid, true), __spreadArray([], boxSent, true), boxPresses, __spreadArray([], pictureIn.keys(), true), isUpdating, loadMark];
+                _c = [presses, asks, own, chats.map(function (c) { var _a, _b; return [c.host, c.chat, (_b = (_a = c.prompts) === null || _a === void 0 ? void 0 : _a.length) !== null && _b !== void 0 ? _b : 0]; }), waiting.map(function (one) { return [one.agent, one.tool]; }), asked.length, __spreadArray([], promptWaits.keys(), true), __spreadArray([], promptHeld, true), __spreadArray([], gateHeld, true), __spreadArray([], gateWaits.keys(), true), __spreadArray([], gatePressed.keys(), true), looseGates.map(function (one) { return one.id; }), __spreadArray([], askPressed, true), __spreadArray([], undoneOffers.keys(), true), boxes.map(function (one) { return one.id; }), __spreadArray([], boxSaid, true), __spreadArray([], boxSent, true), boxPresses, __spreadArray([], pictureIn.keys(), true), isUpdating, loadMark, foldsHeld(momentAt)];
                 _d = [[]];
                 return [4 /*yield*/, read($, todos)];
-            case 3:
+            case 4:
                 _e = [__spreadArray.apply(void 0, _d.concat([(_g.sent()), true]))];
                 return [4 /*yield*/, read($, flows)];
-            case 4:
+            case 5:
                 _c = _c.concat([
                     // and what their presses change that shows later: a Stop's card, a note a box left, the update's steps, a copy made
                     __spreadArray.apply(void 0, _e.concat([(_g.sent()), true])).filter(function (one) { return one.byYou; }).map(function (one) { return one.id; }),
                     __spreadArray([], stoppingJobs, true),
-                    doneNotes.length,
+                    loosePressed.length, __spreadArray([], sentReplies, true).map(function (_a) {
+                        var id = _a[0], sent = _a[1];
+                        return [id, sent.to, sent.text];
+                    }),
                     updatedMoment !== null && updatedMoment !== void 0 ? updatedMoment : null,
                     copiedKey
                 ]);
-                if (!dir) return [3 /*break*/, 6];
+                if (!dir) return [3 /*break*/, 7];
                 return [4 /*yield*/, readOr($, stepsPath())];
-            case 5:
-                _f = _g.sent();
-                return [3 /*break*/, 7];
             case 6:
+                _f = _g.sent();
+                return [3 /*break*/, 8];
+            case 7:
                 _f = "";
-                _g.label = 7;
-            case 7: return [2 /*return*/, _b.apply(_a, [_c.concat([
+                _g.label = 8;
+            case 8: return [2 /*return*/, _b.apply(_a, [_c.concat([
                         _f
                     ])])];
         }
@@ -481,7 +487,12 @@ var freshDrawn = new Map();
 var freshDue = new Set();
 // The panes being drawn afresh just now: an ask that comes meanwhile gets the drawing before, and the pane is asked for again the
 // moment the fresh one is made, since the engine drops the reply of a drawing a newer ask overtook
+// One at a time: an ask that comes while a drawing of the pane is under way gets the drawing before, whatever came meanwhile, and the
+// pane is drawn afresh once with all of it the moment that one is made. A new one begun for each change, as each second's write
+// from work moved freshness, ran side by side with those before, each slowing the rest, on 19 Nov up to nine at once taking 7-12 s
+// each while every click waited behind them. (A drawing the engine never finishes holds none for longer than UNDER_WAY_MOST)
 var freshUnderWay = new Map();
+var UNDER_WAY_MOST = 15000;
 var pressedAt = 0;
 // (isLoaded: the bar above the prompt is drawn in 50-200 ms under the same load, under SLOW_DRAW, so it is given again
 // whenever the panel's own drawings are slow (isPanelSlow))
@@ -489,7 +500,7 @@ var isFreshTooSoon = function ($, key, at, isLoaded, canGiveMade) {
     if (isLoaded === void 0) { isLoaded = false; }
     if (canGiveMade === void 0) { canGiveMade = true; }
     var going = freshUnderWay.get(key);
-    if (going && going.fresh === freshness)
+    if (going && at - going.since < UNDER_WAY_MOST)
         return (going.isOvertaken = true);
     var last = freshDrawn.get(key);
     // The ask for a drawing made while it was overtaken: given that one, once (the panel and a Details tab, which hold a drawing
@@ -518,7 +529,7 @@ var isPanelSlow = function (at) { return __spreadArray([], freshDrawn, true).som
     return key.startsWith("".concat(LIST, "|")) && last.ms >= SLOW_DRAW && at - last.at < 10000;
 }); };
 // Around each drawing made afresh: one asked for while it was made is made again the moment it is done
-var freshBegins = function (key) { return (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false }), freshness); };
+var freshBegins = function (key, at) { return (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false, since: at }), freshness); };
 // Asked for again only for a drawing made afresh, which the engine dropped: an ask answered with the drawing before (a held one) left
 // nothing unseen. And the ask that follows within FRESH_GAP is given the drawing just made, never a new one, while nothing of the
 // mod's own came (madeAgain). Asked for again after every overtaken ask, two asks that came together (as two per push) overtook each
@@ -526,13 +537,20 @@ var freshBegins = function (key) { return (freshUnderWay.set(key, { fresh: fresh
 // 27, with the panel and the bar drawn about seven times a second and the hover under the pointer going out at each (17 Nov)
 var madeAgain = new Map();
 var freshEnds = function ($, key, made) {
-    var _a;
-    var isOvertaken = (_a = freshUnderWay.get(key)) === null || _a === void 0 ? void 0 : _a.isOvertaken;
+    var _a, _b;
+    var going = freshUnderWay.get(key);
     freshUnderWay.delete(key);
+    // (a drawing is as new as what it began with: what came while it was made is not in it, so it is never given as made, and the
+    // ask that follows draws the pane afresh with it)
+    var fresh = (_b = (_a = going === null || going === void 0 ? void 0 : going.fresh) !== null && _a !== void 0 ? _a : made === null || made === void 0 ? void 0 : made.fresh) !== null && _b !== void 0 ? _b : freshness;
     if (made)
-        freshDrawn.set(key, made);
-    if (isOvertaken && made)
-        (madeAgain.set(key, { fresh: made.fresh, at: made.at }), void drawFresh($));
+        freshDrawn.set(key, __assign(__assign({}, made), { fresh: fresh }));
+    if (!(going === null || going === void 0 ? void 0 : going.isOvertaken))
+        return;
+    if (fresh !== freshness)
+        return void drawFresh($);
+    if (made)
+        (madeAgain.set(key, { fresh: fresh, at: made.at }), void drawFresh($));
 };
 var calmAt = 0;
 var engage = function ($) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
@@ -655,11 +673,9 @@ var readDrafts = function ($) { return __awaiter(_this, void 0, void 0, function
     });
 }); };
 // The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
-var lineOf = function (one) { var last = __spreadArray([], one.entries, true).reverse().find(function (entry) { return entry.kind !== 'steer'; }); return last ? "".concat(last.at, ":").concat(last.text) : ''; };
+var lineOf = function (one) { var last = ownNote(one); return last ? "".concat(last.at, ":").concat(last.text) : ''; };
 // How long the card says what was answered, unless the work writes a newer line first
 var ANSWER_SHOWN = 60000;
-// The answers every ask offers when the work gave none of its own
-var DEFAULT_ANSWERS = ['Done', 'Not now'];
 // An ask's question is one line of at most ASK_TEXT letters; what it is about, its details, is kept whole up to ASK_DETAILS
 var ASK_TEXT = 300;
 var ASK_DETAILS = 12000;
@@ -695,60 +711,52 @@ var answerAsk = function ($, one, choice, isReply) {
 // or one that begins with the words of one of its buttons. Any other reply, such as a request first, leaves the ask open while the work acts on it
 var plainWords = function (text) { return text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim(); };
 var settles = function (ask, said, isReply) { var _a; return !isReply || Boolean(ask.refused) || !((_a = ask.choices) === null || _a === void 0 ? void 0 : _a.length) || ask.choices.some(function (choice) { return plainWords(choice) && "".concat(plainWords(said), " ").startsWith("".concat(plainWords(choice), " ")); }); };
-// The asks a press answered, by card, as `${at}:${text}`: the panel draws the card answered from the press itself, its buttons and box
+// The asks a press answered, by card, as `${at}:${text}`: the panel draws the card answered from the press itself, its block
 // gone in the press's own drawing, before the answer is written; the mark goes once the card's file no longer carries the ask
 var askPressed = new Map();
-// A card as the panel draws it: an ask or a gate already pressed is not drawn as still waiting
-// A task whose result's question was just answered is drawn at work from the press, never done in between, until the answer has
-// started it again or could not (resultWaking, by card: when it was pressed). A card the person dismissed is drawn asking nothing
-var resultWaking = new Map();
+// A card as the panel draws it: an ask or a gate already pressed is not drawn as still waiting. A card the person dismissed is
+// drawn asking nothing
 var asPressed = function (given) {
-    var _a, _b;
-    var wakingAt = given.status === 'working' ? undefined : resultWaking.get(given.id);
-    var closed = given.status !== 'working' && !given.closedAt && dismissedNow.has(given.id) ? __assign(__assign({}, given), { closedAt: given.endedAt || 1 }) : given;
-    var one = wakingAt !== undefined ? __assign(__assign({}, closed), { status: 'working', startedAt: closed.endedAt ? wakingAt - (closed.endedAt - closed.startedAt) : closed.startedAt, endedAt: 0 }) : closed.closedAt && closed.ask ? __assign(__assign({}, closed), { ask: undefined }) : closed;
+    var _a, _b, _c;
+    var closed = given.status !== 'working' && !given.closedAt && dismissedNow.has(given.id) ? __assign(__assign({}, given), { closedAt: (_a = dismissedNow.get(given.id)) !== null && _a !== void 0 ? _a : (given.endedAt || 1) }) : given;
+    var one = closed.closedAt && closed.ask ? __assign(__assign({}, closed), { ask: undefined }) : closed;
     var isAnswered = Boolean(one.ask && askPressed.get(one.id) === "".concat(one.ask.at, ":").concat(one.ask.text));
-    var admins = (_a = one.admins) === null || _a === void 0 ? void 0 : _a.filter(function (gate) { return !gatePressed.has(gate.id); });
-    if (!isAnswered && (admins === null || admins === void 0 ? void 0 : admins.length) === ((_b = one.admins) === null || _b === void 0 ? void 0 : _b.length))
+    var admins = (_b = one.admins) === null || _b === void 0 ? void 0 : _b.filter(function (gate) { return !gatePressed.has(gate.id); });
+    if (!isAnswered && (admins === null || admins === void 0 ? void 0 : admins.length) === ((_c = one.admins) === null || _c === void 0 ? void 0 : _c.length))
         return one;
     return __assign(__assign({}, one), { ask: isAnswered ? undefined : one.ask, admins: (admins === null || admins === void 0 ? void 0 : admins.length) ? admins : undefined });
 };
-// Where a reply in words is typed. The desktop app keeps moving a pane's window back to a box that holds the cursor inside it, many
-// times a second, and reports each move as the person's own scroll (found live, 15 Nov: stuck at the box while typing, a bounce
-// once the moves were refused). A pane has no part that stays still, so on a surface whose bar above the prompt takes a box
-// (barBoxes: the bar was drawn there with an Input in its table) an ask's reply box is drawn in that bar, a site of its own that the
-// pane's scrolling does not reach, and never in the pane. It is there only once the person asks for it: the card's answers end
-// with "Answer in words", which opens the box in the bar for that card, and Close takes it away again (16 Nov: a box
-// always in the bar looked bad, and the person asked for it as one of the options)
-// A bar the person folded shows nothing of the mod's, and one of the app's surveys takes its place: neither takes the box, and the
-// card has its own again, so a reply in words can always be typed somewhere
+// Where anything is typed for the panel: one box in the bar above the prompt (band.tsx), a site of its own that the pane's
+// scrolling does not reach. The desktop app keeps moving a pane's window back to a box that holds the cursor inside it, many times a
+// second, and reports each move as the person's own scroll (found live, 15 Nov), so nothing is typed inside the panel there. The
+// box is there only once the person asks for it, with a press on a block or a card: Answer in words, Type it, Paste it, Change
+// something, or Continue on a result; Close takes it away again.
+// A bar the person folded shows nothing of the mod's, one of the app's surveys takes its place, and the terminal's bar draws no
+// field: there the block keeps one field of its own, so words can always be typed somewhere (repliesInBar)
 var barBoxes = new Set();
 var repliesInBar = function (surface) { return barBoxes.has(surface); };
-// When the bar's box last took the cursor or a letter, 0 once the cursor is known to have left it or its reply was sent: the bar
+// When the bar's box last took the cursor or a letter, 0 once the cursor is known to have left it or its words were sent: the bar
 // gives its own drawing again for BAR_BOX_HELD after it (band.tsx, barHeld), and the mod puts off its other redraws for TYPING
 // after it (isBoxHeld). The app may say nothing when the cursor leaves for the chat's own box, so both end by themselves
 var barBoxAt = 0;
 var BAR_BOX_HELD = 300000;
 var isBarBox = function (element) { return /^band-.*-reply-/.test(element !== null && element !== void 0 ? element : ''); };
-// The card whose reply box is open in the bar, none when it is closed: opened by the card's "Answer in words", closed by
-// Close (on the card or in the bar), by the reply sent, by the card answered, or by the bar folding. One box at a time: opened on
-// another card it is that card's, and what was half typed is kept for the card it was typed for. Nothing but the person closes or
-// moves it while the card asks: when the work puts a new question in place of the one it was opened on (replyMark), the box stays
-// as it is, with what is typed in it, and what is sent from it answers the question the work asks then (16 Nov, the person:
-// "it should just allow me to keep typing until I myself either close it or open the new question")
-var replyTo = '';
-var replyMark = '';
-var isReplyOpen = function (one) { return Boolean(replyTo && one.id === replyTo && one.ask); };
-// The open box's own name and what is typed in it, the same through a new question of its work
-var barBoxKey = function (id) { var _a; return "band-".concat(id, "-reply-").concat((_a = replies.get(id)) !== null && _a !== void 0 ? _a : 0, "-").concat(replyMark); };
-var barDraft = function (id) { return "".concat(id, "|").concat(replyMark); };
+var barOpen;
+var isBarOpen = function (kind, id) { return (barOpen === null || barOpen === void 0 ? void 0 : barOpen.kind) === kind && barOpen.id === id; };
+var isReplyOpen = function (one) { return Boolean(one.ask) && isBarOpen('answer', one.id); };
+// Closed for what it was open for, as that is answered or goes; the caller draws again
+var closeBarOf = function (id) { return void ((barOpen === null || barOpen === void 0 ? void 0 : barOpen.id) === id && ((barOpen = undefined), (barBoxAt = 0))); };
+// The open box's own name, the same through a new question of its task, and a new one after each thing sent from it
+var barBoxKey = function () { var _a, _b; return (barOpen ? "band-".concat(barOpen.id, "-reply-").concat(barOpen.kind, "-").concat(isBoxKind(barOpen.kind) ? ((_a = boxTries.get(barOpen.id)) !== null && _a !== void 0 ? _a : 0) : ((_b = replies.get(barOpen.id)) !== null && _b !== void 0 ? _b : 0), "-").concat(barOpen.mark) : ''); };
+// What is typed in it and not sent, kept for an answer, a change and a result (never for a key or a password)
+var barDraft = function () { return (barOpen ? "".concat(barOpen.id, "|").concat(barOpen.kind === 'answer' ? barOpen.mark : barOpen.kind) : ''); };
 // This chat's cards that wait for an answer
 var asksForBar = function (cards) { return cards.filter(function (one) { return !one.parentId && !one.chat && Boolean(asPressed(one).ask) && !isActingOnReply(one); }); };
-var barTarget = function (cards) { return (replyTo ? asksForBar(cards).find(isReplyOpen) : undefined); };
+var barTarget = function (cards) { return ((barOpen === null || barOpen === void 0 ? void 0 : barOpen.kind) === 'answer' ? asksForBar(cards).find(isReplyOpen) : undefined); };
 // The bar's own id on each surface, as its drawing is asked for: where the cursor is put when the box opens
 var barIds = new Map();
 // What was typed in the bar's box is its card's: when the work has since put a new question in place of the one the box was
-// opened on, the words are shown under that question too, in the box as it is opened again and in the card's own box when the
+// opened on, the words are shown under that question too, in the box as it is opened again and in the card's own field when the
 // bar folds. Only the words of the box the person last had open for that card (barLeft), never those of an older question
 var barLeft = new Map();
 var carryDraft = function ($, one, from) {
@@ -762,6 +770,38 @@ var carryDraft = function ($, one, from) {
     keepDraft($, to, typed);
     drafts.delete(from);
     keepDraft($, from, undefined);
+};
+// Opens the one box for something, or closes it (no `to`). Opening it, the cursor is asked into the box: the app gives it only
+// where the bar already holds the keys, so where it does not the person clicks the box
+var openBar = function ($, to, surface) {
+    var _a, _b;
+    var was = barOpen;
+    // What was half typed for a question is kept for its card; a box for a change or a result, closed, is a new one, empty, next time
+    if ((was === null || was === void 0 ? void 0 : was.kind) === 'answer')
+        barLeft.set(was.id, barDraft());
+    if (was && (was.kind === 'change' || was.kind === 'continue'))
+        (drafts.delete(barDraft()), keepDraft($, barDraft(), undefined), replies.set(was.id, ((_a = replies.get(was.id)) !== null && _a !== void 0 ? _a : 0) + 1));
+    var ask = (to === null || to === void 0 ? void 0 : to.kind) === 'answer' ? (_b = to.one) === null || _b === void 0 ? void 0 : _b.ask : undefined;
+    var next = to && (to.kind !== 'answer' || ask) ? to : undefined;
+    if ((next === null || next === void 0 ? void 0 : next.one) && ask)
+        (carryDraft($, next.one, barLeft.get(next.id)), barLeft.delete(next.id));
+    barOpen = next ? { kind: next.kind, id: next.id, mark: ask ? askMark(ask) : '' } : undefined;
+    barKeyTyped.clear();
+    if (next && isBoxKind(next.kind))
+        (boxHeldReply.delete(next.id), boxSaid.delete(next.id));
+    barBoxAt = 0;
+    isBarSettling = false;
+    presses += 1;
+    boxPresses += 1;
+    freeTimes($);
+    redraw($);
+    var bar = barIds.get(surface);
+    if (!next || !bar)
+        return;
+    void $.ui
+        .focus({ requestId: bar, key: barBoxKey() })
+        .then(function (r) { var _a; return recordEvent($, 'focus-call', { deny: (_a = r.deny) !== null && _a !== void 0 ? _a : null }); })
+        .catch(function (err) { return recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }); });
 };
 // A reply sent from the bar's box answers what its card asks as it is sent: the box may have been drawn for an earlier question.
 // On its way from the press itself, as an answer from the card is (answersOnWay)
@@ -786,114 +826,328 @@ var sendFromBar = function ($, id, value) {
     void run.finally(function () { return answersOnWay.delete(run); }).catch(function () { return undefined; });
     return run;
 };
-// Opens the bar's reply box for a card, or closes it. Opening it, the cursor is asked into the box: the app gives it only where
-// the bar already holds the keys, so where it does not the person clicks the box
-var openReply = function ($, one, surface) {
-    if (replyTo)
-        barLeft.set(replyTo, barDraft(replyTo));
-    if (one === null || one === void 0 ? void 0 : one.ask)
-        changeTo = '';
-    if (one)
-        (carryDraft($, one, barLeft.get(one.id)), barLeft.delete(one.id));
-    replyTo = (one === null || one === void 0 ? void 0 : one.ask) ? one.id : '';
-    if (one === null || one === void 0 ? void 0 : one.ask)
-        boxOpen = undefined;
-    replyMark = (one === null || one === void 0 ? void 0 : one.ask) ? askMark(one.ask) : '';
-    barBoxAt = 0;
-    isBarSettling = false;
-    presses += 1;
-    redraw($);
-    var ask = one === null || one === void 0 ? void 0 : one.ask;
-    var bar = barIds.get(surface);
-    if (!one || !ask || !bar)
-        return;
-    void $.ui
-        .focus({ requestId: bar, key: barBoxKey(one.id) })
-        .then(function (r) { var _a; return recordEvent($, 'focus-call', { deny: (_a = r.deny) !== null && _a !== void 0 ? _a : null }); })
-        .catch(function (err) { return recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }); });
-};
-// Change something, on a Done card of this chat's: the same box in the bar, opened for a card that asks nothing (changeTo: its
-// card, none when closed). What is sent from it goes to that task as the person's own words, which starts it again from the
-// submit's or the press's own hook (answersOnWay, toEnded), never from a timer; its card is at work from the press (drawWaking),
-// and the chat is only told, with no turn of its own. Cancel closes the box and keeps nothing of what was typed
-var changeTo = '';
-var changeBoxKey = function (id) { var _a; return "band-".concat(id, "-reply-change-").concat((_a = replies.get(id)) !== null && _a !== void 0 ? _a : 0); };
-var changeDraft = function (id) { return "".concat(id, "|change"); };
-var canChange = function (one) { var _a; return !one.chat && !one.parentId && one.status === 'done' && !one.leftOpen && !openItems(one).length && !one.ask && !((_a = one.admins) === null || _a === void 0 ? void 0 : _a.length); };
-var openChange = function ($, one, surface) {
-    var _a, _b;
-    if (one && replyTo)
-        (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''));
-    if (one)
-        boxOpen = undefined;
-    // A box closed and opened again is a new one, empty
-    if (changeTo)
-        (dropDrafts($, changeTo), replies.set(changeTo, ((_a = replies.get(changeTo)) !== null && _a !== void 0 ? _a : 0) + 1));
-    changeTo = (_b = one === null || one === void 0 ? void 0 : one.id) !== null && _b !== void 0 ? _b : '';
-    barBoxAt = 0;
-    isBarSettling = false;
-    presses += 1;
-    freeTimes($);
-    redraw($);
-    var bar = barIds.get(surface);
-    if (!one || !bar)
-        return;
-    void $.ui
-        .focus({ requestId: bar, key: changeBoxKey(one.id) })
-        .then(function (r) { var _a; return recordEvent($, 'focus-call', { deny: (_a = r.deny) !== null && _a !== void 0 ? _a : null }); })
-        .catch(function (err) { return recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }); });
-};
-var sendChange = function ($, id, value) {
-    var run = changeTask($, id, value.trim());
+// Message, on a card of this chat's that works or has finished: the same box, opened for a card that asks nothing. What is sent from it
+// goes to that task as the person's own words, which carries it on from the submit's or the press's own hook (answersOnWay,
+// toEnded), never from a timer, and the chat is only told, with no turn of its own
+// (a finished one with to-dos left open too: the person may write to any task that works or has finished, 19 Nov)
+var canChange = function (one) { return !one.chat && !one.parentId && (one.status === 'working' || one.status === 'done' || one.status === 'failed') && !isHeld(one) && !needsPerson(one); };
+// A message goes the one way from both places the person writes to a task: the box above the chat that Message opens, and the box
+// at the bottom of the task's Details. Send hands it to the task, which reads it at its next step: Claude Code queues a message to a
+// task at work until its next tool round, and starts a paused or finished one with it at once. Stop and send, while it works, stops
+// it first (interruptStep) and starts it again with the message: Claude Code has no way to cut only the step a task is on, and its
+// stop ends the task's own commands and helpers too (engine 2.1.326, read 19 Nov). The files picked with Attach go with it, each by
+// its path: a message to a task is text alone
+var sendChange = function ($, id, value, isNow) {
+    var _a;
+    if (isNow === void 0) { isNow = false; }
+    var files = (_a = attached.get(id)) !== null && _a !== void 0 ? _a : [];
+    attached.delete(id);
+    var run = changeTask($, id, value.trim(), files, isNow);
     answersOnWay.add(run);
     void run.finally(function () { return answersOnWay.delete(run); }).catch(function () { return undefined; });
     return run;
 };
-var changeTask = function ($, id, said) { return __awaiter(_this, void 0, void 0, function () {
-    var card, at, text, sent, told, _a;
-    var _b;
-    return __generator(this, function (_c) {
-        switch (_c.label) {
-            case 0: return [4 /*yield*/, read($, todos)];
-            case 1:
-                card = (_c.sent()).find(function (one) { return one.id === id; });
-                if (!card || !said || card.chat || card.parentId || isHeld(card))
+// The files picked for a message to each task, by its card, until the message goes or the person takes one off
+var attached = new Map();
+var ATTACH_MOST = 20;
+// Attach opens the computer's own file picker, where the engine runs: so not in a chat run on another Mac over ssh, whose picker
+// would open on that Mac's screen (isRunFromAfar). macOS through osascript, Linux through zenity
+var canAttach = function () { return !isRunFromAfar; };
+var PICK_MAC = ['osascript', '-e', 'activate', '-e', 'set picked to choose file with prompt "Attach files" with multiple selections allowed', '-e', 'set out to ""', '-e', 'repeat with f in picked', '-e', 'set out to out & POSIX path of f & linefeed', '-e', 'end repeat', '-e', 'return out'];
+var PICK_LINUX = ['zenity', '--file-selection', '--multiple', '--separator=\n', '--title=Attach files'];
+var pickFiles = function ($, id) { return __awaiter(_this, void 0, void 0, function () {
+    var r, picked;
+    var _a;
+    return __generator(this, function (_b) {
+        switch (_b.label) {
+            case 0:
+                if (!canAttach())
                     return [2 /*return*/];
-                return [4 /*yield*/, $.clock.now()];
-            case 2:
-                at = _c.sent();
-                drawWaking($, card, at);
-                return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (one) { return (one.id === id ? __assign(__assign({}, one), { entries: __spreadArray(__spreadArray([], one.entries, true), [{ at: at, kind: 'steer', text: said }], false).slice(-ENTRIES_KEPT) }) : one); }); })];
-            case 3:
-                _c.sent();
-                text = CHANGE_ASKED(said);
-                sent = { text: said, ask: CHANGE_WHAT, at: at, line: lineOf(card), isCard: true };
-                return [4 /*yield*/, read($, todos)];
-            case 4:
-                if (!(((_b = (_c.sent()).find(function (one) { return one.id === id; })) === null || _b === void 0 ? void 0 : _b.status) === 'working')) return [3 /*break*/, 6];
-                return [4 /*yield*/, tell($, id, text)];
-            case 5:
-                _a = _c.sent();
-                return [3 /*break*/, 7];
-            case 6:
-                _a = undefined;
-                _c.label = 7;
-            case 7:
-                told = _a;
-                if (!(told && !told.deny)) return [3 /*break*/, 8];
-                (writtenIn($, id, id), sentReplies.set(id, __assign(__assign({}, sent), { to: 'work' })), redraw($));
-                return [3 /*break*/, 10];
-            case 8: return [4 /*yield*/, toEnded($, card, id, text, sent)];
-            case 9:
-                _c.sent();
-                _c.label = 10;
-            case 10: return [4 /*yield*/, tellChat($, named(CHANGE_TOLD(titleOf(card), "\u201C".concat(cut(said, 120), "\u201D"))))];
-            case 11:
-                _c.sent();
+                return [4 /*yield*/, $.process.run(isLinux ? PICK_LINUX : PICK_MAC, { timeoutMs: 600000 }).catch(function (err) { return (log($, "files not picked: ".concat(String(err))), undefined); })];
+            case 1:
+                r = _b.sent();
+                if (!r || r.exitCode !== 0)
+                    return [2 /*return*/];
+                picked = r.stdout.split('\n').map(function (line) { return line.trim(); }).filter(function (line) { return line.startsWith('/'); });
+                if (!picked.length)
+                    return [2 /*return*/];
+                attached.set(id, __spreadArray([], new Set(__spreadArray(__spreadArray([], ((_a = attached.get(id)) !== null && _a !== void 0 ? _a : []), true), picked, true)), true).slice(0, ATTACH_MOST));
+                ((presses += 1), (boxPresses += 1), drawAgain($, true));
                 return [2 /*return*/];
         }
     });
 }); };
+var unattach = function ($, id, path) {
+    var _a;
+    var left = ((_a = attached.get(id)) !== null && _a !== void 0 ? _a : []).filter(function (one) { return one !== path; });
+    if (left.length)
+        attached.set(id, left);
+    else
+        attached.delete(id);
+    ((presses += 1), (boxPresses += 1), drawAgain($, true));
+};
+// What is typed for a message to a task, kept under one name wherever it is typed: the box above the chat and the box in Details
+// are the same message
+var messageDraft = function (id) { return "".concat(id, "|change"); };
+// Sent from either box: the words go, the box empties (a new one, by its key), and the box above the chat, open for this task,
+// closes
+var sendMessageFrom = function ($, id, value, isNow) {
+    var _a, _b;
+    if (!value.trim() && !((_a = attached.get(id)) === null || _a === void 0 ? void 0 : _a.length))
+        return;
+    barBoxAt = 0;
+    paneBoxAt = 0;
+    drafts.delete(messageDraft(id));
+    keepDraft($, messageDraft(id), undefined);
+    replies.set(id, ((_b = replies.get(id)) !== null && _b !== void 0 ? _b : 0) + 1);
+    if (isBarOpen('change', id))
+        barOpen = undefined;
+    freeTimes($);
+    redraw($);
+    void sendChange($, id, value, isNow).catch(function (err) { return log($, "message not sent: ".concat(String(err))); });
+};
+// The row under a message box, the same in the box above the chat and at the bottom of Details: the files picked, each taken off
+// with a press on its name; Attach; then, while the task is in the middle of a step, Send now, and Send, the big one; `close`,
+// the box above the chat's own Close
+var SEND_NOW = 'Stop and send';
+var messageFoot = function ($, ui, one, key, close) {
+    var _a;
+    if (close === void 0) { close = null; }
+    var files = (_a = attached.get(one.id)) !== null && _a !== void 0 ? _a : [];
+    var typed = function () { var _a; return (_a = drafts.get(messageDraft(one.id))) !== null && _a !== void 0 ? _a : ''; };
+    var isMidStep = one.status === 'working';
+    return (<ui.Box key={"".concat(key, "-foot")} flexDirection="column" flexShrink={0} gap={1} width="100%">
+      {files.length ? (<ui.Box key={"".concat(key, "-files")} flexDirection="row" flexWrap="wrap" columnGap={2}>
+          {files.map(function (path, n) {
+                var _a;
+                return (<ui.Button key={"".concat(key, "-file-").concat(n, "-").concat(presses)} label={"\uD83D\uDCCE ".concat(cut((_a = path.split('/').pop()) !== null && _a !== void 0 ? _a : path, 40), " \u2715")} plain dimColor onPress={function () { return unattach($, one.id, path); }}/>);
+            })}
+        </ui.Box>) : null}
+      <ui.Box flexDirection="row" alignItems="center" flexWrap="wrap" gap={1}>
+        {canAttach() ? <ui.Button key={"".concat(key, "-attach-").concat(presses, "-").concat(boxPresses)} label="Attach" plain onPress={function () { return void pickFiles($, one.id).catch(function (err) { return log($, "files not picked: ".concat(String(err))); }); }}/> : null}
+        {/* The sends keep together at the right, on the next line when the pane is narrow */}
+        <ui.Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} justifyContent="flex-end">
+          {isMidStep ? <ui.Button key={"".concat(key, "-now-").concat(presses, "-").concat(boxPresses)} label={SEND_NOW} onPress={function () { return sendMessageFrom($, one.id, typed(), true); }}/> : null}
+          <ui.Button key={"".concat(key, "-send-").concat(presses, "-").concat(boxPresses)} label="Send" variant="primary" onPress={function () { return sendMessageFrom($, one.id, typed(), false); }}/>
+          {close}
+        </ui.Box>
+      </ui.Box>
+    </ui.Box>);
+};
+// The box at the bottom of a task's Details, for a task of this chat's that works or has finished and asks nothing: what is typed
+// in it is the same message as in the box above the chat (messageDraft), and it goes the same way. The desktop app pulls a pane's
+// window back to a box that holds the cursor each time the pane is drawn, and draws the box's ring again: so while it holds the
+// cursor or is typed in, the tab is given again as it was, reading nothing, and the mod's own redraws wait (paneBoxAt, isBoxHeld),
+// as the box above the chat is held. At the bottom, the pull, should one come, is to where the person types
+var paneBoxAt = 0;
+var paneBoxIn = '';
+var isPaneBox = function (element) { return /^details-.*-reply-/.test(element !== null && element !== void 0 ? element : ''); };
+var paneBoxKey = function (id) { var _a; return "details-".concat(id, "-reply-change-").concat((_a = replies.get(id)) !== null && _a !== void 0 ? _a : 0); };
+var isPaneBoxHeld = function (paneId, at) { return paneBoxIn === paneId && paneBoxAt > 0 && at - paneBoxAt < BAR_BOX_HELD; };
+// The Details drawing given again while its box is held, by pane, with what the box was drawn for: its key and its files
+var paneBoxHeld = new Map();
+var paneBoxShape = function (id) { var _a; return JSON.stringify([paneBoxKey(id), (_a = attached.get(id)) !== null && _a !== void 0 ? _a : [], presses, boxPresses]); };
+var messageBox = function ($, ui, one, paneId) { return (<ui.Box key={"message-".concat(one.id)} flexDirection="column" gap={1} flexShrink={0}>
+    {'Input' in ui ? (<ui.Input key={paneBoxKey(one.id)} placeholder="Type your message" value={draftDrawn(messageDraft(one.id))} rows={BOX_ROWS} onInput={function (value) {
+            drafts.set(messageDraft(one.id), value);
+            keepDraft($, messageDraft(one.id), value);
+            holdTimes($);
+            paneBoxIn = paneId;
+            void $.clock.now().then(function (at) { return (paneBoxAt = at); });
+        }} onSubmit={function (value) { return sendMessageFrom($, one.id, value, false); }}/>) : null}
+    {messageFoot($, ui, one, "details-".concat(one.id))}
+  </ui.Box>); };
+// Stop and send: the task is stopped as Claude Code stops one (TaskStop), which ends its step, its commands and its helpers, and its
+// card stays at work, as the message starts it again from its saved conversation (interrupting). Once Claude Code no longer lists it
+// as running, at most INTERRUPT_WAIT, the message goes
+var interrupting = new Set();
+var INTERRUPT_WAIT = 10000;
+var interruptStep = function ($, card) { return __awaiter(_this, void 0, void 0, function () {
+    var r, from, it;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0:
+                interrupting.add(card.id);
+                return [4 /*yield*/, $.tool.call({ tool: 'TaskStop', task_id: card.id }).catch(function (err) { return ({ deny: String(err) }); })];
+            case 1:
+                r = _a.sent();
+                if (r.deny)
+                    return [2 /*return*/, (interrupting.delete(card.id), log($, "task ".concat(card.id, " not stopped for a message: ").concat(r.deny)), false)];
+                return [4 /*yield*/, $.clock.now()];
+            case 2:
+                from = _a.sent();
+                _a.label = 3;
+            case 3: return [4 /*yield*/, $.clock.now()];
+            case 4:
+                if (!((_a.sent()) - from < INTERRUPT_WAIT)) return [3 /*break*/, 7];
+                return [4 /*yield*/, $.agent.list().catch(function () { return []; })];
+            case 5:
+                it = (_a.sent()).find(function (one) { return one.id === card.id; });
+                if (!it || it.status !== 'running')
+                    return [3 /*break*/, 7];
+                return [4 /*yield*/, $.clock.sleep(250)];
+            case 6:
+                _a.sent();
+                return [3 /*break*/, 3];
+            case 7:
+                $.clock.after(60000, function () { return void interrupting.delete(card.id); });
+                return [2 /*return*/, true];
+        }
+    });
+}); };
+// What kind of file each is, by its ending, for how the task opens it
+var fileKind = function (path) {
+    var _a;
+    var end = ((_a = path.split('.').pop()) !== null && _a !== void 0 ? _a : '').toLowerCase();
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(end))
+        return 'picture';
+    if (['heic', 'heif', 'tif', 'tiff', 'bmp'].includes(end))
+        return 'picture-other';
+    if (['mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi'].includes(end))
+        return 'video';
+    if (end === 'pdf')
+        return 'pdf';
+    return 'file';
+};
+// The paths a message names: picked with Attach, or typed or dropped into the box as text (a terminal types a dropped file's path,
+// its spaces escaped; a file:// address is a path too). Only the ones that are files on this computer
+var pathsIn = function ($, said) { return __awaiter(_this, void 0, void 0, function () {
+    var found, _loop_1, _i, _a, m;
+    var _b, _c, _d, _e;
+    return __generator(this, function (_f) {
+        switch (_f.label) {
+            case 0:
+                found = new Set();
+                _loop_1 = function (m) {
+                    var raw, path;
+                    return __generator(this, function (_g) {
+                        switch (_g.label) {
+                            case 0:
+                                raw = (_d = (_c = (_b = m[1]) !== null && _b !== void 0 ? _b : m[2]) !== null && _c !== void 0 ? _c : m[3]) !== null && _d !== void 0 ? _d : '';
+                                path = (function () {
+                                    try {
+                                        return decodeURIComponent(raw.replace(/\\ /g, ' ').replace(/[.,;:)]+$/, ''));
+                                    }
+                                    catch (_a) {
+                                        return raw.replace(/\\ /g, ' ');
+                                    }
+                                })();
+                                return [4 /*yield*/, $.fs.stat(path).catch(function () { return undefined; })];
+                            case 1:
+                                if (((_e = (_g.sent())) === null || _e === void 0 ? void 0 : _e.kind) === 'file')
+                                    found.add(path);
+                                return [2 /*return*/];
+                        }
+                    });
+                };
+                _i = 0, _a = said.matchAll(/(?:file:\/\/)?(\/(?:\\ |[^\s'"`<>])+)|'(\/[^'\n]+)'|"(\/[^"\n]+)"/g);
+                _f.label = 1;
+            case 1:
+                if (!(_i < _a.length)) return [3 /*break*/, 4];
+                m = _a[_i];
+                return [5 /*yield**/, _loop_1(m)];
+            case 2:
+                _f.sent();
+                _f.label = 3;
+            case 3:
+                _i++;
+                return [3 /*break*/, 1];
+            case 4: return [2 /*return*/, __spreadArray([], found, true)];
+        }
+    });
+}); };
+// What the task is told with the files: each path, and how a task opens one of its kind
+var filesNote = function (files) {
+    return files.length
+        ? "\n\nFiles with this message, on this computer: open each one before you act on the message.\n".concat(files
+            .map(function (path) {
+            var kind = fileKind(path);
+            var how = kind === 'picture' || kind === 'pdf'
+                ? 'open it with Read'
+                : kind === 'picture-other'
+                    ? 'turn it into a PNG in your scratch folder (sips -s format png on a Mac, convert on Linux), then open that with Read'
+                    : kind === 'video'
+                        ? 'take stills from it into your scratch folder with ffmpeg (one a second, or more where it moves fast), then open them with Read; ffprobe gives its length'
+                        : 'read it as its kind needs';
+            return "- ".concat(path, " (").concat(how, ")");
+        })
+            .join('\n'))
+        : '';
+};
+var changeTask = function ($_1, id_1, said_1) {
+    var args_1 = [];
+    for (var _i = 3; _i < arguments.length; _i++) {
+        args_1[_i - 3] = arguments[_i];
+    }
+    return __awaiter(_this, __spreadArray([$_1, id_1, said_1], args_1, true), void 0, function ($, id, said, picked, isNow) {
+        var card, at, files, _a, _b, _c, shown, words, _d, text, sent, told, _e;
+        var _f;
+        if (picked === void 0) { picked = []; }
+        if (isNow === void 0) { isNow = false; }
+        return __generator(this, function (_g) {
+            switch (_g.label) {
+                case 0: return [4 /*yield*/, read($, todos)];
+                case 1:
+                    card = (_g.sent()).find(function (one) { return one.id === id; });
+                    if (!card || (!said && !picked.length) || card.chat || card.parentId || isHeld(card))
+                        return [2 /*return*/];
+                    return [4 /*yield*/, $.clock.now()];
+                case 2:
+                    at = _g.sent();
+                    _a = [[]];
+                    _b = Set.bind;
+                    _c = [__spreadArray([], picked, true)];
+                    return [4 /*yield*/, pathsIn($, said)];
+                case 3:
+                    files = __spreadArray.apply(void 0, _a.concat([new (_b.apply(Set, [void 0, __spreadArray.apply(void 0, _c.concat([(_g.sent()), true]))]))(), true]));
+                    shown = __spreadArray([said], picked.map(function (path) { var _a; return "\uD83D\uDCCE ".concat((_a = path.split('/').pop()) !== null && _a !== void 0 ? _a : path); }), true).filter(Boolean).join('\n');
+                    return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (one) { return (one.id === id ? __assign(__assign({}, one), { entries: __spreadArray(__spreadArray([], one.entries, true), [{ at: at, kind: 'steer', text: shown }], false).slice(-ENTRIES_KEPT) }) : one); }); })];
+                case 4:
+                    _g.sent();
+                    words = "".concat(said || '(no words, only the files below)').concat(filesNote(files));
+                    _d = isNow && card.status === 'working';
+                    if (!_d) return [3 /*break*/, 6];
+                    return [4 /*yield*/, interruptStep($, card)];
+                case 5:
+                    _d = (_g.sent());
+                    _g.label = 6;
+                case 6:
+                    if (!_d) return [3 /*break*/, 9];
+                    return [4 /*yield*/, toEnded($, card, id, MESSAGE_NOW(words), { text: shown, ask: CHANGE_WHAT, at: at, line: lineOf(card), isCard: true })];
+                case 7:
+                    _g.sent();
+                    return [4 /*yield*/, tellChat($, named(CHANGE_TOLD(titleOf(card), "\u201C".concat(cut(shown, 120), "\u201D"))))];
+                case 8: return [2 /*return*/, void (_g.sent())];
+                case 9:
+                    text = card.status === 'working' ? MESSAGE_SENT(words) : CHANGE_ASKED(words);
+                    sent = { text: shown, ask: CHANGE_WHAT, at: at, line: lineOf(card), isCard: true };
+                    return [4 /*yield*/, read($, todos)];
+                case 10:
+                    if (!(((_f = (_g.sent()).find(function (one) { return one.id === id; })) === null || _f === void 0 ? void 0 : _f.status) === 'working')) return [3 /*break*/, 12];
+                    return [4 /*yield*/, tell($, id, text)];
+                case 11:
+                    _e = _g.sent();
+                    return [3 /*break*/, 13];
+                case 12:
+                    _e = undefined;
+                    _g.label = 13;
+                case 13:
+                    told = _e;
+                    if (!(told && !told.deny)) return [3 /*break*/, 14];
+                    (writtenIn($, id, id), sentReplies.set(id, __assign(__assign({}, sent), { to: 'work' })), redraw($));
+                    return [3 /*break*/, 16];
+                case 14: return [4 /*yield*/, toEnded($, card, id, text, sent)];
+                case 15:
+                    _g.sent();
+                    _g.label = 16;
+                case 16: return [4 /*yield*/, tellChat($, named(CHANGE_TOLD(titleOf(card), "\u201C".concat(cut(shown, 120), "\u201D"))))];
+                case 17:
+                    _g.sent();
+                    return [2 /*return*/];
+            }
+        });
+    });
+};
 var answerNow = function ($_1, one_1, choice_1) {
     var args_1 = [];
     for (var _i = 3; _i < arguments.length; _i++) {
@@ -927,10 +1181,10 @@ var answerNow = function ($_1, one_1, choice_1) {
                     mark = "".concat(ask.at, ":").concat(ask.text);
                     askPressed.set(one.id, mark);
                     // Its reply box in the bar goes with the answer, and is closed when the same work asks again
-                    if (replyTo === one.id)
-                        ((replyTo = ''), (replyMark = ''), (barBoxAt = 0));
+                    if (isBarOpen('answer', one.id))
+                        closeBarOf(one.id);
                     line = lineOf(one);
-                    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at: Infinity, line: line, isCard: true, askAt: ask.at });
+                    sentReplies.set(one.id, __assign(__assign({ text: said, ask: ask.text }, (ask.details ? { details: ask.details } : {})), { to: 'sending', at: Infinity, line: line, isCard: true, askAt: ask.at }));
                     if (isReply)
                         freeTimes($);
                     redraw($);
@@ -938,7 +1192,7 @@ var answerNow = function ($_1, one_1, choice_1) {
                     steerAt = 0;
                     _h.label = 1;
                 case 1:
-                    _h.trys.push([1, 5, , 11]);
+                    _h.trys.push([1, 5, , 9]);
                     return [4 /*yield*/, $.clock.now()];
                 case 2:
                     at_1 = _h.sent();
@@ -958,7 +1212,7 @@ var answerNow = function ($_1, one_1, choice_1) {
                     return [4 /*yield*/, answerCleared($, one, ask, said, isReply, target, at_1, line)];
                 case 4:
                     _h.sent();
-                    return [3 /*break*/, 11];
+                    return [3 /*break*/, 9];
                 case 5:
                     err_1 = _h.sent();
                     // It did not reach the work: the card says so, and its buttons come back to be pressed again, with nothing of the answer left
@@ -969,179 +1223,135 @@ var answerNow = function ($_1, one_1, choice_1) {
                         answeredAt.delete(one.id);
                     if (pending.get(target) === one.id)
                         pending.delete(target);
-                    if (!isCleared) return [3 /*break*/, 7];
-                    return [4 /*yield*/, unsettleAsked($, one.id, ask.at).catch(function () { return undefined; })];
+                    _a = !isCleared;
+                    if (_a) return [3 /*break*/, 7];
+                    return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (card) { return (card.id === one.id && !card.ask ? __assign(__assign({}, card), { ask: ask, entries: card.entries.filter(function (entry) { return !(entry.kind === 'steer' && entry.at === steerAt); }) }) : card); }); }).then(function () { return true; }).catch(function () { return false; })];
                 case 6:
-                    _h.sent();
+                    _a = (_h.sent());
                     _h.label = 7;
                 case 7:
-                    _a = !isCleared;
-                    if (_a) return [3 /*break*/, 9];
-                    return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (card) { return (card.id === one.id && !card.ask ? __assign(__assign({}, card), { ask: ask, entries: card.entries.filter(function (entry) { return !(entry.kind === 'steer' && entry.at === steerAt); }) }) : card); }); }).then(function () { return true; }).catch(function () { return false; })];
-                case 8:
-                    _a = (_h.sent());
-                    _h.label = 9;
-                case 9:
                     isBack = _a;
                     _c = (_b = sentReplies).set;
                     _d = [one.id];
                     _e = { text: said, ask: ask.text, to: 'failed' };
                     return [4 /*yield*/, $.clock.now().catch(function () { return 0; })];
-                case 10:
+                case 8:
                     _c.apply(_b, _d.concat([(_e.at = _h.sent(), _e.line = line, _e.isCard = true, _e.askAt = ask.at, _e)]));
                     // and when even that could not be written, the chat is told, so the ask is not lost unseen
                     if (!isBack)
-                        $.ui.log("Your answer \u201C".concat(cut(said, 120), "\u201D to \"").concat(titleOf(one), "\" didn't reach Claude, and Claudopus couldn't put the question back on its card. Type your answer in this chat instead. The question: ").concat(ask.text));
+                        $.ui.log("Your answer \u201C".concat(cut(said, 120), "\u201D to \"").concat(titleOf(one), "\" didn't reach its task, and the question couldn't be put back on its card. Type your answer in this chat instead. The question: ").concat(ask.text));
                     redraw($);
                     throw err_1;
-                case 11: return [2 /*return*/];
+                case 9: return [2 /*return*/];
             }
         });
     });
 };
-// The rest of an answer once its ask is cleared from the card's file: to the work, or to wake it
+// The rest of an answer once its ask is cleared from the card's file: written into its task at a step, or sent to it paused
 var answerCleared = function ($, one, ask, said, isReply, target, at, line) { return __awaiter(_this, void 0, void 0, function () {
-    var back, working, held_1, run, isWorking, told_1, _a, to, told, _b;
-    var _c, _d, _e, _f;
-    return __generator(this, function (_g) {
-        switch (_g.label) {
+    var isRelease, _a, run, isRun, back, sent, to, _b, _c, working, told, _d;
+    var _e, _f, _g, _h, _j, _k;
+    return __generator(this, function (_l) {
+        switch (_l.label) {
             case 0:
                 answeredAt.set(one.id, ask.at);
-                // What the work recorded as waiting for the same question is answered with it
-                return [4 /*yield*/, settleAsked($, one.id, ask, isReply ? IN_WORDS : said).catch(function (err) { return log($, "result's question not answered with the ask of ".concat(one.id, ": ").concat(String(err))); })];
-            case 1:
-                // What the work recorded as waiting for the same question is answered with it
-                _g.sent();
                 dropDrafts($, one.id);
-                replies.set(one.id, ((_c = replies.get(one.id)) !== null && _c !== void 0 ? _c : 0) + 1);
-                back = isReply ? {} : { asked: ask, target: target };
-                sentReplies.set(one.id, __assign({ text: said, ask: ask.text, to: 'sending', at: at, line: line, isCard: true, askAt: ask.at }, back));
+                replies.set(one.id, ((_e = replies.get(one.id)) !== null && _e !== void 0 ? _e : 0) + 1);
+                _a = !isReply && !ask.refused && Boolean(ask.release) && ((_f = ask.choices) === null || _f === void 0 ? void 0 : _f[0]) === said;
+                if (!_a) return [3 /*break*/, 2];
+                return [4 /*yield*/, allowRelease($, one.id, (_g = ask.release) !== null && _g !== void 0 ? _g : '').catch(function (err) { return (void log($, "release not allowed by the press: ".concat(String(err))), false); })];
+            case 1:
+                _a = (_l.sent());
+                _l.label = 2;
+            case 2:
+                isRelease = _a;
+                run = ask.refused && !isReply && said === ALLOW ? runAsked.get(one.id) : undefined;
+                isRun = Boolean(run && run.askAt === ask.at && run.command === ask.copy);
+                back = isReply || isRelease || ask.refused ? {} : { asked: ask, target: target };
+                sent = __assign(__assign(__assign(__assign({ text: said, ask: ask.text }, (ask.details ? { details: ask.details } : {})), { at: at, line: line, isCard: true, askAt: ask.at }), (ask.refused && !isReply ? { isPress: true } : {})), back);
+                sentReplies.set(one.id, __assign(__assign({}, sent), { to: 'sending' }));
                 redraw($);
                 // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
                 $.clock.after(ANSWER_SHOWN + 50, function () { return drawAgain($); });
-                return [4 /*yield*/, read($, todos)];
-            case 2:
-                working = ((_d = (_g.sent()).find(function (card) { return card.id === one.id; })) === null || _d === void 0 ? void 0 : _d.status) === 'working';
-                if (!(!isReply && ask.lastStep && ask.folder && ((_e = ask.choices) === null || _e === void 0 ? void 0 : _e[0]) === said)) return [3 /*break*/, 12];
-                sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at: at, line: line, isCard: true, askAt: ask.at });
-                if (!RELEASE_STEP.test(ask.lastStep)) return [3 /*break*/, 4];
-                return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (card) { return (card.id === one.id ? __assign(__assign({}, card), { releasing: { at: at, branch: '', by: 'claudopus' } }) : card); }); }).catch(function (err) { return log($, "release of ".concat(one.id, " not shown: ").concat(String(err))); })];
+                if (!ask.refused) return [3 /*break*/, 6];
+                if (!(isRun && run)) return [3 /*break*/, 4];
+                return [4 /*yield*/, startRun($, one, run)];
             case 3:
-                _g.sent();
-                _g.label = 4;
+                _c = _l.sent();
+                return [3 /*break*/, 5];
             case 4:
-                redraw($);
-                if (!!working) return [3 /*break*/, 6];
-                return [4 /*yield*/, lastStep($, one, ask, said).catch(function (err) { return log($, "last step of ".concat(one.id, " not done: ").concat(String(err))); })];
+                _c = REFUSAL_ANSWERED((_h = ask.copy) !== null && _h !== void 0 ? _h : ask.text, said, isReply);
+                _l.label = 5;
             case 5:
-                _g.sent();
-                return [3 /*break*/, 11];
-            case 6: 
-            // Kept on the card first, so a reload meanwhile keeps it too, and done once the card has ended (stepsAtEnd); a write that fails
-            // here tells the work nothing and puts the question back (answerNow). The rest is caught, as the work has been told by then
-            return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (card) { return (card.id === one.id ? __assign(__assign({}, card), { stepOnEnd: { ask: ask, said: said } }) : card); }); })];
+                _b = _c;
+                return [3 /*break*/, 7];
+            case 6:
+                _b = isReply
+                    ? "".concat(who(true), " replied to your question (\"").concat(ask.text, "\"), in their own words: ").concat(said)
+                    : "".concat(who(true), " pressed \"").concat(said, "\" in answer to your question: ").concat(ask.text).concat(isRelease ? "\n".concat(RELEASE_PRESSED((_j = ask.release) !== null && _j !== void 0 ? _j : '')) : '');
+                _l.label = 7;
             case 7:
-                // Kept on the card first, so a reload meanwhile keeps it too, and done once the card has ended (stepsAtEnd); a write that fails
-                // here tells the work nothing and puts the question back (answerNow). The rest is caught, as the work has been told by then
-                _g.sent();
-                return [4 /*yield*/, tell($, one.id, "".concat(who(true), " pressed \"").concat(said, "\" in answer to your question: ").concat(ask.text, "\nClaudopus does that step (").concat(cut(ask.lastStep, 160), ") once you end this turn: do not do it or start it yourself. Commit anything left on the branch now, change nothing on it after that, and end with your report."))];
+                to = _b;
+                return [4 /*yield*/, read($, todos)];
             case 8:
-                _g.sent();
-                held_1 = function (err) { return log($, "last step of ".concat(one.id, " not held: ").concat(String(err))); };
-                return [4 /*yield*/, stepLine($, one.id, "You pressed \u201C".concat(said, "\u201D \u00B7 Claudopus does it when Claude is done")).catch(held_1)
-                    // (a turn that ended while this was written has had its end's look already)
-                ];
-            case 9:
-                _g.sent();
-                // (a turn that ended while this was written has had its end's look already)
-                return [4 /*yield*/, stepsAtEnd($).catch(held_1)];
-            case 10:
-                // (a turn that ended while this was written has had its end's look already)
-                _g.sent();
-                _g.label = 11;
-            case 11: return [2 /*return*/, void askGone($, one, said)];
-            case 12:
-                if (!ask.refused) return [3 /*break*/, 23];
-                run = !isReply && said === RUN_IT ? runAsked.get(one.id) : undefined;
-                if (!(run && run.askAt === ask.at && run.command === ask.copy)) return [3 /*break*/, 14];
-                sentReplies.set(one.id, { text: said, ask: ask.text, to: 'ran', at: at, line: line, isCard: true, askAt: ask.at });
-                return [4 /*yield*/, startRun($, one, run).catch(function (err) { return log($, "refused command not run: ".concat(String(err))); })];
-            case 13:
-                _g.sent();
-                return [2 /*return*/, void askGone($, one, said)];
-            case 14:
-                if (!(isReply && runList.some(function (r) { return isSameRun(r, { card: one.id, askAt: ask.at }) && !r.startedAt; }))) return [3 /*break*/, 16];
-                return [4 /*yield*/, stepLine($, one.id, "Your answer didn't run the command: only its ".concat(RUN_IT, " button runs it")).catch(function () { return undefined; })];
-            case 15:
-                _g.sent();
-                _g.label = 16;
-            case 16: return [4 /*yield*/, read($, todos)];
-            case 17:
-                isWorking = ((_f = (_g.sent()).find(function (card) { return card.id === target; })) === null || _f === void 0 ? void 0 : _f.status) === 'working';
-                if (!isWorking) return [3 /*break*/, 19];
-                return [4 /*yield*/, tell($, target, REFUSAL_ANSWERED(ask.text, said, isReply))];
-            case 18:
-                _a = _g.sent();
-                return [3 /*break*/, 20];
-            case 19:
-                _a = undefined;
-                _g.label = 20;
-            case 20:
-                told_1 = _a;
-                if (!(!told_1 || told_1.deny)) return [3 /*break*/, 22];
-                return [4 /*yield*/, log($, "answer to the refusal on ".concat(one.id, " not sent: ").concat(target, " is not at work, or could not be written to"))];
-            case 21:
-                _g.sent();
-                _g.label = 22;
-            case 22:
-                sentReplies.set(one.id, { text: said, ask: ask.text, to: told_1 && !told_1.deny ? 'work' : 'other', at: at, line: line, isCard: true, askAt: ask.at });
-                redraw($);
-                return [2 /*return*/, void askGone($, one, said)];
-            case 23:
-                to = isReply ? "".concat(who(true), " replied to your question (\"").concat(ask.text, "\"), in their own words: ").concat(said) : "".concat(who(true), " pressed \"").concat(said, "\" in answer to your question: ").concat(ask.text);
-                if (!working) return [3 /*break*/, 25];
+                working = ((_k = (_l.sent()).find(function (card) { return card.id === one.id; })) === null || _k === void 0 ? void 0 : _k.status) === 'working';
+                if (!working) return [3 /*break*/, 10];
                 return [4 /*yield*/, tell($, target, to)];
-            case 24:
-                _b = _g.sent();
-                return [3 /*break*/, 26];
-            case 25:
-                _b = undefined;
-                _g.label = 26;
-            case 26:
-                told = _b;
-                if (!(told && !told.deny)) return [3 /*break*/, 27];
+            case 9:
+                _d = _l.sent();
+                return [3 /*break*/, 11];
+            case 10:
+                _d = undefined;
+                _l.label = 11;
+            case 11:
+                told = _d;
+                // A press on a blocked command starts no task again and is never sent twice: a task at a step reads it there, and one that has
+                // ended hears what the command printed when it ends (runit.tsx), or nothing of a command that was not run
+                if (ask.refused && !isReply) {
+                    if (told && !told.deny)
+                        writtenIn($, target, one.id);
+                    else
+                        void log($, "".concat(said, " on a blocked command of ").concat(target, ", which is not at a step: it is not started again for it"));
+                    sentReplies.set(one.id, __assign(__assign({}, sent), { to: 'pressed' }));
+                    redraw($);
+                    return [2 /*return*/, void askGone($, one, said)];
+                }
+                if (!(told && !told.deny)) return [3 /*break*/, 12];
                 writtenIn($, target, one.id);
-                sentReplies.set(one.id, __assign({ text: said, ask: ask.text, to: 'work', at: at, line: line, isCard: true, askAt: ask.at }, back));
+                sentReplies.set(one.id, __assign(__assign({}, sent), { to: 'work' }));
                 redraw($);
-                return [3 /*break*/, 29];
-            case 27: return [4 /*yield*/, toEnded($, one, target, "".concat(to, "\n").concat(RESUMED_BY_ANSWER), __assign({ text: said, ask: ask.text, at: at, line: line, isCard: true, askAt: ask.at }, back))
+                return [3 /*break*/, 14];
+            case 12: return [4 /*yield*/, toEnded($, one, target, "".concat(to, "\n").concat(RESUMED_BY_ANSWER), sent)
                 // Said in the chat only once the answer is on its way
             ];
-            case 28:
-                _g.sent();
-                _g.label = 29;
-            case 29:
+            case 13:
+                _l.sent();
+                _l.label = 14;
+            case 14:
                 // Said in the chat only once the answer is on its way
                 void askGone($, one, said);
                 return [2 /*return*/];
         }
     });
 }); };
+// What a task is told with the press on its go-ahead for a release: the press allows its release run, which it does itself
+var RELEASE_PRESSED = function (folder) {
+    return "That press is the permission for the release: your next run of the release runner for ".concat(folder, " goes through once, within the hour, with nothing more asked. Run it now as your rules say, in your background, say on your card what you are releasing, and hand in your result once it has finished.");
+};
 // A button's answer can be taken back while the card says it (heldAnswer, ANSWER_SHOWN), unless the work has asked again since: a press
 // meant for something else lands on an answer (16 Nov: "Not now" pressed while reaching for the picture above it, as the panel
 // jumped). The ask is put back on the card with its buttons, to be answered again, and the work is told not to act on the answer:
 // written in while it runs, dropped from a message still waiting to start it again, and nothing when it has since ended (its
-// card then waits on the person again). An answer that did a last step, such as a release, has no way back
+// card then waits on the person again). A permission, and the go-ahead for a release, have no way back
 var canTakeBack = function (one, now) {
     var sent = heldAnswer(one, now);
-    // Only while the card still says it (sentLine), never for an answer left in the chat, whose model has it already, nor for a last
-    // step such as a release, which the work cannot undo
-    return Boolean((sent === null || sent === void 0 ? void 0 : sent.asked) && !sent.isHeld && !sent.asked.lastStep && !['other', 'ran', 'sending', 'chat'].includes(sent.to) && !one.ask && !one.chat && sentLine(one, now));
+    // Only while the card still says it (sentLine), never for an answer left in the chat, whose model has it already
+    return Boolean((sent === null || sent === void 0 ? void 0 : sent.asked) && !sent.isHeld && !['pressed', 'sending', 'chat'].includes(sent.to) && !one.ask && !one.chat && sentLine(one, now));
 };
 // (at: the answer the button was drawn for: a click on a drawing held from before takes back nothing newer)
 var takeBack = function ($, one, at) {
     var run = takeBackNow($, one, at);
-    // The press hook sends the wakes that wait only once this is done (sendWakes), so the answer taken back is never sent
+    // The press hook sends what waits only once this is done (sendWakes), so the answer taken back is never sent
     answersOnWay.add(run);
     void run.finally(function () { return answersOnWay.delete(run); }).catch(function () { return undefined; });
     return run;
@@ -1174,16 +1384,13 @@ var takeBackNow = function ($, one, shownAt) { return __awaiter(_this, void 0, v
                 waiting = wakes.find(function (w) { return w.target === target && w.answers.some(function (a) { return a.one.id === one.id && a.sent.at === sent.at; }); });
                 if (waiting) {
                     waiting.answers = waiting.answers.filter(function (a) { return !(a.one.id === one.id && a.sent.at === sent.at); });
-                    if (!waiting.answers.length && !waiting.spawn)
+                    if (!waiting.answers.length)
                         wakes.splice(wakes.indexOf(waiting), 1);
                     else
                         waiting.text = "".concat(waiting.text, "\n\n").concat(TAKEN_BACK(sent.text, ask.text));
                 }
                 sentReplies.delete(one.id);
                 answeredAsks.delete("".concat(one.id, ":").concat(ask.at, ":").concat(ask.text));
-                return [4 /*yield*/, unsettleAsked($, one.id, ask.at).catch(function (err) { return log($, "result's question not opened again for ".concat(one.id, ": ").concat(String(err))); })];
-            case 4:
-                _e.sent();
                 if (answeredAt.get(one.id) === ask.at)
                     answeredAt.delete(one.id);
                 if (pending.get(target) === one.id)
@@ -1194,28 +1401,28 @@ var takeBackNow = function ($, one, shownAt) { return __awaiter(_this, void 0, v
                         startedBy.delete(key);
                 }
                 return [4 /*yield*/, $.clock.now()];
-            case 5:
+            case 4:
                 at = _e.sent();
                 isBack = false;
                 return [4 /*yield*/, changeTodos($, function (list) { return ((isBack = false), list).map(function (card) { return (card.id === one.id && !card.ask ? ((isBack = true), __assign(__assign({}, card), { ask: ask, entries: __spreadArray(__spreadArray([], card.entries, true), [{ at: at, kind: 'steer', text: "took back \u201C".concat(sent.text, "\u201D") }], false).slice(-ENTRIES_KEPT) })) : card); }); })];
-            case 6:
+            case 5:
                 _e.sent();
                 redraw($);
                 void log($, "answer \"".concat(cut(sent.text, 40), "\" for ").concat(one.id, " taken back"));
-                if (!isBack) return [3 /*break*/, 8];
+                if (!isBack) return [3 /*break*/, 7];
                 return [4 /*yield*/, tellChat($, named("".concat(who(true), " took back their answer \u201C").concat(cut(sent.text, 120), "\u201D to \"").concat(titleOf(one), "\": the question is open again on its card.")))];
-            case 7:
+            case 6:
                 _e.sent();
                 inChat.delete(one.id);
                 void askInChat($, __assign(__assign({}, one), { ask: ask }));
-                _e.label = 8;
-            case 8:
-                if (!!waiting) return [3 /*break*/, 10];
+                _e.label = 7;
+            case 7:
+                if (!!waiting) return [3 /*break*/, 9];
                 return [4 /*yield*/, tell($, target, TAKEN_BACK(sent.text, ask.text)).catch(function (err) { return log($, "work not told of an answer taken back: ".concat(String(err))); })];
-            case 9:
+            case 8:
                 _e.sent();
-                _e.label = 10;
-            case 10: return [2 /*return*/];
+                _e.label = 9;
+            case 9: return [2 /*return*/];
         }
     });
 }); };
@@ -1250,13 +1457,6 @@ var holdAsk = function ($, one, ask, said, target) { return __awaiter(_this, voi
                 _h.sent();
                 if (!isHeld)
                     return [2 /*return*/];
-                // Their reply answers what the work recorded for that question, as a press does; the ask stays while the work acts on it
-                return [4 /*yield*/, settleAsked($, one.id, ask, IN_WORDS).catch(function (err) { return log($, "result's question not answered with the ask of ".concat(one.id, ": ").concat(String(err))); })
-                    // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
-                ];
-            case 4:
-                // Their reply answers what the work recorded for that question, as a press does; the ask stays while the work acts on it
-                _h.sent();
                 // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
                 dropDrafts($, one.id);
                 // A new box, empty, whenever it comes back: the surface keeps what was typed in a box it finds again by its key
@@ -1271,83 +1471,68 @@ var holdAsk = function ($, one, ask, said, target) { return __awaiter(_this, voi
                 if (inChat.has(one.id))
                     (inChat.delete(one.id), void tellChat($, named(ASK_REPLIED(titleOf(one), "\u201C".concat(cut(said, 120), "\u201D")))));
                 return [4 /*yield*/, read($, todos)];
-            case 5:
+            case 4:
                 working = ((_g = (_h.sent()).find(function (card) { return card.id === target; })) === null || _g === void 0 ? void 0 : _g.status) === 'working';
                 to = "".concat(who(true), " replied to your question (\"").concat(ask.text, "\"), in their own words: ").concat(said, "\n").concat(named(REPLY_HOLDS));
-                if (!working) return [3 /*break*/, 7];
+                if (!working) return [3 /*break*/, 6];
                 return [4 /*yield*/, tell($, target, to)];
-            case 6:
+            case 5:
                 _a = _h.sent();
-                return [3 /*break*/, 8];
-            case 7:
+                return [3 /*break*/, 7];
+            case 6:
                 _a = undefined;
-                _h.label = 8;
-            case 8:
+                _h.label = 7;
+            case 7:
                 told = _a;
                 if (told && !told.deny)
                     return [2 /*return*/, void (writtenIn($, target, one.id), redraw($))];
                 return [4 /*yield*/, toEnded($, one, target, "".concat(to, "\n").concat(RESUMED_BY_ANSWER), { text: said, ask: ask.text, at: at, line: line, isCard: true, askAt: ask.at })];
-            case 9:
+            case 8:
                 _h.sent();
                 return [2 /*return*/];
         }
     });
 }); };
-// An answer to work that has ended starts that work again with it, as a message to it: the chat then gets the work's report as
-// it gets any, and nothing goes into the chat in the person's place.
-// The engine runs what a mod sends from outside its hooks (a timer, a button's own handler) under the mod's own origin, and work
-// started again that way runs with every hook of the mod skipped: each of its panel tools answered "no tool.call hook answered",
-// and its ask never reached the card. So the message waits here and is sent from inside a hook (the press's or the reply's own,
-// a prompt, the end of a turn, a change in how full the chat is), where the work it wakes keeps its tools. Not from a tool call's
-// hook: the engine leaves the calling hook out of what that call raises, and may of what it starts, and work woken there could miss its own tool calls' hook. One no hook takes within WAKE_WAIT, in a chat where
-// nothing runs, is sent from the timer all the same: the work does what it was asked, and its rules have it end with any ask as
-// its report's first line when the panel does not answer, which the chat puts to the person. One a copy a reload replaced still
-// holds goes to the chat instead: a notice the person sees and a row its model reads, with no turn of its own
-var WAKE_WAIT = 4000;
-// Each wake carries every answer joined into it, so each card's line and the chat's notice are settled for every one
+// An answer to a task that is not at a step (paused, or ended) goes to it as a message, which starts it with it: the chat then
+// gets the task's result as it gets any, and nothing goes into the chat in the person's place.
+// The engine runs what a mod sends from outside its hooks (a timer, a button's own handler) under the mod's own origin, and a task
+// started that way runs with every hook of the mod skipped: each of its panel tools answered "no tool.call hook answered", and its
+// question never reached the card. So an answer travels one way: it waits here only until the hook of the press or the submit that
+// gave it, which waits for it and sends it from inside itself (sendWakes, tabs.tsx), and one given inside a hook already goes at
+// once. Nothing sends one from a timer. One a copy a reload replaced still holds goes to the chat instead: a notice the person
+// sees and a row its model reads, with no turn of its own
+// Each message carries every answer joined into it, so each card's line and the chat's notice are settled for every one
 var wakes = [];
-// `isHookOnly`: never from the timer, for what no press of this chat's started (a command run on a press ending, runit.tsx): it
-// waits for the next hook, and its card offers a press meanwhile
-var toEnded = function ($_1, one_1, target_1, text_1, sent_1) {
-    var args_1 = [];
-    for (var _i = 5; _i < arguments.length; _i++) {
-        args_1[_i - 5] = arguments[_i];
-    }
-    return __awaiter(_this, __spreadArray([$_1, one_1, target_1, text_1, sent_1], args_1, true), void 0, function ($, one, target, text, sent, isHookOnly) {
-        var same, wake;
-        if (isHookOnly === void 0) { isHookOnly = false; }
-        return __generator(this, function (_a) {
-            switch (_a.label) {
-                case 0:
-                    // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
-                    pending.set(target, one.id);
-                    // A reply that holds its ask is acted on from now: no answers on the card while its work is started again with it
-                    return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (card) { var _a, _b; return (card.id === one.id && ((_b = (_a = card.ask) === null || _a === void 0 ? void 0 : _a.replied) === null || _b === void 0 ? void 0 : _b.text) === sent.text && !card.ask.replied.isWaking && card.status !== 'working' ? __assign(__assign({}, card), { ask: __assign(__assign({}, card.ask), { replied: __assign(__assign({}, card.ask.replied), { isWaking: true }) }) }) : card); }); })];
-                case 1:
-                    // A reply that holds its ask is acted on from now: no answers on the card while its work is started again with it
-                    _a.sent();
-                    sentReplies.set(one.id, __assign(__assign({}, sent), { to: 'work' }));
-                    redraw($);
-                    same = wakes.find(function (w) { return w.target === target && !w.spawn && Boolean(w.isHookOnly) === isHookOnly; });
-                    if (same)
-                        return [2 /*return*/, void ((same.text = "".concat(same.text, "\n\n").concat(text)), same.answers.push({ one: one, sent: sent }))];
-                    wake = __assign({ target: target, text: text, answers: [{ one: one, sent: sent }] }, (isHookOnly ? { isHookOnly: isHookOnly } : {}));
-                    wakes.push(wake);
-                    if (isHookOnly)
-                        return [2 /*return*/];
-                    void $.clock.after(WAKE_WAIT, function () {
-                        var at = wakes.indexOf(wake);
-                        if (at < 0)
-                            return;
-                        wakes.splice(at, 1);
-                        void log($, "work ".concat(target, "'s answer was taken by no hook of the mod within ").concat(WAKE_WAIT / 1000, " s: it goes from the next one (sendOwn)"));
-                        void sendWake($, wake, false);
-                    });
-                    return [2 /*return*/];
-            }
-        });
+var toEnded = function ($, one, target, text, sent) { return __awaiter(_this, void 0, void 0, function () {
+    var same;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0:
+                // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
+                pending.set(target, one.id);
+                // A reply that holds its ask is acted on from now: no answers on the card while its work is started again with it
+                return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (card) { var _a, _b; return (card.id === one.id && ((_b = (_a = card.ask) === null || _a === void 0 ? void 0 : _a.replied) === null || _b === void 0 ? void 0 : _b.text) === sent.text && !card.ask.replied.isWaking && card.status !== 'working' ? __assign(__assign({}, card), { ask: __assign(__assign({}, card.ask), { replied: __assign(__assign({}, card.ask.replied), { isWaking: true }) }) }) : card); }); })];
+            case 1:
+                // A reply that holds its ask is acted on from now: no answers on the card while its work is started again with it
+                _a.sent();
+                sentReplies.set(one.id, __assign(__assign({}, sent), { to: 'work' }));
+                redraw($);
+                same = wakes.find(function (w) { return w.target === target; });
+                if (same)
+                    ((same.text = "".concat(same.text, "\n\n").concat(text)), same.answers.push({ one: one, sent: sent }));
+                else
+                    wakes.push({ target: target, text: text, answers: [{ one: one, sent: sent }] });
+                return [4 /*yield*/, isInHook($)];
+            case 2:
+                if (!_a.sent()) return [3 /*break*/, 4];
+                return [4 /*yield*/, sendWakes($)];
+            case 3:
+                _a.sent();
+                _a.label = 4;
+            case 4: return [2 /*return*/];
+        }
     });
-};
+}); };
 // Sends what waits, from inside the hook that calls it; a press's or a reply's hook first waits for the answer it started
 var sendWakes = function ($_1) {
     var args_1 = [];
@@ -1379,114 +1564,50 @@ var sendWakes = function ($_1) {
         });
     });
 };
-var sendWake = function ($_1, wake_1) {
-    var args_1 = [];
-    for (var _i = 2; _i < arguments.length; _i++) {
-        args_1[_i - 2] = arguments[_i];
-    }
-    return __awaiter(_this, __spreadArray([$_1, wake_1], args_1, true), void 0, function ($, wake, isInHook) {
-        if (isInHook === void 0) { isInHook = true; }
-        return __generator(this, function (_a) {
-            switch (_a.label) {
-                case 0:
-                    _a.trys.push([0, , 2, 3]);
-                    return [4 /*yield*/, sendWakeNow($, wake, isInHook)];
-                case 1:
-                    _a.sent();
-                    return [3 /*break*/, 3];
-                case 2:
-                    if (resultWaking.delete(wake.target))
-                        redraw($);
-                    return [7 /*endfinally*/];
-                case 3: return [2 /*return*/];
-            }
-        });
+var sendWake = function ($, wake) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, r, _b, _i, _c, _d, one, sent;
+    return __generator(this, function (_e) {
+        switch (_e.label) {
+            case 0:
+                _a = isHeld;
+                return [4 /*yield*/, read($, todos)];
+            case 1:
+                if (!_a.apply(void 0, [(_e.sent()).find(function (one) { return one.id === wake.target; })])) return [3 /*break*/, 3];
+                return [4 /*yield*/, log($, "task ".concat(wake.target, " not started with an answer: the person stopped it"))];
+            case 2: return [2 /*return*/, void (_e.sent())];
+            case 3: return [4 /*yield*/, isReplaced($)];
+            case 4:
+                if (!(_e.sent())) return [3 /*break*/, 5];
+                _b = { isDelivered: false, reason: 'this copy of the mod was replaced by a reload' };
+                return [3 /*break*/, 7];
+            case 5: return [4 /*yield*/, sendOwn($, { to: { agentId: wake.target }, text: wake.text }).catch(function (err) { return ({ isDelivered: false, reason: String(err) }); })];
+            case 6:
+                _b = _e.sent();
+                _e.label = 7;
+            case 7:
+                r = _b;
+                if (!!r.isDelivered) return [3 /*break*/, 9];
+                return [4 /*yield*/, wakeFailed($, wake, r.reason)];
+            case 8: return [2 /*return*/, void (_e.sent())
+                // Only once it is on its way: work at work when the mod's own message reaches it would take that message for the chat's note
+            ];
+            case 9: 
+            // Only once it is on its way: work at work when the mod's own message reaches it would take that message for the chat's note
+            return [4 /*yield*/, wakeCard($, wake.target)
+                // Started by the message, the task reads it in the run it starts: that run's end never sends it a second time
+            ];
+            case 10:
+                // Only once it is on its way: work at work when the mod's own message reaches it would take that message for the chat's note
+                _e.sent();
+                // Started by the message, the task reads it in the run it starts: that run's end never sends it a second time
+                for (_i = 0, _c = wake.answers; _i < _c.length; _i++) {
+                    _d = _c[_i], one = _d.one, sent = _d.sent;
+                    startedBy.add("".concat(one.id, ":").concat(sent.at));
+                }
+                return [2 /*return*/];
+        }
     });
-};
-var sendWakeNow = function ($_1, wake_1) {
-    var args_1 = [];
-    for (var _i = 2; _i < arguments.length; _i++) {
-        args_1[_i - 2] = arguments[_i];
-    }
-    return __awaiter(_this, __spreadArray([$_1, wake_1], args_1, true), void 0, function ($, wake, isInHook) {
-        var _a, r_1, _b, r, _c, _d, _e, _f, one, sent;
-        var _g;
-        if (isInHook === void 0) { isInHook = true; }
-        return __generator(this, function (_h) {
-            switch (_h.label) {
-                case 0:
-                    _a = isHeld;
-                    return [4 /*yield*/, read($, todos)];
-                case 1:
-                    if (!_a.apply(void 0, [(_h.sent()).find(function (one) { return one.id === wake.target; })])) return [3 /*break*/, 4];
-                    return [4 /*yield*/, log($, "work ".concat(wake.target, " not started again with an answer: the person stopped it"))];
-                case 2:
-                    _h.sent();
-                    return [4 /*yield*/, runsSent($, wake, 'held')];
-                case 3: return [2 /*return*/, void (_h.sent())
-                    // A small fresh task for a last step, started from inside a hook so it keeps the mod's own tools and guards; from the timer, where
-                    // the mod's hooks would be skipped for it, its work is started again instead, as before
-                ];
-                case 4:
-                    if (!(wake.spawn && isInHook)) return [3 /*break*/, 9];
-                    return [4 /*yield*/, $.agent.spawn(wake.spawn).catch(function (err) { return ({ deny: String(err) }); })];
-                case 5:
-                    r_1 = _h.sent();
-                    if (!!r_1.deny) return [3 /*break*/, 7];
-                    return [4 /*yield*/, log($, "a small task ".concat((_g = r_1.agentId) !== null && _g !== void 0 ? _g : '', " does the last step of ").concat(wake.target))];
-                case 6: return [2 /*return*/, void (_h.sent())];
-                case 7: return [4 /*yield*/, log($, "the last step's small task not started (".concat(r_1.deny, "): its work is started again instead"))];
-                case 8:
-                    _h.sent();
-                    return [2 /*return*/, sendWakeNow($, __assign(__assign({}, wake), { spawn: undefined }))];
-                case 9:
-                    _b = isHeld;
-                    return [4 /*yield*/, read($, todos)];
-                case 10:
-                    if (!_b.apply(void 0, [(_h.sent()).find(function (one) { return one.id === wake.target; })])) return [3 /*break*/, 12];
-                    return [4 /*yield*/, log($, "work ".concat(wake.target, " not started again with an answer: the person stopped it"))];
-                case 11: return [2 /*return*/, void (_h.sent())];
-                case 12: return [4 /*yield*/, isReplaced($)];
-                case 13:
-                    if (!(_h.sent())) return [3 /*break*/, 14];
-                    _c = { isDelivered: false, reason: 'this copy of the mod was replaced by a reload' };
-                    return [3 /*break*/, 16];
-                case 14: return [4 /*yield*/, sendOwn($, { to: { agentId: wake.target }, text: wake.text }).catch(function (err) { return ({ isDelivered: false, reason: String(err) }); })];
-                case 15:
-                    _c = _h.sent();
-                    _h.label = 16;
-                case 16:
-                    r = _c;
-                    if (!!r.isDelivered) return [3 /*break*/, 19];
-                    return [4 /*yield*/, runsSent($, wake, 'failed')];
-                case 17:
-                    _h.sent();
-                    return [4 /*yield*/, wakeFailed($, wake, r.reason)];
-                case 18: return [2 /*return*/, void (_h.sent())];
-                case 19: return [4 /*yield*/, runsSent($, wake, 'sent')
-                    // Only once it is on its way: work at work when the mod's own message reaches it would take that message for the chat's note
-                ];
-                case 20:
-                    _h.sent();
-                    // Only once it is on its way: work at work when the mod's own message reaches it would take that message for the chat's note
-                    return [4 /*yield*/, wakeCard($, wake.target)
-                        // Started by the message, the work reads it in the run it starts: that run's end never sends it a second time, even when no hook
-                        // of the mod saw its steps (a wake from the timer)
-                    ];
-                case 21:
-                    // Only once it is on its way: work at work when the mod's own message reaches it would take that message for the chat's note
-                    _h.sent();
-                    // Started by the message, the work reads it in the run it starts: that run's end never sends it a second time, even when no hook
-                    // of the mod saw its steps (a wake from the timer)
-                    for (_d = 0, _e = wake.answers; _d < _e.length; _d++) {
-                        _f = _e[_d], one = _f.one, sent = _f.sent;
-                        startedBy.add("".concat(one.id, ":").concat(sent.at));
-                    }
-                    return [2 /*return*/];
-            }
-        });
-    });
-};
+}); };
 // The answers, by card and when given, that started their work again: the run each started reads it
 var startedBy = new Set();
 // An answer written into work under way, which reads it at a step of its own: an earlier wake's run no longer covers this card
@@ -1501,18 +1622,15 @@ var writtenIn = function ($, target, card) {
 // Work an answer or the person's message started again is at work from then: its card is back among the running cards, not under
 // Finished, while it acts on it
 var wakeCard = function ($, target) { return __awaiter(_this, void 0, void 0, function () {
-    var now, isWoken;
+    var now;
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0: return [4 /*yield*/, $.clock.now()];
             case 1:
                 now = _a.sent();
-                isWoken = false;
-                return [4 /*yield*/, changeTodos($, function (list) { return ((isWoken = false), list).map(function (card) { return (card.id !== target || card.status === 'working' ? card : ((isWoken = true), resumed(card, now))); }); })];
+                return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (card) { return (card.id !== target || card.status === 'working' ? card : resumed(card, now)); }); })];
             case 2:
                 _a.sent();
-                if (isWoken)
-                    endedByHandback.delete(target);
                 return [2 /*return*/];
         }
     });
@@ -1576,7 +1694,7 @@ var askInChat = function ($, one) { return __awaiter(_this, void 0, void 0, func
                 if (!ask || isOff || !dir || inChat.get(one.id) === askKey(ask))
                     return [2 /*return*/];
                 inChat.set(one.id, askKey(ask));
-                answers = ((_a = ask.choices) === null || _a === void 0 ? void 0 : _a.length) ? ask.choices : DEFAULT_ANSWERS;
+                answers = (_a = ask.choices) !== null && _a !== void 0 ? _a : [];
                 // The person sees the ask on its card, and is told by the panel's notification; the chat's model reads it in a row of its own,
                 // with how to pass an answer on, which starts no turn and shows nothing in the chat
                 return [4 /*yield*/, $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(ASK_RELAY(one.id, titleOf(one), ask, answers)) }] } }).catch(function (err) { return (inChat.get(one.id) === askKey(ask) && inChat.delete(one.id), log($, "chat not told of an ask: ".concat(String(err)))); })];
@@ -1634,34 +1752,29 @@ var answeredInChat = function ($, a, to, isSent) { return __awaiter(_this, void 
                 // Either way the ask is done with in the chat: the work asking again is sent to it afresh
                 if (isHeld)
                     answeredAsks.delete(a.key);
-                // Their words answer what the work recorded for that question either way: the work clearing the ask later leaves it answered
-                return [4 /*yield*/, settleAsked($, a.card.id, a.ask, IN_WORDS).catch(function (err) { return log($, "result's question not answered with the ask of ".concat(a.card.id, ": ").concat(String(err))); })];
-            case 1:
-                // Their words answer what the work recorded for that question either way: the work clearing the ask later leaves it answered
-                _b.sent();
                 inChat.delete(a.card.id);
                 return [4 /*yield*/, changeTodos($, function (all) { return all.map(function (one) { var _a; return (one.id === a.card.id && ((_a = one.ask) === null || _a === void 0 ? void 0 : _a.at) === a.ask.at && one.ask.text === a.ask.text ? __assign(__assign({}, one), { ask: isHeld ? __assign(__assign({}, one.ask), { replied: __assign({ text: a.words, at: a.at }, (one.status === 'working' ? {} : { isWaking: true })) }) : undefined }) : one); }); })];
-            case 2:
+            case 1:
                 _b.sent();
                 dropDrafts($, a.card.id);
                 sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) });
                 writtenIn($, to, a.card.id);
-                if (!(a.ask.from && a.ask.from !== to)) return [3 /*break*/, 4];
+                if (!(a.ask.from && a.ask.from !== to)) return [3 /*break*/, 3];
                 return [4 /*yield*/, read($, todos)];
-            case 3:
+            case 2:
                 _a = (_b.sent()).find(function (one) { return one.id === a.ask.from && one.status === 'working'; });
-                return [3 /*break*/, 5];
-            case 4:
+                return [3 /*break*/, 4];
+            case 3:
                 _a = undefined;
-                _b.label = 5;
-            case 5:
+                _b.label = 4;
+            case 4:
                 helper = _a;
-                if (!helper) return [3 /*break*/, 7];
+                if (!helper) return [3 /*break*/, 6];
                 return [4 /*yield*/, tell($, helper.id, "".concat(who(true), " answered your question (\"").concat(a.ask.text, "\") in the chat, in their own words: ").concat(a.words))];
-            case 6:
+            case 5:
                 _b.sent();
-                _b.label = 7;
-            case 7:
+                _b.label = 6;
+            case 6:
                 redraw($);
                 return [2 /*return*/];
         }
@@ -1695,8 +1808,11 @@ var replyAfter = function ($, one, said, asked) { return __awaiter(_this, void 0
         }
     });
 }); };
-// The work an answer was written into starts its next step: that step reads it
+// The work an answer was written into starts its next step: that step reads it. What a command the person allowed printed, kept
+// for this step, is written in now (runsAtStep)
 var replyRead = function ($, agentId) {
+    if (runList.some(function (run) { var _a; return ((_a = run.waiting) === null || _a === void 0 ? void 0 : _a.target) === agentId; }))
+        void runsAtStep($, agentId).catch(function (err) { return log($, "output of a command not passed on: ".concat(String(err))); });
     var card = pending.get(agentId);
     if (card === undefined)
         return;
@@ -1733,57 +1849,100 @@ var replyUnread = function ($, agentId) { return __awaiter(_this, void 0, void 0
         }
     });
 }); };
-// An answer given on the card in the last ANSWER_SHOWN: the card stays where it was meanwhile (answeredSince), and says it
+// An answer or a press given on the card in the last ANSWER_SHOWN: the card stays where it was meanwhile (answeredSince), and says it
 var heldAnswer = function (one, now) {
     var sent = one.chat ? undefined : sentReplies.get(one.id);
     return (sent === null || sent === void 0 ? void 0 : sent.isCard) && sent.to !== 'lost' && now - sent.at < ANSWER_SHOWN ? sent : undefined;
 };
-// A reply written into work while one of its calls is held open is read only when that call ends: the card names it and how long it
-// has run, so a wait is never taken for a reply lost
-var waitsBehind = function (one, at, now) {
-    var _a;
-    // the call held open by the very work the reply was written into (the helper that asked, or the work), while it is unread
-    var target = (_a = __spreadArray([], pending, true).find(function (_a) {
-        var card = _a[1];
-        return card === one.id;
-    })) === null || _a === void 0 ? void 0 : _a[0];
-    var running = target !== undefined && one.status === 'working' ? runningOf(target) : undefined;
-    if (!running || running.at > at)
-        return '';
-    var name = running.label ? "\u201C".concat(cut(describedOf(running.label).text || running.label, 50), "\u201D") : running.what.replace(/ running$/, '');
-    return "Claude reads it when ".concat(name, " ends \u00B7 running ").concat(took(now - running.at));
-};
-// What the card says of the answer last given to its ask, for ANSWER_SHOWN after, until the work writes a newer line or asks again.
-// An answer that could not be left for another Mac says so under the ask, which is back
-var sentLine = function (one, now) {
+// The one grey line a card says of what the person last pressed or answered on it, for ANSWER_SHOWN after: what was pressed, and
+// nothing of who reads it. A reply that left its question open says so under it; an answer that could not be sent says so too
+// A reply that holds its ask is said for as long as the card carries it, as it stands in place of the question there. `most`: how
+// many of the person's letters it gives (Details gives them all)
+var sentLine = function (one, now, most) {
     var _a, _b, _c, _d, _e;
+    if (most === void 0) { most = 60; }
     var sent = sentReplies.get(one.id);
     // A held reply this copy did not send (before a reload, or from another chat) is still said under its ask
     var replied = (_a = one.ask) === null || _a === void 0 ? void 0 : _a.replied;
+    var heldLine = replied ? "\u2713 You answered \u201C".concat(cut(replied.text, most), "\u201D").concat(isActingOnReply(one) ? '' : ' · the question is still open') : '';
     if (replied && !(sent && sent.ask === ((_b = one.ask) === null || _b === void 0 ? void 0 : _b.text) && (sent.text === replied.text || sent.isHeld)))
-        return "\u2713 You answered \u201C".concat(cut(replied.text, 60), "\u201D").concat(isActingOnReply(one) ? ' · Claude is working on it' : ' · the question is still open');
+        return heldLine;
     if (!sent)
         return '';
     if (sent.to === 'failed')
-        return ((_c = one.ask) === null || _c === void 0 ? void 0 : _c.text) === sent.ask ? "Couldn't send \u201C".concat(cut(sent.text, 60), "\u201D to Claude \u00B7 press it again") : '';
+        return ((_c = one.ask) === null || _c === void 0 ? void 0 : _c.text) === sent.ask ? "Couldn't send \u201C".concat(cut(sent.text, most), "\u201D \u00B7 press it again") : '';
     if (sent.to === 'lost')
-        return ((_d = one.ask) === null || _d === void 0 ? void 0 : _d.text) === sent.ask ? "Couldn't reach that Mac with \u201C".concat(cut(sent.text, 60), "\u201D \u00B7 answer in its own chat") : '';
-    var newer = lineOf(one) !== sent.line;
+        return ((_d = one.ask) === null || _d === void 0 ? void 0 : _d.text) === sent.ask ? "Couldn't reach that Mac with \u201C".concat(cut(sent.text, most), "\u201D \u00B7 answer in its own chat") : '';
+    if (now - sent.at > ANSWER_SHOWN)
+        return heldLine;
+    if (sent.to === 'pressed')
+        return "\u2713 ".concat(sent.whole || "You pressed \u201C".concat(sent.text, "\u201D")).concat(sent.said ? " \u00B7 ".concat(sent.said) : '');
     var isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || ((_e = one.ask.replied) === null || _e === void 0 ? void 0 : _e.text) === sent.text));
-    if ((one.ask && !isHeld) || (!isHeld && (newer || now - sent.at > ANSWER_SHOWN)))
+    if (one.ask && !isHeld)
         return '';
-    // Run it pressed, and the output of that command carried to its ended task: the card's one quiet line says it (runBlock), nothing more
-    if (sent.to === 'ran' || sent.isRun)
-        return '';
-    var how = {
-        sending: 'Sending to Claude…',
-        work: waitsBehind(one, sent.at, now) || 'Claude reads it next',
-        read: 'Claude has read it',
-        chat: 'sent to the chat, which carries on the task',
-        ran: '',
-        other: "sent to the chat \"".concat(cut(one.chat ? chatName(one.chat) : 'it runs in', 40), "\", which passes it on"),
-    }[sent.to];
-    if (isHeld)
-        return "\u2713 You answered \u201C".concat(cut(sent.text, 60), "\u201D \u00B7 ").concat(sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how).concat(isActingOnReply(one) ? '' : ' · the question is still open');
-    return "\u2713 You ".concat(sent.ask === CHANGE_WHAT ? 'asked for' : 'answered', " \u201C").concat(cut(sent.text, 60), "\u201D \u00B7 ").concat(how);
+    if (sent.to === 'chat')
+        return "\u2713 You answered \u201C".concat(cut(sent.text, most), "\u201D \u00B7 it couldn't reach the task, so it goes with your next message");
+    if (sent.isPress)
+        return "\u2713 You pressed \u201C".concat(cut(sent.text, most), "\u201D");
+    return "\u2713 You ".concat(sent.ask === CHANGE_WHAT ? 'wrote' : 'answered', " \u201C").concat(cut(sent.text, most), "\u201D").concat(isHeld && !isActingOnReply(one) ? ' · the question is still open' : '');
 };
+// A block a press answered on a small card, by card: the card holds the rows it took (foldRows) under the grey line that takes its
+// place, for FOLD_HELD from the first drawing that shows it so, then closes up. `need`: the block's id and when it came, so the rows
+// stand where it stood among the card's other blocks. Its time is counted in the panel's own drawing, which also asks for the drawing
+// that closes it, and the end of each is part of what the person's own presses change (personSign), so a panel held while they use
+// it scrolled down closes it too (19 Nov: the space after Release it never closed while the person moved about the panel)
+var answerFolds = new Map();
+var FOLD_HELD = 3000;
+// (one never drawn within FOLD_UNSEEN of its press is let go, so a card first shown later never opens a space)
+var FOLD_UNSEEN = 10000;
+var holdFold = function (card, need, came, rows) { return void answerFolds.set(card, { need: need, came: came, rows: rows, at: Infinity, pressed: Date.now() }); };
+// The rows a card holds now for a block just answered, while that block is no longer drawn
+var foldOf = function ($, card, now, drawn) {
+    var fold = answerFolds.get(card);
+    if (!fold || drawn.includes(fold.need))
+        return undefined;
+    if (fold.at === Infinity) {
+        if (Date.now() - fold.pressed > FOLD_UNSEEN)
+            return void answerFolds.delete(card);
+        answerFolds.set(card, __assign(__assign({}, fold), { at: now }));
+        $.clock.after(FOLD_HELD + 50, function () { return drawAgain($); });
+        return fold;
+    }
+    if (now - fold.at < FOLD_HELD)
+        return fold;
+    answerFolds.delete(card);
+    return undefined;
+};
+// The cards whose space is still held, as a drawing at `now` would show them
+var foldsHeld = function (now) { return __spreadArray([], answerFolds, true).filter(function (_a) {
+    var fold = _a[1];
+    return now - fold.at < FOLD_HELD;
+}).map(function (_a) {
+    var card = _a[0];
+    return card;
+}); };
+// What was pressed on a block, said in one grey line where the block was: on its task's card (sentLine), or at the top of the
+// panel for a block that belonged to no task (loosePressed). Drawn from the press itself, before anything is awaited
+var loosePressed = [];
+var pressedLine = function ($, card, label, said, whole) {
+    if (said === void 0) { said = ''; }
+    if (whole === void 0) { whole = ''; }
+    var sent = __assign(__assign({ text: label, ask: '', to: 'pressed', at: Infinity, isCard: true }, (said ? { said: said } : {})), (whole ? { whole: whole } : {}));
+    var loose = { text: "\u2713 ".concat(whole || "You pressed \u201C".concat(label, "\u201D")).concat(said ? " \u00B7 ".concat(said) : ''), at: Infinity };
+    if (card)
+        sentReplies.set(card, sent);
+    else
+        loosePressed = __spreadArray(__spreadArray([], loosePressed, true), [loose], false).slice(-4);
+    redraw($);
+    void $.clock
+        .now()
+        .then(function (at) {
+        if (card && sentReplies.get(card) === sent)
+            sentReplies.set(card, __assign(__assign({}, sent), { at: at }));
+        loosePressed = loosePressed.map(function (one) { return (one === loose ? __assign(__assign({}, one), { at: at }) : one); }).filter(function (one) { return at - one.at < ANSWER_SHOWN; });
+        // Drawn again as its time ends, so it goes with nothing else to redraw the panel
+        $.clock.after(ANSWER_SHOWN + 50, function () { return drawAgain($); });
+    })
+        .catch(function () { return undefined; });
+};
+var loosePressedShown = function (now) { return loosePressed.filter(function (one) { return now - one.at < ANSWER_SHOWN; }); };

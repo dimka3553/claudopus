@@ -144,115 +144,29 @@ var boxWording = function (one) {
         // A password is sent only sealed to the key the runner made for this one request: a request with none is drawn nowhere
         if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined || typeof one.key !== 'string' || !BOX_KEY.test(one.key))
             return undefined;
-        var mac = one.host === 'here' ? thisMac() : one.host;
-        return "".concat(again, "Claudopus needs the admin password of ").concat(mac, " to run the command below. It goes only to that command and isn't saved, so the next one asks again.");
+        var mac = one.host === 'here' ? "This Mac's password" : "The password of ".concat(one.host);
+        return { kind: 'password', host: one.host, text: "".concat(again).concat(mac, " is needed to run this as admin."), details: 'It goes only to this command and is never saved.' };
     }
     if (one.kind === 'secret') {
         if (one.host !== undefined)
             return undefined;
         // No name: the first box of a key saved by hand asks its name
         if (one.name === undefined)
-            return 'Name of the key to save, such as GITHUB_TOKEN. Claude uses it by this name.';
+            return { kind: 'key', text: 'Which name should the key be saved under, such as GITHUB_TOKEN?', details: 'Commands use the key by this name.' };
         if (typeof one.name !== 'string' || !BOX_NAME.test(one.name))
             return undefined;
-        return "".concat(again, "Claudopus needs ").concat(one.name, ". Claudopus saves it only in ").concat(keptWhere(), ". Claude uses it by name, and Claudopus hides it in anything a command shows.");
+        return { kind: 'key', name: one.name, text: "".concat(again).concat(one.name, " is needed to run this task's command."), details: "It goes only into ".concat(keptWhere(), ".") };
     }
     return undefined;
 };
 var boxes = [];
-var doneNotes = [];
-var DONE_SHOWN = 60000;
-var DONE_LEAST = 15000;
-var DONE_LONGEST = 30 * 60000;
-var isNoteShown = function (one, at) {
-    return !one.call ? at - one.at < DONE_SHOWN : one.endedAt === undefined ? at - one.at < DONE_LONGEST : at < Math.max(one.endedAt, one.at + DONE_LEAST);
-};
-// The calls that have ended, so a note made after its call ended (a runner sent to the background) is over from the start
-var callsEnded = new Set();
-var noteDone = function ($, note) { return __awaiter(_this, void 0, void 0, function () {
-    var at, made;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                // Drawn from the press itself: in the list before anything is awaited, shown until the clock dates it a moment later
-                doneNotes = __spreadArray(__spreadArray([], doneNotes.filter(function (one) { return one.id !== note.id; }), true), [__assign(__assign({}, note), { at: Infinity })], false);
-                drawAgain($);
-                return [4 /*yield*/, $.clock.now()];
-            case 1:
-                at = _a.sent();
-                made = __assign(__assign(__assign({}, note), { at: at }), (note.call && note.endedAt === undefined && callsEnded.has(note.call) ? { endedAt: at } : {}));
-                doneNotes = __spreadArray(__spreadArray([], doneNotes.filter(function (one) { return one.id !== note.id && isNoteShown(one, at); }), true), [made], false).slice(-6);
-                drawAgain($);
-                // Drawn again as its time ends, so it goes with nothing else to redraw the panel
-                $.clock.after((!made.call ? DONE_SHOWN : made.endedAt !== undefined ? DONE_LEAST : DONE_LONGEST) + 100, function () { return drawAgain($); });
-                return [2 /*return*/];
-        }
-    });
-}); };
-// The call a note tells of has ended: what it said is over, so the note goes (after DONE_LEAST from its press)
-var noteCallEnded = function ($, call) { return __awaiter(_this, void 0, void 0, function () {
-    var at, last;
-    var _a;
-    return __generator(this, function (_b) {
-        switch (_b.label) {
-            case 0:
-                callsEnded.add(call);
-                if (callsEnded.size > 200)
-                    callsEnded.delete((_a = callsEnded.values().next().value) !== null && _a !== void 0 ? _a : '');
-                if (!doneNotes.some(function (one) { return one.call === call && one.endedAt === undefined; }))
-                    return [2 /*return*/];
-                return [4 /*yield*/, $.clock.now()];
-            case 1:
-                at = _b.sent();
-                doneNotes = doneNotes.map(function (one) { return (one.call === call && one.endedAt === undefined ? __assign(__assign({}, one), { endedAt: at }) : one); });
-                drawAgain($);
-                last = Math.max.apply(Math, doneNotes.filter(function (one) { return one.call === call; }).map(function (one) { return one.at + DONE_LEAST; }));
-                $.clock.after(Math.max(0, last - at) + 100, function () { return drawAgain($); });
-                return [2 /*return*/];
-        }
-    });
-}); };
-// What was done is a line, as Claude Code reports a call's result under it: a mark and the words, with no box, fill or edge, so it is
-// never taken for a card of work. Green once allowed or given, grey once refused or cancelled
-var reportLine = function (ui, key, isOn, said, lines) { return (<ui.Box key={key} flexDirection="row" gap={1} paddingX={2} flexShrink={0}>
-    <ui.Text color={isOn ? DONE : undefined} dimColor={!isOn}>{isOn ? '✓' : '✕'}</ui.Text>
-    <ui.Box flexDirection="column" minWidth={0} flexGrow={1} flexShrink={1}>
-      <ui.Text wrap="wrap">{said}</ui.Text>
-      {lines.filter(Boolean).map(function (line, n) { return <ui.Text key={"".concat(key, "-").concat(n)} dimColor wrap="truncate-end">{line}</ui.Text>; })}
-    </ui.Box>
-  </ui.Box>); };
-var doneNotesPart = function (ui, at) {
-    return doneNotes.filter(function (one) { return !one.card && isNoteShown(one, at); }).map(function (one) { return reportLine(ui, "done-".concat(one.id), Boolean(one.isOn), one.said, [one.head, one.what]); });
-};
-// What was done with a gate on a work's card, in that card where the amber box was: the same outlined box, green once allowed, grey
-// once refused, saying what was allowed, until its note goes
-var cardNotesOf = function (card, at) { return doneNotes.filter(function (one) { return one.card === card && isNoteShown(one, at); }); };
-var cardNotesPart = function (ui, card, at) {
-    return cardNotesOf(card, at).map(function (one) { return (<ui.Box key={"done-".concat(one.id)} flexDirection="column" borderStyle="round" borderColor={one.isOn ? DONE : '#808080'} paddingX={1} flexShrink={0}>
-      <ui.Text wrap="truncate-end" dimColor>{one.head}</ui.Text>
-      <ui.Box flexDirection="row" gap={1}>
-        <ui.Text color={one.isOn ? DONE : undefined} dimColor={!one.isOn}>{one.isOn ? '✓' : '✕'}</ui.Text>
-        <ui.Box flexShrink={1} minWidth={0}>
-          <ui.Text wrap="wrap" color={one.isOn ? DONE : undefined} bold={one.isOn}>{one.said}</ui.Text>
-        </ui.Box>
-      </ui.Box>
-      {one.what ? <ui.Text key={"done-".concat(one.id, "-what")} dimColor wrap="truncate-end">{one.what}</ui.Text> : null}
-    </ui.Box>); });
-};
-// What a box asks for, in a few words, for its note once answered
-var boxHead = function (text) {
-    var _a, _b;
-    var name = (_a = text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)) === null || _a === void 0 ? void 0 : _a[1];
-    var mac = (_b = text.match(/admin password of (.+?) to run/)) === null || _b === void 0 ? void 0 : _b[1];
-    return mac ? "The admin password of ".concat(mac) : name ? "The key ".concat(name) : 'A key to save';
-};
 // What is typed in a box is kept by the surface alone, never here or drawn back: a drawing that carried it put older letters over
 // newer ones. Each try that left the box to be typed again gives its field a new key, so the field starts empty
 var boxTries = new Map();
 // The boxes something is typed in, unsent, so an ask's reply box does not take the keys from them
 var boxTyped = new Set();
-// What is typed in the bar's key box while it is open, only so its Send button can send it: never written anywhere, and gone once
-// it is sent, closed or the box moves
+// What is typed for a box in the box above the chat while it is open, only so its Send button can send it: never written
+// anywhere, and gone once it is sent, closed or the box moves
 var barKeyTyped = new Map();
 // A line under a box: what went wrong with what was sent
 var boxSaid = new Map();
@@ -270,162 +184,175 @@ var boxesDir = function () { return "".concat(dir, "/boxes"); };
 // Another chat's request is left to it this long, so its own chat tells it, when that chat is open
 var BOX_GRACE = 5000;
 // In the chat only the name of what is asked, once per box, in the chat that asked or else whichever chat sees it first
-var BOX_TOLD = function (text) { return "".concat(text, " Type it in its box in the Claudopus panel, not in this chat. /claudopus opens the panel. What you type there goes only into ").concat(keptWhere()).concat(text.includes('admin password') ? '' : '. Or answer in words, such as where it already is', "."); };
+var BOX_TOLD = function (one) { return "".concat(one.text, " Press ").concat(one.kind === 'password' ? TYPE_IT : PASTE_IT, " on it in the Claudopus panel (/claudopus opens it) and type it in the box above the chat, never in the chat itself").concat(one.kind === 'password' ? '' : ". Or answer in words, such as where it already is", "."); };
 // This chat's own id, as the runner reads it from CLAUDE_CODE_SESSION_ID, read at each look (a /clear can change it)
 var boxChat = '';
 // Requests this chat has told or seen told
 var boxTold = new Set();
 var lookBoxes = function ($) { return __awaiter(_this, void 0, void 0, function () {
-    var now, found, entries, _loop_1, _i, entries_1, entry, _a, found_1, one, mark_1, opened_1, _loop_2, _b, boxTold_1, id, _loop_3, _c, _d, id, _loop_4, _e, _f, id;
-    var _g;
-    return __generator(this, function (_h) {
-        switch (_h.label) {
+    var now, found, entries, cards, _a, _loop_1, _i, entries_1, entry, _b, found_1, one, mark_1, opened_1, _loop_2, _c, boxTold_1, id, _loop_3, _d, _e, id, _loop_4, _f, _g, id;
+    var _h, _j;
+    return __generator(this, function (_k) {
+        switch (_k.label) {
             case 0:
                 if (!dir)
                     return [2 /*return*/];
                 return [4 /*yield*/, $.session.surfaces().catch(function () { return []; })];
             case 1:
                 // A chat with nothing to draw on (a -p run) takes no request: one it took would wait on a panel nobody sees
-                if (!(_h.sent()).length)
+                if (!(_k.sent()).length)
                     return [2 /*return*/];
                 return [4 /*yield*/, $.session.id().catch(function () { return ''; })];
             case 2:
-                boxChat = _h.sent();
+                boxChat = _k.sent();
                 return [4 /*yield*/, $.clock.now()];
             case 3:
-                now = _h.sent();
+                now = _k.sent();
                 found = [];
                 return [4 /*yield*/, $.fs.list(boxesDir()).catch(function () { return []; })];
             case 4:
-                entries = _h.sent();
+                entries = _k.sent();
+                if (!entries.length) return [3 /*break*/, 6];
+                return [4 /*yield*/, read($, todos)];
+            case 5:
+                _a = _k.sent();
+                return [3 /*break*/, 7];
+            case 6:
+                _a = [];
+                _k.label = 7;
+            case 7:
+                cards = _a;
                 _loop_1 = function (entry) {
-                    var marked, answered, id, one, _j, _k, text, runner, key, isKeySame, _l;
-                    return __generator(this, function (_m) {
-                        switch (_m.label) {
+                    var marked, answered, id, one, _l, _m, words, runner_1, key, isKeySame, card, _o;
+                    return __generator(this, function (_p) {
+                        switch (_p.label) {
                             case 0:
                                 marked = entry.name.replace(/\.told$/, '');
                                 answered = entry.name.replace(/\.reply$/, '');
-                                if (!(entry.name.endsWith('.reply') && BOX_ID.test(answered) && !entries.some(function (other) { return other.name === "".concat(answered, ".json"); }) && now - ((_g = boxRepliedAt.get(answered)) !== null && _g !== void 0 ? _g : 0) > BOX_REPLY_TAKEN)) return [3 /*break*/, 2];
+                                if (!(entry.name.endsWith('.reply') && BOX_ID.test(answered) && !entries.some(function (other) { return other.name === "".concat(answered, ".json"); }) && now - ((_h = boxRepliedAt.get(answered)) !== null && _h !== void 0 ? _h : 0) > BOX_REPLY_TAKEN)) return [3 /*break*/, 2];
                                 boxRepliedAt.delete(answered);
                                 return [4 /*yield*/, $.process.run(['rm', '-f', "".concat(boxesDir(), "/").concat(entry.name)]).catch(function () { return undefined; })];
                             case 1:
-                                (_m.sent());
-                                _m.label = 2;
+                                (_p.sent());
+                                _p.label = 2;
                             case 2:
                                 if (!(entry.name.endsWith('.told') && BOX_ID.test(marked) && !entries.some(function (other) { return other.name === "".concat(marked, ".json"); }))) return [3 /*break*/, 4];
                                 return [4 /*yield*/, $.process.run(['rm', '-f', "".concat(boxesDir(), "/").concat(entry.name)]).catch(function () { return undefined; })];
                             case 3:
-                                _m.sent();
-                                _m.label = 4;
+                                _p.sent();
+                                _p.label = 4;
                             case 4:
                                 id = entry.name.replace(/\.json$/, '');
                                 if (!entry.name.endsWith('.json') || !BOX_ID.test(id) || boxSent.has(id))
                                     return [2 /*return*/, "continue"];
-                                _m.label = 5;
+                                _p.label = 5;
                             case 5:
-                                _m.trys.push([5, 11, , 12]);
-                                _k = (_j = JSON).parse;
+                                _p.trys.push([5, 11, , 12]);
+                                _m = (_l = JSON).parse;
                                 return [4 /*yield*/, readOr($, "".concat(boxesDir(), "/").concat(entry.name))];
                             case 6:
-                                one = _k.apply(_j, [_m.sent()]);
-                                text = one && typeof one === 'object' ? boxWording(one) : undefined;
-                                runner = typeof one.at === 'number' ? runnerFor(one, one.at, now) : undefined;
+                                one = _m.apply(_l, [_p.sent()]);
+                                words = one && typeof one === 'object' ? boxWording(one) : undefined;
+                                runner_1 = typeof one.at === 'number' ? runnerFor(one, one.at, now) : undefined;
                                 key = typeof one.key === 'string' ? one.key : undefined;
                                 if (key && !boxKeys.has(id))
                                     boxKeys.set(id, key);
                                 isKeySame = !key || boxKeys.get(id) === key;
-                                if (!(one.id === id && text && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner)) return [3 /*break*/, 7];
-                                found.push(__assign(__assign({ id: id, text: text, at: one.at, chat: one.chat, command: runner.command, call: runner.call }, (runner.agent ? { agent: runner.agent } : {})), (one.kind === 'admin' && key ? { key: key } : {})));
+                                card = (runner_1 === null || runner_1 === void 0 ? void 0 : runner_1.agent) ? (_j = cards.find(function (other) { var _a; return other.id === topOf(cards, (_a = runner_1.agent) !== null && _a !== void 0 ? _a : ''); })) === null || _j === void 0 ? void 0 : _j.id : undefined;
+                                if (!(one.id === id && words && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner_1)) return [3 /*break*/, 7];
+                                found.push(__assign(__assign(__assign(__assign(__assign({ id: id }, words), { at: one.at, chat: one.chat, command: runner_1.command, call: runner_1.call }), (runner_1.agent ? { agent: runner_1.agent } : {})), (card ? { card: card } : {})), (one.kind === 'admin' && key ? { key: key } : {})));
                                 return [3 /*break*/, 10];
                             case 7:
                                 if (!(typeof one.at === 'number' && (now - one.at >= BOX_OLD || one.at - now > BOX_SKEW))) return [3 /*break*/, 10];
                                 return [4 /*yield*/, $.process.run(['rm', '-f', "".concat(boxesDir(), "/").concat(id, ".json"), "".concat(boxesDir(), "/").concat(id, ".told"), "".concat(boxesDir(), "/").concat(id, ".reply")]).catch(function () { return undefined; })];
                             case 8:
-                                _m.sent();
+                                _p.sent();
                                 return [4 /*yield*/, boxKeyring($, 'delete', id)];
                             case 9:
-                                _m.sent();
-                                _m.label = 10;
+                                _p.sent();
+                                _p.label = 10;
                             case 10: return [3 /*break*/, 12];
                             case 11:
-                                _l = _m.sent();
+                                _o = _p.sent();
                                 return [3 /*break*/, 12];
                             case 12: return [2 /*return*/];
                         }
                     });
                 };
                 _i = 0, entries_1 = entries;
-                _h.label = 5;
-            case 5:
-                if (!(_i < entries_1.length)) return [3 /*break*/, 8];
+                _k.label = 8;
+            case 8:
+                if (!(_i < entries_1.length)) return [3 /*break*/, 11];
                 entry = entries_1[_i];
                 return [5 /*yield**/, _loop_1(entry)];
-            case 6:
-                _h.sent();
-                _h.label = 7;
-            case 7:
-                _i++;
-                return [3 /*break*/, 5];
-            case 8:
-                found.sort(function (a, b) { return a.at - b.at; });
-                _a = 0, found_1 = found;
-                _h.label = 9;
             case 9:
-                if (!(_a < found_1.length)) return [3 /*break*/, 16];
-                one = found_1[_a];
+                _k.sent();
+                _k.label = 10;
+            case 10:
+                _i++;
+                return [3 /*break*/, 8];
+            case 11:
+                found.sort(function (a, b) { return a.at - b.at; });
+                _b = 0, found_1 = found;
+                _k.label = 12;
+            case 12:
+                if (!(_b < found_1.length)) return [3 /*break*/, 19];
+                one = found_1[_b];
                 if (boxTold.has(one.id))
-                    return [3 /*break*/, 15];
+                    return [3 /*break*/, 18];
                 // Another chat's request waits for that chat a moment (and every request does, in a chat that cannot read its own id)
                 if (one.chat !== undefined && one.chat !== boxChat && now - one.at < BOX_GRACE)
-                    return [3 /*break*/, 15];
+                    return [3 /*break*/, 18];
                 boxTold.add(one.id);
                 return [4 /*yield*/, $.process.run(['sh', '-c', 'set -C; : > "$1"', 'sh', "".concat(boxesDir(), "/").concat(one.id, ".told")]).catch(function () { return ({ exitCode: 1 }); })];
-            case 10:
-                mark_1 = _h.sent();
-                if (mark_1.exitCode !== 0)
-                    return [3 /*break*/, 15];
-                return [4 /*yield*/, $.ui.open({ id: LIST, title: LIST_TITLE, focus: true }).catch(function (err) { return (log($, "panel not opened for a box: ".concat(String(err))), undefined); })];
-            case 11:
-                opened_1 = _h.sent();
-                if (!!(opened_1 === null || opened_1 === void 0 ? void 0 : opened_1.isPlaced)) return [3 /*break*/, 14];
-                return [4 /*yield*/, $.process.run(['rm', '-f', "".concat(boxesDir(), "/").concat(one.id, ".told")]).catch(function () { return undefined; })];
-            case 12:
-                _h.sent();
-                return [4 /*yield*/, log($, "box ".concat(one.id, " given back: the panel is not drawn here").concat(opened_1 && !opened_1.isPlaced ? " (".concat(opened_1.reason, ")") : ''))];
             case 13:
-                _h.sent();
-                return [3 /*break*/, 15];
+                mark_1 = _k.sent();
+                if (mark_1.exitCode !== 0)
+                    return [3 /*break*/, 18];
+                return [4 /*yield*/, $.ui.open({ id: LIST, title: LIST_TITLE, focus: true }).catch(function (err) { return (log($, "panel not opened for a box: ".concat(String(err))), undefined); })];
             case 14:
-                $.ui.log(BOX_TOLD(one.text));
-                _h.label = 15;
+                opened_1 = _k.sent();
+                if (!!(opened_1 === null || opened_1 === void 0 ? void 0 : opened_1.isPlaced)) return [3 /*break*/, 17];
+                return [4 /*yield*/, $.process.run(['rm', '-f', "".concat(boxesDir(), "/").concat(one.id, ".told")]).catch(function () { return undefined; })];
             case 15:
-                _a++;
-                return [3 /*break*/, 9];
+                _k.sent();
+                return [4 /*yield*/, log($, "box ".concat(one.id, " given back: the panel is not drawn here").concat(opened_1 && !opened_1.isPlaced ? " (".concat(opened_1.reason, ")") : ''))];
             case 16:
+                _k.sent();
+                return [3 /*break*/, 18];
+            case 17:
+                $.ui.log(BOX_TOLD(one));
+                _k.label = 18;
+            case 18:
+                _b++;
+                return [3 /*break*/, 12];
+            case 19:
                 _loop_2 = function (id) {
                     if (!found.some(function (one) { return one.id === id; }))
                         boxTold.delete(id);
                 };
-                for (_b = 0, boxTold_1 = boxTold; _b < boxTold_1.length; _b++) {
-                    id = boxTold_1[_b];
+                for (_c = 0, boxTold_1 = boxTold; _c < boxTold_1.length; _c++) {
+                    id = boxTold_1[_c];
                     _loop_2(id);
                 }
                 _loop_3 = function (id) {
                     if (!entries.some(function (entry) { return entry.name === "".concat(id, ".json"); }))
                         boxKeys.delete(id);
                 };
-                for (_c = 0, _d = boxKeys.keys(); _c < _d.length; _c++) {
-                    id = _d[_c];
+                for (_d = 0, _e = boxKeys.keys(); _d < _e.length; _d++) {
+                    id = _e[_d];
                     _loop_3(id);
                 }
                 _loop_4 = function (id) {
                     if (!found.some(function (one) { return one.id === id; }))
                         (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id), barKeyTyped.delete(id), boxModes.delete(id), boxHeldReply.delete(id));
                 };
-                for (_e = 0, _f = __spreadArray(__spreadArray(__spreadArray(__spreadArray(__spreadArray([], boxTries.keys(), true), boxSaid.keys(), true), boxTyped, true), boxModes.keys(), true), boxHeldReply.keys(), true); _e < _f.length; _e++) {
-                    id = _f[_e];
+                for (_f = 0, _g = __spreadArray(__spreadArray(__spreadArray(__spreadArray(__spreadArray([], boxTries.keys(), true), boxSaid.keys(), true), boxTyped, true), boxModes.keys(), true), boxHeldReply.keys(), true); _f < _g.length; _f++) {
+                    id = _g[_f];
                     _loop_4(id);
                 }
+                if (barOpen && isBoxKind(barOpen.kind) && !found.some(function (one) { return one.id === (barOpen === null || barOpen === void 0 ? void 0 : barOpen.id); }))
+                    closeBarOf(barOpen.id);
                 if (JSON.stringify(found) === JSON.stringify(boxes))
                     return [2 /*return*/];
                 boxes = found;
@@ -455,13 +382,13 @@ var boxKeyring = function ($, what, id, stdin) { return __awaiter(_this, void 0,
 // Into the keychain under the box's id, on security's stdin as bin/secret keeps a value, so it is never in a command line
 var sendBox = function ($, id, value) { return __awaiter(_this, void 0, void 0, function () {
     var refused, request, asked, sent, _a, escaped, r, _b, _c, isKept, _d, _e, _f, one;
-    var _g, _h, _j;
-    return __generator(this, function (_k) {
-        switch (_k.label) {
+    var _g, _h, _j, _k;
+    return __generator(this, function (_l) {
+        switch (_l.label) {
             case 0:
                 if (!value)
                     return [2 /*return*/];
-                refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? "That's longer than ".concat(BOX_LONGEST, " characters, so Claudopus didn't send it.") : /[^\x20-\x7E]/.test(value) ? "That has a line break, a curly quote or another special character, so Claudopus didn't send it. Type it again." : '';
+                refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? "That's longer than ".concat(BOX_LONGEST, " characters, so it wasn't sent.") : /[^\x20-\x7E]/.test(value) ? "That has a line break, a curly quote or another special character, so it wasn't sent. Type it again." : '';
                 if (refused) {
                     boxSaid.set(id, refused);
                     boxPresses += 1;
@@ -471,9 +398,9 @@ var sendBox = function ($, id, value) { return __awaiter(_this, void 0, void 0, 
                 request = "".concat(boxesDir(), "/").concat(id, ".json");
                 return [4 /*yield*/, $.fs.exists(request).catch(function () { return false; })];
             case 1:
-                if (!!(_k.sent())) return [3 /*break*/, 3];
-                return [4 /*yield*/, cancelBox($, id, 'The command had stopped waiting. Nothing was saved.')];
-            case 2: return [2 /*return*/, void (_k.sent())
+                if (!!(_l.sent())) return [3 /*break*/, 3];
+                return [4 /*yield*/, cancelBox($, id, 'the command had stopped waiting, so nothing was saved')];
+            case 2: return [2 /*return*/, void (_l.sent())
                 // An admin password goes only sealed to its runner's key: what sits in the keychain a moment is of no use to anything else
             ];
             case 3:
@@ -481,15 +408,15 @@ var sendBox = function ($, id, value) { return __awaiter(_this, void 0, void 0, 
                 if (!(asked === null || asked === void 0 ? void 0 : asked.key)) return [3 /*break*/, 5];
                 return [4 /*yield*/, sealedFor($, asked.key, value)];
             case 4:
-                _a = _k.sent();
+                _a = _l.sent();
                 return [3 /*break*/, 6];
             case 5:
                 _a = value;
-                _k.label = 6;
+                _l.label = 6;
             case 6:
                 sent = _a;
                 if (!sent) {
-                    boxSaid.set(id, "Claudopus couldn't encrypt it for the command that asked, so it didn't send it.");
+                    boxSaid.set(id, "It couldn't be encrypted for the command that asked, so it wasn't sent.");
                     boxPresses += 1;
                     boxTries.set(id, ((_h = boxTries.get(id)) !== null && _h !== void 0 ? _h : 0) + 1);
                     return [2 /*return*/, void drawAgain($)];
@@ -497,14 +424,14 @@ var sendBox = function ($, id, value) { return __awaiter(_this, void 0, void 0, 
                 escaped = sent.replace(/[\\"]/g, '\\$&');
                 return [4 /*yield*/, hasKeychain($)];
             case 7:
-                if (!!(_k.sent())) return [3 /*break*/, 8];
+                if (!!(_l.sent())) return [3 /*break*/, 8];
                 _b = { exitCode: -1 };
                 return [3 /*break*/, 13];
             case 8:
                 if (!isLinux) return [3 /*break*/, 10];
                 return [4 /*yield*/, boxKeyring($, 'set', id, "".concat(sent, "\n"))];
             case 9:
-                _c = _k.sent();
+                _c = _l.sent();
                 return [3 /*break*/, 12];
             case 10: return [4 /*yield*/, $.process
                     .run(['/usr/bin/security', '-i'], { stdin: "add-generic-password -U -s \"".concat(BOX_SERVICE, "\" -a \"").concat(id, "\" -l \"Claudopus box\" -w \"").concat(escaped, "\"\n"), timeoutMs: 15000 })
@@ -512,11 +439,11 @@ var sendBox = function ($, id, value) { return __awaiter(_this, void 0, void 0, 
                 // security -i can end well when the add failed: the entry is looked for by its attributes, never its value
             ];
             case 11:
-                _c = _k.sent();
-                _k.label = 12;
+                _c = _l.sent();
+                _l.label = 12;
             case 12:
                 _b = _c;
-                _k.label = 13;
+                _l.label = 13;
             case 13:
                 r = _b;
                 _d = r.exitCode === 0;
@@ -524,62 +451,58 @@ var sendBox = function ($, id, value) { return __awaiter(_this, void 0, void 0, 
                 if (!isLinux) return [3 /*break*/, 15];
                 return [4 /*yield*/, boxKeyring($, 'has', id)];
             case 14:
-                _e = _k.sent();
+                _e = _l.sent();
                 return [3 /*break*/, 17];
             case 15: return [4 /*yield*/, $.process.run(['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15000 }).catch(function () { return ({ exitCode: -1 }); })];
             case 16:
-                _e = _k.sent();
-                _k.label = 17;
+                _e = _l.sent();
+                _l.label = 17;
             case 17:
                 _d = (_e).exitCode === 0;
-                _k.label = 18;
+                _l.label = 18;
             case 18:
                 isKept = _d;
                 _f = isKept;
                 if (!_f) return [3 /*break*/, 20];
                 return [4 /*yield*/, $.fs.exists(request).catch(function () { return false; })];
             case 19:
-                _f = !(_k.sent());
-                _k.label = 20;
+                _f = !(_l.sent());
+                _l.label = 20;
             case 20:
                 if (!_f) return [3 /*break*/, 22];
                 return [4 /*yield*/, boxKeyring($, 'delete', id)];
             case 21:
-                _k.sent();
-                _k.label = 22;
+                _l.sent();
+                _l.label = 22;
             case 22:
                 boxPresses += 1;
                 boxTries.set(id, ((_j = boxTries.get(id)) !== null && _j !== void 0 ? _j : 0) + 1);
                 if (!!isKept) return [3 /*break*/, 24];
-                boxSaid.set(id, "Claudopus couldn't save it in ".concat(keptWhere(), ". Try again."));
+                boxSaid.set(id, "It couldn't be saved in ".concat(keptWhere(), ". Try again."));
                 return [4 /*yield*/, log($, "box ".concat(id, " not kept: security ended ").concat(r.exitCode))];
             case 23:
-                _k.sent();
-                return [3 /*break*/, 28];
+                _l.sent();
+                return [3 /*break*/, 26];
             case 24:
                 boxSent.add(id);
                 boxSaid.delete(id);
                 boxHeldReply.delete(id);
-                if ((boxOpen === null || boxOpen === void 0 ? void 0 : boxOpen.id) === id)
-                    ((boxOpen = undefined), (barBoxAt = 0));
+                closeBarOf(id);
                 one = boxes.find(function (other) { return other.id === id; });
                 boxes = boxes.filter(function (other) { return other.id !== id; });
-                if (!one) return [3 /*break*/, 26];
-                return [4 /*yield*/, noteDone($, __assign(__assign({ id: "box-".concat(id) }, (one.call ? { call: one.call } : {})), { head: boxHead(one.text), said: one.key ? 'You gave it. It went only to the command that asked, which carries on now.' : "You gave it. Claudopus saved it in ".concat(keptWhere(), ", and the command that asked carries on now."), what: '', isOn: true }))];
+                if (one)
+                    pressedLine($, (_k = one.card) !== null && _k !== void 0 ? _k : '', '', '', one.kind === 'password' ? 'You gave the password' : one.name ? "You gave ".concat(one.name) : 'You named the key');
+                return [4 /*yield*/, log($, "box ".concat(id, " sent to the keychain"))];
             case 25:
-                _k.sent();
-                _k.label = 26;
-            case 26: return [4 /*yield*/, log($, "box ".concat(id, " sent to the keychain"))];
-            case 27:
-                _k.sent();
-                _k.label = 28;
-            case 28:
+                _l.sent();
+                _l.label = 26;
+            case 26:
                 drawAgain($);
                 return [2 /*return*/];
         }
     });
 }); };
-// Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
+// Don't allow, or Don't give it: the request goes, and the runner, finding it gone, ends as when a box is cancelled
 var cancelBox = function ($_1, id_1) {
     var args_1 = [];
     for (var _i = 2; _i < arguments.length; _i++) {
@@ -587,37 +510,30 @@ var cancelBox = function ($_1, id_1) {
     }
     return __awaiter(_this, __spreadArray([$_1, id_1], args_1, true), void 0, function ($, id, said) {
         var one;
-        if (said === void 0) { said = 'You cancelled it. Nothing was saved, and the command that asked stops without it.'; }
-        return __generator(this, function (_a) {
-            switch (_a.label) {
+        var _a;
+        if (said === void 0) { said = ''; }
+        return __generator(this, function (_b) {
+            switch (_b.label) {
                 case 0:
                     boxSent.add(id);
                     barKeyTyped.delete(id);
                     one = boxes.find(function (other) { return other.id === id; });
                     boxes = boxes.filter(function (other) { return other.id !== id; });
-                    if ((boxOpen === null || boxOpen === void 0 ? void 0 : boxOpen.id) === id)
-                        ((boxOpen = undefined), (barBoxAt = 0));
+                    closeBarOf(id);
                     boxHeldReply.delete(id);
-                    // The box goes in the press's own drawing, before its request is removed
+                    // The block goes in the press's own drawing, before its request is removed, and one grey line says what was pressed
+                    if (one)
+                        pressedLine($, (_a = one.card) !== null && _a !== void 0 ? _a : '', one.kind === 'password' ? DONT_ALLOW : DONT_GIVE, said);
                     drawAgain($);
-                    return [4 /*yield*/, $.process.run(['rm', '-f', "".concat(boxesDir(), "/").concat(id, ".json")]).catch(function () { return undefined; })
-                        // Cancelled, nothing more comes of it: it is over at once
-                    ];
+                    return [4 /*yield*/, $.process.run(['rm', '-f', "".concat(boxesDir(), "/").concat(id, ".json")]).catch(function () { return undefined; })];
                 case 1:
-                    _a.sent();
-                    if (!one) return [3 /*break*/, 3];
-                    return [4 /*yield*/, noteDone($, __assign(__assign({ id: "box-".concat(id) }, (one.call ? { call: one.call, endedAt: 0 } : {})), { head: boxHead(one.text), said: said, what: '' }))];
-                case 2:
-                    _a.sent();
-                    _a.label = 3;
-                case 3:
+                    _b.sent();
                     drawAgain($);
                     return [2 /*return*/];
             }
         });
     });
 };
-var boxOpen;
 // The mode of a box drawn with its own field, where it differs from the key
 var boxModes = new Map();
 // A response that looked like a key itself, held a moment so the person decides: sent anyway, kept as the key, or neither
@@ -626,8 +542,8 @@ var boxHeldReply = new Map();
 var boxRepliedAt = new Map();
 var BOX_REPLY_TAKEN = 60000;
 // The name a key box asks for, none for the box that asks a key's name
-var boxNameOf = function (one) { var _a; return (_a = one.text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)) === null || _a === void 0 ? void 0 : _a[1]; };
-var isNameBox = function (one) { return one.text.startsWith('Name of the key to save'); };
+var boxNameOf = function (one) { return one.name; };
+var isNameBox = function (one) { return one.kind === 'key' && !one.name; };
 // The words of a response that look like a key rather than about one: a word that starts as the distinctive keys and tokens do, a
 // short prefix (sk-, npm_) with digits after it, a key shaped as a UUID, a password inside an address, or a long run of letters and
 // digits that is no path, address or hyphenated name. Ordinary words, paths and names of settings pass
@@ -649,32 +565,11 @@ var keyWords = function (text) {
     });
 };
 var looksLikeKey = function (text) { return keyWords(text).length > 0; };
-var BOX_LOOKS_KEY = function (where) { return "That looks like the key itself. An answer in words goes into the chat, where Claude reads it. Save it as the key to keep it only in ".concat(where, ", or send it as an answer anyway."); };
-// Opens a key box's field in the bar above the prompt, for the key or a response, or closes it. One box in the bar at a time:
-// an ask's reply box open there closes (openReply does the same the other way). The cursor is asked into the field
-var openBox = function ($, id, mode, surface) {
-    if (id && replyTo)
-        (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''));
-    if (id)
-        changeTo = '';
-    boxOpen = id ? { id: id, mode: mode } : undefined;
-    barKeyTyped.clear();
-    if (id)
-        (boxHeldReply.delete(id), boxSaid.delete(id));
-    barBoxAt = 0;
-    isBarSettling = false;
-    boxPresses += 1;
-    drawAgain($);
-    var bar = barIds.get(surface);
-    if (!id || !bar)
-        return;
-    void $.ui
-        .focus({ requestId: bar, key: barKeyBoxKey(id, mode) })
-        .then(function (r) { var _a; return recordEvent($, 'focus-call', { deny: (_a = r.deny) !== null && _a !== void 0 ? _a : null }); })
-        .catch(function (err) { return recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }); });
-};
-// The bar's field for a key box: named as the bar's reply boxes are (isBarBox), so a click in it holds the bar as drawn
-var barKeyBoxKey = function (id, mode) { var _a; return "band-box-".concat(id, "-reply-").concat(mode, "-").concat((_a = boxTries.get(id)) !== null && _a !== void 0 ? _a : 0); };
+var BOX_LOOKS_KEY = function (where) { return "That looks like the key itself. An answer in words is read by the task that asked. Save it as the key to keep it only in ".concat(where, ", or send it as an answer anyway."); };
+// The kinds of the box above the chat that are a password or key box's (asking.tsx, barOpen)
+var isBoxKind = function (kind) { return kind === 'key' || kind === 'words' || kind === 'password'; };
+// The box above the chat as a password or key block opens it: for the key or password itself, or for words in place of a key
+var barKindOf = function (one, mode) { return (one.kind === 'password' ? 'password' : mode === 'reply' ? 'words' : 'key'); };
 // The person's words in place of the key: left beside the request for its runner, which finds the request gone, prints them and
 // ends without the key. Nothing goes to the keychain. Words that look like the key itself are held until the person says which
 var sendBoxReply = function ($_1, id_1, text_1) {
@@ -684,9 +579,10 @@ var sendBoxReply = function ($_1, id_1, text_1) {
     }
     return __awaiter(_this, __spreadArray([$_1, id_1, text_1], args_1, true), void 0, function ($, id, text, isSure) {
         var said, one, request, name, asked, isWritten, _a, _b, _c;
+        var _d;
         if (isSure === void 0) { isSure = false; }
-        return __generator(this, function (_d) {
-            switch (_d.label) {
+        return __generator(this, function (_e) {
+            switch (_e.label) {
                 case 0:
                     said = text.trim();
                     one = boxes.find(function (other) { return other.id === id; });
@@ -702,9 +598,9 @@ var sendBoxReply = function ($_1, id_1, text_1) {
                     request = "".concat(boxesDir(), "/").concat(id, ".json");
                     return [4 /*yield*/, $.fs.exists(request).catch(function () { return false; })];
                 case 1:
-                    if (!!(_d.sent())) return [3 /*break*/, 3];
-                    return [4 /*yield*/, cancelBox($, id, "The command had stopped waiting. Your answer wasn't sent.")];
-                case 2: return [2 /*return*/, void (_d.sent())];
+                    if (!!(_e.sent())) return [3 /*break*/, 3];
+                    return [4 /*yield*/, cancelBox($, id, "the command had stopped waiting, so your answer wasn't sent")];
+                case 2: return [2 /*return*/, void (_e.sent())];
                 case 3:
                     name = boxNameOf(one);
                     asked = name ? "giving ".concat(name) : isNameBox(one) ? 'naming a key to save' : 'giving the key';
@@ -713,35 +609,32 @@ var sendBoxReply = function ($_1, id_1, text_1) {
                             .then(function () { return true; })
                             .catch(function () { return false; })];
                 case 4:
-                    isWritten = _d.sent();
+                    isWritten = _e.sent();
                     if (!isWritten) return [3 /*break*/, 6];
                     _b = (_a = boxRepliedAt).set;
                     _c = [id];
                     return [4 /*yield*/, $.clock.now()];
                 case 5:
-                    _b.apply(_a, _c.concat([_d.sent()]));
-                    _d.label = 6;
+                    _b.apply(_a, _c.concat([_e.sent()]));
+                    _e.label = 6;
                 case 6:
                     if (!isWritten) {
-                        boxSaid.set(id, "Claudopus couldn't pass your answer to the command that asked. Try again.");
+                        boxSaid.set(id, "Your answer couldn't be passed to the command that asked. Try again.");
                         boxPresses += 1;
                         return [2 /*return*/, void drawAgain($)];
                     }
                     boxSent.add(id);
                     boxSaid.delete(id);
                     boxes = boxes.filter(function (other) { return other.id !== id; });
-                    if ((boxOpen === null || boxOpen === void 0 ? void 0 : boxOpen.id) === id)
-                        ((boxOpen = undefined), (barBoxAt = 0));
+                    closeBarOf(id);
+                    pressedLine($, (_d = one.card) !== null && _d !== void 0 ? _d : '', '', '', "You answered \u201C".concat(cut(oneLine(said), 60), "\u201D"));
                     drawAgain($);
                     return [4 /*yield*/, $.process.run(['rm', '-f', request]).catch(function () { return undefined; })];
                 case 7:
-                    _d.sent();
-                    return [4 /*yield*/, noteDone($, __assign(__assign({ id: "box-".concat(id) }, (one.call ? { call: one.call } : {})), { head: boxHead(one.text), said: 'You answered in words. Your answer went to the command that asked, and nothing was saved.', what: "\u201C".concat(cut(oneLine(said), 160), "\u201D"), isOn: true }))];
-                case 8:
-                    _d.sent();
+                    _e.sent();
                     return [4 /*yield*/, log($, "box ".concat(id, " answered in words"))];
-                case 9:
-                    _d.sent();
+                case 8:
+                    _e.sent();
                     return [2 /*return*/];
             }
         });
@@ -765,7 +658,7 @@ var keepHeldAsKey = function ($, id, surface) {
     if (words.length === 1)
         return void sendBox($, id, (_b = words[0]) !== null && _b !== void 0 ? _b : '').catch(function () { return log($, "box ".concat(id, " not sent")); });
     if (repliesInBar(surface))
-        openBox($, id, 'key', surface);
+        openBar($, { kind: 'key', id: id }, surface);
     else
         (boxModes.set(id, 'key'), (boxPresses += 1));
     boxSaid.set(id, 'More than one word looks like a key. Paste only the key.');
@@ -777,72 +670,4 @@ var heldReplyButtons = function ($, ui, id, where) {
       <ui.Button key={"".concat(where, "-").concat(id, "-askey-").concat(boxPresses)} label="Save as the key" onPress={function (press) { return keepHeldAsKey($, id, press.surface); }}/>
       <ui.Button key={"".concat(where, "-").concat(id, "-anyway-").concat(boxPresses)} label="Send as answer" plain onPress={function () { var _a; return void sendBoxReply($, id, (_a = boxHeldReply.get(id)) !== null && _a !== void 0 ? _a : '', true); }}/>
     </ui.Box>) : null;
-};
-// The box in the bar above the prompt for the key box opened there: what goes where on a line of its own, the field under it as wide
-// as the bar, and Send, the big one, and Close, small, under that, as the reply box is (band.tsx, barReply). A key is one line; a
-// response BOX_ROWS lines. No submitLabel: the app draws one as a second, small send button, and
-// with one a box of several lines sends only on Cmd+Enter
-var barKeyRow = function ($, ui, one, mode) {
-    var name = boxNameOf(one);
-    var head = mode === 'reply' ? "\u21B3 Instead of ".concat(name !== null && name !== void 0 ? name : (isNameBox(one) ? 'the name' : 'the key')) : name ? "\u21B3 ".concat(name) : "\u21B3 The key's name";
-    var key = barKeyBoxKey(one.id, mode);
-    return (<ui.Box key="band-key" flexDirection="column" flexShrink={0} width="100%">
-      <ui.Box flexDirection="row" height={1} overflow="hidden">
-        <ui.Text color={NEEDS} bold wrap="truncate-end">{head}</ui.Text>
-      </ui.Box>
-      {'Input' in ui ? (<ui.Box flexDirection="column" width="100%" flexShrink={0}>
-          <ui.Input key={key} placeholder={mode === 'reply' ? 'Type your answer' : isNameBox(one) ? 'Type the name' : 'Paste the key'} rows={mode === 'reply' ? BOX_ROWS : undefined} autoFocus onInput={function (value) { return void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(function (at) { return (barBoxAt = at); })); }} onSubmit={function (value) { return submitBox($, one.id, mode, value); }}/>
-        </ui.Box>) : null}
-      {boxSaid.get(one.id) ? <ui.Text key="band-key-said" color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
-      {heldReplyButtons($, ui, one.id, 'band-key')}
-      {barFoot($, ui, 'band-key', boxPresses, function () { var _a; return void (barKeyTyped.get(one.id) && submitBox($, one.id, mode, (_a = barKeyTyped.get(one.id)) !== null && _a !== void 0 ? _a : '')); }, function (press) { return openBox($, undefined, mode, press.surface); }, mode === 'reply')}
-    </ui.Box>);
-};
-// The key box open in the bar on a surface that takes one, none once it is answered, cancelled or gone
-var barKeyTarget = function () { return (boxOpen ? boxes.find(function (one) { return one.id === (boxOpen === null || boxOpen === void 0 ? void 0 : boxOpen.id) && !one.key; }) : undefined); };
-// Each box with when it was asked and the box itself: the panel draws a box of a task's command on that task's card, and any other
-// among what waits on the person, in the order they came (only: the boxes wanted)
-var boxRows = function ($, ui, isKeysHeld, surface, only, isOnCard) {
-    if (isKeysHeld === void 0) { isKeysHeld = false; }
-    if (surface === void 0) { surface = ''; }
-    if (only === void 0) { only = function () { return true; }; }
-    if (isOnCard === void 0) { isOnCard = false; }
-    if (!boxes.length || !('Input' in ui))
-        return [];
-    // This chat's own first request holds the keys, so a value typed for the notice it told goes to its own box, wherever it is drawn
-    var shown = __spreadArray(__spreadArray([], boxes.filter(function (one) { return one.chat === boxChat; }), true), boxes.filter(function (one) { return one.chat !== boxChat; }), true);
-    var isBar = repliesInBar(surface);
-    return shown.flatMap(function (one, n) {
-        var _a, _b;
-        if (!only(one))
-            return [];
-        var isKey = !one.key;
-        var name = boxNameOf(one);
-        var inBar = isKey && isBar;
-        var mode = (_a = (inBar ? undefined : boxModes.get(one.id))) !== null && _a !== void 0 ? _a : 'key';
-        var isOpen = inBar && (boxOpen === null || boxOpen === void 0 ? void 0 : boxOpen.id) === one.id;
-        var what = isNameBox(one) ? 'the name' : 'the key';
-        return [{ at: one.at, one: one, node: (<ui.Box key={"box-".concat(one.id)} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
-      <ui.Text dimColor wrap="truncate-end">{isKey ? 'Key · waiting for you' : 'Admin password · waiting for you'}</ui.Text>
-      <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
-      {one.command ? <ui.Text dimColor wrap="wrap">{"Command that asked: ".concat(cut(oneLine(one.command), 200))}</ui.Text> : null}
-      <ui.Text dimColor wrap="wrap">{!isKey ? "You can see what you type here. It goes only to the command that asked, never into a chat, and isn't saved."
-                        : inBar ? "Paste ".concat(what, " in the box above the chat. It goes only into ").concat(keptWhere(), ", never into a chat. Or answer in words, such as where ").concat(name !== null && name !== void 0 ? name : 'the key', " already is, and the command that asked gets your words.")
-                            : mode === 'reply' ? 'Your answer goes to the command that asked, in place of the key. Nothing is saved.'
-                                : "You can see what you type here. It goes only into ".concat(keptWhere(), ", never into a chat.")}</ui.Text>
-      {inBar ? null : (<ui.Box width="100%" flexDirection="column">
-        <ui.Input key={"box-".concat(one.id, "-field-").concat(mode === 'reply' ? 'reply-' : '').concat((_b = boxTries.get(one.id)) !== null && _b !== void 0 ? _b : 0)} placeholder={mode === 'reply' ? 'Type your answer' : 'Type or paste it here'} submitLabel="Send" autoFocus={n === 0 && !isKeysHeld ? true : undefined} onInput={function (value) { return void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($)); }} onSubmit={function (value) { return submitBox($, one.id, mode, value); }}/>
-      </ui.Box>)}
-      {isOpen ? <ui.Text key={"box-".concat(one.id, "-inbar")} dimColor wrap="wrap">✎ Type it in the box above the chat</ui.Text> : null}
-      {boxSaid.get(one.id) && !isOpen ? <ui.Text key={"box-".concat(one.id, "-said")} color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
-      {isOpen ? null : heldReplyButtons($, ui, one.id, 'box')}
-      <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-        {inBar && isOpen ? <ui.Button key={"box-".concat(one.id, "-close-").concat(boxPresses)} label="Close" onPress={function (press) { return openBox($, undefined, 'key', press.surface); }}/> : null}
-        {inBar && !isOpen ? <ui.Button key={"box-".concat(one.id, "-paste-").concat(boxPresses)} label={isNameBox(one) ? 'Type the name' : 'Paste the key'} variant="primary" onPress={function (press) { return openBox($, one.id, 'key', press.surface); }}/> : null}
-        {inBar && !isOpen ? <ui.Button key={"box-".concat(one.id, "-respond-").concat(boxPresses)} label="Answer in words" plain onPress={function (press) { return openBox($, one.id, 'reply', press.surface); }}/> : null}
-        {isKey && !inBar ? (<ui.Button key={"box-".concat(one.id, "-mode-").concat(boxPresses)} label={mode === 'reply' ? "Type ".concat(what, " instead") : 'Answer in words'} onPress={function () { return void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($)); }}/>) : null}
-        <ui.Button key={"box-".concat(one.id, "-cancel-").concat(boxPresses)} label="Cancel" plain dimColor onPress={function () { return void cancelBox($, one.id); }}/>
-      </ui.Box>
-    </ui.Box>) }];
-    });
 };

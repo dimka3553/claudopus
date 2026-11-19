@@ -55,17 +55,15 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     return to.concat(ar || Array.prototype.slice.call(from));
 };
 var _this = this;
-// ---- A command Claude Code refused a task, run on the person's own press ----
+// ---- A command Claude Code blocked a task from running, run on the person's own Allow ----
 // Claude Code's auto mode refuses some of a background task's commands outright (an unpack of an app, a Claude Code session driven
 // for a test, a look at a site's name servers: three on 17 Nov), and the person then pasted the command into their own terminal
-// and told the chat. The card that says so shows the command whole, where it runs and for how long at most, and a Run it button:
-// the person's press, and only that press, has Claudopus run that very command once, as a command they type would run (bin/run-it),
-// and sends the task what it printed. Nothing about the task's own calls changes: the refused call stays refused, no permission or
-// setting is touched, and the task is never let run anything itself. (A "Run it once" button that let the refused call through on a
-// press was dropped on 17 Nov for exactly that: it moved Claude Code's decision.)
-// What may be run is kept in the mod's own state by the hook that saw Claude Code's refusal, never taken from the card: the button
-// shows only for that command, on the notice it was put up with, and goes with the press
-var RUN_IT = 'Run it';
+// and told the chat. Its card asks as any permission does (needs.tsx): "Claude Code blocked this command. Run it anyway?", the
+// command whole, Allow and Don't allow. Allow, and only that press, has Claudopus run that very command once, as a command the
+// person types would run (bin/run-it), and the task gets what it printed. Nothing about the task's own calls changes: the refused
+// call stays refused, no permission or setting is touched, and the task is never let run anything itself.
+// What may be run is kept in the mod's own state by the hook that saw Claude Code's refusal, never taken from the card: Allow
+// runs only that command, on the question it was put up with, and goes with the press
 // A command longer than this is not offered: it could not be read on the card before pressing
 var RUN_TEXT_MOST = 4000;
 // Nor one holding a character that is drawn otherwise than the shell reads it, or not at all: a control character but a line break
@@ -114,117 +112,87 @@ var offeredRun = function (one) {
         return undefined;
     return runList.find(function (run) { return isSameRun(run, { card: one.id, askAt: ask.at }) && run.command === ask.copy && !run.startedAt; });
 };
-// The runs on a card under way, and those ended whose output waits to start their ended task again
-var runningOn = function (card) { return runList.filter(function (run) { return run.card === card && run.startedAt && (!run.endedAt || isRunWaking(run)); }); };
+// The runs on a card under way, and those ended whose output is kept for their task's next step
+var runningOn = function (card) { return runList.filter(function (run) { return run.card === card && run.startedAt && (!run.endedAt || Boolean(run.waiting)); }); };
+// How long a run's end stays one grey line where it ran, unless its task writes a line of its own first: after that its end is
+// the ended row under the card and in Details
+var RUN_END_SHOWN = 60000;
+// The runs said on a card: those running or kept, and one that ended just now
+var runsShownOn = function (one, at) { return __spreadArray(__spreadArray([], runningOn(one.id), true), runList.filter(function (run) { var _a, _b; return run.card === one.id && run.startedAt && run.endedAt && !run.waiting && at - run.endedAt < RUN_END_SHOWN && ((_b = (_a = ownNote(one)) === null || _a === void 0 ? void 0 : _a.at) !== null && _b !== void 0 ? _b : 0) <= run.endedAt; }), true); };
+// How a run the person allowed ended, in the card's own words: its grey line for a while, never the task's line (19 Nov)
+var endedSaid = function (run, what) {
+    var _a, _b, _c, _d;
+    if (what === void 0) { what = 'your command'; }
+    var ran = took(((_a = run.endedAt) !== null && _a !== void 0 ? _a : 0) - ((_c = (_b = run.startedAt) !== null && _b !== void 0 ? _b : run.endedAt) !== null && _c !== void 0 ? _c : 0));
+    var What = what.charAt(0).toUpperCase() + what.slice(1);
+    if (!run.log)
+        return "".concat(What, " didn't start");
+    return { exited: run.exit === 0 ? "".concat(What, " ended after ").concat(ran) : "".concat(What, " failed after ").concat(ran), limit: "".concat(What, " was stopped at its limit of ").concat(limitText(run.limitMs)), stopped: "You stopped ".concat(what, " after ").concat(ran), lost: "".concat(What, " stopped after ").concat(ran) }[(_d = run.end) !== null && _d !== void 0 ? _d : 'lost'];
+};
+// An allowed run that ended is a row of the card's ended commands, as one of the task's own is: its words, how it ended, its log
+var keepRunEnded = function ($, run, why) { return __awaiter(_this, void 0, void 0, function () {
+    var kept, how, ended;
+    var _a, _b, _c;
+    return __generator(this, function (_d) {
+        switch (_d.label) {
+            case 0:
+                kept = (_a = runList.find(function (one) { return isSameRun(one, run); })) !== null && _a !== void 0 ? _a : run;
+                if (!kept.endedAt)
+                    return [2 /*return*/];
+                how = { exited: kept.exit === 0 ? 'finished' : 'failed', limit: 'timed out', stopped: 'stopped', lost: why ? 'failed' : 'ended' }[(_b = kept.end) !== null && _b !== void 0 ? _b : 'lost'];
+                ended = __assign(__assign(__assign({ id: "press-".concat(kept.askAt), what: kept.description || 'Your command', at: (_c = kept.startedAt) !== null && _c !== void 0 ? _c : kept.endedAt, endedAt: kept.endedAt, how: how, cmd: kept.command }, (kept.exit !== undefined && kept.exit !== 0 ? { code: String(kept.exit) } : {})), (why ? { why: why } : {})), (kept.log ? { file: kept.log } : {}));
+                return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (card) { return (card.id === kept.card ? __assign(__assign({}, card), keepEnded(card, [ended])) : card); }); })];
+            case 1:
+                _d.sent();
+                redraw($);
+                return [2 /*return*/];
+        }
+    });
+}); };
 // The ones the person stopped, for this load (the stop is also written in its output)
 var runStopped = new Set();
 var runKey = function (run) { return "".concat(run.card, ":").concat(run.askAt); };
 // The presses this load took, so two at once run it once, and the ask a press cleared that starts its run (answerCleared)
 var runPressed = new Set();
 var runAsked = new Map();
-// Ended runs whose output waits to start their ended task again, at the next hook of this chat (or the person's press of Send it
-// now): kept with the run (`waiting`) until the wake that carries it is sent (runsSent), and queued by this load in `runWaking`
-var runWaking = new Set();
-var isRunWaking = function (run) { return Boolean(run.waiting); };
-// Queues what waits, for a run this load has not queued yet (after a reload too)
-var queueWaiting = function ($) { return __awaiter(_this, void 0, void 0, function () {
-    var _loop_1, _i, _a, run;
-    var _b, _c, _d;
-    return __generator(this, function (_e) {
-        switch (_e.label) {
+// What an ended run printed, kept for a task that was not at a step when it ended: it is told as its next step begins (replyRead,
+// from that step's own hook), and its card says so meanwhile in one grey line. Nothing starts the task for it
+var runsAtStep = function ($, agent) { return __awaiter(_this, void 0, void 0, function () {
+    var due, _loop_1, _i, due_1, run;
+    var _a, _b;
+    return __generator(this, function (_c) {
+        switch (_c.label) {
             case 0:
+                due = runList.filter(function (run) { var _a; return ((_a = run.waiting) === null || _a === void 0 ? void 0 : _a.target) === agent; });
                 _loop_1 = function (run) {
-                    var key, card, target, wake;
-                    return __generator(this, function (_f) {
-                        switch (_f.label) {
-                            case 0:
-                                key = runKey(run);
-                                if (runWaking.has(key) || !run.waiting)
-                                    return [2 /*return*/, "continue"];
-                                return [4 /*yield*/, read($, todos)];
+                    var told;
+                    return __generator(this, function (_d) {
+                        switch (_d.label) {
+                            case 0: return [4 /*yield*/, tell($, agent, (_b = (_a = run.waiting) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : '').catch(function () { return undefined; })];
                             case 1:
-                                card = (_f.sent()).find(function (one) { return one.id === run.card; });
-                                if (!(!card || isHeld(card))) return [3 /*break*/, 5];
+                                told = _d.sent();
+                                if (!told || told.deny)
+                                    return [2 /*return*/, "continue"];
                                 return [4 /*yield*/, saveRuns($, function (list) { return list.map(function (one) { return (isSameRun(one, run) ? __assign(__assign({}, one), { waiting: undefined }) : one); }); })];
                             case 2:
-                                _f.sent();
-                                if (!card) return [3 /*break*/, 4];
-                                return [4 /*yield*/, stepLine($, run.card, "Claude didn't get your command's output as you stopped the task \u00B7 it's in ".concat((_b = run.log) !== null && _b !== void 0 ? _b : 'its output file'))];
-                            case 3:
-                                _f.sent();
-                                _f.label = 4;
-                            case 4: return [2 /*return*/, "continue"];
-                            case 5:
-                                runWaking.add(key);
-                                target = run.waiting.target;
-                                return [4 /*yield*/, toEnded($, card, target, "".concat(run.waiting.text, "\n").concat(RESUMED_BY_ANSWER), { text: RUN_IT, ask: "the command Claude Code refused (".concat(cut(run.description || run.command, 60), ")"), at: (_c = run.endedAt) !== null && _c !== void 0 ? _c : 0, line: lineOf(card), isCard: true, isRun: true, askAt: run.askAt }, true)];
-                            case 6:
-                                _f.sent();
-                                wake = wakes.find(function (w) { return w.target === target && w.isHookOnly; });
-                                if (wake)
-                                    wake.runs = __spreadArray(__spreadArray([], ((_d = wake.runs) !== null && _d !== void 0 ? _d : []), true), [key], false);
+                                _d.sent();
                                 return [2 /*return*/];
                         }
                     });
                 };
-                _i = 0, _a = runList.filter(function (one) { return one.waiting; });
-                _e.label = 1;
+                _i = 0, due_1 = due;
+                _c.label = 1;
             case 1:
-                if (!(_i < _a.length)) return [3 /*break*/, 4];
-                run = _a[_i];
+                if (!(_i < due_1.length)) return [3 /*break*/, 4];
+                run = due_1[_i];
                 return [5 /*yield**/, _loop_1(run)];
             case 2:
-                _e.sent();
-                _e.label = 3;
+                _c.sent();
+                _c.label = 3;
             case 3:
                 _i++;
                 return [3 /*break*/, 1];
             case 4: return [2 /*return*/];
-        }
-    });
-}); };
-// The wake that carried what runs printed has gone: sent, not sent as the person stopped the task, or not delivered (the chat is
-// then given it, wakeFailed). Each run stops waiting, and its card says what became of it
-var runsSent = function ($, wake, how) { return __awaiter(_this, void 0, void 0, function () {
-    var keys, done, _i, done_1, run;
-    var _a, _b, _c;
-    return __generator(this, function (_d) {
-        switch (_d.label) {
-            case 0:
-                keys = (_a = wake.runs) !== null && _a !== void 0 ? _a : [];
-                if (!keys.length)
-                    return [2 /*return*/];
-                done = runList.filter(function (run) { return keys.includes(runKey(run)) && run.waiting; });
-                return [4 /*yield*/, saveRuns($, function (list) { return list.map(function (one) { return (keys.includes(runKey(one)) ? __assign(__assign({}, one), { waiting: undefined }) : one); }); })];
-            case 1:
-                _d.sent();
-                _i = 0, done_1 = done;
-                _d.label = 2;
-            case 2:
-                if (!(_i < done_1.length)) return [3 /*break*/, 9];
-                run = done_1[_i];
-                runWaking.delete(runKey(run));
-                if (!(how === 'sent')) return [3 /*break*/, 4];
-                return [4 /*yield*/, stepLine($, run.card, "Claude got your command's output")];
-            case 3:
-                _d.sent();
-                _d.label = 4;
-            case 4:
-                if (!(how === 'held')) return [3 /*break*/, 6];
-                return [4 /*yield*/, stepLine($, run.card, "Claude didn't get your command's output as you stopped the task \u00B7 it's in ".concat((_b = run.log) !== null && _b !== void 0 ? _b : 'its output file'))];
-            case 5:
-                _d.sent();
-                _d.label = 6;
-            case 6:
-                if (!(how === 'failed')) return [3 /*break*/, 8];
-                return [4 /*yield*/, stepLine($, run.card, "Your command's output couldn't start Claude again, so it went to the chat \u00B7 it's in ".concat((_c = run.log) !== null && _c !== void 0 ? _c : 'its output file'))];
-            case 7:
-                _d.sent();
-                _d.label = 8;
-            case 8:
-                _i++;
-                return [3 /*break*/, 2];
-            case 9: return [2 /*return*/];
         }
     });
 }); };
@@ -253,12 +221,13 @@ var offerRun = function ($, card, from, askAt, runnable) { return __awaiter(_thi
     });
 }); };
 // What the card and the chat say of it before the press (where and for how long are said under the command: runWhere)
-var runDetails = function () {
-    return "".concat(RUN_IT, ": Claudopus runs exactly the command below, once, as yours, and sends the task what it printed. Nothing else changes: Claude Code still decides each of the task's own calls. ").concat(CARRY_ON, ": it doesn't run, and the task goes on without it.");
+var runDetails = function (run, reason) {
+    if (reason === void 0) { reason = ''; }
+    return "Runs once in ".concat(shortPath(run.cwd, 60), ", for at most ").concat(limitText(run.limitMs)).concat(reason ? " \u00B7 blocked as \u201C".concat(reason, "\u201D") : '', ".");
 };
-// The Run it press on the card in this chat's own panel: the one way a run starts. The notice is answered first, as any press
-// answers it; only once it has been cleared does the command start (answerCleared calls startRun). A press whose answer could not
-// be written leaves the button to be pressed again
+// Allow on the card in this chat's own panel: the one way a run starts. The question is answered first, as any press answers
+// it; only once it has been cleared does the command start (answerCleared calls startRun). A press whose answer could not be
+// written leaves the block to be pressed again
 var runIt = function ($, one) { return __awaiter(_this, void 0, void 0, function () {
     var run;
     var _a;
@@ -274,7 +243,7 @@ var runIt = function ($, one) { return __awaiter(_this, void 0, void 0, function
                 _b.label = 1;
             case 1:
                 _b.trys.push([1, , 3, 4]);
-                return [4 /*yield*/, answerAsk($, one, RUN_IT)];
+                return [4 /*yield*/, answerAsk($, one, ALLOW)];
             case 2:
                 _b.sent();
                 return [3 /*break*/, 4];
@@ -287,9 +256,9 @@ var runIt = function ($, one) { return __awaiter(_this, void 0, void 0, function
         }
     });
 }); };
-// Started once its notice is cleared, on that press; whatever goes wrong is said on the card, and the task is told
+// Started once its question is cleared, on that press; whatever goes wrong is said on the card. Answers what the task is told
 var startRun = function ($, one, run) { return __awaiter(_this, void 0, void 0, function () {
-    var at, logFile, target, isLogged, r, _a, pid, why, card, stops;
+    var at, logFile, isLogged, r, _a, pid, why, stops;
     var _b;
     return __generator(this, function (_c) {
         switch (_c.label) {
@@ -297,7 +266,6 @@ var startRun = function ($, one, run) { return __awaiter(_this, void 0, void 0, 
             case 1:
                 at = _c.sent();
                 logFile = "".concat(dir, "/runs/").concat(slug(one.id) || 'work', "-").concat(at, ".log");
-                target = run.from || one.id;
                 return [4 /*yield*/, $.fs.write(logFile, '').then(function () { return true; }).catch(function () { return false; })];
             case 2:
                 isLogged = _c.sent();
@@ -312,7 +280,7 @@ var startRun = function ($, one, run) { return __awaiter(_this, void 0, void 0, 
             case 5:
                 r = _a;
                 pid = r.exitCode === 0 ? (_b = /^(\d+)\s*$/.exec(r.stdout.trim())) === null || _b === void 0 ? void 0 : _b[1] : undefined;
-                if (!!pid) return [3 /*break*/, 10];
+                if (!!pid) return [3 /*break*/, 9];
                 why = cut(oneLine(r.stderr), 100) || 'no reason given';
                 return [4 /*yield*/, log($, "run of the refused command for ".concat(one.id, " not started: ").concat(why))];
             case 6:
@@ -320,31 +288,19 @@ var startRun = function ($, one, run) { return __awaiter(_this, void 0, void 0, 
                 return [4 /*yield*/, saveRuns($, function (list) { return list.map(function (other) { return (isSameRun(other, run) ? __assign(__assign({}, other), { startedAt: at, endedAt: at, end: 'lost' }) : other); }); })];
             case 7:
                 _c.sent();
-                return [4 /*yield*/, stepLine($, one.id, "Your command didn't start: Claudopus could not start it (".concat(why, ")"))];
+                return [4 /*yield*/, keepRunEnded($, run, why)];
             case 8:
                 _c.sent();
-                return [4 /*yield*/, deliverRun($, one.id, target, run, named("{Name} pressed \"".concat(RUN_IT, "\" on your card for the command Claude Code refused, but Claudopus could not start it (").concat(why, "), so it did not run. What Claude Code refused stays refused: do not do it yourself. Carry on without it, and say in your report what was left out.")), at)];
-            case 9:
-                _c.sent();
-                return [2 /*return*/];
-            case 10: return [4 /*yield*/, saveRuns($, function (list) { return list.map(function (other) { return (isSameRun(other, run) ? __assign(__assign({}, other), { startedAt: at, log: logFile, pid: pid }) : other); }); })];
-            case 11:
+                return [2 /*return*/, named("{Name} pressed \"".concat(ALLOW, "\" on your card for the command Claude Code refused, but it could not be started (").concat(why, "), so it did not run. What Claude Code refused stays refused: do not do it yourself. Carry on without it, and say in your report what was left out."))];
+            case 9: return [4 /*yield*/, saveRuns($, function (list) { return list.map(function (other) { return (isSameRun(other, run) ? __assign(__assign({}, other), { startedAt: at, log: logFile, pid: pid }) : other); }); })];
+            case 10:
                 _c.sent();
                 return [4 /*yield*/, log($, "refused command for ".concat(one.id, " run on ").concat(who(), "'s press, in ").concat(run.cwd))];
-            case 12:
+            case 11:
                 _c.sent();
-                return [4 /*yield*/, read($, todos)];
-            case 13:
-                card = (_c.sent()).find(function (other) { return other.id === target; });
                 stops = run.limitMs >= RUN_LIMIT_BACKGROUND ? "It is stopped after ".concat(limitText(run.limitMs), " if it is still running then.") : "It is stopped after ".concat(limitText(run.limitMs), " at most.");
-                if (!((card === null || card === void 0 ? void 0 : card.status) === 'working')) return [3 /*break*/, 15];
-                return [4 /*yield*/, tell($, target, named("{Name} pressed \"".concat(RUN_IT, "\" on your card for the command Claude Code refused, and Claudopus is running it for them now, exactly as shown, in ").concat(run.cwd, ". What it prints goes to ").concat(logFile, ", which you can read as it runs; when it ends, its last lines come to you as a message. ").concat(stops, " Do not run it yourself; carry on with what does not need it, or end your step.")))];
-            case 14:
-                _c.sent();
-                _c.label = 15;
-            case 15:
                 followRun($, __assign(__assign({}, run), { startedAt: at, log: logFile, pid: pid }));
-                return [2 /*return*/];
+                return [2 /*return*/, named("{Name} pressed \"".concat(ALLOW, "\" on your card for the command Claude Code refused, and it is running for them now, exactly as shown, as their own, in ").concat(run.cwd, ". What it prints goes to ").concat(logFile, ", which you can read as it runs; when it ends, its last lines come to you as a message at your next step. ").concat(stops, " Do not run it yourself; carry on with what does not need it."))];
         }
     });
 }); };
@@ -362,9 +318,6 @@ var followRuns = function ($) { return __awaiter(_this, void 0, void 0, function
                     if (run.startedAt && !run.endedAt && run.log && run.pid)
                         followRun($, run);
                 }
-                return [4 /*yield*/, queueWaiting($)];
-            case 2:
-                _a.sent();
                 return [2 /*return*/];
         }
     });
@@ -457,10 +410,10 @@ var stopRun = function ($, run) { return __awaiter(_this, void 0, void 0, functi
         }
     });
 }); };
-// What the task is sent: written in while it runs; else it is started again with it from the next hook of this chat (a prompt, a
-// turn's end, a press), never from a timer, where work started again runs with the mod's hooks skipped. Its card shows meanwhile
-// that the output waits, with a press that sends it at once. Says whether it was sent now, waits, or is not sent (a stopped task)
-var deliverRun = function ($, cardId, target, run, text, at) { return __awaiter(_this, void 0, void 0, function () {
+// What the task is sent of a run's end, which no press of the person's starts: written in while the task is at a step; else kept
+// with the run for the task's next step (runsAtStep), never sent from a timer. Says whether it was sent, is kept, or is not sent
+// (a task the person stopped)
+var deliverRun = function ($, cardId, target, run, text) { return __awaiter(_this, void 0, void 0, function () {
     var card, isWorking, told, _a;
     var _b;
     return __generator(this, function (_c) {
@@ -485,16 +438,13 @@ var deliverRun = function ($, cardId, target, run, text, at) { return __awaiter(
                 told = _a;
                 if (told && !told.deny)
                     return [2 /*return*/, 'sent'
-                        // A task the person stopped is not started again: what it printed stays in its file
+                        // A task the person stopped gets nothing more: what it printed stays in its file
                     ];
-                // A task the person stopped is not started again: what it printed stays in its file
+                // A task the person stopped gets nothing more: what it printed stays in its file
                 if (isHeld(card))
                     return [2 /*return*/, 'held'];
                 return [4 /*yield*/, saveRuns($, function (list) { return list.map(function (one) { return (isSameRun(one, run) ? __assign(__assign({}, one), { waiting: { target: target, text: text } }) : one); }); })];
             case 6:
-                _c.sent();
-                return [4 /*yield*/, queueWaiting($)];
-            case 7:
                 _c.sent();
                 return [2 /*return*/, 'waits'];
         }
@@ -502,7 +452,7 @@ var deliverRun = function ($, cardId, target, run, text, at) { return __awaiter(
 }); };
 // Its end: kept, sent to the task, and said on the card
 var endRun = function ($, run, end, exit, lines) { return __awaiter(_this, void 0, void 0, function () {
-    var at, isFirst, last, ran, how, tail, text, sent, ended, said;
+    var at, isFirst, last, ran, how, tail, text;
     var _a, _b;
     return __generator(this, function (_c) {
         switch (_c.label) {
@@ -520,7 +470,7 @@ var endRun = function ($, run, end, exit, lines) { return __awaiter(_this, void 
                 ran = took(at - ((_b = run.startedAt) !== null && _b !== void 0 ? _b : at));
                 how = {
                     exited: exit === 0 ? "ended well after ".concat(ran) : "ended with exit ".concat(exit, " after ").concat(ran),
-                    limit: "was stopped by Claudopus at its limit of ".concat(limitText(run.limitMs)),
+                    limit: "was stopped at its limit of ".concat(limitText(run.limitMs)),
                     stopped: "was stopped by {name} after ".concat(ran),
                     lost: "stopped after ".concat(ran, " without saying how it ended"),
                 }[end];
@@ -528,32 +478,31 @@ var endRun = function ($, run, end, exit, lines) { return __awaiter(_this, void 
                 return [4 /*yield*/, log($, "refused command for ".concat(run.card, " run on ").concat(who(), "'s press ").concat(named(how)))];
             case 3:
                 _c.sent();
-                text = named("{Name} pressed \"".concat(RUN_IT, "\" on your card for the command Claude Code refused, and Claudopus ran it for them, exactly as shown, once, in ").concat(run.cwd, ":\n").concat(run.command, "\nIt ").concat(how, ". Its whole output is in ").concat(run.log, "; ").concat(tail ? "its last lines:\n".concat(tail) : 'it printed nothing.', "\nThat ran on {name}'s own press, as theirs: it is no permission. Claude Code still decides each call of yours, so do not run it, or another way to the same end, yourself. Use what it printed; if you need it run again, ask {name} with the command."));
-                return [4 /*yield*/, deliverRun($, run.card, run.from || run.card, run, text, at)
-                    // (said to the person in the card's own words: the task is told the exit code above)
+                text = named("{Name} pressed \"".concat(ALLOW, "\" on your card for the command Claude Code refused, and it ran for them, exactly as shown, once, as their own, in ").concat(run.cwd, ":\n").concat(run.command, "\nIt ").concat(how, ". Its whole output is in ").concat(run.log, "; ").concat(tail ? "its last lines:\n".concat(tail) : 'it printed nothing.', "\nThat ran on {name}'s own press, as theirs: it is no permission. Claude Code still decides each call of yours, so do not run it, or another way to the same end, yourself. Use what it printed; if you need it run again, ask {name} with the command."));
+                return [4 /*yield*/, deliverRun($, run.card, run.from || run.card, run, text)
+                    // Said to the person where commands are: a row of the card's ended ones, with its log, and a grey line for a while where it ran
+                    // (runBlock), never on the line that says what the task does now (19 Nov). An output kept for the task's next step is said by
+                    // the card's grey line for it
                 ];
             case 4:
-                sent = _c.sent();
-                ended = { exited: exit === 0 ? "Your command ended after ".concat(ran) : "Your command failed after ".concat(ran), limit: "Claudopus stopped your command at its limit of ".concat(limitText(run.limitMs)), stopped: "You stopped your command after ".concat(ran), lost: "Your command stopped after ".concat(ran) }[end];
-                said = { sent: ' · Claude got its output', waits: '', held: " \u00B7 you stopped the task, so Claude didn't get its output" }[sent];
-                return [4 /*yield*/, stepLine($, run.card, "".concat(ended).concat(said))];
+                _c.sent();
+                // Said to the person where commands are: a row of the card's ended ones, with its log, and a grey line for a while where it ran
+                // (runBlock), never on the line that says what the task does now (19 Nov). An output kept for the task's next step is said by
+                // the card's grey line for it
+                return [4 /*yield*/, keepRunEnded($, run)];
             case 5:
+                // Said to the person where commands are: a row of the card's ended ones, with its log, and a grey line for a while where it ran
+                // (runBlock), never on the line that says what the task does now (19 Nov). An output kept for the task's next step is said by
+                // the card's grey line for it
                 _c.sent();
                 return [2 /*return*/];
         }
     });
 }); };
-// On the card, before the press: where it runs and for how long at most, under the command; then the button
-var runWhere = function (ui, one, key) {
-    var run = offeredRun(one);
-    return run ? <ui.Text key={"".concat(key, "-where")} dimColor wrap="wrap">{"Runs in ".concat(shortPath(run.cwd, 60), ", as a command you type would, for at most ").concat(limitText(run.limitMs))}</ui.Text> : null;
-};
-var runButton = function ($, ui, one, key) { var _a, _b; return offeredRun(one) ? <ui.Button key={"".concat(key, "-run-").concat((_b = (_a = one.ask) === null || _a === void 0 ? void 0 : _a.at) !== null && _b !== void 0 ? _b : 0, "-").concat(loadMark)} label={RUN_IT} onPress={function () { return void runIt($, one).catch(function (err) { return log($, "refused command not run: ".concat(String(err))); }); }}/> : null; };
-// While it runs: one quiet line, how long it has run, and Stop it; the command itself is not shown again, the person saw it before
-// pressing (17 Nov). Once it has ended with its output waiting for its ended task: that, and a press that sends it now (its own hook
-// sends what waits: tabs.tsx)
+// While it runs: one quiet line, how long it has run, and Stop; the command itself is not shown again, the person saw it before
+// pressing (17 Nov). Once it has ended with its task not at a step: one grey line that its output is kept for the task's next step
 var runBlock = function ($, ui, one, key, at) {
-    var list = one.chat ? [] : runningOn(one.id);
+    var list = one.chat ? [] : runsShownOn(one, at);
     if (!list.length)
         return null;
     return (<ui.Box key={key} flexDirection="column">
@@ -562,7 +511,7 @@ var runBlock = function ($, ui, one, key, at) {
             var isStopping = runStopped.has(runKey(run));
             var isEnded = Boolean(run.endedAt);
             var what = list.length > 1 && run.description ? "\u201C".concat(cut(run.description, 60), "\u201D") : 'your command';
-            var said = isEnded ? (what === 'your command' ? 'Its output waits for Claude' : "".concat(what, " \u00B7 its output waits for Claude")) : isStopping ? "Stopping ".concat(what) : "Running ".concat(what);
+            var said = isEnded && !run.waiting ? endedSaid(run, what) : isEnded ? (what === 'your command' ? "Your command's output is kept for the task's next step" : "".concat(what, " \u00B7 its output is kept for the task's next step")) : isStopping ? "Stopping ".concat(what) : "Running ".concat(what);
             return (<ui.Box key={"".concat(key, "-").concat(run.askAt)} flexDirection="row" gap={1} height={1} overflow="hidden">
             <ui.Box flexDirection="row" flexShrink={1} minWidth={0} height={1} overflow="hidden">
               <ui.Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
@@ -572,10 +521,8 @@ var runBlock = function ($, ui, one, key, at) {
                   <ui.Text dimColor>{" \u00B7 ".concat(took(at - ((_a = run.startedAt) !== null && _a !== void 0 ? _a : at)))}</ui.Text>
                 </ui.Box>)}
             </ui.Box>
-            {isEnded ? (<ui.Box flexShrink={0}>
-                <ui.Button key={"".concat(key, "-").concat(run.askAt, "-send-").concat(loadMark)} label="Send now" plain hover={{ scope: "".concat(key, "-").concat(run.askAt, "-send"), underline: true }} onPress={function () { return ((presses += 1), redraw($)); }}/>
-              </ui.Box>) : isStopping ? null : (<ui.Box flexShrink={0}>
-                <ui.Button key={"".concat(key, "-").concat(run.askAt, "-stop-").concat(loadMark)} label="Stop it" plain dimColor hover={{ scope: "".concat(key, "-").concat(run.askAt, "-stop"), underline: true }} onPress={function () { return void stopRun($, run).catch(function (err) { return log($, "run not stopped: ".concat(String(err))); }); }}/>
+            {isEnded || isStopping ? null : (<ui.Box flexShrink={0}>
+                <ui.Button key={"".concat(key, "-").concat(run.askAt, "-stop-").concat(loadMark)} label="Stop" plain dimColor hover={{ scope: "".concat(key, "-").concat(run.askAt, "-stop"), underline: true }} onPress={function () { return void stopRun($, run).catch(function (err) { return log($, "run not stopped: ".concat(String(err))); }); }}/>
               </ui.Box>)}
           </ui.Box>);
         })}
