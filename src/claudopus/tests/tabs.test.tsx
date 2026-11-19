@@ -245,3 +245,82 @@ test('a tab left open as the mod loads, after an update or a reload, is drawn ag
   // The app asks only the chat it shows: the line names this one, so a chat in sight left unasked can be told from those out of sight
   expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/tab [^\n]* not asked for in 40s after this code loaded in chat engine-id: drawn again/)?.[0])).toBeDefined()
 })
+
+// A drawing past what the app draws (2000 parts, 32 deep, 262144 characters) is thrown away whole by the app, with no word to the
+// mod, and the tab says "Nothing to show yet" for good (19 Nov: Details of a task with 22 helpers and 206 ended commands). The
+// app's own check, as it runs before it draws a tab
+const appDraws = (tree: unknown) => {
+  let parts = 0
+  let deepest = 0
+  const plain = (n: unknown): unknown => {
+    if (n === null || n === undefined || typeof n === 'boolean') return null
+    if (typeof n === 'string' || typeof n === 'number') return String(n)
+    if (Array.isArray(n)) return n.map(plain).filter(one => one !== null)
+    const el = n as { type?: string; key?: string; props?: Record<string, unknown>; children?: unknown[] }
+    const props: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(el.props ?? {})) if (typeof v !== 'function' && k !== 'children' && v !== undefined) props[k] = v
+    return { type: el.type, props: { ...props, key: el.key }, children: (el.children ?? []).map(plain).filter(one => one !== null) }
+  }
+  const walk = (n: unknown, depth: number) => {
+    if (typeof n === 'string') return void (parts += 1)
+    const el = n as { children?: unknown[] }
+    parts += 1
+    deepest = Math.max(deepest, depth + 1)
+    for (const child of el.children ?? []) walk(child, depth + 1)
+  }
+  const sent = plain(tree)
+  walk(sent, 0)
+  return { parts, deepest, chars: JSON.stringify(sent).length, isDrawn: parts <= 2000 && deepest <= 32 && JSON.stringify(sent).length <= 262_144 }
+}
+test("a Details tab too big for the app is drawn with less in it, its ended commands folded; one too big even so says so, with the way back", async ($, on) => {
+  const { files, clock, opened } = world(on)
+  await $.session.start(start)
+  const runs = (owner: string, n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `${owner}-r${i}`, what: `Check fix ${i} of ${owner}`, cmd: 'npm test', at: NOW - 600_000 + i, endedAt: NOW - 500_000 + i, how: i % 5 ? 'finished' : 'failed', kind: 'script', named: { why: 'Disk is full, so the build could not write its files' } }))
+  const card = (items: { text: string; state: string }[]) => ({ id: 'b1', parentId: '', isFork: false, tokens: 0, model: 'claude-opus-5-5', title: 'Fix the security findings one by one', words: 'fix them', items, entries: [{ at: NOW, kind: 'note', text: 'Fixing S12.' }], answer: '', startedAt: NOW - 3_600_000, endedAt: 0, status: 'working', endedRuns: runs('b1', 20) })
+  const helpers = Array.from({ length: 30 }, (_, n) => ({ id: `h${n}`, parentId: 'b1', isFork: false, tokens: 0, title: `Build fix S${n}`, words: '', items: [], entries: [], answer: 'Done.', startedAt: NOW - 3_000_000 + n, endedAt: NOW - 1_000_000, status: 'done', endedRuns: runs(`h${n}`, 9) }))
+  const share = (items: { text: string; state: string }[]) => async () => files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ chat: 'chat-b', title: 'Security fixes', folder: '/repo/claudopus', host: '', at: NOW + 10_000, cards: [card(items)], helpers }))
+  const line = (one: object) => JSON.stringify(one)
+  files.set(
+    `${HOME}/.claude/projects/-repo-claudopus/chat-b/subagents/agent-b1.jsonl`,
+    [
+      line({ type: 'user', message: { role: 'user', content: 'fix them' } }),
+      ...Array.from({ length: 200 }, (_, n) => [
+        line({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: `Fix S${n} is merged and its checks pass.` }, { type: 'tool_use', id: `tu${n}`, name: 'Bash', input: { command: 'npm test', description: `Test fix S${n}` } }] } }),
+        line({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `tu${n}`, content: 'ok' }] } }),
+      ]).flat(),
+    ].join('\n'),
+  )
+  await share([{ text: 'Fix S12', state: 'doing' }])()
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const id = (await until(async () => (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith('open-r-'))?.key))?.replace(/^open-/, '').replace(/-\d+$/, '') ?? ''
+  const tab = await $.ui.mount({ ...LIST, requestId: `work-${id}`, props: { ...LIST.props, bodyColumns: 74 }, surface: 'desktop' } as never)
+  const labels = async () => [...(await tab.findAll({ type: 'Text' })).map(t => t.text ?? ''), ...(await tab.findAll({ type: 'Button' })).map(b => String(b.props.label))]
+  // Drawn whole, it is far past the app's limits: drawn with less in it, its title, helpers, commands and conversation all there
+  expect(await until(async () => ((await labels()).some(text => /^Fix S199 is merged/.test(text)) || (await tab.findAll({ type: 'Markdown' })).some(m => /^Fix S199 is merged/.test(String(m.props.text))) ? true : undefined))).toBe(true)
+  const size = appDraws(await tab.drawn())
+  expect(size).toMatchObject({ isDrawn: true })
+  const shown = await labels()
+  expect(shown).toContain('Fix the security findings one by one')
+  expect(shown).toContain('Helpers and commands')
+  expect(shown).toContain('Conversation')
+  // Each group of ended commands is one row that opens on a press
+  expect(shown.filter(text => /^\d+ commands ended.* · show$/.test(text)).length).toBe(31)
+  const endedRows = async () => (await tab.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith('ended-open-')).length
+  expect(await endedRows()).toBe(0)
+  await tab.press({ key: (await tab.findAll({ type: 'Button' })).find(b => /^open-ended-group-.*h3-\d+$/.test(b.key ?? ''))?.key ?? 'ended-group-h3' })
+  expect(await until(async () => ((await endedRows()) === 9 ? true : undefined))).toBe(true)
+  expect(appDraws(await tab.drawn()).isDrawn).toBe(true)
+  expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/tab work-[^\n]* drawn with less in it/)?.[0])).toBeDefined()
+  // Too big even with the least in it: never a drawing the app throws away, but what happened in plain words and the way back
+  await share(Array.from({ length: 2500 }, (_, n) => ({ text: `Check finding ${n}`, state: 'open' })))()
+  await clock.advance(6000)
+  expect(await until(async () => (await tab.find({ type: 'Text', text: "Claudopus couldn't show this tab" })) ?? undefined)).toBeDefined()
+  expect(appDraws(await tab.drawn()).isDrawn).toBe(true)
+  const before = opened.length
+  await pressed(tab, 'too-big-back')
+  expect(await until(async () => (opened.slice(before).includes(LIST.requestId) ? true : undefined))).toBe(true)
+  await tab.unmount()
+  await list.unmount()
+})

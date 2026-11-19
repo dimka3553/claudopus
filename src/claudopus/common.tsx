@@ -48,6 +48,40 @@ const TALK_CHARS = 40_000
 // away whole, so the tab keeps its old drawing, or after a switch away and back says "Nothing to show yet". The pictures a tab draws
 // keep well under it (262144), with room for its text
 const PICTURES_CHARS = 150_000
+// The app's check of a tab's drawing before it draws it: at most 2000 parts (each element and each text in it), 32 elements deep
+// and 262144 characters as sent. Past any of them it throws the drawing away whole, says nothing, and the tab shows "Nothing to
+// show yet" until a drawing that fits comes (19 Nov: a task with 22 helpers and 206 ended commands). Claudopus keeps every
+// drawing under these, with room for what the engine adds as it sends one
+const FIT_PARTS = 1800
+const FIT_DEEP = 30
+const FIT_CHARS = 230_000
+const fitsSeen = new WeakMap<object, boolean>()
+const drawingFits = (drawing: unknown) => {
+  if (!drawing || typeof drawing !== 'object') return true
+  const known = fitsSeen.get(drawing)
+  if (known !== undefined) return known
+  let parts = 0
+  let deepest = 0
+  let chars = 0
+  const walk = (node: unknown, depth: number) => {
+    if (parts > FIT_PARTS || chars > FIT_CHARS || deepest > FIT_DEEP) return
+    if (typeof node === 'string' || typeof node === 'number') return void ((parts += 1), (chars += String(node).length + 2))
+    if (!node || typeof node !== 'object') return
+    if (Array.isArray(node)) return void node.forEach(child => walk(child, depth))
+    const el = node as { type?: unknown; props?: Record<string, unknown>; children?: unknown }
+    if (!el.props && el.type === undefined) return
+    parts += 1
+    deepest = Math.max(deepest, depth + 1)
+    const props: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(el.props ?? {})) if (key !== 'children' && typeof value !== 'function' && value !== undefined) props[key] = value
+    chars += JSON.stringify({ type: typeof el.type === 'string' ? el.type : '', props }).length + 14
+    walk(el.children ?? el.props?.children, depth + 1)
+  }
+  walk(drawing, 0)
+  const fits = parts <= FIT_PARTS && chars <= FIT_CHARS && deepest <= FIT_DEEP
+  fitsSeen.set(drawing, fits)
+  return fits
+}
 // How long one message of that chat may be
 const SAID_CHARS = 8000
 // How much of a long message to the work is drawn before it is opened

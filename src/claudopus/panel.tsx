@@ -50,13 +50,38 @@ const withoutScroll = (key: string) => key.replace(/\|[01]$/, '')
 // The mod's tabs drawn on the desktop, whose buttons a click holds the drawing for (holdForPress)
 const heldTabs = new Set<string>()
 let usedUntil = 0
+// How many times less a Details tab too big for the app may be drawn with (drawFor), and how much less each was last drawn with
+const SQUEEZE_MOST = 3
+const paneSqueezed = new Map<string, number>()
+// A drawing the app would throw away is never given: the tab says so in plain words instead, with the way back to the list, so it
+// never stays on "Nothing to show yet" (drawingFits). Said in the log once a minute at most for each tab
+const tooBigLogged = new Map<string, number>()
+const givenIfDrawn = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0] & { requestId?: string }, drawing: unknown) => {
+  if (drawingFits(drawing)) return drawing
+  const id = e.requestId ?? ''
+  const now = await $.clock.now()
+  if (now - (tooBigLogged.get(id) ?? -Infinity) >= 60_000) (tooBigLogged.set(id, now), await log($, `tab ${id} not given: its drawing is past what the app draws`))
+  const { Box, Button, Text } = uiOf($, e)
+  return (
+    <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
+      <Text bold>Claudopus couldn't show this tab</Text>
+      <Text dimColor wrap="wrap">It holds more than the app can draw at once.</Text>
+      {id !== LIST ? (
+        <Box alignItems="flex-start">
+          <Button key={`too-big-back-${presses}`} label="Back to the list" plain onPress={() => ((presses += 1), void front($, LIST, LIST_TITLE).catch(err => log($, `list not shown: ${String(err)}`)))} />
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
 // The surface the list was last drawn on: the focus says none, and only the desktop's clicks are held for (isPressHeld)
 let listSurface = ''
 const panelHooks = (on: On) => {
 
   // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
   // tab of the mod's but the panel has a first row whose Close, pressed or keyed x, closes it and hands the keys back to the panel
-  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+  // Every drawing of every tab passes here last, on its way out, and is given only if the app will draw it (givenIfDrawn)
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => (await givenIfDrawn($, e, await (async () => {
     const id = e.requestId ?? ''
     // Every ask for a tab's drawing passes here first, and is noted (watchTabs)
     await noteTabAsked($, id)
@@ -104,7 +129,7 @@ const panelHooks = (on: On) => {
         {body}
       </Box>
     )
-  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
+  })())) as Awaited<ReturnType<typeof next>>).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   // Beside the chat: one small card per piece of work under way, as wide as the panel, every card the same height whatever the work
   // writes. Work that has ended leaves the panel. A card's Details is a tab of its own, drawn here too: all its to-dos, then its own chat
@@ -164,7 +189,8 @@ const panelHooks = (on: On) => {
     during(paneId === LIST ? 'draw the panel' : 'draw a Details tab')
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
     if (paneId === LIST) await read($, tick)
-    const drawing = await (async () => {
+    // `squeeze`: how much less a Details tab too big for the app holds (drawingFits): 0 for all of it
+    const drawFor = async (squeeze: number) => {
     const { Box, Button, Markdown, Text } = uiOf($, e)
     // A picture pressed open large in this Details tab is drawn over it, with a row back above and below it
     const large = pictureIn.get(paneId)
@@ -355,7 +381,8 @@ const panelHooks = (on: On) => {
       // An ask of a chat on another Mac names that Mac's files, which are not here: a file at the same path here is another picture
       if (one.chat?.host) return <Text key={`${key}-pics`} dimColor wrap="wrap">{`${paths.length === 1 ? 'Its picture is' : `Its ${paths.length} pictures are`} on the Mac that chat runs on. Open that chat to see ${paths.length === 1 ? 'it' : 'them'}.`}</Text>
       const drawing = uiOf($, e)
-      const canDraw = e.surface !== 'terminal' && 'Svg' in drawing
+      // (nor a Details tab drawn with the least in it: a row each, as in the terminal, while the small card draws them)
+      const canDraw = e.surface !== 'terminal' && 'Svg' in drawing && squeeze < 3
       // The terminal draws no picture: a row each that opens it, with no small copy made
       const made = canDraw ? askPicturesOf($, one) : paths.map(path => ({ name: fileName(path), path, thumb: null }) as Pic)
       // (what of them the small card draws, for what stands above its buttons and the cards under it: markMoved)
@@ -956,12 +983,14 @@ const panelHooks = (on: On) => {
     // group's row folds it away or opens it again (19 Nov: mixed in with what still ran, they read as one long list)
     const endedBranches = (card: Todo): Branch[] => {
       const runs = [...(card.endedRuns ?? [])].sort((a, b) => b.endedAt - a.endedAt)
-      return runs.length ? [{ one: card, ended: runs, kids: endedFolded.has(card.id) ? [] : runs.map(run => ({ one: card, run, kids: [] })) }] : []
+      return runs.length ? [{ one: card, ended: runs, kids: isEndedFolded(card.id) ? [] : runs.map(run => ({ one: card, run, kids: [] })) }] : []
     }
+    // (folded by a press; in a Details tab drawn with less in it, every group starts folded, and a press opens one)
+    const isEndedFolded = (id: string) => endedFolded.has(id) || squeeze >= 2 || (squeeze >= 1 && !endedOpened.has(id))
     const endedGroupRow = (t: Twig) => {
       const id = t.one?.id ?? ''
-      const text = `${endedSummary(0, t.ended ?? [])}${endedFolded.has(id) ? ' · show' : ''}`
-      return twigRowOf(t, `ended-group-${id}`, text, true, '', () => ((endedFolded.has(id) ? endedFolded.delete(id) : endedFolded.add(id)), (presses += 1), redraw($)))
+      const text = `${endedSummary(0, t.ended ?? [])}${isEndedFolded(id) ? ' · show' : ''}`
+      return twigRowOf(t, `ended-group-${id}`, text, true, '', () => ((isEndedFolded(id) ? (endedFolded.delete(id), endedOpened.add(id)) : (endedOpened.delete(id), endedFolded.add(id))), (presses += 1), redraw($)))
     }
     // (every helper with what it has running, then its own helpers, then what of its has ended)
     const withAll = (branches: Branch[]): Branch[] => branches.map(b => (b.job || b.run || b.ended ? b : { ...b, kids: [...jobBranches(b.one, true), ...withAll(b.kids), ...endedBranches(b.one)] }))
@@ -1387,7 +1416,7 @@ const panelHooks = (on: On) => {
           <Box key={`pics-${at}`} flexDirection="column" alignItems="flex-start" gap={1} width="100%">
             {made.map((pic, n) => (
               <Box key={`pic-${at}-${n}`} flexDirection="column" alignItems="flex-start" width="100%">
-                {pic.thumb && e.surface !== 'terminal' && 'Svg' in drawing ? (
+                {pic.thumb && e.surface !== 'terminal' && 'Svg' in drawing && squeeze < 1 ? (
                   <drawing.Svg
                     key={`pic-svg-${at}-${n}`}
                     source={pic.thumb.source}
@@ -1413,7 +1442,7 @@ const panelHooks = (on: On) => {
       }
       // Each line knows how many tool steps came before it: that names a run of steps whatever is drawn above it
       let uses = 0
-      const shown = newest((lines ?? []).map(line => ({ ...line, at: line.isUse ? (uses += 1) : uses })))
+      const shown = newest((lines ?? []).map(line => ({ ...line, at: line.isUse ? (uses += 1) : uses })), squeeze)
       const blocks = shown.reduce<Line[][]>((all, line) => {
         const last = all.at(-1)
         return line.kind === 'step' && last?.[0]?.kind === 'step' ? [...all.slice(0, -1), [...last, line]] : [...all, [line]]
@@ -1510,7 +1539,7 @@ const panelHooks = (on: On) => {
     // The big card, in parts that stand apart: what the work is, with its buttons; where it started; its to-dos; its chat. The
     // buttons sit at the top, above a chat of any length
     const big = (one: Todo, lines: Line[] | undefined) => {
-      const showing = lines ? newest(lines).length : 0
+      const showing = lines ? newest(lines, squeeze).length : 0
       const parent = one.parentId ? [...all, ...elsewhere, ...helpersThere].find(card => card.id === one.parentId) : undefined
       return (
         <Box key={`todo-${one.id}`} flexDirection="column" gap={1} flexGrow={1}>
@@ -1543,7 +1572,7 @@ const panelHooks = (on: On) => {
             </Box>
           </Box>
           {/* What it made, right under its title, while it works and once it is done */}
-          {madeNow($, one)?.made.length || madeNow($, one)?.code ? part('part-files', 'Files', '', madeTiles($, table, madeNow($, one) ?? { made: [] }, paneId, `files-${one.id}`, one.id, e.surface) ?? <Box />) : null}
+          {madeNow($, one)?.made.length || madeNow($, one)?.code ? part('part-files', 'Files', '', madeTiles($, table, madeNow($, one) ?? { made: [] }, paneId, `files-${one.id}`, one.id, e.surface, '', squeeze >= 2) ?? <Box />) : null}
           {needsFor(one).length ? (
             <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE} />
@@ -2001,7 +2030,14 @@ const panelHooks = (on: On) => {
         {!alone ? finishedPart(isFinishedOpen) : null}
       </Box>
     )
-    })()
+    }
+    // The app throws away whole a drawing past its limits, and the tab then says "Nothing to show yet" (drawingFits): a Details
+    // tab too big for it is drawn again with less in it, its ended commands folded and fewer lines of its conversation, until it fits
+    // (from one step lighter than it last needed, so a tab that needs less is drawn with less at once and one that shrank gets more)
+    let squeeze = Math.max(0, (paneSqueezed.get(paneId) ?? 0) - 1)
+    let drawing = await drawFor(squeeze)
+    while (paneId.startsWith(WORK_PANE) && !drawingFits(drawing) && squeeze < SQUEEZE_MOST) ((doneDrawn.length = 0), (drawing = await drawFor((squeeze += 1))))
+    if ((paneSqueezed.get(paneId) ?? 0) !== squeeze) (paneSqueezed.set(paneId, squeeze), void log($, `tab ${paneId} drawn with less in it (${squeeze} of ${SQUEEZE_MOST}) to fit what the app draws`))
     // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
     // ones the engine holds, and this one is made again once the click is over (holdForPress)
     const newestMade = paneNewest.get(paneLine)

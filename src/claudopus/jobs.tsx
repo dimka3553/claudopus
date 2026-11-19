@@ -313,6 +313,8 @@ const openJobOutput = async ($: EngineInterface, job: Pick<Job, 'id' | 'label'>,
 // drawn again as it writes; the same for one that has ended, from the file it left. A press on a command's name opens it
 // The tasks and helpers whose ended commands are folded away in Details
 const endedFolded = new Set<string>()
+// and those opened again by a press in a Details tab drawn with less in it, where they start folded (drawingFits)
+const endedOpened = new Set<string>()
 const LOG_PANE = 'log-'
 const LOG_LINES = 300
 const logPaneOf = (id: string) => `${LOG_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)
