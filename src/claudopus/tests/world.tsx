@@ -642,6 +642,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     }
     if (e.tool === 'Bash' && command.startsWith('hold ')) return { result: { stdout: await new Promise<string>(done => held.set(command.slice(5), done)), stderr: '', interrupted: false } } as never
     if (e.tool === 'Bash' && command.includes('admin')) admins.push({ command, grants: [...files].filter(([path]) => path.startsWith(`${MEMORY}/admin-grants/`)).map(([, text]) => JSON.parse(text)) })
+    // A tool gives what the test lays as result:<tool>:<its action>, as JSON
+    const action = String((e as { action?: unknown }).action ?? '')
+    if (files.has(`result:${e.tool}:${action}`)) return { result: JSON.parse(files.get(`result:${e.tool}:${action}`) ?? '{}') } as never
     // A command prints what the test lays as stdout:<the command>
     if (e.tool === 'Bash' && files.has(`stdout:${command}`)) return { result: { stdout: files.get(`stdout:${command}`), stderr: '', interrupted: false } } as never
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))

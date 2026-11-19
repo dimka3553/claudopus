@@ -3796,12 +3796,13 @@ const MADE_LINK = /^https?:\/\/(www\.)?(github\.com\/[^/\s]+\/[^/\s]+\/(pull|iss
 const LINK = /https?:\/\/[^\s`'"()<>[\]{}|,;*\\]+/g
 const LINKS_MOST = 30
 const linksOf = (text: string) => (text.match(LINK) ?? []).map(link => link.replace(/[.:!?]+$/, ''))
-const linksIn = (text: string) => [...new Set(text.split('\n').flatMap(line => linksOf(line).filter(link => MADE_LINK_LINE.test(line) || MADE_LINK.test(link))))].slice(0, LINKS_MOST)
+const isPlainPage = (link: string) => !/\?|\/api\//.test(link.replace(/^https?:\/\/[^/]+/, ''))
+const linksIn = (text: string) => [...new Set(text.split('\n').flatMap(line => linksOf(line).filter(link => MADE_LINK.test(link) || (MADE_LINK_LINE.test(line) && isPlainPage(link)))))].slice(0, LINKS_MOST)
+const ARTIFACT = /^https?:\/\/claude\.ai\/(public\/)?artifacts?\//i
 const isLink = (said: string) => /^https?:\/\//.test(said)
 const linkName = (link: string) => {
   const [host = '', ...rest] = link.replace(/^https?:\/\//, '').replace(/[?#].*$/, '').replace(/\/$/, '').split('/')
   if (/^(www\.)?(github|gitlab)\.com$/.test(host) && /^(pull|issues|merge_requests)$/.test(rest.at(-2) ?? '') && /^\d+$/.test(rest.at(-1) ?? '')) return `${rest.at(-3) === '-' ? rest.at(-4) : rest[1]} #${rest.at(-1)}`
-  if (/^claude\.ai$/.test(host) && /^artifacts?$/.test(rest.at(-2) ?? '')) return 'claude.ai page'
   const last = rest.at(-1) ?? ''
   const kind = rest.length > 1 ? (rest.at(-2) ?? '').replace(/(?<=\w{3})s$/, '') : ''
   return last ? `${host.replace(/^www\./, '').split('.')[0]} ${kind ? `${kind} ` : ''}${last}`.slice(0, 40) : host.replace(/^www\./, '')
@@ -3823,15 +3824,25 @@ const saidKept = (before: Todo[], next: Todo[]) => {
   return found.size ? next.map(one => (found.has(one.id) ? withSaid(one, found.get(one.id) ?? []) : one)) : next
 }
 const PUTS_UP = /\b(gh\s+(pr|release|gist)\s+create|glab\s+mr\s+create)\b/
-const linksPutUp = (e: { tool: string }, r: { deny?: unknown; isError?: unknown; result?: unknown }) => {
-  if (r.deny || r.isError) return []
-  const isPutting = (e.tool === 'Bash' && PUTS_UP.test(String((e as { command?: unknown }).command ?? ''))) || /artifact/i.test(e.tool)
-  return isPutting ? [...new Set(linksOf(JSON.stringify(r.result ?? '')).filter(link => MADE_LINK.test(link)))] : []
+const linksPutUp = (e: { tool: string }, r: { deny?: unknown; isError?: unknown; result?: unknown }): { links: string[]; titles: Record<string, string> } => {
+  const none = { links: [], titles: {} }
+  if (r.deny || r.isError) return none
+  const input = e as { command?: unknown; action?: unknown; file_path?: unknown }
+  const isArtifact = /artifact/i.test(e.tool)
+  if (isArtifact ? /^(read|list|get|view|delete|comments?)$/i.test(String(input.action ?? '')) : !(e.tool === 'Bash' && PUTS_UP.test(String(input.command ?? '')))) return none
+  const links = [...new Set(linksOf(JSON.stringify(r.result ?? '')).filter(link => MADE_LINK.test(link)))]
+  const given = r.result && typeof r.result === 'object' ? (r.result as { title?: unknown; url?: unknown }) : {}
+  const file = typeof input.file_path === 'string' && input.file_path ? bareName(fileName(input.file_path)).replace(/[-_]+/g, ' ') : ''
+  const title = oneLine(String(given.title ?? '')) || file
+  const titles = Object.fromEntries(isArtifact && title ? links.filter(link => ARTIFACT.test(link)).map(link => [link, cut(title, 60)]) : [])
+  return { links, titles }
 }
-const keepPutUp = async ($: EngineInterface, id: string, links: string[]) => {
-  if (links.length) await changeTodos($, list => list.map(one => (one.id === id || one.id === topOf(list, id) ? withSaid(one, links) : one)))
+const keepPutUp = async ($: EngineInterface, id: string, put: { links: string[]; titles: Record<string, string> }) => {
+  if (!put.links.length) return
+  const titled = (one: Todo) => (Object.keys(put.titles).length ? { ...one, titles: { ...(one.titles ?? {}), ...put.titles } } : one)
+  await changeTodos($, list => list.map(one => (one.id === id || one.id === topOf(list, id) ? titled(withSaid(one, put.links)) : one)))
 }
-const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since: number, isDated = true, said: string[] = []): Promise<FilesMade> => {
+const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since: number, isDated = true, said: string[] = [], titles: Record<string, string> = {}): Promise<FilesMade> => {
   const named = [...new Set([...said.filter(one => !isLink(one)), ...namedPaths(answer)])]
   const made: Made[] = []
   const byTop = new Map<string, string[]>()
@@ -3859,16 +3870,19 @@ const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since
   const order = new Map<string, number>()
   for (const [n, given] of [...named, ...wrote].entries()) if (!order.has(given.replace(/^\/private(?=\/(tmp|var)\/)/, ''))) order.set(given.replace(/^\/private(?=\/(tmp|var)\/)/, ''), n)
   made.sort((a, b) => (order.get(a.path) ?? 0) - (order.get(b.path) ?? 0))
-  for (const link of [...new Set([...said.filter(isLink), ...linksIn(answer)])]) made.push({ path: link, name: linkName(link), kind: 'link' })
+  for (const link of [...new Set([...said.filter(isLink), ...linksIn(answer)])]) made.push(ARTIFACT.test(link) ? { path: link, name: titles[link] ?? 'Claude artifact', kind: 'artifact' } : { path: link, name: linkName(link), kind: 'link' })
   const code = byTop.size ? await codeOf($, byTop, since).catch(() => undefined) : undefined
   return { made, ...(code ? { code } : {}) }
 }
 const listMade = async ($: EngineInterface, one: Todo, answer: string): Promise<FilesMade> => {
-  const now = await madeBy($, one.wrote ?? [], answer, one.begunAt ?? one.startedAt, true, one.said ?? [])
+  const now = await madeBy($, one.wrote ?? [], answer, one.begunAt ?? one.startedAt, true, one.said ?? [], one.titles ?? {})
   const earlier = [one.made, ...(await read($, reports)).filter(r => r.agent === one.id && r.made).map(r => r.made)].filter((files): files is FilesMade => Boolean(files))
   if (!earlier.length) return now
   const paths = new Set(now.made.map(made => made.path))
-  const kept = earlier.flatMap(files => files.made).filter(made => !paths.has(made.path) && (paths.add(made.path), true))
+  const kept = earlier
+    .flatMap(files => files.made)
+    .filter(made => !paths.has(made.path) && (paths.add(made.path), true))
+    .map(made => (made.kind === 'link' && ARTIFACT.test(made.path) ? { ...made, kind: 'artifact' as const, name: one.titles?.[made.path] ?? 'Claude artifact' } : made))
   const counted = new Set((now.code?.files ?? []).map(file => file.path))
   const gone: CodeFile[] = []
   for (const file of earlier.flatMap(files => files.code?.files ?? [])) {
@@ -3917,7 +3931,7 @@ const madeOfReport = ($: EngineInterface, r: Report, text: string): FilesMade =>
     madeLoading.add(r.id)
     void (async () => {
       const one = (await read($, todos)).find(card => card.id === r.agent)
-      const listed = await madeBy($, one?.wrote ?? [], text, one ? (one.begunAt ?? one.startedAt) : 0, Boolean(one), one?.said ?? []).catch(() => ({ made: [] }))
+      const listed = await madeBy($, one?.wrote ?? [], text, one ? (one.begunAt ?? one.startedAt) : 0, Boolean(one), one?.said ?? [], one?.titles ?? {}).catch(() => ({ made: [] }))
       if (madeOfOld.size > 200) madeOfOld.delete(madeOfOld.keys().next().value ?? '')
       madeOfOld.set(r.id, listed)
     })()
@@ -3938,7 +3952,7 @@ const faceKey = (one: Made) => `${one.path}:${one.at ?? 0}`
 let facesMade = 0
 let qlMade = 0
 const makeFace = async ($: EngineInterface, one: Made): Promise<Face> => {
-  if (one.kind === 'link' || one.kind === 'file' || /\.svg$/i.test(one.path)) return null
+  if (one.kind === 'link' || one.kind === 'artifact' || one.kind === 'file' || /\.svg$/i.test(one.path)) return null
   const stat = await $.fs.stat(one.path).catch(() => undefined)
   if (!stat || stat.kind !== 'file') return null
   const to = `${dir}/thumbs/tile-${slug(one.path).slice(-60)}-${mark(one.path).replace(':', '-')}-${Math.round(stat.mtimeMs)}.jpg`
@@ -3995,11 +4009,13 @@ const SVG_FONT = 'font-family="-apple-system,Helvetica,sans-serif"'
 const pageIcon = (badge: string, color: string) =>
   `<path d="M4.5 1.5h13l7 7v21a1 1 0 0 1-1 1h-19a1 1 0 0 1-1-1v-27a1 1 0 0 1 1-1z" fill="#3b3b39" stroke="#9a9890" stroke-width="1.2"/><path d="M17.5 1.5v7h7" fill="none" stroke="#9a9890" stroke-width="1.2"/>${badge ? `<rect x="1" y="15" width="${badge.length > 3 ? 22 : 19}" height="10" rx="2" fill="${color}"/><text x="${badge.length > 3 ? 12 : 10.5}" y="22.6" font-size="7" ${SVG_FONT} font-weight="700" fill="#fff" text-anchor="middle">${badge}</text>` : ''}`
 const LINK_ICON = '<rect x="2.5" y="4.5" width="23" height="23" rx="5" fill="#3b3b39" stroke="#9a9890" stroke-width="1.2"/><path d="M11 13.5h-1.5a3.5 3.5 0 0 0 0 7H11M17 13.5h1.5a3.5 3.5 0 0 1 0 7H17M11.5 17h5" fill="none" stroke="#C9A7FF" stroke-width="1.6" stroke-linecap="round"/>'
+const ARTIFACT_ICON =
+  '<rect x="2.5" y="4.5" width="23" height="23" rx="5" fill="#3b3b39" stroke="#9a9890" stroke-width="1.2"/><g stroke="#D97757" stroke-width="2.2" stroke-linecap="round"><path d="M14 10.5v13M7.5 17h13M9.4 12.4l9.2 9.2M18.6 12.4l-9.2 9.2"/></g>'
 const CODE_ICON = '<circle cx="9" cy="8" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="9" cy="24" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="19" cy="12" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><path d="M9 10.6v10.8M19 14.6c0 4-10 3-10 6.8" fill="none" stroke="#9a9890" stroke-width="1.5"/>'
 const endingOf = (path = '') => (/\.([a-z0-9]{1,4})$/i.exec(path)?.[1] ?? '').toUpperCase()
 const ENDING_COLORS: Record<string, string> = { TS: '#3178C6', TSX: '#3178C6', JS: '#B8A11E', JSX: '#B8A11E', MJS: '#B8A11E', PY: '#3572A5', SH: '#4E9A2A', JSON: '#8A7A2E', CSS: '#663399', HTML: '#D24E2B', MD: '#6B6A65', SWIFT: '#E0583A', GO: '#00879A', RS: '#B7410E', RB: '#B22222', C: '#555BA8', H: '#555BA8', CPP: '#555BA8', ZIP: '#8A6D3B', MP3: '#C2416B', WAV: '#C2416B', M4A: '#C2416B' }
 const iconOf = (kind: MadeKind | 'code', path?: string) =>
-  kind === 'code' ? CODE_ICON : kind === 'link' ? LINK_ICON : pageIcon(kind === 'file' ? endingOf(path) : madeKindOf(kind).badge, kind === 'file' ? (ENDING_COLORS[endingOf(path)] ?? madeKindOf(kind).color) : madeKindOf(kind).color)
+  kind === 'code' ? CODE_ICON : kind === 'link' ? LINK_ICON : kind === 'artifact' ? ARTIFACT_ICON : pageIcon(kind === 'file' ? endingOf(path) : madeKindOf(kind).badge, kind === 'file' ? (ENDING_COLORS[endingOf(path)] ?? madeKindOf(kind).color) : madeKindOf(kind).color)
 const svgOfIcon = (kind: MadeKind | 'code', width: number, height: number, path?: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 28 32">${iconOf(kind, path)}</svg>`
 const tileSvg = (inner: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="${TILE_W}" height="${TILE_H}" viewBox="0 0 ${TILE_W} ${TILE_H}">${inner}</svg>`
 const clipId = (one: Made) => `t${mark(one.path).replace(':', '-')}`
@@ -4045,12 +4061,13 @@ const sharedStart = (names: string[]) => {
 const bareName = (name: string) => name.replace(/\.[a-z0-9]+$/i, '')
 type Thing = { key: string; label: string; kind: MadeKind; files: Made[] }
 const thingsOf = (files: FilesMade, opened: (kind: MadeKind) => boolean): Thing[] => {
-  const skip = sharedStart(files.made.filter(one => one.kind !== 'link').map(one => bareName(one.name)))
-  const nameOf = (one: Made) => (one.kind === 'link' ? one.name : bareName(one.name).slice(skip) || bareName(one.name))
-  const kinds: MadeKind[] = [...MADE_KINDS.map(one => one.kind), 'link']
+  const isPage = (one: { kind: MadeKind }) => one.kind === 'link' || one.kind === 'artifact'
+  const skip = sharedStart(files.made.filter(one => !isPage(one)).map(one => bareName(one.name)))
+  const nameOf = (one: Made) => (isPage(one) ? one.name : bareName(one.name).slice(skip) || bareName(one.name))
+  const kinds: MadeKind[] = ['artifact', ...MADE_KINDS.map(one => one.kind), 'link']
   return kinds.flatMap(kind => {
     const list = files.made.filter(one => one.kind === kind)
-    if (kind !== 'link' && list.length >= 3 && !opened(kind)) return [{ key: `pile-${kind}`, label: `${list.length} ${madeKindOf(kind).many}`, kind, files: list }]
+    if (!isPage({ kind }) && list.length >= 3 && !opened(kind)) return [{ key: `pile-${kind}`, label: `${list.length} ${madeKindOf(kind).many}`, kind, files: list }]
     return list.map((one, n) => ({ key: `${kind}-${n}`, label: nameOf(one), kind, files: [one] }))
   })
 }
@@ -4071,6 +4088,11 @@ const foldersOf = (list: CodeFile[]) => {
 }
 const openMade = async ($: EngineInterface, one: Made, pane: string, row: string, surface?: RenderSurface) => {
   if (one.kind === 'picture') return showPicture($, one.path, pane, row, surface)
+  if (one.kind === 'artifact' && surface !== 'terminal') {
+    const shown = await $.mcp.call('ccd_view', 'show_pane', { pane: 'artifact' }).catch(err => ({ isError: true, content: [{ type: 'text', text: String(err) }] }))
+    if (!shown.isError) return
+    await log($, `artifact not shown in the app's pane, opened in the browser: ${cut(shown.content.map(said => ('text' in said ? String(said.text) : '')).join(' '), 160)}`)
+  }
   const opened = await openOn($, one.path)
   if (opened.exitCode !== 0) await log($, `${one.path} not opened: ${opened.stderr}`)
 }
@@ -4084,7 +4106,7 @@ const madeChips = ($: EngineInterface, ui: Ui, one: Todo, key: string, onOpenWor
   const things = thingsOf(files, () => false)
   const shown = things.slice(0, CHIPS_MOST)
   const icon = (kind: MadeKind | 'code', at: string, path?: string) =>
-    table.Svg && !('isTerminal' in ui) ? <table.Svg key={`${at}-icon`} source={svgOfIcon(kind, 18, 20, path)} alt={kind === 'code' ? 'Code' : kind === 'link' ? 'Link' : madeKindOf(kind).one.replace(/^\w/, c => c.toUpperCase())} width={18} height={20} /> : null
+    table.Svg && !('isTerminal' in ui) ? <table.Svg key={`${at}-icon`} source={svgOfIcon(kind, 18, 20, path)} alt={kind === 'code' ? 'Code' : kind === 'link' ? 'Link' : kind === 'artifact' ? 'Artifact' : madeKindOf(kind).one.replace(/^\w/, c => c.toUpperCase())} width={18} height={20} /> : null
   return (
     <Box key={key} flexDirection="row" flexWrap="wrap" columnGap={2} rowGap={0}>
       {shown.map(thing => (
@@ -4092,7 +4114,7 @@ const madeChips = ($: EngineInterface, ui: Ui, one: Todo, key: string, onOpenWor
           {icon(thing.kind, `${key}-${thing.key}`, thing.files[0]?.path)}
           <Button
             key={`${key}-${thing.key}-open-${presses}`}
-            label={`${middleCut(thing.label, 18)}${thing.kind === 'link' ? ' ↗' : ''}`}
+            label={`${middleCut(thing.label, thing.kind === 'artifact' ? 26 : 18)}${thing.kind === 'link' ? ' ↗' : ''}`}
             plain
             onPress={press => void ((presses += 1), thing.files.length > 1 ? onOpenWork() : thing.files[0] ? openMade($, thing.files[0], '', '', press.surface) : undefined)}
           />

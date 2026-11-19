@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.235 · 19 November 2026
+- A Claude artifact a task or its helpers publish shows first on the task's card, under the title it was published with and with its own icon. Pressing it opens Claude Code's artifact pane beside the chat, or your browser where the app can't.
+- A link a result gives only to try something, such as an address with a query or an API address, no longer shows as something the task made.
+
 ## 0.2.234 · 19 November 2026
 - The claudopus.ai pages now count visits without cookies, and the privacy page says so
 
