@@ -87,7 +87,7 @@ Claudopus never updates by itself. Every hour (or as often as Config says), it c
 
 ### When a task is done
 
-- The card comes to the top, under anything waiting for you, for two seconds, outlined in blue, and says **Delivered**. It stays at the top, over what still works and under anything waiting for you, until you press **Mark as done**: it turns green where it stands for two seconds, then goes under **Finished**; **Reply** opens the box above the chat, and what you send puts the same task back to work. A chime plays, and a notification names the task and the start of its result. Click it to open that chat.
+- The card comes to the top, under anything waiting for you, for two seconds, outlined in blue, and says **Delivered**. It stays at the top, over what still works and under anything waiting for you, until you press **Mark as done**: it turns green where it stands for two seconds, with the happy octopus and the chime, then goes under **Finished**; **Reply** opens the box above the chat, and what you send puts the same task back to work. A chime plays, and a notification names the task and the start of its result. Click it to open that chat.
 - A task that failed with an error stays in its place and turns red.
 - If a finished task left something running, its card stays at the top with **Stop it**.
 - When the panel is scrolled down, the bar just above the prompt says what's waiting or what just finished at the top. Press it to scroll the panel back up.
