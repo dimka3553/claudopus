@@ -2,6 +2,13 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.230 · 19 November 2026
+- Claudopus now cleans up what tasks leave behind, every ten minutes and when a task stops. That covers the copies Chrome makes of itself, browser profiles, leftover temporary folders, task scratch folders untouched for two days, and code copies whose work is merged. Pictures a result shows are moved into the result's folder first. Your CT data, photos, videos and Desktop are never touched.
+- When your disk has less than 20 GB left, the panel says so at its top and you get one notification. Free up space cleans up at once and also clears the download caches.
+- Below 5 GB, tasks' downloads, installs, builds, renders and browser commands wait, so a task can't fill the disk.
+- Tasks no longer start your own Google Chrome without a window. Each start left a copy of the whole app behind, and 205 had piled up.
+- Claudopus's catch-up of past chats no longer leaves a scratch folder behind when it's stopped. Those folders had grown to 9.7 GB.
+
 ## 0.2.229 · 19 November 2026
 - When you answer a question in words, Attach and Paste sit under the box. Attach picks files of any kind, and Paste takes the picture or files you copied. The task gets each one with how to open it.
 - What you attach shows as tiles, the same as a task's files in its Details: a preview of a picture, video, PDF or document, else an icon for its kind. A press on a name opens the file, and its ✕ takes it off before you send.

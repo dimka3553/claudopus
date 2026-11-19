@@ -380,3 +380,65 @@ test("a task's heavy command that must wait, while the Mac is busy and another o
   ownSet(files, 'config.json', JSON.stringify({ heavy: 'never' }))
   expect((await shoot('s5', 'a3', 'Take the header shots')).deny).toBeUndefined()
 })
+
+// 19 Nov: the person's Mac had under 1 GB free, with 205 copies Chrome made of itself as tasks drove it without a window
+test("a disk nearly full says so at the top of the panel with Free up space and a notification once; under 5 GB a task's download, install, build or browser command is refused at once with why, and others run; a task never starts the person's own Chrome without a window", SLOW, async ($, on) => {
+  const { clock, files, own, notified } = world(on)
+  // (heavy commands never wait their turn here: only the disk holds them)
+  ownSet(files, 'config.json', JSON.stringify({ heavy: 'never' }))
+  const df = (gb: number) => files.set('df', `/dev/disk3s1s1 971350180 900000000 ${Math.round(gb * 1024 * 1024)} 97% /System/Volumes/Data\n`)
+  df(80)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'shoot every page', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Shoot the pages', prompt: 'shoot' } as never)
+  const bash = async (id: string, command: string, description: string) => ((await $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command, description, run_in_background: true } as never)) as { deny?: string }).deny
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const warning = () => pane.find({ type: 'Text', text: /disk space left/ })
+  // Plenty left: nothing is said, and every command runs
+  await clock.advance(6_000)
+  expect(await warning()).toBeUndefined()
+  expect(await bash('b1', 'cd /w && npm run build', 'Build the site')).toBeUndefined()
+  // Under 20 GB the panel says so, with its one press, and the person is told once
+  df(12)
+  await clock.advance(31_000)
+  expect((await until(warning))?.text).toBe('Your Mac has 12 GB of disk space left. Free up space?')
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toContain('Free up space')
+  expect(await bash('b2', 'curl -L -o /w/scans.zip https://example.com/scans.zip', 'Download the scans')).toBeUndefined()
+  // Under 5 GB a download, an install, a build and a browser command are refused, with why; a small command runs
+  df(3.2)
+  await clock.advance(31_000)
+  expect((await until(async () => ((await warning())?.text?.includes('3.2') ? warning() : undefined)))?.text).toBe('Your Mac has 3.2 GB of disk space left. Free up space?')
+  const FULL = (what: string) => new RegExp(`^Not run: the Mac has 3\\.2 GB of disk space left, and "${what}" can fill it\\. .* once more than 5 GB is free\\.`)
+  expect(await bash('b3', 'curl -L -o /w/scans.zip https://example.com/scans.zip', 'Download the scans')).toMatch(FULL('Download the scans'))
+  expect(await bash('b4', 'cd /w && npm install', 'Install the packages')).toMatch(FULL('Install the packages'))
+  expect(await bash('b5', 'cd /w && npm run build', 'Build the site')).toMatch(FULL('Build the site'))
+  expect(await bash('b6', 'cd /w && npx playwright screenshot http://localhost:3000 a.png', 'Take the page shots')).toMatch(FULL('Take the page shots'))
+  expect(await bash('b7', 'ls /w', 'List the site')).toBeUndefined()
+  expect(notified.filter(one => /disk space/.test(one))).toEqual(['Your Mac is almost out of disk space | 12 GB left. Free up space from the Claudopus panel.'])
+  // Free up space starts the tidy at once, with the caches, and says what it freed once its run ends
+  await pane.press({ key: String((await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Free up space')?.key) })
+  expect(own.filter(one => String(one[5] ?? '').endsWith('/bin/tidy')).map(one => one.slice(6))).toEqual([['--now', '--deep', MEMORY]])
+  expect((await until(() => pane.find({ type: 'Text', text: 'Freeing up space' })))?.text).toBe('Freeing up space')
+  files.set(`${MEMORY}/tidy/last.json`, JSON.stringify({ at: clock.now(), freed: 9 * 1024 ** 3 }))
+  df(12.2)
+  await clock.advance(31_000)
+  expect((await until(() => pane.find({ type: 'Text', text: /^Freed/ })))?.text).toBe('Freed 9 GB')
+  // With room again it goes, and nobody was told twice
+  df(40)
+  await clock.advance(31_000)
+  expect(await until(async () => ((await warning()) ? undefined : true))).toBe(true)
+  expect(await bash('b8', 'cd /w && npm run build', 'Build the site')).toBeUndefined()
+  expect(notified.filter(one => /disk space/.test(one))).toHaveLength(1)
+  // The person's own Chrome started without a window is refused at any time, written in a command or in the script it runs
+  const COPIED = /^Not run: this starts your own Google Chrome app without a window\. Each start makes a copy of the whole app on the disk/
+  expect(await bash('c1', '"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --screenshot=/w/a.png http://localhost:3000', 'Take a shot')).toMatch(COPIED)
+  expect(await bash('c2', '/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome --headless --print-to-pdf=/w/a.pdf http://localhost:3000', 'Print the page')).toMatch(COPIED)
+  files.set('/w/shoot.mjs', "import puppeteer from 'puppeteer'\nconst b = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' })")
+  expect(await bash('c3', 'cd /w && node shoot.mjs', 'Take the shots')).toMatch(COPIED)
+  files.set('/w/shot.py', "from playwright.sync_api import sync_playwright\nb = p.chromium.launch(channel='chrome')")
+  expect(await bash('c4', 'cd /w && python3 shot.py', 'Take the shots')).toMatch(COPIED)
+  // Playwright's own Chromium, and the person's Chrome opened with a window, run
+  files.set('/w/own.mjs', "import { chromium } from 'playwright'\nconst b = await chromium.launch()")
+  expect(await bash('c5', 'cd /w && node own.mjs', 'Take the shots')).toBeUndefined()
+  expect(await bash('c6', 'open -a "Google Chrome" http://localhost:3000', 'Open the site')).toBeUndefined()
+})

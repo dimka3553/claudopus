@@ -368,6 +368,9 @@ const workHooks = (on: On) => {
     // A heavy command of a piece of work waits its turn while the Mac is busy: refused at once with why and what it waits for
     const next = async (asked: typeof e) => {
       // (never one the person has just allowed as admin or as a release: what they allowed lasts two minutes)
+      // and none runs that fills a disk nearly full, or copies the person's own Chrome to drive it without a window (tidy.tsx)
+      const refused = dir && !isOff && e.agentId !== undefined && asked.tool === 'Bash' && !grants.length ? await turnLeftovers($, asked) : ''
+      if (refused) return { deny: refused } as Awaited<ReturnType<typeof raw>>
       const held = dir && !isOff && e.agentId !== undefined && asked.tool === 'Bash' && !grants.length ? await turnHeavy($, asked) : {}
       if (held.deny) return { deny: held.deny } as Awaited<ReturnType<typeof raw>>
       try {
@@ -727,6 +730,8 @@ const workHooks = (on: On) => {
       const gone = ((await read($, todos)).find(one => one.id === e.agent_id)?.bg ?? []).filter(b => !ids.has(b.id)).map(b => b.id)
       if (gone.length) await dropBackground($, gone).catch(err => log($, `ended background work not let go: ${String(err)}`))
     }
+    // What a task's commands left behind is tidied as it stops (bin/tidy itself runs at most every ten minutes)
+    if (dir && !isOff && !r.block && (await read($, todos)).some(one => one.id === e.agent_id && !one.parentId && !one.chat)) await startTidy($).catch(err => log($, `leftovers not tidied: ${String(err)}`))
     // One rule against stopping early: a task with to-dos open, nothing of its own running and nothing waiting for the person may
     // not stop here (stopRefused). Claude Code's own word that this stop follows a refused one keeps it from being asked twice
     if (!dir || r.block || (e as { stop_hook_active?: boolean }).stop_hook_active) return r

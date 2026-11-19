@@ -382,6 +382,11 @@ const chatHooks = (on: On) => {
     // What no chat on this Mac saved itself, caught up into memory a minute after the load and then every while
     afterLoad($, CATCH_UP_AFTER, () => startCatchUp($).catch(err => log($, `chats not caught up: ${String(err)}`)))
     everyLoad($, CATCH_UP_EVERY, () => startCatchUp($).catch(err => log($, `chats not caught up: ${String(err)}`)))
+    // What tasks left behind, tidied as often (tidy.tsx), and the disk looked at every half minute from a few seconds after the load
+    afterLoad($, TIDY_AFTER, () => startTidy($).catch(err => log($, `leftovers not tidied: ${String(err)}`)))
+    everyLoad($, TIDY_EVERY, () => startTidy($).catch(err => log($, `leftovers not tidied: ${String(err)}`)))
+    afterLoad($, 5000, () => lookDisk($).catch(err => log($, `disk not looked at: ${String(err)}`)))
+    everyLoad($, DISK_EVERY, () => lookDisk($).catch(err => log($, `disk not looked at: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
     await readAnswers($).catch(() => undefined)
     await readOthers($).catch(() => undefined)

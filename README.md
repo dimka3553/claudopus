@@ -96,6 +96,10 @@ Claudopus never updates by itself. Every hour (or as often as Config says), it c
 
 While tasks run, the bar shows memory in use, how busy the processor and graphics processor are, the battery and its time left, and the disk and network speed. Claude's own share is in purple. Memory turns amber past nine tenths, and the battery turns amber at a fifth when it's on its own power. In the desktop app, rest the pointer on a figure to see its card: who uses the most, the network in and out, and what the battery is drawing. In a terminal, they are short labels with small meters, and some drop off when the window is narrow.
 
+### What tasks leave behind
+
+Every ten minutes, and as a task stops, Claudopus removes what tasks left behind: copies Chrome makes of itself when a task drives it without a window, browser profiles, temporary folders no command uses any more, task scratch folders untouched for two days, and code copies (worktrees) whose branch is merged with nothing unsaved in them, an hour after their last change. A picture a result shows moves into the result's folder first. It never touches CT data, photos, videos or your Desktop. When the disk has less than 20 GB left, the panel says so at its top with Free up space, which also clears the download caches; below 5 GB, tasks' downloads, installs, builds, renders and browser commands wait. Tasks never start your own Google Chrome without a window.
+
 ### The pages
 
 The panel's header has these buttons (Results once there is a result):

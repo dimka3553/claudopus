@@ -8918,7 +8918,7 @@ const isOwnEntry = (entry: Entry) => entry.kind === 'note' || entry.kind === 'de
 const ownNote = (one: Pick<Todo, 'entries'>) => [...one.entries].reverse().find(entry => isOwnEntry(entry) && entry.text)
 
 
-type NeedKind = 'permission' | 'question' | 'password' | 'key'
+type NeedKind = 'permission' | 'question' | 'password' | 'key' | 'disk'
 type NeedButton = { key: string; label: string; onPress: (press: { surface: string }) => void; isPlain?: boolean; hotkey?: string; isOpener?: boolean }
 type Need = {
   id: string
@@ -8938,7 +8938,7 @@ type Need = {
   field?: { key: string; placeholder: string; value?: string; isFocused?: boolean; onInput: (value: string) => void; onSubmit: (value: string) => void }
   isActing?: boolean
 }
-const NEED_LABEL: Record<NeedKind, string> = { permission: 'Permission', question: 'Question', password: 'Password', key: 'Key' }
+const NEED_LABEL: Record<NeedKind, string> = { permission: 'Permission', question: 'Question', password: 'Password', key: 'Key', disk: 'Disk space' }
 
 const askNeed = ($: EngineInterface, one: Todo, surface: string, now: number): Need | undefined => {
   const ask = one.ask
@@ -9136,6 +9136,7 @@ const looseNeeds = ($: EngineInterface, surface: string, shown: (card: string | 
     ...looseGates.filter(gate => !gatePressed.has(gate.id)).map(gate => gateNeed($, gate, '', false, 'This chat')),
     ...waiting.filter(p => !shown(p.card)).map(p => promptNeed($, p)),
     ...chats.flatMap(c => (c.prompts ?? []).map(p => promptNeed($, p, c))),
+    ...diskNeeds($),
   ].sort((a, b) => a.at - b.at)
 }
 
@@ -9547,6 +9548,10 @@ const chatHooks = (on: On) => {
     if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
     afterLoad($, CATCH_UP_AFTER, () => startCatchUp($).catch(err => log($, `chats not caught up: ${String(err)}`)))
     everyLoad($, CATCH_UP_EVERY, () => startCatchUp($).catch(err => log($, `chats not caught up: ${String(err)}`)))
+    afterLoad($, TIDY_AFTER, () => startTidy($).catch(err => log($, `leftovers not tidied: ${String(err)}`)))
+    everyLoad($, TIDY_EVERY, () => startTidy($).catch(err => log($, `leftovers not tidied: ${String(err)}`)))
+    afterLoad($, 5000, () => lookDisk($).catch(err => log($, `disk not looked at: ${String(err)}`)))
+    everyLoad($, DISK_EVERY, () => lookDisk($).catch(err => log($, `disk not looked at: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
     await readAnswers($).catch(() => undefined)
     await readOthers($).catch(() => undefined)
@@ -10393,6 +10398,122 @@ const turnHeavy = async ($: EngineInterface, e: ToolCallInput): Promise<{ id?: s
   if (heavyRoom(list, usageNow(now), mode, now)) return (heavyOpen.set(id, agent), (heavyLetAt = now), { id })
   await log($, `work ${agent}'s heavy command refused while the Mac is busy (${busyWords(usageNow(now))})`)
   return { deny: HEAVY_HELD(cut(oneLine(String(input.description ?? '')) || labelOf('', command), 120), usageNow(now), heavyRuns(list), heavyOpen.size) }
+}
+
+const TIDY_AFTER = 2 * 60_000
+const TIDY_EVERY = 10 * 60_000
+const DISK_EVERY = 30_000
+const DISK_WARN = 20 * 1024 ** 3
+const DISK_STOP = 5 * 1024 ** 3
+const DISK_TOLD_EVERY = 6 * 3600_000
+type DiskKept = { at: number; free: number; total: number }
+let diskKept: DiskKept | undefined
+let diskTriedAt = -Infinity
+let diskLowSince = 0
+let diskToldAt = -Infinity
+let tidyPressedAt = 0
+let tidyLast: { at: number; freed: number } | undefined
+
+const TIDY_START = `d=$1; shift; l="$d/tidy/log.txt"; mkdir -p "$d/tidy" || exit 1; [ -f "$l" ] && [ "$(wc -c < "$l")" -gt 1000000 ] && mv -f "$l" "$l.old"; nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' nice -n 10 "$@" >> "$l" 2>&1 < /dev/null &`
+const startTidy = async ($: EngineInterface, flags: string[] = []) => {
+  if (!dir || isOff) return
+  const r = await $.process.run(['/bin/sh', '-c', TIDY_START, 'sh', dir, `${$.plugin.root}/bin/tidy`, ...flags, dir])
+  if (r.exitCode !== 0) await log($, `leftovers not tidied: ${r.stderr.slice(0, 200)}`)
+}
+
+const DISK_LOOK = '# disk left\ndf -Pk "$HOME" 2>/dev/null | tail -n 1'
+const diskOf = (text: string, at: number): DiskKept | undefined => {
+  const m = /(\d+)\s+(\d+)\s+(\d+)\s+\d+%/.exec(text)
+  return m ? { at, total: Number(m[1]) * 1024, free: Number(m[3]) * 1024 } : undefined
+}
+const lastOf = (text: string) => {
+  try {
+    const j = JSON.parse(text) as { at?: unknown; freed?: unknown }
+    return typeof j.at === 'number' ? { at: j.at, freed: typeof j.freed === 'number' ? j.freed : 0 } : undefined
+  } catch {
+    return undefined
+  }
+}
+const isDiskLow = (d: DiskKept | undefined) => Boolean(d && d.free < DISK_WARN)
+const isDiskFull = (d: DiskKept | undefined) => Boolean(d && d.free < DISK_STOP)
+
+const lookDisk = async ($: EngineInterface) => {
+  const now = await $.clock.now()
+  if (now >= diskTriedAt && now - diskTriedAt < DISK_EVERY / 2) return diskKept
+  diskTriedAt = now
+  const r = await $.process.run(['sh', '-c', DISK_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
+  const was = diskKept
+  const wasLast = tidyLast
+  diskKept = diskOf(r?.stdout ?? '', now) ?? diskKept
+  if (dir) tidyLast = lastOf(await $.fs.read(`${dir}/tidy/last.json`).catch(() => '')) ?? tidyLast
+  if (!isDiskLow(diskKept)) diskLowSince = 0
+  else if (!diskLowSince) diskLowSince = now
+  const said = (d: DiskKept | undefined) => (isDiskLow(d) ? `${gbText(d?.free ?? 0)}:${isDiskFull(d)}` : '')
+  if (said(was) !== said(diskKept) || wasLast?.at !== tidyLast?.at) drawAgain($)
+  if (diskKept && isDiskLow(diskKept) && !isOff) await tellDisk($, diskKept, now)
+  return diskKept
+}
+const tellDisk = async ($: EngineInterface, d: DiskKept, now: number) => {
+  if (now >= diskToldAt && now - diskToldAt < DISK_TOLD_EVERY) return
+  diskToldAt = now
+  const told = dir ? Number(await $.fs.read(`${dir}/tidy/told`).catch(() => '0')) || 0 : 0
+  if (now >= told && now - told < DISK_TOLD_EVERY) return
+  if (dir) await $.fs.write(`${dir}/tidy/told`, String(now)).catch(() => undefined)
+  await alertPerson($, 'disk', 'Your Mac is almost out of disk space', `${gbText(d.free)} GB left. Free up space from the Claudopus panel.`, 'disk-low')
+}
+
+const freeSpace = async ($: EngineInterface) => {
+  tidyPressedAt = await $.clock.now()
+  presses += 1
+  diskTriedAt = -Infinity
+  drawAgain($)
+  await log($, 'the person asked to free up disk space')
+  await startTidy($, ['--now', '--deep'])
+}
+
+const diskNeeds = ($: EngineInterface): Need[] => {
+  const d = diskKept
+  if (!dir || isOff || !d || !isDiskLow(d)) return []
+  const isDone = Boolean(tidyPressedAt && tidyLast && tidyLast.at >= tidyPressedAt)
+  const isFreeing = Boolean(tidyPressedAt) && !isDone
+  const stop = gbText(DISK_STOP)
+  return [
+    {
+      id: 'disk-low',
+      kind: 'disk',
+      at: diskLowSince || d.at,
+      text: `Your Mac has ${gbText(d.free)} GB of disk space left. Free up space?`,
+      details: [
+        isDiskFull(d) ? `Tasks' downloads, installs, builds, renders and browser commands wait until more than ${stop} GB is free.` : `Below ${stop} GB, tasks' downloads, installs, builds, renders and browser commands wait.`,
+        'Free up space removes what tasks left behind: temporary files, copies Chrome made of itself, browser profiles, scratch folders untouched for 2 days, code copies whose work is merged, and download caches. Pictures a result shows move into its folder first. Your CT data, photos, videos and Desktop are never touched.',
+      ].join('\n\n'),
+      buttons: isFreeing ? [] : [{ key: `disk-free-${tidyPressedAt}-${presses}`, label: 'Free up space', onPress: () => void freeSpace($).catch(err => log($, `space not freed: ${String(err)}`)) }],
+      ...(isFreeing ? { line: 'Freeing up space' } : isDone && tidyLast ? { line: `Freed ${gbText(tidyLast.freed)} GB` } : {}),
+    },
+  ]
+}
+
+const CHROME_APP = /\/Google Chrome\.app\/Contents\/MacOS\/Google Chrome(?![\w ]*(?:Helper|for Testing))/
+const CHROME_IN_SCRIPT = /executablePath\s*[:=]\s*[^\n]*\/Google Chrome\.app\b|\bchannel\s*[:=]\s*['"]chrome(?:-beta|-dev|-canary)?['"]/
+const CHROME_COPIED = `Not run: this starts your own Google Chrome app without a window. Each start makes a copy of the whole app on the disk, and a start that is stopped leaves it there. Use Playwright's own Chromium instead (chromium.launch() with no channel or executablePath, after npx playwright install chromium), start it once for every page the script needs, and close it in a finally block.`
+const DISK_FULL = (what: string, d: DiskKept) =>
+  named(`Not run: the Mac has ${gbText(d.free)} GB of disk space left, and "${what}" can fill it. Remove what you made that is no longer needed (your scratch folder, temporary files), run heavy work in the cloud, and send the same command again once more than ${gbText(DISK_STOP)} GB is free. {Name} can free up space from the Claudopus panel.`)
+const turnLeftovers = async ($: EngineInterface, e: ToolCallInput) => {
+  const input = e as { command?: unknown; description?: unknown }
+  const command = String(input.command ?? '')
+  const agent = e.agentId ?? ''
+  if (!command || !(await read($, todos)).some(one => one.id === agent && !one.chat)) return ''
+  const scripts = await scriptsRun($, command)
+  const plain = command.replace(/\\ /g, ' ').replace(/["']/g, '')
+  if ((CHROME_APP.test(plain) && /--headless\b/.test(plain)) || scripts.some(text => CHROME_IN_SCRIPT.test(text) || (CHROME_APP.test(text) && /--headless\b/.test(text)))) {
+    await log($, `refused work ${agent}'s command that starts the person's own Chrome without a window`)
+    return CHROME_COPIED
+  }
+  if (!heavyOf(command, scripts) && jobKindOf(command, '') !== 'download') return ''
+  const d = await lookDisk($).catch(() => diskKept)
+  if (!d || !isDiskFull(d)) return ''
+  await log($, `refused work ${agent}'s command while the disk has ${gbText(d.free)} GB left`)
+  return DISK_FULL(cut(oneLine(String(input.description ?? '')) || labelOf('', command), 120), d)
 }
 
 
@@ -11366,6 +11487,8 @@ const workHooks = (on: On) => {
     }
     let woken = ''
     const next = async (asked: typeof e) => {
+      const refused = dir && !isOff && e.agentId !== undefined && asked.tool === 'Bash' && !grants.length ? await turnLeftovers($, asked) : ''
+      if (refused) return { deny: refused } as Awaited<ReturnType<typeof raw>>
       const held = dir && !isOff && e.agentId !== undefined && asked.tool === 'Bash' && !grants.length ? await turnHeavy($, asked) : {}
       if (held.deny) return { deny: held.deny } as Awaited<ReturnType<typeof raw>>
       try {
@@ -11655,6 +11778,7 @@ const workHooks = (on: On) => {
       const gone = ((await read($, todos)).find(one => one.id === e.agent_id)?.bg ?? []).filter(b => !ids.has(b.id)).map(b => b.id)
       if (gone.length) await dropBackground($, gone).catch(err => log($, `ended background work not let go: ${String(err)}`))
     }
+    if (dir && !isOff && !r.block && (await read($, todos)).some(one => one.id === e.agent_id && !one.parentId && !one.chat)) await startTidy($).catch(err => log($, `leftovers not tidied: ${String(err)}`))
     if (!dir || r.block || (e as { stop_hook_active?: boolean }).stop_hook_active) return r
     const why = stopRefused(await read($, todos), e.agent_id)
     if (why) await log($, `work ${e.agent_id} may not stop: to-dos are open and nothing of its own runs`)
