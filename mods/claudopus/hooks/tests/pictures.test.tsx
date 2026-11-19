@@ -1182,7 +1182,7 @@ test("what a task made is on its card under its title, side by side, and as tile
   files.delete('ccd_view:refused')
   const opened = shown.length
   await pressed(pane, 'made-a1-artifact-0-open')
-  expect(await until(async () => (viewed.at(-1)?.pane === 'artifact' ? viewed.at(-1) : undefined))).toEqual({ pane: 'artifact' })
+  expect(await until(async () => ((viewed.at(-1) as { pane?: string } | undefined)?.pane === 'artifact' ? viewed.at(-1) : undefined))).toEqual({ pane: 'artifact' })
   expect(shown.length).toBe(opened)
   files.set('ccd_view:refused', 'No artifact pane here.')
   await pressed(pane, 'made-a1-artifact-0-open')
