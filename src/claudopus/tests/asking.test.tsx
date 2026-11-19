@@ -502,11 +502,11 @@ test('an ask outlives the work that made it: amber after the work ends, with the
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Run this to restart that chat yourself.', command: 'ssh m4 tmux respawn-pane -k -t claude', choices: ['Done'] } as never)
   await $.turn.complete({ answer: 'I could not restart it; the command is on your card.', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
   // Long after it finished, the ask is still there, amber, with its own Done, its buttons for the command and Answer in words;
-  // though the work has ended, its card has no Dismiss or Change something while it asks
+  // though the work has ended, its card has no Change something while it asks; Dismiss puts it away, as on any ended card
   await clock.advance(10 * 60_000)
   expect((await until(async () => list.find({ type: 'Text', text: 'Run this to restart that chat yourself.' })))?.props.color).toBe(AMBER)
   expect(await until(async () => ((await askButtons(list, 'a1')).includes('Answer in words') ? askButtons(list, 'a1') : undefined))).toEqual(['Copy', 'Open in Terminal', 'Done', 'Answer in words'])
-  expect((await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => ['Dismiss', 'Change something', 'Not now'].includes(label))).toEqual([])
+  expect((await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => ['Dismiss', 'Change something', 'Not now'].includes(label))).toEqual(['Dismiss'])
   // Done starts the finished work again with the answer, and the ask goes at once; nothing is sent in the person's place
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done')?.key ?? '' })
   expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Done"') && line.includes('Run this to restart that chat yourself.')))).toBeDefined()
@@ -877,7 +877,7 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   const relay = (await until(async () => appended.find(line => line.startsWith('undefined: In the background task "Redraw the logo", Claude asked the person')))) ?? ''
   expect(submitted.some(line => line.includes('Which logo do you want?'))).toBe(false)
   expect(logged.some(line => line.includes('Which logo do you want?'))).toBe(false)
-  expect(relay).toContain('Which logo do you want? (answers: A · B; pictures: /w/shots/a.png, /w/shots/b.png)')
+  expect(relay).toContain('Which logo do you want? (buttons: A · B; pictures: /w/shots/a.png, /w/shots/b.png)')
   expect(relay).toContain('do not pass it on')
   expect(relay).toContain('SendUserFile')
   // Pictures sent as "proactive" did not show in the chat; "normal" ones did
