@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.218 · 19 November 2026
+- Once you answer a question on a card, in words too, the question goes at once. One grey line says what you answered, cut to one row, and pressing it opens the task's Details, where the question and your answer are whole.
+- After a press on a card, the space the question took stays empty for three seconds under that line, so nothing below slides up under the pointer.
+
 ## 0.2.217 · 19 November 2026
 - A task's changed files are now a list you can open: press "3 changed files" on its card, and its Details lists each file by kind (code, then documents) in lined-up columns, with an icon, its folder, its counts and a bar of the lines added and removed
 - A press on a file in that list shows it in the app's Files pane beside the chat; in the terminal, or for a file the app can't show, what changed in it opens in a tab of the panel

@@ -389,12 +389,42 @@ const panelHooks = (on: On) => {
     }
     // A card's blocks, one under the other in the order they came; a newer one goes under the older, so nothing already on the
     // card moves. Each is the one drawing (needBlock), on the small card as in Details
-    const needBlocks = (one: Todo, isWhole = false) =>
-      needsFor(one).map(need => {
+    // A question the person answered, by a press or in their own words, is gone from the small card at once: one grey line says
+    // the answer in its place (answeredRow), and Details keeps the question whole (19 Nov, the person: "when I answer, there is no
+    // need to keep showing the question")
+    const cardNeeds = (one: Todo, isWhole = false) => needsFor(one).filter(need => isWhole || !need.isActing)
+    // The rows a block just pressed on this small card took, held under its grey line for a moment (foldOf)
+    const heldFold = (one: Todo) => (e.surface === 'desktop' ? foldOf(one.id, at, cardNeeds(one).map(need => need.id)) : undefined)
+    const needBlocks = (one: Todo, isWhole = false) => {
+      const fold = isWhole ? undefined : heldFold(one)
+      const blocks = cardNeeds(one, isWhole).map(need => {
         const isOwnField = Boolean(need.field && need.card)
         const autoFocus = isOwnField && e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : false
-        return needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(one, need.id, isWhole) : null, autoFocus })
+        const node = needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(one, need.id, isWhole) : null, autoFocus })
+        // (on the small card each block starts at the title's left edge; the grey line is a press, which the app moves in itself)
+        return { at: need.at, node: isWhole ? node : <Box key={`lead-${need.id}`} flexDirection="column" paddingLeft={lead}>{node}</Box> }
       })
+      // where the block stood among the others, its grey line at the top of the rows it held
+      const held = fold ? [{ at: fold.came, node: <Box key={`fold-${one.id}`} flexDirection="column" height={fold.rows} flexShrink={0}>{answeredRow(one) ?? null}</Box> }] : []
+      return [...blocks, ...held].sort((a, b) => a.at - b.at).map(block => block.node)
+    }
+    // What the person last pressed or answered on a small card, in one grey line cut to one row, with the press that takes a
+    // button's answer back. The line opens the card's Details, where the question and the answer are whole
+    const answeredRow = (one: Todo) =>
+      (!one.ask || isActingOnReply(one)) && sentLine(one, at) ? (
+        <Box key={`pressed-${one.id}`} flexDirection="row" gap={2} height={1} overflow="hidden">
+          <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
+            <Button key={`answered-${one.id}-${presses}`} plain dimColor hover={{ scope: `answered-${one.id}`, underline: true }} onPress={() => openWork($, one.id)}>
+              <Text dimColor wrap="truncate-end">{sentLine(one, at)}</Text>
+            </Button>
+          </Box>
+          {canTakeBack(one, at) ? (
+            <Box flexShrink={0}>
+              <Button key={`take-back-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label="Take back" plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} />
+            </Box>
+          ) : null}
+        </Box>
+      ) : null
     // The small card: its title, which opens its Details, with Stop at the far end of that row; where it stands and how many
     // to-dos are done; the to-do marked doing, while one is; the line the work last wrote beside the three dots; its helpers. Each
     // part has a fixed number of rows and is clipped to them, so a card changes height only as that to-do row comes and goes
@@ -507,8 +537,8 @@ const panelHooks = (on: On) => {
             {stepLine(one, kept, done)}
             {/* Every part under the title starts at the title's own left edge (lead). What the card waits on, each a block, in
                 the order it came */}
-            {needsFor(one).length ? (
-              <Box key={`needs-lead-${one.id}`} flexDirection="column" gap={1} paddingLeft={lead}>
+            {cardNeeds(one).length || heldFold(one) ? (
+              <Box key={`needs-lead-${one.id}`} flexDirection="column" gap={1}>
                 {needBlocks(one)}
               </Box>
             ) : null}
@@ -519,19 +549,8 @@ const panelHooks = (on: On) => {
               </Box>
             ) : null}
             {/* A card says its stage, its to-do and what it does now, and in amber only what waits for the person */}
-            {/* What the person last pressed or answered here, in one grey line, with the press that takes a button's answer back */}
-            {!one.ask && sentLine(one, at) ? (
-              <Box key={`pressed-${one.id}`} flexDirection="row" gap={2} paddingLeft={lead} height={1} overflow="hidden">
-                <Box flexShrink={1} minWidth={0}>
-                  <Text dimColor wrap="truncate-end">{sentLine(one, at)}</Text>
-                </Box>
-                {canTakeBack(one, at) ? (
-                  <Box flexShrink={0}>
-                    <Button key={`take-back-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label="Take back" plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} />
-                  </Box>
-                ) : null}
-              </Box>
-            ) : null}
+            {/* What the person last pressed or answered here, in one grey line, where no block just pressed holds it */}
+            {heldFold(one) ? null : answeredRow(one)}
             {/* A card that waits says so with its block alone: no line of what the task last did under it. A delivered card's line is
                 one row: what it asks and its presses come right under it */}
             {needsPerson(one) ? null : (
@@ -1550,10 +1569,18 @@ const panelHooks = (on: On) => {
               {runBlock($, table, one, `runs-big-${one.id}`, at)}
             </Box>
           ) : null}
+          {/* The question just answered, whole, and the answer whole under it (what the small card's grey line opens) */}
           {!one.ask && sentLine(one, at) ? (
-            <Box key="part-answered" flexDirection="row" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
+            <Box key="part-answered" flexDirection="column" gap={1} backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
+              {sentReplies.get(one.id)?.ask && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (
+                <Box key="answered-question" flexDirection="column" gap={1} minWidth={0}>
+                  <Text dimColor>Question</Text>
+                  <Text wrap="wrap" bold>{sentReplies.get(one.id)?.ask ?? ''}</Text>
+                  {sentReplies.get(one.id)?.details ? <Markdown text={sentReplies.get(one.id)?.details ?? ''} /> : null}
+                </Box>
+              ) : null}
               <Box flexDirection="row" gap={2} minWidth={0}>
-                <Text dimColor wrap="wrap">{sentLine(one, at)}</Text>
+                <Text dimColor wrap="wrap">{sentLine(one, at, Infinity)}</Text>
                 {canTakeBack(one, at) ? <Button key={`take-back-big-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label="Take back" plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} /> : null}
               </Box>
             </Box>

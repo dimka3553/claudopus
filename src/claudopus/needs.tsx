@@ -6,11 +6,13 @@
 // line that asks, what it is about, the command or code shown whole, its buttons, and what each press does. needBlock draws it,
 // the same on a task's card, in its Details, and at the top of the panel for one that belongs to no task
 type NeedKind = 'permission' | 'question' | 'password' | 'key'
-type NeedButton = { key: string; label: string; onPress: (press: { surface: string }) => void; isPlain?: boolean; hotkey?: string }
+// `isOpener`: a press that answers nothing (it opens or closes the box above the chat, or another chat): the block stays
+type NeedButton = { key: string; label: string; onPress: (press: { surface: string }) => void; isPlain?: boolean; hotkey?: string; isOpener?: boolean }
 // `from`: whose it is, said beside its kind when it is not on its task's card. `card`: the card whose question it is, for its
 // pictures, its Copy and its Open in Terminal. `where`: where it is answered when no press here answers it. `said`: what went wrong
 // with what was last typed for it. `field`: the one field it keeps where the bar above the chat draws none (the terminal).
-// `isActing`: a question the person answered in words, which its task is acting on: in the task's purple, with nothing to press
+// `isActing`: a question the person answered in words, which its task is acting on: in the task's purple, with nothing to press,
+// drawn in Details alone (the small card folds it to the one grey line of the answer). `wholeLine`: that line uncut, for Details
 type Need = {
   id: string
   kind: NeedKind
@@ -23,6 +25,7 @@ type Need = {
   where?: string
   said?: string
   line?: string
+  wholeLine?: string
   buttons: NeedButton[]
   extra?: (ui: Ui) => JSX.Element | null
   field?: { key: string; placeholder: string; value?: string; isFocused?: boolean; onInput: (value: string) => void; onSubmit: (value: string) => void }
@@ -36,7 +39,7 @@ const askNeed = ($: EngineInterface, one: Todo, surface: string, now: number): N
   if (!ask) return undefined
   const id = `ask-${one.id}`
   const line = sentLine(one, now)
-  const base = { id, at: ask.at, text: ask.text, ...(ask.details ? { details: ask.details } : {}), ...(ask.copy ? { command: ask.copy } : {}), card: one, ...(line ? { line } : {}) }
+  const base = { id, at: ask.at, text: ask.text, ...(ask.details ? { details: ask.details } : {}), ...(ask.copy ? { command: ask.copy } : {}), card: one, ...(line ? { line, wholeLine: sentLine(one, now, Infinity) } : {}) }
   // Another chat's is answered only in its own chat: no file carries an answer there
   const elsewhere = one.chat ? `Answer it in its own chat, “${one.chat.title || 'another chat'}”${one.chat.host ? `, on ${one.chat.host}` : ''}.` : ''
   if (ask.refused) {
@@ -64,7 +67,7 @@ const askNeed = ($: EngineInterface, one: Todo, surface: string, now: number): N
     buttons: [
       ...(ask.choices ?? []).map((choice, n) => ({ key: `${id}-choice-${n}-${mark}-${loadMark}`, label: choice, onPress: () => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`))) })),
       // The last answer opens the box above the chat for this card, and closes it again
-      ...(inBar ? [isReplyOpen(one) ? { key: `${id}-inbar-close-${presses}`, label: 'Close', isPlain: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) } : { key: `${id}-inbar-${presses}`, label: ANSWER_IN_WORDS, isPlain: true, onPress: (press: { surface: string }) => openBar($, { kind: 'answer', id: one.id, one }, press.surface) }] : []),
+      ...(inBar ? [isReplyOpen(one) ? { key: `${id}-inbar-close-${presses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) } : { key: `${id}-inbar-${presses}`, label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, { kind: 'answer', id: one.id, one }, press.surface) }] : []),
     ],
     // Where the bar draws no field, the block has the one field itself
     ...(inBar
@@ -140,7 +143,7 @@ const promptNeed = ($: EngineInterface, p: Prompt, c?: Shared, isOnCard = false)
           { key: `${id}-no-${presses}`, label: DONT_ALLOW, onPress: press('no') },
         ]
       : c && url
-        ? [{ key: `${id}-open-${presses}`, label: 'Open chat', onPress: () => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`))) }]
+        ? [{ key: `${id}-open-${presses}`, label: 'Open chat', isOpener: true, onPress: () => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`))) }]
         : [],
   }
 }
@@ -152,7 +155,7 @@ const boxNeed = ($: EngineInterface, one: Asked, surface: string, canFocus = fal
   const isKey = one.kind === 'key'
   const mode: BoxMode = (inBar ? undefined : boxModes.get(one.id)) ?? 'key'
   const isOpen = Boolean(barOpen && isBoxKind(barOpen.kind) && barOpen.id === one.id)
-  const close = { key: `${id}-close-${boxPresses}`, label: 'Close', isPlain: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) }
+  const close = { key: `${id}-close-${boxPresses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) }
   const refuse = { key: `${id}-cancel-${boxPresses}`, label: isKey ? DONT_GIVE : DONT_ALLOW, onPress: () => void cancelBox($, one.id) }
   // The admin command it is for, as the person allowed it; a key's command is the task's own and is not shown again
   const command = isKey ? '' : (adminCalls(one.command ?? '', $.plugin.root)[0]?.command ?? '')
@@ -169,13 +172,13 @@ const boxNeed = ($: EngineInterface, one: Asked, surface: string, canFocus = fal
       ? isOpen
         ? [close, refuse]
         : [
-            { key: `${id}-paste-${boxPresses}`, label: isKey && one.name ? PASTE_IT : TYPE_IT, onPress: (press: { surface: string }) => openBar($, { kind: barKindOf(one, 'key'), id: one.id }, press.surface) },
+            { key: `${id}-paste-${boxPresses}`, label: isKey && one.name ? PASTE_IT : TYPE_IT, isOpener: true, onPress: (press: { surface: string }) => openBar($, { kind: barKindOf(one, 'key'), id: one.id }, press.surface) },
             refuse,
-            ...(isKey ? [{ key: `${id}-respond-${boxPresses}`, label: ANSWER_IN_WORDS, isPlain: true, onPress: (press: { surface: string }) => openBar($, { kind: 'words', id: one.id }, press.surface) }] : []),
+            ...(isKey ? [{ key: `${id}-respond-${boxPresses}`, label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, { kind: 'words', id: one.id }, press.surface) }] : []),
           ]
       : [
           refuse,
-          ...(isKey ? [{ key: `${id}-mode-${boxPresses}`, label: mode === 'reply' ? (one.name ? PASTE_IT : TYPE_IT) : ANSWER_IN_WORDS, isPlain: true, onPress: () => void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($)) }] : []),
+          ...(isKey ? [{ key: `${id}-mode-${boxPresses}`, label: mode === 'reply' ? (one.name ? PASTE_IT : TYPE_IT) : ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: () => void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($)) }] : []),
         ],
     ...(inBar
       ? {}
@@ -211,11 +214,35 @@ const looseNeeds = ($: EngineInterface, surface: string, shown: (card: string | 
   ].sort((a, b) => a.at - b.at)
 }
 
+// How many rows a block takes on a small card of `room` letters, reckoned high: a press that answers it folds it to one grey line,
+// and the card holds that many rows under the line for FOLD_HELD (asking.tsx, answerFolds), so nothing below moves up under the pointer
+// that pressed (19 Nov: the person asked that an answered question go at once, and "the card doesn't jump"). Too many rows only
+// moves what is below further down, never under the pointer, which stays on the rows held
+const foldRows = (need: Need, room: number) => {
+  // (the letters of a row reckoned fewer than the card's own perRow, so a long line is never thought to take fewer rows than it does)
+  const per = Math.max(20, Math.floor(room / 2.4))
+  const lines = (text: string, each = per) => text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / each)), 0)
+  // In the desktop app's pixels, measured on its own renderer (19 Nov): a line of text FOLD_LINE, a gap between parts FOLD_GAP, a
+  // row of buttons FOLD_BUTTONS, the outline and its padding FOLD_EDGE; a held row of the card is FOLD_ROW
+  const details = need.details ? lines(need.details.length <= DETAILS_ON_CARD ? need.details : `${cut(need.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`) * FOLD_LINE : 0
+  const pictures = Math.ceil((need.card?.ask?.pictures?.length ?? 0) / 2) * (ASK_PIC_TALL + FOLD_LINE + 8)
+  const command = need.command ? lines(need.command) * FOLD_LINE + 16 : 0
+  const buttons = need.buttons.length ? Math.ceil(need.buttons.reduce((n, button) => n + button.label.length + 6, 0) / (per * 1.4)) * FOLD_BUTTONS : 0
+  const parts = [FOLD_LINE, lines(cut(need.text, Math.round(room * 1.6)), Math.floor(per * 0.9)) * FOLD_LINE, details, pictures, command, need.where ? lines(need.where) * FOLD_LINE : 0, need.said ? lines(need.said) * FOLD_LINE : 0, buttons, need.line ? FOLD_LINE : 0].filter(Boolean)
+  return Math.ceil((parts.reduce((n, part) => n + part, 0) + (parts.length - 1) * FOLD_GAP + FOLD_EDGE) / FOLD_ROW)
+}
+const FOLD_LINE = 24
+const FOLD_GAP = 12
+const FOLD_BUTTONS = 44
+const FOLD_EDGE = 26
+const FOLD_ROW = 24
+
 // The one drawing: an outlined amber block; a small dim label of its kind; the question in amber; what it is about; the command
 // in a row of its own, whole; then its buttons. `isWhole`: in Details, where nothing is cut. `pictures`: the question's own
 // pictures, drawn by the pane (it keeps how much of them one drawing holds)
 const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boolean; isCompact?: boolean; room?: number; surface?: string; pictures?: JSX.Element | null; autoFocus?: boolean } = {}) => {
   const { isWhole = false, room = 80 } = opts
+  const isFolding = !isWhole && !opts.isCompact && opts.surface === 'desktop'
   const one = need.card
   const ask = one?.ask
   const Link = (ui as Ui & { Link: ElementTable['Link'] }).Link
@@ -273,12 +300,19 @@ const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boo
       {need.buttons.length ? (
         <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
           {need.buttons.map((button, n) => (
-            <ui.Button key={button.key} label={button.label} {...(button.isPlain ? { plain: true } : n === 0 ? { variant: 'primary' as const } : {})} {...(button.hotkey ? { hotkey: button.hotkey } : {})} onPress={button.onPress} />
+            <ui.Button
+              key={button.key}
+              label={button.label}
+              {...(button.isPlain ? { plain: true } : n === 0 ? { variant: 'primary' as const } : {})}
+              {...(button.hotkey ? { hotkey: button.hotkey } : {})}
+              // A press that answers a block on a small card, where a pointer pressed it, holds its rows for a moment
+              onPress={isFolding && !button.isOpener && one ? press => (holdFold($, one.id, need.id, need.at, foldRows(need, room)), button.onPress(press)) : button.onPress}
+            />
           ))}
         </ui.Box>
       ) : null}
       {/* What was last pressed or typed for it, while it is still there: a reply that left it open, an answer that did not go */}
-      {need.line ? <ui.Text key={`${need.id}-sent`} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{need.line}</ui.Text> : null}
+      {need.line ? <ui.Text key={`${need.id}-sent`} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{isWhole ? (need.wholeLine ?? need.line) : need.line}</ui.Text> : null}
     </ui.Box>
   )
 }

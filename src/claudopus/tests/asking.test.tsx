@@ -102,12 +102,12 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   const toWork = (await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('Where do I do that?')))) ?? ''
   expect(toWork).toContain('Submit it to the plugin directory.')
   expect(toWork).toContain('does not settle your question by itself')
-  // At work on the reply, the ask is drawn in the work's purple, not as waiting on the person: its question with the reply under
-  // it in one grey line, and nothing to press or type, on the small card, in Details and above the chat
+  // At work on the reply, the ask is not waiting on the person: the small card has the reply in one grey line in its place, Details
+  // the question in the work's purple with the reply under it, and nothing to press or type in either or above the chat
   const waiting = '✓ You answered “Where do I do that?”'
   for (const pane of [list, ears]) {
     expect((await until(async () => pane.find({ type: 'Text', text: waiting })))?.props.dimColor).toBe(true)
-    expect((await pane.find({ type: 'Text', text: 'Submit it to the plugin directory.' }))?.props.color).toBe(PURPLE)
+    expect((await pane.find({ type: 'Text', text: 'Submit it to the plugin directory.' }))?.props.color).toBe(pane === list ? undefined : PURPLE)
     expect(await askButtons(pane, 'a2')).toEqual([])
     expect(await askFields(pane)).toEqual([])
   }
@@ -646,10 +646,10 @@ test('a reply in words that does not settle an ask keeps it, and the card active
   const told = (await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('in their own words: Show me images first.')))) ?? ''
   expect(told).toContain('does not settle your question by itself')
   expect(told).toContain('Continue the task with this answer')
-  // The card stays among the running cards, at work, with its question and the reply under it in one grey line, and nothing to
-  // press or type; nothing is under Finished
+  // The card stays among the running cards, at work, its question folded to the reply in one grey line, and nothing to press or
+  // type; nothing is under Finished
   expect((await until(async () => list.find({ type: 'Text', text: '✓ You answered “Show me images first.”' })))?.props.dimColor).toBe(true)
-  expect((await list.find({ type: 'Text', text: ASK }))?.props.color).toBe(PURPLE)
+  expect(await list.find({ type: 'Text', text: ASK })).toBeUndefined()
   expect(await askButtons(list, 'a1')).toEqual([])
   expect(await until(async () => ((await typed()) ? undefined : true))).toBe(true)
   expect((await until(async () => ((await isFinished()) ? undefined : true))) ?? JSON.stringify([...(await labels()), ...(await texts())])).toBe(true)
@@ -688,8 +688,8 @@ test('a reply in words that does not settle an ask keeps it, and the card active
   await Promise.all([list.unmount(), bar.unmount()])
 })
 
-test('once the person has answered, by a button or in their own words, the card keeps nothing to press or type; the same ask asked again comes back fresh, in the panel and the chat: the 14 Nov "I would say maybe stop it" to "Should I stop the depth job?"', async ($, on) => {
-  const { appended, logged, clock } = world(on)
+test('once the person has answered, by a button or in their own words, the question is gone from the card at once, one grey line of the answer in its place that opens Details, where both are whole; a press holds the rows the question took for a moment; the same ask asked again comes back fresh, in the panel and the chat: the 14 Nov "I would say maybe stop it" to "Should I stop the depth job?", and the 19 Nov "no need to keep showing the question"', async ($, on) => {
+  const { appended, logged, clock, opened } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'why the M4 is stuck', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Why the M4 is stuck', prompt: 'why the M4 is stuck' } as never)
@@ -705,13 +705,23 @@ test('once the person has answered, by a button or in their own words, the card 
   const relays = () => appended.filter(line => line.startsWith('undefined: In the background task') && line.includes(ASK)).length
   expect(await until(async () => relays() || undefined)).toBe(1)
   expect(await until(async () => ((await labels()).length === 3 ? labels() : undefined))).toEqual(WHOLE)
-  // Typed in their own words: purple at once, the question with the reply under it, and no buttons, box or send
-  const box = await inWords(list, bar, 'a1', 'I would say maybe stop it and then tell it to release it')
+  // Typed in their own words: the question goes at once, the reply cut to one grey line in its place, and no buttons, box or send.
+  // The line opens Details, where the question stands whole in the task's purple, with the whole reply under it
+  const REPLY = 'I would say maybe stop it and then tell it to release it, once the swap is under 10 GB'
+  const box = await inWords(list, bar, 'a1', REPLY)
   expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('maybe stop it')))).toBeDefined()
-  expect(await until(async () => ((await list.find({ type: 'Text', text: ASK }))?.props.color === '#8A63F0' ? true : undefined))).toBe(true)
-  expect(await list.find({ type: 'Text', text: /^✓ You answered “I would say maybe stop it/ })).toBeDefined()
+  expect(await until(async () => ((await list.find({ type: 'Text', text: ASK })) ? undefined : true))).toBe(true)
+  expect(await list.find({ type: 'Text', text: DETAILS })).toBeUndefined()
+  const said = await list.find({ type: 'Text', text: /^✓ You answered “I would say maybe stop it/ })
+  expect([said?.text, said?.props.dimColor, said?.props.wrap]).toEqual(['✓ You answered “I would say maybe stop it and then tell it to release it, …”', true, 'truncate-end'])
   expect(await labels()).toEqual([])
   expect(await until(async () => ((await inputs()).length ? undefined : true))).toBe(true)
+  await pressed(list, 'answered-a1')
+  expect(await until(async () => opened.includes('work-a1') || undefined)).toBe(true)
+  const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  expect((await until(async () => details.find({ type: 'Text', text: ASK })))?.props.color).toBe(PURPLE)
+  expect(await details.find({ type: 'Text', text: `✓ You answered “${REPLY}”` })).toBeDefined()
+  await details.unmount()
   // The chat's model is told it acts on the reply, not that it still asks; the person, who replied on the card, is not shown it
   const toChat = (await until(async () => appended.find(line => line.startsWith('undefined: ✓ The person replied to "Why the M4 is stuck"')))) ?? ''
   expect(toChat).toContain('will ask again if it still needs the person')
@@ -729,20 +739,31 @@ test('once the person has answered, by a button or in their own words, the card 
   expect(again?.key).not.toBe(box?.key)
   expect(await list.find({ type: 'Text', text: /^✓ You answered/ })).toBeUndefined()
   expect(await until(async () => (relays() === 2 ? true : undefined))).toBe(true)
-  // A button pressed: the ask goes whole, nothing left to press or type
+  // A button pressed: the ask goes whole, nothing left to press or type. Its grey line stands where the question stood, over the
+  // rows the question took, held so nothing below moves up under the pointer, until they close up a moment later
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Stop it')?.key ?? '' })
   expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('"Stop it"')))).toBeDefined()
   expect(await until(async () => ((await list.find({ type: 'Text', text: ASK })) ? undefined : true))).toBe(true)
   expect(await labels()).toEqual([])
   expect(await until(async () => ((await inputs()).length ? undefined : true))).toBe(true)
   expect((await until(async () => list.find({ type: 'Text', text: '✓ You answered “Stop it”' })))?.props.dimColor).toBe(true)
+  expect(Number((await list.find({ type: 'Box', key: 'fold-a1' }))?.props.height ?? 0)).toBeGreaterThan(3)
+  await clock.advance(3_100)
+  expect(await until(async () => ((await list.find({ type: 'Box', key: 'fold-a1' })) ? undefined : true))).toBe(true)
+  expect(await list.find({ type: 'Text', text: '✓ You answered “Stop it”' })).toBeDefined()
+  // and Details, opened from it, has the question and its details whole, with the answer
+  const pressedThere = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  expect(await until(async () => pressedThere.find({ type: 'Text', text: ASK }))).toBeDefined()
+  expect(await pressedThere.find({ type: 'Markdown', text: DETAILS } as never)).toBeDefined()
+  await pressedThere.unmount()
   // Typed in the chat and passed on by it, the same: purple, nothing to press or type; asked again, shown in the chat afresh
   await clock.advance(1000)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: ASK, details: DETAILS, choices: ['Stop it', 'Leave it running'] } as never)
   expect(await until(async () => (relays() === 3 ? true : undefined))).toBe(true)
   await $.prompt.submit({ text: 'Show me the swap first', wait: false, origin: composer })
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 't1', to: 'a1', message: 'Their reply: “Show me the swap first”' } as never)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: ASK }))?.props.color === '#8A63F0' ? true : undefined))).toBe(true)
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “Show me the swap first”' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: ASK })).toBeUndefined()
   expect(await labels()).toEqual([])
   expect(await inputs()).toEqual([])
   await clock.advance(1000)
@@ -792,7 +813,7 @@ test('a button answer pressed by mistake is taken back from its card while the c
   await list.unmount()
 })
 
-test('work acting on a reply in words to an ask it keeps open is purple, in the panel and the terminal, with its question and no buttons; stopped again it is amber with them: the 13 Nov "Explain to me the exact differences first." to "Release PR 54 to production?"', async ($, on) => {
+test('work acting on a reply in words to an ask it keeps open is purple, in the panel and the terminal, with no buttons, its question folded to the reply on the card and whole in Details and the terminal\'s band; stopped again it is amber with them: the 13 Nov "Explain to me the exact differences first." to "Release PR 54 to production?"', async ($, on) => {
   // What the engine lists of the work, as the terminal's engine does: running while it waits on a command it left running
   const agents: Record<string, string> = {}
   const { resumed, clock } = world(on, { agents })
@@ -846,9 +867,9 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
   expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('Explain to me the exact differences first.')))).toBeDefined()
   const acting = await until(async () => {
     const l = await look()
-    return isPurple(l.desk) && isPurple(l.term) && isPurple(l.band) && l.heading === 'acting' ? l : undefined
+    return l.desk === undefined && l.term === undefined && isPurple(l.band) && l.heading === 'acting' && l.deskEdges.some(isPurple) ? l : undefined
   })
-  expect(acting ?? (await look())).toMatchObject({ heading: 'acting' })
+  expect(acting ?? (await look())).toMatchObject({ desk: undefined, term: undefined, heading: 'acting' })
   const now = await look()
   expect(now.deskEdges.filter(c => c === AMBER)).toEqual([])
   expect(now.termEdges.filter(c => c === AMBER)).toEqual([])
@@ -864,7 +885,7 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
   await $.turn.complete({ answer: 'Writing up the differences.', durationMs: 1, isAborted: false, turnId: 'turn-2a', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(20_000)
   const held = await look()
-  expect([isPurple(held.desk), isPurple(held.term), isPurple(held.band), held.heading]).toEqual([true, true, true, 'acting'])
+  expect([held.desk, held.term, isPurple(held.band), held.heading]).toEqual([undefined, undefined, true, 'acting'])
   agents.a1 = 'completed'
   // The header counts it as running, not as needing the person
   expect(await desk.find({ type: 'Text', text: /^1 (task )?working/ })).toBeDefined()
@@ -891,7 +912,8 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
     return l.deskEdges.some(isPurple) && !l.deskEdges.includes(AMBER) && l.termEdges.some(isPurple) && !l.termEdges.includes(AMBER) ? l : undefined
   })
   expect(released ?? (await look())).toMatchObject({ desk: undefined })
-  expect(released?.heading).toBe('none')
+  // (Details keeps the question just answered, with the answer under it, in neither amber nor purple)
+  expect(released?.heading).toBe('other')
   // Releasing in the background, its turn ends with the engine still holding it: at work, purple, until it is done
   agents.a1 = 'running'
   await $.turn.complete({ answer: 'Releasing in the background.', durationMs: 1, isAborted: false, turnId: 'turn-3a', reason: 'answer', agentId: 'a1' } as never)
