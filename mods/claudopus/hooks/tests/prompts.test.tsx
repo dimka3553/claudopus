@@ -847,7 +847,7 @@ test("a prompt for a task's call is a Permission block on that task's card, ambe
   expect(texts.filter(one => one.startsWith('Permission ·'))).toEqual([])
   // That card waits for the person: its edge is amber, and the head line counts it once
   expect(await until(async () => list.find({ type: 'Text', text: /^1 waiting for you/ }))).toBeDefined()
-  expect((await list.findAll({ type: 'Box' })).filter(one => one.props.backgroundColor === AMBER)).toHaveLength(1)
+  expect((await list.findAll({ type: 'Box' })).filter(one => !one.key?.startsWith('outline-') && one.props.backgroundColor === AMBER)).toHaveLength(1)
   // The others see it in this chat's file, with the task it came from and nothing of the call beyond what the block shows
   await clock.advance(1000)
   const shared = () => JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}') as { prompts?: Record<string, unknown>[]; answeredPrompts?: unknown }

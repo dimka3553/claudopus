@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.221 · 19 November 2026
+- A card's outline, such as the green one on Mark as done, now has square corners, so the to-do bar on its left edge sits flush inside it instead of sticking out past a rounded corner.
+
 ## 0.2.220 · 19 November 2026
 - A card that waits for you is always above every card that only works. A card you just answered goes under all that still waits, instead of keeping its old place above them.
 
