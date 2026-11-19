@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Claudopus changelog</title>
 <meta name="description" content="What changed in each version of Claudopus, the mod for Claude Code.">
-<link rel="canonical" href="https://claudopus.ai/changelog.html">
+<link rel="canonical" href="https://www.claudopus.ai/changelog.html">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#111112" media="(prefers-color-scheme:dark)">
 <meta name="theme-color" content="#FAF9F5" media="(prefers-color-scheme:light)">
@@ -96,6 +96,7 @@ section li::before{content:"";position:absolute;left:0;top:.6em;width:var(--s2);
   <h1>Changelog</h1>
   <p class="lead">What changed in each version of Claudopus, newest first. Claudopus never updates itself. When a new version is out, its panel shows what is new, and you press Download and then Install.</p>
 </div>
+<section id="v0.2.233"><h2>v0.2.233</h2><p class="note">19 November 2026</p><ul><li>claudopus.ai now tells search engines and AI assistants (ChatGPT, Claude, Perplexity, Google and others) plainly that they may read it, and gives them a short plain-text description of Claudopus with its GitHub link at claudopus.ai/llms.txt, so they can find it and name it correctly.</li></ul></section>
 <section id="v0.2.232"><h2>v0.2.232</h2><p class="note">19 November 2026</p><ul><li>Every permission on a task's card (an admin command, a release, a change to your files, a command Claude Code blocked) has Answer in words. Your words go to the task, which answers inside that permission; the permission stays until you press Allow or Don't allow, and words never allow anything.</li><li>A release permission says what it puts on main: Claude's one line on what it changes and why, the subjects of its commits, and how many commits and files, not only the branch and folder.</li></ul></section>
 <section id="v0.2.231"><h2>v0.2.231</h2><p class="note">19 November 2026</p><ul><li>When you answer a question on a card, the card closes up at once under the grey line of your answer. No empty space is left under it or under the list, scrolled or not, by a button, Answer in words, Allow or Release it.</li></ul></section>
 <section id="v0.2.230"><h2>v0.2.230</h2><p class="note">19 November 2026</p><ul><li>Claudopus now cleans up what tasks leave behind, every ten minutes and when a task stops. That covers the copies Chrome makes of itself, browser profiles, leftover temporary folders, task scratch folders untouched for two days, and code copies whose work is merged. Pictures a result shows are moved into the result's folder first. Your CT data, photos, videos and Desktop are never touched.</li><li>When your disk has less than 20 GB left, the panel says so at its top and you get one notification. Free up space cleans up at once and also clears the download caches.</li><li>Below 5 GB, tasks' downloads, installs, builds, renders and browser commands wait, so a task can't fill the disk.</li><li>Tasks no longer start your own Google Chrome without a window. Each start left a copy of the whole app behind, and 205 had piled up.</li><li>Claudopus's catch-up of past chats no longer leaves a scratch folder behind when it's stopped. Those folders had grown to 9.7 GB.</li></ul></section>
