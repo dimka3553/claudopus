@@ -27,8 +27,6 @@ const topPlaces = new Map<string, number>()
 // waits is all another chat's); one that asks again after that goes to the end, as anything new does
 const topClosed = new Map<string, number>()
 const KEPT_MOST = 10 * 60_000
-// The last drawing made of each pane on each surface, what a press under way keeps on screen (isPressHeld)
-const lastShown = new Map<string, unknown>()
 // Each pane's drawings made afresh are numbered as they are asked for: one that finishes after a newer one (the engine dropped its
 // reply, as a newer ask overtook it) is never kept as the one on screen. Kept anyway, a press hold or the gap gave that stale
 // drawing again, and an answered card came back and went under the pointer (16 Nov recording: 4 drawings late, 5 flips back)
@@ -38,6 +36,15 @@ const shownKept = new Map<string, number>()
 // drawing held for their use is next drawn afresh
 const shownSigns = new Map<string, string>()
 const shownAts = new Map<string, number>()
+// One line of pictures for each pane on each surface: the newest picture made for it, with the size, place and scroll it was made
+// for. A picture kept from before is given again only when it is that newest one. The app asks for the same pane with the view at
+// the top and scrolled down in turn as a card under the pointer changes its height, and each of those once kept a picture of its
+// own, of its own age: a card just answered was drawn as it is now, then as it was, then as it is now (17 Nov, recorded: three
+// pictures of 317, 264 and 301 parts in turn within 200 ms; 19 Nov, the person after Release it: "it first went big, then it went
+// small, then it went big again"). An ask the newest picture was not made for is drawn afresh, so a card only ever moves on. It is also what a press under way keeps on screen
+// (isPressHeld), and the tabs and the bar above the prompt keep theirs the same way
+const paneNewest = new Map<string, { key: string; drawing: unknown }>()
+const newestFor = (line: string, key: string) => (paneNewest.get(line)?.key === key ? paneNewest.get(line)?.drawing : undefined)
 // The mod's tabs drawn on the desktop, whose buttons a click holds the drawing for (holdForPress)
 const heldTabs = new Set<string>()
 let usedUntil = 0
@@ -60,20 +67,21 @@ const panelHooks = (on: On) => {
       heldTabs.add(id)
       const key = `${id}|${e.surface}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.scroll.offset > 0 ? 1 : 0}`
       const at = await $.clock.now()
-      const recent = lastShown.get(key)
+      const line = `${id}|${e.surface}`
+      const recent = newestFor(line, key)
       if (recent && isPressHeld(at)) return ((isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
       // (a tab is often quick to draw on its own: slow or not, it is given again while the panel's drawings are slow, as the bar is)
       if (recent && !isTyping && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent as Awaited<ReturnType<typeof next>>
       freshBegins(key)
-      const askedNo = (shownAsked.get(key) ?? 0) + 1
-      shownAsked.set(key, askedNo)
+      const askedNo = (shownAsked.get(line) ?? 0) + 1
+      shownAsked.set(line, askedNo)
       const madeFrom = Date.now()
       let made: { at: number; ms: number; fresh: number } | undefined
       try {
         const drawing = await next(e)
-        if ((shownKept.get(key) ?? 0) > askedNo && lastShown.has(key)) return lastShown.get(key) as typeof drawing
-        shownKept.set(key, askedNo)
-        lastShown.set(key, drawing)
+        if ((shownKept.get(line) ?? 0) > askedNo && paneNewest.has(line)) return paneNewest.get(line)?.drawing as typeof drawing
+        shownKept.set(line, askedNo)
+        paneNewest.set(line, { key, drawing })
         made = { at, ms: Date.now() - madeFrom, fresh: freshness }
         return drawing
       } finally {
@@ -117,7 +125,8 @@ const panelHooks = (on: On) => {
     // Drawn afresh moments ago: given again as it was, at once, and drawn afresh when the gap is over (FRESH_GAP). Never while the
     // person types, whose box keeps its own drawing below
     const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
-    const recent = lastShown.get(shownKey)
+    const paneLine = `${paneId}|${e.surface}`
+    const recent = newestFor(paneLine, shownKey)
     // A press under way: the drawing on screen, the one last made for this pane on this surface, focused or not
     // (of this size and place: a pane resized or scrolled meanwhile is drawn afresh). Given before anything is read, so it is
     // answered at once: given after the pane's reads, it came too late under load and a newer ask dropped it
@@ -133,8 +142,9 @@ const panelHooks = (on: On) => {
     if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt, false, false)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
     // (counted from the drawing's end: a call for a drawing it made itself, as its own count of what waits at the top, is in it)
     freshBegins(shownKey)
-    const askedNo = (shownAsked.get(shownKey) ?? 0) + 1
-    shownAsked.set(shownKey, askedNo)
+    // (counted by pane, whatever the ask's size or scroll: a drawing begun earlier never takes the place of one begun later)
+    const askedNo = (shownAsked.get(paneLine) ?? 0) + 1
+    shownAsked.set(paneLine, askedNo)
     // (how long it takes by the wall clock: the engine's clock in a test stands still while a drawing is made)
     const madeFrom = Date.now()
     let isMade = false
@@ -145,7 +155,7 @@ const panelHooks = (on: On) => {
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
     // While the mod is behind (lookHold), the pane is given as it was, so the drawing adds nothing to what holds Claude's helper
-    if (held && held.shape === shape && (isTyping || (held.fresh === freshness && ((isBehind() && heldAt - held.at < BEHIND_HELD) || (held.content === content && heldAt - held.at < CALM))))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
+    if (held && held.drawing === recent && held.shape === shape && (isTyping || (held.fresh === freshness && ((isBehind() && heldAt - held.at < BEHIND_HELD) || (held.content === content && heldAt - held.at < CALM))))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
     if (paneId === LIST) drawnFiles.clear()
     during(paneId === LIST ? 'draw the panel' : 'draw a Details tab')
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
@@ -1867,10 +1877,11 @@ const panelHooks = (on: On) => {
     })()
     // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
     // ones the engine holds, and this one is made again once the click is over (holdForPress)
-    if (recent && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
+    const newestMade = paneNewest.get(paneLine)
+    if (newestMade?.key === shownKey && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), newestMade.drawing as Awaited<ReturnType<typeof next>>)
     // Overtaken by a newer drawing that is already made: not kept, and the newer one is given in its place
-    if ((shownKept.get(shownKey) ?? 0) > askedNo && recent !== undefined) return lastShown.get(shownKey) as Awaited<ReturnType<typeof next>>
-    shownKept.set(shownKey, askedNo)
+    if ((shownKept.get(paneLine) ?? 0) > askedNo && newestMade) return newestMade.drawing as Awaited<ReturnType<typeof next>>
+    shownKept.set(paneLine, askedNo)
     shownSigns.set(shownKey, sign)
     shownAts.set(shownKey, heldAt)
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
@@ -1879,7 +1890,7 @@ const panelHooks = (on: On) => {
       if (id) paneBoxHeld.set(`${paneId}|${e.surface}`, { id, shape: paneBoxShape(id), drawing })
       else paneBoxHeld.delete(`${paneId}|${e.surface}`)
     }
-    lastShown.set(shownKey, drawing)
+    paneNewest.set(paneLine, { key: shownKey, drawing })
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     isMade = true
     // (from when it is made, not begun: a drawing that took seconds, as right after an update, would otherwise show a moment half over)
