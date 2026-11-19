@@ -311,7 +311,11 @@ const logOf = async ($: EngineInterface, paneId: string) => {
     const b = one.bg?.find(b => logPaneOf(b.id) === paneId)
     if (b) return { one, job: jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id]), run: undefined, file: jobFiles.get(b.id) || (tasksDir ? `${tasksDir}/${b.id}.output` : '') }
     const run = one.endedRuns?.find(r => logPaneOf(r.id) === paneId)
-    if (run) return { one, job: undefined, run, file: run.file ?? '' }
+    // (one kept before its file was: where this chat's commands write, by its id)
+    if (run) {
+      const where = run.file || one.chat ? '' : tasksDir || (tasksDir = await findTasks($))
+      return { one, job: undefined, run, file: run.file || (where ? `${where}/${run.id}.output` : '') }
+    }
   }
   return undefined
 }
@@ -321,7 +325,7 @@ const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
   if (!found) return <Text dimColor>This log is no longer available.</Text>
   const { one, job, run, file } = found
   const now = await $.clock.now()
-  const label = job ? job.label : runWords(run?.what ?? '') || 'A command'
+  const label = job ? job.label : run ? runLabel(run) : 'A command'
   const kind: JobKind = job?.kind ?? run?.kind ?? 'script'
   const state = job ? `${JOB_NOW[kind]} · ${took(now - job.at)}` : run ? `${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(now - run.endedAt)} ago` : ''
   const r = file && canOpenFile(file) ? await $.process.run(['sh', '-c', 'tail -n "$2" "$1" 2>/dev/null # the log tab', 'sh', file, String(LOG_LINES + 1)], { timeoutMs: 5000 }).catch(() => undefined) : undefined
