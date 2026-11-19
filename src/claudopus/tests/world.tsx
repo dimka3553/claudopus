@@ -444,6 +444,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     }
     // The lines a task added to and took from its files, as the test lays git:numstat
     if (tool === 'sh' && String(rest[1]).includes('git diff --numstat')) return ok(files.get('git:numstat') ?? '')
+    // What changed in one file, as the test lays git:diff:<the file in its repo>; a file it lays none for is new
+    if (tool === 'sh' && String(rest[1]).includes('# the changes tab')) return ok(files.get(`git:diff:${String(rest.at(-1))}`) ?? 'NEW\n')
     if (tool === 'sh' || tool === 'bash') {
       sshed.push([String(rest[1]), String(rest.slice(3).join(' '))])
       // A stream cut short lays half of what it carried and fails

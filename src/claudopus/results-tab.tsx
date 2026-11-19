@@ -369,7 +369,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         <Button key={`report-archive-${gen}`} label={r.archived ? 'Bring back' : 'Archive'} onPress={() => archiveReport($, r, !r.archived)} />
       </Box>
       {/* What its task made, right under its title: tiles side by side, each a press that opens it */}
-      {hasTiles ? band(ui, 'report-files', 'Files', '', madeTiles($, ui, files, pane, `report-files-${r.id}`, undefined, `-${gen}`) ?? <Box />) : null}
+      {hasTiles ? band(ui, 'report-files', 'Files', '', madeTiles($, ui, files, pane, `report-files-${r.id}`, r.id, undefined, `-${gen}`) ?? <Box />) : null}
       {/* A result kept from before that still lists questions: its lines, as text, with nothing to press */}
       {waitsOf(r).length
         ? band(

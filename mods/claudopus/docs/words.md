@@ -48,6 +48,10 @@ A running command or helper is two lines:
 - A count that is full while the command still runs never says 100%: `7 of 7 heads · still running`.
 - A command that failed keeps a row on its card, in red, until it is run again and finishes: its name, `Failed after 2m 05s`, and under it why, the last line it wrote that names a fault. The closing row names what else did not finish: `13 commands ended · 2 ran out of time: Watch the cloud jobs and 1 more`, `2 helpers ended · 1 helper failed: Read the scans`.
 - A press on a command's name opens its log in a tab of the panel, running or ended: its name, how it stands, `Stop`, `Details`, `Open in Terminal`, then the end of what it wrote. Details repeats none of it under a command.
+
+## Files a task changed
+- A card says `3 changed files` beside its other files, a press that opens Details. Under Files there, the files a task changed in a repo are listed by kind, `Code · 5 files`, then `Documents · 2 files`, the most changed first: a bar each (green for lines added, red for lines removed, as long as its change against the most changed), the file's name, its folder in the repo, `new` for a file it made, and `+259 −24`. Past eight, `Show all 12`.
+- A press on a file opens what changed in it in a tab of the panel, named after the file: its name, its folder and counts, `Details`, `Whole file` or `Changes`, then the changes as Claude Code draws a diff. A new file is drawn whole.
 - A command that has written nothing for a minute says whether its programs still use the processor: `No output yet · started 20m ago · still busy`, or in amber `nothing new for 20m · idle`.
 
 ## Marks
