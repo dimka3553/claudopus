@@ -47,7 +47,7 @@ A running command or helper is two lines:
 - Ended: `Done in 2m 05s`, `Failed after 2m 05s`, `Stopped after 1m`, `Ran out of time after 30m`.
 - A count that is full while the command still runs never says 100%, and nothing after it: `7 of 7 heads · still running`.
 - In Details the commands of a task or helper that ended are a group, last under it, headed by a row as its card's closing row: `3 commands ended · 1 failed`. A press on that row folds them away (`3 commands ended · show`). Each is a row under it: its name as it had it running, never its shell line, then how long it ran, `2m 41s`, or how it ended where it did not finish, `Failed after 20s`. A press opens its log, which says when it ended.
-- A card's closing row names what did not finish, the newest of each and how many more: `13 commands ended · 1 failed: Run the scoring · 2 ran out of time: Watch the cloud jobs and 1 more`, `2 helpers ended · 1 helper failed: Read the scans`. A failed command has no row of its own on the card: how and why it failed is in Details and its log.
+- A card's closing row counts what ended and what did not finish, and names none: `13 commands ended · 1 failed, 2 ran out of time`, `2 helpers ended · 1 helper failed`. A failed command has no row of its own on the card: which one, how and why is in Details and its log.
 - A press on a command's name opens its log in a tab of the panel, running or ended: its name, how it stands, `Stop`, `Details`, `Open in Terminal`, then the end of what it wrote. Details repeats none of it under a command.
 
 ## Files a task changed

@@ -9542,18 +9542,14 @@ const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => ({ finished: 'done', 
 const endedLine = (run: Pick<EndedRun, 'how' | 'code'>, ran: string) =>
   run.how === 'finished' ? `Done in ${ran}` : `${{ failed: 'Failed', killed: 'Stopped', stopped: 'Stopped', 'timed out': 'Ran out of time', ended: 'Ended' }[run.how] ?? 'Ended'} after ${ran}`
 const runLabel = (run: Pick<EndedRun, 'what' | 'cmd'>) => endedName(String(run.what ?? ''), run.cmd)
-const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how' | 'what' | 'cmd' | 'id' | 'endedAt'>[], shown = '', lost: string[] = []) => {
+const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[], lost = 0) => {
   const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
   const head = helpers && runs.length ? `${n(helpers, 'helper')} and ${n(runs.length, 'command')} ended` : helpers ? `${n(helpers, 'helper')} ended` : `${n(runs.length, 'command')} ended`
   const bad = (['failed', 'killed', 'timed out'] as const).flatMap(how => {
-    const of = runs.filter(r => r.how === how)
-    if (!of.length) return []
-    const newest = of.reduce((a, b) => (b.endedAt >= a.endedAt ? b : a))
-    const name = of.some(r => r.id === shown) || (!String(newest.what ?? '').trim() && !newest.cmd) ? '' : runLabel(newest)
-    return [`${of.length} ${endedWord({ how })}${name ? `: ${name}${of.length > 1 ? ` and ${of.length - 1} more` : ''}` : ''}`]
+    const count = runs.filter(r => r.how === how).length
+    return count ? [`${count} ${endedWord({ how })}`] : []
   })
-  const helpersBad = lost.length ? [`${n(lost.length, 'helper')} failed: ${lost.at(-1)}${lost.length > 1 ? ` and ${lost.length - 1} more` : ''}`] : []
-  return [head, ...helpersBad, ...bad].join(' · ')
+  return [head, ...(lost ? [`${n(lost, 'helper')} failed`] : []), ...(bad.length ? [bad.join(', ')] : [])].join(' · ')
 }
 const keepEnded = (one: Todo, runs: EndedRun[]) => (runs.length ? { endedRuns: [...(one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id)), ...runs].slice(-BG_KEPT) } : {})
 type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string; at?: number; why?: string }
@@ -12692,7 +12688,7 @@ const panelHooks = (on: On) => {
     }
     const endedGroupRow = (t: Twig) => {
       const id = t.one?.id ?? ''
-      const text = `${endedSummary(0, (t.ended ?? []).map(run => ({ ...run, what: '', cmd: '' })))}${endedFolded.has(id) ? ' · show' : ''}`
+      const text = `${endedSummary(0, t.ended ?? [])}${endedFolded.has(id) ? ' · show' : ''}`
       return twigRowOf(t, `ended-group-${id}`, text, true, '', () => ((endedFolded.has(id) ? endedFolded.delete(id) : endedFolded.add(id)), (presses += 1), redraw($)))
     }
     const withAll = (branches: Branch[]): Branch[] => branches.map(b => (b.job || b.run || b.ended ? b : { ...b, kids: [...jobBranches(b.one, true), ...withAll(b.kids), ...endedBranches(b.one)] }))
@@ -12720,7 +12716,7 @@ const panelHooks = (on: On) => {
       const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
       const onTree = new Set(twigs.flatMap(t => (!t.job && t.one ? [t.one.id] : [])))
       const lost = under.filter(kid => kid.status === 'failed' && !onTree.has(kid.id)).map(kid => titleOf(kid))
-      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs, '', lost), true, '', () => openWork($, one.id))]
+      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs, lost.length), true, '', () => openWork($, one.id))]
     }
 
     const flowMine = await sessionName($)

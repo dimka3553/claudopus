@@ -1840,16 +1840,16 @@ test('only runs really running are listed: a watch the engine killed at its time
   // The watches the engine killed at their limit, the failed and the finished command are gone from the tree, and no clock runs for them
   expect(shown.some(text => /\[killed\]/.test(text))).toBe(false)
   expect(shown.some(text => /^(Wait for first screening pass ×2|Run the tidy up)$/.test(text))).toBe(false)
-  // The one that failed has no row of its own among what still runs: it is named on the closing row (19 Nov "13 commands ended
-  // · 1 failed" named nothing; then a row for it lingered long after it failed)
+  // The one that failed has no row of its own among what still runs and is not named: the closing row counts it, and which one
+  // is in Details (19 Nov: a row for it lingered long after it failed)
   expect(shown).not.toContain('Run the fetch of the list')
   expect(shown.some(text => /^Failed after /.test(text))).toBe(false)
   expect(shown).not.toContain('Traceback: boom')
   // (the card's own line never names the commands that ended: how each ended is in Details, 18 Nov)
   expect(shown.some(text => /^Run the (tidy up|fetch of the list): (done|failed)/.test(text))).toBe(false)
   // The closing row counts them and says, in words, how many did not finish well
-  // (each kind of bad end names its newest, whole, and how many more)
-  expect(shown).toContain('4 commands ended · 1 failed: Run the fetch of the list · 2 ran out of time: Wait for first screening pass and 1 more')
+  // (counts only: which one is in Details)
+  expect(shown).toContain('4 commands ended · 1 failed, 2 ran out of time')
   // The wait still running stays, and the two fits: each row with how long it has run and nothing of the time its description
   // gave, within it or long past it
   expect(shown).toContain('Wait for the details screening to finish')

@@ -936,7 +936,7 @@ const panelHooks = (on: On) => {
     }
     const endedGroupRow = (t: Twig) => {
       const id = t.one?.id ?? ''
-      const text = `${endedSummary(0, (t.ended ?? []).map(run => ({ ...run, what: '', cmd: '' })))}${endedFolded.has(id) ? ' · show' : ''}`
+      const text = `${endedSummary(0, t.ended ?? [])}${endedFolded.has(id) ? ' · show' : ''}`
       return twigRowOf(t, `ended-group-${id}`, text, true, '', () => ((endedFolded.has(id) ? endedFolded.delete(id) : endedFolded.add(id)), (presses += 1), redraw($)))
     }
     // (every helper with what it has running, then its own helpers, then what of its has ended)
@@ -973,12 +973,12 @@ const panelHooks = (on: On) => {
       const rest = under.length - twigs.filter(t => !t.job).length
       if (!rest && !runs.length) return twigsOf(branches).map(rowOf)
       const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
-      // A command that failed is named on the closing row with the others that ended, never a row of its own: one stood among
-      // what still ran long after it failed (19 Nov); how and why it failed is in Details and its log
-      // (and the helpers that failed and have left the tree, by name)
+      // A command that failed is counted on the closing row with the others that ended, never a row of its own (one stood among
+      // what still ran long after it failed) and never by name: which one, how and why is in Details and its log (19 Nov)
+      // (and the helpers that failed and have left the tree, counted too)
       const onTree = new Set(twigs.flatMap(t => (!t.job && t.one ? [t.one.id] : [])))
       const lost = under.filter(kid => kid.status === 'failed' && !onTree.has(kid.id)).map(kid => titleOf(kid))
-      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs, '', lost), true, '', () => openWork($, one.id))]
+      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs, lost.length), true, '', () => openWork($, one.id))]
     }
 
     // ---- A workflow's card, in blue: its stages in order with the one being run, who is in it, and its rounds ----
