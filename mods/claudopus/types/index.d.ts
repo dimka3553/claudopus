@@ -29,7 +29,7 @@ export type Item = { text: string; state: 'open' | 'doing' | 'done' | 'dropped' 
 // What a task made: a file or link of its own, by its kind (with the file's time when it was listed), and its code as a count of
 // files and lines, with each file it changed in a repo (its path, the part of it inside the repo, the lines added and removed, and
 // whether it is new since the task began) and the time it is counted from, in seconds
-export type MadeKind = 'picture' | 'video' | 'pdf' | 'sheet' | 'doc' | 'file' | 'link'
+export type MadeKind = 'picture' | 'video' | 'pdf' | 'sheet' | 'doc' | 'file' | 'link' | 'artifact'
 export type Made = { path: string; name: string; kind: MadeKind; at?: number }
 export type CodeFile = { path: string; inRepo: string; plus: number; minus: number; isNew?: boolean }
 export type CodeMade = { count: number; plus: number; minus: number; files?: CodeFile[]; since?: number }
@@ -62,6 +62,8 @@ export type Todo = {
   // The files and links every result of its named, the links every step's words named as made, and the pull requests, releases
   // and pages its commands put up, the oldest first: what it made, kept for its whole life however often it starts again
   said?: string[]
+  // The titles the Claude artifacts it published were given, by their link
+  titles?: Record<string, string>
   // What it made as last listed, kept with it: a changed file no longer there (in a worktree taken away once merged) stays listed
   made?: FilesMade
   // How many of them since it last touched its to-dos or said where it stands

@@ -344,13 +344,32 @@ test("what a task made is on its card under its title, side by side, and as tile
   files.delete('git:numstat:/wt/s6')
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b3', agentId: 'a1', command: 'npm test', description: 'Test the upgrades' } as never)
   await $.turn.complete({ answer: 'Watching https://github.com/acme/web/pull/285 build.', durationMs: 1, isAborted: false, turnId: 't4', reason: 'answer', agentId: 'a1' } as never)
-  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a1', message: 'Two upgrades are open.\n\n| App | Pull request |\n|---|---|\n| Main app | https://github.com/acme/web/pull/285 |\n| Clipify | https://github.com/acme/clipify/pull/70 |\n\nTracker page: https://claude.ai/artifact/NP6UV\nSee https://docs.example.com/guide' } as never)
+  // It publishes a Claude artifact with Claude Code's Artifact tool, and only reads another (20 Nov: "Claude artifacts are not
+  // visible here")
+  files.set('result:Artifact:publish', JSON.stringify({ url: 'https://claude.ai/artifact/NP6UV', title: 'Review Tracker', artifact_id: 'a-1', seq: 2 }))
+  await $.tool.call({ tool: 'Artifact', tool_use_id: 'ar1', agentId: 'a1', action: 'publish', url: 'https://claude.ai/artifact/NP6UV', file_path: '/tmp/work/tracker.html' } as never)
+  files.set('result:Artifact:read', JSON.stringify({ read: { url: 'https://claude.ai/artifact/SOMEONE', title: 'Their Page' } }))
+  await $.tool.call({ tool: 'Artifact', tool_use_id: 'ar2', agentId: 'a1', action: 'read', url: 'https://claude.ai/artifact/SOMEONE' } as never)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a1', message: 'Two upgrades are open.\n\n| App | Pull request |\n|---|---|\n| Main app | https://github.com/acme/web/pull/285 |\n| Clipify | https://github.com/acme/clipify/pull/70 |\n\nTracker page: https://claude.ai/artifact/NP6UV\nSee https://docs.example.com/guide\nTo see the flaw live today: https://shop.example.com/api/validate?redirect=/x' } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't5', reason: 'answer', agentId: 'a1' } as never)
   await until(async () => ((await madeShown()).includes('clipify #70 ↗') ? true : undefined))
-  expect(await madeShown()).toEqual(['3 pictures', 'vat-report', 'os report 9 ↗', 'web #284 ↗', 'web #285 ↗', 'clipify #70 ↗', 'claude.ai page ↗', '3 changed files'])
-  // Each opens on a press, as the system opens a link
-  await pressed(pane, 'made-a1-link-4-open')
-  expect(shown.at(-1)).toEqual(['open', 'https://claude.ai/artifact/NP6UV'])
+  // The artifact comes first, by the title it was published under, with an icon of its own; an address to try a flaw on is no
+  // thing it made
+  expect(await madeShown()).toEqual(['Review Tracker', '3 pictures', 'vat-report', 'os report 9 ↗', 'web #284 ↗', 'web #285 ↗', 'clipify #70 ↗', '3 changed files'])
+  expect((await pane.findAll({ type: 'Svg' })).filter(svg => svg.props.width === 18).map(svg => String(svg.props.alt).trim())[0]).toBe('Artifact')
+  // It opens in the app's own artifact pane beside the chat, and in the browser where the app won't show it
+  files.delete('ccd_view:refused')
+  const opened = shown.length
+  await pressed(pane, 'made-a1-artifact-0-open')
+  expect(await until(async () => (viewed.at(-1)?.pane === 'artifact' ? viewed.at(-1) : undefined))).toEqual({ pane: 'artifact' })
+  expect(shown.length).toBe(opened)
+  files.set('ccd_view:refused', 'No artifact pane here.')
+  await pressed(pane, 'made-a1-artifact-0-open')
+  expect(await until(async () => (shown.at(-1)?.[1] === 'https://claude.ai/artifact/NP6UV' ? shown.at(-1) : undefined))).toEqual(['open', 'https://claude.ai/artifact/NP6UV'])
+  files.delete('ccd_view:refused')
+  // A link opens on a press, as the system opens it
+  await pressed(pane, 'made-a1-link-3-open')
+  expect(shown.at(-1)).toEqual(['open', 'https://github.com/acme/clipify/pull/70'])
   await pane.unmount()
   expect(logged).toEqual([])
 })
