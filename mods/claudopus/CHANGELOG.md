@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.240 · 19 November 2026
+- When you press Message on a card right after typing in its Details box, the box above the chat now opens at once. Before, it could wait up to half a minute.
+
 ## 0.2.239 · 19 November 2026
 - On Linux, stopping a command a task runs now ends everything that command started, not only its first shell.
 - Claudopus's own tests pass again on GitHub's slower Linux and Mac machines, so a red check there now means something is really broken.
