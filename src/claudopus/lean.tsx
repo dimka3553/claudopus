@@ -314,9 +314,14 @@ const isQuietTurn = (text: string, quiet: ReadonlySet<string>) => {
   return rest !== text && !rest.replace(NOTICE_HEADER, '').trim()
 }
 
-// A line Claudopus writes on a card where the task's own notes are: what became of something the person pressed there
+// A line Claudopus writes in a card's log: what became of something the person pressed there. It is Claudopus's, never the task's
+// own: the card's line beside the dots says only what the task wrote itself (19 Nov: "Your command ended after 20s" stood there
+// in place of what the task was doing)
 const stepLine = async ($: EngineInterface, id: string, text: string) => {
   const at = await $.clock.now()
-  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, entries: [...card.entries, { at, kind: 'note' as const, text }].slice(-ENTRIES_KEPT) } : card)))
+  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, entries: [...card.entries, { at, kind: 'event' as const, text }].slice(-ENTRIES_KEPT) } : card)))
   redraw($)
 }
+// A line the task wrote itself, with its note tool: where it stands, or what it decided
+const isOwnEntry = (entry: Entry) => entry.kind === 'note' || entry.kind === 'decision'
+const ownNote = (one: Pick<Todo, 'entries'>) => [...one.entries].reverse().find(entry => isOwnEntry(entry) && entry.text)

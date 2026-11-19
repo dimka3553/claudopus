@@ -497,7 +497,12 @@ const workHooks = (on: On) => {
             const owes = one.owes === undefined ? undefined : one.owes + 1
             const quiet = (one.quiet ?? 0) + 1
             const isQuiet = !one.parentId && owes === undefined && quiet >= QUIET_STEPS
-            nudge = owes === OWED_AFTER ? named(OWED) : isQuiet ? drifted(quiet) : ''
+            // (its own line, gone stale by the clock, however it keeps its to-dos)
+            const note = ownNote(one)
+            const since = now - (note?.at ?? one.startedAt)
+            const isStale = !one.parentId && owes === undefined && since >= NOTE_STALE && now - (noteAsked.get(id) ?? -Infinity) >= NOTE_STALE
+            nudge = owes === OWED_AFTER ? named(OWED) : isQuiet ? drifted(quiet) : isStale ? named(unnoted(Math.floor(since / 60_000), note?.text ?? '')) : ''
+            if (isQuiet || isStale) noteAsked.set(id, now)
             return { ...base, owes, quiet: isQuiet ? 0 : quiet }
           })
         })

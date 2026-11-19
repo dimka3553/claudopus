@@ -145,7 +145,7 @@ const withSteers = (lines: Line[], entries: Entry[]): Line[] => {
       from = Math.max(from, at + 1)
       return
     }
-    const later = entries.slice(i + 1).filter(one => one.kind !== 'steer').map(one => one.text)
+    const later = entries.slice(i + 1).filter(isOwnEntry).map(one => one.text)
     let at = all.findIndex((line, n) => n >= from && line.kind === 'said' && later.includes(oneLine(line.text).slice(0, NOTE_CHARS)))
     while (at > from && isTool(all[at - 1]?.tool, 'todo')) at -= 1
     all.splice(at < 0 ? all.length : at, 0, { kind: 'steer', text, isWaiting: later.length === 0 })

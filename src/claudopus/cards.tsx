@@ -33,6 +33,8 @@ const stoppedAs = (one: Todo): Todo['status'] => (hasReport(one) ? 'done' : 'sto
 const handedBack = new Map<string, string>()
 // Work stopped by the chat or the panel
 const stoppedHere = new Set<string>()
+// When each task was last asked to say on its card what it does now (NOTE_STALE), for this load
+const noteAsked = new Map<string, number>()
 // Held stopped by the person: stopped with their own press, and no message of theirs has come since
 const isHeld = (one: Todo | undefined) => Boolean(one?.byYou && !one.byYou.isLifted)
 // The words a task is named by, to know the same work started afresh under another title

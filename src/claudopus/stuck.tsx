@@ -58,7 +58,7 @@ const callWords = (tool: string, input?: { description?: unknown; command?: unkn
 // has run once that is a minute; between actions, thinking
 const helperNow = (one: Todo, at: number, commands = 0, most = 200) => {
   const call = lastCall.get(one.id)
-  const note = [...one.entries].reverse().find(entry => entry.kind !== 'steer' && entry.text)
+  const note = ownNote(one)
   // The last thing it said, cut so how long it has been quiet always stays in sight
   const last = (words: string, tail: string) => `Last: ${cut(words, Math.max(8, most - tail.length - 9))} · ${tail}`
   const waits = (idle: number) => `${commands === 1 ? 'Waiting for its command' : 'Waiting for its commands'} · ${took(idle)}`
