@@ -11949,7 +11949,7 @@ const workHooks = (on: On) => {
   on('session.measure', async ($, e, next) => {
     const tokens = e.context.tokens
     if (tokens !== undefined) await update($, me, one => (one.tokens === tokens && one.window ? one : { ...one, tokens, window: one.window || e.context.window }))
-
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     return next(e)
   })
 
@@ -12676,6 +12676,7 @@ const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     const drawBar = () => drawBarNow()
     if (e.surface !== 'desktop' || e.props.hasSurvey) return drawBar()
     const key = `bar|${e.requestId ?? ''}|${e.surface}|${e.props.bodyColumns}|${e.props.isCollapsed ? 1 : 0}`
@@ -12896,6 +12897,7 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     if (paneId === LIST) ((listDrawing += 1), (listSurface = e.surface))
     if (paneId === LIST) await holdTest($)
     try {

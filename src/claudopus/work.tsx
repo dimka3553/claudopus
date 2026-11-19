@@ -663,7 +663,7 @@ const workHooks = (on: On) => {
   on('session.measure', async ($, e, next) => {
     const tokens = e.context.tokens
     if (tokens !== undefined) await update($, me, one => (one.tokens === tokens && one.window ? one : { ...one, tokens, window: one.window || e.context.window }))
-
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     return next(e)
   })
 
