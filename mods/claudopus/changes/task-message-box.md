@@ -1,0 +1,3 @@
+- A task's Details has a box at its bottom to write to that task, whether it works or has finished: the same message as the box Message opens above the chat.
+- Under both boxes: Send, which the task reads at its next step, and, while it works, Stop and send, which stops what it is doing, with its commands and helpers, and starts it again with your message.
+- Attach opens the file picker: pictures, videos and any file go with the message, and the task opens each one, taking stills from a video. A file's path typed or dropped into the box in a terminal goes as a file too.

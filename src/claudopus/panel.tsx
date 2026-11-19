@@ -110,6 +110,10 @@ const panelHooks = (on: On) => {
     const heldKey = `${paneId}|${e.surface}|${e.props.placement ?? ''}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.isFocused ? 1 : 0}|${e.props.scroll.offset > 0 ? 1 : 0}`
     const heldAt = await $.clock.now()
     if (paneId === LIST) drawnNow = heldAt
+    // A Details tab whose message box holds the cursor or is typed in: given again as it was, reading nothing, so neither the work
+    // writing its card nor anything else draws a new box under the person (messageBox); only what the box itself shows draws it anew
+    const boxHeld = paneId.startsWith(WORK_PANE) ? paneBoxHeld.get(`${paneId}|${e.surface}`) : undefined
+    if (boxHeld && isPaneBoxHeld(paneId, heldAt) && boxHeld.shape === paneBoxShape(boxHeld.id)) return boxHeld.drawing as Awaited<ReturnType<typeof next>>
     // Drawn afresh moments ago: given again as it was, at once, and drawn afresh when the gap is over (FRESH_GAP). Never while the
     // person types, whose box keeps its own drawing below
     const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
@@ -1405,6 +1409,10 @@ const panelHooks = (on: On) => {
           {one.chat && !lines && (talks.has(one.id) || one.chat.host)
             ? part('part-chat', 'Conversation', '', theirChat(one, one.chat))
             : part('part-chat', 'Conversation', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading the conversation…</Text>)}
+          {/* At the bottom, under its conversation, a box to write to it, for a task of this chat's that works or has finished and
+              asks nothing (one that asks is answered in its block above): the same message as the box Message opens above the chat */}
+          {canChange(one) && 'Input' in table ? <Box key="message-gap" flexGrow={1} /> : null}
+          {canChange(one) && 'Input' in table ? part('part-message', 'Message', '', messageBox($, table, one, paneId)) : null}
         </Box>
       )
     }
@@ -1809,6 +1817,11 @@ const panelHooks = (on: On) => {
     shownSigns.set(shownKey, sign)
     shownAts.set(shownKey, heldAt)
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
+    if (paneId.startsWith(WORK_PANE)) {
+      const id = (await read($, todos)).find(one => workPaneOf(one.id) === paneId && canChange(asPressed(one)))?.id
+      if (id) paneBoxHeld.set(`${paneId}|${e.surface}`, { id, shape: paneBoxShape(id), drawing })
+      else paneBoxHeld.delete(`${paneId}|${e.surface}`)
+    }
     lastShown.set(shownKey, drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     isMade = true

@@ -586,7 +586,7 @@ const workHooks = (on: On) => {
         await stopHelpers($, stopId)
         await dropBackground($, [stopId], 'stopped')
         const now = await $.clock.now()
-        await changeTodos($, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one)))
+        await changeTodos($, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' && !interrupting.has(stopId) ? ended(one, stoppedAs(one), now) : one)))
         await lookEnds($)
       }
       return r

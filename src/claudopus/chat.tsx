@@ -66,6 +66,8 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
     list.map(one => {
       // (a task whose result went through is done already, and one ended meanwhile stays as it ended)
       if (one.id !== id || one.status !== 'working') return one
+      // (stopped for a message the person sent with Stop and send, which starts it again: it stays at work)
+      if (how === 'stopped' && interrupting.has(id)) return one
       if (how === 'stopped') return ended(one, stoppedAs(one), now)
       if (how === 'failed') return { ...ended(one, 'failed', now), answer: answer || one.answer, why: WHY_ERROR }
       // A helper's hand-back ends it: its result went to its task
