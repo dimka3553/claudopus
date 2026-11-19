@@ -248,6 +248,18 @@ const reportsButton = ($: EngineInterface, ui: Ui, all: Report[], isKeyed = fals
 const RECENT = 5
 let isEarlierOpen = false
 let isArchivedOpen = false
+// Unfolded, Earlier and Archived list this many rows at first and a row that shows as many more: a thousand results in one drawing
+// were past what the app draws, and it showed "Nothing to show yet" (drawingFits). Fewer, while the drawing would not fit
+const RESULTS_PAGE = 50
+let earlierMost = RESULTS_PAGE
+let archivedMost = RESULTS_PAGE
+// Each one page less, for a drawing that would not fit; false once both are at one page
+const fewerResults = () => {
+  if (earlierMost <= RESULTS_PAGE && archivedMost <= RESULTS_PAGE) return false
+  earlierMost = Math.max(RESULTS_PAGE, earlierMost - RESULTS_PAGE)
+  archivedMost = Math.max(RESULTS_PAGE, archivedMost - RESULTS_PAGE)
+  return true
+}
 // When, as short as it fits its place: the time today, the day this year, the year before that
 const when = (at: number, now: number) => (day(at, now) === day(now, now) ? time(at, now) : new Date(at).getFullYear() === new Date(now).getFullYear() ? day(at, now) : String(new Date(at).getFullYear()))
 const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, line: number, height = 0) => {
@@ -262,7 +274,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
   // The app keeps each button it drew by its key, with the handle of its first drawing; the engine gives every button a new handle
   // whenever anything in the drawing changes (a result arriving, a fold, a time). A key that stayed then pressed a dead handle and
   // nothing opened, press after press. So every key here carries a mark of what the drawing shows, which moves whenever it changes
-  const gen = drawingMark(REPORTS_PANE, [presses, line, height, fresh, isEarlierOpen, isArchivedOpen, 'isTerminal' in ui, ...[recent, earlier, gone].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))])
+  const gen = drawingMark(REPORTS_PANE, [presses, line, height, fresh, isEarlierOpen, isArchivedOpen, earlierMost, archivedMost, 'isTerminal' in ui, ...[recent, earlier, gone].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))])
   const fold = (key: string, label: string, isOpen: boolean, onPress: () => void) => (
     <Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" alignItems="flex-start" flexShrink={0}>
       {/* In the rows' title column */}
@@ -299,6 +311,14 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
       {group.map(row)}
     </Box>
   )
+  // Under a page of unfolded rows, the row that shows the next page
+  const more = (key: string, left: number, onPress: () => void) =>
+    left > 0 ? (
+      <Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" alignItems="flex-start" flexShrink={0}>
+        <Box width={1} flexShrink={0} />
+        <Button key={`${key}-${gen}`} label={`Show ${Math.min(RESULTS_PAGE, left)} more`} plain dimColor onPress={() => void ((presses += 1), onPress(), redraw($))} />
+      </Box>
+    ) : null
   return (
     <Box key="reports" flexDirection="column" gap={1} flexGrow={1}>
       <Box key="reports-head" flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
@@ -312,11 +332,12 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
       {recent.length ? band(ui, 'reports-recent', 'Newest', '', rows(recent)) : null}
       {earlier.length || gone.length ? (
         <Box key="reports-folded" flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-          {earlier.length ? fold('earlier-fold', `Earlier ${earlier.length}`, isEarlierOpen, () => (isEarlierOpen = !isEarlierOpen)) : null}
-          {earlier.length && isEarlierOpen ? rows(earlier) : null}
-          {gone.length ? fold('archived-fold', `Archived ${gone.length}`, isArchivedOpen, () => (isArchivedOpen = !isArchivedOpen)) : null}
+          {earlier.length ? fold('earlier-fold', `Earlier ${earlier.length}`, isEarlierOpen, () => ((isEarlierOpen = !isEarlierOpen), (earlierMost = RESULTS_PAGE))) : null}
+          {earlier.length && isEarlierOpen ? rows(earlier.slice(0, earlierMost)) : null}
+          {isEarlierOpen ? more('earlier-more', earlier.length - earlierMost, () => (earlierMost += RESULTS_PAGE)) : null}
+          {gone.length ? fold('archived-fold', `Archived ${gone.length}`, isArchivedOpen, () => ((isArchivedOpen = !isArchivedOpen), (archivedMost = RESULTS_PAGE))) : null}
           {gone.length && isArchivedOpen
-            ? gone.map(entry => {
+            ? gone.slice(0, archivedMost).map(entry => {
                 const r = entry[0]
                 if (!r) return null
                 return (
@@ -333,6 +354,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
                 )
               })
             : null}
+          {isArchivedOpen ? more('archived-more', gone.length - archivedMost, () => (archivedMost += RESULTS_PAGE)) : null}
         </Box>
       ) : null}
     </Box>

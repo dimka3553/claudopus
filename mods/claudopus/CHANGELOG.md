@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.241 · 20 November 2026
+- Results opens again with many results: Earlier and Archived now unfold 50 at a time, with Show 50 more under them, instead of every result at once, which was more than the app could draw.
+
 ## 0.2.240 · 19 November 2026
 - When you press Message on a card right after typing in its Details box, the box above the chat now opens at once. Before, it could wait up to half a minute.
 

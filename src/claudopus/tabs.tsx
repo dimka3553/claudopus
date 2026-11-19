@@ -43,11 +43,16 @@ const tabHooks = (on: On) => {
     const kept = await read($, reports)
     // What one row holds: the pane's cells less the block's padding. The app's letters are narrower than a cell
     const line = Math.max(24, Math.floor((e.props.bodyColumns - 8) * (e.surface === 'terminal' ? 1 : 1.25)))
-    return (
+    const now = await $.clock.now()
+    const drawn = () => (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportsView($, uiOf($, e), kept, await $.clock.now(), line, e.props.scroll.bodyRows)}
+        {reportsView($, uiOf($, e), kept, now, line, e.props.scroll.bodyRows)}
       </Box>
     )
+    // Pages unfolded past what the app draws are taken back until it fits (fewerResults)
+    let drawing = drawn()
+    while (!drawingFits(drawing) && fewerResults()) drawing = drawn()
+    return drawing
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   // Stats, in a pane of its own: drawn at once from what was read last, while the records are read again at most once a minute
