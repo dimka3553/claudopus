@@ -1,0 +1,1 @@
+- The claudopus.ai pages now count visits without cookies, and the privacy page says so
