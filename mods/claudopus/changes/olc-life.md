@@ -6,3 +6,8 @@
 - A task waiting for something far away runs a watch, shown as a row.
 - The chat no longer writes "No response requested." when a paused task's notice arrives.
 - The header counts tasks by stage: waiting for you, working.
+- A card that has ended stays where it is until you press Dismiss: nothing else moves it under Finished. A Done card says `✓ Done` and the task's last note, and offers Change something and Dismiss.
+- When you carry on from what a task made, your words go to that same task, which works again on the same card. A second task is only for a new job.
+- A helper's result goes only to the task that started it, and no longer appears in the chat.
+- A helper's to-dos stay on its own row, not on its task's list.
+- A row shows a time left only when the command itself prints one.

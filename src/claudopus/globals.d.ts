@@ -223,7 +223,6 @@ declare global {
   export import foldJobs = M10.foldJobs
   export import isKindSaid = M10.isKindSaid
   export import labelOf = M10.labelOf
-  export import timeLeftText = M10.leftText
   export import JOB_COLOR = M10.JOB_COLOR
   export import JOB_GLYPH = M10.JOB_GLYPH
   export import JOB_HEAD = M10.JOB_HEAD

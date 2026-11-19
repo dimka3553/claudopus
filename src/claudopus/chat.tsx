@@ -467,7 +467,8 @@ const chatHooks = (on: On) => {
       if (reports.length) e = { ...e, context: [...(e.context ?? []), ...reports] }
       // A task that paused is still working: Claude Code's notice that it ended its step without a report is nothing new
       const cards = await read($, todos)
-      const atWork = new Set(cards.filter(one => !one.parentId && !one.chat && one.status === 'working').map(one => one.id))
+      // (nor is such a notice of a helper: its result goes to its task, taken at its hand-back, and is never the chat's)
+      const atWork = new Set(cards.filter(one => !one.chat && (one.parentId ? one.parentId !== HELPER || one.tookReport : one.status === 'working')).map(one => one.id))
       const quiet = quietNotices(e.text, atWork, new Set(cards.filter(one => one.reportGiven && !reports.length).map(one => one.id)))
       const held = cards.filter(one => !one.parentId && isHeld(one) && ids.includes(one.id))
       if (held.length) return next({ ...e, context: [...(e.context ?? []), ...held.map(one => named(STOPPED_BY_YOU(titleOf(one), one.id)))] })
@@ -518,13 +519,8 @@ const chatHooks = (on: On) => {
         const subjects = (await readIndex($)).map(s => `- ${[s.name, s.repo, s.session, s.state, s.summary, `streams/${slug(s.name)}.md`].join(' | ')}`).join('\n')
         context.push(`${role}\nThis chat's saved words: ${dir}/words/${m.id}.md\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${subjects || '(none yet)'}`)
       }
-      // How full each piece of work is, so a steer for one that is nearly full goes to a fresh agent instead
-      const sizes = (await read($, todos))
-        .filter(one => !one.parentId && one.tokens > 0)
-        .slice(-8)
-        .map(one => `${one.title || 'task'} (${one.id}) ${one.isFork && m.window ? `${Math.round((one.tokens / m.window) * 100)}%` : thousands(one.tokens)}`)
       const told = reportsTold(await read($, reports), await $.clock.now())
-      context.push(`${await keptRule($, 'each', async () => BRIEF)}${sizes.length ? `\nHow full each task's context is: ${sizes.join('; ')}.` : ''}${told ? `\n${told}` : ''}`)
+      context.push(`${await keptRule($, 'each', async () => BRIEF)}${told ? `\n${told}` : ''}`)
       await update($, me, one => ({ ...one, isChat: true, needsContext: false }))
 
       if (text.length > PASTE_CHARS) {

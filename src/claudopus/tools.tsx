@@ -33,7 +33,8 @@ const toolHooks = (on: On) => {
     return { result: `Files are under ${dir}.\n${lines.slice(0, 40).join('\n')}${more}` }
   })
 
-  // The work lists what it sets out to do under its to-do, ticks it, rewords it or marks it dropped
+  // The work lists what it sets out to do under its to-do, ticks it, rewords it or marks it dropped. A helper's list is its own,
+  // on its own row: never added to the list of the task that started it, whose count is of its own to-dos
   on('tool.call', { tool: 'mcp__claudopus__todo' }, async ($, e) => {
     const input = e as unknown as { item?: string; state?: string; was?: string }
     const text = oneLine(input.item ?? '').slice(0, 200)
@@ -48,7 +49,7 @@ const toolHooks = (on: On) => {
       // One thing is being done at a time: what was being done before waits again
       items = state === 'doing' ? next.map(item => (item.state === 'doing' && item.text !== text ? { ...item, state: 'open' as const } : item)) : next
       return { ...one, items }
-    })
+    }, true)
 
     return { result: items.map(item => `${item.state === 'done' ? '[x]' : item.state === 'dropped' ? '[dropped]' : item.state === 'doing' ? '[doing]' : '[ ]'} ${item.text}`).join('\n') }
   })

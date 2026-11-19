@@ -1022,7 +1022,7 @@ test("work that ends in another chat turns happy in this panel for its pause, th
   await list.unmount()
 })
 
-test("while the person types a reply into an ask, work finishing here and in another chat still turns green and happy for its pause, then leaves", async ($, on) => {
+test("while the person types a reply into an ask, work finishing here and in another chat still turns green and happy for its pause; after it this chat's card stays among the cards, done, and the other chat's leaves", async ($, on) => {
   const { files, clock } = world(on, { art: true })
   await $.session.start(start)
   const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
@@ -1036,22 +1036,33 @@ test("while the person types a reply into an ask, work finishing here and in ano
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Submit it to the plugin directory.' } as never)
   const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   await list.input({ key: box?.key ?? '', text: 'Not y', kind: 'change' } as never)
-  // This chat's task hands in its result mid-typing: green and happy at once, then gone after its pause, the times still held
+  // The cards that say Done, and those in their moment at the top, outlined green
+  const doneCards = async () => (await list.findAll({ type: 'Text' })).filter(one => one.text === '✓ Done' && one.props.color === 'success').length
+  const outlined = async () => (await list.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.borderColor === 'success').length
+  // This chat's task hands in its result mid-typing: green and happy at once; after its pause the moment is over and its card is
+  // still among the cards, done, the times still held
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'a2', message: 'Done.' } as never)
   expect((await until(async () => list.find({ type: 'Text', text: '✓ Done' })))?.props.color).toBe('success')
   expect(await drawn(list)).toContain('happy')
+  expect(await outlined()).toBe(1)
   await clock.advance(2_100)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: /Draw the eyes/ })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await outlined()) ? undefined : 'moment over'))).toBe('moment over')
+  expect(await drawn(list)).not.toContain('happy')
+  expect(await list.find({ type: 'Text', text: /Draw the eyes/ })).toBeDefined()
+  expect(await doneCards()).toBe(1)
   // Another chat's work finishes mid-typing: the same
   const file = JSON.parse(otherChat(NOW)) as { at: number; cards: { status: string; endedAt: number; ask?: unknown }[] }
   files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at: NOW + 8000, cards: file.cards.map(card => ({ ...card, status: 'done', endedAt: NOW + 7500, ask: undefined })) }))
   await list.input({ key: box?.key ?? '', text: 'Not ye', kind: 'change' } as never)
   // This panel reads the other chats every few seconds: the pause runs from the look that saw the end
-  for (let n = 0; n < 6 && !(await list.find({ type: 'Text', text: '✓ Done' })); n += 1) await clock.advance(1000)
-  expect((await until(async () => list.find({ type: 'Text', text: '✓ Done' })))?.props.color).toBe('success')
+  // (that chat's two cards end together, so with this chat's three say Done)
+  for (let n = 0; n < 6 && (await doneCards()) < 3; n += 1) await clock.advance(1000)
+  expect(await until(async () => ((await doneCards()) === 3 ? 'all done' : undefined))).toBe('all done')
   expect(await drawn(list)).toContain('happy')
+  // After their pause the other chat's cards have left, and this chat's is still there
   await clock.advance(3000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Done' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await doneCards()) === 1 ? 'others left' : undefined))).toBe('others left')
+  expect(await list.find({ type: 'Text', text: /Draw the eyes/ })).toBeDefined()
   // The half reply is still in its box: while typing the box holds the letters itself, and once typing stops it is drawn with them
   await clock.advance(31_000)
   expect(await until(async () => ((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value === 'Not ye' ? true : undefined))).toBe(true)
