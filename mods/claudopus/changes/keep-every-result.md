@@ -1,0 +1,3 @@
+- A task's card keeps everything it made for its whole life, however often it starts again: the pages and documents each of its results named, its pictures, and its changed files, even once a worktree they were in is taken away.
+- Pull requests, issues, releases and published pages show on the card wherever a result names them, as in a table, each by its repo and number (`clipify #70`), and one a command opened is there even when the result names it only by its number.
+- More than eight things on a card end in a "N more" you can press, which opens the task's Details with all of them.
