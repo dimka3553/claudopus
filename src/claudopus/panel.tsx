@@ -431,7 +431,7 @@ const panelHooks = (on: On) => {
                     takes a box; the same task then carries on with what is typed */}
                 {canChange(one) && 'Input' in table && repliesInBar(e.surface) ? (
                   <Box flexShrink={0}>
-                    <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : 'Change something'} plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
+                    <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : 'Message'} plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
                   </Box>
                 ) : null}
                 {/* Failed, or stopped by the person: only their press starts it again */}

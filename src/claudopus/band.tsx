@@ -47,7 +47,7 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
 // `draft`: where what is typed and not sent is kept (an answer, a change, a result); a key or a password is kept nowhere but in
 // barKeyTyped while the box is open, for its Send button. `said`: what went wrong with what was last sent from it
 type BarBox = { head: string; placeholder: string; draft?: string; secret?: string; said?: string; extra?: JSX.Element | null; send: (value: string) => void }
-// The Done card the box was opened on by Change something, while it is still done: at work again, or asking, its box goes
+// The card the box was opened on by Message, while it works or has finished and asks nothing: asking, its box goes
 const changeTarget = (cards: Todo[]) => (barOpen?.kind === 'change' ? cards.find(one => one.id === barOpen?.id && canChange(asPressed(one))) : undefined)
 // What the open box is for, as it stands now; none once that is answered, gone or no longer open to it, and the box goes with it
 const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): BarBox | undefined => {
@@ -64,11 +64,11 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
   }
   if (open.kind === 'change') {
     const one = changeTarget(cards)
-    return one && { head: `↳ What should “${cut(titleOf(one), 50)}” change?`, placeholder: 'Type what to change', draft: barDraft(), send: value => void (sent(one.id), (barOpen = undefined), sendChange($, one.id, value).catch(err => log($, `change not sent: ${String(err)}`))) }
+    return one && { head: `↳ Message to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: barDraft(), send: value => void (sent(one.id), (barOpen = undefined), sendChange($, one.id, value).catch(err => log($, `change not sent: ${String(err)}`))) }
   }
   if (open.kind === 'continue') {
     const r = kept.find(one => one.id === open.id)
-    return r && { head: `↳ What should “${cut(r.title, 50)}” change?`, placeholder: 'Type what to change', draft: barDraft(), send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))) }
+    return r && { head: `↳ Message to “${cut(r.title, 50)}”`, placeholder: 'Type your message', draft: barDraft(), send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))) }
   }
   const box = boxes.find(one => one.id === open.id)
   if (!box) return undefined
@@ -121,9 +121,7 @@ const barBox = ($: EngineInterface, ui: Ui, box: BarBox) => {
       {box.said ? <ui.Text key="band-box-said" color={NEEDS} wrap="wrap">{box.said}</ui.Text> : null}
       {box.extra ?? null}
       <ui.Box key="band-box-foot" flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
-        <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
-          <ui.Text dimColor wrap="wrap">{`Enter sends · ${box.secret ? 'Goes only to this command' : 'Send carries the task on'}`}</ui.Text>
-        </ui.Box>
+        <ui.Box flexGrow={1} flexShrink={1} minWidth={0} />
         <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
           <ui.Button key={`band-box-send-${presses}-${boxPresses}`} label="Send" variant="primary" onPress={() => send(typed())} />
           <ui.Button key={`band-box-close-${presses}-${boxPresses}`} label="Close" plain dimColor onPress={press => openBar($, undefined, press.surface)} />
@@ -234,8 +232,8 @@ const bandHooks = (on: On) => {
       barBoxAt = 0
       // Only a card that asks is drawn differently for it
       // and a key box, whose buttons or field are drawn by it too
-      // and a Done card, whose Change something is there only with the box
-      if ((asksForBar(cards).length || boxes.length || barOpen || cards.some(one => canChange(asPressed(one)))) && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
+      // and a Done card, whose Message is there only with the box (a working card's comes with its own next drawing)
+      if ((asksForBar(cards).length || boxes.length || barOpen || cards.some(one => one.status !== 'working' && canChange(asPressed(one)))) && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
     }
     if (e.props.hasSurvey) return next(e)
     const bandAt = await $.clock.now()

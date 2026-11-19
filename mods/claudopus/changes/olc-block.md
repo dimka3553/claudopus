@@ -5,6 +5,5 @@
 - A result asks nothing. Questions an older result left are shown as plain text.
 - Release it is one press: it answers the task and allows that one release, with no second box. A release nobody pressed for is still asked.
 - Every button on a question is an answer that carries the task on. There is no Not now: a question you do not press stays open.
-- A finished card has two quiet buttons, Change something and Dismiss. Dismiss sends nothing. A result carries on with the same Change something box.
-- The box above the chat says whether Send carries the task on or goes only to a command.
+- Every card of a task that works or has finished has a quiet Message button: what you write goes straight to that task, not through the chat. A finished card also has Dismiss, which sends nothing. A result has the same Message box.
 - An answer reaches its task from your press alone, with no timer behind it.

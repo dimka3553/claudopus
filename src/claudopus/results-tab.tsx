@@ -1,6 +1,6 @@
 // The Results tab and each result's own tab: the list, a result drawn whole, put away and brought back
 
-// Change something on a result: the box above the chat opens (openBar), and what is typed there goes to the result's own task
+// Message on a result: the box above the chat opens (openBar), and what is typed there goes to the result's own task
 // while its card can be changed, else as the person's own message naming the result by its path, a real submit as Start again's is. Nothing is put in the chat's own box
 const CONTINUE_FROM = (r: Report, now: number, words: string) => `Continue from the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: ${words}`
 // (on its way from the press's own hook, which waits for it before it sends what the press left to send: answersOnWay)
@@ -447,12 +447,12 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         'Follow-up',
         '',
         <Box flexDirection="column" alignItems="flex-start" gap={1}>
-          {/* Change something opens the box above the chat; where that bar takes no box (the terminal), the one field is here */}
+          {/* Message opens the box above the chat; where that bar takes no box (the terminal), the one field is here */}
           {repliesInBar(surface) ? (
-            <Button key={`report-carry-${gen}`} label={isBarOpen('continue', r.id) ? 'Close' : 'Change something'} onPress={press => openBar($, isBarOpen('continue', r.id) ? undefined : { kind: 'continue', id: r.id }, press.surface)} />
+            <Button key={`report-carry-${gen}`} label={isBarOpen('continue', r.id) ? 'Close' : 'Message'} onPress={press => openBar($, isBarOpen('continue', r.id) ? undefined : { kind: 'continue', id: r.id }, press.surface)} />
           ) : 'Input' in ui ? (
             <Box width="100%" flexDirection="column">
-              <ui.Input key={`report-carry-reply-${r.id}-${replies.get(r.id) ?? 0}`} placeholder="Type what to change" submitLabel="Send" onInput={() => holdTimes($)} onSubmit={value => void (value.trim() && (replies.set(r.id, (replies.get(r.id) ?? 0) + 1), freeTimes($), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))))} />
+              <ui.Input key={`report-carry-reply-${r.id}-${replies.get(r.id) ?? 0}`} placeholder="Type your message" submitLabel="Send" onInput={() => holdTimes($)} onSubmit={value => void (value.trim() && (replies.set(r.id, (replies.get(r.id) ?? 0) + 1), freeTimes($), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))))} />
             </Box>
           ) : null}
           {kin.length ? (

@@ -1798,12 +1798,12 @@ test('the stop button of a to-do stops its work, and its card stays among the ca
   await pane.unmount()
 })
 
-test("work that finishes comes to the top for two seconds, then stays among the cards, green, until it is dismissed: two at once, through an hour and another task's end, one ended while the panel was closed; done, it offers only Change something and Dismiss; dismissed, it stays under Finished; a message to it makes the same card work again, and done again when it hands in", async ($, on) => {
+test("work that finishes comes to the top for two seconds, then stays among the cards, green, until it is dismissed: two at once, through an hour and another task's end, one ended while the panel was closed; done, it offers only Message and Dismiss; dismissed, it stays under Finished; a message to it makes the same card work again, and done again when it hands in", async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}
   const { clock } = world(on, { agents, kinds })
   await $.session.start(start)
-  // (the bar above the prompt is drawn, which takes the box Change something opens)
+  // (the bar above the prompt is drawn, which takes the box Message opens)
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
   await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
@@ -1844,10 +1844,10 @@ test("work that finishes comes to the top for two seconds, then stays among the 
   const again = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect([await titles(again), await dones(again), await fold(again)]).toEqual([['Fix the nose', 'Check the ears', 'Draw the eyes'], [['success', 'success', 'success'], 3], undefined])
   expect(await head(again)).toBe('Nothing waits for you')
-  // A done card's line is the last it wrote; it offers Change something and Dismiss and nothing else: no Stop, no Start again,
+  // A done card's line is the last it wrote; it offers Message and Dismiss and nothing else: no Stop, no Start again,
   // and no question about its result
   expect((await again.find({ type: 'Text', text: /^ · The nostril/ }))?.text).toBe(' · The nostril is closed on both sides.')
-  for (const id of ['a1', 'a2', 'a3']) expect([id, await offered(again, id)]).toEqual([id, ['Change something', 'Dismiss']])
+  for (const id of ['a1', 'a2', 'a3']) expect([id, await offered(again, id)]).toEqual([id, ['Message', 'Dismiss']])
   expect(await again.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
 
   // Dismiss puts it under Finished, and it stays there: an hour on, and as other work goes on and ends
@@ -1857,17 +1857,17 @@ test("work that finishes comes to the top for two seconds, then stays among the 
   await clock.advance(3_600_000)
   expect([await fold(again), await titles(again), await dones(again)]).toEqual(['▸ Finished 1', ['Check the ears', 'Draw the eyes'], [['success', 'success'], 2]])
 
-  // A message to a done task makes the same card work again, purple with its Stop, and no second card; started again by
+  // A message to a done task makes the same card work again, purple with its Stop and Message, and no second card; started again by
   // Claude Code under its id, it is still that one card
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a3', message: 'Shade the eyes too.' } as never)
   agents.a3 = 'running'
   await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'Shade the eyes too.', resume: { agentId: 'a3' } } as never)
-  expect([await titles(again), await offered(again, 'a3'), await dones(again), await head(again), await fold(again)]).toEqual([['Check the ears', 'Draw the eyes'], ['Stop'], [['success'], 1], '1 working', '▸ Finished 1'])
+  expect([await titles(again), await offered(again, 'a3'), await dones(again), await head(again), await fold(again)]).toEqual([['Check the ears', 'Draw the eyes'], ['Stop', 'Message'], [['success'], 1], '1 working', '▸ Finished 1'])
   // When it hands in it is done again: at the top for its two seconds, then among the cards as before, the dismissed one still
   // under Finished
   agents.a3 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h3', agentId: 'a3', message: 'The eyes are shaded.' } as never)
-  expect([await titles(again), await offered(again, 'a3'), await dones(again), await fold(again)]).toEqual([['Draw the eyes', 'Check the ears'], ['Change something', 'Dismiss'], [['success', 'success'], 2], '▸ Finished 1'])
+  expect([await titles(again), await offered(again, 'a3'), await dones(again), await fold(again)]).toEqual([['Draw the eyes', 'Check the ears'], ['Message', 'Dismiss'], [['success', 'success'], 2], '▸ Finished 1'])
   await clock.advance(2_100)
   expect([await titles(again), await dones(again), await fold(again)]).toEqual([['Check the ears', 'Draw the eyes'], [['success', 'success'], 2], '▸ Finished 1'])
   await again.unmount()

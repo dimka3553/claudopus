@@ -487,10 +487,10 @@ const sendFromBar = ($: EngineInterface, id: string, value: string) => {
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
   return run
 }
-// Change something, on a finished card of this chat's: the same box, opened for a card that asks nothing. What is sent from it
+// Message, on a card of this chat's that works or has finished: the same box, opened for a card that asks nothing. What is sent from it
 // goes to that task as the person's own words, which carries it on from the submit's or the press's own hook (answersOnWay,
 // toEnded), never from a timer, and the chat is only told, with no turn of its own
-const canChange = (one: Todo) => !one.chat && !one.parentId && (one.status === 'done' || one.status === 'failed') && !isHeld(one) && !openItems(one).length && !needsPerson(one)
+const canChange = (one: Todo) => !one.chat && !one.parentId && (one.status === 'working' || one.status === 'done' || one.status === 'failed') && !isHeld(one) && (one.status === 'working' || !openItems(one).length) && !needsPerson(one)
 const sendChange = ($: EngineInterface, id: string, value: string) => {
   const run = changeTask($, id, value.trim())
   answersOnWay.add(run)
@@ -502,7 +502,7 @@ const changeTask = async ($: EngineInterface, id: string, said: string) => {
   if (!card || !said || card.chat || card.parentId || isHeld(card)) return
   const at = await $.clock.now()
   await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) } : one)))
-  const text = CHANGE_ASKED(said)
+  const text = card.status === 'working' ? MESSAGE_SENT(said) : CHANGE_ASKED(said)
   const sent = { text: said, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true }
   const told = (await read($, todos)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
   if (told && !told.deny) (writtenIn($, id, id), sentReplies.set(id, { ...sent, to: 'work' }), redraw($))
@@ -863,7 +863,7 @@ const sentLine = (one: Todo, now: number) => {
   if (one.ask && !isHeld) return ''
   if (sent.to === 'chat') return `✓ You answered “${cut(sent.text, 60)}” · it couldn't reach the task, so it goes with your next message`
   if (sent.isPress) return `✓ You pressed “${cut(sent.text, 60)}”`
-  return `✓ You ${sent.ask === CHANGE_WHAT ? 'asked for' : 'answered'} “${cut(sent.text, 60)}”${isHeld && !isActingOnReply(one) ? ' · the question is still open' : ''}`
+  return `✓ You ${sent.ask === CHANGE_WHAT ? 'wrote' : 'answered'} “${cut(sent.text, 60)}”${isHeld && !isActingOnReply(one) ? ' · the question is still open' : ''}`
 }
 // What was pressed on a block, said in one grey line where the block was: on its task's card (sentLine), or at the top of the
 // panel for a block that belonged to no task (loosePressed). Drawn from the press itself, before anything is awaited

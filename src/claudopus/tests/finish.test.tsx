@@ -558,7 +558,7 @@ const dozen = async ($: Parameters<TestBody>[0], on: On, asking = false) => {
 }
 const others = (but: number[]) => Array.from({ length: 12 }, (_, n) => n + 1).filter(n => !but.includes(n)).map(n => `Piece ${n}`)
 
-test('a finished card in the middle of a dozen comes to the top at once, outlined green, for two seconds on time, then is back in its place among the cards, still green and never under Finished, after an hour and after another task finishes; only Dismiss puts it under Finished; done, it has only Change something and Dismiss to press, failed those two as well, and Dismiss tells its task nothing', SLOW, async ($, on) => {
+test('a finished card in the middle of a dozen comes to the top at once, outlined green, for two seconds on time, then is back in its place among the cards, still green and never under Finished, after an hour and after another task finishes; only Dismiss puts it under Finished; done, it has only Message and Dismiss to press, failed those two as well, and Dismiss tells its task nothing', SLOW, async ($, on) => {
   const { list, order, green, fold, end, clock, appended, resumed, sent, submitted } = await dozen($, on)
   const doneLines = async () => (await list.findAll({ type: 'Text' })).filter(one => one.text === '✓ Done' && one.props.color === 'success').length
   expect(await order()).toEqual(others([]))
@@ -615,7 +615,7 @@ test('a finished card in the middle of a dozen comes to the top at once, outline
     expect(await until(async () => ((await onCard(id)).some(one => one[0] === 'Dismiss') ? true : undefined))).toBe(true)
     expect(await list.find({ type: 'Text', text: said })).toBeDefined()
     // (a failed card also has its Start again)
-    expect([id, (await onCard(id)).filter(one => one[0] !== 'Start again')]).toEqual([id, [[`Piece ${id.slice(1)}`, true, undefined], ['Change something', true, true], ['Dismiss', true, true]]])
+    expect([id, (await onCard(id)).filter(one => one[0] !== 'Start again')]).toEqual([id, [[`Piece ${id.slice(1)}`, true, undefined], ['Message', true, true], ['Dismiss', true, true]]])
     if (reason === 'answer') expect((await onCard(id)).length).toBe(3)
     const told = [appended.length, resumed.length, sent.length, submitted.length]
     const folded = Number(/\d+/.exec(String(await fold()))?.[0])

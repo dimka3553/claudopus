@@ -310,11 +310,14 @@ const ANSWER_ECHO = 60 * 60_000
 const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs {name}.`
 // What the work is told with a reply that does not settle its ask: the ask stays open on its card until it clears or replaces it
 const REPLY_HOLDS = `That reply does not settle your question by itself: act on it. Their card shows your question with their reply under it, and nothing more to press or type while you work on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still needs them after you have done what they said, ask it again, which brings back its buttons.`
-// Change something on a Done card: what the box asks, what its task is told with the person's words, and what the chat is told
-const CHANGE_WHAT = 'what should it change?'
+// Message on a Done card: what the box asks, what its task is told with the person's words, and what the chat is told
+const CHANGE_WHAT = 'your message'
+// The same box on a card at work: the person's words reach the task between its steps
+const MESSAGE_SENT = (said: string) =>
+  `${who(true)} pressed "Message" on your card and wrote to you, in their own words: ${said}\nThese are their own words to you, as a message of theirs in the chat would be: bring your to-dos in line with them first, then carry on.`
 const CHANGE_ASKED = (said: string) =>
-  `${who(true)} pressed "Change something" on the card of your finished task and wrote, in their own words, what to change in your finished work: ${said}\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
-const CHANGE_TOLD = (title: string, said: string) => `✓ {Name} asked the finished task "${title}" on its card to change something: ${said}. The task has their words and carries on with them itself: start nothing for it.`
+  `${who(true)} pressed "Message" on the card of your finished task and wrote to you, in their own words: ${said}\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
+const CHANGE_TOLD = (title: string, said: string) => `✓ {Name} wrote to the task "${title}" on its card: ${said}. The task has their words and carries on with them itself: start nothing for it.`
 const RESUMED_BY_ANSWER = `You were paused or had finished. Continue the task with this answer, then end with your report as before.`
 // What the person sees as a notice, and the chat's model reads, when an answer could not reach its task
 const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = false) =>

@@ -15,12 +15,13 @@ const oneBox = async (bar: Drawn) => {
   return {
     head: texts.find(text => text.startsWith('↳')) ?? '',
     fields: (await bar.findAll({ type: 'Input' })).map(one => one.props.placeholder),
-    enter: texts.find(text => text.startsWith('Enter sends')) ?? '',
+    enter: texts.find(text => /^Enter sends|carries the task on|Goes only to/.test(text)) ?? '',
     buttons: (await bar.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(label => ['Send', 'Close', 'Cancel'].includes(label)),
   }
 }
-const SENDS = 'Enter sends · Send carries the task on'
-const SENDS_KEY = 'Enter sends · Goes only to this command'
+// (no line under the box says what Enter does)
+const SENDS = ''
+const SENDS_KEY = ''
 // An answer in words on the desktop: Answer in words on the card's block opens the one box above the chat, and what is sent
 // from it is the answer. Gives the box it was typed in
 const inWords = async (pane: Drawn, bar: Drawn, card: string, text: string) => {
@@ -507,11 +508,11 @@ test('an ask outlives the work that made it: amber after the work ends, with the
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'I could not restart it; the command is on your card.' } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
   // Long after it finished, the ask is still there, amber, with its own Done, its buttons for the command and Answer in words;
-  // though the work has ended, its card has no Change something while it asks; Dismiss puts it away, as on any ended card
+  // though the work has ended, its card has no Message while it asks; Dismiss puts it away, as on any ended card
   await clock.advance(10 * 60_000)
   expect((await until(async () => list.find({ type: 'Text', text: 'Run this to restart that chat yourself.' })))?.props.color).toBe(AMBER)
   expect(await until(async () => ((await askButtons(list, 'a1')).includes('Answer in words') ? askButtons(list, 'a1') : undefined))).toEqual(['Copy', 'Open in Terminal', 'Done', 'Answer in words'])
-  expect((await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => ['Dismiss', 'Change something', 'Not now'].includes(label))).toEqual(['Dismiss'])
+  expect((await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => ['Dismiss', 'Message', 'Not now'].includes(label))).toEqual(['Dismiss'])
   // Done starts the finished work again with the answer, and the ask goes at once; nothing is sent in the person's place
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done')?.key ?? '' })
   expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Done"') && line.includes('Run this to restart that chat yourself.')))).toBeDefined()
@@ -1758,7 +1759,7 @@ test('a reply never waits behind a long command: one that may run for minutes is
   expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “Yep, looks good”' }))).toBeDefined()
   await settle()
 })
-test("where the bar above the prompt takes a box, a card's answers end with Answer in words, which opens the one box in that bar and never in the panel or its Details, whose window the app drags to a box that holds the cursor (15 Nov); Close takes it away with what was typed kept; one box at a time; Change something on a Done card opens the same box, and what is sent from it starts that task again; nothing is ever put into the chat's own box", async ($, on) => {
+test("where the bar above the prompt takes a box, a card's answers end with Answer in words, which opens the one box in that bar and never in the panel or its Details, whose window the app drags to a box that holds the cursor (15 Nov); Close takes it away with what was typed kept; one box at a time; Message on a Done card opens the same box, and what is sent from it starts that task again; nothing is ever put into the chat's own box", async ($, on) => {
   const { appended, clock, files, keep, resumed, submitted } = world(on, { panes: ['claudopus'] })
   const filled: string[] = []
   on('prompt.fill', (_, e) => (filled.push(e.text), { isFilled: true }))
@@ -2032,8 +2033,8 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
     await list.input({ key: (await boxesIn(list))[0]?.key ?? '', text: five })
     expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('in their own words: one\ntwo')))).toBeDefined()
   }
-  // Change something, on a Done card of this chat's, beside its Dismiss: only where the bar above the chat takes a box, so not
-  // while that bar is folded, and never on a card still at work
+  // Message, on a card of this chat's that has finished, beside its Dismiss, or still works, beside its Stop: only where the
+  // bar above the chat takes a box, so not while that bar is folded
   const key = async (base: string) => (await list.findAll({ type: 'Button' })).find(b => new RegExp(`^${base}-\\d+$`).test(b.key ?? ''))
   await $.agent.spawn({ ...spawn, description: 'Trim the tail', prompt: 'trim the tail' } as never)
   await $.turn.complete({ agentId: 'a3', answer: 'The tail is trimmed.', durationMs: 1, isAborted: false, turnId: 'c1', reason: 'answer' })
@@ -2041,19 +2042,18 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   expect(await key('change-a3')).toBeUndefined()
   await shut.unmount()
   const top = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
-  expect((await until(async () => (await key('change-a3')) ?? undefined))?.props.label).toBe('Change something')
+  expect((await until(async () => (await key('change-a3')) ?? undefined))?.props.label).toBe('Message')
   expect((await list.findAll({ type: 'Button' })).map(b => String(b.key)).filter(one => /^(change|dismiss)-a3-/.test(one)).map(one => one.split('-')[0])).toEqual(['change', 'dismiss'])
-  expect(await key('change-a2')).toBeUndefined()
   // Pressed, it opens the box in the bar for that card, with no question: one line that asks what to change, Send and Close
   const changeBox = async () => (await top.findAll({ type: 'Input' } as never)).find(one => /-reply-change-/.test(one.key ?? ''))
-  const changes = () => resumed.filter(line => line.includes('pressed "Change something"'))
-  const toldOfChange = () => appended.filter(line => line.includes('to change something'))
+  const changes = () => resumed.filter(line => line.includes('pressed "Message"'))
+  const toldOfChange = () => appended.filter(line => line.includes('wrote to the task'))
   const wasSubmitted = submitted.length
   expect(await changeBox()).toBeUndefined()
   await list.press({ key: (await key('change-a3'))?.key ?? '' })
   const opened = await until(changeBox)
   expect(opened).toBeDefined()
-  expect(await oneBox(top)).toEqual({ head: '↳ What should “Trim the tail” change?', fields: ['Type what to change'], enter: SENDS, buttons: ['Send', 'Close'] })
+  expect(await oneBox(top)).toEqual({ head: '↳ Message to “Trim the tail”', fields: ['Type your message'], enter: SENDS, buttons: ['Send', 'Close'] })
   // Close closes it and sends nothing: the card is Done as it was, and the box opened again is empty
   await top.input({ key: opened?.key ?? '', text: 'Never mind this', kind: 'change' } as never)
   await top.press({ key: (await labelled(top, CLOSE))[0]?.key ?? '' })
@@ -2069,11 +2069,21 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   const sentAt = clock.now()
   await top.input({ key: again2?.key ?? '', text: 'Leave the tip longer' })
   expect(clock.now()).toBe(sentAt)
-  expect(changes()).toEqual(['a3: The person pressed "Change something" on the card of your finished task and wrote, in their own words, what to change in your finished work: Leave the tip longer\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.'])
+  expect(changes()).toEqual(['a3: The person pressed "Message" on the card of your finished task and wrote to you, in their own words: Leave the tip longer\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.'])
   expect(submitted).toHaveLength(wasSubmitted)
-  expect(toldOfChange()).toEqual([expect.stringContaining('asked the finished task "Trim the tail" on its card to change something: “Leave the tip longer”. The task has their words and carries on with them itself: start nothing for it.')])
+  expect(toldOfChange()).toEqual([expect.stringContaining('wrote to the task "Trim the tail" on its card: “Leave the tip longer”. The task has their words and carries on with them itself: start nothing for it.')])
   expect(await until(async () => (await list.find({ type: 'Button', key: 'stop-a3' })) ?? undefined)).toBeDefined()
-  expect(await key('change-a3')).toBeUndefined()
+  expect(await until(async () => ((await changeBox()) ? undefined : true))).toBe(true)
+  // At work, its card keeps Message beside Stop: what is sent goes straight to the task as the person's words, between its steps,
+  // and the chat is asked nothing
+  await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 'td-a3', agentId: 'a3', item: 'Lengthen the tip', state: 'doing' } as never)
+  expect((await until(async () => (await key('change-a3')) ?? undefined))?.props.label).toBe('Message')
+  await list.press({ key: (await key('change-a3'))?.key ?? '' })
+  const atWork = await until(changeBox)
+  expect(await oneBox(top)).toEqual({ head: '↳ Message to “Trim the tail”', fields: ['Type your message'], enter: SENDS, buttons: ['Send', 'Close'] })
+  await top.input({ key: atWork?.key ?? '', text: 'Keep the tuft' })
+  expect(await until(async () => appended.find(line => line.startsWith('a3: ') && line.includes('pressed "Message" on your card and wrote to you, in their own words: Keep the tuft\n')))).toBeDefined()
+  expect(submitted).toHaveLength(wasSubmitted)
   expect(await until(async () => ((await changeBox()) ? undefined : true))).toBe(true)
   // It finishes again, and can be asked for a change again
   await $.turn.complete({ agentId: 'a3', answer: 'The tip is longer now.', durationMs: 1, isAborted: false, turnId: 'c2', reason: 'answer' })

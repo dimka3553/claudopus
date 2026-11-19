@@ -871,34 +871,34 @@ test('finished work leaves a result for good that asks nothing: its pictures cop
   expect(await keyed(one, 'report-page')).toBeUndefined()
   expect(await one.find({ type: 'Text', text: `${folder}/revenue.png` })).toBeUndefined()
 
-  // Change something opens the one box above the chat: its heading names the result, then the field, what Enter and Send do,
+  // Message opens the one box above the chat: its heading names the result, then the field, what Enter and Send do,
   // Send and Close. Nothing is typed in the result's own tab on the desktop, and nothing is put in the chat's own box
   const inputsOf = async (site: typeof bar) => (await site.findAll({ type: 'Input' } as never)) as { key?: string; props: Record<string, unknown> }[]
   const barLabels = async () => (await bar.findAll({ type: 'Button' })).map(b => String(b.props.label))
-  expect((await keyed(one, 'report-carry'))?.props.label).toBe('Change something')
+  expect((await keyed(one, 'report-carry'))?.props.label).toBe('Message')
   expect(await inputsOf(one as never)).toEqual([])
   expect(await inputsOf(bar)).toEqual([])
   await pressed(one, 'report-carry')
-  const head = await until(async () => bar.find({ type: 'Text', text: /^↳ What should/ }))
-  expect(head?.text).toBe('↳ What should “Weekly revenue” change?')
+  const head = await until(async () => bar.find({ type: 'Text', text: /^↳ Message to/ }))
+  expect(head?.text).toBe('↳ Message to “Weekly revenue”')
   const [field, ...moreFields] = await inputsOf(bar)
   expect(moreFields).toEqual([])
-  expect(field?.props.placeholder).toBe('Type what to change')
-  expect(await bar.find({ type: 'Text', text: 'Enter sends · Send carries the task on' })).toBeDefined()
+  expect(field?.props.placeholder).toBe('Type your message')
+  expect(await bar.find({ type: 'Text', text: /^Enter sends/ })).toBeUndefined()
   expect((await barLabels()).filter(label => label === 'Send' || label === 'Close')).toEqual(['Send', 'Close'])
   expect(await inputsOf(one as never)).toEqual([])
   // (the button that opened it closes it again; opened once more, it is there as before)
   expect(await until(async () => ((await keyed(one, 'report-carry'))?.props.label === 'Close' ? true : undefined))).toBe(true)
   await pressed(one, 'report-carry')
   expect(await until(async () => ((await inputsOf(bar)).length ? undefined : true))).toBe(true)
-  expect(await bar.find({ type: 'Text', text: /^↳ What should/ })).toBeUndefined()
+  expect(await bar.find({ type: 'Text', text: /^↳ Message to/ })).toBeUndefined()
   await pressed(one, 'report-carry')
   const again = await until(async () => (await inputsOf(bar))[0])
   // What is sent from it goes to the result's own task, whose card is still there to carry on from: it is started again with the
   // person's words from the press's own hook (the clock has not moved), the chat is asked nothing, and the box goes
-  const changes = () => resumed.filter(line => line.startsWith('a1: ') && line.includes('pressed "Change something"'))
+  const changes = () => resumed.filter(line => line.startsWith('a1: ') && line.includes('pressed "Message"'))
   await bar.input({ key: again?.key ?? '', text: 'send it to the team' })
-  expect(await until(async () => changes()[0])).toContain('what to change in your finished work: send it to the team\n')
+  expect(await until(async () => changes()[0])).toContain('wrote to you, in their own words: send it to the team\n')
   expect(changes()).toHaveLength(1)
   expect(submitted).toEqual([])
   expect(await until(async () => ((await inputsOf(bar)).length ? undefined : true))).toBe(true)
@@ -907,14 +907,14 @@ test('finished work leaves a result for good that asks nothing: its pictures cop
   expect(await pane.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
   await $.turn.complete({ agentId: 'a1', answer: report, durationMs: 1, isAborted: false, turnId: 't4', reason: 'answer' })
   await clock.advance(10)
-  expect(await until(async () => ((await keyed(one, 'report-carry'))?.props.label === 'Change something' ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await keyed(one, 'report-carry'))?.props.label === 'Message' ? true : undefined))).toBe(true)
   // In the terminal, whose bar draws no field, the result has its own field instead, and what is sent from it goes the same way
   const termed = await $.ui.mount({ ...LIST, requestId: id, props: { ...LIST.props, title: 'Weekly revenue', bodyColumns: 80 }, surface: 'terminal' } as never)
   expect(await keyed(termed, 'report-carry')).toBeUndefined()
   const own = (await inputsOf(termed as never)).filter(input => /^report-carry-reply-/.test(input.key ?? ''))
-  expect(own.map(input => input.props.placeholder)).toEqual(['Type what to change'])
+  expect(own.map(input => input.props.placeholder)).toEqual(['Type your message'])
   await termed.input({ key: own[0]?.key ?? '', text: 'check the refunds' })
-  expect(await until(async () => changes()[1])).toContain('what to change in your finished work: check the refunds\n')
+  expect(await until(async () => changes()[1])).toContain('wrote to you, in their own words: check the refunds\n')
   await termed.unmount()
   await $.turn.complete({ agentId: 'a1', answer: report, durationMs: 1, isAborted: false, turnId: 't4b', reason: 'answer' })
   await clock.advance(10)
@@ -1094,14 +1094,14 @@ test('a result saved earlier that lists questions shows them as plain text under
     const texts = await tab.findAll({ type: 'Text' })
     expect([one.id, texts.filter(text => text.props.bold).map(text => text.text)]).toEqual([one.id, one.heads])
     expect([one.id, texts.filter(text => /\?$/.test(String(text.text))).map(text => [text.text, text.props.dimColor, text.props.color])]).toEqual([one.id, one.left.map(text => [text, true, undefined])])
-    expect([one.id, (await tab.findAll({ type: 'Button' })).map(button => String(button.props.label)).filter(label => !/ · /.test(label))]).toEqual([one.id, ['Archive', 'Change something']])
+    expect([one.id, (await tab.findAll({ type: 'Button' })).map(button => String(button.props.label)).filter(label => !/ · /.test(label))]).toEqual([one.id, ['Archive', 'Message']])
     await tab.unmount()
   }
-  // Change something on a result whose task has no card left to carry on from: what is sent from the box above the chat goes as
+  // Message on a result whose task has no card left to carry on from: what is sent from the box above the chat goes as
   // the person's own message naming the result and its path, and nothing is put in the chat's own box
   const tab = await $.ui.mount({ ...LIST, requestId: 'report-old', props: { ...LIST.props, title: 'Old', bodyColumns: 80 }, surface: 'desktop' } as never)
   await pressed(tab, 'report-carry')
-  expect((await until(async () => bar.find({ type: 'Text', text: /^↳ What should/ })))?.text).toBe('↳ What should “Old” change?')
+  expect((await until(async () => bar.find({ type: 'Text', text: /^↳ Message to/ })))?.text).toBe('↳ Message to “Old”')
   const field = ((await bar.findAll({ type: 'Input' } as never)) as { key?: string }[])[0]
   await bar.input({ key: field?.key ?? '', text: 'ship it after all' })
   expect(await until(async () => submitted[0])).toMatch(new RegExp(`^Continue from the result "Old" \\(13 Sep 2020, \\d\\d:26\\), ${MEMORY}/reports/old/report\\.md: ship it after all$`))

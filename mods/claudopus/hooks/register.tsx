@@ -836,10 +836,12 @@ const ANSWER_ALREADY_SENT = (said: string) => `Not sent: "${said}" is the answer
 const ANSWER_ECHO = 60 * 60_000
 const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs {name}.`
 const REPLY_HOLDS = `That reply does not settle your question by itself: act on it. Their card shows your question with their reply under it, and nothing more to press or type while you work on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still needs them after you have done what they said, ask it again, which brings back its buttons.`
-const CHANGE_WHAT = 'what should it change?'
+const CHANGE_WHAT = 'your message'
+const MESSAGE_SENT = (said: string) =>
+  `${who(true)} pressed "Message" on your card and wrote to you, in their own words: ${said}\nThese are their own words to you, as a message of theirs in the chat would be: bring your to-dos in line with them first, then carry on.`
 const CHANGE_ASKED = (said: string) =>
-  `${who(true)} pressed "Change something" on the card of your finished task and wrote, in their own words, what to change in your finished work: ${said}\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
-const CHANGE_TOLD = (title: string, said: string) => `✓ {Name} asked the finished task "${title}" on its card to change something: ${said}. The task has their words and carries on with them itself: start nothing for it.`
+  `${who(true)} pressed "Message" on the card of your finished task and wrote to you, in their own words: ${said}\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
+const CHANGE_TOLD = (title: string, said: string) => `✓ {Name} wrote to the task "${title}" on its card: ${said}. The task has their words and carries on with them itself: start nothing for it.`
 const RESUMED_BY_ANSWER = `You were paused or had finished. Continue the task with this answer, then end with your report as before.`
 const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = false) =>
   isYou
@@ -2590,12 +2592,12 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         'Follow-up',
         '',
         <Box flexDirection="column" alignItems="flex-start" gap={1}>
-          {/* Change something opens the box above the chat; where that bar takes no box (the terminal), the one field is here */}
+          {/* Message opens the box above the chat; where that bar takes no box (the terminal), the one field is here */}
           {repliesInBar(surface) ? (
-            <Button key={`report-carry-${gen}`} label={isBarOpen('continue', r.id) ? 'Close' : 'Change something'} onPress={press => openBar($, isBarOpen('continue', r.id) ? undefined : { kind: 'continue', id: r.id }, press.surface)} />
+            <Button key={`report-carry-${gen}`} label={isBarOpen('continue', r.id) ? 'Close' : 'Message'} onPress={press => openBar($, isBarOpen('continue', r.id) ? undefined : { kind: 'continue', id: r.id }, press.surface)} />
           ) : 'Input' in ui ? (
             <Box width="100%" flexDirection="column">
-              <ui.Input key={`report-carry-reply-${r.id}-${replies.get(r.id) ?? 0}`} placeholder="Type what to change" submitLabel="Send" onInput={() => holdTimes($)} onSubmit={value => void (value.trim() && (replies.set(r.id, (replies.get(r.id) ?? 0) + 1), freeTimes($), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))))} />
+              <ui.Input key={`report-carry-reply-${r.id}-${replies.get(r.id) ?? 0}`} placeholder="Type your message" submitLabel="Send" onInput={() => holdTimes($)} onSubmit={value => void (value.trim() && (replies.set(r.id, (replies.get(r.id) ?? 0) + 1), freeTimes($), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))))} />
             </Box>
           ) : null}
           {kin.length ? (
@@ -5469,7 +5471,7 @@ const sendFromBar = ($: EngineInterface, id: string, value: string) => {
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
   return run
 }
-const canChange = (one: Todo) => !one.chat && !one.parentId && (one.status === 'done' || one.status === 'failed') && !isHeld(one) && !openItems(one).length && !needsPerson(one)
+const canChange = (one: Todo) => !one.chat && !one.parentId && (one.status === 'working' || one.status === 'done' || one.status === 'failed') && !isHeld(one) && (one.status === 'working' || !openItems(one).length) && !needsPerson(one)
 const sendChange = ($: EngineInterface, id: string, value: string) => {
   const run = changeTask($, id, value.trim())
   answersOnWay.add(run)
@@ -5481,7 +5483,7 @@ const changeTask = async ($: EngineInterface, id: string, said: string) => {
   if (!card || !said || card.chat || card.parentId || isHeld(card)) return
   const at = await $.clock.now()
   await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) } : one)))
-  const text = CHANGE_ASKED(said)
+  const text = card.status === 'working' ? MESSAGE_SENT(said) : CHANGE_ASKED(said)
   const sent = { text: said, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true }
   const told = (await read($, todos)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
   if (told && !told.deny) (writtenIn($, id, id), sentReplies.set(id, { ...sent, to: 'work' }), redraw($))
@@ -5754,7 +5756,7 @@ const sentLine = (one: Todo, now: number) => {
   if (one.ask && !isHeld) return ''
   if (sent.to === 'chat') return `✓ You answered “${cut(sent.text, 60)}” · it couldn't reach the task, so it goes with your next message`
   if (sent.isPress) return `✓ You pressed “${cut(sent.text, 60)}”`
-  return `✓ You ${sent.ask === CHANGE_WHAT ? 'asked for' : 'answered'} “${cut(sent.text, 60)}”${isHeld && !isActingOnReply(one) ? ' · the question is still open' : ''}`
+  return `✓ You ${sent.ask === CHANGE_WHAT ? 'wrote' : 'answered'} “${cut(sent.text, 60)}”${isHeld && !isActingOnReply(one) ? ' · the question is still open' : ''}`
 }
 let loosePressed: { text: string; at: number }[] = []
 const pressedLine = ($: EngineInterface, card: string, label: string, said = '', whole = '') => {
@@ -11080,11 +11082,11 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
   }
   if (open.kind === 'change') {
     const one = changeTarget(cards)
-    return one && { head: `↳ What should “${cut(titleOf(one), 50)}” change?`, placeholder: 'Type what to change', draft: barDraft(), send: value => void (sent(one.id), (barOpen = undefined), sendChange($, one.id, value).catch(err => log($, `change not sent: ${String(err)}`))) }
+    return one && { head: `↳ Message to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: barDraft(), send: value => void (sent(one.id), (barOpen = undefined), sendChange($, one.id, value).catch(err => log($, `change not sent: ${String(err)}`))) }
   }
   if (open.kind === 'continue') {
     const r = kept.find(one => one.id === open.id)
-    return r && { head: `↳ What should “${cut(r.title, 50)}” change?`, placeholder: 'Type what to change', draft: barDraft(), send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))) }
+    return r && { head: `↳ Message to “${cut(r.title, 50)}”`, placeholder: 'Type your message', draft: barDraft(), send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))) }
   }
   const box = boxes.find(one => one.id === open.id)
   if (!box) return undefined
@@ -11136,9 +11138,7 @@ const barBox = ($: EngineInterface, ui: Ui, box: BarBox) => {
       {box.said ? <ui.Text key="band-box-said" color={NEEDS} wrap="wrap">{box.said}</ui.Text> : null}
       {box.extra ?? null}
       <ui.Box key="band-box-foot" flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
-        <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
-          <ui.Text dimColor wrap="wrap">{`Enter sends · ${box.secret ? 'Goes only to this command' : 'Send carries the task on'}`}</ui.Text>
-        </ui.Box>
+        <ui.Box flexGrow={1} flexShrink={1} minWidth={0} />
         <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
           <ui.Button key={`band-box-send-${presses}-${boxPresses}`} label="Send" variant="primary" onPress={() => send(typed())} />
           <ui.Button key={`band-box-close-${presses}-${boxPresses}`} label="Close" plain dimColor onPress={press => openBar($, undefined, press.surface)} />
@@ -11211,7 +11211,7 @@ const bandHooks = (on: On) => {
       if (open) (carryDraft($, open, barDraft()), freeTimes($))
       if (!canBox) ((barOpen = undefined), barHeld.delete(e.surface))
       barBoxAt = 0
-      if ((asksForBar(cards).length || boxes.length || barOpen || cards.some(one => canChange(asPressed(one)))) && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
+      if ((asksForBar(cards).length || boxes.length || barOpen || cards.some(one => one.status !== 'working' && canChange(asPressed(one)))) && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
     }
     if (e.props.hasSurvey) return next(e)
     const bandAt = await $.clock.now()
@@ -11638,7 +11638,7 @@ const panelHooks = (on: On) => {
                     takes a box; the same task then carries on with what is typed */}
                 {canChange(one) && 'Input' in table && repliesInBar(e.surface) ? (
                   <Box flexShrink={0}>
-                    <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : 'Change something'} plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
+                    <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : 'Message'} plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
                   </Box>
                 ) : null}
                 {/* Failed, or stopped by the person: only their press starts it again */}
