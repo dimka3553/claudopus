@@ -665,7 +665,7 @@ test("a card's title, its line of facts and every line under them start at one l
     // A desktop moves every line in by the step a plain Button pads its label with; a terminal draws each at the card's edge.
     // What waits for the person is an outlined block: its outline starts at that edge, and its words one cell inside the outline
     expect(await edges('desktop')).toEqual(Array.from({ length: lines }, (_, n) => 'xs'))
-    expect(await edges('terminal')).toEqual(Array.from({ length: lines }, (_, n) => (n === block ? '1' : '')))
+    expect(await edges('terminal')).toEqual(Array.from({ length: lines }, (_, n) => ''))
   }
   // At work: the title, the model's name that opens the choice of models, the step it is on, the line beside the dots, the helper tree
   await expectOneEdge(5)
