@@ -1,0 +1,37 @@
+# Claudopus
+
+> Claudopus is a free, open-source (MIT) mod for Claude Code, Anthropic's coding agent, for macOS and Linux. Each message you send in a chat becomes a task that Claude runs in the background, so the chat is free for your next message straight away. A panel beside the chat shows every task as a card, questions that need you come to the top of it, and what each finished task found is kept in a Results list. Claudopus is not made by Anthropic.
+
+- Website: https://www.claudopus.ai
+- Source code: https://github.com/dimka3553/claudopus
+- Latest release: https://github.com/dimka3553/claudopus/releases/latest
+- Licence: MIT
+
+## Install
+
+At the Claude Code prompt:
+
+```
+/plugin marketplace add dimka3553/claudopus
+/plugin install claudopus@claudopus
+```
+
+Then `/claudopus` opens the panel. In the Claude desktop app: + next to the prompt box, Plugins, Add marketplace `dimka3553/claudopus`, then add `claudopus`.
+
+## What it does
+
+- One chat runs many tasks at once: each request is its own background task, and the chat stays small because the work happens in the tasks.
+- The panel shows each task's to-dos, how far it has got, its helpers and its long commands; Stop ends a task.
+- Questions, permission prompts and releases from every chat wait at the top of the panel with answer buttons, a sound and a notification.
+- Results keeps what each finished task found, with its pictures, as plain files on your machine.
+- Memory keeps your messages word for word and notes on each topic, so later chats can look them up.
+- A second agent that did not do the work can check it before you see it.
+- Tasks that run side by side use tokens side by side: five at once use them about five times as fast as one.
+
+## Pages
+
+- [Home](https://www.claudopus.ai/): what Claudopus is, the panel, Results and how to install it
+- [Tour](https://www.claudopus.ai/tour.html): a video of one chat running many tasks
+- [Changelog](https://www.claudopus.ai/changelog.html): what changed in each version
+- [Privacy](https://www.claudopus.ai/privacy.html): what the website collects about a visit
+- [README and full guide](https://github.com/dimka3553/claudopus#readme)
