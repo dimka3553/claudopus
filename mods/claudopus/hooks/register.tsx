@@ -1261,14 +1261,14 @@ const topOf = (list: Todo[], id: string) => {
 const kidsOf = (list: Todo[], id: string) => list.filter(one => one.parentId === id).sort((a, b) => a.startedAt - b.startedAt)
 const underOf = (list: Todo[], id: string, depth = 1): Todo[] => (depth > TREE_DEEP ? [] : kidsOf(list, id).flatMap(one => [one, ...underOf(list, one.id, depth + 1)]))
 const TREE_DEEP = 8
-type Branch = { one: Todo; kids: Branch[]; job?: Job }
+type Branch = { one: Todo; kids: Branch[]; job?: Job; run?: NonNullable<Todo['endedRuns']>[number]; ended?: NonNullable<Todo['endedRuns']> }
 const branchesOf = (list: Todo[], id: string, keep: (one: Todo) => boolean, depth = 1): Branch[] =>
   depth > TREE_DEEP ? [] : kidsOf(list, id).map(one => ({ one, kids: branchesOf(list, one.id, keep, depth + 1) })).filter(b => keep(b.one) || b.kids.length > 0)
-type Twig = { one?: Todo; job?: Job; depth: number; rails: boolean[]; isLast: boolean; hasKids: boolean }
+type Twig = { one?: Todo; job?: Job; run?: NonNullable<Todo['endedRuns']>[number]; ended?: NonNullable<Todo['endedRuns']>; depth: number; rails: boolean[]; isLast: boolean; hasKids: boolean }
 const twigsOf = (branches: Branch[], isMore = false, depth = 1, rails: boolean[] = []): Twig[] =>
   branches.flatMap((b, i) => {
     const isLast = i === branches.length - 1 && !isMore
-    return [{ one: b.one, ...(b.job ? { job: b.job } : {}), depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
+    return [{ one: b.one, ...(b.job ? { job: b.job } : {}), ...(b.run ? { run: b.run } : {}), ...(b.ended ? { ended: b.ended } : {}), depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
   })
 const railText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}${t.hasKids ? '│ ' : '  '} `
 const twigText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}`
@@ -9214,14 +9214,15 @@ type EndedRun = NonNullable<Todo['endedRuns']>[number]
 const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => ({ finished: 'done', failed: 'failed', killed: 'stopped', stopped: 'stopped', 'timed out': 'ran out of time', ended: 'ended' })[run.how] ?? run.how
 const endedLine = (run: Pick<EndedRun, 'how' | 'code'>, ran: string) =>
   run.how === 'finished' ? `Done in ${ran}` : `${{ failed: 'Failed', killed: 'Stopped', stopped: 'Stopped', 'timed out': 'Ran out of time', ended: 'Ended' }[run.how] ?? 'Ended'} after ${ran}`
-const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how' | 'what' | 'id' | 'endedAt'>[], shown = '', lost: string[] = []) => {
+const runLabel = (run: Pick<EndedRun, 'what' | 'cmd'>) => labelOf(describedOf(String(run.what ?? '')).text, run.cmd ?? String(run.what ?? '')) || 'A command'
+const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how' | 'what' | 'cmd' | 'id' | 'endedAt'>[], shown = '', lost: string[] = []) => {
   const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
   const head = helpers && runs.length ? `${n(helpers, 'helper')} and ${n(runs.length, 'command')} ended` : helpers ? `${n(helpers, 'helper')} ended` : `${n(runs.length, 'command')} ended`
   const bad = (['failed', 'killed', 'timed out'] as const).flatMap(how => {
     const of = runs.filter(r => r.how === how)
     if (!of.length) return []
     const newest = of.reduce((a, b) => (b.endedAt >= a.endedAt ? b : a))
-    const name = of.some(r => r.id === shown) ? '' : runWords(String(newest.what ?? ''))
+    const name = of.some(r => r.id === shown) || (!String(newest.what ?? '').trim() && !newest.cmd) ? '' : runLabel(newest)
     return [`${of.length} ${endedWord({ how })}${name ? `: ${name}${of.length > 1 ? ` and ${of.length - 1} more` : ''}` : ''}`]
   })
   const helpersBad = lost.length ? [`${n(lost.length, 'helper')} failed: ${lost.at(-1)}${lost.length > 1 ? ` and ${lost.length - 1} more` : ''}`] : []
@@ -9251,7 +9252,7 @@ const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Re
         const how = end.how === 'killed' && b.expiresAt && endedAt >= b.expiresAt - Math.min(60_000, (b.expiresAt - b.at) / 10) ? 'timed out' : end.how
         const kind: JobKind = b.isWatch ? 'watch' : jobKindOf(b.cmd ?? b.what, b.what)
         const file = jobFiles.get(b.id)
-        return { id: b.id, what: b.what, at: b.at, endedAt, how, kind, ...(end.code ? { code: end.code } : {}), ...(end.why ? { why: end.why } : {}), ...(file ? { file } : {}) } as EndedRun
+        return { id: b.id, what: b.what, ...(b.cmd ? { cmd: b.cmd.slice(0, 400) } : {}), at: b.at, endedAt, how, kind, ...(end.code ? { code: end.code } : {}), ...(end.why ? { why: end.why } : {}), ...(file ? { file } : {}) } as EndedRun
       })
       return { ...one, bg: bg?.length ? bg : undefined, ...keepEnded(one, runs) }
     })
@@ -9303,7 +9304,8 @@ const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
   const many = job.count && job.count > 1 ? ` ×${job.count}` : ''
   const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${many}`
-  if (job.isNamed && isKindSaid(job.label)) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${many}`
+  const said = describedOf(job.label).kind
+  if (job.isNamed && isKindSaid(job.label) && (said === job.kind || (said === 'script' && job.kind === 'remote'))) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${many}`
   return `${kind} · ${job.label}`
 }
 
@@ -9518,6 +9520,7 @@ const openJobOutput = async ($: EngineInterface, job: Pick<Job, 'id' | 'label'>,
   if (r.exitCode !== 0) void log($, `output not opened: ${r.stderr.trim().slice(0, 160)}`)
 }
 
+const endedFolded = new Set<string>()
 const LOG_PANE = 'log-'
 const LOG_LINES = 300
 const logPaneOf = (id: string) => `${LOG_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)
@@ -9533,7 +9536,10 @@ const logOf = async ($: EngineInterface, paneId: string) => {
     const b = one.bg?.find(b => logPaneOf(b.id) === paneId)
     if (b) return { one, job: jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id]), run: undefined, file: jobFiles.get(b.id) || (tasksDir ? `${tasksDir}/${b.id}.output` : '') }
     const run = one.endedRuns?.find(r => logPaneOf(r.id) === paneId)
-    if (run) return { one, job: undefined, run, file: run.file ?? '' }
+    if (run) {
+      const where = run.file || one.chat ? '' : tasksDir || (tasksDir = await findTasks($))
+      return { one, job: undefined, run, file: run.file || (where ? `${where}/${run.id}.output` : '') }
+    }
   }
   return undefined
 }
@@ -9543,7 +9549,7 @@ const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
   if (!found) return <Text dimColor>This log is no longer available.</Text>
   const { one, job, run, file } = found
   const now = await $.clock.now()
-  const label = job ? job.label : runWords(run?.what ?? '') || 'A command'
+  const label = job ? job.label : run ? runLabel(run) : 'A command'
   const kind: JobKind = job?.kind ?? run?.kind ?? 'script'
   const state = job ? `${JOB_NOW[kind]} · ${took(now - job.at)}` : run ? `${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(now - run.endedAt)} ago` : ''
   const r = file && canOpenFile(file) ? await $.process.run(['sh', '-c', 'tail -n "$2" "$1" 2>/dev/null # the log tab', 'sh', file, String(LOG_LINES + 1)], { timeoutMs: 5000 }).catch(() => undefined) : undefined
@@ -11857,10 +11863,7 @@ const panelHooks = (on: On) => {
     }
     const now = (one: Todo) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
-      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim()) : []
-      const said: Record<string, string> = { finished: 'done', failed: 'failed', killed: 'stopped', stopped: 'stopped', ended: 'ended' }
-      const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))}: ${said[r.how] ?? 'ended'}`)
-      return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} · ${second}` : `${first} · ${second} · ${runs.length - 2} more ended`
+      return entry?.text ?? ''
     }
     const noteOf = (one: Todo) => [...one.entries].reverse().find(entry => entry.kind !== 'steer')?.text ?? ''
 
@@ -12329,12 +12332,41 @@ const panelHooks = (on: On) => {
           {endedMark(run)}
         </Box>
       )
-    const openEnded = (run: EndedRun, owner: string) => (canOpenFile(run.file) ? openLog($, run.id, runWords(run.what) || 'A command') : openWork($, owner))
+    const canOpenEnded = (run: EndedRun, owner: Todo | undefined) => !isRunFromAfar && (Boolean(run.file) || !owner?.chat)
+    const openEnded = (run: EndedRun, owner: string) => (canOpenEnded(run, all.find(one => one.id === owner)) ? openLog($, run.id, runLabel(run)) : openWork($, owner))
+    const endedRow = (t: Twig) => {
+      const run = t.run
+      if (!run) return null
+      const key = `ended-${run.id}`
+      const side = run.how === 'finished' ? took(run.endedAt - run.at) : endedLine(run, took(run.endedAt - run.at))
+      const name = cut(runLabel(run), Math.max(12, perRow - 4 - t.depth * 2 - side.length - 1))
+      return (
+        <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+          {endedLines(t, `twig-lines-${key}`, run)}
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+            <Button key={`ended-open-${run.id}-${presses}`} label={name} plain dimColor hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openEnded(run, t.one?.id ?? '')} />
+          </Box>
+          <Box flexShrink={0}>
+            <Text dimColor={run.how !== 'failed'} color={run.how === 'failed' ? 'error' : undefined}>{side}</Text>
+          </Box>
+        </Box>
+      )
+    }
+    const endedBranches = (card: Todo): Branch[] => {
+      const runs = [...(card.endedRuns ?? [])].sort((a, b) => b.endedAt - a.endedAt)
+      return runs.length ? [{ one: card, ended: runs, kids: endedFolded.has(card.id) ? [] : runs.map(run => ({ one: card, run, kids: [] })) }] : []
+    }
+    const endedGroupRow = (t: Twig) => {
+      const id = t.one?.id ?? ''
+      const text = `${endedSummary(0, (t.ended ?? []).map(run => ({ ...run, what: '', cmd: '' })))}${endedFolded.has(id) ? ' · show' : ''}`
+      return twigRowOf(t, `ended-group-${id}`, text, true, '', () => ((endedFolded.has(id) ? endedFolded.delete(id) : endedFolded.add(id)), (presses += 1), redraw($)))
+    }
+    const withAll = (branches: Branch[]): Branch[] => branches.map(b => (b.job || b.run || b.ended ? b : { ...b, kids: [...jobBranches(b.one, true), ...withAll(b.kids), ...endedBranches(b.one)] }))
     const failedRow = (t: Twig, run: EndedRun, owner: string) => {
       const key = `failed-${owner}-${run.id}`
       const width = perRow - 4 - t.depth * 2
       const side = endedLine(run, took(run.endedAt - run.at))
-      const name = cut(runWords(run.what) || 'A command', Math.max(12, width))
+      const name = cut(runLabel(run), Math.max(12, width))
       return (
         <Box key={`job-${key}`} flexDirection="column" flexShrink={0}>
           <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
@@ -12666,6 +12698,7 @@ const panelHooks = (on: On) => {
       )
     }
     const underTwig = (t: Twig) => {
+      if (t.run || t.ended) return null
       if (t.job) {
         const tail: string[] = []
         if (!tail.length) return null
@@ -12710,44 +12743,19 @@ const panelHooks = (on: On) => {
     const helpersPart = (one: Todo) => {
       const list = one.chat ? helpersThere : all
       const under = underOf(list, one.id)
-      const branches = [...jobBranches(one, true), ...withJobs(branchesOf(list, one.id, () => true), true)]
+      const branches = [...jobBranches(one, true), ...withAll(branchesOf(list, one.id, () => true)), ...endedBranches(one)]
       const jobs = [one, ...under].reduce((n, kid) => n + jobsOf(kid).reduce((sum, job) => sum + (job.count ?? 1), 0), 0)
-      if (!under.length && !jobs) return null
+      const runs = endedRunsOf(one, list)
+      if (!under.length && !jobs && !runs.length) return null
       const running = under.filter(kid => kid.status === 'working').length
       const helpers = running === under.length ? `${running} ${running === 1 ? 'helper' : 'helpers'} working` : running ? `${running} of ${under.length} helpers working` : `${under.length} ${under.length === 1 ? 'helper' : 'helpers'}`
-      const side = [jobs ? `${jobs} ${jobs === 1 ? 'command' : 'commands'} running` : '', under.length ? helpers : ''].filter(Boolean).join(' · ')
+      const failed = runs.filter(run => run.how === 'failed').length
+      const side = [jobs ? `${jobs} ${jobs === 1 ? 'command' : 'commands'} running` : '', failed ? `${failed} failed` : '', under.length ? helpers : ''].filter(Boolean).join(' · ')
       return part(
         'part-helpers',
-        !jobs ? 'Helpers' : under.length ? 'Helpers and commands' : 'Commands',
+        !jobs && !runs.length ? 'Helpers' : under.length ? 'Helpers and commands' : 'Commands',
         side,
-        <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>,
-      )
-    }
-    const endedRunsPart = (one: Todo) => {
-      const runs = endedRunsOf(one, one.chat ? helpersThere : all).reverse()
-      if (!runs.length) return null
-      const isBad = (run: (typeof runs)[number]) => run.how === 'failed' || run.how === 'killed' || run.how === 'timed out'
-      return part(
-        'part-ended-runs',
-        'Commands ended',
-        endedSummary(0, runs.map(run => ({ ...run, what: '' }))),
-        <Box flexDirection="column">
-          {runs.flatMap(run => [
-            <Box key={`ended-${run.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
-              <Box flexShrink={0}>{endedMark(run)}</Box>
-              <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                {canOpenFile(run.file) ? (
-                  <Button key={`ended-open-${run.id}-${presses}`} label={describedOf(run.what).text || run.what || 'A command'} plain hover={{ scope: `ended-${run.id}`, underline: true }} onPress={() => openEnded(run, one.id)} />
-                ) : (
-                  <Text wrap="truncate-end">{describedOf(run.what).text || run.what || 'A command'}</Text>
-                )}
-              </Box>
-              <Box flexShrink={0}>
-                <Text dimColor={!isBad(run)} color={run.how === 'failed' ? 'error' : undefined}>{`${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(at - run.endedAt)} ago`}</Text>
-              </Box>
-            </Box>,
-          ])}
-        </Box>,
+        <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.ended ? endedGroupRow(t) : t.run ? endedRow(t) : t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>,
       )
     }
 
@@ -12933,7 +12941,6 @@ const panelHooks = (on: On) => {
           {one.words ? askPart(one) : null}
           {todoPart(one)}
           {helpersPart(one)}
-          {endedRunsPart(one)}
           {one.chat && !lines && (talks.has(one.id) || one.chat.host)
             ? part('part-chat', 'Conversation', '', theirChat(one, one.chat))
             : part('part-chat', 'Conversation', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading the conversation…</Text>)}

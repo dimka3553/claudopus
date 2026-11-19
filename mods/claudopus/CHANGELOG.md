@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.216 · 19 November 2026
+- In Details, the commands a task or helper ran that have ended are a group under the one that started them, headed by a row that says how many ended and how many failed, instead of a flat list under Commands ended. A press on that row folds them away.
+- An ended command is named as it was while it ran, never by its shell line.
+- A press on any ended command opens its log in a tab of the panel, including commands that ended before this version.
+- A watch named by another verb, such as Check, leads with Watch again.
+
 ## 0.2.215 · 19 November 2026
 - Config is shorter: your name, your principles, when a task ends, the models, the second check and updates are in sight, and what you rarely change is under More.
 - Sound and Notifications are one choice, When a task ends: sound and notification, notification only, sound only, or nothing.
