@@ -493,9 +493,12 @@ const panelHooks = (on: On) => {
                     it last said */}
                 {stage(one) === 'done' || stage(one) === 'stopped' || stage(one) === 'failed' ? (
                   <Box flexDirection="row" minWidth={0}>
-                    <Text wrap="truncate-end" color={stageColor(stage(one))} dimColor={stage(one) === 'stopped'}>
-                      {stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? `✕ Failed${one.why ? ` · ${one.why}` : ''}` : 'Stopped'}
-                    </Text>
+                    {/* (the stage's own word is never the part cut short: on a narrow panel a long note beside it left "✓ …") */}
+                    <Box flexShrink={stage(one) === 'failed' ? 1 : 0} minWidth={0}>
+                      <Text wrap="truncate-end" color={stageColor(stage(one))} dimColor={stage(one) === 'stopped'}>
+                        {stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? `✕ Failed${one.why ? ` · ${one.why}` : ''}` : 'Stopped'}
+                      </Text>
+                    </Box>
                     {noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}
                   </Box>
                 ) : (
@@ -1289,7 +1292,7 @@ const panelHooks = (on: On) => {
             if (i === 0 && first?.kind === 'told' && isLong && !isOpen)
               return (
                 <Box key={`talk-${i}`} alignItems="flex-start">
-                  <Button key={`told-${at}-${presses}`} label="▸ The instructions Claude was given" plain dimColor onPress={() => fold(-at - 1)} />
+                  <Button key={`told-${at}-${presses}`} label="▸ The task's instructions" plain dimColor onPress={() => fold(-at - 1)} />
                 </Box>
               )
             return (
