@@ -301,8 +301,6 @@ const pileTile = (first: Made, face: Face | undefined) =>
 const BAR_W = 64
 const BAR_H = 8
 const BAR_CELLS = 6
-// The bar's column in the panel's cells
-const BAR_COLUMNS = 7
 const ADDED = '#57AB5A'
 const REMOVED = '#E5534B'
 const barShare = (one: CodeFile, most: number) => (most > 0 ? Math.sqrt((one.plus + one.minus) / most) : 0)
@@ -400,8 +398,15 @@ const madeChips = ($: EngineInterface, ui: Ui, one: Todo, key: string, onOpenWor
         <Box key={`${key}-code`} flexDirection="row" alignItems="center" gap={1} flexShrink={0} height={1} overflow="hidden">
           {icon('code', `${key}-code`)}
           <Button key={`${key}-code-open-${presses}`} label={countWord(files.code)} plain hover={{ underline: true }} onPress={() => void ((presses += 1), onOpenWork())} />
-          <Text color="success">{`+${files.code.plus.toLocaleString('en-US')}`}</Text>
-          {files.code.minus ? <Text color="error">{`−${files.code.minus.toLocaleString('en-US')}`}</Text> : null}
+          {/* (the counts drawn at the button's size, as in Details) */}
+          {table.Svg && !('isTerminal' in ui) ? (
+            <table.Svg key={`${key}-code-counts`} source={chipCountsSvg(files.code)} alt={linesWord(files.code)} width={chipCountsW(files.code)} height={LIST_H} />
+          ) : (
+            [
+              <Text key={`${key}-code-plus`} color="success">{`+${files.code.plus.toLocaleString('en-US')}`}</Text>,
+              files.code.minus ? <Text key={`${key}-code-minus`} color="error">{`−${files.code.minus.toLocaleString('en-US')}`}</Text> : null,
+            ]
+          )}
         </Box>
       ) : null}
     </Box>
@@ -455,98 +460,119 @@ const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, k
     </Box>
   )
 }
-// Under the tiles, the files the task changed in a repo, by kind, as a table whose columns line up: each kind's heading with its
-// counts, then under each folder inside the repo a row a file: its icon, its name, then its counts and its bar at the right in
-// columns of their own, which line up down the list. A press on a name shows the file in the app's Files pane. A task counted before files were kept
-// has only its counts
+// Under the tiles, the files the task changed in a repo, by kind: each kind's heading with its counts, then under a line for each
+// folder inside the repo a row a file: its icon, its name, then its counts and its bar at the right, which line up down the list.
+// The app draws a button's words at 14 pixels and other words at 16, so where it draws pictures every word but a file's name (a
+// button) is drawn in a picture at 14, and the list reads at one size. A press on a name shows the file in the app's Files pane. A
+// task counted before files were kept has only its counts
+const LIST_FONT = 14
+const LIST_H = 20
+// The counts' picture: `new` for a file the task made, the lines added and removed, each right-aligned in a column of its own, then
+// the bar
+const COUNTS_W = 200
+const countsSvg = (one: { plus: number; minus: number }, bar?: { most: number }, isNew = false, isDim = false) => {
+  const y = LIST_H / 2 + LIST_FONT * 0.36
+  const text = (x: number, color: string, words: string, anchor = 'end') =>
+    `<text x="${x}" y="${y}" font-size="${LIST_FONT}" ${SVG_FONT} fill="${color}" text-anchor="${anchor}">${words}</text>`
+  const shown = barSvg({ path: '', inRepo: '', ...one }, bar?.most ?? 0)
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${COUNTS_W}" height="${LIST_H}" viewBox="0 0 ${COUNTS_W} ${LIST_H}">${isNew ? text(0, '#9a9890', 'new', 'start') : ''}${text(70, isDim ? '#57AB5A99' : ADDED, `+${one.plus.toLocaleString('en-US')}`)}${text(118, one.minus && !isDim ? REMOVED : '#E5534B80', `−${one.minus.toLocaleString('en-US')}`)}${bar ? `<g transform="translate(${COUNTS_W - BAR_W} ${(LIST_H - BAR_H) / 2})">${shown.replace(/^<svg[^>]*>|<\/svg>$/g, '')}</g>` : ''}</svg>`
+}
+// The same counts on a card, side by side from the left, as wide as they are (a figure is about 8.5 pixels at the list's size)
+const FIGURE_W = 8.5
+const chipCountsW = (one: { plus: number; minus: number }) => Math.ceil((`+${one.plus.toLocaleString('en-US')}`.length + 1 + `−${one.minus.toLocaleString('en-US')}`.length) * FIGURE_W) + 4
+const chipCountsSvg = (one: { plus: number; minus: number }) => {
+  const plus = `+${one.plus.toLocaleString('en-US')}`
+  const y = LIST_H / 2 + LIST_FONT * 0.36
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${chipCountsW(one)}" height="${LIST_H}" viewBox="0 0 ${chipCountsW(one)} ${LIST_H}"><text x="0" y="${y}" font-size="${LIST_FONT}" ${SVG_FONT}><tspan fill="${ADDED}">${plus}</tspan><tspan fill="${one.minus ? REMOVED : '#E5534B80'}" x="${Math.ceil((plus.length + 1) * FIGURE_W)}">−${one.minus.toLocaleString('en-US')}</tspan></text></svg>`
+}
+// A line of words drawn at the list's size: a kind's heading (its name in white, its count in grey) or a folder (grey)
+const wordsSvg = (parts: { words: string; color: string; bold?: boolean }[], width: number) => {
+  const y = LIST_H / 2 + LIST_FONT * 0.36
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${LIST_H}" viewBox="0 0 ${width} ${LIST_H}"><text x="0" y="${y}" font-size="${LIST_FONT}" ${SVG_FONT}>${parts.map(part => `<tspan fill="${part.color}"${part.bold ? ' font-weight="600"' : ''}>${escapeXml(part.words)} </tspan>`).join('')}</text></svg>`
+}
+const escapeXml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+// The widths of a folder's line and a kind's heading, in pixels: a folder's 44 characters at most, a heading's few words
+const LINE_W = 320
+const HEAD_W = 160
 const changedList = ($: EngineInterface, ui: Ui, code: CodeMade, pane: string, key: string, canDraw: boolean, owner: string, gen: string) => {
   const { Box, Button, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
+  const Svg = canDraw ? table.Svg : undefined
   const list = code.files ?? []
   const isAll = openPiles.has(`${pane}:code`)
   const most = Math.max(0, ...list.map(one => one.plus + one.minus))
-  const plusOf = (one: { plus: number }) => `+${one.plus.toLocaleString('en-US')}`
-  const minusOf = (one: { minus: number }) => `−${one.minus.toLocaleString('en-US')}`
   const groups = CODE_KINDS.map(group => {
     const all = list.filter(group.test)
     return { ...group, all, sum: { plus: all.reduce((n, one) => n + one.plus, 0), minus: all.reduce((n, one) => n + one.minus, 0) } }
   }).filter(group => group.all.length)
-  // Each count's column as wide as its widest, the sums' too
-  const plusW = Math.max(...[...list, ...groups.map(group => group.sum)].map(one => plusOf(one).length), 2)
-  const minusW = Math.max(...[...list, ...groups.map(group => group.sum)].map(one => minusOf(one).length), 2)
-  const counts = (one: { plus: number; minus: number }, at: string, isDim = false) => (
-    <Box key={`${at}-counts`} flexDirection="row" gap={1} flexShrink={0}>
-      <Box width={plusW} justifyContent="flex-end">
-        <Text color="success" dimColor={isDim}>{plusOf(one)}</Text>
-      </Box>
-      <Box width={minusW} justifyContent="flex-end">
-        <Text color="error" dimColor={isDim || !one.minus}>{minusOf(one)}</Text>
-      </Box>
-    </Box>
-  )
-  if (!list.length)
+  const filesWord = (n: number) => `${n.toLocaleString('en-US')} ${n === 1 ? 'file' : 'files'}`
+  // The counts at a row's right: a picture where the app draws them, else words and cells
+  const countsOf = (one: { plus: number; minus: number }, at: string, bar?: { most: number }, isNew = false, isDim = false) => {
+    if (Svg) return <Svg key={`${at}-counts`} source={countsSvg(one, bar, isNew, isDim)} alt={`${isNew ? 'new, ' : ''}${linesWord(one)}`} width={COUNTS_W} height={LIST_H} />
+    const cells = bar ? barCells({ path: '', inRepo: '', ...one }, bar.most) : undefined
     return (
-      <Box key={`${key}-code`} flexDirection="row" gap={1}>
-        <Text dimColor>{countWord(code)}</Text>
-        {counts(code, `${key}-code`)}
-      </Box>
-    )
-  // The bar's column, the same width in every row and under each heading
-  const barColumn = (one: CodeFile | undefined, at: string) => {
-    if (!canDraw || !table.Svg) {
-      const bar = one ? barCells(one, most) : undefined
-      return (
-        <Box key={`${at}-bar`} flexDirection="row" width={BAR_CELLS} flexShrink={0}>
-          {bar ? <Text color="success">{bar.green}</Text> : null}
-          {bar ? <Text color="error">{bar.red}</Text> : null}
-          {bar ? <Text dimColor>{bar.rest}</Text> : null}
-        </Box>
-      )
-    }
-    return (
-      <Box key={`${at}-bar`} width={BAR_COLUMNS} flexShrink={0} alignItems="center" justifyContent="flex-end">
-        {one ? <table.Svg key={`${at}-bar-svg`} source={barSvg(one, most)} alt={linesWord(one)} width={BAR_W} height={BAR_H} /> : null}
+      <Box key={`${at}-counts`} flexDirection="row" gap={1}>
+        {isNew ? <Text dimColor>new</Text> : null}
+        <Text color="success" dimColor={isDim}>{`+${one.plus.toLocaleString('en-US')}`}</Text>
+        <Text color="error" dimColor={isDim || !one.minus}>{`−${one.minus.toLocaleString('en-US')}`}</Text>
+        {cells ? (
+          <Box flexDirection="row">
+            <Text color="success">{cells.green}</Text>
+            <Text color="error">{cells.red}</Text>
+            <Text dimColor>{cells.rest}</Text>
+          </Box>
+        ) : null}
       </Box>
     )
   }
+  if (!list.length)
+    return (
+      <Box key={`${key}-code`} flexDirection="row" alignItems="center" gap={1}>
+        {Svg ? <Svg key={`${key}-code-word`} source={wordsSvg([{ words: countWord(code), color: '#9a9890' }], HEAD_W)} alt={countWord(code)} width={HEAD_W} height={LIST_H} /> : <Text dimColor>{countWord(code)}</Text>}
+        {countsOf(code, `${key}-code`)}
+      </Box>
+    )
   let left = isAll ? Infinity : CHANGED_MOST
   return (
     <Box key={`${key}-code`} flexDirection="column" gap={1}>
       {groups.map(group => {
         const rows = group.all.slice(0, Math.max(0, left))
         left -= rows.length
+        const heading = `${group.title} · ${filesWord(group.all.length)}`
         return (
           <Box key={`${key}-${group.kind}`} flexDirection="column">
-            <Box flexDirection="row" alignItems="center" gap={1}>
-              <Box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
-                <Text bold>{group.title}</Text>
-                <Text dimColor>{`${group.all.length} ${group.all.length === 1 ? 'file' : 'files'}`}</Text>
+            <Box flexDirection="row" alignItems="center" gap={1} minWidth={0}>
+              <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+                {Svg ? (
+                  <Svg key={`${key}-${group.kind}-head`} source={wordsSvg([{ words: group.title, color: '#ECEAE3', bold: true }, { words: filesWord(group.all.length), color: '#9a9890' }], HEAD_W)} alt={heading} width={HEAD_W} height={LIST_H} />
+                ) : (
+                  <Text bold>{heading}</Text>
+                )}
               </Box>
-              {counts(group.sum, `${key}-${group.kind}-sum`, true)}
-              {barColumn(undefined, `${key}-${group.kind}-sum`)}
+              <Box flexShrink={0}>{countsOf(group.sum, `${key}-${group.kind}-sum`, undefined, false, true)}</Box>
             </Box>
             {foldersOf(rows).map(([folder, inFolder]) => (
               <Box key={`${key}-${group.kind}-in-${mark(folder).replace(':', '-')}`} flexDirection="column">
-                <Box paddingLeft={canDraw ? 3 : 0} minWidth={0}>
+                {Svg ? (
+                  <Box minWidth={0} overflow="hidden">
+                    <Svg key={`${key}-${group.kind}-folder-${mark(folder).replace(':', '-')}`} source={wordsSvg([{ words: middleCut(folder, 44), color: '#9a9890' }], LINE_W)} alt={folder} width={LINE_W} height={LIST_H} />
+                  </Box>
+                ) : (
                   <Text dimColor wrap="truncate-end">{folder}</Text>
-                </Box>
+                )}
                 {inFolder.map(one => {
                   const row = `${key}-${group.kind}-${mark(one.path).replace(':', '-')}`
                   return (
                     <Box key={row} flexDirection="row" alignItems="center" gap={1} minWidth={0}>
-                      {canDraw && table.Svg ? (
+                      {Svg ? (
                         <Box flexShrink={0}>
-                          <table.Svg key={`${row}-icon`} source={svgOfIcon('file', 16, 18, one.path)} alt={`${endingOf(one.path) || 'Text'} file`} width={16} height={18} />
+                          <Svg key={`${row}-icon`} source={svgOfIcon('file', 16, 18, one.path)} alt={`${endingOf(one.path) || 'Text'} file`} width={16} height={18} />
                         </Box>
                       ) : null}
-                      <Box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-                        <Box flexShrink={1} minWidth={0}>
-                          <Button key={`${row}-open-${presses}${gen}`} label={fileName(one.path)} plain hover={{ underline: true }} onPress={press => void showFile($, one, code.since ?? 0, owner, press.surface)} />
-                        </Box>
-                        {one.isNew ? <Text dimColor>new</Text> : null}
+                      <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+                        <Button key={`${row}-open-${presses}${gen}`} label={fileName(one.path)} plain hover={{ underline: true }} onPress={press => void showFile($, one, code.since ?? 0, owner, press.surface)} />
                       </Box>
-                      {counts(one, row)}
-                      {barColumn(one, row)}
+                      <Box flexShrink={0}>{countsOf(one, row, { most }, Boolean(one.isNew))}</Box>
                     </Box>
                   )
                 })}

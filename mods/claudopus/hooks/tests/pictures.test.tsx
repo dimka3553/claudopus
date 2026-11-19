@@ -1032,7 +1032,8 @@ test("what a task made is on its card under its title, side by side, and as tile
   // Each has its icon, which the app draws only with words of its own (it drops a picture whose alt is blank)
   const icons = (await pane.findAll({ type: 'Svg' })).filter(svg => svg.props.width === 18)
   expect(icons.map(svg => String(svg.props.alt).trim())).toEqual(['Picture', 'PDF', 'Code'])
-  expect((await pane.findAll({ type: 'Text' })).map(one => one.text).filter(text => /^[+−]\d/.test(String(text)))).toEqual(['+52', '−3'])
+  // its changed files' counts drawn at the size of the button beside them
+  expect((await pane.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).filter(alt => alt.includes('added'))).toEqual(['52 added, 3 removed'])
   expect((await pane.findAll({ type: 'Text' })).some(one => /\/Users\/me|\/repo\/src|scratch|old/.test(String(one.text)))).toBe(false)
   // Its changed files are a count that opens its Details (19 Nov: "1 code file" could not be pressed)
   await pressed(pane, 'made-a1-code-open')
@@ -1053,25 +1054,28 @@ test("what a task made is on its card under its title, side by side, and as tile
   expect(await tiles()).toEqual(['a', 'b', 'c', 'vat-report'])
   await pressed(tab, 'files-a1-fewer')
   await until(async () => ((await tiles()).includes('3 pictures') ? true : undefined))
-  // Under the tiles, the files it changed in its repo, by kind, the most changed first: a bar each, as long as its lines changed
-  // against the most changed, with its name, its folder in the repo and its counts; never a folder outside the repo
+  // Under the tiles, the files it changed in its repo, by kind, the most changed first, under a line for the folder each is in (the
+  // repo's own name for one at its top): an icon, its name, and its counts and bar, as long as its lines changed against the most
+  // changed; never a folder outside the repo
   const texts = async (in_: typeof tab) => (await in_.findAll({ type: 'Text' })).map(one => String(one.text))
-  expect((await texts(tab)).filter(text => /^(Code|Documents|\d+ files?)$/.test(text))).toEqual(['Code', '1 file', 'Documents', '1 file'])
-  const bars = (await tab.findAll({ type: 'Svg' })).filter(svg => svg.props.width === 64)
-  expect(bars.map(svg => String(svg.props.alt))).toEqual(['12 added, 3 removed', '40 added, 0 removed'])
+  const drawn = async (in_: typeof tab) => (await in_.findAll({ type: 'Svg' })).filter(svg => svg.props.width !== 96).map(svg => String(svg.props.alt))
+  expect(await drawn(tab)).toEqual(['Code · 1 file', '12 added, 3 removed', 'src', 'TS file', '12 added, 3 removed', 'Documents · 1 file', '40 added, 0 removed', 'repo', 'MD file', 'new, 40 added, 0 removed'])
+  // Every word but a file's name (a button, which the app draws at 14 pixels) is drawn at 14 pixels too, so the list reads at one
+  // size (19 Nov: "why is some text big and some text small"); none is a Text of the app's own 16
+  const sources = (await tab.findAll({ type: 'Svg' })).filter(svg => /^(Code|Documents) · |^src$|^repo$|added/.test(String(svg.props.alt))).map(svg => String(svg.props.source))
+  expect(sources.every(source => source.includes('font-size="14"'))).toBe(true)
+  expect((await texts(tab)).filter(text => /^(Code|Documents|src|repo|new)$|^[+−]\d/.test(text))).toEqual([])
+  // The counts and bars stand at the same places in every row, so they line up down the list (19 Nov: "it all doesn't align")
+  const rowCounts = sources.filter(source => source.includes('<g transform'))
+  expect(rowCounts.map(source => /<text x="(\d+)"[^>]*fill="#57AB5A"/.exec(source)?.[1])).toEqual(['70', '70'])
+  expect(rowCounts[1]).toContain('width="64" height="8" rx="2" fill="#57AB5A"')
+  expect(rowCounts[0]).toMatch(/width="(\d+)" height="8" rx="2" fill="#57AB5A".*fill="#E5534B"/)
   // Each file has an icon with its ending, in its language's colour (19 Nov: "add icons to the files")
   const fileIcons = (await tab.findAll({ type: 'Svg' })).filter(svg => svg.props.width === 16)
-  expect(fileIcons.map(svg => String(svg.props.alt))).toEqual(['TS file', 'MD file'])
   expect(String(fileIcons[0]?.props.source)).toContain('#3178C6')
-  // The counts stand in columns as wide as the widest, so they line up down the list (19 Nov: "it all doesn't align")
-  expect((await tab.findAll({ type: 'Box' })).filter(box => box.props.width === 3 && box.props.justifyContent === 'flex-end').length).toBeGreaterThanOrEqual(4)
-  expect(String(bars[1]?.props.source)).toContain('width="64" height="8" rx="2" fill="#57AB5A"')
-  expect(String(bars[0]?.props.source)).toMatch(/width="(\d+)" height="8" rx="2" fill="#57AB5A".*fill="#E5534B"/)
   const rows = (await tab.findAll({ type: 'Button' })).filter(one => /^(app\.ts|README\.md)$/.test(String(one.props.label)))
   expect(rows.map(one => String(one.props.label))).toEqual(['app.ts', 'README.md'])
-  // under a line for the folder each is in, the repo's own name for one at its top
-  expect(await texts(tab)).toEqual(expect.arrayContaining(['src', 'repo', 'new']))
-  expect((await texts(tab)).some(text => /\/Users\/me|\/repo\//.test(text))).toBe(false)
+  expect([...(await texts(tab)), ...(await drawn(tab))].some(text => /\/Users\/me|\/repo\//.test(text))).toBe(false)
   // A press on a file shows it in the app's own Files pane beside the chat, and opens no tab of the panel (19 Nov: "it shouldn't open
   // within the tab itself")
   await tab.press({ key: rows[0]?.key ?? '' })
