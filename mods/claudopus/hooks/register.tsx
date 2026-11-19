@@ -21,6 +21,8 @@ import { heavyOf, waitingOf, watcherOf } from './jobs'
 import type { HeavyKind, WaitKind } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
+import { LOG_SENT, NAMING_MODEL, NAMING_SYSTEM, namedHead, namingKey, namingOf, namingPrompt } from './naming'
+import type { Naming, NamingAsk } from './naming'
 import { batteryShown, batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
 import type { UsageTop, UsageBattery, UsageFigures, UsageKept } from './usage'
 
@@ -6356,7 +6358,7 @@ const shareMine = async ($: EngineInterface) => {
     const seen = Object.fromEntries(
       (one.bg ?? []).flatMap(job => {
         const s = jobLog.get(job.id)
-        return s ? [[job.id, { latest: s.latest, ...(s.pct ? { pct: s.pct } : {}), ...(s.done ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}), ...(s.wroteAt ? { wroteAt: s.wroteAt } : {}), ...(s.tail?.length ? { tail: s.tail } : {}), ...(s.words ? { words: s.words } : {}), ...(s.isOwn ? { isOwn: true } : {}), ...(s.isEarlier ? { isEarlier: true } : {}), ...(s.isEmpty ? { isEmpty: true } : {}) }]] : []
+        return s ? [[job.id, { latest: s.latest, ...(s.pct ? { pct: s.pct } : {}), ...(s.done ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}), ...(s.wroteAt ? { wroteAt: s.wroteAt } : {}), ...(s.tail?.length ? { tail: s.tail } : {}), ...(s.words ? { words: s.words } : {}), ...(s.isOwn ? { isOwn: true } : {}), ...(s.isEarlier ? { isEarlier: true } : {}), ...(s.isEmpty ? { isEmpty: true } : {}), ...(namedNow.get(job.id) ? { now: namedNow.get(job.id) } : {}) }]] : []
       }),
     )
     return Object.keys(seen).length ? { ...one, seenJobs: seen } : one
@@ -9576,7 +9578,7 @@ type EndedRun = NonNullable<Todo['endedRuns']>[number]
 const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => ({ finished: 'done', failed: 'failed', killed: 'stopped', stopped: 'stopped', 'timed out': 'ran out of time', ended: 'ended' })[run.how] ?? run.how
 const endedLine = (run: Pick<EndedRun, 'how' | 'code'>, ran: string) =>
   run.how === 'finished' ? `Done in ${ran}` : `${{ failed: 'Failed', killed: 'Stopped', stopped: 'Stopped', 'timed out': 'Ran out of time', ended: 'Ended' }[run.how] ?? 'Ended'} after ${ran}`
-const runLabel = (run: Pick<EndedRun, 'what' | 'cmd'>) => endedName(String(run.what ?? ''), run.cmd)
+const runLabel = (run: Pick<EndedRun, 'what' | 'cmd' | 'named'>) => run.named?.title || endedName(String(run.what ?? ''), run.cmd)
 const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[], lost = 0) => {
   const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
   const head = helpers && runs.length ? `${n(helpers, 'helper')} and ${n(runs.length, 'command')} ended` : helpers ? `${n(helpers, 'helper')} ended` : `${n(runs.length, 'command')} ended`
@@ -9604,9 +9606,10 @@ const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Re
         const end = endOfId(b.id)
         const endedAt = end.at && end.at >= b.at && end.at <= now ? end.at : now
         const how = end.how === 'killed' && b.expiresAt && endedAt >= b.expiresAt - Math.min(60_000, (b.expiresAt - b.at) / 10) ? 'timed out' : end.how
-        const kind: JobKind = b.isWatch ? 'watch' : jobKindOf(b.cmd ?? b.what, b.what)
+        const told: JobKind = b.isWatch ? 'watch' : jobKindOf(b.cmd ?? b.what, b.what)
+        const kind: JobKind = told === 'script' && b.named?.kind === 'cloud job' ? 'remote' : told
         const file = jobFiles.get(b.id)
-        return { id: b.id, what: b.what, ...(b.cmd ? { cmd: b.cmd.slice(0, 400) } : {}), at: b.at, endedAt, how, kind, ...(end.code ? { code: end.code } : {}), ...(end.why ? { why: end.why } : {}), ...(file ? { file } : {}) } as EndedRun
+        return { id: b.id, what: b.what, ...(b.cmd ? { cmd: b.cmd.slice(0, 400) } : {}), at: b.at, endedAt, how, kind, ...(end.code ? { code: end.code } : {}), ...(end.why ? { why: end.why } : {}), ...(file ? { file } : {}), ...(b.named ? { named: b.named } : {}) } as EndedRun
       })
       return { ...one, bg: bg?.length ? bg : undefined, ...keepEnded(one, runs) }
     })
@@ -9645,18 +9648,21 @@ let tasksOf = ''
 let tasksMissedAt = 0
 const jobFiles = new Map<string, string>()
 
-const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false, theirs?: Seen): Job => {
+const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false, theirs?: Seen & { now?: string }, named?: { title?: string; kind?: string }): Job => {
   const seen = jobLog.get(id) ?? theirs
   const said = describedOf(what)
-  const kind: JobKind = isWatch ? 'watch' : jobKindOf(cmd, what)
+  const told: JobKind = isWatch ? 'watch' : jobKindOf(cmd, what)
+  const kind: JobKind = told === 'script' && named?.kind === 'cloud job' ? 'remote' : told
   const label = labelOf(said.text || cmd, cmd)
-  return { id, label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd, kind, at, ...(seen ?? {}), port: portOf(cmd) ?? seen?.port }
+  const now = namedNow.get(id) ?? theirs?.now
+  return { id, label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd, kind, at, ...(seen ?? {}), port: portOf(cmd) ?? seen?.port, ...(named?.title ? { title: named.title, ...(named.kind ? { namedKind: named.kind } : {}) } : {}), ...(now ? { now } : {}) }
 }
-const jobsOf = (one: Todo): Job[] => foldJobs((one.bg ?? []).map(b => jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id])))
+const jobsOf = (one: Todo): Job[] => foldJobs((one.bg ?? []).map(b => jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id], b.named)))
 
 const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
   const many = job.count && job.count > 1 ? ` ×${job.count}` : ''
+  if (job.title) return `${namedHead({ title: job.title, kind: job.namedKind as Naming['kind'] })}${job.kind === 'server' && job.port && !job.title.includes(job.port) ? ` :${job.port}` : ''}${many}`
   const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${many}`
   const said = describedOf(job.label).kind
   if (job.isNamed && isKindSaid(job.label) && (said === job.kind || (said === 'script' && job.kind === 'remote'))) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${many}`
@@ -9693,6 +9699,7 @@ const lookJobs = async ($: EngineInterface) => {
   asked.forEach((o, n) => jobFiles.set(o.id, files[n] ?? ''))
   const ended: string[] = []
   const endedAs: Record<string, EndAs> = {}
+  const texts: Record<string, string> = {}
   for (const one of list) for (const b of one.bg ?? []) if (b.isWatch && b.expiresAt && now - b.expiresAt >= WATCH_GRACE) (ended.push(b.id), (endedAs[b.id] = 'timed out'))
   let isChanged = false
   const moved = new Set<string>()
@@ -9706,6 +9713,7 @@ const lookJobs = async ($: EngineInterface) => {
       const job = asked[(n - 1) / 2]
       const id = job?.id ?? ''
       const text = parts[n + 1] ?? ''
+      texts[id] = text
       const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
       const end = runEndOf(text)
       const why = end?.how === 'failed' ? whyOf(text) : ''
@@ -9747,6 +9755,7 @@ const lookJobs = async ($: EngineInterface) => {
       if (o && seen && seen.live !== live) (jobLog.set(o.id, { ...seen, live }), (isChanged = true))
     }
   }
+  void nameJobs($, list, texts, endedAs).catch(err => log($, `commands not named: ${String(err)}`))
   if (ended.length) {
     await dropBackground($, ended, endedAs)
     for (const id of ended) jobLog.delete(id)
@@ -9888,7 +9897,7 @@ const openLog = ($: EngineInterface, id: string, label: string) => {
 const logOf = async ($: EngineInterface, paneId: string) => {
   for (const one of await read($, todos)) {
     const b = one.bg?.find(b => logPaneOf(b.id) === paneId)
-    if (b) return { one, job: jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id]), run: undefined, file: jobFiles.get(b.id) || (tasksDir ? `${tasksDir}/${b.id}.output` : '') }
+    if (b) return { one, job: jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id], b.named), run: undefined, file: jobFiles.get(b.id) || (tasksDir ? `${tasksDir}/${b.id}.output` : '') }
     const run = one.endedRuns?.find(r => logPaneOf(r.id) === paneId)
     if (run) {
       const where = run.file || one.chat ? '' : tasksDir || (tasksDir = await findTasks($))
@@ -9903,7 +9912,8 @@ const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
   if (!found) return <Text dimColor>This log is no longer available.</Text>
   const { one, job, run, file } = found
   const now = await $.clock.now()
-  const label = job ? job.label : run ? runLabel(run) : 'A command'
+  const label = job ? (job.title ?? job.label) : run ? runLabel(run) : 'A command'
+  const why = run?.how === 'failed' ? run.named?.why : undefined
   const kind: JobKind = job?.kind ?? run?.kind ?? 'script'
   const state = job ? `${JOB_NOW[kind]} · ${took(now - job.at)}` : run ? `${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(now - run.endedAt)} ago` : ''
   const r = file && canOpenFile(file) ? await $.process.run(['sh', '-c', 'tail -n "$2" "$1" 2>/dev/null # the log tab', 'sh', file, String(LOG_LINES + 1)], { timeoutMs: 5000 }).catch(() => undefined) : undefined
@@ -9921,7 +9931,7 @@ const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
             <Text bold wrap="wrap">{label}</Text>
           </Box>
         </Box>
-        {isFailed ? <Text color="error" wrap="wrap">{state}</Text> : null}
+        {isFailed ? <Text color="error" wrap="wrap">{why ? `${state} · ${why}` : state}</Text> : null}
         <Text dimColor wrap="wrap">{[isFailed ? '' : state, `of the task “${cut(titleOf(one), 40)}”`].filter(Boolean).join(' · ')}</Text>
         <Box flexDirection="row" gap={2} flexShrink={0}>
           {job && canStopJob(job) ? <Button key={`log-stop-${presses}`} label={stoppingJobs.has(job.id) ? 'Stopping' : 'Stop'} plain onPress={() => void stopJob($, one.id, job).catch(err => log($, `run not stopped: ${String(err)}`))} /> : null}
@@ -9941,6 +9951,109 @@ const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
       </Box>
     </Box>
   )
+}
+
+
+const namingAsked = new Map<string, { at: number; sign: string; times: number; isEnd?: boolean }>()
+const titlesKept = new Map<string, Pick<Naming, 'title' | 'kind'>>()
+const TITLES_KEPT = 300
+const namedNow = new Map<string, string>()
+const namingNow = new Set<string>()
+const NAMING_AT_ONCE = 4
+const NAMING_EVERY = 90_000
+const NAMING_TIMES = 20
+let namingOffUntil = 0
+const NAMING_REST = 5 * 60_000
+const NAMING_REFUSED_REST = 30 * 60_000
+
+const folderOf = (cmd: string) => cmd.match(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)/)?.[1]?.replace(/^["']|["']$/g, '') || cwd
+
+const askNaming = async ($: EngineInterface, ask: NamingAsk): Promise<Naming | undefined> => {
+  const now = await $.clock.now()
+  if (now < namingOffUntil) return undefined
+  const r = await $.model
+    .complete({ model: NAMING_MODEL, system: NAMING_SYSTEM, prompt: namingPrompt(ask), maxTokens: 600, effort: 'low', timeoutMs: 20_000 })
+    .catch(err => {
+      namingOffUntil = now + NAMING_REFUSED_REST
+      void log($, `commands not named: ${String(err)}`)
+      return undefined
+    })
+  if (!r) return undefined
+  if (!r.isAnswered) {
+    if (r.reason === 'api-error') namingOffUntil = now + NAMING_REST
+    return undefined
+  }
+  return namingOf(r.text)
+}
+
+const keepNaming = async ($: EngineInterface, id: string, key: string, named: Naming | undefined, isEnd: boolean) => {
+  if (!named) return
+  if (named.title) {
+    titlesKept.delete(key)
+    titlesKept.set(key, { title: named.title, ...(named.kind ? { kind: named.kind } : {}) })
+    for (const old of titlesKept.keys()) if (titlesKept.size > TITLES_KEPT) titlesKept.delete(old)
+  }
+  if (named.now && !isEnd) namedNow.set(id, named.now)
+  const title: { title?: string; kind?: string } = named.title ? { title: named.title, ...(named.kind ? { kind: named.kind } : {}) } : {}
+  await changeTodos($, list => {
+    let isChanged = false
+    const next = list.map(one => {
+      const bg = one.bg?.map(b => (b.id === id && title.title && !b.named?.title ? ((isChanged = true), { ...b, named: title }) : b))
+      const endedRuns = one.endedRuns?.map(r => {
+        if (r.id !== id) return r
+        const both = { ...(r.named?.title ? {} : title), ...(r.how === 'failed' && named.why && !r.named?.why ? { why: named.why } : {}) }
+        return Object.keys(both).length ? ((isChanged = true), { ...r, named: { ...r.named, ...both } }) : r
+      })
+      return bg === one.bg && endedRuns === one.endedRuns ? one : { ...one, ...(bg ? { bg } : {}), ...(endedRuns ? { endedRuns } : {}) }
+    })
+    return isChanged ? next : list
+  })
+  outputMoved = true
+}
+
+const nameJobs = async ($: EngineInterface, list: Todo[], texts: Record<string, string>, endedAs: Record<string, EndAs>) => {
+  const now = await $.clock.now()
+  if (now < namingOffUntil) return
+  for (const id of namingAsked.keys()) if (!list.some(one => one.bg?.some(b => b.id === id) || one.endedRuns?.some(r => r.id === id))) (namingAsked.delete(id), namedNow.delete(id))
+  for (const id of namedNow.keys()) if (!list.some(one => one.bg?.some(b => b.id === id))) namedNow.delete(id)
+  for (const one of list) {
+    if (one.chat) continue
+    for (const b of one.bg ?? []) {
+      if (namingNow.size >= NAMING_AT_ONCE) return
+      if (namingNow.has(b.id)) continue
+      const cmd = b.cmd ?? b.what
+      const folder = folderOf(cmd)
+      const key = namingKey({ cmd, label: b.what, folder })
+      const end = endedAs[b.id]
+      const how = typeof end === 'string' ? end : end?.how
+      const isFailed = how === 'failed'
+      const lines = logLines(texts[b.id] ?? '').slice(-LOG_SENT)
+      const sign = lines.join('\n')
+      const was = namingAsked.get(b.id)
+      const kept = titlesKept.get(key)
+      if (kept && !b.named?.title) void keepNaming($, b.id, key, kept, false).catch(err => log($, `a command's name not kept: ${String(err)}`))
+      const hasTitle = Boolean(b.named?.title || kept)
+      const isDue = !was || now - was.at >= NAMING_EVERY
+      const needs = isFailed ? !was?.isEnd : how ? !hasTitle && isDue : (!hasTitle && isDue) || (Boolean(sign) && sign !== was?.sign && isDue && (was?.times ?? 0) < NAMING_TIMES)
+      if (!needs) continue
+      namingAsked.set(b.id, { at: now, sign, times: (was?.times ?? 0) + 1, ...(how ? { isEnd: true } : {}) })
+      namingNow.add(b.id)
+      const ask: NamingAsk = {
+        task: titleOf(list.find(card => card.id === topOf(list, one.id)) ?? one),
+        todo: one.items?.find(item => item.state === 'doing')?.text,
+        label: b.what,
+        folder,
+        cmd,
+        state: isFailed ? 'failed' : how ? 'finished' : sign ? 'running' : 'starting',
+        ran: took(((typeof end === 'object' && end.at) || now) - b.at),
+        lines,
+      }
+      void askNaming($, ask)
+        .then(named => keepNaming($, b.id, key, named, Boolean(how)))
+        .catch(err => log($, `a command not named: ${String(err)}`))
+        .finally(() => namingNow.delete(b.id))
+    }
+  }
 }
 
 const HEAVY_RAMP = 20_000
@@ -12591,7 +12704,9 @@ const panelHooks = (on: On) => {
       const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
       const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
       const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
-      const words = isFull ? '' : plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, job.label)
+      const isOwnNow = job.isOwn && !job.isEarlier
+      const nowSaid = job.now ? (/^[A-Z][a-z]/.test(job.now) ? job.now.charAt(0).toLowerCase() + job.now.slice(1) : job.now) : ''
+      const words = isFull ? '' : (isOwnNow ? plainOf(job.words, job.label) : '') || nowSaid || (isOwnNow ? '' : plainOf(job.latest, job.label))
       const hasSaid = Boolean(words || full.length || pct.length)
       const live = job.live === 'busy' ? ' · still busy' : job.live === 'idle' ? ' · idle' : ''
       const [state, short]: [string, string] =
@@ -12616,7 +12731,7 @@ const panelHooks = (on: On) => {
         const kindLead = job.kind === 'server' ? 'Serving' : job.kind === 'watch' ? 'Watching' : ''
         const shownLead = kindLead ? `${kindLead} · ${said ? 'last: ' : ''}` : lead && (nums.length || said) ? lead : ''
         const line = `${shownLead}${text}`
-        return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : (job.kind === 'script' && job.isNamed ? nowWord(job.label) : '') || JOB_NOW[job.kind], isWarn }
+        return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : (job.kind === 'script' && (job.title || job.isNamed) ? nowWord(job.title ?? job.label) : '') || JOB_NOW[job.kind], isWarn }
       }
       return { text: short, isWarn }
     }
@@ -12638,7 +12753,7 @@ const panelHooks = (on: On) => {
             {isMore(job) && owner ? (
               <Button key={`more-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openWork($, owner)} />
             ) : canOpenJob(job) ? (
-              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openLog($, job.id, job.label)} />
+              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openLog($, job.id, job.title ?? job.label)} />
             ) : (
               <Text wrap="truncate-end">{name}</Text>
             )}
@@ -12710,7 +12825,7 @@ const panelHooks = (on: On) => {
       const key = `ended-${run.id}`
       const side = run.how === 'finished' ? took(run.endedAt - run.at) : endedLine(run, took(run.endedAt - run.at))
       const name = cut(runLabel(run), Math.max(12, perRow - 4 - t.depth * 2 - side.length - 1))
-      return (
+      const head = (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
           {endedLines(t, `twig-lines-${key}`, run)}
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -12719,6 +12834,14 @@ const panelHooks = (on: On) => {
           <Box flexShrink={0}>
             <Text dimColor={run.how !== 'failed'} color={run.how === 'failed' ? 'error' : undefined}>{side}</Text>
           </Box>
+        </Box>
+      )
+      const why = run.how === 'failed' ? run.named?.why : undefined
+      if (!why) return head
+      return (
+        <Box key={`ended-box-${key}`} flexDirection="column" flexShrink={0}>
+          {head}
+          {twigUnder(t, `why-${key}`, <Text color="error" wrap="truncate-end">{why}</Text>)}
         </Box>
       )
     }

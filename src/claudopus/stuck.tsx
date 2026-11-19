@@ -214,7 +214,8 @@ const endedLine = (run: Pick<EndedRun, 'how' | 'code'>, ran: string) =>
 // which one (19 Nov "13 commands ended · 1 failed" named nothing); not one that has a row of its own above (`shown`, its id)
 // An ended command's name, as its row had it while it ran: its own words, or else what it ran in a few words, never its shell
 // line (19 Nov: "cd /Users/…; S=/private/tmp/…" and "until [ -f /private/…" stood as names under Commands ended)
-const runLabel = (run: Pick<EndedRun, 'what' | 'cmd'>) => endedName(String(run.what ?? ''), run.cmd)
+// (its title in plain words first, where the small model gave one)
+const runLabel = (run: Pick<EndedRun, 'what' | 'cmd' | 'named'>) => run.named?.title || endedName(String(run.what ?? ''), run.cmd)
 // (counts only, never which: a name on the row was more than it needs, and which one is a press away in Details, 19 Nov;
 // `lost`: how many helpers failed, said as helpers so their count is never taken for the commands')
 const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[], lost = 0) => {
@@ -251,9 +252,10 @@ const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Re
         const endedAt = end.at && end.at >= b.at && end.at <= now ? end.at : now
         const how = end.how === 'killed' && b.expiresAt && endedAt >= b.expiresAt - Math.min(60_000, (b.expiresAt - b.at) / 10) ? 'timed out' : end.how
         // With its kind, for its mark, why it failed, and the file it wrote to, which a press on its name opens
-        const kind: JobKind = b.isWatch ? 'watch' : jobKindOf(b.cmd ?? b.what, b.what)
+        const told: JobKind = b.isWatch ? 'watch' : jobKindOf(b.cmd ?? b.what, b.what)
+        const kind: JobKind = told === 'script' && b.named?.kind === 'cloud job' ? 'remote' : told
         const file = jobFiles.get(b.id)
-        return { id: b.id, what: b.what, ...(b.cmd ? { cmd: b.cmd.slice(0, 400) } : {}), at: b.at, endedAt, how, kind, ...(end.code ? { code: end.code } : {}), ...(end.why ? { why: end.why } : {}), ...(file ? { file } : {}) } as EndedRun
+        return { id: b.id, what: b.what, ...(b.cmd ? { cmd: b.cmd.slice(0, 400) } : {}), at: b.at, endedAt, how, kind, ...(end.code ? { code: end.code } : {}), ...(end.why ? { why: end.why } : {}), ...(file ? { file } : {}), ...(b.named ? { named: b.named } : {}) } as EndedRun
       })
       return { ...one, bg: bg?.length ? bg : undefined, ...keepEnded(one, runs) }
     })
