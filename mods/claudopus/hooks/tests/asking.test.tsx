@@ -323,6 +323,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     const sipsSaid = tool === 'sips' ? options.sips?.([...e.argv]) : undefined
     if (sipsSaid !== undefined) return { value: { exitCode: 0, stdout: sipsSaid, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (tool === 'osascript') osa.push([...e.argv])
+    // The file picker Attach opens: what the test lays as picker:chosen is picked, else the person cancels it
+    if (tool === 'osascript' && e.argv.some(one => String(one).includes('choose file'))) return files.has('picker:chosen') ? ok(files.get('picker:chosen') ?? '') : ok('', 1)
     // What was handed to this Mac's keychain on security's stdin
     if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
@@ -867,7 +869,9 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Answer in words')?.key ?? '' })
   const box = await until(async () => (await bar.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith('band-a2-reply-answer-')))
   expect(await oneBox(bar)).toEqual({ head: '↳ Your answer to “Check the ears”', fields: ['Type your answer'], enter: SENDS, buttons: ['Send', 'Close'] })
-  for (const pane of [list, ears]) expect(await pane.findAll({ type: 'Input' } as never)).toEqual([])
+  // (Details keeps its message box at its bottom, the task's own, which answers no question)
+  const askFields = async (pane: typeof list) => (await pane.findAll({ type: 'Input' } as never)).filter(one => !/^details-.*-reply-change-/.test(one.key ?? ''))
+  for (const pane of [list, ears]) expect(await askFields(pane)).toEqual([])
   await bar.input({ key: box?.key ?? '', text: 'Where do I do that?' })
   const toWork = (await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('Where do I do that?')))) ?? ''
   expect(toWork).toContain('Submit it to the plugin directory.')
@@ -879,7 +883,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
     expect((await until(async () => pane.find({ type: 'Text', text: waiting })))?.props.dimColor).toBe(true)
     expect((await pane.find({ type: 'Text', text: 'Submit it to the plugin directory.' }))?.props.color).toBe(PURPLE)
     expect(await askButtons(pane, 'a2')).toEqual([])
-    expect(await pane.findAll({ type: 'Input' } as never)).toEqual([])
+    expect(await askFields(pane)).toEqual([])
   }
   expect(await until(async () => ((await bar.findAll({ type: 'Input' } as never)).length ? undefined : true))).toBe(true)
   // The work's next step reads it: the line says what was answered still, and nothing of who reads it
@@ -1604,7 +1608,8 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
   expect(now.termEdges.some(isPurple)).toBe(true)
   for (const labels of now.buttons) expect(labels.filter(label => label === 'Release it' || label === 'Answer in words')).toEqual([])
   expect((await details.findAll({ type: 'Button' })).some(b => b.props.label === 'Release it')).toBe(false)
-  expect((await details.findAll({ type: 'Input' } as never)).some(one => /-reply-/.test(one.key ?? ''))).toBe(false)
+  // (nothing to type for the question: the box at the bottom of Details is the task's own message box)
+  expect((await details.findAll({ type: 'Input' } as never)).some(one => /-reply-/.test(one.key ?? '') && !/^details-.*-reply-change-/.test(one.key ?? ''))).toBe(false)
   // Its turn ends while a command it started in the background still runs, the engine listing it as running: it has not stopped,
   // and stays purple
   agents.a1 = 'running'
@@ -2532,7 +2537,7 @@ test('a reply never waits behind a long command: one that may run for minutes is
   await settle()
 })
 test("where the bar above the prompt takes a box, a card's answers end with Answer in words, which opens the one box in that bar and never in the panel or its Details, whose window the app drags to a box that holds the cursor (15 Nov); Close takes it away with what was typed kept; one box at a time; Message on a Done card opens the same box, and what is sent from it starts that task again; nothing is ever put into the chat's own box", async ($, on) => {
-  const { appended, clock, files, keep, resumed, submitted } = world(on, { panes: ['claudopus'] })
+  const { appended, clock, files, keep, resumed, stopped, submitted } = world(on, { panes: ['claudopus'] })
   const filled: string[] = []
   on('prompt.fill', (_, e) => (filled.push(e.text), { isFilled: true }))
   await $.session.start(start)
@@ -2818,7 +2823,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   expect((await list.findAll({ type: 'Button' })).map(b => String(b.key)).filter(one => /^(change|dismiss)-a3-/.test(one)).map(one => one.split('-')[0])).toEqual(['change', 'dismiss'])
   // Pressed, it opens the box in the bar for that card, with no question: one line that asks what to change, Send and Close
   const changeBox = async () => (await top.findAll({ type: 'Input' } as never)).find(one => /-reply-change-/.test(one.key ?? ''))
-  const changes = () => resumed.filter(line => line.includes('pressed "Message"'))
+  const changes = () => resumed.filter(line => line.includes('wrote to you from the card'))
   const toldOfChange = () => appended.filter(line => line.includes('wrote to the task'))
   const wasSubmitted = submitted.length
   expect(await changeBox()).toBeUndefined()
@@ -2841,7 +2846,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   const sentAt = clock.now()
   await top.input({ key: again2?.key ?? '', text: 'Leave the tip longer' })
   expect(clock.now()).toBe(sentAt)
-  expect(changes()).toEqual(['a3: The person pressed "Message" on the card of your finished task and wrote to you, in their own words: Leave the tip longer\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.'])
+  expect(changes()).toEqual(['a3: The person wrote to you from the card of your finished task, in their own words: Leave the tip longer\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.'])
   expect(submitted).toHaveLength(wasSubmitted)
   expect(toldOfChange()).toEqual([expect.stringContaining('wrote to the task "Trim the tail" on its card: “Leave the tip longer”. The task has their words and carries on with them itself: start nothing for it.')])
   expect(await until(async () => (await list.find({ type: 'Button', key: 'stop-a3' })) ?? undefined)).toBeDefined()
@@ -2853,13 +2858,81 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   await list.press({ key: (await key('change-a3'))?.key ?? '' })
   const atWork = await until(changeBox)
   expect(await oneBox(top)).toEqual({ head: '↳ Message to “Trim the tail”', fields: ['Type your message'], enter: SENDS, buttons: ['Send', 'Close'] })
+  // Under the box, while the task works: Attach, Stop and send, and Send (19 Nov, the person: "either send and interrupt, or just
+  // send for the next turn. Have the ability to attach pictures, videos, files, whatever")
+  const footOf = async (site: Site, from: string) => (await site.findAll({ type: 'Button' })).filter(b => String(b.key ?? '').startsWith(from)).map(b => String(b.props.label))
+  expect(await footOf(top, 'band-box-')).toEqual(['Attach', 'Stop and send', 'Send', 'Close'])
   await top.input({ key: atWork?.key ?? '', text: 'Keep the tuft' })
-  expect(await until(async () => appended.find(line => line.startsWith('a3: ') && line.includes('pressed "Message" on your card and wrote to you, in their own words: Keep the tuft\n')))).toBeDefined()
+  expect(await until(async () => appended.find(line => line.startsWith('a3: ') && line.includes('wrote to you from your card, in their own words: Keep the tuft\n')))).toBeDefined()
   expect(submitted).toHaveLength(wasSubmitted)
   expect(await until(async () => ((await changeBox()) ? undefined : true))).toBe(true)
+  // The task's own view, its Details: the same box at its bottom, under its conversation, at work or done; what is typed there is
+  // the same message as in the box above the chat, and goes the same way
+  const view3 = await $.ui.mount({ ...LIST, requestId: 'work-a3', surface: 'desktop' } as never)
+  const viewBox = async () => (await view3.findAll({ type: 'Input' } as never)).find(one => /^details-a3-reply-change-/.test(one.key ?? ''))
+  expect((await until(viewBox))?.props.placeholder).toBe('Type your message')
+  expect((await viewBox())?.props.rows).toBe(4)
+  const heads = (await view3.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  expect(heads.lastIndexOf('Message')).toBeGreaterThan(heads.indexOf('Conversation'))
+  expect(await footOf(view3, 'details-a3-')).toEqual(['Attach', 'Stop and send', 'Send'])
+  // Typed in, while the task writes its card: the same box, never drawn anew under the person (its ring would flash, and the app
+  // pulls the tab back to it at every drawing)
+  const viewNumber = async () => {
+    let found: number | undefined
+    const walk = (node: unknown) => {
+      if (Array.isArray(node)) return void node.forEach(walk)
+      if (!node || typeof node !== 'object') return
+      const one = node as { type?: string; props?: { key?: string }; press?: { handle?: number }; children?: unknown }
+      if (one.type === 'Input' && /^details-a3-reply-/.test(one.props?.key ?? '')) found = one.press?.handle
+      walk(one.children)
+    }
+    walk(await view3.drawn())
+    return found
+  }
+  await view3.input({ key: (await viewBox())?.key ?? '', text: 'Shorter ears', kind: 'change' } as never)
+  await clock.advance(100)
+  const viewNumbered = await viewNumber()
+  expect(viewNumbered).toBeDefined()
+  for (const n of [1, 2, 3]) {
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `ve${n}`, agentId: 'a3', text: `Ear step ${n}` } as never)
+    await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: `vt${n}`, agentId: 'a3', item: `Ear to-do ${n}`, state: 'doing' } as never)
+    await clock.advance(3000)
+  }
+  expect(await viewNumber()).toBe(viewNumbered)
+  // Opened above the chat too, the box holds what was typed in the view
+  await list.press({ key: (await until(async () => (await key('change-a3')) ?? undefined))?.key ?? '' })
+  expect((await until(changeBox))?.props.value).toBe('Shorter ears')
+  await top.press({ key: (await labelled(top, CLOSE))[0]?.key ?? '' })
+  // Attach opens the computer's own file picker; what is picked shows under the box, each taken off with a press on it
+  files.set('picker:chosen', '/Users/me/Desktop/ears.png\n/Users/me/Movies/ears.mov\n')
+  await view3.press({ key: (await view3.findAll({ type: 'Button' })).find(b => b.props.label === 'Attach')?.key ?? '' })
+  const chips = async () => (await view3.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => label.startsWith('📎'))
+  expect(await until(async () => ((await chips()).length === 2 ? await chips() : undefined))).toEqual(['📎 ears.png ✕', '📎 ears.mov ✕'])
+  await view3.press({ key: (await view3.findAll({ type: 'Button' })).find(b => b.props.label === '📎 ears.mov ✕')?.key ?? '' })
+  expect(await until(async () => ((await chips()).length === 1 ? await chips() : undefined))).toEqual(['📎 ears.png ✕'])
+  // A path dropped or typed into the box, a file on this computer, goes as a file too
+  files.set('/Users/me/Desktop/ref shot.mov', 'x')
+  await view3.input({ key: (await viewBox())?.key ?? '', text: 'Shorter ears, like /Users/me/Desktop/ref\\ shot.mov', kind: 'change' } as never)
+  // Stop and send stops the task where it is and starts it again with the words and the files, each with how to open it; its card
+  // stays at work all along
+  const wasStopped = stopped.length
+  await view3.press({ key: (await view3.findAll({ type: 'Button' })).find(b => b.props.label === 'Stop and send')?.key ?? '' })
+  expect(await until(async () => (stopped.length > wasStopped ? stopped.at(-1) : undefined))).toBe('a3')
+  const now = await until(async () => resumed.find(line => line.startsWith('a3: ') && line.includes('stopped you to write to you from your card')))
+  expect(now).toContain('in their own words: Shorter ears, like /Users/me/Desktop/ref\\ shot.mov\n')
+  expect(now).toContain('- /Users/me/Desktop/ears.png (open it with Read)')
+  expect(now).toContain('- /Users/me/Desktop/ref shot.mov (take stills from it')
+  expect(now).not.toContain('ears.mov')
+  expect(await until(async () => (await list.find({ type: 'Button', key: 'stop-a3' })) ?? undefined)).toBeDefined()
+  expect(await until(async () => ((await chips()).length === 0 && !(await viewBox())?.props.value ? true : undefined))).toBe(true)
   // It finishes again, and can be asked for a change again
   await $.turn.complete({ agentId: 'a3', answer: 'The tip is longer now.', durationMs: 1, isAborted: false, turnId: 'c2', reason: 'answer' })
   expect(await until(async () => (await key('change-a3')) ?? undefined)).toBeDefined()
+  // Done, its view keeps the box, with only Send: the message starts it again
+  expect(await until(async () => ((await footOf(view3, 'details-a3-')).join() === 'Attach,Send' ? true : undefined))).toBe(true)
+  await view3.input({ key: (await viewBox())?.key ?? '', text: 'One more ear' })
+  expect(await until(async () => changes().find(line => line.includes('in their own words: One more ear\n')))).toBeDefined()
+  await view3.unmount()
   expect(filled).toEqual([])
   await Promise.all([list.unmount(), details.unmount(), top.unmount()])
 })

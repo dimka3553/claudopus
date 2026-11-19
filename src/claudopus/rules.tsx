@@ -314,9 +314,12 @@ const REPLY_HOLDS = `That reply does not settle your question by itself: act on 
 const CHANGE_WHAT = 'your message'
 // The same box on a card at work: the person's words reach the task between its steps
 const MESSAGE_SENT = (said: string) =>
-  `${who(true)} pressed "Message" on your card and wrote to you, in their own words: ${said}\nThese are their own words to you, as a message of theirs in the chat would be: bring your to-dos in line with them first, then carry on.`
+  `${who(true)} wrote to you from your card, in their own words: ${said}\nThese are their own words to you, as a message of theirs in the chat would be: bring your to-dos in line with them first, then carry on.`
+// Stop and send: the task was stopped mid-step to read this, which ended its commands and helpers
+const MESSAGE_NOW = (said: string) =>
+  `${who(true)} stopped you to write to you from your card, in their own words: ${said}\nWhat you were doing was cut off where it stood, and the commands and helpers you had running were stopped with it. Bring your to-dos in line with their words first, then carry on, starting again whatever they still need.`
 const CHANGE_ASKED = (said: string) =>
-  `${who(true)} pressed "Message" on the card of your finished task and wrote to you, in their own words: ${said}\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
+  `${who(true)} wrote to you from the card of your finished task, in their own words: ${said}\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
 const CHANGE_TOLD = (title: string, said: string) => `✓ {Name} wrote to the task "${title}" on its card: ${said}. The task has their words and carries on with them itself: start nothing for it.`
 const RESUMED_BY_ANSWER = `You were paused or had finished. Continue the task with this answer, then end with your report as before.`
 // What the person sees as a notice, and the chat's model reads, when an answer could not reach its task

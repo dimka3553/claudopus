@@ -838,9 +838,11 @@ const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to "${t
 const REPLY_HOLDS = `That reply does not settle your question by itself: act on it. Their card shows your question with their reply under it, and nothing more to press or type while you work on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still needs them after you have done what they said, ask it again, which brings back its buttons.`
 const CHANGE_WHAT = 'your message'
 const MESSAGE_SENT = (said: string) =>
-  `${who(true)} pressed "Message" on your card and wrote to you, in their own words: ${said}\nThese are their own words to you, as a message of theirs in the chat would be: bring your to-dos in line with them first, then carry on.`
+  `${who(true)} wrote to you from your card, in their own words: ${said}\nThese are their own words to you, as a message of theirs in the chat would be: bring your to-dos in line with them first, then carry on.`
+const MESSAGE_NOW = (said: string) =>
+  `${who(true)} stopped you to write to you from your card, in their own words: ${said}\nWhat you were doing was cut off where it stood, and the commands and helpers you had running were stopped with it. Bring your to-dos in line with their words first, then carry on, starting again whatever they still need.`
 const CHANGE_ASKED = (said: string) =>
-  `${who(true)} pressed "Message" on the card of your finished task and wrote to you, in their own words: ${said}\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
+  `${who(true)} wrote to you from the card of your finished task, in their own words: ${said}\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
 const CHANGE_TOLD = (title: string, said: string) => `✓ {Name} wrote to the task "${title}" on its card: ${said}. The task has their words and carries on with them itself: start nothing for it.`
 const RESUMED_BY_ANSWER = `You were paused or had finished. Continue the task with this answer, then end with your report as before.`
 const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = false) =>
@@ -5244,7 +5246,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], barOpen?.kind ?? '', barOpen?.id ?? '', barOpen?.mark ?? ''])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], barOpen?.kind ?? '', barOpen?.id ?? '', barOpen?.mark ?? '', [...attached], [...replies]])
 }
 const calmCard = (one: Todo) => {
   const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, ...rest } = one as Todo & Record<string, unknown>
@@ -5265,7 +5267,7 @@ const freeTimes = ($: EngineInterface) => {
   if (wasHeld) drawAgain($)
 }
 let isRedrawOwed = false
-const isBoxHeld = (at: number) => Boolean(barOpen) && barBoxAt > 0 && at - barBoxAt < TYPING
+const isBoxHeld = (at: number) => (Boolean(barOpen) && barBoxAt > 0 && at - barBoxAt < TYPING) || (paneBoxAt > 0 && at - paneBoxAt < TYPING)
 const drawFresh = async ($: EngineInterface, isThroughTyping = false) => {
   if (!isThroughTyping && isBoxHeld(await $.clock.now())) return void ((isRedrawOwed = true), recordEvent($, 'redraw-owed'))
   isRedrawOwed = false
@@ -5471,24 +5473,175 @@ const sendFromBar = ($: EngineInterface, id: string, value: string) => {
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
   return run
 }
-const canChange = (one: Todo) => !one.chat && !one.parentId && (one.status === 'working' || one.status === 'done' || one.status === 'failed') && !isHeld(one) && (one.status === 'working' || !openItems(one).length) && !needsPerson(one)
-const sendChange = ($: EngineInterface, id: string, value: string) => {
-  const run = changeTask($, id, value.trim())
+const canChange = (one: Todo) => !one.chat && !one.parentId && (one.status === 'working' || one.status === 'done' || one.status === 'failed') && !isHeld(one) && !needsPerson(one)
+const sendChange = ($: EngineInterface, id: string, value: string, isNow = false) => {
+  const files = attached.get(id) ?? []
+  attached.delete(id)
+  const run = changeTask($, id, value.trim(), files, isNow)
   answersOnWay.add(run)
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
   return run
 }
-const changeTask = async ($: EngineInterface, id: string, said: string) => {
+const attached = new Map<string, string[]>()
+const ATTACH_MOST = 20
+const canAttach = () => !isRunFromAfar
+const PICK_MAC = ['osascript', '-e', 'activate', '-e', 'set picked to choose file with prompt "Attach files" with multiple selections allowed', '-e', 'set out to ""', '-e', 'repeat with f in picked', '-e', 'set out to out & POSIX path of f & linefeed', '-e', 'end repeat', '-e', 'return out']
+const PICK_LINUX = ['zenity', '--file-selection', '--multiple', '--separator=\n', '--title=Attach files']
+const pickFiles = async ($: EngineInterface, id: string) => {
+  if (!canAttach()) return
+  const r = await $.process.run(isLinux ? PICK_LINUX : PICK_MAC, { timeoutMs: 600_000 }).catch(err => (log($, `files not picked: ${String(err)}`), undefined))
+  if (!r || r.exitCode !== 0) return
+  const picked = r.stdout.split('\n').map(line => line.trim()).filter(line => line.startsWith('/'))
+  if (!picked.length) return
+  attached.set(id, [...new Set([...(attached.get(id) ?? []), ...picked])].slice(0, ATTACH_MOST))
+  ;((presses += 1), (boxPresses += 1), drawAgain($, true))
+}
+const unattach = ($: EngineInterface, id: string, path: string) => {
+  const left = (attached.get(id) ?? []).filter(one => one !== path)
+  if (left.length) attached.set(id, left)
+  else attached.delete(id)
+  ;((presses += 1), (boxPresses += 1), drawAgain($, true))
+}
+const messageDraft = (id: string) => `${id}|change`
+const sendMessageFrom = ($: EngineInterface, id: string, value: string, isNow: boolean) => {
+  if (!value.trim() && !attached.get(id)?.length) return
+  barBoxAt = 0
+  paneBoxAt = 0
+  drafts.delete(messageDraft(id))
+  keepDraft($, messageDraft(id), undefined)
+  replies.set(id, (replies.get(id) ?? 0) + 1)
+  if (isBarOpen('change', id)) barOpen = undefined
+  freeTimes($)
+  redraw($)
+  void sendChange($, id, value, isNow).catch(err => log($, `message not sent: ${String(err)}`))
+}
+const SEND_NOW = 'Stop and send'
+const messageFoot = ($: EngineInterface, ui: Ui, one: Todo, key: string, close: JSX.Element | null = null) => {
+  const files = attached.get(one.id) ?? []
+  const typed = () => drafts.get(messageDraft(one.id)) ?? ''
+  const isMidStep = one.status === 'working'
+  return (
+    <ui.Box key={`${key}-foot`} flexDirection="column" flexShrink={0} gap={1} width="100%">
+      {files.length ? (
+        <ui.Box key={`${key}-files`} flexDirection="row" flexWrap="wrap" columnGap={2}>
+          {files.map((path, n) => (
+            <ui.Button key={`${key}-file-${n}-${presses}`} label={`📎 ${cut(path.split('/').pop() ?? path, 40)} ✕`} plain dimColor onPress={() => unattach($, one.id, path)} />
+          ))}
+        </ui.Box>
+      ) : null}
+      <ui.Box flexDirection="row" alignItems="center" flexWrap="wrap" gap={1}>
+        {canAttach() ? <ui.Button key={`${key}-attach-${presses}-${boxPresses}`} label="Attach" plain onPress={() => void pickFiles($, one.id).catch(err => log($, `files not picked: ${String(err)}`))} /> : null}
+        {/* The sends keep together at the right, on the next line when the pane is narrow */}
+        <ui.Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} justifyContent="flex-end">
+          {isMidStep ? <ui.Button key={`${key}-now-${presses}-${boxPresses}`} label={SEND_NOW} onPress={() => sendMessageFrom($, one.id, typed(), true)} /> : null}
+          <ui.Button key={`${key}-send-${presses}-${boxPresses}`} label="Send" variant="primary" onPress={() => sendMessageFrom($, one.id, typed(), false)} />
+          {close}
+        </ui.Box>
+      </ui.Box>
+    </ui.Box>
+  )
+}
+let paneBoxAt = 0
+let paneBoxIn = ''
+const isPaneBox = (element: string | undefined) => /^details-.*-reply-/.test(element ?? '')
+const paneBoxKey = (id: string) => `details-${id}-reply-change-${replies.get(id) ?? 0}`
+const isPaneBoxHeld = (paneId: string, at: number) => paneBoxIn === paneId && paneBoxAt > 0 && at - paneBoxAt < BAR_BOX_HELD
+const paneBoxHeld = new Map<string, { id: string; shape: string; drawing: unknown }>()
+const paneBoxShape = (id: string) => JSON.stringify([paneBoxKey(id), attached.get(id) ?? [], presses, boxPresses])
+const messageBox = ($: EngineInterface, ui: Ui, one: Todo, paneId: string) => (
+  <ui.Box key={`message-${one.id}`} flexDirection="column" gap={1} flexShrink={0}>
+    {'Input' in ui ? (
+      <ui.Input
+        key={paneBoxKey(one.id)}
+        placeholder="Type your message"
+        value={draftDrawn(messageDraft(one.id))}
+        rows={BOX_ROWS}
+        onInput={value => {
+          drafts.set(messageDraft(one.id), value)
+          keepDraft($, messageDraft(one.id), value)
+          holdTimes($)
+          paneBoxIn = paneId
+          void $.clock.now().then(at => (paneBoxAt = at))
+        }}
+        onSubmit={value => sendMessageFrom($, one.id, value, false)}
+      />
+    ) : null}
+    {messageFoot($, ui, one, `details-${one.id}`)}
+  </ui.Box>
+)
+const interrupting = new Set<string>()
+const INTERRUPT_WAIT = 10_000
+const interruptStep = async ($: EngineInterface, card: Todo) => {
+  interrupting.add(card.id)
+  const r = await $.tool.call({ tool: 'TaskStop', task_id: card.id }).catch(err => ({ deny: String(err) }))
+  if (r.deny) return (interrupting.delete(card.id), log($, `task ${card.id} not stopped for a message: ${r.deny}`), false)
+  const from = await $.clock.now()
+  while ((await $.clock.now()) - from < INTERRUPT_WAIT) {
+    const it = (await $.agent.list().catch(() => [])).find(one => one.id === card.id)
+    if (!it || it.status !== 'running') break
+    await $.clock.sleep(250)
+  }
+  $.clock.after(60_000, () => void interrupting.delete(card.id))
+  return true
+}
+const fileKind = (path: string) => {
+  const end = (path.split('.').pop() ?? '').toLowerCase()
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(end)) return 'picture'
+  if (['heic', 'heif', 'tif', 'tiff', 'bmp'].includes(end)) return 'picture-other'
+  if (['mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi'].includes(end)) return 'video'
+  if (end === 'pdf') return 'pdf'
+  return 'file'
+}
+const pathsIn = async ($: EngineInterface, said: string) => {
+  const found = new Set<string>()
+  for (const m of said.matchAll(/(?:file:\/\/)?(\/(?:\\ |[^\s'"`<>])+)|'(\/[^'\n]+)'|"(\/[^"\n]+)"/g)) {
+    const raw = m[1] ?? m[2] ?? m[3] ?? ''
+    const path = (() => {
+      try {
+        return decodeURIComponent(raw.replace(/\\ /g, ' ').replace(/[.,;:)]+$/, ''))
+      } catch {
+        return raw.replace(/\\ /g, ' ')
+      }
+    })()
+    if ((await $.fs.stat(path).catch(() => undefined))?.kind === 'file') found.add(path)
+  }
+  return [...found]
+}
+const filesNote = (files: string[]) =>
+  files.length
+    ? `\n\nFiles with this message, on this computer: open each one before you act on the message.\n${files
+        .map(path => {
+          const kind = fileKind(path)
+          const how =
+            kind === 'picture' || kind === 'pdf'
+              ? 'open it with Read'
+              : kind === 'picture-other'
+                ? 'turn it into a PNG in your scratch folder (sips -s format png on a Mac, convert on Linux), then open that with Read'
+                : kind === 'video'
+                  ? 'take stills from it into your scratch folder with ffmpeg (one a second, or more where it moves fast), then open them with Read; ffprobe gives its length'
+                  : 'read it as its kind needs'
+          return `- ${path} (${how})`
+        })
+        .join('\n')}`
+    : ''
+const changeTask = async ($: EngineInterface, id: string, said: string, picked: string[] = [], isNow = false) => {
   const card = (await read($, todos)).find(one => one.id === id)
-  if (!card || !said || card.chat || card.parentId || isHeld(card)) return
+  if (!card || (!said && !picked.length) || card.chat || card.parentId || isHeld(card)) return
   const at = await $.clock.now()
-  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) } : one)))
-  const text = card.status === 'working' ? MESSAGE_SENT(said) : CHANGE_ASKED(said)
-  const sent = { text: said, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true }
+  const files = [...new Set([...picked, ...(await pathsIn($, said))])]
+  const shown = [said, ...picked.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join('\n')
+  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: shown }].slice(-ENTRIES_KEPT) } : one)))
+  const words = `${said || '(no words, only the files below)'}${filesNote(files)}`
+  if (isNow && card.status === 'working' && (await interruptStep($, card))) {
+    await toEnded($, card, id, MESSAGE_NOW(words), { text: shown, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true })
+    return void (await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(shown, 120)}”`))))
+  }
+  const text = card.status === 'working' ? MESSAGE_SENT(words) : CHANGE_ASKED(words)
+  const sent = { text: shown, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true }
   const told = (await read($, todos)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
   if (told && !told.deny) (writtenIn($, id, id), sentReplies.set(id, { ...sent, to: 'work' }), redraw($))
   else await toEnded($, card, id, text, sent)
-  await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(said, 120)}”`)))
+  await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(shown, 120)}”`)))
 }
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   if (one.chat) return
@@ -8417,6 +8570,7 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   await changeTodos($, list =>
     list.map(one => {
       if (one.id !== id || one.status !== 'working') return one
+      if (how === 'stopped' && interrupting.has(id)) return one
       if (how === 'stopped') return ended(one, stoppedAs(one), now)
       if (how === 'failed') return { ...ended(one, 'failed', now), answer: answer || one.answer, why: WHY_ERROR }
       if (isHanded && one.parentId) return { ...ended(one, 'done', now), answer: answer || one.answer }
@@ -10455,7 +10609,7 @@ const workHooks = (on: On) => {
         await stopHelpers($, stopId)
         await dropBackground($, [stopId], 'stopped')
         const now = await $.clock.now()
-        await changeTodos($, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one)))
+        await changeTodos($, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' && !interrupting.has(stopId) ? ended(one, stoppedAs(one), now) : one)))
         await lookEnds($)
       }
       return r
@@ -10636,6 +10790,8 @@ const commandHooks = (on: On) => {
   on('ui.focus', async ($, e, next) => {
     const isInBarBox = e.plugin === 'claudopus' && isBarBox(e.element)
     if (isInBarBox && (e.origin.kind === 'person' || barBoxAt === 0)) barBoxAt = await $.clock.now()
+    const isInPaneBox = e.plugin === 'claudopus' && isPaneBox(e.element)
+    if (isInPaneBox && (e.origin.kind === 'person' || paneBoxAt === 0)) ((paneBoxAt = await $.clock.now()), (paneBoxIn = e.requestId ?? ''))
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
       if (e.plugin === 'claudopus') await engage($)
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
@@ -10645,6 +10801,7 @@ const commandHooks = (on: On) => {
       if ((e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element)) || isBarButton || isTabButton) await holdForPress($)
       else pressFrom = 0
       if (!isInBarBox) barBoxAt = 0
+      if (!isInPaneBox) paneBoxAt = 0
     }
     return next(e)
   })
@@ -11066,7 +11223,7 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
       ) : null}
     </ui.Box>
   ) : null
-type BarBox = { head: string; placeholder: string; draft?: string; secret?: string; said?: string; extra?: JSX.Element | null; send: (value: string) => void }
+type BarBox = { head: string; placeholder: string; draft?: string; secret?: string; said?: string; extra?: JSX.Element | null; message?: Todo; send: (value: string) => void }
 const changeTarget = (cards: Todo[]) => (barOpen?.kind === 'change' ? cards.find(one => one.id === barOpen?.id && canChange(asPressed(one))) : undefined)
 const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): BarBox | undefined => {
   const open = barOpen
@@ -11082,7 +11239,7 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
   }
   if (open.kind === 'change') {
     const one = changeTarget(cards)
-    return one && { head: `↳ Message to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: barDraft(), send: value => void (sent(one.id), (barOpen = undefined), sendChange($, one.id, value).catch(err => log($, `change not sent: ${String(err)}`))) }
+    return one && { head: `↳ Message to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) }
   }
   if (open.kind === 'continue') {
     const r = kept.find(one => one.id === open.id)
@@ -11137,18 +11294,23 @@ const barBox = ($: EngineInterface, ui: Ui, box: BarBox) => {
       ) : null}
       {box.said ? <ui.Text key="band-box-said" color={NEEDS} wrap="wrap">{box.said}</ui.Text> : null}
       {box.extra ?? null}
-      <ui.Box key="band-box-foot" flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
+      {box.message ? (
+        <ui.Box key="band-box-message" flexShrink={0} marginTop={1} width="100%">
+          {messageFoot($, ui, box.message, 'band-box', <ui.Button key={`band-box-close-${presses}-${boxPresses}`} label="Close" plain dimColor onPress={press => openBar($, undefined, press.surface)} />)}
+        </ui.Box>
+      ) : null}
+      {box.message ? null : <ui.Box key="band-box-foot" flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
         <ui.Box flexGrow={1} flexShrink={1} minWidth={0} />
         <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
           <ui.Button key={`band-box-send-${presses}-${boxPresses}`} label="Send" variant="primary" onPress={() => send(typed())} />
           <ui.Button key={`band-box-close-${presses}-${boxPresses}`} label="Close" plain dimColor onPress={press => openBar($, undefined, press.surface)} />
         </ui.Box>
-      </ui.Box>
+      </ui.Box>}
     </ui.Box>
   )
 }
 const barHeld = new Map<string, { shape: string; mark: string; drawing: unknown }>()
-const barShape = () => (barOpen ? `${barOpen.kind}|${barBoxKey()}|${isBoxKind(barOpen.kind) ? `${boxSaid.get(barOpen.id) ?? ''}|${boxHeldReply.has(barOpen.id)}` : barCardsDrawn}` : '')
+const barShape = () => (barOpen ? `${barOpen.kind}|${barBoxKey()}|${JSON.stringify(attached.get(barOpen.id) ?? [])}|${isBoxKind(barOpen.kind) ? `${boxSaid.get(barOpen.id) ?? ''}|${boxHeldReply.has(barOpen.id)}` : barCardsDrawn}` : '')
 let barCardsDrawn = ''
 const barCardsSign = (cards: Todo[]) => {
   const one = changeTarget(cards) ?? barTarget(cards)
@@ -11400,6 +11562,8 @@ const panelHooks = (on: On) => {
     const heldKey = `${paneId}|${e.surface}|${e.props.placement ?? ''}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.isFocused ? 1 : 0}|${e.props.scroll.offset > 0 ? 1 : 0}`
     const heldAt = await $.clock.now()
     if (paneId === LIST) drawnNow = heldAt
+    const boxHeld = paneId.startsWith(WORK_PANE) ? paneBoxHeld.get(`${paneId}|${e.surface}`) : undefined
+    if (boxHeld && isPaneBoxHeld(paneId, heldAt) && boxHeld.shape === paneBoxShape(boxHeld.id)) return boxHeld.drawing as Awaited<ReturnType<typeof next>>
     const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
     const recent = lastShown.get(shownKey)
     if (recent && paneId === LIST && isPressHeld(heldAt)) return ((listHeldAt = heldAt), (isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
@@ -12496,6 +12660,10 @@ const panelHooks = (on: On) => {
           {one.chat && !lines && (talks.has(one.id) || one.chat.host)
             ? part('part-chat', 'Conversation', '', theirChat(one, one.chat))
             : part('part-chat', 'Conversation', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading the conversation…</Text>)}
+          {/* At the bottom, under its conversation, a box to write to it, for a task of this chat's that works or has finished and
+              asks nothing (one that asks is answered in its block above): the same message as the box Message opens above the chat */}
+          {canChange(one) && 'Input' in table ? <Box key="message-gap" flexGrow={1} /> : null}
+          {canChange(one) && 'Input' in table ? part('part-message', 'Message', '', messageBox($, table, one, paneId)) : null}
         </Box>
       )
     }
@@ -12833,6 +13001,11 @@ const panelHooks = (on: On) => {
     shownSigns.set(shownKey, sign)
     shownAts.set(shownKey, heldAt)
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
+    if (paneId.startsWith(WORK_PANE)) {
+      const id = (await read($, todos)).find(one => workPaneOf(one.id) === paneId && canChange(asPressed(one)))?.id
+      if (id) paneBoxHeld.set(`${paneId}|${e.surface}`, { id, shape: paneBoxShape(id), drawing })
+      else paneBoxHeld.delete(`${paneId}|${e.surface}`)
+    }
     lastShown.set(shownKey, drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     isMade = true

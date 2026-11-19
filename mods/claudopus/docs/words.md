@@ -31,7 +31,7 @@ Every word Claudopus shows you (panel, cards, the bar, questions, notices, resul
 - The panel's header counts by stage: `1 waiting for you · 2 working`, `2 working`, `Just finished`, `Nothing waits for you`.
 - **Time running** `29m 40s`, over an hour `1h 05m`. Never a guessed time: no "of about", no "over". **Ago** `2m ago`. **Left**, only when the command itself prints one: `1m left`. **Dates** `11 Nov, 14:20`.
 - **Counts** `<n> of <total> <what>`: `2 of 6 stills`, `2 of 5 to-dos`.
-- **Buttons** are a verb of one to three words, the same word for the same act: Allow, Don't allow, Type it, Paste it, Don't give it, Answer in words, Release it, Send, Close, Stop, Message, Dismiss, Details, Result, Open chat.
+- **Buttons** are a verb of one to three words, the same word for the same act: Allow, Don't allow, Type it, Paste it, Don't give it, Answer in words, Release it, Send, Stop and send, Attach, Close, Stop, Message, Dismiss, Details, Result, Open chat.
 - **Headings** are a noun: To-dos, Helpers and commands, Commands ended, Finished, Result.
 
 ## Every running thing has a progress line
@@ -51,7 +51,7 @@ A running command or helper is two lines:
 - **Permission**: `Allow`, `Don't allow`; an admin command also has `Always allow this command`. `Run this as admin on this Mac?` `Release <branch> to main?` `Claude Code blocked this command. Run it anyway?`
 - **Password**: `Type it`, `Don't allow`. **Key**: `Paste it`, `Don't give it`, `Answer in words`.
 - **Question**: the task's own buttons, then `Answer in words`. No button is added, and every button is an answer that carries the task on: there is no `Not now`, as not pressing leaves it open.
-- **Message** is a quiet button at the top right of a card that works or has finished: it opens the same box, and what you send goes straight to that task, which carries on with it. A finished card has `Message` and `Dismiss` (puts it under Finished and sends nothing) and nothing else.
+- **Message** is a quiet button at the top right of a card that works or has finished: it opens the same box, and what you send goes straight to that task, which carries on with it. A finished card has `Message` and `Dismiss` (puts it under Finished and sends nothing) and nothing else. The same box, the same message, sits at the bottom of the task's Details. Under it: `Attach`, then, while the task works, `Stop and send` (stops what it is doing, with its commands and helpers, and starts it again with the message), and `Send` (it reads it at its next step). A file picked shows as `📎 <name> ✕`; a press takes it off.
 - **Typing** happens in one box above the chat: a heading that says what it is for, the field, `Send` and `Close`; Enter sends. No line under the field explains it. Filled buttons go to the task; the quiet `Close` and `Dismiss` never do.
 - **After a press** the block goes at once and one grey line says what you did: `✓ You pressed "Allow"`, `✓ You answered "…"`. No line says who took it or what runs now.
 - **An error**: what failed, then what happens next or what you can do. `Couldn't save the setting. Your old value stays.`

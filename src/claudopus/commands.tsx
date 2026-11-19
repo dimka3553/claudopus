@@ -21,6 +21,9 @@ const commandHooks = (on: On) => {
     // anew, and each redraw would renew the hold that puts redraws off (asking.tsx, isBoxHeld)
     const isInBarBox = e.plugin === 'claudopus' && isBarBox(e.element)
     if (isInBarBox && (e.origin.kind === 'person' || barBoxAt === 0)) barBoxAt = await $.clock.now()
+    // and a Details tab its message box (messageBox), the same way
+    const isInPaneBox = e.plugin === 'claudopus' && isPaneBox(e.element)
+    if (isInPaneBox && (e.origin.kind === 'person' || paneBoxAt === 0)) ((paneBoxAt = await $.clock.now()), (paneBoxIn = e.requestId ?? ''))
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
       // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
       if (e.plugin === 'claudopus') await engage($)
@@ -35,6 +38,7 @@ const commandHooks = (on: On) => {
       if ((e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element)) || isBarButton || isTabButton) await holdForPress($)
       else pressFrom = 0
       if (!isInBarBox) barBoxAt = 0
+      if (!isInPaneBox) paneBoxAt = 0
     }
     return next(e)
   })

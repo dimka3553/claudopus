@@ -131,7 +131,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], barOpen?.kind ?? '', barOpen?.id ?? '', barOpen?.mark ?? ''])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], barOpen?.kind ?? '', barOpen?.id ?? '', barOpen?.mark ?? '', [...attached], [...replies]])
 }
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
@@ -163,7 +163,7 @@ const freeTimes = ($: EngineInterface) => {
 let isRedrawOwed = false
 // Only the bar's box: a box in a pane is drawn again with its pane as before. The hold ends TYPING after the last letter or focus,
 // as the app may say nothing when the cursor leaves; a letter typed after that holds it again at once
-const isBoxHeld = (at: number) => Boolean(barOpen) && barBoxAt > 0 && at - barBoxAt < TYPING
+const isBoxHeld = (at: number) => (Boolean(barOpen) && barBoxAt > 0 && at - barBoxAt < TYPING) || (paneBoxAt > 0 && at - paneBoxAt < TYPING)
 const drawFresh = async ($: EngineInterface, isThroughTyping = false) => {
   if (!isThroughTyping && isBoxHeld(await $.clock.now())) return void ((isRedrawOwed = true), recordEvent($, 'redraw-owed'))
   isRedrawOwed = false
@@ -490,24 +490,208 @@ const sendFromBar = ($: EngineInterface, id: string, value: string) => {
 // Message, on a card of this chat's that works or has finished: the same box, opened for a card that asks nothing. What is sent from it
 // goes to that task as the person's own words, which carries it on from the submit's or the press's own hook (answersOnWay,
 // toEnded), never from a timer, and the chat is only told, with no turn of its own
-const canChange = (one: Todo) => !one.chat && !one.parentId && (one.status === 'working' || one.status === 'done' || one.status === 'failed') && !isHeld(one) && (one.status === 'working' || !openItems(one).length) && !needsPerson(one)
-const sendChange = ($: EngineInterface, id: string, value: string) => {
-  const run = changeTask($, id, value.trim())
+// (a finished one with to-dos left open too: the person may write to any task that works or has finished, 19 Nov)
+const canChange = (one: Todo) => !one.chat && !one.parentId && (one.status === 'working' || one.status === 'done' || one.status === 'failed') && !isHeld(one) && !needsPerson(one)
+// A message goes the one way from both places the person writes to a task: the box above the chat that Message opens, and the box
+// at the bottom of the task's Details. Send hands it to the task, which reads it at its next step: Claude Code queues a message to a
+// task at work until its next tool round, and starts a paused or finished one with it at once. Stop and send, while it works, stops
+// it first (interruptStep) and starts it again with the message: Claude Code has no way to cut only the step a task is on, and its
+// stop ends the task's own commands and helpers too (engine 2.1.326, read 19 Nov). The files picked with Attach go with it, each by
+// its path: a message to a task is text alone
+const sendChange = ($: EngineInterface, id: string, value: string, isNow = false) => {
+  const files = attached.get(id) ?? []
+  attached.delete(id)
+  const run = changeTask($, id, value.trim(), files, isNow)
   answersOnWay.add(run)
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
   return run
 }
-const changeTask = async ($: EngineInterface, id: string, said: string) => {
+// The files picked for a message to each task, by its card, until the message goes or the person takes one off
+const attached = new Map<string, string[]>()
+const ATTACH_MOST = 20
+// Attach opens the computer's own file picker, where the engine runs: so not in a chat run on another Mac over ssh, whose picker
+// would open on that Mac's screen (isRunFromAfar). macOS through osascript, Linux through zenity
+const canAttach = () => !isRunFromAfar
+const PICK_MAC = ['osascript', '-e', 'activate', '-e', 'set picked to choose file with prompt "Attach files" with multiple selections allowed', '-e', 'set out to ""', '-e', 'repeat with f in picked', '-e', 'set out to out & POSIX path of f & linefeed', '-e', 'end repeat', '-e', 'return out']
+const PICK_LINUX = ['zenity', '--file-selection', '--multiple', '--separator=\n', '--title=Attach files']
+const pickFiles = async ($: EngineInterface, id: string) => {
+  if (!canAttach()) return
+  // (a picker left open is the person's: it waits for them, the ten minutes a command of the mod's may run at most; cancelled, it
+  // adds nothing)
+  const r = await $.process.run(isLinux ? PICK_LINUX : PICK_MAC, { timeoutMs: 600_000 }).catch(err => (log($, `files not picked: ${String(err)}`), undefined))
+  if (!r || r.exitCode !== 0) return
+  const picked = r.stdout.split('\n').map(line => line.trim()).filter(line => line.startsWith('/'))
+  if (!picked.length) return
+  attached.set(id, [...new Set([...(attached.get(id) ?? []), ...picked])].slice(0, ATTACH_MOST))
+  ;((presses += 1), (boxPresses += 1), drawAgain($, true))
+}
+const unattach = ($: EngineInterface, id: string, path: string) => {
+  const left = (attached.get(id) ?? []).filter(one => one !== path)
+  if (left.length) attached.set(id, left)
+  else attached.delete(id)
+  ;((presses += 1), (boxPresses += 1), drawAgain($, true))
+}
+// What is typed for a message to a task, kept under one name wherever it is typed: the box above the chat and the box in Details
+// are the same message
+const messageDraft = (id: string) => `${id}|change`
+// Sent from either box: the words go, the box empties (a new one, by its key), and the box above the chat, open for this task,
+// closes
+const sendMessageFrom = ($: EngineInterface, id: string, value: string, isNow: boolean) => {
+  if (!value.trim() && !attached.get(id)?.length) return
+  barBoxAt = 0
+  paneBoxAt = 0
+  drafts.delete(messageDraft(id))
+  keepDraft($, messageDraft(id), undefined)
+  replies.set(id, (replies.get(id) ?? 0) + 1)
+  if (isBarOpen('change', id)) barOpen = undefined
+  freeTimes($)
+  redraw($)
+  void sendChange($, id, value, isNow).catch(err => log($, `message not sent: ${String(err)}`))
+}
+// The row under a message box, the same in the box above the chat and at the bottom of Details: the files picked, each taken off
+// with a press on its name; Attach; then, while the task is in the middle of a step, Send now, and Send, the big one; `close`,
+// the box above the chat's own Close
+const SEND_NOW = 'Stop and send'
+const messageFoot = ($: EngineInterface, ui: Ui, one: Todo, key: string, close: JSX.Element | null = null) => {
+  const files = attached.get(one.id) ?? []
+  const typed = () => drafts.get(messageDraft(one.id)) ?? ''
+  const isMidStep = one.status === 'working'
+  return (
+    <ui.Box key={`${key}-foot`} flexDirection="column" flexShrink={0} gap={1} width="100%">
+      {files.length ? (
+        <ui.Box key={`${key}-files`} flexDirection="row" flexWrap="wrap" columnGap={2}>
+          {files.map((path, n) => (
+            <ui.Button key={`${key}-file-${n}-${presses}`} label={`📎 ${cut(path.split('/').pop() ?? path, 40)} ✕`} plain dimColor onPress={() => unattach($, one.id, path)} />
+          ))}
+        </ui.Box>
+      ) : null}
+      <ui.Box flexDirection="row" alignItems="center" flexWrap="wrap" gap={1}>
+        {canAttach() ? <ui.Button key={`${key}-attach-${presses}-${boxPresses}`} label="Attach" plain onPress={() => void pickFiles($, one.id).catch(err => log($, `files not picked: ${String(err)}`))} /> : null}
+        {/* The sends keep together at the right, on the next line when the pane is narrow */}
+        <ui.Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} justifyContent="flex-end">
+          {isMidStep ? <ui.Button key={`${key}-now-${presses}-${boxPresses}`} label={SEND_NOW} onPress={() => sendMessageFrom($, one.id, typed(), true)} /> : null}
+          <ui.Button key={`${key}-send-${presses}-${boxPresses}`} label="Send" variant="primary" onPress={() => sendMessageFrom($, one.id, typed(), false)} />
+          {close}
+        </ui.Box>
+      </ui.Box>
+    </ui.Box>
+  )
+}
+// The box at the bottom of a task's Details, for a task of this chat's that works or has finished and asks nothing: what is typed
+// in it is the same message as in the box above the chat (messageDraft), and it goes the same way. The desktop app pulls a pane's
+// window back to a box that holds the cursor each time the pane is drawn, and draws the box's ring again: so while it holds the
+// cursor or is typed in, the tab is given again as it was, reading nothing, and the mod's own redraws wait (paneBoxAt, isBoxHeld),
+// as the box above the chat is held. At the bottom, the pull, should one come, is to where the person types
+let paneBoxAt = 0
+let paneBoxIn = ''
+const isPaneBox = (element: string | undefined) => /^details-.*-reply-/.test(element ?? '')
+const paneBoxKey = (id: string) => `details-${id}-reply-change-${replies.get(id) ?? 0}`
+const isPaneBoxHeld = (paneId: string, at: number) => paneBoxIn === paneId && paneBoxAt > 0 && at - paneBoxAt < BAR_BOX_HELD
+// The Details drawing given again while its box is held, by pane, with what the box was drawn for: its key and its files
+const paneBoxHeld = new Map<string, { id: string; shape: string; drawing: unknown }>()
+const paneBoxShape = (id: string) => JSON.stringify([paneBoxKey(id), attached.get(id) ?? [], presses, boxPresses])
+const messageBox = ($: EngineInterface, ui: Ui, one: Todo, paneId: string) => (
+  <ui.Box key={`message-${one.id}`} flexDirection="column" gap={1} flexShrink={0}>
+    {'Input' in ui ? (
+      <ui.Input
+        key={paneBoxKey(one.id)}
+        placeholder="Type your message"
+        value={draftDrawn(messageDraft(one.id))}
+        rows={BOX_ROWS}
+        onInput={value => {
+          drafts.set(messageDraft(one.id), value)
+          keepDraft($, messageDraft(one.id), value)
+          holdTimes($)
+          paneBoxIn = paneId
+          void $.clock.now().then(at => (paneBoxAt = at))
+        }}
+        onSubmit={value => sendMessageFrom($, one.id, value, false)}
+      />
+    ) : null}
+    {messageFoot($, ui, one, `details-${one.id}`)}
+  </ui.Box>
+)
+// Stop and send: the task is stopped as Claude Code stops one (TaskStop), which ends its step, its commands and its helpers, and its
+// card stays at work, as the message starts it again from its saved conversation (interrupting). Once Claude Code no longer lists it
+// as running, at most INTERRUPT_WAIT, the message goes
+const interrupting = new Set<string>()
+const INTERRUPT_WAIT = 10_000
+const interruptStep = async ($: EngineInterface, card: Todo) => {
+  interrupting.add(card.id)
+  const r = await $.tool.call({ tool: 'TaskStop', task_id: card.id }).catch(err => ({ deny: String(err) }))
+  if (r.deny) return (interrupting.delete(card.id), log($, `task ${card.id} not stopped for a message: ${r.deny}`), false)
+  const from = await $.clock.now()
+  while ((await $.clock.now()) - from < INTERRUPT_WAIT) {
+    const it = (await $.agent.list().catch(() => [])).find(one => one.id === card.id)
+    if (!it || it.status !== 'running') break
+    await $.clock.sleep(250)
+  }
+  $.clock.after(60_000, () => void interrupting.delete(card.id))
+  return true
+}
+// What kind of file each is, by its ending, for how the task opens it
+const fileKind = (path: string) => {
+  const end = (path.split('.').pop() ?? '').toLowerCase()
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(end)) return 'picture'
+  if (['heic', 'heif', 'tif', 'tiff', 'bmp'].includes(end)) return 'picture-other'
+  if (['mp4', 'mov', 'm4v', 'webm', 'mkv', 'avi'].includes(end)) return 'video'
+  if (end === 'pdf') return 'pdf'
+  return 'file'
+}
+// The paths a message names: picked with Attach, or typed or dropped into the box as text (a terminal types a dropped file's path,
+// its spaces escaped; a file:// address is a path too). Only the ones that are files on this computer
+const pathsIn = async ($: EngineInterface, said: string) => {
+  const found = new Set<string>()
+  for (const m of said.matchAll(/(?:file:\/\/)?(\/(?:\\ |[^\s'"`<>])+)|'(\/[^'\n]+)'|"(\/[^"\n]+)"/g)) {
+    const raw = m[1] ?? m[2] ?? m[3] ?? ''
+    const path = (() => {
+      try {
+        return decodeURIComponent(raw.replace(/\\ /g, ' ').replace(/[.,;:)]+$/, ''))
+      } catch {
+        return raw.replace(/\\ /g, ' ')
+      }
+    })()
+    if ((await $.fs.stat(path).catch(() => undefined))?.kind === 'file') found.add(path)
+  }
+  return [...found]
+}
+// What the task is told with the files: each path, and how a task opens one of its kind
+const filesNote = (files: string[]) =>
+  files.length
+    ? `\n\nFiles with this message, on this computer: open each one before you act on the message.\n${files
+        .map(path => {
+          const kind = fileKind(path)
+          const how =
+            kind === 'picture' || kind === 'pdf'
+              ? 'open it with Read'
+              : kind === 'picture-other'
+                ? 'turn it into a PNG in your scratch folder (sips -s format png on a Mac, convert on Linux), then open that with Read'
+                : kind === 'video'
+                  ? 'take stills from it into your scratch folder with ffmpeg (one a second, or more where it moves fast), then open them with Read; ffprobe gives its length'
+                  : 'read it as its kind needs'
+          return `- ${path} (${how})`
+        })
+        .join('\n')}`
+    : ''
+const changeTask = async ($: EngineInterface, id: string, said: string, picked: string[] = [], isNow = false) => {
   const card = (await read($, todos)).find(one => one.id === id)
-  if (!card || !said || card.chat || card.parentId || isHeld(card)) return
+  if (!card || (!said && !picked.length) || card.chat || card.parentId || isHeld(card)) return
   const at = await $.clock.now()
-  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) } : one)))
-  const text = card.status === 'working' ? MESSAGE_SENT(said) : CHANGE_ASKED(said)
-  const sent = { text: said, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true }
+  const files = [...new Set([...picked, ...(await pathsIn($, said))])]
+  const shown = [said, ...picked.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join('\n')
+  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: shown }].slice(-ENTRIES_KEPT) } : one)))
+  const words = `${said || '(no words, only the files below)'}${filesNote(files)}`
+  // Send now on a task in the middle of a step: that step is stopped first, and the message starts it again from there
+  if (isNow && card.status === 'working' && (await interruptStep($, card))) {
+    await toEnded($, card, id, MESSAGE_NOW(words), { text: shown, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true })
+    return void (await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(shown, 120)}”`))))
+  }
+  const text = card.status === 'working' ? MESSAGE_SENT(words) : CHANGE_ASKED(words)
+  const sent = { text: shown, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true }
   const told = (await read($, todos)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
   if (told && !told.deny) (writtenIn($, id, id), sentReplies.set(id, { ...sent, to: 'work' }), redraw($))
   else await toEnded($, card, id, text, sent)
-  await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(said, 120)}”`)))
+  await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(shown, 120)}”`)))
 }
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   // Another chat's ask is answered only in that chat: no file carries an answer to it, from this Mac or another

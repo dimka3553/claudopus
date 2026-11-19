@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.207 · 19 November 2026
+- A task's Details has a box at its bottom to write to that task, whether it works or has finished: the same message as the box Message opens above the chat.
+- Under both boxes: Send, which the task reads at its next step, and, while it works, Stop and send, which stops what it is doing, with its commands and helpers, and starts it again with your message.
+- Attach opens the file picker: pictures, videos and any file go with the message, and the task opens each one, taking stills from a video. A file's path typed or dropped into the box in a terminal goes as a file too.
+
 ## 0.2.206 · 19 November 2026
 - Everything that waits for you is one block, the same on the card, in Details and at the top of the panel: a small label (Permission, Question, Password or Key), the question in amber, what it is about, the command whole, and the buttons.
 - The buttons are Allow and Don't allow for a permission, Type it for a password, Paste it and Don't give it for a key, and for a question the task's own buttons with Answer in words. No Done, Yes or No is added.

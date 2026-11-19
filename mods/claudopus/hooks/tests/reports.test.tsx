@@ -323,6 +323,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     const sipsSaid = tool === 'sips' ? options.sips?.([...e.argv]) : undefined
     if (sipsSaid !== undefined) return { value: { exitCode: 0, stdout: sipsSaid, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (tool === 'osascript') osa.push([...e.argv])
+    // The file picker Attach opens: what the test lays as picker:chosen is picked, else the person cancels it
+    if (tool === 'osascript' && e.argv.some(one => String(one).includes('choose file'))) return files.has('picker:chosen') ? ok(files.get('picker:chosen') ?? '') : ok('', 1)
     // What was handed to this Mac's keychain on security's stdin
     if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
@@ -896,9 +898,9 @@ test('finished work leaves a result for good that asks nothing: its pictures cop
   const again = await until(async () => (await inputsOf(bar))[0])
   // What is sent from it goes to the result's own task, whose card is still there to carry on from: it is started again with the
   // person's words from the press's own hook (the clock has not moved), the chat is asked nothing, and the box goes
-  const changes = () => resumed.filter(line => line.startsWith('a1: ') && line.includes('pressed "Message"'))
+  const changes = () => resumed.filter(line => line.startsWith('a1: ') && line.includes('wrote to you from the card'))
   await bar.input({ key: again?.key ?? '', text: 'send it to the team' })
-  expect(await until(async () => changes()[0])).toContain('wrote to you, in their own words: send it to the team\n')
+  expect(await until(async () => changes()[0])).toContain('in their own words: send it to the team\n')
   expect(changes()).toHaveLength(1)
   expect(submitted).toEqual([])
   expect(await until(async () => ((await inputsOf(bar)).length ? undefined : true))).toBe(true)
@@ -914,7 +916,7 @@ test('finished work leaves a result for good that asks nothing: its pictures cop
   const own = (await inputsOf(termed as never)).filter(input => /^report-carry-reply-/.test(input.key ?? ''))
   expect(own.map(input => input.props.placeholder)).toEqual(['Type your message'])
   await termed.input({ key: own[0]?.key ?? '', text: 'check the refunds' })
-  expect(await until(async () => changes()[1])).toContain('wrote to you, in their own words: check the refunds\n')
+  expect(await until(async () => changes()[1])).toContain('in their own words: check the refunds\n')
   await termed.unmount()
   await $.turn.complete({ agentId: 'a1', answer: report, durationMs: 1, isAborted: false, turnId: 't4b', reason: 'answer' })
   await clock.advance(10)
