@@ -1,204 +1,233 @@
+"use strict";
 // Everything that waits for the person: one record, one list of them for a card, and one drawing
-var __assign = (this && this.__assign) || function () {
-    __assign = Object.assign || function(t) {
-        for (var s, i = 1, n = arguments.length; i < n; i++) {
-            s = arguments[i];
-            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
-                t[p] = s[p];
-        }
-        return t;
-    };
-    return __assign.apply(this, arguments);
-};
-var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
-    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
-        if (ar || !(i in from)) {
-            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
-            ar[i] = from[i];
-        }
-    }
-    return to.concat(ar || Array.prototype.slice.call(from));
-};
-var NEED_LABEL = { permission: 'Permission', question: 'Question', password: 'Password', key: 'Key' };
+const NEED_LABEL = { permission: 'Permission', question: 'Question', password: 'Password', key: 'Key' };
 // A task's own question, or the command Claude Code blocked it from running
-var askNeed = function ($, one, surface, now) {
-    var _a, _b;
-    var ask = one.ask;
+const askNeed = ($, one, surface, now) => {
+    const ask = one.ask;
     if (!ask)
         return undefined;
-    var id = "ask-".concat(one.id);
-    var line = sentLine(one, now);
-    var base = __assign(__assign(__assign(__assign({ id: id, at: ask.at, text: ask.text }, (ask.details ? { details: ask.details } : {})), (ask.copy ? { command: ask.copy } : {})), { card: one }), (line ? { line: line, wholeLine: sentLine(one, now, Infinity) } : {}));
+    const id = `ask-${one.id}`;
+    const line = sentLine(one, now);
+    const base = { id, at: ask.at, text: ask.text, ...(ask.details ? { details: ask.details } : {}), ...(ask.copy ? { command: ask.copy } : {}), card: one, ...(line ? { line, wholeLine: sentLine(one, now, Infinity) } : {}) };
     // Another chat's is answered only in its own chat: no file carries an answer there
-    var elsewhere = one.chat ? "Answer it in its own chat, \u201C".concat(one.chat.title || 'another chat', "\u201D").concat(one.chat.host ? ", on ".concat(one.chat.host) : '', ".") : '';
+    const elsewhere = one.chat ? `Answer it in its own chat, “${one.chat.title || 'another chat'}”${one.chat.host ? `, on ${one.chat.host}` : ''}.` : '';
     if (ask.refused) {
-        var run = offeredRun(one);
-        return __assign(__assign(__assign(__assign({}, base), { kind: 'permission' }), (elsewhere ? { where: elsewhere } : {})), { buttons: elsewhere
+        const run = offeredRun(one);
+        return {
+            ...base,
+            kind: 'permission',
+            ...(elsewhere ? { where: elsewhere } : {}),
+            buttons: elsewhere
                 ? []
-                : __spreadArray(__spreadArray([], (run ? [{ key: "".concat(id, "-allow-").concat(ask.at, "-").concat(loadMark), label: ALLOW, onPress: function () { return void runIt($, one).catch(function (err) { return log($, "refused command not run: ".concat(String(err))); }); } }] : []), true), [
-                    { key: "".concat(id, "-deny-").concat(ask.at, "-").concat(loadMark), label: DONT_ALLOW, onPress: function () { return void ((presses += 1), answerAsk($, one, DONT_ALLOW).catch(function (err) { return log($, "answer not sent: ".concat(String(err))); })); } },
-                ], false) });
+                : [
+                    ...(run ? [{ key: `${id}-allow-${ask.at}-${loadMark}`, label: ALLOW, onPress: () => void runIt($, one).catch(err => log($, `refused command not run: ${String(err)}`)) }] : []),
+                    { key: `${id}-deny-${ask.at}-${loadMark}`, label: DONT_ALLOW, onPress: () => void ((presses += 1), answerAsk($, one, DONT_ALLOW).catch(err => log($, `answer not sent: ${String(err)}`))) },
+                ],
+        };
     }
     if (isActingOnReply(one))
-        return __assign(__assign({}, base), { kind: 'question', isActing: true, buttons: [] });
+        return { ...base, kind: 'question', isActing: true, buttons: [] };
     if (elsewhere)
-        return __assign(__assign({}, base), { kind: 'question', where: elsewhere, buttons: [] });
-    var mark = askMark(ask);
-    var inBar = repliesInBar(surface);
-    var send = function (value) { var _a; return void (value.trim() && (dropDrafts($, one.id), replies.set(one.id, ((_a = replies.get(one.id)) !== null && _a !== void 0 ? _a : 0) + 1), freeTimes($), answerAsk($, one, value, true).catch(function (err) { return log($, "reply not sent: ".concat(String(err))); }))); };
-    return __assign(__assign(__assign({}, base), { kind: 'question', buttons: __spreadArray(__spreadArray([], ((_a = ask.choices) !== null && _a !== void 0 ? _a : []).map(function (choice, n) { return ({ key: "".concat(id, "-choice-").concat(n, "-").concat(mark, "-").concat(loadMark), label: choice, onPress: function () { return void ((presses += 1), answerAsk($, one, choice).catch(function (err) { return log($, "answer not sent: ".concat(String(err))); })); } }); }), true), (inBar ? [isReplyOpen(one) ? { key: "".concat(id, "-inbar-close-").concat(presses), label: 'Close', isPlain: true, isOpener: true, onPress: function (press) { return openBar($, undefined, press.surface); } } : { key: "".concat(id, "-inbar-").concat(presses), label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: function (press) { return openBar($, { kind: 'answer', id: one.id, one: one }, press.surface); } }] : []), true) }), (inBar
-        ? {}
-        : {
-            field: {
-                key: "".concat(id, "-reply-").concat((_b = replies.get(one.id)) !== null && _b !== void 0 ? _b : 0, "-").concat(mark),
-                placeholder: ANSWER_IN_WORDS,
-                value: draftShown(one.id, ask),
-                onInput: function (value) { return void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($)); },
-                onSubmit: send,
-            },
-        }));
+        return { ...base, kind: 'question', where: elsewhere, buttons: [] };
+    const mark = askMark(ask);
+    const inBar = repliesInBar(surface);
+    const send = (value) => void (value.trim() && (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`))));
+    return {
+        ...base,
+        kind: 'question',
+        buttons: [
+            ...(ask.choices ?? []).map((choice, n) => ({ key: `${id}-choice-${n}-${mark}-${loadMark}`, label: choice, onPress: () => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`))) })),
+            // The last answer opens the box above the chat for this card, and closes it again
+            ...(inBar ? [isReplyOpen(one) ? { key: `${id}-inbar-close-${presses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press) => openBar($, undefined, press.surface) } : { key: `${id}-inbar-${presses}`, label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: (press) => openBar($, { kind: 'answer', id: one.id, one }, press.surface) }] : []),
+        ],
+        // Where the bar draws no field, the block has the one field itself
+        ...(inBar
+            ? {}
+            : {
+                field: {
+                    key: `${id}-reply-${replies.get(one.id) ?? 0}-${mark}`,
+                    placeholder: ANSWER_IN_WORDS,
+                    value: draftShown(one.id, ask),
+                    onInput: (value) => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($)),
+                    onSubmit: send,
+                },
+            }),
+    };
 };
 // A permission the admin gate holds: an admin command, a release, a change to a file of the person's, or one it undid
-var gateNeed = function ($, gate, card, elsewhere, from) {
-    var _a;
-    if (from === void 0) { from = ''; }
-    var id = "gate-".concat(gate.id);
-    var isHeld = gateHeld.has(gate.id) && !elsewhere;
-    var details = gate.isUndone
-        ? "".concat(gate.isOutside ? 'Something outside the panel changed this file, maybe you in an editor' : 'A command wrote to this file', ", so the change was undone. ").concat(ALLOW, " makes it again. Either way the changed text is kept beside the file as a .put-back copy.")
+const gateNeed = ($, gate, card, elsewhere, from = '') => {
+    const id = `gate-${gate.id}`;
+    const isHeld = gateHeld.has(gate.id) && !elsewhere;
+    const details = gate.isUndone
+        ? `${gate.isOutside ? 'Something outside the panel changed this file, maybe you in an editor' : 'A command wrote to this file'}, so the change was undone. ${ALLOW} makes it again. Either way the changed text is kept beside the file as a .put-back copy.`
         : gate.kind === 'release'
-            ? "Branch ".concat((_a = gate.branch) !== null && _a !== void 0 ? _a : '').concat(gate.folder ? " \u00B7 from ".concat(shortPath(gate.folder)) : '')
+            ? `Branch ${gate.branch ?? ''}${gate.folder ? ` · from ${shortPath(gate.folder)}` : ''}`
             : gate.isWork
-                ? "".concat(ALLOW, " also covers this task's next admin commands.")
+                ? `${ALLOW} also covers this task's next admin commands.`
                 : !gate.command
                     ? 'Its details show only on its own Mac.'
                     : '';
-    return __assign(__assign(__assign(__assign(__assign({ id: id, kind: 'permission', at: gate.at, text: gateWhat(gate) }, (from ? { from: from } : {})), (details ? { details: details } : {})), (gate.kind !== 'release' && gate.command ? { command: gate.command } : {})), (isHeld ? {} : { where: elsewhere ? 'Allow it on its card in its own chat.' : "It's no longer waiting for you." })), { buttons: isHeld
-            ? __spreadArray([
-                { key: "".concat(id, "-once-").concat(loadMark), label: ALLOW, onPress: function () { return answerGate($, gate, 'once', card); } },
-                { key: "".concat(id, "-deny-").concat(loadMark), label: DONT_ALLOW, onPress: function () { return answerGate($, gate, 'deny', card); } }
-            ], (gate.kind ? [] : [{ key: "".concat(id, "-always-").concat(loadMark), label: ALWAYS_ALLOW, isPlain: true, onPress: function () { return answerGate($, gate, 'always', card); } }]), true) : [] });
+    return {
+        id,
+        kind: 'permission',
+        at: gate.at,
+        text: gateWhat(gate),
+        ...(from ? { from } : {}),
+        ...(details ? { details } : {}),
+        ...(gate.kind !== 'release' && gate.command ? { command: gate.command } : {}),
+        ...(isHeld ? {} : { where: elsewhere ? 'Allow it on its card in its own chat.' : "It's no longer waiting for you." }),
+        buttons: isHeld
+            ? [
+                { key: `${id}-once-${loadMark}`, label: ALLOW, onPress: () => answerGate($, gate, 'once', card) },
+                { key: `${id}-deny-${loadMark}`, label: DONT_ALLOW, onPress: () => answerGate($, gate, 'deny', card) },
+                // (a release and a change to a file are asked each time)
+                ...(gate.kind ? [] : [{ key: `${id}-always-${loadMark}`, label: ALWAYS_ALLOW, isPlain: true, onPress: () => answerGate($, gate, 'always', card) }]),
+            ]
+            : [],
+    };
 };
 // Claude Code's own prompt: a call to allow, answered here while this chat holds it; its question or its plan, answered in its own box
-var promptNeed = function ($, p, c, isOnCard) {
-    if (isOnCard === void 0) { isOnCard = false; }
-    var id = "prompt-".concat(c ? "".concat(c.host, "-").concat(c.chat, "-") : 'this-').concat(p.id);
-    var isHeld = !c && Boolean(p.isHeld) && promptHeld.has(p.id) && p.kind !== 'question' && p.kind !== 'plan';
-    var url = c ? pressOf(c) : '';
-    var where = c
-        ? "Answer it in the chat \u201C".concat(chatName(c), "\u201D").concat(c.host ? (url ? ", which runs on ".concat(macName(c.host)) : ", on ".concat(macName(c.host))) : '', ".")
+const promptNeed = ($, p, c, isOnCard = false) => {
+    const id = `prompt-${c ? `${c.host}-${c.chat}-` : 'this-'}${p.id}`;
+    const isHeld = !c && Boolean(p.isHeld) && promptHeld.has(p.id) && p.kind !== 'question' && p.kind !== 'plan';
+    const url = c ? pressOf(c) : '';
+    const where = c
+        ? `Answer it in the chat “${chatName(c)}”${c.host ? (url ? `, which runs on ${macName(c.host)}` : `, on ${macName(c.host)}`) : ''}.`
         : p.kind === 'question'
             ? 'Pick your answer in the box at the bottom of this chat.'
             : 'Answer it in the box at the bottom of this chat.';
-    var press = function (said) { return function () { return void (answerPrompt($, p.id, said), redraw($)); }; };
-    return __assign(__assign(__assign(__assign(__assign({ id: id, kind: p.kind === 'allow' || !p.kind ? 'permission' : 'question', at: p.at, text: p.text }, (isOnCard ? {} : { from: p.title || (c ? '' : 'This chat') })), (p.about ? { details: p.about } : {})), (p.detail ? { command: p.detail } : {})), (isHeld ? {} : { where: where })), { buttons: isHeld
+    const press = (said) => () => void (answerPrompt($, p.id, said), redraw($));
+    return {
+        id,
+        kind: p.kind === 'allow' || !p.kind ? 'permission' : 'question',
+        at: p.at,
+        text: p.text,
+        ...(isOnCard ? {} : { from: p.title || (c ? '' : 'This chat') }),
+        ...(p.about ? { details: p.about } : {}),
+        ...(p.detail ? { command: p.detail } : {}),
+        ...(isHeld ? {} : { where }),
+        buttons: isHeld
             ? [
-                { key: "".concat(id, "-yes-").concat(presses), label: ALLOW, onPress: press('yes') },
-                { key: "".concat(id, "-no-").concat(presses), label: DONT_ALLOW, onPress: press('no') },
+                { key: `${id}-yes-${presses}`, label: ALLOW, onPress: press('yes') },
+                { key: `${id}-no-${presses}`, label: DONT_ALLOW, onPress: press('no') },
             ]
             : c && url
-                ? [{ key: "".concat(id, "-open-").concat(presses), label: 'Open chat', isOpener: true, onPress: function () { return void ((presses += 1), openChat($, c).catch(function (err) { return log($, "chat not opened: ".concat(String(err))); })); } }]
-                : [] });
+                ? [{ key: `${id}-open-${presses}`, label: 'Open chat', isOpener: true, onPress: () => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`))) }]
+                : [],
+    };
 };
 // A password or key a command waits for: typed in the box above the chat, never in the panel, where that bar draws a field
-var boxNeed = function ($, one, surface, canFocus) {
-    var _a, _b, _c, _d, _e;
-    if (canFocus === void 0) { canFocus = false; }
-    var id = "box-".concat(one.id);
-    var inBar = repliesInBar(surface);
-    var isKey = one.kind === 'key';
-    var mode = (_a = (inBar ? undefined : boxModes.get(one.id))) !== null && _a !== void 0 ? _a : 'key';
-    var isOpen = Boolean(barOpen && isBoxKind(barOpen.kind) && barOpen.id === one.id);
-    var close = { key: "".concat(id, "-close-").concat(boxPresses), label: 'Close', isPlain: true, isOpener: true, onPress: function (press) { return openBar($, undefined, press.surface); } };
-    var refuse = { key: "".concat(id, "-cancel-").concat(boxPresses), label: isKey ? DONT_GIVE : DONT_ALLOW, onPress: function () { return void cancelBox($, one.id); } };
+const boxNeed = ($, one, surface, canFocus = false) => {
+    const id = `box-${one.id}`;
+    const inBar = repliesInBar(surface);
+    const isKey = one.kind === 'key';
+    const mode = (inBar ? undefined : boxModes.get(one.id)) ?? 'key';
+    const isOpen = Boolean(barOpen && isBoxKind(barOpen.kind) && barOpen.id === one.id);
+    const close = { key: `${id}-close-${boxPresses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press) => openBar($, undefined, press.surface) };
+    const refuse = { key: `${id}-cancel-${boxPresses}`, label: isKey ? DONT_GIVE : DONT_ALLOW, onPress: () => void cancelBox($, one.id) };
     // The admin command it is for, as the person allowed it; a key's command is the task's own and is not shown again
-    var command = isKey ? '' : ((_d = (_c = adminCalls((_b = one.command) !== null && _b !== void 0 ? _b : '', $.plugin.root)[0]) === null || _c === void 0 ? void 0 : _c.command) !== null && _d !== void 0 ? _d : '');
-    return __assign(__assign(__assign(__assign(__assign({ id: id, kind: one.kind, at: one.at, text: one.text, details: one.details }, (command ? { command: command } : {})), (boxSaid.get(one.id) && !isOpen ? { said: boxSaid.get(one.id) } : {})), (isOpen || !boxHeldReply.has(one.id) ? {} : { extra: function (ui) { return heldReplyButtons($, ui, one.id, 'box'); } })), { buttons: inBar
+    const command = isKey ? '' : (adminCalls(one.command ?? '', $.plugin.root)[0]?.command ?? '');
+    return {
+        id,
+        kind: one.kind,
+        at: one.at,
+        text: one.text,
+        details: one.details,
+        ...(command ? { command } : {}),
+        ...(boxSaid.get(one.id) && !isOpen ? { said: boxSaid.get(one.id) } : {}),
+        ...(isOpen || !boxHeldReply.has(one.id) ? {} : { extra: (ui) => heldReplyButtons($, ui, one.id, 'box') }),
+        buttons: inBar
             ? isOpen
                 ? [close, refuse]
-                : __spreadArray([
-                    { key: "".concat(id, "-paste-").concat(boxPresses), label: isKey && one.name ? PASTE_IT : TYPE_IT, isOpener: true, onPress: function (press) { return openBar($, { kind: barKindOf(one, 'key'), id: one.id }, press.surface); } },
-                    refuse
-                ], (isKey ? [{ key: "".concat(id, "-respond-").concat(boxPresses), label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: function (press) { return openBar($, { kind: 'words', id: one.id }, press.surface); } }] : []), true)
-            : __spreadArray([
-                refuse
-            ], (isKey ? [{ key: "".concat(id, "-mode-").concat(boxPresses), label: mode === 'reply' ? (one.name ? PASTE_IT : TYPE_IT) : ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: function () { return void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($)); } }] : []), true) }), (inBar
-        ? {}
-        : {
-            field: __assign(__assign({ key: "".concat(id, "-field-").concat(mode === 'reply' ? 'reply-' : '').concat((_e = boxTries.get(one.id)) !== null && _e !== void 0 ? _e : 0), placeholder: mode === 'reply' ? 'Type your answer' : isKey && one.name ? 'Paste it here' : 'Type it here' }, (canFocus ? { isFocused: true } : {})), { onInput: function (value) { return void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($)); }, onSubmit: function (value) { return submitBox($, one.id, mode, value); } }),
-        }));
+                : [
+                    { key: `${id}-paste-${boxPresses}`, label: isKey && one.name ? PASTE_IT : TYPE_IT, isOpener: true, onPress: (press) => openBar($, { kind: barKindOf(one, 'key'), id: one.id }, press.surface) },
+                    refuse,
+                    ...(isKey ? [{ key: `${id}-respond-${boxPresses}`, label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: (press) => openBar($, { kind: 'words', id: one.id }, press.surface) }] : []),
+                ]
+            : [
+                refuse,
+                ...(isKey ? [{ key: `${id}-mode-${boxPresses}`, label: mode === 'reply' ? (one.name ? PASTE_IT : TYPE_IT) : ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: () => void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($)) }] : []),
+            ],
+        ...(inBar
+            ? {}
+            : {
+                field: {
+                    key: `${id}-field-${mode === 'reply' ? 'reply-' : ''}${boxTries.get(one.id) ?? 0}`,
+                    placeholder: mode === 'reply' ? 'Type your answer' : isKey && one.name ? 'Paste it here' : 'Type it here',
+                    ...(canFocus ? { isFocused: true } : {}),
+                    onInput: (value) => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($)),
+                    onSubmit: (value) => submitBox($, one.id, mode, value),
+                },
+            }),
+    };
 };
 // The needs of one card, in the order they came: its own question, the permissions held for its commands, and, for this chat's
 // own cards, Claude Code's prompts for its calls and the password and key boxes of its commands
 // The box whose field takes the keys where a block has its own (the terminal): this chat's own first request
-var firstBox = function () { return __spreadArray(__spreadArray([], boxes.filter(function (box) { return box.chat === boxChat; }), true), boxes.filter(function (box) { return box.chat !== boxChat; }), true)[0]; };
-var needsOf = function ($, one, surface, now, canFocus) {
-    var _a;
-    if (canFocus === void 0) { canFocus = false; }
-    var ask = askNeed($, one, surface, now);
-    var own = one.chat ? [] : __spreadArray(__spreadArray([], waiting.filter(function (p) { return p.card === one.id; }).map(function (p) { return promptNeed($, p, undefined, true); }), true), boxes.filter(function (box) { return box.card === one.id; }).map(function (box) { return boxNeed($, box, surface, canFocus && box === firstBox()); }), true);
-    var gates = ((_a = one.admins) !== null && _a !== void 0 ? _a : []).filter(function (gate) { return !gatePressed.has(gate.id); }).map(function (gate) { return gateNeed($, gate, one.chat ? '' : one.id, Boolean(one.chat)); });
-    return __spreadArray(__spreadArray(__spreadArray([], (ask ? [ask] : []), true), gates, true), own, true).sort(function (a, b) { return a.at - b.at; });
+const firstBox = () => [...boxes.filter(box => box.chat === boxChat), ...boxes.filter(box => box.chat !== boxChat)][0];
+const needsOf = ($, one, surface, now, canFocus = false) => {
+    const ask = askNeed($, one, surface, now);
+    const own = one.chat ? [] : [...waiting.filter(p => p.card === one.id).map(p => promptNeed($, p, undefined, true)), ...boxes.filter(box => box.card === one.id).map(box => boxNeed($, box, surface, canFocus && box === firstBox()))];
+    const gates = (one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).map(gate => gateNeed($, gate, one.chat ? '' : one.id, Boolean(one.chat)));
+    return [...(ask ? [ask] : []), ...gates, ...own].sort((a, b) => a.at - b.at);
 };
 // The needs that belong to no card drawn here: the chat's own thread's, a task's whose card is not shown, and other chats' prompts
-var looseNeeds = function ($, surface, shown, chats, canFocus) {
-    if (canFocus === void 0) { canFocus = false; }
-    return __spreadArray(__spreadArray(__spreadArray(__spreadArray([], boxes.filter(function (box) { return !shown(box.card); }).map(function (box) { return boxNeed($, box, surface, canFocus && box === firstBox()); }), true), looseGates.filter(function (gate) { return !gatePressed.has(gate.id); }).map(function (gate) { return gateNeed($, gate, '', false, 'This chat'); }), true), waiting.filter(function (p) { return !shown(p.card); }).map(function (p) { return promptNeed($, p); }), true), chats.flatMap(function (c) { var _a; return ((_a = c.prompts) !== null && _a !== void 0 ? _a : []).map(function (p) { return promptNeed($, p, c); }); }), true).sort(function (a, b) { return a.at - b.at; });
+const looseNeeds = ($, surface, shown, chats, canFocus = false) => {
+    return [
+        ...boxes.filter(box => !shown(box.card)).map(box => boxNeed($, box, surface, canFocus && box === firstBox())),
+        ...looseGates.filter(gate => !gatePressed.has(gate.id)).map(gate => gateNeed($, gate, '', false, 'This chat')),
+        ...waiting.filter(p => !shown(p.card)).map(p => promptNeed($, p)),
+        ...chats.flatMap(c => (c.prompts ?? []).map(p => promptNeed($, p, c))),
+    ].sort((a, b) => a.at - b.at);
 };
 // How many rows a block takes on a small card of `room` letters, reckoned high: a press that answers it folds it to one grey line,
 // and the card holds that many rows under the line for FOLD_HELD (asking.tsx, answerFolds), so nothing below moves up under the pointer
 // that pressed (19 Nov: the person asked that an answered question go at once, and "the card doesn't jump"). Too many rows only
 // moves what is below further down, never under the pointer, which stays on the rows held
-var foldRows = function (need, room) {
-    var _a, _b, _c, _d;
+const foldRows = (need, room) => {
     // (the letters of a row reckoned fewer than the card's own perRow, so a long line is never thought to take fewer rows than it does)
-    var per = Math.max(20, Math.floor(room / 2.4));
-    var lines = function (text, each) {
-        if (each === void 0) { each = per; }
-        return text.split('\n').reduce(function (n, line) { return n + Math.max(1, Math.ceil(line.length / each)); }, 0);
-    };
+    const per = Math.max(20, Math.floor(room / 2.4));
+    const lines = (text, each = per) => text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / each)), 0);
     // In the desktop app's pixels, measured on its own renderer (19 Nov): a line of text FOLD_LINE, a gap between parts FOLD_GAP, a
     // row of buttons FOLD_BUTTONS, the outline and its padding FOLD_EDGE; a held row of the card is FOLD_ROW
-    var details = need.details ? lines(need.details.length <= DETAILS_ON_CARD ? need.details : "".concat(cut(need.details, DETAILS_ON_CARD), "\n\nThe rest is in its Details.")) * FOLD_LINE : 0;
-    var pictures = Math.ceil(((_d = (_c = (_b = (_a = need.card) === null || _a === void 0 ? void 0 : _a.ask) === null || _b === void 0 ? void 0 : _b.pictures) === null || _c === void 0 ? void 0 : _c.length) !== null && _d !== void 0 ? _d : 0) / 2) * (ASK_PIC_TALL + FOLD_LINE + 8);
-    var command = need.command ? lines(need.command) * FOLD_LINE + 16 : 0;
-    var buttons = need.buttons.length ? Math.ceil(need.buttons.reduce(function (n, button) { return n + button.label.length + 6; }, 0) / (per * 1.4)) * FOLD_BUTTONS : 0;
-    var parts = [FOLD_LINE, lines(cut(need.text, Math.round(room * 1.6)), Math.floor(per * 0.9)) * FOLD_LINE, details, pictures, command, need.where ? lines(need.where) * FOLD_LINE : 0, need.said ? lines(need.said) * FOLD_LINE : 0, buttons, need.line ? FOLD_LINE : 0].filter(Boolean);
-    return Math.ceil((parts.reduce(function (n, part) { return n + part; }, 0) + (parts.length - 1) * FOLD_GAP + FOLD_EDGE) / FOLD_ROW);
+    const details = need.details ? lines(need.details.length <= DETAILS_ON_CARD ? need.details : `${cut(need.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`) * FOLD_LINE : 0;
+    const pictures = Math.ceil((need.card?.ask?.pictures?.length ?? 0) / 2) * (ASK_PIC_TALL + FOLD_LINE + 8);
+    const command = need.command ? lines(need.command) * FOLD_LINE + 16 : 0;
+    const buttons = need.buttons.length ? Math.ceil(need.buttons.reduce((n, button) => n + button.label.length + 6, 0) / (per * 1.4)) * FOLD_BUTTONS : 0;
+    const parts = [FOLD_LINE, lines(cut(need.text, Math.round(room * 1.6)), Math.floor(per * 0.9)) * FOLD_LINE, details, pictures, command, need.where ? lines(need.where) * FOLD_LINE : 0, need.said ? lines(need.said) * FOLD_LINE : 0, buttons, need.line ? FOLD_LINE : 0].filter(Boolean);
+    return Math.ceil((parts.reduce((n, part) => n + part, 0) + (parts.length - 1) * FOLD_GAP + FOLD_EDGE) / FOLD_ROW);
 };
-var FOLD_LINE = 24;
-var FOLD_GAP = 12;
-var FOLD_BUTTONS = 44;
-var FOLD_EDGE = 26;
-var FOLD_ROW = 24;
+const FOLD_LINE = 24;
+const FOLD_GAP = 12;
+const FOLD_BUTTONS = 44;
+const FOLD_EDGE = 26;
+const FOLD_ROW = 24;
 // The one drawing: an outlined amber block; a small dim label of its kind; the question in amber; what it is about; the command
 // in a row of its own, whole; then its buttons. `isWhole`: in Details, where nothing is cut. `pictures`: the question's own
 // pictures, drawn by the pane (it keeps how much of them one drawing holds)
-var needBlock = function ($, ui, need, opts) {
-    var _a, _b, _c, _d;
-    if (opts === void 0) { opts = {}; }
-    var _e = opts.isWhole, isWhole = _e === void 0 ? false : _e, _f = opts.room, room = _f === void 0 ? 80 : _f;
-    var isFolding = !isWhole && !opts.isCompact && opts.surface === 'desktop';
-    var one = need.card;
-    var ask = one === null || one === void 0 ? void 0 : one.ask;
-    var Link = ui.Link;
-    var copyButton = one && (ask === null || ask === void 0 ? void 0 : ask.copy) && !ask.refused ? <ui.Button key={"ask-".concat(one.id, "-copy-").concat(presses)} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={function (press) { var _a; return copyAsk($, one.id, (_a = ask.copy) !== null && _a !== void 0 ? _a : '', press.surface); }}/> : null;
-    var terminalButton = one && ask && !ask.refused && canOpenTerminal(one) ? <ui.Button key={"".concat(need.id, "-terminal-").concat(presses)} label={openedKey === "".concat(one.id, ":").concat(ask.at, ":").concat(ask.copy) ? '✓ Typed, not run yet' : 'Open in Terminal'} plain onPress={function () { return void openTerminal($, one).catch(function (err) { return log($, "terminal not opened: ".concat(String(err))); }); }}/> : null;
-    return squareOutline(ui.Box, opts.isCompact ? undefined : need.isActing ? LIVE : NEEDS, "need-outline-".concat(need.id), (
+const needBlock = ($, ui, need, opts = {}) => {
+    const { isWhole = false, room = 80 } = opts;
+    const isFolding = !isWhole && !opts.isCompact && opts.surface === 'desktop';
+    const one = need.card;
+    const ask = one?.ask;
+    const Link = ui.Link;
+    const copyButton = one && ask?.copy && !ask.refused ? <ui.Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)}/> : null;
+    const terminalButton = one && ask && !ask.refused && canOpenTerminal(one) ? <ui.Button key={`${need.id}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Typed, not run yet' : 'Open in Terminal'} plain onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))}/> : null;
+    return squareOutline(ui.Box, opts.isCompact ? undefined : need.isActing ? LIVE : NEEDS, `need-outline-${need.id}`, (
     // (compact, in the terminal's bar above the prompt, which has a few rows: no outline and no gaps)
-    <ui.Box key={"need-".concat(need.id)} flexDirection="column" flexShrink={0} {...(opts.isCompact ? {} : { gap: 1, paddingX: 1 })}>
-      <ui.Text dimColor wrap="truncate-end">{"".concat(NEED_LABEL[need.kind]).concat(need.from ? " \u00B7 ".concat(need.from) : '')}</ui.Text>
+    <ui.Box key={`need-${need.id}`} flexDirection="column" flexShrink={0} {...(opts.isCompact ? {} : { gap: 1, paddingX: 1, paddingY: 1 })}>
+      <ui.Text dimColor wrap="truncate-end">{`${NEED_LABEL[need.kind]}${need.from ? ` · ${need.from}` : ''}`}</ui.Text>
       {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
-      <ui.Text wrap="wrap" color={need.isActing ? LIVE : NEEDS} bold>{withLinks(Link, isWhole ? need.text : cut(need.text, Math.round(room * 1.6)), "".concat(need.id, "-text"), need.text)}</ui.Text>
+      <ui.Text wrap="wrap" color={need.isActing ? LIVE : NEEDS} bold>{withLinks(Link, isWhole ? need.text : cut(need.text, Math.round(room * 1.6)), `${need.id}-text`, need.text)}</ui.Text>
       {/* What it is about, under its question: whole in Details, and on the small card up to DETAILS_ON_CARD */}
-      {need.details ? (<ui.Box key={"".concat(need.id, "-details")} flexDirection="column" minWidth={0}>
-          <ui.Markdown text={isWhole || need.details.length <= DETAILS_ON_CARD ? need.details : "".concat(cut(need.details, DETAILS_ON_CARD), "\n\nThe rest is in its Details.")}/>
+      {need.details ? (<ui.Box key={`${need.id}-details`} flexDirection="column" minWidth={0}>
+          <ui.Markdown text={isWhole || need.details.length <= DETAILS_ON_CARD ? need.details : `${cut(need.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`}/>
         </ui.Box>) : null}
-      {(_a = opts.pictures) !== null && _a !== void 0 ? _a : null}
+      {opts.pictures ?? null}
       {need.command ? (<ui.Box flexDirection="column" backgroundColor={FILL} paddingLeft={2}>
           <ui.Box flexDirection="row" alignItems="center" gap={1}>
             <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
-              <ui.Text mono wrap="wrap">{withLinks(Link, need.command, "".concat(need.id, "-copy"))}</ui.Text>
+              <ui.Text mono wrap="wrap">{withLinks(Link, need.command, `${need.id}-copy`)}</ui.Text>
             </ui.Box>
             {/* A question's code or command is copied with one press */}
             {copyButton && !terminalButton ? copyButton : null}
@@ -209,19 +238,19 @@ var needBlock = function ($, ui, need, opts) {
               {terminalButton}
             </ui.Box>) : null}
         </ui.Box>) : null}
-      {need.where ? <ui.Text key={"".concat(need.id, "-where")} dimColor wrap="wrap">{need.where}</ui.Text> : null}
-      {need.said ? <ui.Text key={"".concat(need.id, "-said")} color={NEEDS} wrap="wrap">{need.said}</ui.Text> : null}
-      {(_c = (_b = need.extra) === null || _b === void 0 ? void 0 : _b.call(need, ui)) !== null && _c !== void 0 ? _c : null}
+      {need.where ? <ui.Text key={`${need.id}-where`} dimColor wrap="wrap">{need.where}</ui.Text> : null}
+      {need.said ? <ui.Text key={`${need.id}-said`} color={NEEDS} wrap="wrap">{need.said}</ui.Text> : null}
+      {need.extra?.(ui) ?? null}
       {/* The one field a block keeps where the bar above the chat draws none */}
       {need.field && 'Input' in ui ? (<ui.Box width="100%" flexDirection="column">
           <ui.Input key={need.field.key} placeholder={need.field.placeholder} {...(need.field.value === undefined ? {} : { value: need.field.value })} {...(opts.surface === 'terminal' ? {} : { rows: BOX_ROWS })} submitLabel="Send" autoFocus={opts.autoFocus || need.field.isFocused ? true : undefined} onInput={need.field.onInput} onSubmit={need.field.onSubmit}/>
         </ui.Box>) : null}
       {need.buttons.length ? (<ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-          {need.buttons.map(function (button, n) { return (<ui.Button key={button.key} label={button.label} {...(button.isPlain ? { plain: true } : n === 0 ? { variant: 'primary' } : {})} {...(button.hotkey ? { hotkey: button.hotkey } : {})} 
+          {need.buttons.map((button, n) => (<ui.Button key={button.key} label={button.label} {...(button.isPlain ? { plain: true } : n === 0 ? { variant: 'primary' } : {})} {...(button.hotkey ? { hotkey: button.hotkey } : {})} 
             // A press that answers a block on a small card, where a pointer pressed it, holds its rows for a moment
-            onPress={isFolding && !button.isOpener && one ? function (press) { return (holdFold(one.id, need.id, need.at, foldRows(need, room)), button.onPress(press)); } : button.onPress}/>); })}
+            onPress={isFolding && !button.isOpener && one ? press => (holdFold(one.id, need.id, need.at, foldRows(need, room)), button.onPress(press)) : button.onPress}/>))}
         </ui.Box>) : null}
       {/* What was last pressed or typed for it, while it is still there: a reply that left it open, an answer that did not go */}
-      {need.line ? <ui.Text key={"".concat(need.id, "-sent")} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{isWhole ? ((_d = need.wholeLine) !== null && _d !== void 0 ? _d : need.line) : need.line}</ui.Text> : null}
+      {need.line ? <ui.Text key={`${need.id}-sent`} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{isWhole ? (need.wholeLine ?? need.line) : need.line}</ui.Text> : null}
     </ui.Box>));
 };

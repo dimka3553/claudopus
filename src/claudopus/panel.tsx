@@ -23,10 +23,6 @@ let firstAtTop = ''
 // Where each card that waits stands at the top of the list: the moment it first came up there, kept while it stays, so what comes
 // later goes under it and nothing moves by itself (by chat and card: placeKey)
 const topPlaces = new Map<string, number>()
-// When each placed card stopped waiting (answered): kept up, under what waits, while something else still waits (only KEPT_MOST while what
-// waits is all another chat's); one that asks again after that goes to the end, as anything new does
-const topClosed = new Map<string, number>()
-const KEPT_MOST = 10 * 60_000
 // Each pane's drawings made afresh are numbered as they are asked for: one that finishes after a newer one (the engine dropped its
 // reply, as a newer ask overtook it) is never kept as the one on screen. Kept anyway, a press hold or the gap gave that stale
 // drawing again, and an answered card came back and went under the pointer (16 Nov recording: 4 drawings late, 5 flips back)
@@ -1785,35 +1781,21 @@ const panelHooks = (on: On) => {
     // (a box that comes while the person types a reply in the terminal leaves the keys with that reply)
     const notices = looseNeeds($, e.surface, card => Boolean(card && shownIds.has(card)), otherChats, !keysHeldNow()).map(need => ({ at: need.at, what: need.text, node: needBlock($, ui, need, { room, surface: e.surface }) }))
     // A task that waits on the person comes to the top whole, its blocks in it; once one is answered, one grey line says what was
-    // pressed, and the card keeps its place while it says so
+    // pressed, on the card in its own place
     const isAsking = (one: Todo) => Boolean(one.ask) && !isActingOnReply(one)
     // Each thing that waits, counted once: a card with a question and a key box waits on two
     const waiting2 = (one: Todo) => needsFor(one).filter(need => !need.isActing)
     const waitsOn = (one: Todo) => waiting2(one).length
     const isOpen = (one: Todo) => waitsOn(one) > 0
-    // An ask answered on its card keeps the card where it was, its answer said in it, for ANSWER_SHOWN: a press or a reply never
-    // takes the card from under the person's eyes, as a gate answered on its card does not
-    const answeredSince = (one: Todo) => {
-      return heldAnswer(one, at)?.at ?? 0
-    }
-    // An answered card keeps the place its ask had, among the answered ones under what still waits
-    const answeredPlace = (one: Todo) => (answeredSince(one) ? (sentReplies.get(one.id)?.askAt ?? answeredSince(one)) : 0)
     const placeKey = (one: Todo) => `${one.chat?.host ?? ''}/${one.chat?.id ?? ''}/${one.id}`
-    // While anything still waits, a card that waited stays up at the top once answered, under all that still waits: only once nothing
-    // waits do the answered ones go back among the rest
-    // (for KEPT_MOST at most after a card's own answer, so a request nobody here can answer, another chat's, never pins it for long)
-    const isAnyOpen = notices.length > 0 || shownWork.some(isOpen) || listedChats.some(c => shownOf(c).some(isOpen))
-    // Something the person can answer here: while it waits, an answered card keeps its place however long; only while all that waits
-    // is another chat's does it go back after KEPT_MOST
-    const isOpenHere = notices.length > otherChats.reduce((n, c) => n + (c.prompts?.length ?? 0), 0) || shownWork.some(isOpen)
-    const isKeptPlace = (one: Todo) => topPlaces.has(placeKey(one)) && (isOpenHere || at - (topClosed.get(placeKey(one)) ?? at) < KEPT_MOST)
-    const isWaits = (one: Todo) => isOpen(one) || answeredSince(one) > 0 || (isAnyOpen && isKeptPlace(one))
-    // A card that waited and now only says what was done (a gate answered) keeps its place too while it says so: what comes later
-    // goes under it, never above
+    // Only what still waits is up there: a card answered goes at once to its place by its colour, under every card that waits, and
+    // says the answer there (19 Nov, the person: "Blue ones should always go above a purple. And yellow should always go above a
+    // blue")
+    const isWaits = (one: Todo) => isOpen(one)
     const isKeptUp = (one: Todo) => isWaits(one)
     // Where a card stands among what waits: where it first came, kept for as long as it stays up there
     const cameAt = (one: Todo) => Math.min(...waiting2(one).map(need => need.at), Infinity)
-    const placeOf = (one: Todo) => topPlaces.get(placeKey(one)) ?? (Number.isFinite(cameAt(one)) ? cameAt(one) : answeredPlace(one) || at)
+    const placeOf = (one: Todo) => topPlaces.get(placeKey(one)) ?? (Number.isFinite(cameAt(one)) ? cameAt(one) : at)
     // Just finished: up at the top, right under what waits, the newest first, each for its own two seconds
     const isFinishing = (one: Todo) => !isWaits(one) && isFinishMoment(one)
     const finishFrom = (one: Todo) => (one.chat ? (endSeen.get(`${one.id}:${one.endedAt}`) ?? one.endedAt) : pauseFrom(one))
@@ -1828,32 +1810,22 @@ const panelHooks = (on: On) => {
     // The places kept: set as a card comes up among what waits, dropped as it leaves
     if (paneId === LIST) {
       const waitingNow = new Set(askCards.filter(isKeptUp).map(placeKey))
-      for (const one of askCards) {
-        const key = placeKey(one)
-        if (!topPlaces.has(key)) continue
-        if (!isOpen(one)) {
-          if (!topClosed.has(key)) topClosed.set(key, at)
-        } else if (topClosed.has(key)) ((topClosed.get(key) ?? 0) <= cameAt(one) ? topPlaces.set(key, cameAt(one)) : undefined, topClosed.delete(key))
-      }
       for (const one of askCards.filter(isWaits)) if (!topPlaces.has(placeKey(one))) topPlaces.set(placeKey(one), placeOf(one))
-      for (const key of [...topPlaces.keys()]) if (!waitingNow.has(key)) (topPlaces.delete(key), topClosed.delete(key))
+      for (const key of [...topPlaces.keys()]) if (!waitingNow.has(key)) topPlaces.delete(key)
     }
     const restHere = shownWork.filter(one => !isUp(one))
     const isHandedIn = (one: Todo) => stage(one) === 'delivered' || isDoneMoment(one, at)
-    const restFlows = shownFlows.filter(f => !isFlowMoment(f))
+    // (a workflow in its green moment stays where it was: it is there only for two seconds)
+    const restFlows = shownFlows
     // Each card keeps the place it began in: work started again (Release it on an ended ask) never moves to the end
     const begun = (one: Todo) => one.begunAt ?? one.startedAt
-    // What waits first, notices and cards in the order they came; under every one of them the cards kept up once answered, in the
-    // places they had, so nothing still waiting is ever under a card that only works (19 Nov, the person: "a yellow task is below a
-    // purple one, so that shouldn't happen"); under those what just finished, the newest first; then cards that only say what was
-    // allowed or left something running. A card is drawn when the panel is
-    const finishingFlows = shownFlows.filter(isFlowMoment)
+    // What waits first, notices and cards in the order they came; under it what just finished, blue, the newest first; then ended
+    // cards that left something running. A card is drawn when the panel is
     // What the first thing waiting on a card asks, under its task's name, for the line above the chat
     const whatOf = (one: Todo) => (waiting2(one)[0] ? `${cut(titleOf(one), 40)}: ${oneLine(waiting2(one)[0]?.text ?? '')}` : '')
     const top = [
       ...notices.map(one => ({ rank: 0, at: one.at, what: one.what, draw: () => one.node })),
-      ...askCards.map(one => (isKeptUp(one) ? { rank: isOpen(one) ? 0 : 0.5, at: placeOf(one), what: isOpen(one) ? whatOf(one) : '', draw: () => small(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: () => small(one) } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: () => small(one) })),
-      ...finishingFlows.map(f => ({ rank: 1, at: -pauseFrom(f), what: '', draw: () => flowSmall(f) })),
+      ...askCards.map(one => (isKeptUp(one) ? { rank: 0, at: placeOf(one), what: whatOf(one), draw: () => small(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: () => small(one) } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: () => small(one) })),
     ].sort((a, b) => a.rank - b.rank || a.at - b.at)
     const waitsCount = notices.length + askCards.reduce((n, one) => n + waitsOn(one), 0)
     keptUpNow = new Set(askCards.filter(isKeptUp).map(one => one.id))
@@ -1886,7 +1858,7 @@ const panelHooks = (on: On) => {
       const was = listOffsets.get(e.surface) ?? 0
       listOffsets.set(e.surface, Math.max(0, e.props.scroll.offset))
       const count = waitsCount
-      const finishedNow = [...askCards.filter(isFinishing).map(titleOf), ...finishingFlows.map(f => f.title)]
+      const finishedNow = askCards.filter(isFinishing).map(titleOf)
       if (finishedNow.join('\n') !== finishedAtTop.join('\n')) ((finishedAtTop = finishedNow), drawAgain($))
       const first = top.find(one => one.rank === 0 && one.what)?.what ?? ''
       if (count !== waitsAtTop || first !== firstAtTop || (was > 0) !== ((listOffsets.get(e.surface) ?? 0) > 0)) ((waitsAtTop = count), (firstAtTop = first), drawAgain($))
@@ -1979,7 +1951,9 @@ const panelHooks = (on: On) => {
               ...[...restHere.map(one => (isHandedIn(one) ? { rank: 0, at: -one.endedAt, card: () => small(one) } : { rank: 1, at: begun(one), card: () => small(one) })), ...restFlows.map(f => ({ rank: 1, at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.rank - b.rank || a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, with what is left of it once its asks are at the top
               ...listedChats.flatMap(c => {
-                const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => begun(a) - begun(b))
+                // (what was delivered first there too, the newest on top)
+                const handedIn = (one: Todo) => stageOf(shownOf(c), one) === 'delivered'
+                const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => Number(handedIn(b)) - Number(handedIn(a)) || (handedIn(a) ? b.endedAt - a.endedAt : begun(a) - begun(b)))
                 return cards.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...cards.map(one => small(one))] : []
               }),
             ]}
