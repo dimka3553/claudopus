@@ -9058,8 +9058,11 @@ const tidyKeptRules = async ($: EngineInterface, id: string) => {
   for (const entry of await $.fs.list(rulesDir()).catch(() => [])) {
     if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
     const path = `${rulesDir()}/${entry.name}`
-    if (entry.name === `${id}.json`) await $.fs.write(path, await readOr($, path))
-    else if (entry.mtimeMs && now - entry.mtimeMs > RULES_KEPT_FOR) await $.process.run(['rm', '-f', path]).catch(() => undefined)
+    if (entry.name === `${id}.json`) {
+      const text = await readOr($, path)
+      if (text) await $.fs.write(path, text)
+    }
+    if (entry.name !== `${id}.json` && entry.mtimeMs && now - entry.mtimeMs > RULES_KEPT_FOR) await $.process.run(['rm', '-f', path]).catch(() => undefined)
   }
 }
 
