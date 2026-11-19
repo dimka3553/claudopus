@@ -10,10 +10,12 @@ import { timelineRows } from '../stats'
 const HOME = '/home/sam'
 // The mod's own folder on this machine: each area's tests are built into mods/claudopus/hooks/tests/
 const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '')
-// Every test may take a minute, not the kit's 5 seconds: the areas' files run side by side, and on a busy machine or GitHub's runner
-// (about twice as slow as a Mac) the longest scenarios, 4 to 8 seconds alone, passed or failed by the machine's load, not by the mod.
-// SLOW is that limit, kept for the tests that name it
-const SLOW = { timeoutMs: 60_000 }
+// Every test may take three minutes, not the kit's 5 seconds: the areas' files run side by side, and on a busy machine or GitHub's
+// runner (two to three times as slow as a Mac) the longest scenarios passed or failed by the machine's load, not by the mod. Those
+// that run the clock through hours fire the mod's timers each second of it, as in a chat: 10 to 20 seconds alone on a Mac, 30 to 60
+// on GitHub's, where a minute's limit failed them, and a test that ran out took its whole file's results with it ("the file did
+// not load"). SLOW is that limit, kept for the tests that name it
+const SLOW = { timeoutMs: 180_000 }
 // The test now running, for the world's clock (below): the tests of a file run one after another
 let driver: Parameters<TestBody>[0] | undefined
 function test(name: string, body: TestBody): void
@@ -3170,10 +3172,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
 })
 
 
-// Its clock runs 4 hours 40 minutes, past the four-hour reminder, and the mod's timers fire each second of it as in a chat: about
-// 45,000 timers and 300,000 calls into the engine, 16 to 30 seconds alone on a quiet Mac and up to a minute on GitHub's, so it has
-// three minutes, not one
-test('a question nobody answers on its card is said again at 15 minutes and an hour, once each, and no more once answered; with each message of the person the chat reads what every card shows and is asked to name the question once an hour', { timeoutMs: 180_000 }, async ($, on) => {
+test('a question nobody answers on its card is said again at 15 minutes and an hour, once each, and no more once answered; with each message of the person the chat reads what every card shows and is asked to name the question once an hour', SLOW, async ($, on) => {
   const { notified, clock } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'push the fix', wait: false, origin: composer })

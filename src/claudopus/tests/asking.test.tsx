@@ -2349,10 +2349,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
 })
 
 
-// Its clock runs 4 hours 40 minutes, past the four-hour reminder, and the mod's timers fire each second of it as in a chat: about
-// 45,000 timers and 300,000 calls into the engine, 16 to 30 seconds alone on a quiet Mac and up to a minute on GitHub's, so it has
-// three minutes, not one
-test('a question nobody answers on its card is said again at 15 minutes and an hour, once each, and no more once answered; with each message of the person the chat reads what every card shows and is asked to name the question once an hour', { timeoutMs: 180_000 }, async ($, on) => {
+test('a question nobody answers on its card is said again at 15 minutes and an hour, once each, and no more once answered; with each message of the person the chat reads what every card shows and is asked to name the question once an hour', SLOW, async ($, on) => {
   const { notified, clock } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'push the fix', wait: false, origin: composer })
