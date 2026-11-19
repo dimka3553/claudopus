@@ -860,7 +860,7 @@ test('in the terminal the octopus and the marks of work are cells that move in p
 
   // The app's drawing is as it was: its Svg, and no cells
   const app = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect((await app.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Claudopus, working')).toBe(true)
+  expect((await app.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Claudopus, Claude is working')).toBe(true)
   expect(await app.findAll({ type: 'Raster' })).toEqual([])
   await app.unmount()
 })
@@ -896,7 +896,7 @@ test('in the terminal a picture is not drawn: its row, pressed, opens it in the 
 test('in a terminal reached over ssh a picture pressed is sent to the device it is watched from, by Tailscale where both have it', async ($, on) => {
   const { tab, shown, dropped, svg } = await pictured($, on, { env: { SSH_CONNECTION: '100.72.19.2 65204 100.97.255.107 22', USER: 'sam' }, tailscale: '100.72.19.2\tsams-laptop\n100.86.184.91\tphone\toffline; last seen 4h ago\n' })
   await pressed(tab, 'pic-open-1-0')
-  await until(async () => tab.find({ type: 'Text', text: /Sent to sams-laptop by Tailscale/ }))
+  expect(await until(async () => tab.find({ type: 'Text', text: '✓ Claudopus sent it to sams-laptop with Tailscale. It’s in Downloads there.' }))).toBeDefined()
   expect(dropped.map(argv => argv.slice(1))).toEqual([['file', 'cp', svg, '100.72.19.2:']])
   // Nothing opens on this Mac, where nobody looks
   expect(shown.some(argv => argv.includes(svg))).toBe(false)

@@ -158,7 +158,9 @@ const chatHooks = (on: On) => {
     // long hold in the load's own reads is logged with them too
     holdAt = 0
     // (not in the test kit, whose clock a test moves by hours at once: there only a test that asks for it has it)
-    isTimed = (await $.env.get('CLAUDOPUS_TIMING')) !== 'test'
+    const timing = (await $.env.get('CLAUDOPUS_TIMING')) ?? ''
+    isTimed = !/^test\b/.test(timing)
+    isDrawTimed = timing !== 'test'
     if (isTimed) everyLoad($, HOLD_LOOK, () => lookHold($))
     // The mod's own kinds of agent, each starting with only the tools its work takes
     void registerKinds($)

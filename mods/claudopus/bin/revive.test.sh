@@ -30,29 +30,35 @@ revived() { grep -c '"revived"' "$1" 2>/dev/null | tr -d ' '; }
 beat() { printf '%s\t%s\t%s\n' "$1" "$2" "$3" > "$mem/keep/$4.beat"; }
 stale() { touch -t 202001010000 "$mem/keep/$1.beat"; }
 tries() { wc -l < "$mem/keep/$1.revived" 2>/dev/null | tr -d ' '; }
+# A chat beating as Claudopus does, far more often than QUIET, so a busy machine never makes a beating chat look quiet: beating
+# <beat file> starts it, still <beat file> stops it, and no touch comes after
+beating() { : > "$1.on"; while [ -e "$1.on" ]; do touch "$1"; sleep 0.2; done & beater=$!; }
+still() { rm -f "$1.on"; wait "$beater" 2>/dev/null; }
 
 # A chat beating: nothing changes
 beat "$chat" claudopus@claudopus "$settings" s1
 "$revive" "$mem" &
 watcher=$!
-for k in 1 2 3 4; do sleep 1; touch "$mem/keep/s1.beat"; done
+beating "$mem/keep/s1.beat"; sleep 4; still "$mem/keep/s1.beat"
 [ "$(revived "$settings")" = 0 ] && ok "a chat that beats is left alone" || no "a chat that beats is left alone"
 # A second watcher of the same copy leaves the one running
 "$revive" "$mem" & second=$!
 within '! kill -0 $second 2>/dev/null' 3 && kill -0 "$watcher" 2>/dev/null && ok "one watcher at a time" || no "one watcher at a time"
 
-# Quiet while its process runs: only its own copy's setting changes, every other key as it was
+# Quiet while its process runs: only its own copy's setting changes, every other key as it was (and then it is said, so the log is
+# waited for)
 stale s1
 within '[ "$(revived "$settings")" = 1 ]' 8 && ok "a quiet beat changes its own copy's setting" || no "a quiet beat changes its own copy's setting"
 grep -q '"theme": "dark"' "$settings" && grep -q '"other@else": true' "$settings" && grep -q '"hooks": {}' "$settings" && ! grep -A3 '"claudopus@other"' "$settings" | grep -q revived && ok "the other settings and copies are kept" || no "the other settings and copies are kept"
-grep -q "chat s1: quiet" "$mem/keep/revive.log" && ok "it says what it did" || no "it says what it did"
+within 'grep -q "chat s1: quiet" "$mem/keep/revive.log"' 5 && ok "it says what it did" || no "it says what it did"
 # Still quiet: tried again, then left for as long as it stays quiet, however long that is
 within '[ -e "$mem/keep/s1.gaveup" ]' 10 && ok "a chat that does not come back is left after its tries" || no "a chat that does not come back is left after its tries"
 n=$(tries s1); sleep 6
 [ "$(tries s1)" = "$n" ] && [ "$n" = 2 ] && ok "and is not tried again while it stays quiet" || no "and is not tried again while it stays quiet"
 # Back (its beat moves): its tries start afresh
-touch "$mem/keep/s1.beat"
+beating "$mem/keep/s1.beat"
 within '[ ! -e "$mem/keep/s1.gaveup" ] && [ ! -e "$mem/keep/s1.revived" ]' 5 && ok "a chat that comes back has its tries afresh" || no "a chat that comes back has its tries afresh"
+still "$mem/keep/s1.beat"; rm -f "$mem/keep/s1.beat"
 
 # A chat whose own load beats again after a change was never off, only slow: it is left alone, so the other chats are not reloaded
 # again and again, until a newer load beats or it stays quiet SLOW_QUIET
@@ -61,14 +67,15 @@ slowset=$tmp/slow.json
 printf '{ "enabledPlugins": { "claudopus@claudopus": true } }\n' > "$slowset"
 beatl "$chat" claudopus@claudopus "$slowset" s8 load-a; stale s8
 within '[ "$(revived "$slowset")" = 1 ]' 8 && ok "a quiet load is changed for once" || no "a quiet load is changed for once"
+within 'grep -q "chat s8: quiet" "$mem/keep/revive.log"' 5
 c1=$(grep -c "chat s8: quiet" "$mem/keep/revive.log")
-touch "$mem/keep/s8.beat"
+beating "$mem/keep/s8.beat"
 within 'grep -q "chat s8: beats again from the same load" "$mem/keep/revive.log"' 5 && ok "the same load beating again is seen as slow, not off" || no "the same load beating again is seen as slow, not off"
-stale s8; sleep 6
+still "$mem/keep/s8.beat"; stale s8; sleep 6
 [ "$(grep -c "chat s8: quiet" "$mem/keep/revive.log")" = "$c1" ] && ok "a slow load quiet again changes nothing" || no "a slow load quiet again changes nothing"
 # nor after a few seconds of steady beats: the mark lasts SLOW_KEEP from its last stall, so a chat slow on and off is not reloaded
 # at every short stall
-for k in 1 2 3 4 5; do touch "$mem/keep/s8.beat"; sleep 1; done
+beating "$mem/keep/s8.beat"; sleep 5; still "$mem/keep/s8.beat"
 stale s8; sleep 5
 [ "$(grep -c "chat s8: quiet" "$mem/keep/revive.log")" = "$c1" ] && ok "a chat slow on and off is not changed at its next short stall" || no "a chat slow on and off is not changed at its next short stall"
 beatl "$chat" claudopus@claudopus "$slowset" s8 load-b; sleep 2; stale s8
@@ -140,8 +147,9 @@ log2() { grep -c "chat $1: $2" "$mem2/keep/revive.log" 2>/dev/null | tr -d ' '; 
 CLAUDOPUS_REVIVE_SLOW_QUIET=4 CLAUDOPUS_REVIVE_SLOW_KEEP=3 "$revive" "$mem2" & w2=$!
 # Marked slow: changed once, then beats from the same load
 beat2 t1 "$set2" load-1; stale2 t1
-within '[ "$(log2 t1 quiet)" = 1 ]' 8; touch "$mem2/keep/t1.beat"
+within '[ "$(log2 t1 quiet)" = 1 ]' 8; beating "$mem2/keep/t1.beat"
 within '[ "$(log2 t1 "beats again from the same load")" = 1 ]' 5 || no "a slow chat is marked"
+still "$mem2/keep/t1.beat"
 # A beat half written, with no load line, leaves the mark
 printf '%s\t%s\t%s\n' "$chat2" claudopus@claudopus "$set2" > "$mem2/keep/t1.beat"; sleep 1
 [ "$(head -n 1 "$mem2/keep/t1.slow" 2>/dev/null)" = load-1 ] && ok "a beat with no load line leaves the slow mark" || no "a beat with no load line leaves the slow mark"
@@ -149,8 +157,9 @@ printf '%s\t%s\t%s\n' "$chat2" claudopus@claudopus "$set2" > "$mem2/keep/t1.beat
 beat2 t1 "$set2" load-1; stale2 t1
 within 'grep -q "chat t1: Claudopus did not come back after 2 tries" "$mem2/keep/revive.log"' 15 && [ "$(log2 t1 quiet)" = 3 ] && ok "a slow chat quiet past SLOW_QUIET has its tries" || no "a slow chat quiet past SLOW_QUIET has its tries"
 # SLOW_KEEP without a stall: the mark lapses, and a switch-off then is tried as any other's, at once
-for k in 1 2 3 4 5 6; do touch "$mem2/keep/t1.beat"; sleep 1; done
-within '[ "$(log2 t1 "no stall for")" = 1 ] && [ ! -e "$mem2/keep/t1.slow" ]' 4 && ok "a slow chat with no stall for SLOW_KEEP is as any other again" || no "a slow chat with no stall for SLOW_KEEP is as any other again"
+beating "$mem2/keep/t1.beat"
+within '[ "$(log2 t1 "no stall for")" = 1 ] && [ ! -e "$mem2/keep/t1.slow" ]' 10 && ok "a slow chat with no stall for SLOW_KEEP is as any other again" || no "a slow chat with no stall for SLOW_KEEP is as any other again"
+still "$mem2/keep/t1.beat"
 n=$(log2 t1 quiet); stale2 t1
 within '[ "$(log2 t1 quiet)" -ge $((n + 2)) ]' 12 && ok "and has its tries again" || no "and has its tries again"
 rm -f "$mem2/keep/t1.beat"

@@ -282,7 +282,18 @@ const clockText = (at: number) => {
   const d = new Date(at)
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
-const dayText = (at: number) => new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+// Each day's words made once: toLocaleDateString builds the locale's formatter each time, and the timeline asks for a day several
+// times a bar, so a long history spent most of a second on it
+const days = new Map<number, string>()
+const dayText = (at: number) => {
+  const d = new Date(at)
+  const key = d.getFullYear() * 400 + d.getMonth() * 32 + d.getDate()
+  const known = days.get(key)
+  if (known !== undefined) return known
+  const text = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+  days.set(key, text)
+  return text
+}
 
 // Lanes for the timeline: each piece goes in the first lane free by its start, so the lanes count the work running at once
 export const lanesOf = (pieces: Piece[]) => {
@@ -319,8 +330,15 @@ export const axisOf = (pieces: Piece[], width: number) => {
     x += part.w + gap
     return part
   })
+  // The first part that ends at or after t, found by halves: the parts are in order, and a long history has thousands of them
   const at = (t: number) => {
-    const p = parts.find(one => t <= one.to) ?? parts.at(-1)
+    let [lo, hi] = [0, parts.length]
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if ((parts[mid]?.to ?? 0) < t) lo = mid + 1
+      else hi = mid
+    }
+    const p = parts[lo] ?? parts.at(-1)
     return p ? p.x + (Math.min(Math.max(t, p.from), p.to) - p.from) * (p.w / Math.max(1, p.to - p.from)) : 0
   }
   return { parts, at }

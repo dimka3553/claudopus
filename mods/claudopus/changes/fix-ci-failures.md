@@ -1,0 +1,2 @@
+- On Linux, stopping a command a task runs now ends everything that command started, not only its first shell.
+- Claudopus's own tests pass again on GitHub's slower Linux and Mac machines, so a red check there now means something is really broken.
