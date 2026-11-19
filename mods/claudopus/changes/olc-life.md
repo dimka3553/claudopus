@@ -1,0 +1,8 @@
+- A task's card has five stages, each with one colour: Working (purple), Waiting for you (amber), Done (green), Stopped (grey) and Failed (red, saying why). Amber means only that something waits for you.
+- A task is Done only when it hands in its result with every to-do ticked or dropped and none of its commands running. A server it leaves for you keeps its row under the Done card, with Stop.
+- A task that ends without its result, or whose app closed while it worked, is Failed and says why, with Start again. Nothing starts a task again by itself.
+- A task may not stop with to-dos open and nothing running: it carries on, asks you, or hands in its result after dropping what it won't do.
+- Every command a task runs has a row with what it does, how long it has run, how far it is and Stop. Commands that would run out of sight are refused, and so are guessed times.
+- A task waiting for something far away runs a watch, shown as a row.
+- The chat no longer writes "No response requested." when a paused task's notice arrives.
+- The header counts tasks by stage: waiting for you, working.

@@ -60,7 +60,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(await pane.find({ type: 'Text', text: /^●$/ })).toBeUndefined()
   // A finished task whose result asks something more is done, in green: its card stays at the top, never under Finished, with
   // the first question and its answers, until it is answered or dismissed, and the header counts each question
-  expect(await pane.find({ type: 'Text', text: /^2 questions waiting for you/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^2 waiting for you/ })).toBeDefined()
   const asking = await pane.find({ type: 'Text', text: 'Result ready · Shall I send it to the team?' })
   expect([asking?.props.color, asking?.props.bold]).toEqual([undefined, true])
   expect(await pane.find({ type: 'Text', text: /^Waiting for you · / })).toBeUndefined()
@@ -107,14 +107,14 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   await pressed(one, 'report-say-0-Yes')
   expect(answers()).toHaveLength(1)
   expect(answers()[0]).toMatch(/^a1: The person pressed "Yes" to answer a question in your result "Weekly revenue" \(.*\/report\.md\): Shall I send it to the team\?\n1 other question of that result still waits for them/)
-  expect(answers()[0]).toContain('this answer starts you again')
+  expect(answers()[0]).toContain('Continue the task with this answer')
   expect(answers()[0]).not.toMatch(/\b(me|my)\b/)
   expect(submitted).toHaveLength(0)
   expect(appended.filter(line => line.includes('answered a question in the result "Weekly revenue"'))).toEqual([expect.stringContaining('Its task has the answer and carries on with it itself')])
   // Its card is at work at once: Stop, no question, counted as working
   expect(await until(async () => (await pane.find({ type: 'Button', key: 'stop-a1' })) ?? undefined)).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: /^1 task working/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^1 working/ })).toBeDefined()
   expect(await keyed(pane, 'dismiss-a1')).toBeUndefined()
   await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[0]?.answer ? true : undefined))
   // It ends again with the other question still open: it waits for the person again
@@ -126,7 +126,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(await one.find({ type: 'Text', text: 'Post it in the channel too?' })).toBeDefined()
   // The card goes on to the next question, the last one
   expect(await until(async () => (await pane.find({ type: 'Text', text: 'Result ready · Post it in the channel too?' })) ?? undefined)).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^1 question waiting for you/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^1 waiting for you/ })).toBeDefined()
   expect((await pane.findAll({ type: 'Button' })).some(b => /^result-ask-a1-more-/.test(b.key ?? ''))).toBe(false)
   // Not now clears the other and sends nothing
   await pressed(one, 'report-say-1-Not now')
@@ -240,7 +240,10 @@ test('work started from a report keeps its own report linked to it, beside the o
   // The older one is kept as it was
   expect(files.get(`${MEMORY}/reports/${old.id}/report.md`)).toBe('Revenue was flat.\n')
 
-  // The same work reporting again, and the report it started from, are one row: the newest
+  // The same work reporting again, and the report it started from, are one row: the newest (the person's words start it again:
+  // a task that is done reports again only from a run of its own)
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Sam: “count the refunds too”' } as never)
+  for await (const _ of $.turn.step({ turnId: 't2', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
   await $.turn.complete({ agentId: 'a1', answer: `Revenue rose 6% once the refunds are counted.\n\n${'Refunds are in the table. '.repeat(30)}`, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
   await clock.advance(70_000)
   await until(async () => ([...files.keys()].filter(path => path.endsWith('/meta.json')).length === 3 ? true : undefined))
@@ -299,34 +302,6 @@ test('an older report waits by its one question, a report that only ends with a 
   expect(told).toContain('waiting on: (2) Make it public?')
   expect(told).not.toContain('Delete the folder?')
   expect(told).not.toContain('Shall I go on?')
-})
-
-test('a report handed back asking the person something it never recorded as waiting is refused once, so its card can show it waits; one that recorded it, or asks only in code, goes through', async ($, on) => {
-  world(on)
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'make three videos', wait: false, origin: composer })
-  const handback = async (agentId: string, message: string) => ((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: `h-${agentId}`, agentId, message } as never)) as { deny?: string }).deny
-  const cases: { title: string; message: string; waits?: string[]; kind?: string; refused: boolean }[] = [
-    // 18 Nov: the question was the report's first line, and nothing was recorded
-    { title: 'Three openings', message: 'Which opening should go out: A, B or C? Nothing is posted until you pick one.', refused: true },
-    { title: 'Life cycle', message: 'The picture is redrawn.\n\n**Waiting on you**\n- Yes or no to building it.', refused: true },
-    { title: 'Headed', message: 'Pushed.\n\n## Waiting on you\n- Yes or no to releasing it.', refused: true },
-    { title: 'Short', message: '1. Ship it to `main`?', refused: true },
-    { title: 'Recorded', message: 'Which opening should go out: A, B or C?', waits: ['Which opening should go out?'], refused: false },
-    { title: 'Nothing waits', message: 'Should the chat say more? It did not, so I left it.', waits: [], refused: false },
-    { title: 'Only code', message: 'The check `a?.b` and "Is it done?" are fixed. Pushed.', refused: false },
-    { title: 'Headings and tables', message: '## Why did it fail?\nIt timed out.\n\n| Passes? | Yes |\n\n    if (a ? b : c) return', refused: false },
-    // An agent with no waits tool is never told to call it
-    { title: 'Second look', message: 'Shall I look at the terminal too? I did not.', kind: 'claudopus:check', refused: false },
-  ]
-  for (const [n, one] of cases.entries()) {
-    const id = `a${n + 1}`
-    await $.agent.spawn({ ...spawn, description: one.title, prompt: one.title, ...(one.kind ? { subagentType: one.kind } : {}) } as never)
-    if (one.waits) await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: `w-${id}`, items: one.waits, agentId: id } as never)
-    expect([one.title, await handback(id, one.message)]).toEqual([one.title, one.refused ? expect.stringContaining('Not sent: your report asks') : undefined])
-    // Refused once a round: sent again, it goes through as it is
-    if (one.refused) expect(await handback(id, one.message)).toBeUndefined()
-  }
 })
 
 test('a result archived with one press leaves the list, its tab, the count and the note, waits on nothing, keeps its text, and comes back from the folded Archived row', async ($, on) => {
@@ -537,11 +512,14 @@ test("what a result waits on is answered however the person answers it, and only
   await $.agent.spawn({ ...spawn, description: 'Waits fix', prompt: 'build it' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release 0.2.168?' } as never)
   expect((await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w1', agentId: 'a1', items: [{ text: 'Release 0.2.168 with the waits fix?', asked: true }, 'Shall I redraw its icon?'] } as never)).result).toContain('One is the question on your card')
+  // (it hands its result in with the ask still open: a turn's end alone leaves a task that waits for the person at work)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'Built the waits fix.' } as never)
   await $.turn.complete({ agentId: 'a1', answer: 'Built the waits fix.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   // The same line as its ask is that ask's without the mark; a question that only shares its words is another question
   await $.agent.spawn({ ...spawn, description: 'Key box', prompt: 'build it' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Release the new key box?' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w2', agentId: 'a2', items: ['release the new key box', 'Should the new key box replace the old one in Settings?'] } as never)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h2', agentId: 'a2', message: 'Built the key box.' } as never)
   await $.turn.complete({ agentId: 'a2', answer: 'Built the key box.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
   await clock.advance(10)
   const fix = await reportOf('waits-fix')

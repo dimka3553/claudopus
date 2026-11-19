@@ -186,11 +186,10 @@ const panelHooks = (on: On) => {
     }
     // Every piece of work this chat keeps; its own are the ones the chat's thread started, the rest are their helpers
     // A card whose ask or gate was just pressed is drawn answered, from the press itself (asPressed)
-    // (each read as it stands, never as Done while something of its own runs or to-dos are left: shownAs)
-    const shownKept = await read($, reports)
-    const shownAt = await $.clock.now()
-    const all = shownAs((await read($, todos)).map(asPressed), one => openResultWaits(one, shownKept, shownAt).length > 0)
+    const all = (await read($, todos)).map(asPressed)
     const own = all.filter(one => !one.parentId)
+    // Each card's stage, which its colour, its line, its place and the header's counts all read (stageOf)
+    const stage = (one: Todo) => stageOf(all, one)
     // What a finished task's results still ask the person (openResultWaits): its card stays at the top, green, never under
     // Finished, until each is answered
     const resultsKept = await read($, reports)
@@ -208,9 +207,10 @@ const panelHooks = (on: On) => {
     const answeredOf = (list: Prompt[] | undefined) => (list ?? []).filter(p => !p.endedAt || at - p.endedAt < PROMPT_SHOWN)
     const promptsAnswered = answeredShown(at)
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
-    // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
-    // (a card the person dismissed is under Finished whatever it still asks or left, until its task works again)
-    const shownWork = own.filter(one => !isDismissed(one)).filter(one => one.status === 'working' || isLingering(one, at) || one.ask || resultWaits(one).length > 0 || one.admins?.length || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD) || isLeftStopped(one, at) || isLeftOpen(one, at))
+    // The cards kept up: every one working or waiting for the person, one that just ended for its pause, one that failed (it says
+    // why, and has Start again) until it is dismissed or a day old, one that finished with a server left for the person, whose row
+    // and Stop are under it, one whose result still asks the person something, and one a command run on a press still shows on. A card the person dismissed is under Finished
+    const shownWork = own.filter(one => !isDismissed(one)).filter(one => stage(one) === 'working' || stage(one) === 'waiting' || isLingering(one, at) || runningOn(one.id).length > 0 || (stage(one) === 'failed' && at - one.endedAt < FAILED_UP) || (stage(one) === 'done' && Boolean(one.bg?.length)) || resultWaits(one).length > 0)
     // A key box or a prompt of the app's that a task's own command raised, by that task's card: drawn on the card, never above it
     // (filled where the top of the panel is put together, below)
     let onCards = new Map<string, { at: number; key: string; what: string; node: JSX.Element }[]>()
@@ -228,17 +228,17 @@ const panelHooks = (on: On) => {
     // then it goes under Finished. Work stopped or stopped by an error is not: it pauses in its place, in its own look
     // In the few rows above the prompt a narrow terminal gives the panel, the outline would take two of them
     const isAbovePrompt = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
-    const isFinishMoment = (one: Todo) => one.status === 'done' && !one.leftOpen && !one.ask && !resultWaits(one).length && lingers(one, at)
+    const isFinishMoment = (one: Todo) => stage(one) === 'done' && lingers(one, at)
     const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
-    // Work under way says nothing of its state: the moving dots do
-    const stood: Record<Todo['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
+    // How a workflow's card says it ended; one under way says nothing of its state: the moving dots do
+    const stood: Record<Flow['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
     // Work the app sent to an older model says so, and which one; work that answers from one all the same says so
     const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `Claude Code moved it to ${one.moved}` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
     // A card's top row is its facts alone: model, how full, to-dos and time, never its stage, which its colour and the line under
     // it say (18 Nov, the person: "This top row should never say 'waiting for its command'. It should only have context, model,
     // how many to-dos, and time"). Details, whose header is the whole card, still begins with how it ended
     const glance = (one: Todo, count = '', isWhole = false) =>
-      [isWhole ? (one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waiting for you' : one.leftOpen ? 'Not done' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status]) : '', modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [isWhole && stage(one) !== 'working' ? `${STAGE_WORD[stage(one)]}${stage(one) === 'failed' && one.why ? ` · ${one.why}` : ''}` : '', modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
@@ -297,7 +297,7 @@ const panelHooks = (on: On) => {
     const now = (one: Todo) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
       // (nor what one command left going while other programs of it still work)
-      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim() && !one.detached?.some(d => d.from === r.id || (leftCommandOf(r.id) !== '' && leftCommandOf(d.id) === leftCommandOf(r.id)))) : []
+      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim()) : []
       const said: Record<string, string> = { finished: 'done', failed: 'failed', killed: 'stopped', stopped: 'stopped', ended: 'ended' }
       const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))}: ${said[r.how] ?? 'ended'}`)
       return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} · ${second}` : `${first} · ${second} · ${runs.length - 2} more ended`
@@ -490,7 +490,7 @@ const panelHooks = (on: On) => {
       const { r, wait, index } = first
       return (
         <Box key={key} flexDirection="column" gap={1}>
-          <Text wrap="wrap" color={one.leftOpen ? NEEDS : undefined} bold>{`Result ready · ${cut(wait.text, Math.round(room * 1.6))}`}</Text>
+          <Text wrap="wrap" bold>{`Result ready · ${cut(wait.text, Math.round(room * 1.6))}`}</Text>
           {r ? (
             <Box flexDirection="row" flexWrap="wrap" gap={1}>
               {answersOf(wait).map((said, n) => (
@@ -566,7 +566,7 @@ const panelHooks = (on: On) => {
                   </Button>
                 </Box>
                 <Box flexGrow={1} />
-                {one.status === 'working' && !one.chat && (!one.wasDone || one.leftSince) ? (
+                {one.status === 'working' && !one.chat ? (
                   <Box flexShrink={0}>
                     <Button key={`stop-${one.id}`} label="Stop" plain dimColor hover={{ scope: `stop-${one.id}`, underline: true }} onPress={() => void stop($, one.id)} />
                   </Box>
@@ -576,6 +576,12 @@ const panelHooks = (on: On) => {
                 {(canChange(one) && !resultWaits(one).length) && 'Input' in table && repliesInBar(e.surface) ? (
                   <Box flexShrink={0}>
                     <Button key={`change-${one.id}-${presses}`} label="Change something" plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openChange($, one, press.surface)} />
+                  </Box>
+                ) : null}
+                {/* Failed, or stopped by the person: only their press starts it again */}
+                {!one.chat && (stage(one) === 'failed' || (stage(one) === 'stopped' && one.byYou)) ? (
+                  <Box flexShrink={0}>
+                    <Button key={`again-small-${one.id}-${presses}`} label="Start again" plain dimColor hover={{ scope: `again-${one.id}`, underline: true }} onPress={() => ((presses += 1), void startAgain($, one.id))} />
                   </Box>
                 ) : null}
                 {/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again */}
@@ -627,50 +633,24 @@ const panelHooks = (on: On) => {
                 </Box>
               ) })),
             ].sort((a, b) => a.at - b.at).map(part => part.node)}
-            {/* A card says its stage, its to-do and what it does now, and in amber what needs the person. What Claudopus did on the
-                way (started it again after the chat stopped or after it stopped partway, the command it waits for, the time it starts
-                it again, the helpers it was told to check on) is never on the card (18 Nov) */}
-            {/* Nothing new has come back under it for a while, and no helper of its is at work: amber */}
-            {stuckLine(all, one, at) && one.status === 'working' && !one.chat ? (
-              <Box key={`stuck-${one.id}`} paddingLeft={lead}>
-                <Text color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
-              </Box>
-            ) : null}
-            {/* Cut off as the chat's process ended, and Claudopus could not start it again: amber, as it needs the person */}
-            {cutLine(one) && !one.chat ? (
-              <Box key={`cut-${one.id}`} paddingLeft={lead}>
-                <Text color={NEEDS} wrap="wrap">{cutLine(one)}</Text>
-              </Box>
-            ) : null}
-            {/* Stopped partway without a result, and Claudopus stopped starting it again: amber */}
-            {carryLine(one) && !one.chat ? (
-              <Box key={`carry-${one.id}`} paddingLeft={lead}>
-                <Text color={NEEDS} wrap="wrap">{carryLine(one)}</Text>
-              </Box>
-            ) : null}
-            {/* Ended with to-dos not done: which, in the colour of what needs the person, so nobody has to ask what was left */}
-            {notDoneLine(one) ? (
-              <Box key={`not-done-${one.id}`} paddingLeft={lead}>
-                <Text color={NEEDS} wrap="wrap">{notDoneLine(one)}</Text>
-              </Box>
-            ) : null}
+            {/* A card says its stage, its to-do and what it does now, and in amber only what waits for the person */}
             {/* A result's question is all a card waiting for its answer says: no line of what Claude last did */}
             {resultWaits(one).length ? null : (
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden" paddingLeft={lead}>
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                {/* Ended, the line begins with how it ended, in a word: green when it finished, amber when not done, plain when
-                    it was stopped; then what it last said */}
-                {!one.ask && one.status !== 'working' && !isActingOnReply(one) ? (
+                {/* Ended, the line begins with its stage, in its colour: green done, grey stopped, red failed with why; then what
+                    it last said */}
+                {stage(one) === 'done' || stage(one) === 'stopped' || stage(one) === 'failed' ? (
                   <Box flexDirection="row" minWidth={0}>
-                    <Text wrap="truncate-end" color={one.leftOpen ? NEEDS : one.status === 'done' ? DONE : one.status === 'failed' ? 'error' : undefined} dimColor={one.status !== 'done' && one.status !== 'failed' && !one.leftOpen}>
-                      {one.leftOpen ? 'Not done' : one.status === 'done' ? '✓ Done' : one.status === 'failed' ? '✕ Failed' : one.byYou ? 'Stopped by you' : 'Stopped'}
+                    <Text wrap="truncate-end" color={stageColor(stage(one))} dimColor={stage(one) === 'stopped'}>
+                      {stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? `✕ Failed${one.why ? ` · ${one.why}` : ''}` : 'Stopped'}
                     </Text>
-                    {!leftLine(one, at) && noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}
+                    {noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}
                   </Box>
                 ) : (
                   <Box flexDirection="column" minWidth={0}>
-                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(noteOf(one), room) || (one.status === 'working' ? (one.ask ? 'Waiting for you' : at - one.startedAt < 60_000 ? 'Starting' : 'Working') : "Claude hasn't said what it's doing")}</Text>
+                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(noteOf(one), room) || (stage(one) === 'waiting' ? 'Waiting for you' : at - one.startedAt < 60_000 ? 'Starting' : 'Working')}</Text>
                     {/* Held where it was after an answer, once a newer line of the work's took the answer's place: why it is still up there */}
                     {!one.ask && !sentLine(one, at) && heldAnswer(one, at) && heldAnswer(one, at)?.to !== 'ran' && !heldAnswer(one, at)?.isRun ? <Text key={`held-answer-${one.id}`} dimColor wrap="truncate-end">{`✓ You answered “${cut(heldAnswer(one, at)?.text ?? '', 60)}”`}</Text> : null}
                   </Box>
@@ -684,33 +664,22 @@ const panelHooks = (on: On) => {
                 <Button key={`take-back-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label={`↶ Take back “${cut(heldAnswer(one, at)?.text ?? '', 30)}”`} plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} />
               </Box>
             ) : null}
-            {/* Finished, with something it started still running: what, how long, and a way to stop it */}
-            {leftLine(one, at) && !one.chat ? (
-              <Box key={`left-${one.id}`} flexDirection="column" gap={1} paddingLeft={lead}>
-                <Text color={NEEDS} wrap="wrap">{leftLine(one, at)}</Text>
-                <Box flexDirection="row">
-                  <Button key={`left-stop-${one.id}-${presses}`} label="Stop it" onPress={() => void stop($, one.id)} />
-                </Box>
-              </Box>
-            ) : null}
             {/* Its helpers, inside the card: its coloured edge runs down beside them */}
             {tree.length ? <Box key={`tree-${one.id}`} flexDirection="column" paddingLeft={lead}>{tree}</Box> : null}
           </Box>
         </Box>
       )
     }
-    // The card's coloured edge. Purple while it works, green once it finished, amber while it needs the person's hands; work
-    // stopped or stopped by an error has none. While it works the edge is also its to-dos, one part each from the top down:
+    // The card's coloured edge is its stage: purple while it works, amber while it waits for the person, green once done, red
+    // when it failed, none when it was stopped. While it works the edge is also its to-dos, one part each from the top down:
     // those done bright, the one being done between, the rest a dim tint of the same purple, so the whole edge stays purple.
     // More than EDGE_PARTS to-dos are one edge filled as far as they are done. The parts are boxes that share the card's
     // height, whatever it is; a terminal has no part thinner than a row, so there the edge is whole
     const edge = (one: Todo, count: number, done: number, isDoing: boolean) => {
-      // An error that stopped it is said in red, on its edge too
-      if (one.status === 'failed') return <Box width={1} flexShrink={0} backgroundColor="error" />
-      if (one.status !== 'working' && one.status !== 'done') return <Box width={1} flexShrink={0} />
-      // (amber for one that waits on the person to go on, or that left to-dos; a done one whose result asks something more is green)
-      const isNeeded = needsPerson(one) || (onCards.get(one.id)?.length ?? 0) > 0 || Boolean(one.leftOpen)
-      if (isNeeded || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={isNeeded ? NEEDS : one.status === 'working' || isActingOnReply(one) ? LIVE : DONE} />
+      // (what waits for the person on its card, a key box or a prompt its command raised, is amber as its own question is)
+      const now: Stage = stage(one) === 'working' && (onCards.get(one.id)?.length ?? 0) > 0 ? 'waiting' : stage(one)
+      if (now === 'stopped') return <Box width={1} flexShrink={0} />
+      if (now !== 'working' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={stageColor(now)} />
       const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
       return count > EDGE_PARTS ? (
         <Box key={`edge-${one.id}`} width={1} flexShrink={0} flexDirection="column">
@@ -781,7 +750,7 @@ const panelHooks = (on: On) => {
       const row = twigRowOf(t, `${scope}-${one.id}`, cut(titleOf(one), Math.max(12, width - side.length)), one.status !== 'working', side, () => openWork($, one.id), one.status)
       // Under a helper at work, what it is doing now in plain words, as a command's second line says how it goes (17 Nov: a
       // helper's row said only its model, tokens and time, nothing of what it did)
-      const doing = one.status === 'working' && !one.chat ? helperNow(one, at, jobsOf(one, at).length, Math.max(12, width)) : ''
+      const doing = one.status === 'working' && !one.chat ? helperNow(one, at, jobsOf(one).length, Math.max(12, width)) : ''
       if (!doing) return row
       return (
         <Box key={`twig-pair-${scope}-${one.id}`} flexDirection="column" flexShrink={0}>
@@ -802,7 +771,7 @@ const panelHooks = (on: On) => {
     const jobLines = (t: Twig, key: string, job: Job) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !job.isPaused && job.kind !== 'wait' && !(job.isEmpty ? at - job.at >= JOB_QUIET : job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !(job.isEmpty ? at - job.at >= JOB_QUIET : job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
         </Box>
       ) : (
         <Box key={key} flexDirection="row" flexShrink={0}>
@@ -841,20 +810,7 @@ const panelHooks = (on: On) => {
     // only while that line is the latest, and never for a wait, whose count is how long it is willing to wait
     const guessLeft = (job: Job, ran: number) => {
       const share = Number.parseFloat(job.pct ?? '') / 100
-      return !job.left && job.isOwn && !job.isEarlier && job.kind !== 'wait' && share >= 0.01 && share < 1 && ran >= 20_000 ? timeLeftText((ran / 1000) * ((1 - share) / share)) : undefined
-    }
-    // Its time, and how long it said it should take. Once past that, the figure it said no longer holds: where the run says how
-    // long it has left as it prints now (or its percent gives one), the time so far and that left make a fresh expectation;
-    // otherwise its row says plainly that it is past the time it was expected to take, in amber. Nothing is made up
-    const jobTime = (job: Job, ran: number) => {
-      if (!job.expectText || !job.expect) return { time: took(ran), isPast: false }
-      if (ran <= job.expect) return { time: `${took(ran)} of about ${job.expectText}`, isPast: false }
-      const isFresh = !job.isPaused && Boolean(job.wroteAt) && at - (job.wroteAt ?? 0) < 60_000
-      // the time left is as of when it was printed, so it adds to the time it had run then
-      const printedAt = Math.min(ran, Math.max(0, (job.wroteAt ?? 0) - job.at))
-      const left = isFresh ? leftSeconds(job.left ?? guessLeft(job, printedAt)) : undefined
-      const fresh = left ? timeLeftText(Math.max(ran / 1000, printedAt / 1000 + left))?.replace(/ left$/, '') : undefined
-      return fresh ? { time: `${took(ran)} of about ${fresh}`, isPast: false } : { time: `${took(ran)} · ${shortAgo(ran - job.expect)} over`, isPast: true }
+      return !job.left && job.isOwn && !job.isEarlier && job.kind !== 'watch' && share >= 0.01 && share < 1 && ran >= 20_000 ? timeLeftText((ran / 1000) * ((1 - share) / share)) : undefined
     }
     // Every run's second line has the one shape plainOf describes: how far, a few plain words, and its sign of life, which changes
     // as time goes so the line never stands still while the run goes on. Nothing raw is shown: a line that is not plain words is
@@ -872,7 +828,7 @@ const panelHooks = (on: On) => {
       // Quiet for three minutes, in amber: a server or a watch speaks only when there is something to say, so its quiet is no
       // fault, and one whose output has not been read yet is not known to be silent until a minute has passed. Before three
       // minutes nothing is said of when: a count of seconds beside a still percent told nothing (16 Nov)
-      const isSilent = !job.isPaused && !job.target && job.kind !== 'server' && job.kind !== 'watch' && !(quiet === undefined && !job.isEmpty && ran < SILENT_WARN) && still >= SILENT_AFTER
+      const isSilent = job.kind !== 'server' && job.kind !== 'watch' && !(quiet === undefined && !job.isEmpty && ran < SILENT_WARN) && still >= SILENT_AFTER
       // its speed and time left only while it prints: ten seconds old, they are no longer how it goes
       const isFresh = quiet !== undefined && quiet < 10_000
       const guess = guessLeft(job, ran)
@@ -882,34 +838,26 @@ const panelHooks = (on: On) => {
       const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
       // a count without its unit, for the narrowest line, so how far it is stays beside how long is left
       const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
-      // The memory it holds only where it is a gigabyte or more, said as memory, as it counts against what this Mac may hold; a few
-      // megabytes say nothing to a person (16 Nov a row led with "35 MB"), and it goes first when the line has no room
-      const mem = job.mem && /\b[GT]B\b/.test(job.mem) ? [`${job.mem} memory`] : []
       // Its own plain words for what it does now; a watch's are its last event
-      const words = plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, `${job.label} ${job.waitsFor ?? ''}`)
+      const words = plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, job.label)
       const hasSaid = Boolean(words || full.length || pct.length)
       // Quiet never stands alone (17 Nov "nothing printed for 29m 30s" said nothing of what it did): the last thing it said stays,
-      // marked as the last, or that it has shown no output or no progress at all; and once Claude was told of it, that too
-      const told = isSilent && silentTold.has(job.id) ? 'Claude was told to check it' : ''
+      // marked as the last, or that it has shown no output or no progress at all
       const [state, short]: [string, string] =
-        job.isPaused ? ['Paused', 'Paused']
-        : job.target ? [job.target, job.target.replace(/^What it waits for hasn't changed for /, 'No change for ').replace(/^What it waits for /, 'Its target ')]
-        : job.kind === 'server' || job.kind === 'watch' ? ['', '']
+        job.kind === 'server' || job.kind === 'watch' ? ['', '']
         : !isSilent ? ['', '']
         : hasSaid ? [`nothing new for ${ago(still)}`, `nothing new for ${shortAgo(still)}`]
         : !job.wroteAt || job.isEmpty ? [`No output yet · started ${shortAgo(ran)} ago`, `No output yet · ${shortAgo(ran)}`]
         : [`No progress shown · nothing new for ${ago(still)}`, `No progress for ${shortAgo(still)}`]
-      const isWarn = job.isPaused || Boolean(job.target) || isSilent
+      const isWarn = isSilent
       // A server or a watch leads with what it does, then the last thing it said
       const lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving · ') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching · ') : isSilent && hasSaid ? 'Last: ' : ''
-      // (what one command left going, when it is several programs, says how many: its row names the command once)
       // (a narrow row drops the "about" of a time left worked out from its percent)
       const near = left.map(one => one.replace(/^about /, ''))
-      const programs = leftCommandOf(job.id) && job.count && job.count > 1 ? [`${job.count} programs`] : []
-      const numbers = [[...full, ...pct, ...rate, ...left, ...programs, ...mem], [...full, ...pct, ...rate, ...left, ...programs], [...full, ...pct, ...left, ...programs], [...full, ...pct, ...left], ...(near.length ? [[...full, ...near]] : []), [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...compact, ...near], [...bare, ...near]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]
-      const tails = [[state, told], [state], [short, told], [short]].map(t => t.filter(Boolean))
-      // How far it is comes first, then its sign of life, then whether Claude was told: the fullest counts with each tail, then any
-      const tries = [...numbers.slice(0, 3).flatMap(nums => tails.map(tail => ({ nums, tail }))), ...tails.flatMap(tail => numbers.map(nums => ({ nums, tail })))]
+      const numbers = [[...full, ...pct, ...rate, ...left], [...full, ...pct, ...left], ...(near.length ? [[...full, ...near]] : []), [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...compact, ...near], [...bare, ...near]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]
+      const tails = [[state], [short]].map(t => t.filter(Boolean))
+      // How far it is comes first, then its sign of life: the fullest counts with each tail, then any
+      const tries = [...numbers.slice(0, 2).flatMap(nums => tails.map(tail => ({ nums, tail }))), ...tails.flatMap(tail => numbers.map(nums => ({ nums, tail })))]
       for (const { nums, tail } of tries) {
         const fixed = [...nums, ...tail].join(' · ')
         if (lead.length + fixed.length > width) continue
@@ -925,7 +873,7 @@ const panelHooks = (on: On) => {
         const kindLead = job.kind === 'server' ? 'Serving' : job.kind === 'watch' ? 'Watching' : ''
         const shownLead = kindLead ? `${kindLead} · ${said ? 'last: ' : ''}` : lead && (nums.length || said) ? lead : ''
         const line = `${shownLead}${text}`
-        return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : kindLead || (job.kind === 'wait' ? 'Waiting' : job.kind === 'download' ? 'Downloading' : 'Working'), isWarn }
+        return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : kindLead || (job.kind === 'download' ? 'Downloading' : 'Working'), isWarn }
       }
       return { text: short, isWarn }
     }
@@ -937,11 +885,11 @@ const panelHooks = (on: On) => {
       const key = `${scope}-job-${job.id}`
       const width = perRow - 4 - t.depth * 2
       const ran = at - job.at
-      const { time, isPast: isLong } = jobTime(job, ran)
+      const time = took(ran)
       // Stop, at its end, where it can be stopped from here: it ends the run and tells the work it was stuck
       const owner = t.one?.id ?? ''
-      // (not on a row too narrow to say how far it is beside it; Details, wider, has it)
-      const isStoppable = Boolean(owner) && canStopJob(job) && !job.id.startsWith('more-') && width >= 44
+      // (every row has it, down to the narrowest that still has room for a word of how far it is beside it)
+      const isStoppable = Boolean(owner) && canStopJob(job) && !job.id.startsWith('more-') && width >= 24
       const name = cut(jobHead(job), Math.max(12, width - time.length - 1))
       const head = (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
@@ -955,7 +903,7 @@ const panelHooks = (on: On) => {
             )}
           </Box>
           <Box flexShrink={0}>
-            <Text dimColor={!isLong} color={isLong ? NEEDS : undefined}>{time}</Text>
+            <Text dimColor>{time}</Text>
           </Box>
         </Box>
       )
@@ -1004,11 +952,11 @@ const panelHooks = (on: On) => {
     // At most JOBS_SHOWN each, the newest; the rest one row that says how many more run and opens the card's Details
     // In Details every one is shown
     const jobBranches = (card: Todo, isAll = false): Branch[] => {
-      const jobs = jobsOf(card, at)
+      const jobs = jobsOf(card)
       if (isAll || jobs.length <= JOBS_SHOWN) return jobs.map(job => ({ one: card, job, kids: [] }))
       const more = jobs.length - JOBS_SHOWN + 1
       const shown = jobs.slice(-(JOBS_SHOWN - 1))
-      const rest: Job = { id: `more-${card.id}`, label: `${jobs.slice(0, more).reduce((n, job) => n + (leftCommandOf(job.id) ? 1 : (job.count ?? 1)), 0)} more commands`, cmd: '', kind: 'watch', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
+      const rest: Job = { id: `more-${card.id}`, label: `${jobs.slice(0, more).reduce((n, job) => n + (job.count ?? 1), 0)} more commands`, cmd: '', kind: 'watch', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
       return [...shown, rest].map(job => ({ one: card, job, kids: [] }))
     }
     const withJobs = (branches: Branch[], isAll = false): Branch[] =>
@@ -1019,7 +967,7 @@ const panelHooks = (on: On) => {
     // helper is listed. A helper that ended with a job still running stays for it
     // The runs that ended under a card: its own and its helpers', oldest first
     // (what one command left going counts as ended once its last program has: before that it is still its running row)
-    const endedRunsOf = (one: Todo, list = all) => [one, ...underOf(list, one.id)].flatMap(kid => (kid.endedRuns ?? []).filter(r => !leftCommandOf(r.id) || !kid.detached?.some(d => leftCommandOf(d.id) === leftCommandOf(r.id)))).sort((a, b) => a.endedAt - b.endedAt)
+    const endedRunsOf = (one: Todo, list = all) => [one, ...underOf(list, one.id)].flatMap(kid => kid.endedRuns ?? []).sort((a, b) => a.endedAt - b.endedAt)
     // Runs that ended leave the tree at once; the closing row counts them with the helpers that ended, and says how many of them
     // failed, were killed or ran out of time, so nothing goes without a trace
     const treeUnder = (one: Todo) => {
@@ -1027,7 +975,7 @@ const panelHooks = (on: On) => {
       const own = jobBranches(one)
       const runs = endedRunsOf(one, one.chat ? helpersThere : all)
       if (!under.length && !own.length && !runs.length) return []
-      const branches = [...own, ...withJobs(branchesOf(all, one.id, kid => kid.status === 'working' || isLingering(kid, at) || jobsOf(kid, at).length > 0))]
+      const branches = [...own, ...withJobs(branchesOf(all, one.id, kid => kid.status === 'working' || isLingering(kid, at) || jobsOf(kid).length > 0))]
       const twigs = twigsOf(branches, true)
       const rest = under.length - twigs.filter(t => !t.job).length
       if (!rest && !runs.length) return twigsOf(branches).map(rowOf)
@@ -1088,7 +1036,7 @@ const panelHooks = (on: On) => {
       const round = rounds.at(-1)
       if (f.status === 'working') {
         const one = round ? [...round.agents].reverse().find(agent => agent.status === 'working') : undefined
-        return one ? doing(one.phase || stageOf(f) || 'Working') : round ? 'Between stages' : 'Starting'
+        return one ? doing(one.phase || flowStageOf(f) || 'Working') : round ? 'Between stages' : 'Starting'
       }
       if (f.status === 'stopped') return 'Stopped'
       if (f.status === 'failed') return 'Failed'
@@ -1108,7 +1056,7 @@ const panelHooks = (on: On) => {
     // Who is at work in a round, in plain words: the rounds script's maker and checker by name, any other stage by its own
     const atWork = (f: Flow, r: Round) => {
       const one = [...r.agents].reverse().find(agent => agent.status === 'working')
-      const phase = one?.phase || stageOf(f)
+      const phase = one?.phase || flowStageOf(f)
       if (!one) return 'between stages'
       if (phase === 'Make') return r.n === 1 ? 'Maker building it' : 'Maker fixing what the check found'
       if (phase === 'Check') return 'Checker testing it'
@@ -1384,7 +1332,7 @@ const panelHooks = (on: On) => {
       const under = underOf(list, one.id)
       const branches = [...jobBranches(one, true), ...withJobs(branchesOf(list, one.id, () => true), true)]
       // (what one command left going counts as that one command, however many programs it is)
-      const jobs = [one, ...under].reduce((n, kid) => n + jobsOf(kid, at).reduce((sum, job) => sum + (leftCommandOf(job.id) ? 1 : (job.count ?? 1)), 0), 0)
+      const jobs = [one, ...under].reduce((n, kid) => n + jobsOf(kid).reduce((sum, job) => sum + (job.count ?? 1), 0), 0)
       if (!under.length && !jobs) return null
       const running = under.filter(kid => kid.status === 'working').length
       // Beside the jobs, the helpers are named, so neither count reads as the other's
@@ -1581,11 +1529,11 @@ const panelHooks = (on: On) => {
                   {openTheirs(one, one.chat)}
                 </Box>
               ) : null}
-              {(one.status === 'working' && !one.chat) || left(one) || (one.status === 'stopped' && one.byYou && !one.chat) ? (
+              {(one.status === 'working' && !one.chat) || left(one) || ((one.status === 'failed' || (one.status === 'stopped' && one.byYou)) && !one.chat) ? (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
                   {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
-                  {/* Work the person stopped stays stopped until they start it again from here or ask in a message */}
-                  {one.status === 'stopped' && one.byYou && !one.chat ? <Button key={`again-${one.id}-${presses}`} label="Start again" onPress={() => ((presses += 1), void startAgain($, one.id))} /> : null}
+                  {/* Work the person stopped, or that failed, stays so until they start it again from here or ask in a message */}
+                  {(one.status === 'failed' || (one.status === 'stopped' && one.byYou)) && !one.chat ? <Button key={`again-${one.id}-${presses}`} label="Start again" onPress={() => ((presses += 1), void startAgain($, one.id))} /> : null}
                   {left(one) ? <Button key={`artifact-${one.id}-${presses}`} label="Result" onPress={() => void openReport($, left(one)?.id ?? '')} /> : null}
                 </Box>
               ) : null}
@@ -1734,12 +1682,12 @@ const panelHooks = (on: On) => {
     // steady row of two lines (what it was, how it ended, its model, how long it took, when) that opens its card as for running work
     // Other chats' ended work folds in here too, once its pause is over; the row then says it holds every chat's
     // Work shown finished only because it left its chat's file is not kept there: its chat said nothing of how it ended
-    const endedElsewhere = elsewhere.filter(one => one.status !== 'working' && !one.ask && !lingers(one, at) && !isVanished(one.id))
+    const endedElsewhere = elsewhere.filter(one => stageOf(elsewhere, one) !== 'working' && stageOf(elsewhere, one) !== 'waiting' && !lingers(one, at) && !isVanished(one.id))
     // Each other chat's cards under its name: running, asking, or in the pause after ending. A chat with none of these and no prompt
     // is not listed at all, however many are open: the app's own list of chats has them
-    const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
+    const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (stageOf(elsewhere, one) === 'working' || stageOf(elsewhere, one) === 'waiting' || lingers(one, at)))
     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length || answeredOf(c.answeredPrompts).length)
-    const finished = [...own.filter(one => isDismissed(one) || (one.status !== 'working' && !isLingering(one, at) && !one.ask && !resultWaits(one).length && !isLeftStopped(one, at) && !isLeftOpen(one, at))), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
+    const finished = [...own.filter(one => isDismissed(one) || (one.status !== 'working' && !shownWork.some(up => up.id === one.id))), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
         <Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
@@ -1765,7 +1713,7 @@ const panelHooks = (on: On) => {
     // its outcome; one agent's chat at a time, picked from the rounds; and what it returned once it ended
     const flowBig = (f: Flow, picked: FlowAgent | undefined, lines: Line[] | undefined) => {
       const rounds = roundsOf(f)
-      const current = stageOf(f)
+      const current = flowStageOf(f)
       const agentRow = (one: FlowAgent) => {
         const isPicked = picked?.id === one.id
         const facts = [modelName(one.model ?? ''), one.status === 'working' ? (f.status === 'working' ? 'working' : 'stopped') : one.status === 'failed' ? 'failed' : ''].filter(Boolean).join(' · ')
@@ -1966,8 +1914,8 @@ const panelHooks = (on: On) => {
     // Just finished: up at the top, right under what waits, the newest first, each for its own two seconds
     const isFinishing = (one: Todo) => !isWaits(one) && isFinishMoment(one)
     const finishFrom = (one: Todo) => (one.chat ? (endSeen.get(`${one.id}:${one.endedAt}`) ?? one.endedAt) : pauseFrom(one))
-    // Finished but left something running: after its moment it stays up, under what waits, with its Stop it, never back among the rest
-    const isLeftUp = (one: Todo) => !one.chat && one.status !== 'working' && Boolean(one.leftSince) && !isWaits(one) && !isFinishing(one)
+    // Done with a server left for the person: after its moment it stays up, under what waits, its row and Stop under it
+    const isLeftUp = (one: Todo) => !one.chat && stage(one) === 'done' && Boolean(one.bg?.length) && !isWaits(one) && !isFinishing(one)
     // A command you ran on a press, while it runs or its output waits for its ended task: up with what it is and its press
     const isUp = (one: Todo) => isWaits(one) || isFinishing(one) || isLeftUp(one) || (!one.chat && (cardNotesOf(one.id, at).length > 0 || runningOn(one.id).length > 0))
     const upSince = (one: Todo) => Math.max(...(one.chat ? [] : runningOn(one.id).map(run => run.startedAt ?? 0)), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)), 0)
@@ -2006,14 +1954,14 @@ const panelHooks = (on: On) => {
     if (keysAsk && !askingHere.some(one => one.id === keysAsk && isAsking(one))) keysAsk = ''
     // The header says what every card under it says, every chat's: what needs the person, what runs here and in other chats, and
     // work that just finished (happy too for a workflow in its pause whose card turned green: it finished and its last round passed)
-    const runningThere = elsewhere.filter(one => one.status === 'working' && !needsPerson(one))
+    const runningThere = elsewhere.filter(one => stageOf(elsewhere, one) === 'working')
     const head = {
-      here: working.filter(one => !needsPerson(one)).length + runningFlows.length,
+      here: own.filter(one => stage(one) === 'working').length + runningFlows.length,
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
       // Each thing at the top counts once, as the line above the prompt counts them
       asks: waitsCount,
-      isDone: isHappy(own.filter(one => !one.leftOpen && !resultWaits(one).length), at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
+      isDone: isHappy(own, at) || elsewhere.some(one => stageOf(elsewhere, one) === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
     }
     const mood = headMood(head)
     // A letter for each header button, in the terminal alone, and only while the panel has no password box to type in: there the

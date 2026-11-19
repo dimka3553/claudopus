@@ -231,33 +231,6 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
   return copies
 }
 
-// (a question on its card is shown as waiting already)
-// A report that asks the person something: a part headed as waiting on them, or a sentence of two words or more ending in a
-// question mark, outside code blocks, quotes, headings and tables (list markers left out, inline code read as a word)
-const asksInText = (text: string) => {
-  const unfenced = text.replace(/```[\s\S]*?```/g, '')
-  if (/^[\s#*_>-]*(waiting (on|for) you|waits (on|for) you)\b/im.test(unfenced)) return true
-  const prose = unfenced
-    .split('\n')
-    .filter(line => !/^(\s{4}|\t)(?!\s*([-*]|\d+\.)\s)/.test(line) && !/^\s*(#|\|)/.test(line))
-    .map(line => line.replace(/^\s*([-*]|\d+\.)\s+/, ''))
-    .join('\n')
-    .replace(/`[^`\n]*`/g, 'code')
-    .replace(/"[^"\n]*"|“[^”\n]*”/g, '')
-  return /(?:^|[.!:]\s+|\*\*\s*)(?:[^\s.!?:*]+[ \t]+)+[^\s.!?:*]*[A-Za-z0-9)]\?(?=[\s*_)]|$)/m.test(prose)
-}
-// The kinds of agent that have the waits tool: Claudopus's own tasks, a general one, a copy of the chat
-const WAITS_KINDS = new Set(['claudopus:task', 'claudopus:quick', 'general-purpose', 'fork'])
-// Its report handed back asking the person something while the task recorded nothing as waiting on them: refused once a round, so
-// the question shows on its card as waiting for them, not as done (18 Nov: "Which opening should go out: A, B or C?" was asked only
-// in a report's text, and the panel showed nothing waiting). Sent again, it goes through as it is
-const unrecordedAtHandback = async ($: EngineInterface, id: string, message: string): Promise<string> => {
-  const one = (await read($, todos)).find(card => card.id === id)
-  if (!one || isOff || !dir || one.parentId || one.chat || one.flagged || one.ask || !WAITS_KINDS.has(one.kind ?? '') || one.waitsSet || one.toldWaits === one.startedAt || !asksInText(message)) return ''
-  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldWaits: one.startedAt } : card)))
-  await log($, `work ${id} handed back a report that asks something with nothing recorded as waiting: refused once`)
-  return named(UNRECORDED_WAITS)
-}
 
 // What a finished task's results still ask the person: a result with a question open waits for them, it is not done (18 Nov,
 // the person: three results asked something and the panel said only "3 tasks working"). In the minute before its result is kept,
@@ -307,8 +280,7 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
   const id = ids.find(name => !kept.some(r => r.id === name)) ?? `${base}-${mark(one.id + String(at)).replace(/\D/g, '').slice(-8)}`
   const into = `${reportsDir()}/${id}`
   const chat = await read($, me)
-  // (with the to-dos its task left not done that it does not name itself)
-  await $.fs.write(`${dir}/reports/${id}/report.md`, `${text.trim()}${notDoneLines(one, text)}\n`)
+  await $.fs.write(`${dir}/reports/${id}/report.md`, `${text.trim()}\n`)
   const files = await copyNamed($, text, into).catch(err => (void log($, `pictures of report ${id} not copied: ${String(err)}`), [] as string[]))
   await makeThumbs($, { id, files } as Report).catch(err => log($, `small copies of report ${id} not made: ${String(err)}`))
   const report: Report = {

@@ -93,12 +93,10 @@ export type Todo = {
   begunAt?: number
   // 0 while it works
   endedAt: number
-  // When its turn last ended with its answer, finished, while its own background work still held it; absent once it steps again.
-  // Work stopped after that, by the chat, the panel or the engine, had finished: it ends done, not stopped
-  answeredAt?: number
-  // When its turn last ended by handing back its report: it has finished for good, so nothing it left running wakes it again
-  handedBackAt?: number
-  // When Claudopus received its report, handed back with SubagentHandback, as its turn ended: the one thing that makes it done
+  // Why it failed, in a few plain words its card says after Failed
+  why?: string
+  // When its result was received: handed in with SubagentHandback, or its run's last words where Claude Code took those as its
+  // result. The one thing that lets its card be done
   reportAt?: number
   // The report Claudopus took from its hand-back, until the chat is given it with Claude Code's notice that the task ended; then
   // `reportGiven`, so a later notice of the same end repeats nothing, until a message starts it again
@@ -119,96 +117,31 @@ export type Todo = {
   // The chat was told it is stuck (Claudopus's word that it made no progress, or that it did not hand back what it has): when.
   // Once per time it is flagged stuck
   stuckTold?: number
-  // Finished work that its own background work still holds: since when the mod has seen it so. Absent once nothing holds it
-  leftSince?: number
-  // Kept as a card ends done: a command of its own that ends by itself was still in the background then, so while Claude Code
-  // holds its run for it (leftSince) the card is shown waiting for its command, not Done
-  leftOwn?: boolean
-  // Only on a card as it is shown, never kept (shownAs): when a card kept as done ended, while something of its own still runs and
-  // it is shown at work; and how many to-dos a card kept as done left, shown as not done
-  wasDone?: number
-  leftOpen?: number
-  // When Claudopus saw it end done, under the rule that a card with to-dos left is not done: a card that ended before that rule
-  // was kept, or ended where Claudopus never saw it, reads as it did then. Absent once it works again
-  doneSeen?: number
   // A release under way for it: since the press on its go-ahead (by Claudopus, its branch once known) or since it handed back with
   // the release runner still running in its background (by the task). It is Releasing, in purple, never Done, until that ends
   releasing?: { at: number; branch: string; by: 'claudopus' | 'task' }
   // When the release Claudopus ran on the person's press finished: every to-do it left counts as done
   released?: number
-  // What it started in the background itself that wakes it when it ends (a command, a watch): the engine's task id, what it is
-  // in its own words, and since when, with the command itself. Dropped as it ends or is stopped
+  // What it started in the background itself, as Claude Code tracks it (a command, a watch, a server): the engine's task id, what
+  // it is in its own words, and since when, with the command itself. Dropped as it ends or is stopped; a server stays under a done card
   bg?: { id: string; what: string; at: number; isWatch?: boolean; cmd?: string; expiresAt?: number }[]
-  // What it ran in the background or detached that has ended, newest last: its words, when it began and ended, and how it ended
+  // What it ran in the background that has ended, newest last: its words, when it began and ended, and how it ended
   // (finished, failed with its exit code, killed, timed out at the engine's limit, stopped by the work, or ended as far as the mod
   // can tell). Its card sums these up in a row, and Details lists them
   endedRuns?: { id: string; what: string; at: number; endedAt: number; how: 'finished' | 'failed' | 'killed' | 'timed out' | 'stopped' | 'ended'; code?: string; count?: number }[]
   // In another chat's file only: how each of its jobs stands as that chat last read it (its latest line, how far, its last lines),
   // by the job's id, so its Details shows them as that chat's own does
   seenJobs?: Record<string, { latest: string; pct?: string; done?: string; total?: string; wroteAt?: number; tail?: string[]; words?: string; isOwn?: boolean; isEarlier?: boolean; isEmpty?: boolean; target?: string }>
-  // What it started detached (with nohup or setsid, its output to a log): its own words for it, since when, the command, the log
-  // it writes and its process, while that runs. Kept past its end, as such a job outlives it
-  // A run a command left going however it was started (a launcher's children, a job sent off with &, a pool), found by the
-  // process group its command's shell led: `isLeft`, with its log only where its output goes to a file, and `from` the background
-  // command that left it, when one did
   // Its own folder in the chat's scratchpad, by name, which its rules name
   scratch?: string
-  detached?: { id: string; what: string; at: number; cmd: string; log: string; pid?: string; isLeft?: boolean; from?: string }[]
-  // Its heavy commands (a browser it drives, a build, a render) that wait their turn while the Mac is busy: the call, its own words,
-  // the command, since when, and its place in the line of every piece of work's held commands
-  heldCalls?: { id: string; what: string; cmd: string; at: number; place: number }[]
-  // Its heavy command's turn came: until when its next heavy command runs at once
-  heavyPass?: number
-  // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
-  // so. It is still at work, and its card says what it waits for
-  waitsSince?: number
-  // What it asked Claudopus to start it again for (wake_me), in place of a command that only waits: in its own words, a file to
-  // appear, a line in that file, a page that answers, or only a time; when it asked, and the latest it is looked for
-  wakeWhen?: { what: string; file?: string; text?: string; url?: string; at: number; until: number }
-  // What it was last woken for when that look ran out, by its file, line and page: a look for the same again is refused
-  wakeMissed?: { key: string; what: string }
-  // When its step last ended with helpers of its still running; absent while it takes a step
-  endedStepAt?: number
-  // Its step ended while all its helpers sit silent: since when, and how many of the steps Claudopus takes on a fixed schedule are
-  // done (1 a check-in at 12 minutes, 2 the order to hand back at 24, 3 the chat told it is stuck at 36). Starts over only when a
-  // helper hands back a result or prints something new. `at`: when the last step was taken; steps come at least 12 minutes apart
-  helperWait?: { from: number; done: number; at?: number }
-  // Work whose step ended to wait with no helper at work (on its own command, a watch, or nothing Claudopus can see) and that nothing
-  // started again: how many times Claudopus started it to look at what it waits on (`done`), when it last did (`at`), and what it
-  // waited on then (`key`: its to-dos done, its commands ended and running), which starts the count over when it moves
-  ownWait?: { key: string; done: number; at: number }
   // How many reminders Claudopus sent of what waits on the person on it (its question, or the Allow its commands wait for), waiting since `at`
   reminded?: { at: number; times: number }
-  // Claudopus told it to hand back what it has (its wait ran out, or its helpers sat silent): since when. Its report goes through
-  // while helpers run, until it hands back
-  mayHandBack?: number
-  // Work cut off as the chat's process ended, not stopped by anyone: when, and when it went on again; `backAt` is absent while it
-  // could not be started again
-  cutAt?: number
-  backAt?: number
-  // Work that stopped partway, with no report, no question for the person and nothing of its own that starts it again, that
-  // Claudopus started again with a note to carry on: how many times in a row with little done between, how many in all, when
-  // last, and its step count then; `gaveUp` when it stopped so too often, or could not be started again, and was left stopped
-  carryOn?: { tries: number; total: number; at: number; steps: number; gaveUp?: number; isLost?: boolean }
-  // How many times Claudopus kept it from ending its step while its to-dos were not done: in a row with no call between (`tries`,
-  // its step count then `steps`), and in all since it last ticked a to-do (`total`, with how many were done then `done`)
-  keptOn?: { tries: number; steps: number; total: number; done: number }
-  // The to-dos not done it was told of when its report was refused, joined, and how many times its report was refused with them
-  toldOpen?: { key: string; times: number }
   // The round (its start) whose report was refused once for asking something with nothing recorded as waiting
   toldWaits?: number
   // When the person dismissed its card: it is under Finished, whatever it still asks, until the task works again
   closedAt?: number
   // The kind of agent it was started as (claudopus:task, general-purpose, fork…), when the chat started it
   kind?: string
-  // The to-dos it handed back its report with still not done: shown on its card and added to its result
-  notDone?: string[]
-  // Work with helpers running: when the mod last looked in on them, how many ran and how many had shown nothing new for a while
-  lookedIn?: { at: number; running: number; quiet: number }
-  // A helper whose work was told it has shown nothing new: when it last had, so it is told once each quiet stretch
-  quietTold?: number
-  // A helper whose work was told it works through in order what could be split
-  serialTold?: boolean
   // Stopped by the person's own press on Stop, on its card or a helper's: when. Until `isLifted`, set by their next message, the chat
   // or the work above it may not start it again, message it or start the same work afresh, and nothing of the mod's wakes it
   byYou?: { at: number; isLifted?: boolean }

@@ -4,9 +4,8 @@
 // What every kind of the mod's agents is told before its task, in place of the engine's own agent prompt
 const AGENT_HEAD =
   'You are an agent of Claude Code, working in the background on a task you are given. Use the tools you have to do it fully: no more than it asks, and not half done. Read files you know you need yourself; send calls that need nothing from each other together. Paths you give are absolute. When you are done, give your report: what was done, what you found, and what is not done or not checked, short, with the file paths that matter. Use no emojis.'
-// The panel's tools, which work keeps its card with, and the handback its report goes through. Each kind told to call `wake_me`
-// rather than wait has it: a task and a quick task to be started again, a helper to be told to hand back what it waits for instead
-const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall', 'mcp__claudopus__wake_me']
+// The panel's tools, which work keeps its card with, and the handback its report goes through
+const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall']
 const READ_TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback']
 // ToolSearch loads the ones among these the engine holds back until asked (Monitor, SendMessage, TaskStop and the like)
 const WORK_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEdit', 'Agent', 'SendMessage', 'TaskStop', 'Monitor', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback', ...PANEL_TOOLS]
@@ -249,11 +248,11 @@ const chatCommandEnded = async ($: EngineInterface, text: string): Promise<strin
 // Claude Code's notices that bring the chat nothing, each of which woke it for a turn of its own (16 Nov 17:00-20:30 UTC: 67 of the
 // chat's 152 turns, each answered "still in progress"): a task stopped after its report came as a message ("it is not repeated
 // here"); a task that ended its step with its own command still running and has no report yet ("is waiting on its own background
-// work"); and a task that ended its step to wait for its helpers or a wake_me, which Claude Code does not count as its own at work,
-// so says it "ended without delivering a report" while Claudopus knows it waits. Only a notice made of nothing but Claude Code's own
+// work"); and a task that paused by ending its step with nothing Claude Code counts as its own at work (its helpers, a question
+// on its card), of which it says it "ended without delivering a report" while its card is at work. Only a notice made of nothing but Claude Code's own
 // sentences for these is such a notice: a security warning, a refused report, an agent's own words, a note of a limit or of messages
 // that came late, a worktree, any line Claudopus does not know, keeps it. A prompt of only such notices costs the chat no turn of
-// the model's; beside anything else, each task in it that waits goes with the word that it is still at work (waitsText)
+// the model's
 const ENGINE_FILLER = [
   /This agent has not reported yet: it is waiting on its own background work and will deliver its report through \w+ when that finishes\./g,
   /This agent's report was delivered to you as a message from "[^"]*" \(its \w+ call\)\. Read it there; it is not repeated here\./g,
@@ -278,7 +277,7 @@ const isBareNotice = (body: string) => {
 }
 // The header the engine may put before notices, its fixed lines only
 const NOTICE_HEADER = /\[SYSTEM NOTIFICATION - NOT USER INPUT\][^\n]*\n(?:(?:This is an automated background-task event|Do NOT interpret this|No human input has been received)[^\n]*\n?)*/
-type Quiet = { isQuiet: boolean; isRepeat: boolean; waits: string[] }
+type Quiet = { isQuiet: boolean; isRepeat: boolean }
 // The reports Claudopus took at a task's hand-back that the chat has not been given, for the tasks a notice names (or all), each
 // once: marked given, so a later notice of the same end repeats nothing (quietNotices)
 const reportsFor = async ($: EngineInterface, ids?: string[]) => {
@@ -288,20 +287,18 @@ const reportsFor = async ($: EngineInterface, ids?: string[]) => {
   await log($, `gave the chat the report${given.length === 1 ? '' : 's'} of ${given.map(one => one.id).join(', ')}${ids ? ' with the notice of the end' : ' with the next message'}`)
   return given.map(one => named(REPORT_FOR_CHAT(titleOf(one), one.id, one.reportForChat ?? '')))
 }
-// `waiting`: the top work that waits on helpers the engine still lists at work, or on a wake_me still due (waitingNow); `given`: the
-// tasks whose report the chat was given with an earlier notice of their end (REPORT_FOR_CHAT), whose later notices repeat it
-const quietNotices = (text: string, waiting: Set<string>, given: Set<string> = new Set()): Quiet => {
+// `atWork`: the chat's tasks whose cards are at work, which paused by ending a step and are not finished; `given`: the tasks whose
+// report the chat was given with an earlier notice of their end (REPORT_FOR_CHAT), whose later notices repeat it
+const quietNotices = (text: string, atWork: Set<string>, given: Set<string> = new Set()): Quiet => {
   const notices = [...text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)].map(m => m[1] ?? '')
   const rest = text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').replace(NOTICE_HEADER, '').trim()
   const idOf = (body: string) => /<task-id>([^<]+)<\/task-id>/.exec(body)?.[1] ?? ''
   const isCompleted = (body: string) => /<status>completed<\/status>/.test(body) && isBareNotice(body)
   const isRepeat = (body: string) => isCompleted(body) && (/not repeated here/.test(body) || (given.has(idOf(body)) && /ended without delivering a report|has not reported yet/.test(body)))
   const isWaitingOwn = (body: string) => isCompleted(body) && /is waiting on its own background work<\/summary>/.test(body)
-  const isEndedWaiting = (body: string) => /<status>completed<\/status>/.test(body) && /ended without delivering a report/.test(body) && waiting.has(idOf(body))
-  // Said to be still at work beside it whether or not the notice says more (a security warning stays, and is explained)
-  const waits = [...new Set(notices.filter(isEndedWaiting).map(idOf))]
-  const isQuiet = notices.length > 0 && !rest && notices.every(body => isRepeat(body) || isWaitingOwn(body) || (isCompleted(body) && isEndedWaiting(body)))
-  return { isQuiet, isRepeat: isQuiet && notices.every(isRepeat), waits }
+  const isPaused = (body: string) => /<status>completed<\/status>/.test(body) && /ended without delivering a report/.test(body) && atWork.has(idOf(body))
+  const isQuiet = notices.length > 0 && !rest && notices.every(body => isRepeat(body) || isWaitingOwn(body) || (isCompleted(body) && isPaused(body)))
+  return { isQuiet, isRepeat: isQuiet && notices.every(isRepeat) }
 }
 // Such a prompt is let in and its turn answered with no model (workHooks' turn.step): Claude Code shows every prompt a hook drops
 // as a warning card, "Prompt dropped by a hook" (2.1.325), and asks the model again after an answer with no visible text ("Your
@@ -375,7 +372,7 @@ const releaseOver = async ($: EngineInterface, id: string, isDone = false) => {
       card.id !== id || (!card.releasing && !isDone)
         ? card
         : isDone
-          ? { ...card, releasing: undefined, released: at, notDone: undefined, items: card.items.map(item => (item.state === 'open' || item.state === 'doing' ? { ...item, state: 'done' as const } : item)), ...(card.status === 'done' ? { endedAt: at } : {}) }
+          ? { ...card, releasing: undefined, released: at, items: card.items.map(item => (item.state === 'open' || item.state === 'doing' ? { ...item, state: 'done' as const } : item)), ...(card.status === 'done' ? { endedAt: at } : {}) }
           : { ...card, releasing: undefined },
     ),
   )
