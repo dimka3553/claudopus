@@ -78,6 +78,16 @@ const readyOf = ({ id }: { id: string }, cards: Todo[], runs: Flow[]) => {
   return { title: one.title || 'Task', isDone: one.status === 'done', what }
 }
 
+// A card the person marked done: the same sound as its moment begins on screen, unless config.json switched the sound off
+const playDone = async ($: EngineInterface) => {
+  let config: { sound?: unknown } = {}
+  try {
+    config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as typeof config
+  } catch {
+    // A config.json being edited leaves the sound on
+  }
+  if (config.sound !== false) await $.audio.play({ asset: READY_SOUND }).catch(err => log($, `done sound not played: ${String(err)}`))
+}
 // One sound for all that ended together, only when some finished; one notification naming them. config.json switches each off
 const announce = async ($: EngineInterface) => {
   isSettling = false

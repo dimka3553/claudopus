@@ -22,7 +22,19 @@ const stageOf = (_list: readonly Staged[], card: Staged): Stage => {
 // Just marked done by the person: for its two seconds the card stays where it was, green, before it goes under Finished
 // (19 Nov, the person: "Done stays exactly where the delivered was when you mark it as done. It should always play the green
 // animation")
-const isDoneMoment = (one: Pick<Todo, 'status' | 'closedAt'>, at: number) => one.status === 'done' && Boolean(one.closedAt) && at >= (one.closedAt ?? 0) && at - (one.closedAt ?? 0) < LINGER
+// Its two seconds count from the first drawing of the panel made that shows it, never from the press: right after an update the
+// panel's drawings came seconds late, so a moment counted from the press was over before any drawing showed it, and the card went straight
+// under Finished with no green, no octopus and no sound while the next delivered card, alike, slid into its place: the press seemed
+// to do nothing (19 Nov, the person: "I clicked Mark as done two times, and the animation didn't play. The sound didn't play")
+// Each press of this load's, until its moment is first drawn (shownAt 0), and from when; one never drawn is over DONE_UNSEEN on
+const doneMoments = new Map<string, { pressedAt: number; shownAt: number }>()
+const DONE_UNSEEN = 10_000
+const isDoneMoment = (one: Pick<Todo, 'id' | 'status' | 'closedAt'>, at: number) => {
+  const moment = doneMoments.get(one.id)
+  if (one.status !== 'done' || !one.closedAt || !moment || moment.pressedAt !== one.closedAt) return false
+  // (a drawing begun before the first one showing it was made, as that very drawing, is in the moment too)
+  return at >= moment.pressedAt && (moment.shownAt ? at - moment.shownAt < LINGER : at - moment.pressedAt < DONE_UNSEEN)
+}
 // Whether it handed in its result: delivered, or marked done by the person
 const hasResult = (stage: Stage) => stage === 'delivered' || stage === 'done'
 // Each stage in the words a card says it with, and its colour
