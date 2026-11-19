@@ -1,0 +1,1 @@
+- The square outline on a card is thinner now, and the question block has room inside it above and below its words.
