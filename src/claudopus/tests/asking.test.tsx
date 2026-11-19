@@ -577,7 +577,7 @@ test('a press on one ended work\'s ask leaves the other asks\' buttons where the
   await list.unmount()
 })
 
-test('a press on a question that moved under the pointer a moment before does nothing and says so: with two cards waiting, the first answered goes under the second, and the second\'s Answer in words, pressed just then, opens no box until pressed again, then opens it for that card (19 Nov: an answer in words went to the card that slid under the pointer)', async ($, on) => {
+test('a press on a question that moved under the pointer a moment before does nothing and says so: with two cards waiting, the first answered goes to its own place, the second moves up, and its Answer in words, pressed just then, opens no box until pressed again, then opens it for that card (19 Nov: an answer in words went to the card that slid under the pointer)', async ($, on) => {
   const { appended, clock } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'two questions', wait: false, origin: composer })
@@ -593,10 +593,12 @@ test('a press on a question that moved under the pointer a moment before does no
   await clock.advance(5000)
   const inWordsOf = async (card: string) => (await list.findAll({ type: 'Button' })).find(one => new RegExp(`^ask-${card}-inbar-\\d+$`).test(one.key ?? ''))?.key ?? ''
   expect(await until(async () => (await inWordsOf('a2')) || undefined)).toBeTruthy()
-  // The first card answered: it goes under the second, which moves up under the pointer
+  // The first card answered: it goes to its own place under the second, which moves up under the pointer
+  const titles = async () => (await list.findAll({ type: 'Text' })).map(one => one.text).filter(text => text === 'Check the ears' || text === 'Sort the invoices')
+  expect(await titles()).toEqual(['Check the ears', 'Sort the invoices'])
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')?.key ?? '' })
   expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('"Approve"')))).toBeDefined()
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'May I delete the old scans?' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await titles())[0] === 'Sort the invoices' ? true : undefined))).toBe(true)
   // Pressed just then, the second card's Answer in words opens nothing, and its block says why
   await list.press({ key: await inWordsOf('a2') })
   const moved = 'This moved as you pressed, so nothing was sent. Press again.'
@@ -2103,7 +2105,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   expect((await labelled(list, OPEN)).length).toBe(1)
   // The bar folded by the person with a reply half typed in it: nothing of the bar is on screen, so the card has its own box
   // again, with what was typed, and offers no box elsewhere
-  // (pressed once the card has stood still for a moment: the first, answered, went under it, and a press just then is held back)
+  // (pressed once the card has stood still for a moment: the question answered above it went, and a press just then is held back)
   await clock.advance(2000)
   await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
   expect(await until(async () => ((await boxesIn(bar)).length === 1 ? true : undefined))).toBe(true)
