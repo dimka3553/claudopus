@@ -257,7 +257,7 @@ const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Re
         const endedAt = end.at && end.at >= b.at && end.at <= now ? end.at : now
         const how = end.how === 'killed' && b.expiresAt && endedAt >= b.expiresAt - Math.min(60_000, (b.expiresAt - b.at) / 10) ? 'timed out' : end.how
         // With its kind, for its mark, why it failed, and the file it wrote to, which a press on its name opens
-        const kind: JobKind = b.isWatch ? 'watch' : (describedOf(b.what).kind ?? jobKindOf(b.cmd ?? b.what, b.what))
+        const kind: JobKind = b.isWatch ? 'watch' : jobKindOf(b.cmd ?? b.what, b.what)
         const file = jobFiles.get(b.id)
         return { id: b.id, what: b.what, at: b.at, endedAt, how, kind, ...(end.code ? { code: end.code } : {}), ...(end.why ? { why: end.why } : {}), ...(file ? { file } : {}) } as EndedRun
       })

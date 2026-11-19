@@ -31,7 +31,7 @@ Every word Claudopus shows you (panel, cards, the bar, questions, notices, resul
 - The panel's header counts by stage: `1 waiting for you · 2 working`, `2 working · 1 delivered`, `1 delivered`, `Just finished`, `Nothing waits for you`.
 - **Time running** `29m 40s`, over an hour `1h 05m`. Never a guessed time: no "of about", no "over". **Ago** `2m ago`. **Left**, only when the command itself prints one: `1m left`. **Dates** `11 Nov, 14:20`.
 - **Counts** `<n> of <total> <what>`: `2 of 6 stills`, `2 of 5 to-dos`.
-- **Buttons** are a verb of one to three words, the same word for the same act: Allow, Don't allow, Type it, Paste it, Don't give it, Answer in words, Release it, Send, Stop and send, Attach, Close, Stop, Message, Reply, Give feedback, Mark as done, Dismiss, Details, Result, Open chat.
+- **Buttons** are a verb of one to three words, the same word for the same act: Allow, Don't allow, Type it, Paste it, Don't give it, Answer in words, Release it, Send, Stop and send, Attach, Close, Stop, Message, Reply, Give feedback, Mark as done, Dismiss, Details, Result, Open chat, Open in Terminal.
 - **Headings** are a noun: To-dos, Helpers and commands, Commands ended, Finished, Result.
 
 ## Every running thing has a progress line
@@ -47,7 +47,8 @@ A running command or helper is two lines:
 - Ended: `Done in 2m 05s`, `Failed after 2m 05s`, `Stopped after 1m`, `Ran out of time after 30m`.
 - A count that is full while the command still runs never says 100%: `7 of 7 heads · still running`.
 - A command that failed keeps a row on its card, in red, until it is run again and finishes: its name, `Failed after 2m 05s`, and under it why, the last line it wrote that names a fault. The closing row names what else did not finish: `13 commands ended · 2 ran out of time: Watch the cloud jobs and 1 more`, `2 helpers ended · 1 helper failed: Read the scans`.
-- A press on a command's name opens what it wrote, running or ended.
+- A press on a command's name opens its log in a tab of the panel, running or ended: its name, how it stands, `Stop`, `Details`, `Open in Terminal`, then the end of what it wrote. Details repeats none of it under a command.
+- A command that has written nothing for a minute says whether its programs still use the processor: `No output yet · started 20m ago · still busy`, or in amber `nothing new for 20m · idle`.
 
 ## Marks
 One mark for each kind of row, the same on a card and in Details; a ring moves around one that runs.
@@ -55,7 +56,8 @@ One mark for each kind of row, the same on a card and in Details; a ring moves a
 | Mark | Kind | Its row begins | With nothing of its own to say |
 |---|---|---|---|
 | ● purple | helper | its title | `Thinking`, or what its step does: `Reading files`, `Searching the web` |
-| ■ teal | command | `Run …` | `Running` |
+| ■ teal | command | `Run …`, or its own verb: `Build …`, `Test …`, `Render …` | `Running`, `Building`, `Testing` |
+| □ teal | command on another computer (ssh, a cloud job, a cluster) | the same | `Running on another computer` |
 | ▼ blue | download | `Download …` | `Downloading` |
 | ▲ blue | upload | `Upload …` | `Uploading` |
 | ◆ green | server | `Serve …` | `Serving` |

@@ -123,7 +123,7 @@ const TWIG_STEP = 18
 const TWIG_ENDED = '#4EBA65'
 const TWIG_FAILED = '#E5484D'
 const twigWidth = (t: Twig) => t.rails.length * TWIG_STEP + 36
-const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'circle' | 'square' | 'diamond' | 'down' | 'up' | 'open' = 'circle') => {
+const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'circle' | 'square' | 'hollow' | 'diamond' | 'down' | 'up' | 'open' = 'circle') => {
   const mid = line / 2
   const x = (level: number) => level * TWIG_STEP + 9
   const own = x(t.rails.length)
@@ -140,6 +140,7 @@ const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'c
     square: `<rect x="${at - 3.5}" y="${mid - 3.5}" width="7" height="7" rx="1" fill="${dot}"/>`,
     diamond: `<path d="M${at} ${mid - 4.5}L${at + 4.5} ${mid}L${at} ${mid + 4.5}L${at - 4.5} ${mid}Z" fill="${dot}"/>`,
     down: `<path d="M${at - 4.5} ${mid - 3.5}H${at + 4.5}L${at} ${mid + 4}Z" fill="${dot}"/>`,
+    hollow: `<rect x="${at - 3.25}" y="${mid - 3.25}" width="6.5" height="6.5" rx="1" fill="none" stroke="${dot}" stroke-width="1.5"/>`,
     up: `<path d="M${at - 4.5} ${mid + 3.5}H${at + 4.5}L${at} ${mid - 4}Z" fill="${dot}"/>`,
     open: `<path d="M${at} ${mid - 4}L${at + 4} ${mid}L${at} ${mid + 4}L${at - 4} ${mid}Z" fill="none" stroke="${dot}" stroke-width="1.5"/>`,
   }[shape]

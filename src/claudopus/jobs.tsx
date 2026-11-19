@@ -4,7 +4,7 @@
 // What kinds of job there are, how each is told and how its latest line is read are in hooks/jobs.ts
 
 // What each job wrote last, by its task id: its latest line and when its output last changed
-type Seen = { latest: string; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; words?: string; isEmpty?: boolean; port?: string; wroteAt?: number }
+type Seen = { latest: string; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; words?: string; isEmpty?: boolean; live?: 'busy' | 'idle'; port?: string; wroteAt?: number }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -22,7 +22,7 @@ const jobFiles = new Map<string, string>()
 const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false, theirs?: Seen): Job => {
   const seen = jobLog.get(id) ?? theirs
   const said = describedOf(what)
-  const kind: JobKind = isWatch ? 'watch' : (said.kind ?? jobKindOf(cmd, what))
+  const kind: JobKind = isWatch ? 'watch' : jobKindOf(cmd, what)
   const label = labelOf(said.text || cmd, cmd)
   return { id, label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd, kind, at, ...(seen ?? {}), port: portOf(cmd) ?? seen?.port }
 }
@@ -120,6 +120,27 @@ const lookJobs = async ($: EngineInterface) => {
       if (seen.latest && owner && was && was.latest !== seen.latest && now - (jobNews.get(owner) ?? 0) >= JOB_NEWS) moved.add(owner)
     }
   }
+  // A command that has written nothing for a minute: whether the programs that hold its log open use the processor, looked at
+  // every LIVE_LOOK, so its row can say it is still busy or idle instead of leaving that to a guess (19 Nov: a command silent for
+  // 20 minutes, and nothing said whether it still ran)
+  const quiet = asked.filter(o => {
+    if (ended.includes(o.id)) return false
+    const b = list.find(one => one.id === o.owner)?.bg?.find(b => b.id === o.id)
+    const seen = jobLog.get(o.id)
+    if (!b || b.isWatch || !seen) return false
+    return now - (seen.wroteAt && !seen.isEmpty ? seen.wroteAt : b.at) >= SILENT_WARN
+  })
+  for (const o of asked) if (!quiet.includes(o) && jobLog.get(o.id)?.live) (jobLog.set(o.id, { ...(jobLog.get(o.id) as Seen), live: undefined }), (isChanged = true))
+  if (quiet.length && now - liveLookedAt >= LIVE_LOOK) {
+    liveLookedAt = now
+    const r = await $.process.run(['sh', '-c', LIVE_SCRIPT, 'sh', ...quiet.map(o => `${tasksDir}/${o.id}.output`)], { timeoutMs: 8000 }).catch(() => undefined)
+    for (const m of (r?.stdout ?? '').matchAll(/^@@LIVE@@ (\d+) (.*)$/gm)) {
+      const o = quiet.find(o => `${tasksDir}/${o.id}.output` === m[2])
+      const seen = o ? jobLog.get(o.id) : undefined
+      const live = Number(m[1]) >= LIVE_BUSY ? 'busy' : 'idle'
+      if (o && seen && seen.live !== live) (jobLog.set(o.id, { ...seen, live }), (isChanged = true))
+    }
+  }
   // A background command that has ended, by the engine's last line on its output, leaves its card
   if (ended.length) {
     await dropBackground($, ended, endedAs)
@@ -137,6 +158,12 @@ const lookJobs = async ($: EngineInterface) => {
   else if (isChanged) outputMoved = true
 }
 let outputMoved = false
+// How often a silent command's programs are looked at, how much of a processor counts as busy (percent, all of them together),
+// and the look itself: who holds each log open, and what they use
+const LIVE_LOOK = 20_000
+const LIVE_BUSY = 3
+let liveLookedAt = 0
+const LIVE_SCRIPT = `command -v lsof >/dev/null 2>&1 || exit 0; for f; do p=$(lsof -t "$f" 2>/dev/null | tr '\\n' ',' | sed 's/,$//'); [ -n "$p" ] || continue; c=$(ps -o pcpu= -p "$p" 2>/dev/null | awk '{s+=$1} END{printf "%d", s+0.5}'); echo "@@LIVE@@ $c $f"; done`
 
 // A short time since, for a row's side: seconds, minutes, or hours and minutes
 const shortAgo = (ms: number) => {
@@ -221,8 +248,8 @@ const stopping = async ($: EngineInterface, owner: string, job: Job, said?: stri
 // its next step. Not a server or a watch, which speak only when there is something to say
 const RUN_SILENT_TOLD = 60_000
 const silentTold = new Set<string>()
-const RUN_SILENT = (what: string, silent: string) =>
-  `Your command "${what}" has printed nothing for ${silent}. Look at it now: if it is stuck, stop it with TaskStop and find out why; if it is still working, let it finish, and make what you run next print a plain \`progress:\` line as it goes.`
+const RUN_SILENT = (what: string, silent: string, live?: 'busy' | 'idle') =>
+  `Your command "${what}" has printed nothing for ${silent}${live === 'busy' ? ', and its programs are still using the processor, so it is likely still working' : live === 'idle' ? ', and its programs are not using the processor: it is stuck, or waits on something far away' : ''}. Look at it now: if it is stuck, stop it with TaskStop and find out why; if it is still working, let it finish, and make what you run next print a plain \`progress:\` line as it goes.`
 const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
   for (const one of list) {
     if (one.status !== 'working' || one.chat) continue
@@ -233,7 +260,7 @@ const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
       const silent = job.isEmpty ? now - job.at : now - job.wroteAt
       if (silent < RUN_SILENT_TOLD) continue
       silentTold.add(job.id)
-      void tell($, one.id, RUN_SILENT(job.label, shortAgo(silent)))
+      void tell($, one.id, RUN_SILENT(job.label, shortAgo(silent), job.live))
       await log($, `work ${one.id} told its run ${job.id} has been silent ${shortAgo(silent)}`)
     }
   }
@@ -247,14 +274,14 @@ const runWords = (what: string, cmd = '') => labelOf(describedOf(what).text, cmd
 // A press on a run's row opens a Terminal window that shows its output as it is, from its start (the last thousand lines) and as
 // it goes on; on this Mac only, as the window is this Mac's
 // A command that has ended keeps the file it wrote to, so its output opens the same way from where its end is said
-const canOpenFile = (file: string | undefined) => Boolean(file) && !isRunFromAfar && !isLinux
+const canOpenFile = (file: string | undefined) => Boolean(file) && !isRunFromAfar
 const canOpenJob = (job: Job) => canOpenFile(jobFiles.get(job.id))
 const openJobOutput = async ($: EngineInterface, job: Pick<Job, 'id' | 'label'>, written?: string) => {
   const file = written ?? jobFiles.get(job.id)
   // A press moves the buttons' keys, so the panel does not keep pulling back to this row
   presses += 1
   drawAgain($)
-  if (!file || !canOpenFile(file)) return
+  if (!file || !canOpenFile(file) || isLinux) return
   const at = await $.clock.now()
   const base = `${dir}/terminal`
   const home = `${base}/output-${slug(job.id) || 'job'}-${at}`
@@ -264,4 +291,72 @@ const openJobOutput = async ($: EngineInterface, job: Pick<Job, 'id' | 'label'>,
   const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
   if (r.exitCode !== 0) void log($, `output not opened: ${r.stderr.trim().slice(0, 160)}`)
+}
+
+// A command's log is a tab of the panel, named after the command: what it is and how it stands, then the end of what it wrote,
+// drawn again as it writes; the same for one that has ended, from the file it left. A press on a command's name opens it
+const LOG_PANE = 'log-'
+const LOG_LINES = 300
+const logPaneOf = (id: string) => `${LOG_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)
+const openLog = ($: EngineInterface, id: string, label: string) => {
+  presses += 1
+  void comingTab((async () => {
+    await front($, logPaneOf(id), cut(label || 'Log', 30))
+    redraw($)
+  })()).catch(err => log($, `log of ${id} not opened: ${String(err)}`))
+}
+// The command a log tab is of, running or ended, with its task and the file it writes to
+const logOf = async ($: EngineInterface, paneId: string) => {
+  for (const one of await read($, todos)) {
+    const b = one.bg?.find(b => logPaneOf(b.id) === paneId)
+    if (b) return { one, job: jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id]), run: undefined, file: jobFiles.get(b.id) || (tasksDir ? `${tasksDir}/${b.id}.output` : '') }
+    const run = one.endedRuns?.find(r => logPaneOf(r.id) === paneId)
+    if (run) return { one, job: undefined, run, file: run.file ?? '' }
+  }
+  return undefined
+}
+const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
+  const { Box, Button, Text } = ui
+  const found = await logOf($, paneId)
+  if (!found) return <Text dimColor>This log is no longer available.</Text>
+  const { one, job, run, file } = found
+  const now = await $.clock.now()
+  const label = job ? job.label : runWords(run?.what ?? '') || 'A command'
+  const kind: JobKind = job?.kind ?? run?.kind ?? 'script'
+  const state = job ? `${JOB_NOW[kind]} · ${took(now - job.at)}` : run ? `${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(now - run.endedAt)} ago` : ''
+  const r = file && canOpenFile(file) ? await $.process.run(['sh', '-c', 'tail -n "$2" "$1" 2>/dev/null # the log tab', 'sh', file, String(LOG_LINES + 1)], { timeoutMs: 5000 }).catch(() => undefined) : undefined
+  const all = logLines(r?.stdout ?? '')
+  const lines = all.slice(-LOG_LINES)
+  const isFailed = run?.how === 'failed'
+  return (
+    <Box key="log" flexDirection="column" gap={1} flexGrow={1}>
+      <Box key="log-head" flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+        <Box flexDirection="row" gap={1}>
+          <Box flexShrink={0}>
+            <Text color={isFailed ? 'error' : job ? JOB_COLOR[kind] : undefined} dimColor={!job && !isFailed}>{JOB_GLYPH[kind]}</Text>
+          </Box>
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+            <Text bold wrap="wrap">{label}</Text>
+          </Box>
+        </Box>
+        {isFailed ? <Text color="error" wrap="wrap">{state}</Text> : null}
+        <Text dimColor wrap="wrap">{[isFailed ? '' : state, `of the task “${cut(titleOf(one), 40)}”`].filter(Boolean).join(' · ')}</Text>
+        <Box flexDirection="row" gap={2} flexShrink={0}>
+          {job && canStopJob(job) ? <Button key={`log-stop-${presses}`} label={stoppingJobs.has(job.id) ? 'Stopping' : 'Stop'} plain onPress={() => void stopJob($, one.id, job).catch(err => log($, `run not stopped: ${String(err)}`))} /> : null}
+          <Button key={`log-details-${presses}`} label="Details" plain onPress={() => openWork($, one.id)} />
+          {file && canOpenFile(file) && !isLinux ? <Button key={`log-terminal-${presses}`} label="Open in Terminal" plain onPress={() => void openJobOutput($, { id: job?.id ?? run?.id ?? '', label }, file).catch(err => log($, `output not opened: ${String(err)}`))} /> : null}
+        </Box>
+      </Box>
+      <Box key="log-lines" flexDirection="column" backgroundColor={OUTPUT_FILL} paddingX={2} paddingY={1} flexShrink={0}>
+        {all.length > lines.length ? <Text dimColor>{`The last ${LOG_LINES} lines`}</Text> : null}
+        {lines.length ? (
+          lines.map((line, n) => (
+            <Text key={`log-line-${n}`} wrap="wrap">{line || ' '}</Text>
+          ))
+        ) : (
+          <Text dimColor wrap="wrap">{!file || !canOpenFile(file) ? "This log isn't on this Mac." : job ? 'No output yet. It shows here as soon as the command writes something.' : 'It wrote nothing.'}</Text>
+        )}
+      </Box>
+    </Box>
+  )
 }

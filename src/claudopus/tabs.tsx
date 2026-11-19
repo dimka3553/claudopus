@@ -100,6 +100,12 @@ const tabHooks = (on: On) => {
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
+  // A command's log, a pane of its own named after the command
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    if (!e.requestId?.startsWith(LOG_PANE)) return next(e)
+    return logView($, uiOf($, e), e.requestId)
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
+
   // A report opened as a pane of its own, named after it
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (!e.requestId?.startsWith('report-')) return next(e)

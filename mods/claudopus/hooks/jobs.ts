@@ -1,7 +1,7 @@
 // The running jobs a piece of work has, told apart and read: a server, a download or a script, from its command or its own words,
 // and the latest line it wrote, from the end of its output. Nothing here touches the engine
 
-export type JobKind = 'server' | 'download' | 'upload' | 'script' | 'watch'
+export type JobKind = 'server' | 'download' | 'upload' | 'script' | 'remote' | 'watch'
 // A job as its row shows it: when its output last changed and how many alike it stands for
 export type Job = {
   id: string
@@ -26,6 +26,8 @@ export type Job = {
   isNamed?: boolean
   wroteAt?: number
   count?: number
+  // While it writes nothing: whether the programs that hold its log open use the processor
+  live?: 'busy' | 'idle'
 }
 
 // How often the jobs' output is read, and how often a job that wrote something new counts as news for its card
@@ -38,14 +40,15 @@ export const JOB_TAIL = 4000
 
 // Purple and a round dot are a helper's alone: a job has its own colour and shape, and its kind in words at the head of its row
 // (a download and an upload share their blue: the arrow says which way it goes)
-export const JOB_COLOR: Record<JobKind, string> = { server: '#4EBA65', download: '#5AA7E6', upload: '#5AA7E6', script: '#36B5A8', watch: '#9A9A9A' }
-export const JOB_GLYPH: Record<JobKind, string> = { server: '◆', download: '▼', upload: '▲', script: '■', watch: '◇' }
-export const JOB_WORD: Record<JobKind, string> = { server: 'Server running', download: 'Downloading', upload: 'Uploading', script: 'Command running', watch: 'Watching' }
-export const JOB_HEAD: Record<JobKind, string> = { server: 'Server', download: 'Download', upload: 'Upload', script: 'Command', watch: 'Watch' }
+// (and a command that runs on another computer is a command's square, hollow: the work is not on this Mac)
+export const JOB_COLOR: Record<JobKind, string> = { server: '#4EBA65', download: '#5AA7E6', upload: '#5AA7E6', script: '#36B5A8', remote: '#36B5A8', watch: '#9A9A9A' }
+export const JOB_GLYPH: Record<JobKind, string> = { server: '◆', download: '▼', upload: '▲', script: '■', remote: '□', watch: '◇' }
+export const JOB_WORD: Record<JobKind, string> = { server: 'Server running', download: 'Downloading', upload: 'Uploading', script: 'Command running', remote: 'Running on another computer', watch: 'Watching' }
+export const JOB_HEAD: Record<JobKind, string> = { server: 'Server', download: 'Download', upload: 'Upload', script: 'Command', remote: 'Remote command', watch: 'Watch' }
 // What a row says while its command gives no plain word of its own: its kind, as a doing word
-export const JOB_NOW: Record<JobKind, string> = { server: 'Serving', download: 'Downloading', upload: 'Uploading', script: 'Running', watch: 'Watching' }
+export const JOB_NOW: Record<JobKind, string> = { server: 'Serving', download: 'Downloading', upload: 'Uploading', script: 'Running', remote: 'Running on another computer', watch: 'Watching' }
 // Its mark on the tree, drawn: a square, a diamond, a down arrow, an open diamond, never a helper's round dot
-export const JOB_SHAPE: Record<JobKind, 'square' | 'diamond' | 'down' | 'up' | 'open'> = { server: 'diamond', download: 'down', upload: 'up', script: 'square', watch: 'open' }
+export const JOB_SHAPE: Record<JobKind, 'square' | 'hollow' | 'diamond' | 'down' | 'up' | 'open'> = { server: 'diamond', download: 'down', upload: 'up', script: 'square', remote: 'hollow', watch: 'open' }
 // A job whose output has not changed for this long says, in amber, that it has gone quiet, and one that has printed nothing at all
 // says so: work is told to print progress at least every 10 seconds, so a few minutes of nothing is worth a look
 export const JOB_QUIET = 3 * 60_000
@@ -80,10 +83,11 @@ const isFetching = (step: string) => {
 // nothing from the command: its kind first (Download, Upload, Watch, Serve, Run), then what it does: `Download the CT scans`
 const KIND_WORDS: [RegExp, JobKind][] = [
   [/^upload\b/i, 'upload'],
-  [/^(download|fetch|copy|sync|clone)\b/i, 'download'],
+  [/^(download|fetch|copy|sync|clone|install)\b/i, 'download'],
   [/^(watch|wait(ing)?|poll(ing)?)\b/i, 'watch'],
   [/^serve\b/i, 'server'],
-  [/^run\b/i, 'script'],
+  // (the plain verb for what a command does says its kind as Run does: its row leads with it, and says Building, Testing while it goes)
+  [/^(run|build|test|render|train|deploy|make|convert|compute|fit|check|verify|draw|measure|export|index|compress|extract)\b/i, 'script'],
 ]
 export const describedOf = (what: string) => {
   // (a time in brackets at its end, as descriptions once carried, is no part of what it does: a row never says a guessed time)
@@ -96,8 +100,17 @@ export const isKindSaid = (label: string) => KIND_WORDS.some(([re]) => re.test(l
 const LOCAL_TOOL = /^(?:\/\S*\/)?(?:find|fd|grep|egrep|rg|ag|ls|cat|head|tail|less|open|mdfind|stat|file|du|wc|sed|awk|sort|tree|cp|mv|rm|mkdir|touch|cd|echo|printf|test|pwd|code|unzip|tar|shasum)\b/
 const isLocalTool = (step: string) => LOCAL_TOOL.test(step)
 // Else, for words written another way or none, its kind is told from its command
-export const jobKindOf = (cmd: string, label: string): JobKind =>
-  describedOf(label).kind ?? (SERVER_CMD.test(cmd) || /\bserver\b/i.test(label) ? 'server' : !CHECKS.test(label.trim()) && (stepsOf(cmd).some(isFetching) || (/\bdownload(?:ing|ed)?\b/i.test(label) && !stepsOf(cmd).every(isLocalTool))) ? 'download' : 'script')
+// A command whose own program runs the work on another computer (ssh, a cloud job it starts or follows, a cluster's queue) is a
+// remote command, whatever verb its words lead with: what it does is not on this Mac
+const REMOTE_CMD = /^(?:\S*\/)?(?:ssh\s+(?!-V\b)|az\s+(?:ml\s+job\s+(?:create|stream)|batch\s|vm\s+run-command|container\s+exec|acr\s+build)|gcloud\s+(?:compute\s+ssh|ai\s|run\s+jobs|builds\s+submit|batch\s)|aws\s+(?:batch|sagemaker|ssm\s+start-session)\s|kubectl\s+(?:exec|run)\s|modal\s+run\s|sbatch\b|srun\b)/
+const isRemote = (cmd: string) => stepsOf(cmd).some(step => REMOTE_CMD.test(step))
+export const jobKindOf = (cmd: string, label: string): JobKind => {
+  const said = describedOf(label).kind
+  if (said) return said === 'script' && isRemote(cmd) ? 'remote' : said
+  if (SERVER_CMD.test(cmd) || /\bserver\b/i.test(label)) return 'server'
+  if (!CHECKS.test(label.trim()) && (stepsOf(cmd).some(isFetching) || (/\bdownload(?:ing|ed)?\b/i.test(label) && !stepsOf(cmd).every(isLocalTool)))) return 'download'
+  return isRemote(cmd) ? 'remote' : 'script'
+}
 // Each step of a shell line with what only sets it up taken off its head (a variable, env, nohup, time, sudo, exec), never a `cd`
 const SETUP = /^(?:(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)|env|nohup|setsid|exec|sudo|command|(?:\/usr\/bin\/)?time(?:\s+-\w+)*|timeout\s+\S+|caffeinate(?:\s+-\w+)*)\s+)+/
 const stepsOf = (cmd: string) =>
@@ -463,6 +476,19 @@ export const endOf = (text: string): RunEnd | undefined => {
   return /(^|\n)\[killed\]\s*$/.test(text) ? { how: 'killed' } : undefined
 }
 export const isOutputEnded = (text: string) => Boolean(endOf(text))
+// A log's lines as its tab shows them: no colour codes, a line redrawn in place as it last stood, and without the engine's own
+// last line or the blank lines before it
+export const logLines = (text: string): string[] => {
+  const lines = text
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b\][^\x07]*\x07/g, '')
+    .replace(/\n?\[(?:exited with code [^\]\n]*|killed)\]\s*$/, '')
+    .split('\n')
+    .map(line => (line.split('\r').filter(part => part.trim()).at(-1) ?? '').replace(/\s+$/, ''))
+  while (lines.length && !lines.at(-1)?.trim()) lines.pop()
+  while (lines.length && !lines[0]?.trim()) lines.shift()
+  return lines
+}
 // Why a command failed, from the end of its output: the last line that names an error, or else the last line it wrote, as it
 // wrote it and cut short. Nothing for a line that names a password, key or login, or where it wrote nothing
 const FAULT = /\b(?:error|errno|exception|traceback|fatal|failed|failure|cannot|can't|couldn't|could not|unable|denied|refused|not found|no such|missing|invalid|unexpected|timed? ?out|killed|out of memory|oom|panic|abort(?:ed)?|segmentation)\b/i

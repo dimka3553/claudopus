@@ -58,7 +58,7 @@ const panelHooks = (on: On) => {
     const id = e.requestId ?? ''
     // Every ask for a tab's drawing passes here first, and is noted (watchTabs)
     await noteTabAsked($, id)
-    const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, 'report-'].some(start => id.startsWith(start))
+    const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, LOG_PANE, 'report-'].some(start => id.startsWith(start))
     // A tab of the mod's on the desktop, Settings, About, Results and the rest, but for a work's or a workflow's Details, which are
     // drawn with the panel below: every drawing of the panel draws it again too, so under load its buttons went as the panel's did
     // (16 Nov: Settings' Reset pressed, never reached the mod). Held the same way: given again through a click, and while its
@@ -699,6 +699,11 @@ const panelHooks = (on: On) => {
     // Every run's second line has the one shape plainOf describes: how far, a few plain words, and its sign of life, which changes
     // as time goes so the line never stands still while the run goes on. Nothing raw is shown: a line that is not plain words is
     // left out, and a run that has given no word says so and for how long, in amber past a few minutes
+    // (a command with nothing to say yet says the verb its own words lead with: Build the site is Building)
+    const nowWord = (label: string) => {
+      const first = doingOf(label).split(/\s+/)[0] ?? ''
+      return /ing$/.test(first) && first.toLowerCase() !== (label.trim().split(/\s+/)[0] ?? '').toLowerCase() ? first : ''
+    }
     const jobStand = (job: Job, width: number) => {
       // A count that is full while the command still runs says so in place of its percent: 100% beside a running row read as
       // done (19 Nov "7 of 7 heads · 100% · started, finishing", from a script that counted what it had started)
@@ -728,15 +733,18 @@ const panelHooks = (on: On) => {
       // Its own plain words for what it does now; a watch's are its last event
       const words = plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, job.label)
       const hasSaid = Boolean(words || full.length || pct.length)
+      // Silent, whether its programs still use the processor: still busy, or idle (stuck, or waiting on something far away)
+      const live = job.live === 'busy' ? ' · still busy' : job.live === 'idle' ? ' · idle' : ''
       // Quiet never stands alone (17 Nov "nothing printed for 29m 30s" said nothing of what it did): the last thing it said stays,
       // marked as the last, or that it has shown no output or no progress at all
       const [state, short]: [string, string] =
         job.kind === 'server' || job.kind === 'watch' ? ['', '']
         : !isSilent ? ['', '']
-        : hasSaid ? [`nothing new for ${ago(still)}`, `nothing new for ${shortAgo(still)}`]
-        : !job.wroteAt || job.isEmpty ? [`No output yet · started ${shortAgo(ran)} ago`, `No output yet · ${shortAgo(ran)}`]
-        : [`No progress shown · nothing new for ${ago(still)}`, `No progress for ${shortAgo(still)}`]
-      const isWarn = isSilent
+        : hasSaid ? [`nothing new for ${ago(still)}${live}`, `nothing new for ${shortAgo(still)}${live}`]
+        : !job.wroteAt || job.isEmpty ? [`No output yet · started ${shortAgo(ran)} ago${live}`, `No output yet · ${shortAgo(ran)}${live}`]
+        : [`No progress shown · nothing new for ${ago(still)}${live}`, `No progress for ${shortAgo(still)}${live}`]
+      // (in amber only where nothing says it still works)
+      const isWarn = isSilent && job.live !== 'busy'
       // A server or a watch leads with what it does, then the last thing it said
       const lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving · ') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching · ') : isSilent && hasSaid ? 'Last: ' : ''
       const near = left
@@ -759,7 +767,7 @@ const panelHooks = (on: On) => {
         const kindLead = job.kind === 'server' ? 'Serving' : job.kind === 'watch' ? 'Watching' : ''
         const shownLead = kindLead ? `${kindLead} · ${said ? 'last: ' : ''}` : lead && (nums.length || said) ? lead : ''
         const line = `${shownLead}${text}`
-        return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : JOB_NOW[job.kind], isWarn }
+        return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : (job.kind === 'script' && job.isNamed ? nowWord(job.label) : '') || JOB_NOW[job.kind], isWarn }
       }
       return { text: short, isWarn }
     }
@@ -785,7 +793,7 @@ const panelHooks = (on: On) => {
             {isMore(job) && owner ? (
               <Button key={`more-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openWork($, owner)} />
             ) : canOpenJob(job) ? (
-              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => void openJobOutput($, job).catch(err => log($, `output not opened: ${String(err)}`))} />
+              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openLog($, job.id, job.label)} />
             ) : (
               <Text wrap="truncate-end">{name}</Text>
             )}
@@ -854,7 +862,7 @@ const panelHooks = (on: On) => {
         </Box>
       )
     // A press on an ended command's name opens what it wrote, where that is still there and this Mac can show it; else its card's Details
-    const openEnded = (run: EndedRun, owner: string) => (canOpenFile(run.file) ? void openJobOutput($, { id: run.id, label: runWords(run.what) || 'A command' }, run.file).catch(err => log($, `output not opened: ${String(err)}`)) : openWork($, owner))
+    const openEnded = (run: EndedRun, owner: string) => (canOpenFile(run.file) ? openLog($, run.id, runWords(run.what) || 'A command') : openWork($, owner))
     const failedRow = (t: Twig, run: EndedRun, owner: string) => {
       const key = `failed-${owner}-${run.id}`
       const width = perRow - 4 - t.depth * 2
@@ -1235,7 +1243,9 @@ const panelHooks = (on: On) => {
     const underTwig = (t: Twig) => {
       if (t.job) {
         // (its row says it in plain words, so the last line is here as it was printed too)
-        const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).slice(-OUTPUT_LINES)
+        // (a command's row says how it stands, and its log is a press on its name away: its last lines under it said the same
+        // thing twice, 19 Nov)
+        const tail: string[] = []
         if (!tail.length) return null
         const inset = canOpenJob(t.job) ? lead : 0
         return (
@@ -1320,13 +1330,6 @@ const panelHooks = (on: On) => {
                 <Text dimColor={!isBad(run)} color={run.how === 'failed' ? 'error' : undefined}>{`${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(at - run.endedAt)} ago`}</Text>
               </Box>
             </Box>,
-            ...(run.how === 'failed' && run.why
-              ? [
-                  <Box key={`ended-why-${run.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0} paddingLeft={2}>
-                    <Text dimColor wrap="truncate-end">{run.why}</Text>
-                  </Box>,
-                ]
-              : []),
           ])}
         </Box>,
       )
