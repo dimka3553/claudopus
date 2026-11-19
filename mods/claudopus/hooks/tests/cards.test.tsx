@@ -973,6 +973,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.text).toBe('1 delivered')
   expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', '1 helper ended', 'Mark as done'])
   await pressed(pane, 'dismiss-a1')
+  await clock.advance(2_100)
   // Dismissed, it is one folded row, "Finished", under the running cards; unfolded, a card as running work has, with Details and no Stop
   const buttons = (await until(async () => ((await pane.findAll({ type: 'Button' })).some(b => b.props.label === '▸ Finished 1') ? pane.findAll({ type: 'Button' }) : undefined))) ?? []
   expect(buttons.map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', '▸ Finished 1'])
@@ -1323,6 +1324,7 @@ test('work that ends in an error is kept as failed, saying why; a run that is ov
   // A dismissed card goes before any of them: the newest is dismissed, and as one more task ends it is the one forgotten, while
   // every card still up, the oldest too, is kept
   await pressed(again, `dismiss-${newest}`)
+  await clock.advance(2_100)
   expect(await until(() => fold(again))).toBe('▸ Finished 1')
   await other(50)
   expect(await until(async () => ((await fold(again)) ? undefined : true))).toBe(true)
@@ -1786,7 +1788,7 @@ test('the stop button of a to-do stops its work, and its card stays among the ca
   await clock.advance(3_600_000)
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h2', agentId: 'a2', message: 'The ears match.' } as never)
   await clock.advance(2_100)
-  expect(await titles()).toEqual(['Fix the nose', 'Check the ears'])
+  expect(await titles()).toEqual(['Check the ears', 'Fix the nose'])
   expect((await pane.find({ type: 'Text', text: 'Stopped' }))?.props.dimColor).toBe(true)
   // It offers Start again, as the person stopped it, and Dismiss, and nothing else
   const offered = async (id: string) => (await pane.findAll({ type: 'Button' })).filter(b => new RegExp(`^(stop|change|again-small|dismiss)-${id}(-\\d+)?$`).test(String(b.key))).map(b => b.props.label)
@@ -1801,7 +1803,7 @@ test('the stop button of a to-do stops its work, and its card stays among the ca
   await pane.unmount()
 })
 
-test("work that finishes comes to the top for two seconds, then stays among the cards, blue and Delivered, until the person marks it done: two at once, through an hour and another task's end, one ended while the panel was closed; delivered, its only presses are at its bottom, Give feedback and Mark as done; marked done, it is green under Finished; a message to it makes the same card work again, and delivered again when it hands in, what its last note left open listed on it with Reply", async ($, on) => {
+test("work that finishes comes to the top, outlined for two seconds, and stays there over what works, the newest first, blue and Delivered, until the person marks it done: two at once, through an hour and another task's end, one ended while the panel was closed; delivered, its only presses are at its bottom, Give feedback and Mark as done; marked done, it is green where it stood for two seconds, then under Finished; a message to it makes the same card work again, and delivered again when it hands in, what its last note left open listed on it with Reply", async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}
   const { clock } = world(on, { agents, kinds })
@@ -1824,7 +1826,7 @@ test("work that finishes comes to the top for two seconds, then stays among the 
   const head = async (of: Pane) => (await of.findAll({ type: 'Text' })).filter(one => /working|waiting for you|^Nothing|^Just|delivered$/.test(one.text)).map(one => one.text).join('')
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
 
-  // Two that end together both go to the top, green, the newer first, over the one still working; neither is under Finished
+  // Two that end together both go to the top, blue, the newer first, over the one still working; neither is under Finished
   await clock.advance(400)
   await end('a1', 't1')
   await clock.advance(100)
@@ -1833,11 +1835,11 @@ test("work that finishes comes to the top for two seconds, then stays among the 
   expect(await dones(pane)).toEqual([['#4C9AFF', '#4C9AFF'], 2])
   expect(await head(pane)).toBe('1 working · 2 delivered')
   expect(await fold(pane)).toBeUndefined()
-  // After their two seconds both are still among the cards, each in the place it began in, green, and so an hour later: no time
-  // moves a card under Finished
+  // After their two seconds both are still on top, over what works, the newer first, and so an hour later: no time moves a
+  // card under Finished
   for (const ms of [2_100, 3_600_000]) {
     await clock.advance(ms)
-    expect([ms, await titles(pane), await dones(pane), await fold(pane)]).toEqual([ms, ['Fix the nose', 'Check the ears', 'Draw the eyes'], [['#4C9AFF', '#4C9AFF'], 2], undefined])
+    expect([ms, await titles(pane), await dones(pane), await fold(pane)]).toEqual([ms, ['Draw the eyes', 'Fix the nose', 'Check the ears'], [['#4C9AFF', '#4C9AFF'], 2], undefined])
   }
 
   // Nor does another task's end, and work that ends while the panel is closed is up among the cards, green, when it opens
@@ -1845,7 +1847,7 @@ test("work that finishes comes to the top for two seconds, then stays among the 
   await end('a2', 't2')
   await clock.advance(2_500)
   const again = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect([await titles(again), await dones(again), await fold(again)]).toEqual([['Fix the nose', 'Check the ears', 'Draw the eyes'], [['#4C9AFF', '#4C9AFF', '#4C9AFF'], 3], undefined])
+  expect([await titles(again), await dones(again), await fold(again)]).toEqual([['Check the ears', 'Draw the eyes', 'Fix the nose'], [['#4C9AFF', '#4C9AFF', '#4C9AFF'], 3], undefined])
   expect(await head(again)).toBe('3 delivered')
   // A delivered card's line is the last it wrote; its presses are Give feedback and Mark as done, at its bottom, and nothing
   // else: no Stop, no Start again, no Message or Dismiss beside its title
@@ -1855,7 +1857,15 @@ test("work that finishes comes to the top for two seconds, then stays among the 
   expect(await again.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
 
   // Dismiss puts it under Finished, and it stays there: an hour on, and as other work goes on and ends
+  // Marked done, it turns green where it stood, outlined, for two seconds, the octopus happy: nothing moves and nothing is
+  // under Finished yet; then it is there
+  const before = await titles(again)
   await pressed(again, 'dismiss-a1')
+  const greens = async () => [(await again.findAll({ type: 'Text', text: '✓ Done' })).map(one => one.props.color), (await again.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.borderColor === 'success').length]
+  expect([await until(async () => ((await greens())[1] ? titles(again) : undefined)), await greens(), await fold(again), await offered(again, 'a1')]).toEqual([before, [['success'], 1], undefined, ['Message']])
+  await clock.advance(1_900)
+  expect([await titles(again), await greens(), await fold(again)]).toEqual([before, [['success'], 1], undefined])
+  await clock.advance(200)
   expect(await until(() => fold(again))).toBe('▸ Finished 1')
   expect(await titles(again)).toEqual(['Check the ears', 'Draw the eyes'])
   // (marked done, it is green there, with Message, and the header no longer counts it)
@@ -1887,7 +1897,7 @@ test("work that finishes comes to the top for two seconds, then stays among the 
   expect((await until(() => band.find({ type: 'Text', text: /^↳ / })))?.text).toBe('↳ Reply to “Draw the eyes”')
   await pressed(again, 'change-a3')
   await clock.advance(2_100)
-  expect([await titles(again), await dones(again), await fold(again)]).toEqual([['Check the ears', 'Draw the eyes'], [['#4C9AFF', '#4C9AFF'], 2], '▸ Finished 1'])
+  expect([await titles(again), await dones(again), await fold(again)]).toEqual([['Draw the eyes', 'Check the ears'], [['#4C9AFF', '#4C9AFF'], 2], '▸ Finished 1'])
   await again.unmount()
   await band.unmount()
 })

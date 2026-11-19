@@ -19,6 +19,10 @@ const stageOf = (_list: readonly Staged[], card: Staged): Stage => {
   if (needsPerson(card)) return 'waiting'
   return card.status === 'done' ? (card.up && !card.closedAt ? 'delivered' : 'done') : 'working'
 }
+// Just marked done by the person: for its two seconds the card stays where it was, green, before it goes under Finished
+// (19 Nov, the person: "Done stays exactly where the delivered was when you mark it as done. It should always play the green
+// animation")
+const isDoneMoment = (one: Pick<Todo, 'status' | 'closedAt'>, at: number) => one.status === 'done' && Boolean(one.closedAt) && at >= (one.closedAt ?? 0) && at - (one.closedAt ?? 0) < LINGER
 // Whether it handed in its result: delivered, or marked done by the person
 const hasResult = (stage: Stage) => stage === 'delivered' || stage === 'done'
 // Each stage in the words a card says it with, and its colour

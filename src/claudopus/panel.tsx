@@ -214,7 +214,7 @@ const panelHooks = (on: On) => {
     // person presses Dismiss on it: nothing else moves a card under Finished, no time and no other task's end (the person,
     // iterating on a result: "tasks shouldn't be dismissed on their own"). A card that ended before cards stayed up is under
     // Finished, as it was
-    const shownWork = own.filter(one => !isDismissed(one)).filter(one => stage(one) === 'working' || stage(one) === 'waiting' || staysUp(one) || isLingering(one, at) || runningOn(one.id).length > 0)
+    const shownWork = own.filter(one => !isDismissed(one) || isDoneMoment(one, at)).filter(one => stage(one) === 'working' || stage(one) === 'waiting' || staysUp(one) || isLingering(one, at) || isDoneMoment(one, at) || runningOn(one.id).length > 0)
     // What waits on a card for the person, each a block (needs.tsx): its own question, the permissions held for its commands,
     // Claude Code's prompt for a call of its own, the password or key box of a command of its own
     const keysHeldNow = () => e.surface === 'terminal' && Boolean(keysAsk && hasDraft(keysAsk))
@@ -411,7 +411,7 @@ const panelHooks = (on: On) => {
     }
     // A card of this chat's that has ended and is not under Finished can be dismissed there; one at work has Stop, and one a
     // command waits on for the person's Allow stays
-    const canDismiss = (one: Todo) => !one.chat && !one.parentId && one.status !== 'working' && shownWork.some(up => up.id === one.id) && !isActingOnReply(one) && !one.admins?.length && !needsFor(one).some(need => need.kind !== 'question')
+    const canDismiss = (one: Todo) => !one.chat && !one.parentId && one.status !== 'working' && !isDismissed(one) && shownWork.some(up => up.id === one.id) && !isActingOnReply(one) && !one.admins?.length && !needsFor(one).some(need => need.kind !== 'question')
     // What a delivered task's result leaves open, as its last note listed it: numbered lines, all answered by one reply
     const questionLines = (one: Todo, key: string, left: number | 'xs') => {
       const asked = one.questions ?? []
@@ -431,7 +431,7 @@ const panelHooks = (on: On) => {
     const small = (one: Todo) => {
       // In the terminal, while the letters are keys, the first nine cards are numbered and the number opens the card's Details
       // A card in its moment at the top is not numbered, so the others keep their numbers through it
-      const isMomentNow = isFinishMoment(one) && !keptUpNow.has(one.id) && !isDismissed(one)
+      const isMomentNow = (isFinishMoment(one) && !keptUpNow.has(one.id) && !isDismissed(one)) || isDoneMoment(one, at)
       if (!isMomentNow) cardNo += 1
       const digit = keyed && cardNo <= 9 && !isMomentNow ? String(cardNo) : undefined
       const kept = one.items.filter(item => item.state !== 'dropped')
@@ -1499,7 +1499,7 @@ const panelHooks = (on: On) => {
     // is not listed at all, however many are open: the app's own list of chats has them
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (stageOf(elsewhere, one) === 'working' || stageOf(elsewhere, one) === 'waiting' || lingers(one, at)))
     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
-    const finished = [...own.filter(one => isDismissed(one) || (one.status !== 'working' && !shownWork.some(up => up.id === one.id))), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
+    const finished = [...own.filter(one => one.status !== 'working' && !shownWork.some(up => up.id === one.id)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
         <Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
@@ -1716,6 +1716,7 @@ const panelHooks = (on: On) => {
       for (const key of [...topPlaces.keys()]) if (!waitingNow.has(key)) (topPlaces.delete(key), topClosed.delete(key))
     }
     const restHere = shownWork.filter(one => !isUp(one))
+    const isHandedIn = (one: Todo) => stage(one) === 'delivered' || isDoneMoment(one, at)
     const restFlows = shownFlows.filter(f => !isFlowMoment(f))
     // Each card keeps the place it began in: work started again (Release it on an ended ask) never moves to the end
     const begun = (one: Todo) => one.begunAt ?? one.startedAt
@@ -1847,7 +1848,10 @@ const panelHooks = (on: On) => {
               // This chat's work first, named as this chat's once another chat's is shown, in the order it began; what waits on the
               // person is above, at the top. Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
               ...(listedChats.length && (restHere.length || restFlows.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
-              ...[...restHere.map(one => ({ at: begun(one), card: () => small(one) })), ...restFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
+              // What was delivered comes first, the newest on top, each in that place through its green moment once marked done; then
+              // the rest, each in the place it began in (19 Nov, the person: "All of the delivered things go on top. The working
+              // ones go underneath it. Needs you goes even above them")
+              ...[...restHere.map(one => (isHandedIn(one) ? { rank: 0, at: -one.endedAt, card: () => small(one) } : { rank: 1, at: begun(one), card: () => small(one) })), ...restFlows.map(f => ({ rank: 1, at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.rank - b.rank || a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, with what is left of it once its asks are at the top
               ...listedChats.flatMap(c => {
                 const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => begun(a) - begun(b))
