@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.234 · 19 November 2026
+- The claudopus.ai pages now count visits without cookies, and the privacy page says so
+
 ## 0.2.233 · 19 November 2026
 - claudopus.ai now tells search engines and AI assistants (ChatGPT, Claude, Perplexity, Google and others) plainly that they may read it, and gives them a short plain-text description of Claudopus with its GitHub link at claudopus.ai/llms.txt, so they can find it and name it correctly.
 
