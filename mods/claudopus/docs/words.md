@@ -40,6 +40,7 @@ A running command or helper is two lines:
 2. **Now**: how far in things · how fast · what it is doing now: `2 of 6 · 33% · rendering still 3`. It counts things, never time; a time left shows only when the command itself prints one.
 
 - After three minutes with nothing new, line 2 keeps the last thing it said and adds how long: `Last: 2 of 6 stills rendered · nothing new for 29m`. With nothing ever said: `No output yet · started 29m ago`. Never "nothing new" alone. A narrow row keeps the time: `No output yet · 29m`, `No progress for 29m`.
+- A cloud job is never called busy or idle, as its work is on another computer. Silent, it says `Nothing back from the cloud yet · started 48m ago · still waiting on the cloud machine`, in amber, and its task is told to bring the job's own output back, which then shows as any command's does, in its row and its log.
 - Every row has Stop. Only commands the app itself tracks have rows: nothing runs out of its sight.
 - A server: `Serving`, and its row stays under a Done card until you stop it. A watch for something far away: `Watching · last: series arrived`.
 - A helper's line 2 is what it is doing now, in plain words: `Reading files`, `Rendering the song stills · 4m`, `Searching the web`, `Waiting for its commands`, or its own last note. Quiet for three minutes, it is `Last: Reading files · nothing new for 29m`.

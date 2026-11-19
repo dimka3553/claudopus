@@ -10154,6 +10154,8 @@ const RUN_SILENT_TOLD = 60_000
 const silentTold = new Set<string>()
 const RUN_SILENT = (what: string, silent: string, live?: 'busy' | 'idle') =>
   `Your command "${what}" has printed nothing for ${silent}${live === 'busy' ? ', and its programs are still using the processor, so it is likely still working' : live === 'idle' ? ', and its programs are not using the processor: it is stuck, or waits on something far away' : ''}. Look at it now: if it is stuck, stop it with TaskStop and find out why; if it is still working, let it finish, and make what you run next print a plain \`progress:\` line as it goes.`
+const CLOUD_SILENT = (what: string, silent: string) =>
+  `Your cloud job "${what}" has sent nothing back for ${silent}, so its card and its log show nothing of what the cloud machine does, and ${who()} cannot tell whether it works. Look at it now. If it is stuck, stop it with TaskStop and find out why. If it works, make its own output come back while it runs: from a command of yours sent to the background, follow the job's log from its first line until the job ends (\`ssh <machine> 'tail -n +1 -f <its log>'\`, \`az ml job stream\`, \`kubectl logs -f\`), never a call that answers only at the end; print \`state: queued\`, \`state: starting\`, \`state: running\` as it changes, have the job print a \`progress:\` line as it goes, and about once a minute one line of how busy its machine is, such as \`machine: GPU 87% · 14 of 24 GB\`. Never print a key, a token or a signed link.`
 const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
   for (const one of list) {
     if (one.status !== 'working' || one.chat) continue
@@ -10163,7 +10165,7 @@ const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
       const silent = job.isEmpty ? now - job.at : now - job.wroteAt
       if (silent < RUN_SILENT_TOLD) continue
       silentTold.add(job.id)
-      void tell($, one.id, RUN_SILENT(job.label, shortAgo(silent), job.live))
+      void tell($, one.id, job.kind === 'remote' ? CLOUD_SILENT(job.title || job.label, shortAgo(silent)) : RUN_SILENT(job.label, shortAgo(silent), job.live))
       await log($, `work ${one.id} told its run ${job.id} has been silent ${shortAgo(silent)}`)
     }
   }
@@ -10253,7 +10255,7 @@ const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
             <Text key={`log-line-${n}`} wrap="wrap">{line || ' '}</Text>
           ))
         ) : (
-          <Text dimColor wrap="wrap">{!file || !canOpenFile(file) ? "This log isn't on this Mac." : job ? 'No output yet. It shows here as soon as the command writes something.' : 'It wrote nothing.'}</Text>
+          <Text dimColor wrap="wrap">{!file || !canOpenFile(file) ? "This log isn't on this Mac." : job ? (kind === 'remote' ? 'Nothing has come back from the cloud machine yet. The command that started the job still waits for it, and its task has been told to bring the job\'s own output here as it runs.' : 'No output yet. It shows here as soon as the command writes something.') : 'It wrote nothing.'}</Text>
         )}
       </Box>
     </Box>
@@ -13167,14 +13169,15 @@ const panelHooks = (on: On) => {
       const nowSaid = job.now ? (/^[A-Z][a-z]/.test(job.now) ? job.now.charAt(0).toLowerCase() + job.now.slice(1) : job.now) : ''
       const words = isFull ? '' : (isOwnNow ? plainOf(job.words, job.label) : '') || nowSaid || (isOwnNow ? '' : plainOf(job.latest, job.label))
       const hasSaid = Boolean(words || full.length || pct.length)
-      const live = job.live === 'busy' ? ' · still busy' : job.live === 'idle' ? ' · idle' : ''
+      const live = job.kind === 'remote' ? (job.live ? ' · still waiting on the cloud machine' : '') : job.live === 'busy' ? ' · still busy' : job.live === 'idle' ? ' · idle' : ''
+      const nothing = job.kind === 'remote' ? 'Nothing back from the cloud yet' : 'No output yet'
       const [state, short]: [string, string] =
         job.kind === 'server' || job.kind === 'watch' ? ['', '']
         : !isSilent ? ['', '']
         : hasSaid ? [`nothing new for ${ago(still)}${live}`, `nothing new for ${shortAgo(still)}${live}`]
-        : !job.wroteAt || job.isEmpty ? [`No output yet · started ${shortAgo(ran)} ago${live}`, `No output yet · ${shortAgo(ran)}${live}`]
+        : !job.wroteAt || job.isEmpty ? [`${nothing} · started ${shortAgo(ran)} ago${live}`, `${job.kind === 'remote' ? 'Nothing back yet' : nothing} · ${shortAgo(ran)}`]
         : [`No progress shown · nothing new for ${ago(still)}${live}`, `No progress for ${shortAgo(still)}${live}`]
-      const isWarn = isSilent && job.live !== 'busy'
+      const isWarn = isSilent && (job.kind === 'remote' || job.live !== 'busy')
       const lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving · ') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching · ') : isSilent && hasSaid ? 'Last: ' : ''
       const near = left
       const numbers = [[...full, ...pct, ...rate, ...left], [...full, ...pct, ...left], ...(near.length ? [[...full, ...near]] : []), [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...compact, ...near], [...bare, ...near]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]

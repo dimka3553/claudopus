@@ -263,6 +263,9 @@ const RUN_SILENT_TOLD = 60_000
 const silentTold = new Set<string>()
 const RUN_SILENT = (what: string, silent: string, live?: 'busy' | 'idle') =>
   `Your command "${what}" has printed nothing for ${silent}${live === 'busy' ? ', and its programs are still using the processor, so it is likely still working' : live === 'idle' ? ', and its programs are not using the processor: it is stuck, or waits on something far away' : ''}. Look at it now: if it is stuck, stop it with TaskStop and find out why; if it is still working, let it finish, and make what you run next print a plain \`progress:\` line as it goes.`
+// A cloud job that sends nothing back cannot be followed from its card: its task is told to bring the job's own output back
+const CLOUD_SILENT = (what: string, silent: string) =>
+  `Your cloud job "${what}" has sent nothing back for ${silent}, so its card and its log show nothing of what the cloud machine does, and ${who()} cannot tell whether it works. Look at it now. If it is stuck, stop it with TaskStop and find out why. If it works, make its own output come back while it runs: from a command of yours sent to the background, follow the job's log from its first line until the job ends (\`ssh <machine> 'tail -n +1 -f <its log>'\`, \`az ml job stream\`, \`kubectl logs -f\`), never a call that answers only at the end; print \`state: queued\`, \`state: starting\`, \`state: running\` as it changes, have the job print a \`progress:\` line as it goes, and about once a minute one line of how busy its machine is, such as \`machine: GPU 87% · 14 of 24 GB\`. Never print a key, a token or a signed link.`
 const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
   for (const one of list) {
     if (one.status !== 'working' || one.chat) continue
@@ -273,7 +276,7 @@ const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
       const silent = job.isEmpty ? now - job.at : now - job.wroteAt
       if (silent < RUN_SILENT_TOLD) continue
       silentTold.add(job.id)
-      void tell($, one.id, RUN_SILENT(job.label, shortAgo(silent), job.live))
+      void tell($, one.id, job.kind === 'remote' ? CLOUD_SILENT(job.title || job.label, shortAgo(silent)) : RUN_SILENT(job.label, shortAgo(silent), job.live))
       await log($, `work ${one.id} told its run ${job.id} has been silent ${shortAgo(silent)}`)
     }
   }
@@ -375,7 +378,7 @@ const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
             <Text key={`log-line-${n}`} wrap="wrap">{line || ' '}</Text>
           ))
         ) : (
-          <Text dimColor wrap="wrap">{!file || !canOpenFile(file) ? "This log isn't on this Mac." : job ? 'No output yet. It shows here as soon as the command writes something.' : 'It wrote nothing.'}</Text>
+          <Text dimColor wrap="wrap">{!file || !canOpenFile(file) ? "This log isn't on this Mac." : job ? (kind === 'remote' ? 'Nothing has come back from the cloud machine yet. The command that started the job still waits for it, and its task has been told to bring the job\'s own output here as it runs.' : 'No output yet. It shows here as soon as the command writes something.') : 'It wrote nothing.'}</Text>
         )}
       </Box>
     </Box>

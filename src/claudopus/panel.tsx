@@ -786,17 +786,20 @@ const panelHooks = (on: On) => {
       const words = isFull ? '' : (isOwnNow ? plainOf(job.words, job.label) : '') || nowSaid || (isOwnNow ? '' : plainOf(job.latest, job.label))
       const hasSaid = Boolean(words || full.length || pct.length)
       // Silent, whether its programs still use the processor: still busy, or idle (stuck, or waiting on something far away)
-      const live = job.live === 'busy' ? ' · still busy' : job.live === 'idle' ? ' · idle' : ''
+      // (a cloud job's work is on another computer: what its command here uses says nothing of it, so it is never called idle or
+      // busy, only that the command still waits on that machine; 19 Nov four cloud jobs at work read "idle" for 48 minutes)
+      const live = job.kind === 'remote' ? (job.live ? ' · still waiting on the cloud machine' : '') : job.live === 'busy' ? ' · still busy' : job.live === 'idle' ? ' · idle' : ''
+      const nothing = job.kind === 'remote' ? 'Nothing back from the cloud yet' : 'No output yet'
       // Quiet never stands alone (17 Nov "nothing printed for 29m 30s" said nothing of what it did): the last thing it said stays,
       // marked as the last, or that it has shown no output or no progress at all
       const [state, short]: [string, string] =
         job.kind === 'server' || job.kind === 'watch' ? ['', '']
         : !isSilent ? ['', '']
         : hasSaid ? [`nothing new for ${ago(still)}${live}`, `nothing new for ${shortAgo(still)}${live}`]
-        : !job.wroteAt || job.isEmpty ? [`No output yet · started ${shortAgo(ran)} ago${live}`, `No output yet · ${shortAgo(ran)}${live}`]
+        : !job.wroteAt || job.isEmpty ? [`${nothing} · started ${shortAgo(ran)} ago${live}`, `${job.kind === 'remote' ? 'Nothing back yet' : nothing} · ${shortAgo(ran)}`]
         : [`No progress shown · nothing new for ${ago(still)}${live}`, `No progress for ${shortAgo(still)}${live}`]
       // (in amber only where nothing says it still works)
-      const isWarn = isSilent && job.live !== 'busy'
+      const isWarn = isSilent && (job.kind === 'remote' || job.live !== 'busy')
       // A server or a watch leads with what it does, then the last thing it said
       const lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving · ') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching · ') : isSilent && hasSaid ? 'Last: ' : ''
       const near = left
