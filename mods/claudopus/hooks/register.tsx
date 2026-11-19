@@ -9281,7 +9281,8 @@ const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
   const many = job.count && job.count > 1 ? ` ×${job.count}` : ''
   const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${many}`
-  if (job.isNamed && isKindSaid(job.label)) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${many}`
+  const said = describedOf(job.label).kind
+  if (job.isNamed && isKindSaid(job.label) && (said === job.kind || (said === 'script' && job.kind === 'remote'))) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${many}`
   return `${kind} · ${job.label}`
 }
 

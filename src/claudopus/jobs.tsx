@@ -36,7 +36,9 @@ const jobHead = (job: Job) => {
   const many = job.count && job.count > 1 ? ` ×${job.count}` : ''
   const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${many}`
   // Its own words alone when they say its kind already (Download the CT scans, Watch the cloud jobs)
-  if (job.isNamed && isKindSaid(job.label)) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${many}`
+  // (only when they say the kind it is: a watch named Check that… still leads with Watch)
+  const said = describedOf(job.label).kind
+  if (job.isNamed && isKindSaid(job.label) && (said === job.kind || (said === 'script' && job.kind === 'remote'))) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${many}`
   return `${kind} · ${job.label}`
 }
 

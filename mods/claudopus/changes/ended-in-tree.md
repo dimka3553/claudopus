@@ -1,3 +1,4 @@
 - In Details, a command that ended is now a row under the task or helper that started it, in the same tree as what still runs, instead of a flat list under Commands ended.
 - An ended command is named as it was while it ran, never by its shell line.
 - A press on any ended command opens its log in a tab of the panel, including commands that ended before this version.
+- A watch named by another verb, such as Check, leads with Watch again.
