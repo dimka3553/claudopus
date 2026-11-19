@@ -68,7 +68,7 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
   }
   if (open.kind === 'continue') {
     const r = kept.find(one => one.id === open.id)
-    return r && { head: `↳ What next from the result “${cut(r.title, 50)}”?`, placeholder: 'Type what to do next', draft: barDraft(), send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))) }
+    return r && { head: `↳ What should “${cut(r.title, 50)}” change?`, placeholder: 'Type what to change', draft: barDraft(), send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))) }
   }
   const box = boxes.find(one => one.id === open.id)
   if (!box) return undefined
@@ -122,7 +122,7 @@ const barBox = ($: EngineInterface, ui: Ui, box: BarBox) => {
       {box.extra ?? null}
       <ui.Box key="band-box-foot" flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
         <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
-          <ui.Text dimColor wrap="truncate-end">Enter sends</ui.Text>
+          <ui.Text dimColor wrap="truncate-end">{`Enter sends · ${box.secret ? 'Goes only to this command' : 'Send carries the task on'}`}</ui.Text>
         </ui.Box>
         <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
           <ui.Button key={`band-box-send-${presses}-${boxPresses}`} label="Send" variant="primary" onPress={() => send(typed())} />

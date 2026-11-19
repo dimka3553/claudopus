@@ -344,10 +344,10 @@ const readDrafts = async ($: EngineInterface) => {
 }
 // The last answer or press given on each card, said there in one grey line for a while after (sentLine)
 // `to`: where it stands. 'pressed': a press on a permission, password or key block (`whole` in place of "You pressed …", `said`
-// what came of it when it came to nothing); 'open': Not now, which sent nothing; the rest an answer to a question on its way
+// what came of it when it came to nothing); the rest an answer to a question on its way
 // ('sending'), written into or sent to its task ('work', 'read'), not sent ('failed', 'lost') or left for the chat ('chat')
 // A button's answer keeps the ask it answered and the work it went to (asked, target), so it can be taken back (takeBack)
-type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'pressed' | 'open' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; isPress?: boolean; said?: string; whole?: string; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
+type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'pressed' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; isPress?: boolean; said?: string; whole?: string; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
 // The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
 const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
 // How long the card says what was answered, unless the work writes a newer line first
@@ -490,7 +490,7 @@ const sendFromBar = ($: EngineInterface, id: string, value: string) => {
 // Change something, on a Done card of this chat's: the same box, opened for a card that asks nothing. What is sent from it goes
 // to that task as the person's own words, which starts it again from the submit's or the press's own hook (answersOnWay,
 // toEnded), never from a timer, and the chat is only told, with no turn of its own
-const canChange = (one: Todo) => !one.chat && !one.parentId && one.status === 'done' && !one.leftOpen && !openItems(one).length && !needsPerson(one)
+const canChange = (one: Todo) => !one.chat && !one.parentId && (one.status === 'done' || one.status === 'failed') && !isHeld(one) && !one.leftOpen && !openItems(one).length && !needsPerson(one)
 const sendChange = ($: EngineInterface, id: string, value: string) => {
   const run = changeTask($, id, value.trim())
   answersOnWay.add(run)
@@ -516,8 +516,6 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   const said = choice.trim()
   if (!ask || !said) return
   const target = ask.from ?? one.id
-  // Not now leaves the question open and sends nothing: its block stays, and one grey line says what was pressed
-  if (!isReply && !ask.refused && plainWords(said) === 'not now') return void (sentReplies.set(one.id, { text: said, ask: ask.text, to: 'open', at: await $.clock.now(), isCard: true, askAt: ask.at }), redraw($), $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($)))
   if (!settles(ask, said, isReply)) return holdAsk($, one, ask, said, target)
   // The amber goes and the box clears at once. Only the first answer to the ask it was made for counts: a second press, or a press
   // on an ask the work has since replaced, sends nothing. Marked before anything is awaited, so two presses at once count once
@@ -608,7 +606,7 @@ const RELEASE_PRESSED = (folder: string) =>
 const canTakeBack = (one: Todo, now: number) => {
   const sent = heldAnswer(one, now)
   // Only while the card still says it (sentLine), never for an answer left in the chat, whose model has it already
-  return Boolean(sent?.asked && !sent.isHeld && !['pressed', 'open', 'sending', 'chat'].includes(sent.to) && !one.ask && !one.chat && sentLine(one, now))
+  return Boolean(sent?.asked && !sent.isHeld && !['pressed', 'sending', 'chat'].includes(sent.to) && !one.ask && !one.chat && sentLine(one, now))
 }
 // (at: the answer the button was drawn for: a click on a drawing held from before takes back nothing newer)
 const takeBack = ($: EngineInterface, one: Todo, at: number) => {
@@ -854,8 +852,6 @@ const sentLine = (one: Todo, now: number) => {
   if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Couldn't reach that Mac with “${cut(sent.text, 60)}” · answer in its own chat` : ''
   if (now - sent.at > ANSWER_SHOWN) return ''
   if (sent.to === 'pressed') return `✓ ${sent.whole || `You pressed “${sent.text}”`}${sent.said ? ` · ${sent.said}` : ''}`
-  // Not now: nothing was sent, and its question is still there
-  if (sent.to === 'open') return one.ask?.text === sent.ask ? `✓ You pressed “${sent.text}” · the question stays open` : ''
   const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text))
   if (one.ask && !isHeld) return ''
   if (sent.to === 'chat') return `✓ You answered “${cut(sent.text, 60)}” · it couldn't reach the task, so it goes with your next message`

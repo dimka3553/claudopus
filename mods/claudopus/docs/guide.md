@@ -69,7 +69,7 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 - Claudopus cuts a question longer than 300 letters at a word, and shows the whole of it under the question.
 - Above the prompt, a question that has more says the rest is in the chat and on its card.
 - Next comes any text to paste, beside a Copy button. Claude asks you to type only a command it can't run itself, and gives it whole, with its folder. On the Mac you sit at, the card also has Open in Terminal. It opens Terminal with the command typed at the prompt, in its folder. It never runs the command, and only opens when you press it. In a chat on another Mac there's no such button. You type the command in your own session to that Mac.
-- You answer with the buttons Claude gave, or with Answer in words. No button is added to Claude's own. Not now leaves the question open.
+- You answer with the buttons Claude gave, or with Answer in words. No button is added to Claude's own, and every button is an answer that carries the task on. To leave a question open, press nothing.
 - In the desktop app, Answer in words opens one box in the bar above the chat's prompt, named after the task it goes to, with Send and Close. A key, a password, a change to a finished task and continuing from a result are typed in that same box. Nothing is typed on the card, because the app keeps moving the panel back to a box that holds the cursor.
 - Close takes the box away and saves what you typed for the next time you open it. If the same task asks a new question, the box stays open with what you typed.
 - If the bar is folded, one of the app's surveys is in it, or the chat runs in a terminal, the block on the card has its own field instead.

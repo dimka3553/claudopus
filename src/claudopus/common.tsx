@@ -89,6 +89,8 @@ const ALWAYS_ALLOW = 'Always allow this command'
 const TYPE_IT = 'Type it'
 const PASTE_IT = 'Paste it'
 const DONT_GIVE = "Don't give it"
+// A choice a task gives that would answer nothing: left out of its question's buttons (tools.tsx)
+const LEAVES_OPEN = /^(?:no,? )?(?:not (?:now|yet)|later|maybe later|skip|skip it|cancel|dismiss|close)$/
 const ANSWER_IN_WORDS = 'Answer in words'
 // The one test of "something waits for the person on this card": its own question, a permission held for their press (an admin
 // command, a release, a change to a file of theirs), and what is drawn on it from the mod's own memory: Claude Code's prompt for a
