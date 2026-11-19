@@ -1,0 +1,4 @@
+- Config is shorter: your name, your principles, when a task ends, the models, the second check and updates are in sight, and what you rarely change is under More.
+- Sound and Notifications are one choice, When a task ends: sound and notification, notification only, sound only, or nothing.
+- Fable 5.2 tasks is gone: Heavy tasks has Same as most tasks, which keeps Fable 5.2 for when you name it, and Most tasks can be Fable 5.2. Your saved choices still count.
+- Admin commands and the commands you always allow are one row, and Open file is beside Cancel once you press Edit.

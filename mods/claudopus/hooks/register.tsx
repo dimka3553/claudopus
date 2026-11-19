@@ -8,7 +8,7 @@ import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
 import { broughtBackBy, isResultId, marksOf, merged, markThere, parsedMeta, PLACE, PULL, pullThere, PUSH, PUSH_THERE, rehome, RESULTS_A_TRIP, RESULTS_EVERY, RESULTS_LOOK, resultsOf } from './results'
 import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, helpersOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, deliveredSaid, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, shareableHelpers, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
 import type { Answer, Off } from './shared'
-import { clearModel, configView, editing, fillModels, heavyModeOf, leanOf, modelsIn, modelsOf, modelsShort, parse, TEXTS } from './config'
+import { ALERTS, clearModel, configMore, configView, editing, fillModels, heavyModeOf, leanOf, modelsIn, modelsOf, modelsShort, parse, ROLES, SAME, TEXTS } from './config'
 import type { Config, ConfigShown, HeavyMode, Lean, LeanKey, Models, Role } from './config'
 import type { Fail, LookIo, Notice, Published, Source, Steps } from './update'
 import { copyOf, download, FAILS, folderMarketplace, folderReady, install, installedFrom, isNewer, isUpdateDue, isVersion, lookEveryOf, LOOK_EVERY_HOURS, missedOn, noticeOf, publishedOf, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, sizeText, stampOf, stepsOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
@@ -1094,7 +1094,11 @@ const configAct = ($: EngineInterface, what: string, act: () => Promise<string |
     })
 }
 const configActs = ($: EngineInterface) => ({
-  open: (text: (typeof TEXTS)[number]) => configAct($, `Couldn't open ${text.name}`, () => editText($, $.plugin.root, dir, text.path)),
+  open: (text: (typeof TEXTS)[number]) =>
+    configAct($, `Couldn't open ${text.name}`, async () => {
+      Object.assign(editing, { key: '', draft: '' })
+      return editText($, $.plugin.root, dir, text.path)
+    }),
   edit: (text: (typeof TEXTS)[number], body: string) => configAct($, '', async () => void Object.assign(editing, { key: text.key, draft: body })),
   save: (text: (typeof TEXTS)[number], body: string) =>
     configAct($, `Couldn't save ${text.name}`, async () => {
@@ -1108,6 +1112,25 @@ const configActs = ($: EngineInterface) => ({
     configAct($, "Couldn't save the setting", async () => {
       await setConfig($, dir, key, value, role)
     }),
+  model: (role: Role, value: string) =>
+    configAct($, "Couldn't save the setting", async () => {
+      const fable = leanOf(await readConfig($, dir)).fable
+      const shipped = (one: Role) => ROLES.find(r => r.key === one)?.shipped
+      if (fable === 'all' && role !== 'work') await setConfig($, dir, 'models', 'fable' === shipped('work') ? undefined : 'fable', 'work')
+      if (role === 'heavy' && value === SAME) {
+        await setConfig($, dir, 'models', undefined, 'heavy')
+        return setConfig($, dir, 'lean', 'named', 'fable')
+      }
+      await setConfig($, dir, 'models', value === shipped(role) ? undefined : value, role)
+      if (fable === 'all' || (fable === 'named' && role === 'heavy')) await setConfig($, dir, 'lean', undefined, 'fable')
+    }),
+  alerts: (value: (typeof ALERTS)[number]['value']) =>
+    configAct($, "Couldn't save the setting", async () => {
+      const one = ALERTS.find(a => a.value === value) ?? ALERTS[0]
+      await setConfig($, dir, 'sound', one.sound ? undefined : false)
+      await setConfig($, dir, 'notifications', one.notifications ? undefined : false)
+    }),
+  more: (isOpen: boolean) => configAct($, '', async () => void (configMore.isOpen = isOpen)),
   gateMode: (mode: 'each' | 'work' | 'never') => configAct($, "Couldn't save the setting", () => regate($, { mode })),
   gateRemove: (host: string, command: string) => configAct($, "Couldn't remove the command", () => regate($, { remove: { host, command } })),
   lookEvery: (hours: number) =>

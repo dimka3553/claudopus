@@ -150,7 +150,9 @@ declare global {
   export import stuckOf = M5.stuckOf
   export import Answer = M5.Answer
   export import Off = M5.Off
+  export import ALERTS = M6.ALERTS
   export import clearModel = M6.clearModel
+  export import configMore = M6.configMore
   export import configView = M6.configView
   export import editing = M6.editing
   export import fillModels = M6.fillModels
@@ -160,6 +162,8 @@ declare global {
   export import modelsOf = M6.modelsOf
   export import modelsShort = M6.modelsShort
   export import parse = M6.parse
+  export import ROLES = M6.ROLES
+  export import SAME = M6.SAME
   export import TEXTS = M6.TEXTS
   export import Config = M6.Config
   export import ConfigShown = M6.ConfigShown
