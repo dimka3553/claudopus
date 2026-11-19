@@ -390,6 +390,8 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
   files.delete('auto-refuse')
   await clock.advance(1000)
   expect(['asked again for the next command', Boolean(await until(async () => list.find({ type: 'Text', text: BLOCKED })))]).toEqual(['asked again for the next command', true])
+  // Pressed once the task has ended, having handed in its result, nothing starts it again
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h-end', agentId: 'a1', message: 'The notes are written, without the files Claude Code refused.' } as never)
   agents.a1 = 'completed'
   ended.add('a1')
   await $.turn.complete({ answer: 'The notes are written, without the files Claude Code refused.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)

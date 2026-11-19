@@ -205,7 +205,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     const text = e.tool === 'get_session' ? JSON.stringify({ sessionId: 'local_1', title: 'Old title' }) : '[]'
     return { value: { content: [{ type: 'text', text }], isError: false } }
   })
-  on('session.id', () => ({ value: 'engine-id' }))
+  // (another chat, where the test lays session:id)
+  on('session.id', () => ({ value: files.get('session:id') ?? 'engine-id' }))
   // The mod's pause in a long step (breathe): answered after the test's own timers have had their turn, as the engine answers from
   // outside the helper
   on('session.turns', async () => (await new Promise(done => setTimeout(() => done(undefined), 0)), { value: 1 }))
@@ -298,6 +299,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The jobs' outputs as the panel reads them in one go, where the test gives them: each output it asks for ends in what the test
     // says, last written when it says, and every detached process it names still runs
     // (and, where the test gives them, the processes and the file each held-open command's shell writes to)
+    // (as the mod asks now: every word after the script's name is an output, with no count before them, and nothing follows the last)
+    if (options.jobs && tool === 'sh' && String(rest[1]).startsWith('for f; do ') && String(rest[1]).includes('@@JOB@@'))
+      return ok(rest.slice(3).map(file => `\n@@JOB@@ ${Math.floor((options.jobs?.wroteAt(String(file)) ?? 0) / 1000)} ${String(file)}\n${options.jobs?.output(String(file)) ?? ''}`).join(''))
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('@@JOB@@')) {
       const n = Number(rest[3] ?? 0)
       const asked = rest.slice(4, 4 + n).map(String)
@@ -490,8 +494,6 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(files.has('git:top') ? `${files.get('git:top')}\n` : '', files.has('git:top') ? 0 : 128)
     // and where the repo a worktree belongs to keeps its git folder, as git:common lays it
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--git-common-dir')) return ok(files.has('git:common') ? `${files.get('git:common')}\n` : '', files.has('git:common') ? 0 : 128)
-    // (a folder's own branch, where the test lays git:branch:<folder>)
-    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref') && files.has(`git:branch:${rest[rest.indexOf('-C') + 1]}`)) return ok(`${files.get(`git:branch:${rest[rest.indexOf('-C') + 1]}`)}\n`)
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref')) return ok(files.has('git:branch') ? `${files.get('git:branch')}\n` : '', files.has('git:branch') ? 0 : 128)
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
@@ -783,7 +785,6 @@ test('finished work leaves a result for good that asks nothing: its pictures cop
   const filled: string[] = []
   on('prompt.fill', (_, e) => (filled.push(e.text), { isFilled: true }))
   files.set('/private/tmp/s/scratchpad/revenue.png', 'PNG')
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'tasks' } }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'how is revenue doing', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Weekly revenue', prompt: 'how is revenue doing' } as never)
@@ -935,13 +936,17 @@ test('finished work leaves a result for good that asks nothing: its pictures cop
   const finishedCount = async () => Number(/Finished (\d+)/.exec(String((await keyed(cards, 'finished-fold'))?.props.label))?.[1] ?? 0)
   await $.agent.spawn({ ...spawn, description: 'Pick an opening', prompt: 'pick an opening' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a4', text: 'Which opening should go out?', choices: ['A', 'B', 'C'] } as never)
-  await $.turn.complete({ agentId: 'a4', answer: 'Three openings are cut, A, B and C. Nothing is posted until one is picked.', durationMs: 1, isAborted: false, turnId: 't5', reason: 'answer' })
+  // (it hands in its result with the question still open: that, not its turn's end, ends a task)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h4', agentId: 'a4', message: 'Three openings are cut, A, B and C. Nothing is posted until one is picked.' } as never)
+  await $.turn.complete({ agentId: 'a4', answer: '', durationMs: 1, isAborted: false, turnId: 't5', reason: 'answer' })
   await clock.advance(3_000)
   await pane.unmount()
   const cards = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
   expect((await until(async () => (await cards.find({ type: 'Text', text: 'Which opening should go out?' })) ?? undefined))?.props.color).toBe('#E5A50A')
   expect(await cards.find({ type: 'Text', text: /^1 .*waiting for you/ })).toBeDefined()
-  // (the two that ended before it are under Finished once their two seconds are over)
+  // (the two that ended before it stay up, with nothing under Finished, until each is dismissed)
+  expect(await finishedCount()).toBe(0)
+  for (const id of ['a1', 'a3']) await pressed(cards, `dismiss-${id}`)
   await until(async () => ((await finishedCount()) === 2 ? true : undefined))
   const before = await finishedCount()
   expect(before).toBe(2)
@@ -1011,7 +1016,10 @@ test('work started from a report keeps its own report linked to it, beside the o
   // The older one is kept as it was
   expect(files.get(`${MEMORY}/reports/${old.id}/report.md`)).toBe('Revenue was flat.\n')
 
-  // The same work reporting again, and the report it started from, are one row: the newest
+  // The same work reporting again, and the report it started from, are one row: the newest (the person's words start it again:
+  // a task that is done reports again only from a run of its own)
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Sam: “count the refunds too”' } as never)
+  for await (const _ of $.turn.step({ turnId: 't2', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
   await $.turn.complete({ agentId: 'a1', answer: `Revenue rose 6% once the refunds are counted.\n\n${'Refunds are in the table. '.repeat(30)}`, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
   await clock.advance(70_000)
   await until(async () => ([...files.keys()].filter(path => path.endsWith('/meta.json')).length === 3 ? true : undefined))

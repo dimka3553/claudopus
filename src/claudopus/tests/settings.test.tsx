@@ -90,33 +90,43 @@ test('Config lists each thing a person can set with what is in force, edits a te
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').name).toBeUndefined()
 })
 
-test('the model each kind of work runs on comes from Config, and the chat\'s and work\'s rules name it', async ($, on) => {
+test('the model each kind of work runs on comes from Config, and the chat\'s and work\'s rules name it: a chat keeps the models it was first told, and a new chat is told the new ones', async ($, on) => {
   const { files } = world(on, { chatRole: 'CHAT ROLE\n- {models}' })
   await $.session.start(start)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   await config.select({ key: 'config-model-legwork-pick', value: 'opus' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ models: { legwork: 'opus' } })
-  // The chat is told at its next message, and the work's rules name the helpers' model
+  expect(await config.find({ type: 'Text', text: /A change to the rules, the models or the second check reaches new chats and new tasks; open ones keep what they started with\./ })).toBeDefined()
+  // The chat is told with its first message, and the work's rules name the helpers' model
   const told = (await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })) as { context?: string[] }
-  expect((told.context ?? []).join('\n')).toContain('Long legwork such as indexing runs on Opus 5.5, `model: "opus"`.')
+  expect((told.context ?? []).join('\n')).toContain('A clearly stated job, and long legwork such as indexing, runs on Opus 5.5, `model: "opus"`.')
   await $.agent.spawn({ ...spawn, prompt: 'index the photos' } as never)
   expect(prompts[0]).not.toContain('{helpers}')
   expect(prompts[0]).not.toContain('{checker}')
   // Picking what shipped takes the key out again
   await config.select({ key: 'config-model-legwork-pick', value: 'sonnet' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
+  // The open chat is told nothing of the change, at its next message or when its rules go out again after a compaction
+  expect(((await $.prompt.submit({ text: 'and the videos', wait: false, origin: composer })) as { context?: string[] }).context?.join('\n')).not.toContain('legwork')
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'one', toolUses: [] }] as never })
+  expect(((await $.prompt.submit({ text: 'and the songs', wait: false, origin: composer })) as { context?: string[] }).context?.join('\n')).toContain('long legwork such as indexing, runs on Opus 5.5')
+  // A new chat is told the models as they are now
+  files.set('session:id', 'chat-2')
+  await $.session.start(start)
+  expect(((await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })) as { context?: string[] }).context?.join('\n')).toContain('long legwork such as indexing, runs on Sonnet 5.5')
 })
 
-test("Config's Tasks band shows who does a short request, when Fable runs and when a second agent checks, each with its shipped choice, and a choice is written as lean in config.json; the choices of how work is handed out are gone", async ($, on) => {
+test("Config's Tasks band shows only when Fable runs and when a second agent checks, each with its shipped choice, and a choice is written as lean in config.json; the choices of how work is handed out and of who does a short request are gone, and a saved one goes at the next save", async ($, on) => {
   const { files } = world(on)
+  // (a choice of 0.2.201 to 0.2.205's, still in the file)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'itself' } }))
   await $.session.start(start)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   const settings: [string, string, string, string][] = [
-    ['chat', 'Short requests', 'itself', 'tasks'],
     ['fable', 'Fable 5.2 tasks', 'heavy', 'named'],
     ['second', 'Second check', 'asked', 'every'],
   ]
-  for (const [key, name] of [['small', 'Small jobs'], ['quick', 'Quick task model'], ['start', 'What a task starts with'], ['checker', 'Checker model'], ['readers', 'Helpers that only read']])
+  for (const [key, name] of [['chat', 'Short requests'], ['small', 'Small jobs'], ['quick', 'Quick task model'], ['start', 'What a task starts with'], ['checker', 'Checker model'], ['readers', 'Helpers that only read']])
     expect([name, Boolean(await config.find({ type: 'Text', text: name })), Boolean(await config.find({ type: 'Select', key: `config-lean-${key}-pick` } as never))]).toEqual([name, false, false])
   for (const [key, name, shipped, other] of settings) {
     expect([name, Boolean(await config.find({ type: 'Text', text: name }))]).toEqual([name, true])

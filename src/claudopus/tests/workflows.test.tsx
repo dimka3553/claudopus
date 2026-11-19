@@ -80,7 +80,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   await until(async () => words.find({ type: 'Text', text: /^Roman numerals$/ }))
   expect((await words.findAll({ type: 'Text', text: /^[■□]$/ })).map(one => one.text).join('')).toBe('■■■□□□')
   await words.unmount()
-  expect(await pane.find({ type: 'Text', text: /^1 task working$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^1 working$/ })).toBeDefined()
   // Kept in a file of its own, for the chat that started this session
   expect(JSON.parse(files.get(`${MEMORY}/flows/wf_1.json`) ?? '{}').session).toBe('local_1')
 

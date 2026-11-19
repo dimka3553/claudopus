@@ -139,7 +139,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   expect(await until(async () => ((await askButtons(list, 'a2')).length ? askButtons(list, 'a2') : undefined))).toEqual(['Answer in words'])
   const box3 = await inWords(list, bar, 'a2', 'claudopus')
   expect(box3?.props.value ?? '').toBe('')
-  expect(await until(async () => resumed.find(line => line.startsWith('a2: ') && line.includes('in their own words: claudopus')))).toContain('this answer starts you again')
+  expect(await until(async () => resumed.find(line => line.startsWith('a2: ') && line.includes('in their own words: claudopus')))).toContain('Continue the task with this answer')
   expect(submitted.some(line => line.includes('claudopus'))).toBe(false)
   expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “claudopus”' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Tell me the repo name.' })).toBeUndefined()
@@ -461,6 +461,9 @@ test('with work running and nobody typing, the panel is drawn again at once for 
   await $.agent.spawn({ ...spawn, description: 'Check the nose', prompt: 'nose' } as never)
   await $.turn.complete({ answer: 'Nose checked.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a3' } as never)
   await clock.advance(12_000)
+  // (an ended card stays up until it is dismissed: dismissed, it is the one under Finished)
+  await pressed(list, 'dismiss-a3')
+  expect(await until(async () => keyed(list, 'finished-fold'))).toBeDefined()
   const shut = await texts()
   await pressed(list, 'finished-fold')
   expect(await until(async () => ((await texts()) !== shut ? true : undefined))).toBe(true)
@@ -500,7 +503,9 @@ test('an ask outlives the work that made it: amber after the work ends, with the
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Run this to restart that chat yourself.', command: 'ssh m4 tmux respawn-pane -k -t claude', choices: ['Done'] } as never)
-  await $.turn.complete({ answer: 'I could not restart it; the command is on your card.', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
+  // (it hands in its result with the question still open: that, not its turn's end, ends a task)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'I could not restart it; the command is on your card.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
   // Long after it finished, the ask is still there, amber, with its own Done, its buttons for the command and Answer in words;
   // though the work has ended, its card has no Change something while it asks; Dismiss puts it away, as on any ended card
   await clock.advance(10 * 60_000)
@@ -524,7 +529,9 @@ test('a press on one ended work\'s ask leaves the other asks\' buttons where the
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   for (const [id, text] of [['a1', 'Release Linux support?'], ['a2', 'Release the Azure route?']]) {
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${id}`, agentId: id, text, choices: ['Release it'] } as never)
-    await $.turn.complete({ answer: 'Waits for your Release it.', durationMs: 1, isAborted: false, turnId: `turn-${id}`, reason: 'answer', agentId: id } as never)
+    // (each hands in its result with the question still open: that, not its turn's end, ends a task)
+    await $.tool.call({ tool: 'SubagentHandback', tool_use_id: `h-${id}`, agentId: id, message: 'Waits for your Release it.' } as never)
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: `turn-${id}`, reason: 'answer', agentId: id } as never)
   }
   await clock.advance(60_000)
   // The keys as the late surface last drew them, both cards amber with their buttons
@@ -570,6 +577,13 @@ test('Release it on a go-ahead asked with its worktree reaches the task as its a
   expect(await list.find({ type: 'Text', text: 'Permission' })).toBeUndefined()
   run?.('released')
   expect((await first).deny).toBeUndefined()
+  // A task runs its release in its own background, and its card is never Done while that runs: its hand-in is refused until the
+  // release has ended (18 Nov, the person: "Until it's done releasing, it's not done")
+  await bash('bgr', 'hold release-in-the-background', 'a1', { description: 'Release fix-nose', run_in_background: true })
+  const early = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h-early', agentId: 'a1', message: 'Released.' } as never)) as { deny?: string }
+  expect(early.deny).toContain('Not handed in: a command of yours still runs')
+  expect(await list.find({ type: 'Text', text: /^✓ Done/ })).toBeUndefined()
+  await $.tool.call({ tool: 'TaskStop', tool_use_id: 'bgr-s', agentId: 'a1', task_id: 'bg-bgr' } as never)
   // Once: the same card's next release run is asked as any release nobody pressed for
   await clock.advance(1000)
   const second = bash('r2', 'hold xr2; /plug/claudopus/bin/release') as Promise<{ deny?: string }>
@@ -607,7 +621,7 @@ test('a reply in words that does not settle an ask keeps it, and the card active
   const box = await inWords(list, bar, 'a1', 'Show me images first.')
   const told = (await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('in their own words: Show me images first.')))) ?? ''
   expect(told).toContain('does not settle your question by itself')
-  expect(told).toContain('this answer starts you again')
+  expect(told).toContain('Continue the task with this answer')
   // The card stays among the running cards, at work, with its question and the reply under it in one grey line, and nothing to
   // press or type; nothing is under Finished
   expect((await until(async () => list.find({ type: 'Text', text: '✓ You answered “Show me images first.”' })))?.props.dimColor).toBe(true)
@@ -641,6 +655,10 @@ test('a reply in words that does not settle an ask keeps it, and the card active
   expect((await until(async () => ((await isFinished()) ? undefined : true))) ?? JSON.stringify([...(await labels()), ...(await texts())])).toBe(true)
   await $.turn.complete({ answer: 'Released as 0.2.77.', durationMs: 1, isAborted: false, turnId: 'turn-4', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(60_000)
+  // Done, it stays among the cards, saying so, until the person dismisses it: only then is it under Finished
+  expect(await until(async () => list.find({ type: 'Text', text: /^✓ Done/ }))).toBeDefined()
+  expect(await isFinished()).toBe(false)
+  await pressed(list, 'dismiss-a1')
   expect(await until(async () => ((await isFinished()) ? true : undefined))).toBe(true)
   await Promise.all([list.unmount(), bar.unmount()])
 })
@@ -781,7 +799,9 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
     heading: await details.find({ type: 'Text', text: ASK }).then(q => (!q ? 'none' : q.props.color === AMBER ? 'needs' : isPurple(q.props.color) ? 'acting' : 'other')),
   })
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: ASK, choices: ['Release it'] } as never)
-  await $.turn.complete({ answer: 'Release PR 54 to production? (Answer: Release it.)', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
+  // (it hands in its result with the question still open: that, not its turn's end, ends a task)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'Release PR 54 to production? (Answers: Release it / Not now.)' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(60_000)
   // Before the reply: it waits on the person, amber everywhere
   const before = await until(async () => {
@@ -991,7 +1011,9 @@ test('an answer to ended work that cannot be started again is left in the chat a
   await $.agent.spawn({ ...spawn, description: 'Pick a colour', prompt: 'pick a colour' } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Red or blue?', choices: ['Red', 'Blue'] } as never)
-  await $.turn.complete({ answer: 'Waiting on your colour.', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
+  // (it hands in its result with the question still open: that, not its turn's end, ends a task)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'Waiting on your colour.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
   await list.press({ key: (await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Blue')))?.key ?? '' })
   expect(await until(async () => logged.find(line => line.includes('Your answer “Blue” to “Pick a colour” (Red or blue?)')))).toContain("couldn't reach its task. It goes with your next message here.")
   expect(await until(async () => appended.find(line => line.startsWith('undefined: ') && line.includes('The answer could not reach that task')))).toContain('(Red or blue?): Blue.')
@@ -1323,7 +1345,9 @@ test('a copy a reload replaced wakes no work: its timers stop, an answer left fo
   await $.agent.spawn({ ...spawn, description: 'Restart the old chat', prompt: 'restart the old chat' } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I restart it?', choices: ['Approve'] } as never)
-  await $.turn.complete({ answer: 'It waits on your go-ahead.', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
+  // (ended work: it hands in its result with the question still open)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'It waits on your go-ahead.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(2000)
   // A newer load takes charge in this chat, as a /reload-plugins does; this copy's timers run on beside it, as the engine leaves them
   isNewer = true
@@ -1350,7 +1374,9 @@ test('F-013 · an answer another chat left in a file for ended work wakes nothin
   await $.prompt.submit({ text: 'restart the old chat', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Restart the old chat', prompt: 'restart the old chat' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I restart it?', choices: ['Approve'] } as never)
-  await $.turn.complete({ answer: 'It waits on your go-ahead.', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
+  // (ended work: it hands in its result with the question still open)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'It waits on your go-ahead.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
   files.set(`${MEMORY}/live/answers/engine-id/0-a.json`, JSON.stringify({ card: 'a1', choice: 'Approve', isReply: true, ask: 'May I restart it?', askAt: 1_700_000_000_000, at: 1_700_000_000_000 }))
   await clock.advance(6000)
   expect(files.has(`${MEMORY}/live/answers/engine-id/0-a.json`)).toBe(false)
@@ -1579,17 +1605,24 @@ test('folding Finished while scrolled down draws one card and the fold at their 
   for (const what of ['ears', 'nose', 'chin', 'eyes', 'mouth']) await $.agent.spawn({ ...spawn, description: `Check the ${what}`, prompt: what } as never)
   for (const n of [2, 3, 4, 5]) await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: `t${n}`, reason: 'answer', agentId: `a${n}` } as never)
   await clock.advance(2_100)
+  // (each ended card stays up until the person dismisses it: they dismissed all four)
+  const first = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  for (const n of [2, 3, 4, 5]) (expect(await until(async () => keyed(first, `dismiss-a${n}`))).toBeDefined(), await pressed(first, `dismiss-a${n}`))
+  expect(await until(async () => (await first.findAll({ type: 'Button' })).find(b => /Finished 4$/.test(String(b.props.label))))).toBeDefined()
+  await first.unmount()
+  // (and left the panel alone since: a drawing is held while they use it)
+  await clock.advance(31_000)
   // The person opened Finished, the list ran to 300 rows as the app said, and they scrolled down to its fold, 200 rows in
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 200, bodyRows: 50 } }, surface: 'desktop' } as never)
   const fold = async () => (await list.findAll({ type: 'Button' })).find(b => /Finished 4$/.test(String(b.props.label)))
   await list.press({ key: String((await fold())?.key) })
-  expect((await fold())?.props.label).toBe('▾ Finished 4')
+  expect(await until(async () => ((await fold())?.props.label === '▾ Finished 4' ? true : undefined))).toBe(true)
   await ($.ui as any).scroll({ component: 'Pane', requestId: LIST.requestId, offset: 200, by: 20, bodyRows: 50, contentRows: 300, origin: { kind: 'person' } }).catch(() => undefined)
   // They fold it: one card and the fold are left, drawn at the pane's own height, so the view comes back to them and no blank runs
   // under them to scroll through (17 Nov, Dima's screenshot: one card, the fold at the bottom and blank down to it. Held at the
   // list's longest moment on 0.2.170, and with the hold at the bottom of the view alone, blank down to where the fold was pressed)
   await list.press({ key: String((await fold())?.key) })
-  expect((await fold())?.props.label).toBe('▸ Finished 4')
+  expect(await until(async () => ((await fold())?.props.label === '▸ Finished 4' ? true : undefined))).toBe(true)
   expect(Number((await list.find({ type: 'Box' }))?.props.minHeight ?? 0)).toBe(50)
   await list.unmount()
 })
@@ -1695,10 +1728,10 @@ test('a reply never waits behind a long command: one that may run for minutes is
     expect(wait.deny).toContain('End your step now')
   }
   expect(held.has('record')).toBe(false)
-  // A command known to run for minutes, by its words, or a build, render, browser run or download asking for a longer time limit, is
+  // A build, render, browser run or download asking for a longer time limit is
   // refused with the same call to send in the background, never changed on its way (auto mode refuses a call a hook changed after it
   // reviewed it: 484 calls on 16-17 Nov); sent so, it runs as written
-  for (const [id, more] of [['s1', { timeout: 600000, command: 'npm run build', description: 'Run the build' }], ['s2', { command: 'hold s2', description: 'Waiting for the CQ500 results (about 5 min)' }], ['s4', { timeout: 600000, description: 'Run the tests (about 6 min)', command: 'hold s4 &>test.log' }], ['s5', { timeout: 600000, command: 'curl -L -o scans.zip https://example.com/scans.zip', description: 'Get the scans' }]] as const) {
+  for (const [id, more] of [['s1', { timeout: 600000, command: 'npm run build', description: 'Run the build' }], ['s5', { timeout: 600000, command: 'curl -L -o scans.zip https://example.com/scans.zip', description: 'Get the scans' }]] as const) {
     const r = (await $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', ...more } as never)) as { deny?: string }
     expect([id, r.deny]).toEqual([id, expect.stringContaining('Send the same call again with `run_in_background: true` and nothing else changed')])
     expect(r.deny).toContain('replies reach you while it runs')
@@ -1711,9 +1744,6 @@ test('a reply never waits behind a long command: one that may run for minutes is
     const r = (await $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', ...more } as never)) as { deny?: string; result?: { backgroundTaskId?: string } }
     expect([id, r.deny, r.result?.backgroundTaskId]).toEqual([id, undefined, undefined])
   }
-  // A launcher that leaves its runs going is left as it is, as what it started is followed while it runs
-  const launched = (await $.tool.call({ tool: 'Bash', tool_use_id: 's3', agentId: 'a1', command: 'nohup python run.py > run.log 2>&1 & echo $!', description: 'Wait for the head check to start on every set (about 20 min)', timeout: 600000 } as never)) as { context?: string[] }
-  expect((launched as { deny?: string }).deny).toBeUndefined()
   // A short one is held open as asked; a reply given meanwhile is taken at once, and the card says it in one grey line
   void keep($.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1', command: 'hold build', description: 'Run the build' } as never))
   await until(async () => held.get('build'))
@@ -2037,7 +2067,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   const sentAt = clock.now()
   await top.input({ key: again2?.key ?? '', text: 'Leave the tip longer' })
   expect(clock.now()).toBe(sentAt)
-  expect(changes()).toEqual(['a3: The person pressed "Change something" on the card of your finished task and wrote, in their own words, what to change in your finished work: Leave the tip longer\nYou had finished; this starts you again. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.'])
+  expect(changes()).toEqual(['a3: The person pressed "Change something" on the card of your finished task and wrote, in their own words, what to change in your finished work: Leave the tip longer\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.'])
   expect(submitted).toHaveLength(wasSubmitted)
   expect(toldOfChange()).toEqual([expect.stringContaining('asked the finished task "Trim the tail" on its card to change something: “Leave the tip longer”. The task has their words and carries on with them itself: start nothing for it.')])
   expect(await until(async () => (await list.find({ type: 'Button', key: 'stop-a3' })) ?? undefined)).toBeDefined()

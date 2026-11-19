@@ -4,23 +4,11 @@
 const SEC_NOW = 1_700_000_000_000
 
 test("F-001 · an admin command in the chat's own thread is refused before it is held: nothing asks, and no grant is left behind", async ($, on) => {
-  const { list, grants, admins } = await gated($, on, { lean: { chat: 'tasks' } })
+  const { list, grants, admins } = await gated($, on)
   const r = (await $.tool.call({ tool: 'Bash', tool_use_id: 'c1', command: `${ADMIN} here 'id -u'` } as never)) as { deny?: string }
   expect(r.deny).toContain('only reads')
   expect(await keyed(list, 'gate-c1-0-deny')).toBeUndefined()
   expect(grants()).toEqual([])
-  expect(admins).toEqual([])
-})
-
-test("F-001 · in a chat that does short requests itself, an admin command in its own thread is never run unasked: it is held for the person's press, as a task's is", async ($, on) => {
-  const { list, admins, press } = await gated($, on)
-  let ended = false
-  const call = $.tool.call({ tool: 'Bash', tool_use_id: 'c1', command: `${ADMIN} here 'id -u'` } as never).then(r => ((ended = true), r))
-  expect(await until(async () => await keyed(list, 'gate-c1-0-deny'))).toBeDefined()
-  expect(ended).toBe(false)
-  expect(admins).toEqual([])
-  await press('gate-c1-0-deny')
-  expect(((await call) as { deny?: string }).deny).toBeDefined()
   expect(admins).toEqual([])
 })
 

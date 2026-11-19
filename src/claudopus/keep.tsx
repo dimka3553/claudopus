@@ -1,79 +1,24 @@
-// Work that goes on when the chat's process ends: a keeper on this Mac for a chat the app runs from another Mac, the cards of
-// work cut off marked so, that work started again by itself, and the person told on their own device
+// The chat's process: what is at work is kept beside it, so a card found at work after the process was replaced says that the app
+// closed while it worked; and the watcher that brings Claudopus back should Claude switch it off
 
-// ---- What the keeper reads, and the keeper itself ----
-
-// Its files, one set per chat, under keep/: <chat>.json (the mod's: how many pieces of work are at work, and which),
-// <chat>.state (the keeper's: when the process ended, when the chat went on here, when the app took it back), <chat>.log
+// keep/<chat>.json: the chat's process and what is at work in it, kept true as the cards change
 const keepFile = (id: string, kind = 'json') => `${dir}/keep/${id}.${kind}`
 let keepSign = ''
-// The chat's own process, which runs the mod's commands: a load in the same process is a reload of the mod, which cuts nothing off
+// The chat's own process, which runs the mod's commands: a load in the same process is a reload of the mod, which ends nothing
 let enginePid = ''
 const pidOfEngine = async ($: EngineInterface) => ((await $.process.run(['/bin/sh', '-c', 'echo $PPID']).catch(() => undefined))?.stdout ?? '').trim()
-// Kept true as the cards change: the keeper reads it once the chat's process has ended, so it says what was at work then
 const saveKeep = async ($: EngineInterface) => {
-  const { id, title } = await read($, me)
+  const { id } = await read($, me)
   if (!id || !dir) return
   const list = await read($, todos)
-  const ids = list.filter(one => !one.parentId && !one.chat && (one.status === 'working' || lapsed.has(one.id))).map(one => one.id)
-  // and the helpers at work under them, by the task or helper that started each, which go on again with them
-  const helpers = Object.fromEntries(list.filter(one => one.parentId && one.parentId !== HELPER && !one.chat && one.status === 'working' && ids.includes(topOf(list, one.id))).map(one => [one.id, one.parentId]))
-  const sign = `${ids.join(',')}|${Object.keys(helpers).join(',')}|${title}`
+  const atWork = list.filter(one => !one.chat && one.status === 'working')
+  // (each task with its title, so a card the new process does not have comes back under its own name)
+  const titles = Object.fromEntries(atWork.filter(one => !one.parentId).map(one => [one.id, oneLine(one.title).slice(0, 200)]))
+  const sign = `${atWork.map(one => one.id).join(',')}|${Object.values(titles).join('|')}`
   if (sign === keepSign) return
   keepSign = sign
-  // with each one's title, so a card the new process does not have comes back under its own name
-  const titles = Object.fromEntries(list.filter(one => ids.includes(one.id) || one.id in helpers).map(one => [one.id, oneLine(one.title).slice(0, 200)]))
-  await $.fs.write(keepFile(id), JSON.stringify({ count: ids.length, ids, helpers, titles, title, pid: enginePid, at: await $.clock.now() }))
+  await $.fs.write(keepFile(id), JSON.stringify({ ids: atWork.map(one => one.id), titles, pid: enginePid, at: await $.clock.now() }))
 }
-
-// A chat this Mac runs for the app on another Mac lives only as long as the app lets it: the app ends its process when it
-// chooses, and the process signs in with the app's sign-in, which lapses while the app is away. So each load starts a keeper,
-// in a session of its own so it outlives the process: when the process ends with work at work and the app does not start it
-// again within a minute, it starts the chat again here, under this Mac's own sign-in (bin/keep). Not in the copy it starts,
-// which Claude Code's own background service keeps, nor in a chat this Mac's own terminal runs
-const isKeptCopy = async ($: EngineInterface) => (await $.env.get('CLAUDE_CODE_SESSION_KIND')) === 'bg'
-const startKeeper = async ($: EngineInterface, id: string) => {
-  if (!dir || !/^[A-Za-z0-9-]{1,80}$/.test(id) || (await isKeptCopy($))) return
-  // $PPID is the chat's process, which runs this shell; perl's setsid takes the keeper out of its process group, which the
-  // app ends with the process
-  const script = `nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$1" "$PPID" "$2" "$3" "$4" "$5" >/dev/null 2>&1 </dev/null &`
-  // The mod's own folder goes to the copy whole: a folder it is loaded from may have spaces in its path, which ps would split
-  const own = $.plugin.root.includes('/.claude/plugins/cache/') ? '' : $.plugin.root
-  const r = await $.process.run(['/bin/sh', '-c', script, 'sh', `${$.plugin.root}/bin/keep`, id, cwd, dir, own]).catch(err => ({ exitCode: -1, stderr: String(err) }))
-  await log($, r.exitCode === 0 ? `keeper started for ${id}` : `keeper not started: ${r.stderr.slice(0, 200)}`)
-}
-
-// With the app away its sign-in lapses, and the chat's process, still running, can no longer reach Claude: a turn ends with the
-// API saying so. The keeper is asked to end the process then, which hands the chat to this Mac's own sign-in at once (bin/keep
-// ends it on <chat>.handover); the work that failed so is counted as at work, to be started again there
-// Only the API's own words for a lapsed sign-in, and only twice within a few minutes: one helper's refusal is no lapse
-const SIGNIN_LAPSED = /API Error: 401\b[\s\S]{0,400}(authentication_error|OAuth token has expired|OAuth token revoked|invalid authentication credentials)/i
-const LAPSED_AGAIN = 10 * 60_000
-const lapsed = new Set<string>()
-let lapsedAt: number[] = []
-const lapsedSignIn = async ($: EngineInterface, e: { agentId?: string; reason: string; answer: string }) => {
-  if (!isRunFromAfar || e.reason !== 'error' || !SIGNIN_LAPSED.test(e.answer) || (await isKeptCopy($))) return false
-  const { id } = await read($, me)
-  if (!id || !dir) return false
-  const now = await $.clock.now()
-  if (e.agentId) lapsed.add(e.agentId)
-  lapsedAt = [...lapsedAt.filter(at => now - at < LAPSED_AGAIN), now]
-  if (lapsedAt.length < 2) return void log($, `a turn ended with a lapsed sign-in${e.agentId ? ` (work ${e.agentId})` : ''}; handed over if another does`)
-  keepSign = ''
-  await saveKeep($)
-  // The keeper acts only on an ask naming the process it watches
-  await $.fs.write(keepFile(id, 'handover'), enginePid)
-  await log($, `the sign-in the app lent this chat lapsed${e.agentId ? ` (work ${e.agentId})` : ''}: the keeper is asked to hand the chat to this Mac`)
-  return true
-}
-
-// ---- Work cut off: marked, started again, said ----
-
-// How long after the chat starts its cut-off work is looked at: by then Claude Code has started again what it starts itself
-const CUT_LOOK = 30_000
-// Work cut off longer ago than this is not started again
-const CUT_OLD = 24 * 3600_000
-type KeepState = { cutAt?: number; movedAt?: number; backAt?: number; copy?: string }
 const parsedOr = <T,>(text: string, or: T): T => {
   try {
     return text ? (JSON.parse(text) as T) : or
@@ -81,149 +26,30 @@ const parsedOr = <T,>(text: string, or: T): T => {
     return or
   }
 }
-// What was at work when the chat's process last ended, read as it starts again, before this load writes its own; when the
-// keeper saw that process end (or stopped its copy for the app); and what a load of the mod already did about that cut
-type CutHandled = { at?: number; pid?: string; isDone?: boolean }
-const readCut = async ($: EngineInterface, id: string) => {
-  const was = parsedOr<{ ids?: unknown; helpers?: unknown; titles?: unknown; pid?: unknown; at?: unknown }>(await readOr($, keepFile(id)), {})
-  const state = parsedOr<KeepState>(await readOr($, keepFile(id, 'state')), {})
-  const handled = parsedOr<CutHandled>(await readOr($, keepFile(id, 'cut')), {})
-  const isId = (one: unknown): one is string => typeof one === 'string' && /^[\w-]{1,80}$/.test(one)
-  const ids = Array.isArray(was.ids) ? was.ids.filter(isId) : []
-  const helpers = Object.fromEntries(Object.entries(was.helpers && typeof was.helpers === 'object' ? (was.helpers as Record<string, unknown>) : {}).filter((pair): pair is [string, string] => isId(pair[0]) && isId(pair[1])))
-  // The copy stopped for the app is a cut of its own: its work is started again in the app's chat
-  const kept = typeof state.backAt === 'number' ? state.backAt : typeof state.cutAt === 'number' ? state.cutAt : 0
-  // With no keeper, as in a chat this Mac's app runs: a process other than this one wrote the file last, so that process ended
-  // with work at work (the app quit, restarted or dropped the chat: 17 Nov 16:00, three tasks and their helpers lost). It ended
-  // about when its beat last came, or else when the file was last written
-  const wasPid = typeof was.pid === 'string' ? was.pid : ''
-  // (a cut the keeper saw that was already taken up is no reason to miss a later one it did not see)
-  const keptNew = kept && !(handled.at === kept && handled.isDone) ? kept : 0
-  const isOtherProcess = !keptNew && /^\d+$/.test(wasPid) && /^\d+$/.test(enginePid) && wasPid !== enginePid
-  const beat = isOtherProcess && (await readOr($, beatFile(id))).startsWith(`${wasPid}\t`) ? (await $.fs.stat(beatFile(id)).catch(() => undefined))?.mtimeMs : undefined
-  const [endedPid = '', endedAt = ''] = isOtherProcess ? (await readOr($, `${dir}/keep/${id}.ended`)).trim().split('\t') : []
-  const ended = endedPid === wasPid && Number(endedAt) > 0 ? Number(endedAt) : undefined
-  const cutAt = keptNew || (isOtherProcess ? beat || ended || (typeof was.at === 'number' ? was.at : 0) : 0)
-  const titles = Object.fromEntries(Object.entries(was.titles && typeof was.titles === 'object' ? (was.titles as Record<string, unknown>) : {}).filter((pair): pair is [string, string] => isId(pair[0]) && typeof pair[1] === 'string'))
-  return { ids, helpers, titles, cutAt, state, handled }
-}
-// Cut-off work not yet looked at again: Claude Code may be starting it again, so it is neither ended nor announced meanwhile
-const cutPending = new Set<string>()
-const markCut = ($: EngineInterface, id: string, handled: CutHandled) => $.fs.write(keepFile(id, 'cut'), JSON.stringify(handled)).catch(err => log($, `cut-off work not noted: ${String(err)}`))
-// The words the work is started again with
-const CUT_TELL = (cutAt: number, here: boolean, hasHelpers = false) =>
-  `From Claudopus, not {name}: this chat's process was ended at ${hhmm(cutAt)} while you were working, not by {name}, and the chat has started again${here ? ' on this Mac by itself, under its own sign-in' : ''}. Continue from where you were: first check what you already have and whether a command you started is still running (a detached one keeps running), then continue with your to-dos.${hasHelpers ? ' Claudopus also started your helpers that were cut off again: do not start them a second time; their results come to you as before.' : ''}`
-const CUT_BACK_IN_CHAT = (titles: string[], at: string, helpers: number) =>
-  `From Claudopus: the chat stopped at ${at} while tasks were at work, and Claudopus has started ${titles.join(', ')} again${helpers ? `, with ${helpers === 1 ? 'the helper' : `${helpers} helpers`} cut off under them` : ''}. Do not start ${titles.length === 1 ? 'it' : 'them'} again or message ${titles.length === 1 ? 'it' : 'them'} about the stop yourself; nothing needs telling {name}.`
-const hhmm = (at: number) => new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-
-// As the chat starts: only a cut the keeper saw counts (a chat with no keeper, or one quit before any, starts nothing again),
-// once, by the first process to start after it; a reload of the mod in that process before it was done takes it up again
-const noteCut = async ($: EngineInterface, id: string) => {
+// As the chat starts: a command lasts only while the app is open, so what was at work when the chat's process was replaced (the app
+// quit, restarted or dropped the chat) ended with it. Its card says so, Failed with why, and nothing starts it again by itself:
+// the person's Start again does. What Claude Code itself runs again in the new process is at work
+const noteClosed = async ($: EngineInterface, id: string) => {
   keepSign = ''
   if (!dir) return
   enginePid = await pidOfEngine($)
-  const cut = await readCut($, id)
-  if ((!cut.ids.length && !Object.keys(cut.helpers).length) || !cut.cutAt) return
-  if (cut.handled.at === cut.cutAt && cut.handled.isDone) return
-  const now = await $.clock.now()
-  if (now - cut.cutAt > CUT_OLD) return void log($, `work cut off at ${hhmm(cut.cutAt)} is too old to start again: ${cut.ids.join(', ')}`)
-  const isCopy = await isKeptCopy($)
-  await markCut($, id, { at: cut.cutAt, pid: enginePid, isDone: false })
-  for (const one of [...cut.ids, ...Object.keys(cut.helpers)]) cutPending.add(one)
-  await log($, `work cut off at ${hhmm(cut.cutAt)}${isCopy ? ', the chat going on here as a copy' : ''}: ${cut.ids.join(', ')}${Object.keys(cut.helpers).length ? `, helpers ${Object.keys(cut.helpers).join(', ')}` : ''}`)
-  $.clock.after(CUT_LOOK, () => void bringBack($, id, cut.ids, cut.cutAt, isCopy, cut.helpers, cut.titles).catch(err => log($, `cut-off work not started again: ${String(err)}`)))
-}
-
-// Each piece of cut-off work: one Claude Code started again by itself is marked; one the person stopped since is left; any other
-// is sent a message, which starts it again; one that cannot be is marked cut off and left ended. Then one notice for all of them
-const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: number, isCopy: boolean, helpers: Record<string, string> = {}, titles: Record<string, string> = {}) => {
-  const handled = parsedOr<CutHandled>(await readOr($, keepFile(id, 'cut')), {})
-  if (handled.at === cutAt && handled.isDone) return
-  await markCut($, id, { at: cutAt, pid: enginePid, isDone: true })
-  // The task a helper was started under, through the helpers between
-  const rootOf = (kid: string) => {
-    let at = kid
-    for (let hops = 0; hops < 10 && helpers[at]; hops += 1) at = helpers[at] ?? at
-    return at
-  }
-  for (const one of [...ids, ...Object.keys(helpers)]) cutPending.delete(one)
-  await sync($).catch(() => undefined)
+  const was = parsedOr<{ ids?: unknown; titles?: unknown; pid?: unknown }>(await readOr($, keepFile(id)), {})
+  const wasPid = typeof was.pid === 'string' ? was.pid : ''
+  if (!/^\d+$/.test(wasPid) || !/^\d+$/.test(enginePid) || wasPid === enginePid) return
+  const isId = (one: unknown): one is string => typeof one === 'string' && /^[\w-]{1,80}$/.test(one)
+  const titles = Object.fromEntries(Object.entries(was.titles && typeof was.titles === 'object' ? (was.titles as Record<string, unknown>) : {}).filter((pair): pair is [string, string] => isId(pair[0]) && typeof pair[1] === 'string'))
   const live = await $.agent.list().catch(() => [])
-  const back: string[] = []
-  const lost: string[] = []
-  const heldNow = await read($, todos)
-  // (nor one that had finished: handed back or gave its result before the end, as a keep file can be a moment behind)
-  const isFinished = (one: string) => Boolean(heldNow.find(card => card.id === one && (card.handedBackAt !== undefined || (card.status !== 'working' && card.answeredAt !== undefined))))
-  for (const one of ids.filter(one => !stoppedHere.has(one) && !isHeld(heldNow.find(card => card.id === one)) && !isFinished(one))) {
-    const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
-    const hasHelpers = Object.keys(helpers).some(kid => rootOf(kid) === one)
-    const r = isLive ? { isDelivered: true as const } : await sendOwn($, { to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy, hasHelpers)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
-    ;(r.isDelivered ? back : lost).push(one)
-    if (!r.isDelivered) await log($, `cut-off work ${one} not started again: ${r.reason}`)
-  }
-  // The helpers cut off under them go on too, each under the task or helper that started it; none under a task the person stopped
-  const helpersBack: string[] = []
-  const helpersLost: string[] = []
-  for (const [one, parent] of Object.entries(helpers)) {
-    // (only under a task started again, every helper between them kept too)
-    let isKept = back.includes(rootOf(one))
-    for (let at = parent, hops = 0; isKept && at !== rootOf(one) && hops < 10; at = helpers[at] ?? rootOf(one), hops += 1) isKept = at in helpers && !stoppedHere.has(at) && !isHeld(heldNow.find(card => card.id === at))
-    if (!isKept || stoppedHere.has(one) || isHeld(heldNow.find(card => card.id === one))) continue
-    const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
-    const r = isLive ? { isDelivered: true as const } : await sendOwn($, { to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
-    ;(r.isDelivered ? helpersBack : helpersLost).push(one)
-    if (!r.isDelivered) await log($, `cut-off helper ${one} not started again: ${r.reason}`)
-  }
-  if (helpersBack.length || helpersLost.length) {
-    const at = await $.clock.now()
-    await changeTodos($, list => {
-      const known = new Set(list.map(one => one.id))
-      const added = [...helpersBack, ...helpersLost].filter(one => !known.has(one)).map(one => ({ ...started(one, helpers[one] ?? HELPER, titles[one] ?? '', '', cutAt), status: 'stopped' as const, endedAt: cutAt }))
-      return [...list, ...added].map(one =>
-        helpersBack.includes(one.id) ? { ...(one.status === 'working' ? one : resumed(one, at)), cutAt, backAt: at } : helpersLost.includes(one.id) ? { ...(one.status === 'working' ? ended(one, 'stopped', cutAt) : one), cutAt, backAt: undefined } : one,
-      )
-    })
-    await log($, `helpers cut off at ${hhmm(cutAt)}: ${helpersBack.length} started again${helpersLost.length ? `, ${helpersLost.length} not` : ''}`)
-  }
-  if (!back.length && !lost.length) return void (helpersBack.length || helpersLost.length ? redraw($) : undefined)
+  const isLive = (one: string) => live.some(agent => agent.id === one && WORKING.includes(agent.status))
   const now = await $.clock.now()
+  const closed: string[] = []
   await changeTodos($, list => {
+    closed.length = 0
     const known = new Set(list.map(one => one.id))
-    const added = [...back, ...lost].filter(one => !known.has(one)).map(one => ({ ...started(one, '', titles[one] ?? '', '', cutAt), status: 'stopped' as const, endedAt: cutAt }))
-    return [...list, ...added].map(one =>
-      back.includes(one.id) ? { ...(one.status === 'working' ? one : resumed(one, now)), parentId: '', cutAt, backAt: now } : lost.includes(one.id) ? { ...(one.status === 'working' ? ended(one, 'stopped', cutAt) : one), parentId: '', cutAt, backAt: undefined } : one,
-    )
+    const added = Object.keys(titles).filter(one => !known.has(one) && !isLive(one)).map(one => started(one, '', titles[one] ?? '', '', now))
+    return [...list, ...added].map(one => (one.chat || one.status !== 'working' || isLive(one.id) ? one : (closed.push(one.id), { ...ended(one, 'failed', now), why: WHY_APP_CLOSED, bg: undefined })))
   })
-  await saveKeep($)
-  redraw($)
-  const cards = await read($, todos)
-  const titled = (one: string) => `"${titleOf(cards.find(card => card.id === one) ?? started(one, '', '', '', cutAt))}"`
-  const where = isCopy ? ', in the background on this Mac' : ''
-  const startedAgain = back.length ? `Claudopus started ${back.length === 1 ? titled(back[0] ?? '') : `${back.length} tasks`} again at ${hhmm(now)}${where}, after the chat stopped at ${hhmm(cutAt)}.` : ''
-  const text = [
-    startedAgain,
-    lost.length ? `Claudopus couldn't start ${lost.length === 1 ? titled(lost[0] ?? '') : `${lost.length} tasks`} again after the chat stopped at ${hhmm(cutAt)}.` : '',
-  ]
-    .filter(Boolean)
-    .join(' ')
-  // The cards show what was started again: only a task that could not be is said in the chat. Its model is told what Claudopus
-  // started, so it does not start the same again by hand
-  if (lost.length) $.ui.log(text.replace(startedAgain, '').trim())
-  if (back.length) await tellChat($, named(CUT_BACK_IN_CHAT(back.map(titled), hhmm(cutAt), helpersBack.length)))
-  await tellDevice($, text)
+  if (closed.length) await log($, `the chat's process was replaced (${wasPid} to ${enginePid}) while work was at work: ${closed.join(', ')} ended with it`)
 }
-
-// The person is told on their own device: Claude Code's push to the Claude app on their phone, where Remote Control reaches it;
-// and the notification this Mac's chats raise
-const tellDevice = async ($: EngineInterface, text: string) => {
-  const pushed = await $.tool.call({ tool: 'PushNotification', message: text.slice(0, 199) } as never).catch(err => ({ deny: String(err) }))
-  await log($, `cut-off notice pushed: ${JSON.stringify(pushed).slice(0, 200)}`)
-  await alertPerson($, 'cut', 'Task interrupted', text, `cut-${Math.round((await $.clock.now()) / 60_000)}`)
-}
-
-// The line on a card of cut-off work Claudopus could not start again, which needs the person; one started again says nothing of it
-const cutLine = (one: Todo) => (one.cutAt && !one.backAt ? `Interrupted at ${hhmm(one.cutAt)} when the chat stopped · Claudopus couldn't start it again` : '')
 
 
 // ---- Back by itself after Claude switches it off ----
