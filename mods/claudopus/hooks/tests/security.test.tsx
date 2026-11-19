@@ -83,6 +83,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const copied: string[] = []
   // The terminal tabs opened beside the chat, by what they were opened with
   const terminals: unknown[] = []
+  // What the app's view tool was asked to show beside the chat; it refuses where the test lays ccd_view:refused
+  const viewed: unknown[] = []
   // What was sent on to an agent, what the mod wrote into an agent's chat, and what it submitted to this one
   const sent: string[] = []
   const appended: string[] = []
@@ -201,6 +203,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   on('mcp.call', (_, e) => {
     if (e.server === 'terminal') terminals.push(e.args)
+    if (e.server === 'ccd_view') {
+      viewed.push(e.args)
+      if (files.has('ccd_view:refused')) return { value: { content: [{ type: 'text', text: files.get('ccd_view:refused') ?? '' }], isError: true } }
+    }
     if (e.tool === 'set_session_title') titles.push(String(e.args.title))
     const text = e.tool === 'get_session' ? JSON.stringify({ sessionId: 'local_1', title: 'Old title' }) : '[]'
     return { value: { content: [{ type: 'text', text }], isError: false } }
@@ -451,6 +457,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     }
     // The lines a task added to and took from its files, as the test lays git:numstat
     if (tool === 'sh' && String(rest[1]).includes('git diff --numstat')) return ok(files.get('git:numstat') ?? '')
+    // What changed in one file, as the test lays git:diff:<the file in its repo>; a file it lays none for is new
+    if (tool === 'sh' && String(rest[1]).includes('# the changes tab')) return ok(files.get(`git:diff:${String(rest.at(-1))}`) ?? 'NEW\n')
     if (tool === 'sh' || tool === 'bash') {
       sshed.push([String(rest[1]), String(rest.slice(3).join(' '))])
       // A stream cut short lays half of what it carried and fails
@@ -676,7 +684,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, pressRuns, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, pressRuns, titles, compacts, opened, tabs, viewed, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -724,6 +732,11 @@ const until = async <T,>(look: () => Promise<T | undefined>) => {
     if (Date.now() > end) return undefined
     await new Promise<void>(resolve => setTimeout(() => resolve(), 5))
   }
+}
+// Config's More opened, where it is closed
+const moreShown = async (pane: Parameters<typeof pressed>[0]) => {
+  if (await keyed(pane, 'config-more-show')) await pressed(pane, 'config-more-show')
+  return until(async () => ((await keyed(pane, 'config-more-hide')) ? true : undefined))
 }
 
 // ---- Set-ups more than one area uses ----
@@ -1121,7 +1134,7 @@ test('F-021 · what a chat or work is told, the gate and a Config press read the
   await pressed(list, 'config-open')
   expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBeDefined()
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 80 }, surface: 'desktop' } as never)
-  await pressed(config, 'config-sound-off')
+  await config.select({ key: 'config-alerts-pick', value: 'notice' })
   expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').sound === false ? true : undefined))).toBe(true)
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', sound: false })
 })
@@ -1135,7 +1148,7 @@ test('F-021 · an old kept copy put back with the old file is not taken by a cha
   await bash('o0', 'ls')
   const old = [files.get(`${MEMORY}/admin-known.json`) ?? '', files.get(config) ?? '']
   const pane = await (async () => (await pressed(list, 'config-open'), $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 80 }, surface: 'desktop' } as never)))()
-  await pressed(pane, 'config-sound-off')
+  await pane.select({ key: 'config-alerts-pick', value: 'notice' })
   expect(await until(async () => (JSON.parse(files.get(config) ?? '{}').sound === false ? true : undefined))).toBe(true)
   // Both put back later: the old seal was made under a key that is gone, so the settings as last set stay
   files.set(`${MEMORY}/admin-known.json`, old[0] ?? '')

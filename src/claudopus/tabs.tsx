@@ -106,6 +106,12 @@ const tabHooks = (on: On) => {
     return logView($, uiOf($, e), e.requestId)
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
+  // What changed in a file a task changed, a pane of its own named after the file
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    if (!e.requestId?.startsWith(DIFF_PANE)) return next(e)
+    return diffView($, uiOf($, e), e.requestId)
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
+
   // A report opened as a pane of its own, named after it
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (!e.requestId?.startsWith('report-')) return next(e)

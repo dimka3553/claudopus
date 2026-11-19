@@ -32,7 +32,7 @@ Every word Claudopus shows you (panel, cards, the bar, questions, notices, resul
 - **Time running** `29m 40s`, over an hour `1h 05m`. Never a guessed time: no "of about", no "over". **Ago** `2m ago`. **Left**, only when the command itself prints one: `1m left`. **Dates** `11 Nov, 14:20`.
 - **Counts** `<n> of <total> <what>`: `2 of 6 stills`, `2 of 5 to-dos`.
 - **Buttons** are a verb of one to three words, the same word for the same act: Allow, Don't allow, Type it, Paste it, Don't give it, Answer in words, Release it, Send, Stop and send, Attach, Close, Stop, Message, Reply, Give feedback, Mark as done, Dismiss, Details, Result, Open chat, Open in Terminal.
-- **Headings** are a noun: To-dos, Helpers and commands, Commands ended, Finished, Result.
+- **Headings** are a noun: To-dos, Helpers and commands, Finished, Result.
 
 ## Every running thing has a progress line
 A running command or helper is two lines:
@@ -46,9 +46,13 @@ A running command or helper is two lines:
 - A task's card says only its stage, the to-do marked doing (`To-do 5 of 7 · Mend the nose`), and its own last note as its line, plus in amber what needs you. A paused task is Working, and its card says nothing of the pause; a command that ended never takes the place of the task's own line.
 - Ended: `Done in 2m 05s`, `Failed after 2m 05s`, `Stopped after 1m`, `Ran out of time after 30m`.
 - A count that is full while the command still runs never says 100%: `7 of 7 heads · still running`.
+- In Details the commands of a task or helper that ended are a group, last under it, headed by a row as its card's closing row: `3 commands ended · 1 failed`. A press on that row folds them away (`3 commands ended · show`). Each is a row under it: its name as it had it running, never its shell line, then how long it ran, `2m 41s`, or how it ended where it did not finish, `Failed after 20s`. A press opens its log, which says when it ended.
 - A command that failed keeps a row on its card, in red, until it is run again and finishes: its name, `Failed after 2m 05s`, and under it why, the last line it wrote that names a fault. The closing row names what else did not finish: `13 commands ended · 2 ran out of time: Watch the cloud jobs and 1 more`, `2 helpers ended · 1 helper failed: Read the scans`.
 - A press on a command's name opens its log in a tab of the panel, running or ended: its name, how it stands, `Stop`, `Details`, `Open in Terminal`, then the end of what it wrote. Details repeats none of it under a command.
-- A command that has written nothing for a minute says whether its programs still use the processor: `No output yet · started 20m ago · still busy`, or in amber `nothing new for 20m · idle`.
+
+## Files a task changed
+- A card says `3 changed files` beside its other files, a press that opens Details. Under Files there, the files a task changed in a repo are a table by kind, `Code 5 files`, then `Documents 2 files`, each heading with its counts, the most changed first, under a dim line for each folder in the repo: a row a file with its icon (its ending in its language's colour), its name, `new` for a file it made, then `+259 −24` and a bar (green for lines added, red for lines removed, as long as its change against the most changed) in columns that line up down the list. Past eight, `Show all 12`.
+- A press on a file's name shows it in the app's Files pane beside the chat. Where the app can't (the terminal, or a file outside the chat's folders), what changed in it opens in a tab of the panel, named after the file: its name, its folder and counts, `Details`, `Whole file` or `Changes`, then the changes as Claude Code draws a diff.
 
 ## Marks
 One mark for each kind of row, the same on a card and in Details; a ring moves around one that runs.

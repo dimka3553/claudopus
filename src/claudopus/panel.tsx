@@ -64,7 +64,7 @@ const panelHooks = (on: On) => {
     const id = e.requestId ?? ''
     // Every ask for a tab's drawing passes here first, and is noted (watchTabs)
     await noteTabAsked($, id)
-    const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, LOG_PANE, 'report-'].some(start => id.startsWith(start))
+    const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, LOG_PANE, DIFF_PANE, 'report-'].some(start => id.startsWith(start))
     // A tab of the mod's on the desktop, Settings, About, Results and the rest, but for a work's or a workflow's Details, which are
     // drawn with the panel below: every drawing of the panel draws it again too, so under load its buttons went as the panel's did
     // (16 Nov: Settings' Reset pressed, never reached the mod). Held the same way: given again through a click, and while its
@@ -312,10 +312,8 @@ const panelHooks = (on: On) => {
     const now = (one: Todo) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
       // (nor what one command left going while other programs of it still work)
-      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim()) : []
-      const said: Record<string, string> = { finished: 'done', failed: 'failed', killed: 'stopped', stopped: 'stopped', ended: 'ended' }
-      const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))}: ${said[r.how] ?? 'ended'}`)
-      return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} · ${second}` : `${first} · ${second} · ${runs.length - 2} more ended`
+      // (a command that ended is a row of its own under the one that started it, never said here again, 19 Nov)
+      return entry?.text ?? ''
     }
     // The card's line: the task's own latest note, in its own words, whatever ran or ended since (those are rows on its tree and in
     // its Details), never words of Claudopus's own about its actions, how long it was quiet or which command ended (18 Nov)
@@ -903,12 +901,50 @@ const panelHooks = (on: On) => {
         </Box>
       )
     // A press on an ended command's name opens what it wrote, where that is still there and this Mac can show it; else its card's Details
-    const openEnded = (run: EndedRun, owner: string) => (canOpenFile(run.file) ? openLog($, run.id, runWords(run.what) || 'A command') : openWork($, owner))
+    // (its log is this chat's own file, kept or found by its id; another chat's or another Mac's task opens its Details)
+    const canOpenEnded = (run: EndedRun, owner: Todo | undefined) => !isRunFromAfar && (Boolean(run.file) || !owner?.chat)
+    const openEnded = (run: EndedRun, owner: string) => (canOpenEnded(run, all.find(one => one.id === owner)) ? openLog($, run.id, runLabel(run)) : openWork($, owner))
+    // In Details an ended command is a row of the tree under the task or helper that started it, after what that one still has
+    // running: its kind's mark, its name as it had it running, and how it ended, how long it ran and when; a press opens its log
+    const endedRow = (t: Twig) => {
+      const run = t.run
+      if (!run) return null
+      const key = `ended-${run.id}`
+      // (one that finished says only how long it ran, as a running row does, so its name keeps the room: the row over them says
+      // they ended, and its mark that it went well; one that did not says how it ended too. When is in its log's tab)
+      const side = run.how === 'finished' ? took(run.endedAt - run.at) : endedLine(run, took(run.endedAt - run.at))
+      const name = cut(runLabel(run), Math.max(12, perRow - 4 - t.depth * 2 - side.length - 1))
+      return (
+        <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+          {endedLines(t, `twig-lines-${key}`, run)}
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+            <Button key={`ended-open-${run.id}-${presses}`} label={name} plain dimColor hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openEnded(run, t.one?.id ?? '')} />
+          </Box>
+          <Box flexShrink={0}>
+            <Text dimColor={run.how !== 'failed'} color={run.how === 'failed' ? 'error' : undefined}>{side}</Text>
+          </Box>
+        </Box>
+      )
+    }
+    // What a task or helper ran that has ended is one group, last under it: a row that says how many ended and how many of them
+    // did not finish well, as its card's closing row does, with each of them a row under it, the newest first. A press on the
+    // group's row folds it away or opens it again (19 Nov: mixed in with what still ran, they read as one long list)
+    const endedBranches = (card: Todo): Branch[] => {
+      const runs = [...(card.endedRuns ?? [])].sort((a, b) => b.endedAt - a.endedAt)
+      return runs.length ? [{ one: card, ended: runs, kids: endedFolded.has(card.id) ? [] : runs.map(run => ({ one: card, run, kids: [] })) }] : []
+    }
+    const endedGroupRow = (t: Twig) => {
+      const id = t.one?.id ?? ''
+      const text = `${endedSummary(0, (t.ended ?? []).map(run => ({ ...run, what: '', cmd: '' })))}${endedFolded.has(id) ? ' · show' : ''}`
+      return twigRowOf(t, `ended-group-${id}`, text, true, '', () => ((endedFolded.has(id) ? endedFolded.delete(id) : endedFolded.add(id)), (presses += 1), redraw($)))
+    }
+    // (every helper with what it has running, then its own helpers, then what of its has ended)
+    const withAll = (branches: Branch[]): Branch[] => branches.map(b => (b.job || b.run || b.ended ? b : { ...b, kids: [...jobBranches(b.one, true), ...withAll(b.kids), ...endedBranches(b.one)] }))
     const failedRow = (t: Twig, run: EndedRun, owner: string) => {
       const key = `failed-${owner}-${run.id}`
       const width = perRow - 4 - t.depth * 2
       const side = endedLine(run, took(run.endedAt - run.at))
-      const name = cut(runWords(run.what) || 'A command', Math.max(12, width))
+      const name = cut(runLabel(run), Math.max(12, width))
       return (
         <Box key={`job-${key}`} flexDirection="column" flexShrink={0}>
           <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
@@ -1282,6 +1318,7 @@ const panelHooks = (on: On) => {
     // Under a helper at work, the step it is on and where it says it is; under a job, the last lines its output ends with, as a
     // terminal shows them. Both sit where the row's name starts; one that ended has nothing under it
     const underTwig = (t: Twig) => {
+      if (t.run || t.ended) return null
       if (t.job) {
         // (its row says it in plain words, so the last line is here as it was printed too)
         // (a command's row says how it stands, and its log is a press on its name away: its last lines under it said the same
@@ -1330,49 +1367,22 @@ const panelHooks = (on: On) => {
       // Another chat's work has its helpers from that chat's file
       const list = one.chat ? helpersThere : all
       const under = underOf(list, one.id)
-      const branches = [...jobBranches(one, true), ...withJobs(branchesOf(list, one.id, () => true), true)]
+      const branches = [...jobBranches(one, true), ...withAll(branchesOf(list, one.id, () => true)), ...endedBranches(one)]
       // (what one command left going counts as that one command, however many programs it is)
       const jobs = [one, ...under].reduce((n, kid) => n + jobsOf(kid).reduce((sum, job) => sum + (job.count ?? 1), 0), 0)
-      if (!under.length && !jobs) return null
+      const runs = endedRunsOf(one, list)
+      if (!under.length && !jobs && !runs.length) return null
       const running = under.filter(kid => kid.status === 'working').length
       // Beside the jobs, the helpers are named, so neither count reads as the other's
       const helpers = running === under.length ? `${running} ${running === 1 ? 'helper' : 'helpers'} working` : running ? `${running} of ${under.length} helpers working` : `${under.length} ${under.length === 1 ? 'helper' : 'helpers'}`
-      const side = [jobs ? `${jobs} ${jobs === 1 ? 'command' : 'commands'} running` : '', under.length ? helpers : ''].filter(Boolean).join(' · ')
+      // (and the commands that ended, with how many of them failed: each is a row under the one that started it)
+      const failed = runs.filter(run => run.how === 'failed').length
+      const side = [jobs ? `${jobs} ${jobs === 1 ? 'command' : 'commands'} running` : '', failed ? `${failed} failed` : '', under.length ? helpers : ''].filter(Boolean).join(' · ')
       return part(
         'part-helpers',
-        !jobs ? 'Helpers' : under.length ? 'Helpers and commands' : 'Commands',
+        !jobs && !runs.length ? 'Helpers' : under.length ? 'Helpers and commands' : 'Commands',
         side,
-        <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>,
-      )
-    }
-    // In Details, under what runs: every run that has ended, the newest first, each with how it ended in plain words, how long it
-    // ran and when it ended; one that failed, was killed or ran out of time in amber
-    const endedRunsPart = (one: Todo) => {
-      const runs = endedRunsOf(one, one.chat ? helpersThere : all).reverse()
-      if (!runs.length) return null
-      const isBad = (run: (typeof runs)[number]) => run.how === 'failed' || run.how === 'killed' || run.how === 'timed out'
-      return part(
-        'part-ended-runs',
-        'Commands ended',
-        // (its rows name each one, so the count beside the heading names none)
-        endedSummary(0, runs.map(run => ({ ...run, what: '' }))),
-        <Box flexDirection="column">
-          {runs.flatMap(run => [
-            <Box key={`ended-${run.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
-              <Box flexShrink={0}>{endedMark(run)}</Box>
-              <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                {canOpenFile(run.file) ? (
-                  <Button key={`ended-open-${run.id}-${presses}`} label={describedOf(run.what).text || run.what || 'A command'} plain hover={{ scope: `ended-${run.id}`, underline: true }} onPress={() => openEnded(run, one.id)} />
-                ) : (
-                  <Text wrap="truncate-end">{describedOf(run.what).text || run.what || 'A command'}</Text>
-                )}
-              </Box>
-              <Box flexShrink={0}>
-                <Text dimColor={!isBad(run)} color={run.how === 'failed' ? 'error' : undefined}>{`${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(at - run.endedAt)} ago`}</Text>
-              </Box>
-            </Box>,
-          ])}
-        </Box>,
+        <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.ended ? endedGroupRow(t) : t.run ? endedRow(t) : t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>,
       )
     }
 
@@ -1545,7 +1555,7 @@ const panelHooks = (on: On) => {
             </Box>
           </Box>
           {/* What it made, right under its title, while it works and once it is done */}
-          {madeNow($, one)?.made.length || madeNow($, one)?.code ? part('part-files', 'Files', '', madeTiles($, table, madeNow($, one) ?? { made: [] }, paneId, `files-${one.id}`, e.surface) ?? <Box />) : null}
+          {madeNow($, one)?.made.length || madeNow($, one)?.code ? part('part-files', 'Files', '', madeTiles($, table, madeNow($, one) ?? { made: [] }, paneId, `files-${one.id}`, one.id, e.surface) ?? <Box />) : null}
           {needsFor(one).length ? (
             <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE} />
@@ -1580,7 +1590,6 @@ const panelHooks = (on: On) => {
           {one.words ? askPart(one) : null}
           {todoPart(one)}
           {helpersPart(one)}
-          {endedRunsPart(one)}
           {one.chat && !lines && (talks.has(one.id) || one.chat.host)
             ? part('part-chat', 'Conversation', '', theirChat(one, one.chat))
             : part('part-chat', 'Conversation', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading the conversation…</Text>)}

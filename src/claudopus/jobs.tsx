@@ -36,7 +36,9 @@ const jobHead = (job: Job) => {
   const many = job.count && job.count > 1 ? ` ×${job.count}` : ''
   const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${many}`
   // Its own words alone when they say its kind already (Download the CT scans, Watch the cloud jobs)
-  if (job.isNamed && isKindSaid(job.label)) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${many}`
+  // (only when they say the kind it is: a watch named Check that… still leads with Watch)
+  const said = describedOf(job.label).kind
+  if (job.isNamed && isKindSaid(job.label) && (said === job.kind || (said === 'script' && job.kind === 'remote'))) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${many}`
   return `${kind} · ${job.label}`
 }
 
@@ -295,6 +297,8 @@ const openJobOutput = async ($: EngineInterface, job: Pick<Job, 'id' | 'label'>,
 
 // A command's log is a tab of the panel, named after the command: what it is and how it stands, then the end of what it wrote,
 // drawn again as it writes; the same for one that has ended, from the file it left. A press on a command's name opens it
+// The tasks and helpers whose ended commands are folded away in Details
+const endedFolded = new Set<string>()
 const LOG_PANE = 'log-'
 const LOG_LINES = 300
 const logPaneOf = (id: string) => `${LOG_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)
@@ -311,7 +315,11 @@ const logOf = async ($: EngineInterface, paneId: string) => {
     const b = one.bg?.find(b => logPaneOf(b.id) === paneId)
     if (b) return { one, job: jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id]), run: undefined, file: jobFiles.get(b.id) || (tasksDir ? `${tasksDir}/${b.id}.output` : '') }
     const run = one.endedRuns?.find(r => logPaneOf(r.id) === paneId)
-    if (run) return { one, job: undefined, run, file: run.file ?? '' }
+    // (one kept before its file was: where this chat's commands write, by its id)
+    if (run) {
+      const where = run.file || one.chat ? '' : tasksDir || (tasksDir = await findTasks($))
+      return { one, job: undefined, run, file: run.file || (where ? `${where}/${run.id}.output` : '') }
+    }
   }
   return undefined
 }
@@ -321,7 +329,7 @@ const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
   if (!found) return <Text dimColor>This log is no longer available.</Text>
   const { one, job, run, file } = found
   const now = await $.clock.now()
-  const label = job ? job.label : runWords(run?.what ?? '') || 'A command'
+  const label = job ? job.label : run ? runLabel(run) : 'A command'
   const kind: JobKind = job?.kind ?? run?.kind ?? 'script'
   const state = job ? `${JOB_NOW[kind]} · ${took(now - job.at)}` : run ? `${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(now - run.endedAt)} ago` : ''
   const r = file && canOpenFile(file) ? await $.process.run(['sh', '-c', 'tail -n "$2" "$1" 2>/dev/null # the log tab', 'sh', file, String(LOG_LINES + 1)], { timeoutMs: 5000 }).catch(() => undefined) : undefined

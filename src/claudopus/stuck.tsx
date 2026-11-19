@@ -212,14 +212,18 @@ const endedLine = (run: Pick<EndedRun, 'how' | 'code'>, ran: string) =>
 // The closing row under a card: how many helpers and runs have ended, then how many of the runs did not finish well, in words
 // Those that did not finish well are named, the newest of each kind of end and how many more, so "1 failed" never stands without
 // which one (19 Nov "13 commands ended · 1 failed" named nothing); not one that has a row of its own above (`shown`, its id)
-const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how' | 'what' | 'id' | 'endedAt'>[], shown = '', lost: string[] = []) => {
+// An ended command's name, as its row had it while it ran: its own words, or else what it ran in a few words, never its shell
+// line (19 Nov: "cd /Users/…; S=/private/tmp/…" and "until [ -f /private/…" stood as names under Commands ended)
+const runLabel = (run: Pick<EndedRun, 'what' | 'cmd'>) => labelOf(describedOf(String(run.what ?? '')).text, run.cmd ?? String(run.what ?? '')) || 'A command'
+const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how' | 'what' | 'cmd' | 'id' | 'endedAt'>[], shown = '', lost: string[] = []) => {
   const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
   const head = helpers && runs.length ? `${n(helpers, 'helper')} and ${n(runs.length, 'command')} ended` : helpers ? `${n(helpers, 'helper')} ended` : `${n(runs.length, 'command')} ended`
   const bad = (['failed', 'killed', 'timed out'] as const).flatMap(how => {
     const of = runs.filter(r => r.how === how)
     if (!of.length) return []
     const newest = of.reduce((a, b) => (b.endedAt >= a.endedAt ? b : a))
-    const name = of.some(r => r.id === shown) ? '' : runWords(String(newest.what ?? ''))
+    // (nor where its rows stand right under it, which gives it no name to say)
+    const name = of.some(r => r.id === shown) || (!String(newest.what ?? '').trim() && !newest.cmd) ? '' : runLabel(newest)
     return [`${of.length} ${endedWord({ how })}${name ? `: ${name}${of.length > 1 ? ` and ${of.length - 1} more` : ''}` : ''}`]
   })
   // (a helper that failed is named as a helper, so its name is never taken for a command's)
@@ -259,7 +263,7 @@ const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Re
         // With its kind, for its mark, why it failed, and the file it wrote to, which a press on its name opens
         const kind: JobKind = b.isWatch ? 'watch' : jobKindOf(b.cmd ?? b.what, b.what)
         const file = jobFiles.get(b.id)
-        return { id: b.id, what: b.what, at: b.at, endedAt, how, kind, ...(end.code ? { code: end.code } : {}), ...(end.why ? { why: end.why } : {}), ...(file ? { file } : {}) } as EndedRun
+        return { id: b.id, what: b.what, ...(b.cmd ? { cmd: b.cmd.slice(0, 400) } : {}), at: b.at, endedAt, how, kind, ...(end.code ? { code: end.code } : {}), ...(end.why ? { why: end.why } : {}), ...(file ? { file } : {}) } as EndedRun
       })
       return { ...one, bg: bg?.length ? bg : undefined, ...keepEnded(one, runs) }
     })

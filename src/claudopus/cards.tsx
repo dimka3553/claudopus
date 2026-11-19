@@ -99,18 +99,20 @@ const kidsOf = (list: Todo[], id: string) => list.filter(one => one.parentId ===
 const underOf = (list: Todo[], id: string, depth = 1): Todo[] => (depth > TREE_DEEP ? [] : kidsOf(list, id).flatMap(one => [one, ...underOf(list, one.id, depth + 1)]))
 const TREE_DEEP = 8
 // A branch that is a job its helper (`one`) has running carries the job
-type Branch = { one: Todo; kids: Branch[]; job?: Job }
+// (or a command of its that has ended, in Details)
+// (`ended`: the row that heads those, saying how many ended and how)
+type Branch = { one: Todo; kids: Branch[]; job?: Job; run?: NonNullable<Todo['endedRuns']>[number]; ended?: NonNullable<Todo['endedRuns']> }
 // The helpers under a piece of work that `keep` picks, each with its own; one that is not picked stays while one under it is
 const branchesOf = (list: Todo[], id: string, keep: (one: Todo) => boolean, depth = 1): Branch[] =>
   depth > TREE_DEEP ? [] : kidsOf(list, id).map(one => ({ one, kids: branchesOf(list, one.id, keep, depth + 1) })).filter(b => keep(b.one) || b.kids.length > 0)
 // One row of the tree: how deep it is, which of the levels above it still have a row to come (their line runs on past it),
 // whether it is the last under its parent, and whether rows of its own follow
-type Twig = { one?: Todo; job?: Job; depth: number; rails: boolean[]; isLast: boolean; hasKids: boolean }
+type Twig = { one?: Todo; job?: Job; run?: NonNullable<Todo['endedRuns']>[number]; ended?: NonNullable<Todo['endedRuns']>; depth: number; rails: boolean[]; isLast: boolean; hasKids: boolean }
 // The rows in the order they are drawn; `isMore` says a closing row follows the top level's last
 const twigsOf = (branches: Branch[], isMore = false, depth = 1, rails: boolean[] = []): Twig[] =>
   branches.flatMap((b, i) => {
     const isLast = i === branches.length - 1 && !isMore
-    return [{ one: b.one, ...(b.job ? { job: b.job } : {}), depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
+    return [{ one: b.one, ...(b.job ? { job: b.job } : {}), ...(b.run ? { run: b.run } : {}), ...(b.ended ? { ended: b.ended } : {}), depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
   })
 // The lines that join a row to the tree, as text. Each level is two letters wide; a row's own helpers hang from the second
 // and as text carried down past a row, as wide as its lines and mark, for each line of its own under it
