@@ -50,18 +50,17 @@ const shareMine = async ($: EngineInterface) => {
   // Each card and helper carries how its jobs stand, as this chat reads them, so another chat's Details shows them as this one does
   const withSeen = (one: Todo): Todo => {
     const seen = Object.fromEntries(
-      [...(one.bg ?? []), ...(one.detached ?? [])].flatMap(job => {
+      (one.bg ?? []).flatMap(job => {
         const s = jobLog.get(job.id)
-        return s ? [[job.id, { latest: s.latest, ...(s.pct ? { pct: s.pct } : {}), ...(s.done ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}), ...(s.wroteAt ? { wroteAt: s.wroteAt } : {}), ...(s.tail?.length ? { tail: s.tail } : {}), ...(s.words ? { words: s.words } : {}), ...(s.isOwn ? { isOwn: true } : {}), ...(s.isEarlier ? { isEarlier: true } : {}), ...(s.isEmpty ? { isEmpty: true } : {}), ...(s.target ? { target: s.target } : {}) }]] : []
+        return s ? [[job.id, { latest: s.latest, ...(s.pct ? { pct: s.pct } : {}), ...(s.done ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}), ...(s.wroteAt ? { wroteAt: s.wroteAt } : {}), ...(s.tail?.length ? { tail: s.tail } : {}), ...(s.words ? { words: s.words } : {}), ...(s.isOwn ? { isOwn: true } : {}), ...(s.isEarlier ? { isEarlier: true } : {}), ...(s.isEmpty ? { isEmpty: true } : {}) }]] : []
       }),
     )
     return Object.keys(seen).length ? { ...one, seenJobs: seen } : one
   }
-  // (each as this chat shows it: never done to another chat while a command or helper of its own runs or to-dos are left)
-  const sharedKept = await read($, reports)
-  const cards = shareable(shownAs(list, one => openResultWaits(one, sharedKept, now).length > 0), now).map(withSeen)
+  // (each as it is kept: another chat reads its stage from the same card, as this one does)
+  const cards = shareable(list, now).map(withSeen)
   const helpers = shareableHelpers(list, cards).map(withSeen)
-  const jobsSign = [...cards, ...helpers].map(one => Object.values(one.seenJobs ?? {}).map(s => `${s.latest}:${s.tail?.at(-1) ?? ''}:${Math.floor((s.wroteAt ?? 0) / 30_000)}:${s.target ?? ''}`).join('|')).join(' ')
+  const jobsSign = [...cards, ...helpers].map(one => Object.values(one.seenJobs ?? {}).map(s => `${s.latest}:${s.tail?.at(-1) ?? ''}:${Math.floor((s.wroteAt ?? 0) / 30_000)}`).join('|')).join(' ')
   const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, input: _input, ...p }: Waiting): Prompt => p
   const prompts: Prompt[] = waiting.map(shareOf)
   // Answered prompts go apart, so a chat of an older version, which reads only `prompts`, never shows one as still open

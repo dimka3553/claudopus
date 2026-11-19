@@ -425,44 +425,18 @@ const STUCK_IN_CHAT = (title: string, mins: number, isHelpersAtWork = false) =>
   `Nothing new from "${title}" for ${minutesSaid(mins)}${isHelpersAtWork ? ', though its helpers are still running something' : ''}. Claude may be stuck waiting for something. Its card shows how far it got.`
 // What the chat alone reads with it: it may ask the task what it waits on, as nothing of Claudopus's will
 const STUCK_ASK = 'Claudopus does nothing more about it: you may send it a message asking what it waits on, and to finish with what it has if nothing is coming.'
-// The same for a task waiting with its step ended, which Claudopus looks in on (lookOwnWaits)
-const STUCK_ASK_LOOKS = 'Claudopus starts it again from time to time to check on what it waits for while nothing moves, and you may send it a message asking what it waits on, and to finish with what it has if nothing is coming.'
-// A task that ended its step to wait for its helpers, from which nothing new has come back: Claudopus starts it again with a nudge,
-// first to ask them, then to hand back what it has. What it is told, and what the chat is told
-const HELPERS_SILENT = (mins: number, helpers: string) =>
-  `From Claudopus: nothing new has come back from your helpers for ${mins} min while your step had ended: ${helpers}. Ask each with SendMessage what it is doing and when it will end, and tell one that is stuck or waits on nothing to hand back what it has now. Then carry on with what needs nothing from them, or end your step.`
-const HELPERS_STILL_SILENT = (mins: number, helpers: string) =>
-  `From Claudopus: nothing new has come back from your helpers for ${mins} min, nor since you were asked to check on them: ${helpers}. Unless one told you it is still making progress and when it ends, hand back your report now with what you have, saying what each was still doing: Claudopus lets you hand it back while they run, and stops those that sit silent as you do.`
-const GAVE_UP_IN_CHAT = (title: string, mins: number) =>
-  `"${title}" is stuck: nothing new from its helpers for ${minutesSaid(mins)}, and Claude hasn't sent what it has, though Claudopus asked it to.`
-// A task whose step ended to wait on its own command, a watch or nothing at all, with no helper at work, that nothing started again
-// (18 Nov: three tasks sat from about 02:00 to 06:23, cloud jobs that never started, until the person asked): what Claude is told,
-// and what the chat's model reads
-const OWN_WAIT_LOOK = (mins: number, what: string) =>
-  `From Claudopus, not {name}: you ended your step ${minutesSaid(mins)} ago to wait for ${what}, and nothing has started you again since. Look at it now. If it is still getting somewhere, say how far with the \`note\` tool and end your step again. If it is stuck, or waits on something that won't come (a full disk, a machine that won't start, a limit, a question nobody has answered), stop it and fix what you can, or hand back your report with what you have and what is left.`
-const OWN_WAIT_IN_CHAT = (title: string, mins: number) =>
-  `Nothing new from "${title}" for ${minutesSaid(mins)} while it waits. Claudopus started Claude again to check on what it waits for.`
-const NUDGED_IN_CHAT = (title: string, mins: number, isLast: boolean) =>
-  `Nothing new from the helpers of "${title}" for ${minutesSaid(mins)}. Claudopus started Claude again and asked it ${isLast ? 'to send what it has now' : 'to check on them'}.`
-// A task that had stopped partway through a step without a report, restarted by Claudopus: what Claude is told, and what the chat is told
-const RESTARTED_WORK = `From Claudopus, not {name}: you stopped partway through a step without a report (the app restarted, the Mac slept or a command was interrupted). First check what you already have, then continue from where you were; a command or helper you started may still be running, or may need starting again.`
-// A task whose step ended with no result, no question and nothing of its own that starts it again: what Claude is told as Claudopus
-// starts it again, what the chat's model is told beside Claude Code's notice that it ended, and what it is told once Claudopus gave up
-const STOPPED_SHORT_GO_ON = `From Claudopus, not {name}: your step ended without your report, without a question for {name}, and with nothing of yours running that starts you again, so you were left stopped partway. Carry on from where you were: check what you already have and whether something you started still runs, then go on with your to-dos. When all is done, hand back your report with SubagentHandback; when a step needs {name}, ask with the ask tool; to wait for something, run it in the background or call wake_me, then end your step.`
-// A task ending its step with to-dos still to do and nothing of its own running: what Claude is told as Claudopus keeps it going in
-// the same run; and what it is told when it hands back its report with to-dos not done
+// One rule against stopping early, and the gate at the hand-back: what a task is told as its stop or its hand-back is refused
 const quotedItems = (items: string[]) => items.map(item => `"${item}"`).join('; ')
-// (and what is added for one with to-dos left on its card, which may have sent a report where Claudopus could not see its run)
-const STILL_TO_DO = (items: string[]) =>
-  ` Still to do on your card: ${quotedItems(items)}. If you already sent your report, it went out while your card still showed these: do each now, or tick it if it is done, or drop it if it will not be done, record with the waits tool what waits on {name}, and hand back again with only what is new.`
-const KEEP_GOING = (items: string[]) =>
-  `From Claudopus, not {name}: don't end here, your task isn't finished. Still to do: ${quotedItems(items)}. Nothing of yours is running that would start you again (no command in the background, no detached command started with \`echo $!\` after it, no helper at work, no wake_me, no question on your card), so if your step ends now this work stops undone. Claude Code's note that your report has not been delivered doesn't apply yet: send your report only once every to-do is ticked. Carry on now with the first of them. If you expected something you started to be running, look at its log: it may have failed or ended. To wait for something, run it in the background or detached with \`echo $!\` after it, or call wake_me for a file, a page or a time, then end your step. Tick each to-do as soon as it is done. For one only {name} can do, ask with the ask tool and end your step.`
-const NOT_TICKED = (items: string[]) =>
-  `Not sent: ${items.length === 1 ? 'a to-do of yours is' : `${items.length} of your to-dos are`} still to do: ${quotedItems(items)}. Do ${items.length === 1 ? 'it' : 'each'} now, or tick it done if it is done already, or drop it if it will no longer be done and say why in your report, then hand back your report. One that only {name} can do or decide stays as it is: record it with the waits tool, name it in your report under "Not done", with what {name} needs to do, and send your report again. Claudopus then shows it as not done on your card and in your result, and your card never says Done while a to-do is left.`
+const MAY_NOT_STOP = (items: string[]) =>
+  `You may not stop here: ${items.length === 1 ? 'a to-do is' : `${items.length} to-dos are`} still open (${quotedItems(items)}), nothing of yours is running and nothing waits for {name}. Carry on with ${items.length === 1 ? 'it' : 'them'}, ask {name} with the \`ask\` tool, or hand in your result with SubagentHandback after dropping what will not be done.`
+const NOT_HANDED_TODOS = (items: string[]) =>
+  `Not handed in: ${items.length === 1 ? 'a to-do is' : `${items.length} to-dos are`} still open: ${quotedItems(items)}. Tick it, drop it, or ask: tick each one that is done, drop each one that will not be done and say why in your result, and put what only {name} can do or decide to them with the \`ask\` tool before you finish.`
+const NOT_HANDED_HELPERS = (helpers: string[]) =>
+  `Not handed in: ${helpers.length === 1 ? 'a helper of yours is' : `${helpers.length} helpers of yours are`} still at work: ${quotedItems(helpers)}. ${helpers.length === 1 ? 'Its result comes' : 'Their results come'} to you as ${helpers.length === 1 ? 'it ends' : 'each ends'}: carry on with what needs nothing from ${helpers.length === 1 ? 'it' : 'them'}, or end your step until then. One you no longer need: tell it with SendMessage to hand in what it has now.`
+const NOT_HANDED_RUNS = (runs: string[]) =>
+  `Not handed in: ${runs.length === 1 ? 'a command of yours' : `${runs.length} commands of yours`} still ${runs.length === 1 ? 'runs' : 'run'}: ${quotedItems(runs)}. Hand in your result once ${runs.length === 1 ? 'it has' : 'they have'} ended, or stop ${runs.length === 1 ? 'it' : 'them'} with TaskStop; only a server {name} uses may stay, started with a description that begins with Serve and named in your result.`
 // A task's report that asks the person something, with nothing recorded as waiting on them: what it is told as it is refused once
 const UNRECORDED_WAITS = `Not sent: your report asks {name} something, but you recorded nothing as waiting on {name}, so the panel would show your task as done. Record each question only {name} can answer with the waits tool, or call it with [] if nothing waits on {name}, then send your report again.`
-const NOT_DONE_IN_CHAT = (title: string, items: string[]) =>
-  `From Claudopus: the task "${title}" sent its result with ${items.length === 1 ? 'a to-do' : `${items.length} to-dos`} not done: ${quotedItems(items)}. When you pass its result on to {name}, say these are not done.`
 // A task's report reaches the person once, as the chat's own reply: Claude Code shows a hand-back to the chat in a box of its own,
 // unrendered and cut short, which the chat then said again (18 Nov: "Look, why is it doubled?"). So Claudopus takes the report at
 // the hand-back, and gives it to the chat's model with Claude Code's notice that the task ended. What the task is told, and what
@@ -476,20 +450,12 @@ const REPORT_FOR_CHAT = (title: string, id: string, report: string, kept = '') =
 // A command waiting for the person's press: the press is on the card, and the chat's model is told only so it knows, with no turn
 const GATE_IN_CHAT = (title: string, act: string, command: string) =>
   `From Claudopus: ${title ? `the task "${title}"` : 'this chat'} wants to ${act}: ${command}. {Name} allows it with a press ${title ? 'on its card in' : 'at the top of'} the Claudopus panel and has been told there; typing in this chat does not allow it. Say nothing about it unless {name} asks.`
-const CARRIED_IN_CHAT = (title: string) =>
-  `From Claudopus: the task "${title}" stopped partway without its report, and Claudopus started it again to carry on. Claude Code may say it ended without delivering a report: there is nothing for you to do, and nothing to tell {name}.`
-const CARRY_GAVE_UP_IN_CHAT = (title: string, id: string) =>
-  `From Claudopus: the task "${title}" (${id}) keeps stopping partway without its report, so Claudopus stopped starting it again, and its card says so. Tell {name} in one line only if {name} asks about it; send it a message (SendMessage to ${id}) only when {name} asks you to.`
-const CARRY_LOST_IN_CHAT = (title: string, id: string) =>
-  `From Claudopus: the task "${title}" (${id}) stopped partway without its report, and Claudopus could not start it again; its card says so. Tell {name} in one line only if {name} asks about it; send it a message (SendMessage to ${id}) only when {name} asks you to.`
-const RESTARTED_IN_CHAT = (title: string, mins: number) =>
-  `"${title}" stopped partway ${minutesSaid(mins)} ago without a result, so Claudopus started it again. Its card shows how far it got.`
 
 // Work the person stopped with their own press on Stop: what the chat, or the work above a helper, is told, as the engine's notice
 // of the stop says only that it was stopped "by Claude"; what a call that would start it again is refused with; what their next
 // message carries while some is stopped so. `left` lists what it started detached that goes on running
-const STOPPED_BY_YOU = (title: string, id: string, left: string[] = []) =>
-  `{Name} stopped "${title}" (${id}) with Stop on its card. {Name} stopped this, not you: do not restart it, message it or start the same task again unless {name} asks.${left.length ? ` Still running, because it was started detached: ${left.join('; ')}.` : ''} Do not mention the stop unless {name} asks.`
+const STOPPED_BY_YOU = (title: string, id: string) =>
+  `{Name} stopped "${title}" (${id}) with Stop on its card. {Name} stopped this, not you: do not restart it, message it or start the same task again unless {name} asks. Do not mention the stop unless {name} asks.`
 const STOPPED_REFUSED = (title: string) =>
   `Refused by Claudopus: {name} stopped "${title}" with Stop on its card. {Name} stopped this; do not restart it, message it or start the same task again unless {name} asks for that in a new message. Do not try another way.`
 const STOPPED_EARLIER = (titles: string[]) =>

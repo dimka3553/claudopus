@@ -26,8 +26,8 @@ const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: ''
 const ART_FILES: Record<Exclude<keyof typeof ART, 'asking' | 'updated'>, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg', wave: 'wave.svg' }
 // Whether the octopus is happy at a time: work of this chat's that finished, not stopped or failed, is in its pause. A new drawing
 // starts its animation, so it plays from the first finish and holds its last picture through any finish that follows in the pause
-const isHappy = (cards: { id: string; parentId?: string; status: string; endedAt: number }[], at: number) =>
-  cards.some(one => !one.parentId && one.status === 'done' && isLingering(one, at))
+const isHappy = (cards: (Staged & { id: string; parentId?: string; endedAt: number })[], at: number) =>
+  cards.some(one => !one.parentId && stageOf(cards, one) === 'done' && isLingering(one, at))
 // How big the octopus is drawn in the panel's header and in the line above the prompt, in the app's pixels
 const HEAD_MARK = 48
 const BAND_MARK = 16

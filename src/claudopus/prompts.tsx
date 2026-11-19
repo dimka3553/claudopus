@@ -195,7 +195,7 @@ type SendResult = Awaited<ReturnType<EngineInterface['session']['send']>>
 type OwnMessage = { to: { agentId: string }; text: string }
 const IN_HOOK = 'CLAUDOPUS_IN_HOOK'
 const HOOK_WAIT = 60_000
-const UNSEEN_RUN = `From Claudopus: this message starts you where Claudopus cannot see you, as nothing of its own ran for a minute to send it from. In this run its panel tools (todo, note, ask, wake_me, waits) do not answer, and nothing starts you again once your step ends. So do not end your step to wait for anything: do what you can now, then hand back your report with SubagentHandback, saying what is left.`
+const UNSEEN_RUN = `From Claudopus: this message starts you where Claudopus cannot see you, as nothing of its own ran for a minute to send it from. In this run its panel tools (todo, note, ask, waits) do not answer, and nothing starts you again once your step ends. So do not end your step to wait for anything: do what you can now, then hand back your report with SubagentHandback, saying what is left.`
 // Asked of the engine itself: the mod's own hook answers this name (promptHooks), and the engine leaves that hook out exactly
 // where it would leave the mod's hooks out of a task started from here
 const isInHook = async ($: EngineInterface) => (await $.env.get('CLAUDOPUS_IN_HOOK').catch(() => undefined)) === 'hook'

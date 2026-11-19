@@ -125,7 +125,7 @@ const draftDrawn = (key: string) => {
 // tab's own to-dos
 const paneShape = async ($: EngineInterface, paneId: string) => {
   const at = await $.clock.now()
-  const card = (one: Todo) => [one.id, one.status, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, one.parentId ?? '', lingers(one, at), (one.admins ?? []).map(gate => gate.id), one.leftSince ?? 0, one.cutAt ?? 0, one.stuckAt ?? 0, one.waitsSince ?? 0, one.running?.at ?? 0, jobsOf(one, at).length]
+  const card = (one: Todo) => [one.id, one.status, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, one.parentId ?? '', lingers(one, at), (one.admins ?? []).map(gate => gate.id), one.stuckAt ?? 0, one.running?.at ?? 0, jobsOf(one).length]
   const own = await read($, todos)
   const chats = await read($, others)
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
@@ -489,7 +489,7 @@ const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) =
 let changeTo = ''
 const changeBoxKey = (id: string) => `band-${id}-reply-change-${replies.get(id) ?? 0}`
 const changeDraft = (id: string) => `${id}|change`
-const canChange = (one: Todo) => !one.chat && !one.parentId && one.status === 'done' && !one.leftOpen && !openItems(one).length && !one.ask && !one.admins?.length
+const canChange = (one: Todo) => !one.chat && !one.parentId && one.status === 'done' && !openItems(one).length && !one.ask && !one.admins?.length
 const openChange = ($: EngineInterface, one: Todo | undefined, surface: string) => {
   if (one && replyTo) (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''))
   if (one) boxOpen = undefined
@@ -827,9 +827,7 @@ const writtenIn = ($: EngineInterface, target: string, card: string) => {
 // Finished, while it acts on it
 const wakeCard = async ($: EngineInterface, target: string) => {
   const now = await $.clock.now()
-  let isWoken = false
-  await changeTodos($, list => ((isWoken = false), list).map(card => (card.id !== target || card.status === 'working' ? card : ((isWoken = true), resumed(card, now)))))
-  if (isWoken) endedByHandback.delete(target)
+  await changeTodos($, list => list.map(card => (card.id !== target || card.status === 'working' ? card : resumed(card, now))))
 }
 const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes)[number], reason: string) => {
   if (answers.some(({ one }) => pending.get(target) === one.id)) pending.delete(target)

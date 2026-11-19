@@ -1,156 +1,74 @@
-// ---- One state for a task's card: done only once its report is in ----
+// ---- One stage for a task's card ----
 
-// A task of this chat's stands in one of these, and its card, the panel's counts, the chat's notes and the results list all go by it:
-// - working: taking steps, or ended a step that Claudopus starts again (carrying it on)
-// - waiting-you: a question or an Allow of its waits on its card for the person
-// - waiting-own: its step ended while something of its own runs that starts it again when it ends: a command in the background or
-//   detached, a helper at work, a watch, what it asked Claudopus to wake it for, or a heavy command held for its turn
-// (a card kept as done is still not shown as Done while a command or helper of its own runs or to-dos are left: shownAs)
-// - done: it handed back its report with SubagentHandback, and Claudopus received it as its report (or, in a run Claude Code never
-//   pressed for a hand-back, its last words were taken as its result). Nothing else makes it done: not its commands or helpers
-//   ending, not its step ending, not the engine listing its run as over, not words written after Claude Code pressed for its report.
-//   holdDone keeps every change to the cards to this, so a card's status 'done' and this state always agree, and what counts or
-//   announces by status (the header, the bar, the ready notification, the results list) goes by the same
-// - stopped or failed: the person or the chat stopped it, Claudopus gave up starting it again, or its run failed
-// (18 Nov: a site-building task's card showed done for half an hour with to-dos still to do, and no report ever came. A preview
-// server it left running counted as work that would start it again, so nothing kept it going, and as its run ended the card ended done)
-type TaskState = 'working' | 'waiting-you' | 'waiting-own' | 'done' | 'stopped' | 'failed'
+// A card stands in one of five stages, and its colour, its line, its place in the panel, the header's counts, the octopus, the
+// sound, the notifications and what other chats see all read it here; nothing else decides
+// - working (purple): from its start until its result, whether it takes steps or has ended a step with commands or helpers of its
+//   own running
+// - waiting (amber): only while something of its own waits for the person: a question, a permission, a key or password box
+// - done (green): only by handing in its result, with every to-do ticked or dropped and nothing of its own running; a server it
+//   left for the person keeps its row under the card
+// - stopped (grey): only by the person's Stop, or the chat's on their word
+// - failed (red): it could not go on, and its card says why
+type Stage = 'working' | 'waiting' | 'done' | 'stopped' | 'failed'
+type Staged = Pick<Todo, 'status'> & Parameters<typeof needsPerson>[0]
+const stageOf = (_list: readonly Staged[], card: Staged): Stage => {
+  if (card.status === 'failed' || card.status === 'stopped') return card.status
+  if (needsPerson(card)) return 'waiting'
+  return card.status === 'done' ? 'done' : 'working'
+}
+// Each stage in the words a card says it with, and its colour
+const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
+const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, done: DONE, stopped: undefined, failed: 'error' })[stage]
+// A card that failed stays up, saying why, for this long unless it is dismissed
+const FAILED_UP = 24 * 3600_000
+// Why a card failed, where it says so
+const WHY_NO_RESULT = 'Ended without its result'
+const WHY_APP_CLOSED = 'The app closed while it worked'
+const WHY_ERROR = 'Ended with an error'
+const WHY_FLAGGED = 'Ended by a safety check'
 
-// A server runs until it is stopped: it never ends by itself, so it never starts the work that left it again
+// A server runs until it is stopped: it never ends by itself, so a task may finish with one left for the person
 // (a build by a tool that also serves, as `vite build`, ends)
 const isServerRun = (cmd: string | undefined, what: string) => (SERVER_CMD.test(cmd ?? '') && !/\b(vite|next|nuxt|astro) build\b/.test(cmd ?? '')) || describedOf(what).kind === 'server'
-// What of its own starts the work again by itself once its step has ended: its commands in the background or detached that end
-// (a watch counts, as its lines reach it; a server does not), its helpers at work, and what it asked Claudopus to wake it for or a
-// heavy command held for its turn
-const wakesOf = (list: Todo[], card: Todo) => {
-  const runs = [...(card.bg ?? []).filter(b => !isServerRun(b.cmd, b.what)), ...(card.detached ?? []).filter(d => !isServerRun(d.cmd, d.what))]
-  const helpers = runningHelpers(list, card.id).length
-  const isWoken = card.wakeWhen !== undefined || isTurnWaited(list, card.id)
-  return { runs, helpers, isWoken, isAny: runs.length > 0 || helpers > 0 || isWoken }
+// The commands of its own that end by themselves and still run: every row of its card but a server's
+const ownRuns = (card: Todo | undefined) => (card?.bg ?? []).filter(b => !isServerRun(b.cmd, b.what))
+// Its helpers at work
+const helpersAtWork = (list: Todo[], id: string) => list.filter(one => one.parentId === id && one.status === 'working')
+// Whether something of its own runs: a command that ends by itself, or a helper at work
+const ownsWork = (list: Todo[], card: Todo) => ownRuns(card).length > 0 || helpersAtWork(list, card.id).length > 0
+// Whether Claude Code pressed it for its report as its run ended, after its last call: the sign that its words reached no one (the
+// chat is told only that it "ended without delivering a report"). A run where the engine asks for no report, as headless ones, ends
+// with its words as its result
+const isPressedAtEnd = (rows: unknown) => {
+  if (!Array.isArray(rows)) return false
+  for (const row of [...rows].reverse()) {
+    const m = (row && typeof row === 'object' && 'message' in row ? (row as { message?: unknown }).message : row) as { role?: unknown; content?: unknown } | undefined
+    const blocks: unknown[] = Array.isArray(m?.content) ? m.content : [m?.content]
+    const texts = blocks.map(b => (typeof b === 'string' ? b : b && typeof b === 'object' ? String((b as { text?: unknown }).text ?? '') + (typeof (b as { content?: unknown }).content === 'string' ? String((b as { content?: unknown }).content) : '') : ''))
+    if (m?.role === 'assistant' && blocks.some(b => b && typeof b === 'object' && (b as { type?: unknown }).type === 'tool_use')) return false
+    if (m?.role === 'user' && texts.some(text => text.includes(HANDBACK_PRESS))) return true
+  }
+  return false
 }
 // Whether Claude Code took the run's last words as its result: it never pressed it for a hand-back. Its messages unread, it may
 // have been pressed, so it has not
 const isUnpressed = async ($: EngineInterface, id: string) => {
   const rows = await $.session.messages({ as: 'api', agentId: id }).catch(() => undefined)
-  return Array.isArray(rows) && !isPressedAtEnd(rows) && !isLetEnd((await read($, todos)).find(one => one.id === id))
+  return Array.isArray(rows) && !isPressedAtEnd(rows)
 }
-// Claudopus received its report: it handed it back with SubagentHandback (or its unpressed run ended with it), and its turn ended
-// with that report as its result
+// Its result was received: handed in with SubagentHandback, or its run's last words where Claude Code took those as its result
 const hasReport = (one: Todo | undefined) => one?.reportAt !== undefined
-// The one place a task's state is read from
-const stateOf = (list: Todo[], one: Todo): TaskState => {
-  if (one.status === 'done' || one.status === 'stopped' || one.status === 'failed') return one.status
-  if (needsPerson(one)) return 'waiting-you'
-  return one.endedStepAt !== undefined && wakesOf(list, one).isAny ? 'waiting-own' : 'working'
-}
-// ---- Done is shown only for a task that finished everything ----
-// A card kept as done is drawn, counted and announced as Done only when nothing stands between it and Done. Whatever path kept it
-// as done (a hand-back, the engine's word, a run Claudopus could not see, a card read back after a reload), the card is read
-// through here before anyone sees it:
-// - a command of its own that ends by itself still runs, or a helper of its is at work: it waits for its own work, in purple
-//   (a command it sent to the background, which Claude Code still holds its run for after its report, counts by `leftOwn`, kept as
-//   the card ended, its rows being gone by then; a server never ends by itself, so a card that left only a server is done)
-// - to-dos it never ticked or dropped: it is not done, in amber, and says how many are done
-// (18 Nov, the person: "Why is it done after four to-dos? Why does it have a command running when it's finished?" A task that
-// ran where Claudopus could not see it handed back past every check, its to-dos and its line left as they were; another card
-// kept a command for 47 minutes after its report)
-// - a release under way for it, Claudopus's on the person's press or its own runner in its background: Releasing, in purple, and
-//   Done once only, when that has finished (18 Nov, the person: "Until it's done releasing, it's not done. Why does it turn from
-//   purple to green to purple to green to purple?")
-// A command left in its background counts from the moment it hands back (`leftOwn`), not only once the engine's list says it holds
-// the run for it (`leftSince`), which came seconds later: green came in between
-// (`_asks` is no longer read: a result's question changes nothing of this)
-const shownAs = (list: Todo[], _asks?: (one: Todo) => boolean): Todo[] =>
-  list.map(one => {
-    if (isOff || one.parentId || one.chat || one.status !== 'done') return one
-    // (one the person dismissed is under Finished and waits for nothing more, but with to-dos left it still never reads Done)
-    if (one.closedAt) return isLeftUndone(one) ? { ...one, leftOpen: openItems(one).length } : one
-    const atWork = { ...one, status: 'working' as const, wasDone: one.endedAt, endedAt: 0, endedStepAt: one.endedStepAt ?? one.endedAt }
-    if (one.releasing) return atWork
-    // (a question of its own on its card comes first: it is Waiting for you, its command's row under it)
-    if (one.ask) return one
-    const { runs, helpers } = wakesOf(list, one)
-    if (runs.length || helpers || one.leftOwn) return atWork
-    // (to-dos left: not done, in amber, whatever its result asks; with every to-do done it is Done and green, though its result
-    // still asks the person something: the person, 18 Nov, "the ones that are not done should be yellow, the ones that are done
-    // should be green")
-    if (isLeftUndone(one)) return { ...one, leftOpen: openItems(one).length }
-    return one
-  })
-// Released on the person's press: whatever to-do it left was that release, and it is done (a card from before `released` was
-// kept says so on its line)
-const isReleased = (one: Todo) => one.released !== undefined || one.entries.some(entry => entry.kind === 'note' && entry.text.startsWith('Released · '))
-// To-dos left on a card Claudopus saw end done under that rule, never released: it is not done. A card that ended before it, or
-// long ago, reads as it did then, and never comes back up as not done (18 Nov, the person: two tasks of the morning, one of them
-// released, came back to the top in amber after the update)
-const isLeftUndone = (one: Todo) => one.doneSeen !== undefined && !isReleased(one) && openItems(one).length > 0
-// The release runner, run by a task's own command (its status look asks nothing and releases nothing)
-const isReleaseRun = (cmd: string | undefined) => /\bbin\/release\b/.test(cmd ?? '') && !/\s--status\b/.test(cmd ?? '')
-// One card read so
-const shownOne = (list: Todo[], id: string, asks?: (one: Todo) => boolean) => shownAs(list, asks).find(one => one.id === id)
 
-// Every change to the cards goes through here: a task's card that would end done without its report stays at work, as it was before
-// the change, its step ended. Any path that ends a card (the end of its turn, the engine's list, a look after a reload) is held to it
-// The ids held so, for Claudopus to start each again that nothing of its own starts (doneHeld)
-const holdDone = (before: Todo[], next: Todo[], now: number) => {
-  const held: string[] = []
-  if (isOff) return { list: next, held }
+// Every change to the cards goes through here: a task's card cannot be kept as done without its received result, whatever path
+// would end it so. It stays as it was before the change
+const holdDone = (before: Todo[], next: Todo[]) => {
+  if (isOff) return next
   const was = new Map(before.map(one => [one.id, one]))
-  const list = next.map(one => {
+  return next.map(one => {
     const old = was.get(one.id)
+    const isHeld = !one.parentId && !one.chat && one.status === 'done' && !hasReport(one) && old?.status === 'working'
     // (what the person allowed it under "Ask once per piece of work" ends with it, and only once it really ends)
-    if (old?.status === 'working' && one.status !== 'working' && !(one.status === 'done' && !one.parentId && !one.chat && !hasReport(one))) workAllowed.delete(one.id)
-    if (one.parentId || one.chat || one.status !== 'done' || hasReport(one)) return one
-    // (only a card at work: one read back from the chat's records ended before Claudopus kept it, as its records say)
-    if (old?.status !== 'working') return one
-    held.push(one.id)
-    const base = old
-    return { ...base, status: 'working' as const, endedAt: 0, answer: one.answer || base.answer, answeredAt: undefined, endedStepAt: base.endedStepAt ?? now }
+    if (old?.status === 'working' && one.status !== 'working' && !isHeld) workAllowed.delete(one.id)
+    return isHeld && old ? { ...old, answer: one.answer || old.answer } : one
   })
-  // A task's card Claudopus sees end done is kept so (isLeftUndone): one done already, or only now read back, is not
-  const seen = list.map(one => (one.status === 'done' && !one.parentId && !one.chat && one.doneSeen === undefined && was.has(one.id) && was.get(one.id)?.status !== 'done' ? { ...one, doneSeen: now } : one))
-  return { list: seen, held }
-}
-// Cards held from ending done without their report, each taken up once per stop (by its steps and the times it was carried on): one
-// whose run Claude Code never pressed ends done with its last words as its result, as at a heard end; one that waits on its own work
-// waits, and is taken up again if that work goes without starting it; one waiting for the person waits for them; one the person
-// stopped or held, or flagged, or given up on, ends stopped; any other is started again to carry on, as a task stopped partway is,
-// until it hands back its report or Claudopus gives up and ends it stopped
-const heldTaken = new Set<string>()
-const doneHeld = async ($: EngineInterface, ids: string[]) => {
-  for (const id of ids) {
-    const list = await read($, todos)
-    const one = list.find(card => card.id === id)
-    if (!one || one.status !== 'working') continue
-    // (only a task, which keeps to-dos and hands back, its kind unknown on a card from before kinds were kept: a reader's or a planner's last words are its
-    // result; and one that cannot be started as stopped partway ends as before)
-    // (never with to-dos still to do: a run Claudopus could not see hands back past every check, its to-dos as they were, so it is
-    // started again where Claudopus sees it, to do them or drop them and hand back, as any task stopped partway is)
-    if (!(openItems(one).length && (!one.kind || WAITS_KINDS.has(one.kind)) && isStoppedShort(one, '')) && (await isUnpressed($, id))) {
-      const now = await $.clock.now()
-      await changeTodos($, cards => cards.map(card => (card.id === id && card.status === 'working' ? { ...ended(card, 'done', now), reportAt: now } : card)))
-      await lookEnds($)
-      await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
-      const card = (await read($, todos)).find(c => c.id === id)
-      if (card?.status === 'done' && card.answer.trim()) $.clock.after(5, () => void saveReport($, card, card.answer).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
-      continue
-    }
-    if (wakesOf(list, one).isAny) continue
-    const key = `${id}:${one.steps ?? 0}:${one.carryOn?.total ?? 0}`
-    if (heldTaken.has(key)) continue
-    heldTaken.add(key)
-    if (needsPerson(one)) {
-      await log($, `work ${id} would have ended done without its report: it waits for the person`)
-      continue
-    }
-    if (isHeld(one) || stoppedHere.has(id) || pressed.has(id) || one.flagged || one.carryOn?.gaveUp) {
-      const now = await $.clock.now()
-      await changeTodos($, cards => cards.map(card => (card.id === id && card.status === 'working' ? ended(card, 'stopped', now) : card)))
-      await log($, `work ${id} would have ended done without its report: ended stopped`)
-      await lookEnds($)
-      continue
-    }
-    await log($, `work ${id} would have ended done without its report: started again to carry on`)
-    await goOn($, id, 'its card would have ended done without its report', true)
-  }
 }

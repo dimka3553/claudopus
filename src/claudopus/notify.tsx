@@ -20,23 +20,24 @@ let isSettling = false
 const announced = new Map<string, number>()
 // Work the person stopped with its Stop button: they saw it end, so it is not announced
 const pressed = new Set<string>()
-const standing = (status: string, endedAt: number) => (status === 'working' ? 'working' : `${status}:${endedAt}`)
+// How a card stands, by its stage: at work (working, or waiting for the person), or how and when it ended
+const standing = (stage: string, endedAt: number) => (stage === 'working' || stage === 'waiting' ? 'working' : `${stage}:${endedAt}`)
 
 // Looks for work of this chat's that has ended since the last look; helpers are never listed, so never announced
 const lookEnds = async ($: EngineInterface) => {
   const mine = await sessionName($)
-  // (each as its card shows it: one that handed back while a command or helper of its own still runs has not ended yet, and is
-  // announced once that has ended, however long ago its report came)
-  const cards = shownAs(await read($, todos), one => (one.waits ?? []).some(wait => !askedWait(wait).answer)).filter(one => !one.parentId)
+  // (each by its stage: one that waits for the person has not ended, and is announced once it has)
+  const list = await read($, todos)
+  const cards = list.filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
-  const all = [...cards.map(one => ({ id: one.id, status: one.status, endedAt: one.endedAt, waits: one.waits })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt, waits: undefined as Todo['waits'] }))]
+  const all: { id: string; status: string; endedAt: number; waits: Todo['waits'] }[] = [...cards.map(one => ({ id: one.id, status: stageOf(list, one), endedAt: one.endedAt, waits: one.waits })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt, waits: undefined as Todo['waits'] }))]
   const was = lastSeen
   lastSeen = new Map(all.map(one => [one.id, standing(one.status, one.endedAt)]))
   if (!was) return
   for (const one of all) {
     const before = was.get(one.id)
-    if (one.status === 'working' || before === undefined || before === standing(one.status, one.endedAt) || cutPending.has(one.id)) continue
+    if (standing(one.status, one.endedAt) === 'working' || before === undefined || before === standing(one.status, one.endedAt)) continue
     if ((now - one.endedAt > STALE_END && before !== 'working') || now - (announced.get(one.id) ?? -Infinity) < AGAIN) continue
     announced.set(one.id, now)
     if (pressed.delete(one.id)) continue
@@ -66,9 +67,9 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
   const kept = cards.find(card => card.id === id)
   if (!kept) return undefined
   const waits = (kept.waits ?? seen ?? []).filter(wait => !askedWait(wait).answer)
-  // (as its card shows it: one that still waits for a command or helper of its own has not ended, and one that left to-dos is not done)
-  const one = shownOne(cards, id, () => waits.length > 0) ?? kept
-  if (one.status === 'working') return undefined
+  const one = kept
+  const stage = stageOf(cards, one)
+  if (stage === 'working' || stage === 'waiting') return undefined
   const said = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text ?? ''
   const what =
     one.status === 'done'
@@ -76,9 +77,8 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
         ? `Waiting for you: ${fewWords(waits[0] ? askedWait(waits[0]).text : '')}${waits.length > 1 ? `, and ${waits.length - 1} more` : ''}`
         : fewWords(one.answer) || fewWords(said) || 'Done.'
       : one.status === 'failed'
-        ? 'Failed.'
+        ? `Failed${one.why ? ` · ${one.why}` : ''}.`
         : 'Stopped.'
-  if (one.leftOpen) return { title: one.title || 'Task', isDone: false, what: `Not done: ${one.leftOpen === 1 ? 'a to-do is' : `${one.leftOpen} to-dos are`} left.` }
   return { title: one.title || 'Task', isDone: one.status === 'done', isWaiting: one.status === 'done' && waits.length > 0, what }
 }
 
@@ -262,9 +262,9 @@ const cardsNow = async ($: EngineInterface) => {
     const note = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text
     const what = waits
       ? `waiting for {name}: ${cut(oneLine(waits.text), 160)}`
-      : one.status === 'working'
+      : stageOf(list, one) === 'working'
         ? `working, ${items.filter(item => item.state === 'done').length} of ${items.length} to-dos done${doing ? `, doing "${cut(doing, 80)}"` : ''}${note ? `, last note "${cut(oneLine(note), 120)}"` : ''}`
-        : one.status
+        : `${one.status}${one.status === 'failed' && one.why ? ` (${one.why.charAt(0).toLowerCase()}${one.why.slice(1)})` : ''}`
     return { one, waits, what, row: `- "${cut(titleOf(one), 80)}" (${one.id}): ${waits ? `${what.replace(/^waiting for \{name\}/, `waiting for {name} for ${minutesSaid(Math.round((now - waits.at) / 60_000))}`)}` : one.status === 'working' ? what : `${what} ${minutesSaid(Math.round((now - one.endedAt) / 60_000))} ago`}` }
   })
   const toName = facts.filter(({ one, waits }) => {
