@@ -1,0 +1,493 @@
+#!/usr/bin/perl
+# Removes what tasks and the browsers they drive leave behind, and nothing a person may still want:
+#   A. a browser's leftovers: Playwright's and Puppeteer's profiles, Chrome's downloads, and the copy of Chrome that macOS makes
+#      at each launch, which a Chrome that was stopped leaves behind;
+#   B. Claudopus's own leftovers in the temp folder, and anything else there unchanged for longer than macOS keeps it;
+#   C. old task scratch folders, after copying any file a result names into that result's own folder;
+#   D. worktrees whose branch is merged and which hold nothing unsaved, and their branches;
+#   E. with --deep, uv's and npm's caches.
+# A folder holding CT data, the person's own pictures, films and desktop, anything in use or changed lately, and anything outside
+# the folder it was found in are kept. Every removal and every keep is said on a line of its own, and what came out is written
+# to <memory folder>/tidy/last.json.
+#   tidy [--now] [--deep] <memory folder>
+use strict;
+use warnings;
+use Cwd qw(realpath);
+use File::Basename qw(basename dirname);
+use File::Compare qw(compare);
+use File::Copy qw(copy);
+use File::Path qw(make_path remove_tree);
+use POSIX ();
+use Time::HiRes ();
+
+my ($now, $deep) = (0, 0);
+while (@ARGV && $ARGV[0] =~ /^--/) {
+  my $flag = shift @ARGV;
+  $now = 1 if $flag eq '--now';
+  $deep = 1 if $flag eq '--deep';
+}
+my ($mem) = @ARGV;
+die "usage: tidy [--now] [--deep] <memory folder>\n" unless defined $mem && length $mem && -d $mem;
+$mem =~ s{(?<=.)/+$}{};
+my $EVERY = $ENV{TIDY_EVERY} // 600;                   # seconds between two runs
+my $DAYS = $ENV{TIDY_DAYS} // 2;                       # days a task's scratch folder is kept unchanged
+my $IDLE = $ENV{TIDY_WORKTREE_IDLE} // 60;             # minutes a merged worktree stays unchanged before it goes
+make_path("$mem/locks", "$mem/tidy");
+
+# One run at a time: the run that made the lock is the only one that removes it, and a lock left by a run that died goes after
+# three hours. A run starts at most every EVERY seconds, counted from when the last one started
+my $lock = "$mem/locks/tidy";
+my $isMine = 0;
+END { rmdir $lock if $isMine }
+$SIG{$_} = sub { exit 1 } for qw(TERM HUP INT);
+if (!mkdir $lock) {
+  my $age = time - ((stat $lock)[9] // time);
+  exit 0 if $age < 3 * 3600;
+  remove_tree($lock);
+  mkdir $lock or exit 0;
+}
+$isMine = 1;
+my $stamp = "$mem/tidy/stamp";
+exit 0 if !$now && -e $stamp && time - (stat $stamp)[9] < $EVERY;
+{ open my $fh, '>', $stamp or die "cannot write $stamp\n"; close $fh }
+$| = 1;
+
+# ---- Running commands: what is run, with its output (and its errors too when asked); never the shell's own words ----
+sub capture {
+  my ($withErrors, @cmd) = @_;
+  my $pid = open(my $fh, '-|');
+  return ('', -1) unless defined $pid;
+  if (!$pid) {
+    if ($withErrors) { open STDERR, '>&', \*STDOUT } else { open STDERR, '>', '/dev/null' }
+    exec { $cmd[0] } @cmd or POSIX::_exit(127);
+  }
+  local $/;
+  my $out = <$fh> // '';
+  close $fh;
+  return ($out, $?);
+}
+sub out { return (capture(0, @_))[0] }
+sub lines_of { return grep { length } split /\n/, out(@_) }
+sub on_path { my $n = shift; return (grep { -x $_ && !-d $_ } map { "$_/$n" } split /:/, ($ENV{PATH} // ''))[0] }
+
+# ---- Where it looks, each its own environment value so a test uses made-up folders ----
+my $uid = $<;
+my $TEMP = (defined $ENV{TIDY_TEMP} && length $ENV{TIDY_TEMP}) ? $ENV{TIDY_TEMP} : ((defined $ENV{TMPDIR} && length $ENV{TMPDIR}) ? $ENV{TMPDIR} : '/tmp');
+$TEMP =~ s{(?<=.)/+$}{};
+my $CLONES = $ENV{TIDY_CLONES};
+if (!defined $CLONES) {
+  $CLONES = '';
+  if ($^O eq 'darwin') {
+    my ($user_temp) = lines_of('getconf', 'DARWIN_USER_TEMP_DIR');
+    if (defined $user_temp && length $user_temp) { $user_temp =~ s{/+$}{}; $CLONES = dirname($user_temp) . '/X' }
+  }
+}
+my @SCRATCH = defined $ENV{TIDY_SCRATCH} ? grep { length } split /\n/, $ENV{TIDY_SCRATCH} : ("/private/tmp/claude-$uid", "/tmp/claude-$uid");
+my @REPOS;
+if (defined $ENV{TIDY_REPOS}) { @REPOS = grep { length } split /\n/, $ENV{TIDY_REPOS} }
+elsif (open my $idx, '<', "$mem/index.md") {
+  while (<$idx>) {
+    next unless /^\s*-\s[^|]*\|\s*([^|\n]*?)\s*\|/;
+    my $p = $1;
+    $p =~ s{^~(?=/|$)}{$ENV{HOME} // '~'}e;
+    push @REPOS, $p if length $p && -e "$p/.git";
+  }
+  close $idx;
+}
+
+# ---- What runs now: each command's whole line, and each one's current folder ----
+my @commands = lines_of('sh', '-c', $ENV{TIDY_PS} // 'ps axww -o command=');
+my @cwds;
+if (defined $ENV{TIDY_CWDS}) { @cwds = lines_of('sh', '-c', $ENV{TIDY_CWDS}) }
+elsif (-d '/proc/self') { for (glob '/proc/[0-9]*/cwd') { my $l = readlink $_; push @cwds, $l if defined $l } }
+else { @cwds = lines_of('sh', '-c', q{lsof -a -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'}) }
+@cwds = map { my $r = realpath($_); (defined $r && $r ne $_) ? ($_, $r) : ($_) } @cwds;
+
+my %removed = (browser => 0, temp => 0, scratch => 0, worktrees => 0);
+my ($freed, $rescued, $kept) = (0, 0, 0);
+sub finish {
+  my $at = int(Time::HiRes::time() * 1000);
+  my $json = sprintf('{"at": %d, "freed": %d, "removed": {"browser": %d, "temp": %d, "scratch": %d, "worktrees": %d}, "rescued": %d, "kept": %d}',
+    $at, $freed, @removed{qw(browser temp scratch worktrees)}, $rescued, $kept);
+  if (open my $fh, '>', "$mem/tidy/last.json.new") { print $fh "$json\n"; close $fh; rename "$mem/tidy/last.json.new", "$mem/tidy/last.json" }
+}
+# Without knowing what runs, nothing is safe to remove
+if (!@commands || !@cwds) {
+  print "could not list the running commands, so nothing was removed\n";
+  finish();
+  exit 0;
+}
+
+my ($done, $said) = (0, time);
+sub progress { if (time - $said >= 10) { print "progress: $done done\n"; $said = time } }
+sub stage { print "$_[0]\n"; ($done, $said) = (0, time) }
+
+# ---- What is safe to remove ----
+sub uniq { my %s; return grep { !$s{$_}++ } @_ }
+# The path's own place, its folder's links resolved but not the path itself, when it lies inside the root; else ''
+sub inside {
+  my ($p, $rroot) = @_;
+  my $dir = realpath(dirname($p));
+  return '' unless defined $dir && defined $rroot;
+  my $real = ($dir eq '/' ? '' : $dir) . '/' . basename($p);
+  return index($real, "$rroot/") == 0 ? $real : '';
+}
+# Every way a command or a result may name a path: as found, resolved, and with or without macOS's /private
+sub forms {
+  my @f = grep { defined && length } @_;
+  for my $x (grep { defined && length } @_) {
+    push @f, $1 if $x =~ m{^/private(/(?:tmp|var)/.*)$};
+    push @f, "/private$x" if $x =~ m{^/(?:tmp|var)/};
+  }
+  return uniq(@f);
+}
+sub real_or { my $r = realpath($_[0]); return defined $r ? $r : $_[0] }
+my $HOME = $ENV{HOME} // '';
+my @GUARDED = length $HOME ? uniq(map { ($_, real_or($_)) } map { "$HOME/$_" } qw(Desktop Pictures Movies)) : ();
+# The person's own pictures, films and desktop, a Photos library, or a folder holding one of them
+sub guarded {
+  for my $p (@_) {
+    return 1 if index($p, 'Photos Library') >= 0;
+    for my $g (@GUARDED) { return 1 if $p eq $g || index($p, "$g/") == 0 || index($g, "$p/") == 0 }
+  }
+  return 0;
+}
+sub in_use {
+  for my $f (@_) {
+    for (@commands) { return 'a running command names it' if index($_, $f) >= 0 }
+    for (@cwds) { return 'a running command works in it' if $_ eq $f || index($_, "$f/") == 0 }
+  }
+  return '';
+}
+# Walks a path without following links: its newest change (stopping once one is newer than $since, as it stays then), and
+# whether it holds CT data, a socket, a Photos library, or a folder it could not read. $skip names folders not looked into
+sub look {
+  my ($top, $since, $skip) = @_;
+  my %r = (newest => 0);
+  my @todo = ($top);
+  while (defined(my $p = pop @todo)) {
+    my @st = lstat $p or next;
+    my $name = substr($p, rindex($p, '/') + 1);
+    my $isDir = -d _;
+    my $isSocket = -S _;
+    my $isFile = -f _;
+    next if $isDir && $skip && $p ne $top && $skip->{$name};
+    $r{newest} = $st[9] if $st[9] > $r{newest};
+    last if defined $since && $r{newest} > $since;
+    $r{socket} = 1 if $isSocket;
+    $r{ct} = 1 if $isFile && ($name =~ /\.(?:dcm|nii|nii\.gz|nrrd|mha|mhd)$/i || $name eq 'DICOMDIR');
+    $r{photos} = 1 if index($name, 'Photos Library') >= 0;
+    if ($isDir) {
+      if (opendir my $dh, $p) { push @todo, map { "$p/$_" } grep { $_ ne '.' && $_ ne '..' } readdir $dh; closedir $dh }
+      else { $r{unreadable} = 1 }
+    }
+    progress();
+  }
+  return \%r;
+}
+sub kept { my ($p, $why) = @_; print "kept $p: $why\n"; $kept++; return 0 }
+sub du_bytes { my $o = out('du', '-sk', $_[0]); return $o =~ /^(\d+)/ ? $1 * 1024 : 0 }
+sub take {
+  my ($kind, $key, $p) = @_;
+  my $bytes = du_bytes($p);
+  if (-d $p && !-l $p) { capture(1, 'rm', '-rf', $p) } else { unlink $p }
+  return kept($p, 'it could not be removed') if -e $p || -l $p;
+  $freed += $bytes;
+  $removed{$key}++;
+  print "removed $kind $p\n";
+  return 1;
+}
+
+# ---- Files a result names, saved before their folder goes: copied beside the result, which then names the copy ----
+my %reports;
+my $reportsRead = 0;
+sub read_reports {
+  return if $reportsRead++;
+  opendir my $dh, "$mem/reports" or return;
+  for my $id (sort readdir $dh) {
+    next if $id =~ /^\./;
+    my $f = "$mem/reports/$id/report.md";
+    next unless -f $f;
+    open my $in, '<:raw', $f or next;
+    local $/;
+    $reports{$f} = <$in> // '';
+    close $in;
+  }
+  closedir $dh;
+}
+sub copy_beside {
+  my ($rep, $src) = @_;
+  my $dir = dirname($rep) . '/files';
+  make_path($dir);
+  my $name = basename($src);
+  my ($stem, $ext) = $name =~ /^(.+?)((?:\.[^.]*)?)$/s;
+  for my $i (1 .. 999) {
+    my $to = $i == 1 ? "$dir/$name" : "$dir/$stem-$i$ext";
+    if (-e $to || -l $to) { return $to if !-l $to && compare($src, $to) == 0; next }
+    return copy($src, $to) ? $to : undef;
+  }
+  return undef;
+}
+sub rescue {
+  my @forms = @_;
+  read_reports();
+  for my $rep (sort keys %reports) {
+    my $text = $reports{$rep};
+    my %swap;
+    for my $form (@forms) {
+      my $at = 0;
+      while (($at = index($text, "$form/", $at)) >= 0) {
+        my ($rest) = substr($text, $at, 4096) =~ /^([^\n]*)/;
+        $at += length($form) + 1;
+        # The longest text from there that is a file: a path may hold spaces and any other character
+        for (my $n = length $rest; $n > length($form) + 1; $n--) {
+          my $named = substr($rest, 0, $n);
+          next unless -f $named && !-l $named;
+          $swap{$named} //= copy_beside($rep, $named);
+          last;
+        }
+      }
+    }
+    my @from = sort { length $b <=> length $a } grep { defined $swap{$_} } keys %swap;
+    next unless @from;
+    for my $from (@from) {
+      $text = join($swap{$from}, split /\Q$from\E/, $text, -1);
+      $rescued++;
+      print "saved $from as $swap{$from}\n";
+    }
+    if (open my $fh, '>:raw', "$rep.tidy") { print $fh $text; close $fh; rename "$rep.tidy", $rep; $reports{$rep} = $text }
+  }
+}
+
+# One item: kept with its reason, or removed. Returns 1 when removed, 0 when kept, -1 when it changed after $since (said
+# only unless quiet)
+sub consider {
+  my %o = @_;
+  my $p = $o{path};
+  my $real = inside($p, $o{root});
+  return kept($p, 'it is outside the folder it was found in') unless $real;
+  my @forms = forms($p, $real);
+  return kept($p, 'it is your own pictures, films or desktop') if guarded(@forms);
+  my $l = look($p, $o{since}, undef);
+  if ($l->{newest} > $o{since}) { kept($p, $o{fresh}) unless $o{quiet}; return -1 }
+  if (my $why = in_use(@forms)) { return kept($p, $why) }
+  if ($o{also}) { if (my $why = $o{also}->($p)) { return kept($p, $why) } }
+  return kept($p, 'it holds CT data') if $l->{ct};
+  return kept($p, 'it holds a Photos library') if $l->{photos};
+  return kept($p, 'it holds a socket a running command may use') if $l->{socket};
+  return kept($p, 'part of it could not be read') if $l->{unreadable};
+  rescue(@forms) if $o{rescue};
+  return take($o{kind}, $o{key}, $p);
+}
+sub entries {
+  my $d = shift;
+  opendir my $dh, $d or return ();
+  my @e = sort grep { $_ ne '.' && $_ ne '..' } readdir $dh;
+  closedir $dh;
+  return @e;
+}
+
+my $t0 = time;
+my $rTEMP = realpath($TEMP);
+my %scratchSeen;
+my @scratchRoots = grep { -d $_ && !$scratchSeen{real_or($_)}++ } @SCRATCH;
+my $BROWSER = qr/^(?:playwright_chromiumdev_profile-|playwright_firefoxdev_profile-|playwright-artifacts-|puppeteer_dev_chrome_profile-|puppeteer_dev_firefox_profile-|\.com\.google\.Chrome\.|\.org\.chromium\.Chromium\.|\.com\.google\.chrome\.for\.testing\.|com\.google\.Chrome\.chrome_chrome_url_fetcher_|com\.google\.chrome\.for\.testing\.chrome_chrome_url_fetcher_)/;
+my $OURS = qr/^(?:claudopus-catch-up\.|claudopus-guard-|claudopus-tree-|claudopus-release\.|claudopus-.*-test\.|claude-plugin-test-)/;
+
+# ---- A. A browser's leftovers, unchanged for 10 minutes ----
+stage('looking for browser leftovers');
+if ($rTEMP) {
+  for my $e (grep { /$BROWSER/ } entries($TEMP)) {
+    $done++;
+    consider(path => "$TEMP/$e", root => $rTEMP, since => $t0 - 600, fresh => 'changed within 10 minutes', kind => 'browser', key => 'browser');
+  }
+}
+# Chrome's copy of itself, made at its launch: the copy of a Chrome still running is the one made within 2 minutes of its start
+my $rCLONES = length $CLONES ? realpath($CLONES) : undef;
+if ($rCLONES) {
+  my @starts;
+  my $isMain = qr{^/.*?/Contents/MacOS/Google Chrome(?: for Testing)?(?=\s|\z)(?!\s+(?:for Testing\s+)?Helper)};
+  if (defined $ENV{TIDY_STARTS}) {
+    for (lines_of('sh', '-c', $ENV{TIDY_STARTS})) {
+      my ($at, $command) = /^\s*(\d+)\s+(.*)$/ or next;
+      push @starts, $at if $command =~ $isMain;
+    }
+  } else {
+    for (lines_of('ps', 'axww', '-o', 'etime=,command=')) {
+      my ($d, $h, $m, $sec, $command) = /^\s*(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)\s+(.*)$/ or next;
+      push @starts, time - ((($d // 0) * 24 + ($h // 0)) * 3600 + $m * 60 + $sec) if $command =~ $isMain;
+    }
+  }
+  my $born = sub {
+    my $p = shift;
+    my $m = (lstat $p)[9] // 0;
+    my ($b) = $^O eq 'darwin' ? lines_of('stat', '-f', '%B', $p) : lines_of('stat', '-c', '%W', $p);
+    return (defined $b && $b =~ /^\d+$/ && $b > 0 && $b < $m) ? $b : $m;
+  };
+  my $mine = sub {
+    my $at = $born->(shift);
+    return (grep { abs($_ - $at) <= 120 } @starts) ? 'it is the copy of a Chrome that is running' : '';
+  };
+  for my $group (grep { /\.code_sign_clone$/ && -d "$CLONES/$_" && !-l "$CLONES/$_" } entries($CLONES)) {
+    for my $e (grep { /^code_sign_clone\./ } entries("$CLONES/$group")) {
+      $done++;
+      consider(path => "$CLONES/$group/$e", root => $rCLONES, since => $t0 - 600, fresh => 'changed within 10 minutes',
+        also => $mine, kind => 'browser', key => 'browser');
+    }
+  }
+}
+
+# ---- B. Claudopus's own leftovers in the temp folder, unchanged for 3 hours, and anything else there unchanged for longer
+# than macOS keeps it (it clears it only at a restart) ----
+stage('looking for leftovers in the temp folder');
+if ($rTEMP) {
+  my @never = map { real_or($_) } grep { length } ($mem, @scratchRoots, $CLONES, @REPOS);
+  my $oldest = $t0 - ($DAYS + 1) * 86400;
+  for my $e (entries($TEMP)) {
+    next if $e =~ /$BROWSER/;
+    my $p = "$TEMP/$e";
+    $done++;
+    if ($e =~ /$OURS/) {
+      consider(path => $p, root => $rTEMP, since => $t0 - 3 * 3600, fresh => 'changed within 3 hours', kind => 'temp', key => 'temp', rescue => 1);
+      next;
+    }
+    next if $e =~ /^\./ || $e =~ /^com\.apple/;
+    my @st = lstat $p or next;
+    next if -S _ || $st[4] != $uid;
+    my $real = "$rTEMP/$e";
+    if (grep { $_ eq $real || index($_, "$real/") == 0 } @never) { kept($p, 'it holds the memory, a scratch folder or a repo'); next }
+    consider(path => $p, root => $rTEMP, since => $oldest, quiet => 1, kind => 'temp', key => 'temp', rescue => 1);
+  }
+}
+
+# ---- C. Task scratch folders: a session unchanged for DAYS days goes whole, and in a newer one each scratchpad entry unchanged
+# that long ----
+stage('looking for old task scratch folders');
+my $scratchSince = $t0 - $DAYS * 86400;
+my $dayWords = $DAYS == 1 ? '1 day' : "$DAYS days";
+for my $root (@scratchRoots) {
+  my $rroot = realpath($root) // next;
+  for my $project (entries($root)) {
+    my $pd = "$root/$project";
+    next if -l $pd || !-d $pd;
+    for my $session (entries($pd)) {
+      $done++;
+      my $sd = "$pd/$session";
+      my $r = consider(path => $sd, root => $rroot, since => $scratchSince, quiet => 1, kind => 'scratch', key => 'scratch', rescue => 1);
+      next unless $r == -1 && !-l $sd && -d "$sd/scratchpad" && !-l "$sd/scratchpad";
+      for my $e (entries("$sd/scratchpad")) {
+        $done++;
+        consider(path => "$sd/scratchpad/$e", root => $rroot, since => $scratchSince, fresh => "changed within $dayWords",
+          kind => 'scratch', key => 'scratch', rescue => 1);
+      }
+    }
+  }
+}
+
+# ---- D. Worktrees whose branch is merged, with nothing unsaved in them, unchanged for IDLE minutes, and their branches ----
+stage('looking for merged worktrees');
+my %REBUILT = map { $_ => 1 } qw(node_modules .venv venv __pycache__ dist build .next .turbo .cache target out coverage .pytest_cache
+  .mypy_cache .ruff_cache .parcel-cache .svelte-kit .DS_Store);
+sub rebuildable {
+  my @parts = grep { length } split m{/}, shift;
+  return 0 unless @parts;
+  return 1 if grep { $REBUILT{$_} } @parts;
+  return $parts[-1] =~ /\.pyc$/ ? 1 : 0;
+}
+sub git_ok { my (undef, $code) = capture(0, 'git', '-C', @_); return $code == 0 }
+my $rHOME = length $HOME ? real_or($HOME) : '';
+sub consider_tree {
+  my ($main, $t, $bases) = @_;
+  my $wt = $t->{worktree};
+  my $real = real_or($wt);
+  my $rmain = real_or($main);
+  return kept($wt, 'it is the main checkout') if $real eq $rmain || index("$rmain/", "$real/") == 0 || $real eq '/';
+  return kept($wt, 'it holds the home folder') if length $rHOME && index("$rHOME/", "$real/") == 0;
+  return kept($wt, 'it is locked') if exists $t->{locked};
+  return kept($wt, 'it has no branch') unless $t->{branch} && $t->{HEAD};
+  (my $branch = $t->{branch}) =~ s{^refs/heads/}{};
+  return kept($wt, 'its branch is not merged') unless grep { git_ok($main, 'merge-base', '--is-ancestor', $t->{HEAD}, $_) } @$bases;
+  my @forms = forms($wt, $real);
+  return kept($wt, 'it is your own pictures, films or desktop') if guarded(@forms);
+  if (my $why = in_use(@forms)) { return kept($wt, $why) }
+  my ($status, $code) = capture(0, 'git', '-C', $wt, 'status', '--porcelain', '--untracked-files=all');
+  return kept($wt, 'it has changes not committed') if $code != 0 || $status =~ /\S/;
+  my ($ignored, $icode) = capture(0, 'git', '-C', $wt, 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory');
+  return kept($wt, 'its ignored files could not be listed') if $icode != 0;
+  for (split /\0/, $ignored) { return kept($wt, 'it has ignored files that may be unsaved') if length && !rebuildable($_) }
+  my $since = $t0 - $IDLE * 60;
+  my $l = look($real, $since, { node_modules => 1, '.git' => 1 });
+  return kept($wt, "changed within $IDLE minutes") if $l->{newest} > $since;
+  return kept($wt, 'it holds CT data') if $l->{ct};
+  return kept($wt, 'it holds a Photos library') if $l->{photos};
+  return kept($wt, 'part of it could not be read') if $l->{unreadable};
+  my $bytes = du_bytes($wt);
+  my ($said, $rc) = capture(1, 'git', '-C', $main, 'worktree', 'remove', $wt);
+  # Git refuses a worktree holding ignored files only as "modified or untracked", and those were all found rebuildable above
+  ($said, $rc) = capture(1, 'git', '-C', $main, 'worktree', 'remove', '--force', $wt) if $rc != 0 && $said =~ /modified or untracked/;
+  if ($rc != 0 || -e $wt) {
+    my ($first) = $said =~ /^(?:fatal: |error: )?([^\n]*)/;
+    return kept($wt, 'git would not remove it' . (length($first // '') ? ": $first" : ''));
+  }
+  $freed += $bytes;
+  $removed{worktrees}++;
+  print "removed worktree $wt\n";
+  my ($bsaid, $bc) = capture(1, 'git', '-C', $main, 'branch', '-D', $branch);
+  if ($bc == 0) { print "removed branch $branch\n" } else { $bsaid =~ s/\s+$//; print "kept branch $branch: $bsaid\n" }
+  return 1;
+}
+my %mainSeen;
+for my $repo (@REPOS) {
+  next unless -d $repo;
+  my @trees;
+  for my $block (split /\n\n+/, out('git', '-C', $repo, 'worktree', 'list', '--porcelain')) {
+    my %t;
+    for (split /\n/, $block) { $t{$1} = $2 // 1 if /^(\S+)(?: (.*))?$/ }
+    push @trees, \%t if defined $t{worktree};
+  }
+  next unless @trees;
+  my $main = $trees[0]{worktree};
+  next if $mainSeen{real_or($main)}++;
+  my @bases = grep { git_ok($main, 'rev-parse', '--verify', '--quiet', "$_^{commit}") }
+    qw(refs/remotes/origin/main refs/remotes/origin/master refs/heads/main refs/heads/master);
+  my $pruned = 0;
+  for my $t (@trees[1 .. $#trees]) {
+    $done++;
+    progress();
+    my $wt = $t->{worktree};
+    if (!-e $wt && !-l $wt) {
+      next if exists $t->{locked};
+      capture(0, 'git', '-C', $main, 'worktree', 'prune') unless $pruned++;
+      print "pruned worktree $wt: its folder was gone\n";
+      next;
+    }
+    consider_tree($main, $t, \@bases);
+  }
+}
+
+# ---- E. With --deep: uv's and npm's caches, each with what it says ----
+if ($deep) {
+  stage("clearing uv's and npm's caches");
+  for my $tool (['uv', ['cache', 'dir'], ['cache', 'prune']], ['npm', ['config', 'get', 'cache'], ['cache', 'clean', '--force']]) {
+    my ($name, $where, $clear) = @$tool;
+    my $bin = on_path($name) or next;
+    my ($dir) = lines_of($bin, @$where);
+    my $before = defined $dir && -d $dir ? du_bytes($dir) : 0;
+    system($bin, @$clear);
+    my $after = defined $dir && -d $dir ? du_bytes($dir) : 0;
+    $freed += $before - $after if $before > $after;
+  }
+}
+
+sub size_words {
+  my $b = shift;
+  return sprintf('%.1f GB', $b / 2**30) if $b >= 2**30;
+  return sprintf('%.0f MB', $b / 2**20) if $b >= 2**20;
+  return sprintf('%.0f KB', $b / 2**10);
+}
+my $n = sub { my ($c, $one, $many) = @_; return "$c " . ($c == 1 ? $one : $many) };
+print 'freed ', size_words($freed), ': removed ', join(', ',
+  $n->($removed{browser}, 'browser leftover', 'browser leftovers'), $n->($removed{temp}, 'temp leftover', 'temp leftovers'),
+  $n->($removed{scratch}, 'scratch folder', 'scratch folders'), $n->($removed{worktrees}, 'worktree', 'worktrees')),
+  ', saved ', $n->($rescued, 'file results name', 'files results name'), ', kept ', $kept, "\n";
+finish();

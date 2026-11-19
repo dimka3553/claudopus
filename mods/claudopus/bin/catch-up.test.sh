@@ -5,6 +5,9 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/claudopus-catch-up-test.XXXXXX") || exit 1
 trap '[ -n "${CATCH_UP_TEST_KEEP:-}" ] || rm -rf "$tmp"' EXIT
+# The runs' scratch folders go in a temp folder of the test's own
+export TMPDIR=$tmp/tmpdir
+mkdir -p "$TMPDIR"
 mem=$tmp/memory
 projects=$tmp/projects
 mkdir -p "$mem/words" "$projects/-p-app/c1/subagents" "$projects/-p-app" "$projects/ssh-remote1"
@@ -117,5 +120,23 @@ printf '## 2026-11-10T01:00:00.010Z\ntyped again later\n\n' > "$mem/words/c6.md"
 old "$projects/-p-app/c6.jsonl"
 run
 check "the start of a chat saved from partway goes beside it" 'grep -q "the early part" "$mem/words/c6.before.md" && ! grep -q "typed again later" "$mem/words/c6.before.md" && ! grep -q "the early part" "$mem/words/c6.md"'
+
+# A scratch folder a stopped run left goes at the next run, and a run stopped partway leaves none, nor its lock
+left=$TMPDIR/claudopus-catch-up.Ab12Z9
+mkdir -p "$left" && : > "$left/lines" && old "$left/lines" "$left"
+run
+check "a scratch folder a stopped run left goes at the next run" '[ ! -e "$left" ] && [ -z "$(ls "$TMPDIR")" ]'
+mkdir -p "$tmp/slow"
+printf '#!/bin/sh\n: > "%s/slow/reading"\nsleep 2\n' "$tmp" > "$tmp/slow/jq"
+chmod +x "$tmp/slow/jq"
+u c7 2026-11-11T00:00:00Z human '"read slowly"' > "$projects/-p-app/c7.jsonl"
+old "$projects/-p-app/c7.jsonl"
+PATH="$tmp/slow:$PATH" "$here/catch-up" "$mem" "$projects" > "$tmp/out" 2>&1 &
+pid=$!
+until [ -e "$tmp/slow/reading" ] || ! kill -0 "$pid" 2>/dev/null; do sleep 0.1; done
+had=$(ls "$TMPDIR")
+kill -TERM "$pid" 2>/dev/null
+wait "$pid"
+check "a run stopped partway leaves no scratch folder and no lock" '[[ "$had" == claudopus-catch-up.* ]] && [ -z "$(ls "$TMPDIR")" ] && [ ! -d "$mem/locks/catch-up" ]'
 
 if [ "$fails" = 0 ]; then echo "catch-up: all passed"; else echo "catch-up: $fails failed"; cat "$tmp/out"; exit 1; fi

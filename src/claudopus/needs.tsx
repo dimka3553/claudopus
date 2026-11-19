@@ -5,7 +5,7 @@
 // gate, the app's prompt, a runner's request file, the task's `ask`), it is read into this one record: its kind, the one amber
 // line that asks, what it is about, the command or code shown whole, its buttons, and what each press does. needBlock draws it,
 // the same on a task's card, in its Details, and at the top of the panel for one that belongs to no task
-type NeedKind = 'permission' | 'question' | 'password' | 'key'
+type NeedKind = 'permission' | 'question' | 'password' | 'key' | 'disk'
 // `isOpener`: a press that answers nothing (it opens or closes the box above the chat, or another chat): the block stays
 type NeedButton = { key: string; label: string; onPress: (press: { surface: string }) => void; isPlain?: boolean; hotkey?: string; isOpener?: boolean }
 // `from`: whose it is, said beside its kind when it is not on its task's card. `card`: the card whose question it is, for its
@@ -31,7 +31,7 @@ type Need = {
   field?: { key: string; placeholder: string; value?: string; isFocused?: boolean; onInput: (value: string) => void; onSubmit: (value: string) => void }
   isActing?: boolean
 }
-const NEED_LABEL: Record<NeedKind, string> = { permission: 'Permission', question: 'Question', password: 'Password', key: 'Key' }
+const NEED_LABEL: Record<NeedKind, string> = { permission: 'Permission', question: 'Question', password: 'Password', key: 'Key', disk: 'Disk space' }
 
 // A task's own question, or the command Claude Code blocked it from running
 const askNeed = ($: EngineInterface, one: Todo, surface: string, now: number): Need | undefined => {
@@ -211,6 +211,7 @@ const looseNeeds = ($: EngineInterface, surface: string, shown: (card: string | 
     ...looseGates.filter(gate => !gatePressed.has(gate.id)).map(gate => gateNeed($, gate, '', false, 'This chat')),
     ...waiting.filter(p => !shown(p.card)).map(p => promptNeed($, p)),
     ...chats.flatMap(c => (c.prompts ?? []).map(p => promptNeed($, p, c))),
+    ...diskNeeds($),
   ].sort((a, b) => a.at - b.at)
 }
 
