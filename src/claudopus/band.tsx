@@ -201,7 +201,7 @@ const bandHooks = (on: On) => {
     const isBarHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
     if (recent && !isBarHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
     if (recent && !isBarHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
-    freshBegins(key)
+    freshBegins(key, at)
     const madeFrom = Date.now()
     let made: { at: number; ms: number; fresh: number } | undefined
     try {

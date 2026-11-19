@@ -1,0 +1,1 @@
+- Buttons in the panel, such as Close and Mark as done, answer on the first click again while your Mac is busy: after a scroll the panel no longer starts a new drawing for every change, up to dozens at once, but makes one at a time and keeps the one on screen meanwhile.

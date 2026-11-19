@@ -254,13 +254,18 @@ const freshDrawn = new Map<string, { at: number; ms: number; fresh: number }>()
 const freshDue = new Set<string>()
 // The panes being drawn afresh just now: an ask that comes meanwhile gets the drawing before, and the pane is asked for again the
 // moment the fresh one is made, since the engine drops the reply of a drawing a newer ask overtook
-const freshUnderWay = new Map<string, { fresh: number; isOvertaken: boolean }>()
+// One at a time: an ask that comes while a drawing of the pane is under way gets the drawing before, whatever came meanwhile, and the
+// pane is drawn afresh once with all of it the moment that one is made. A new one begun for each change, as each second's write
+// from work moved freshness, ran side by side with those before, each slowing the rest, on 19 Nov up to nine at once taking 7-12 s
+// each while every click waited behind them. (A drawing the engine never finishes holds none for longer than UNDER_WAY_MOST)
+const freshUnderWay = new Map<string, { fresh: number; isOvertaken: boolean; since: number }>()
+const UNDER_WAY_MOST = 15_000
 let pressedAt = 0
 // (isLoaded: the bar above the prompt is drawn in 50-200 ms under the same load, under SLOW_DRAW, so it is given again
 // whenever the panel's own drawings are slow (isPanelSlow))
 const isFreshTooSoon = ($: EngineInterface, key: string, at: number, isLoaded = false, canGiveMade = true) => {
   const going = freshUnderWay.get(key)
-  if (going && going.fresh === freshness) return (going.isOvertaken = true)
+  if (going && at - going.since < UNDER_WAY_MOST) return (going.isOvertaken = true)
   const last = freshDrawn.get(key)
   // The ask for a drawing made while it was overtaken: given that one, once (the panel and a Details tab, which hold a drawing
   // only while what they show is the same, look at that themselves: canGiveMade)
@@ -280,7 +285,7 @@ const isFreshTooSoon = ($: EngineInterface, key: string, at: number, isLoaded = 
 // Whether the panel's last drawings made afresh, in the last ten seconds, were slow: the load that drops drawings is on
 const isPanelSlow = (at: number) => [...freshDrawn].some(([key, last]) => key.startsWith(`${LIST}|`) && last.ms >= SLOW_DRAW && at - last.at < 10_000)
 // Around each drawing made afresh: one asked for while it was made is made again the moment it is done
-const freshBegins = (key: string) => (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false }), freshness)
+const freshBegins = (key: string, at: number) => (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false, since: at }), freshness)
 // Asked for again only for a drawing made afresh, which the engine dropped: an ask answered with the drawing before (a held one) left
 // nothing unseen. And the ask that follows within FRESH_GAP is given the drawing just made, never a new one, while nothing of the
 // mod's own came (madeAgain). Asked for again after every overtaken ask, two asks that came together (as two per push) overtook each
@@ -288,10 +293,15 @@ const freshBegins = (key: string) => (freshUnderWay.set(key, { fresh: freshness,
 // 27, with the panel and the bar drawn about seven times a second and the hover under the pointer going out at each (17 Nov)
 const madeAgain = new Map<string, { fresh: number; at: number }>()
 const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: number; fresh: number }) => {
-  const isOvertaken = freshUnderWay.get(key)?.isOvertaken
+  const going = freshUnderWay.get(key)
   freshUnderWay.delete(key)
-  if (made) freshDrawn.set(key, made)
-  if (isOvertaken && made) (madeAgain.set(key, { fresh: made.fresh, at: made.at }), void drawFresh($))
+  // (a drawing is as new as what it began with: what came while it was made is not in it, so it is never given as made, and the
+  // ask that follows draws the pane afresh with it)
+  const fresh = going?.fresh ?? made?.fresh ?? freshness
+  if (made) freshDrawn.set(key, { ...made, fresh })
+  if (!going?.isOvertaken) return
+  if (fresh !== freshness) return void drawFresh($)
+  if (made) (madeAgain.set(key, { fresh, at: made.at }), void drawFresh($))
 }
 let calmAt = 0
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())

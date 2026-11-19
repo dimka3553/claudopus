@@ -1056,6 +1056,26 @@ test('while drawings of the panel are slow, as under seven tasks and their comma
   expect(await list.find({ type: 'Text', text: 'Find more scans' })).toBeUndefined()
   await pressed(list, 'stats-open')
   expect(await until(async () => list.find({ type: 'Text', text: 'Find more scans' }))).toBeDefined()
+  // The app asks for the panel with the view at the top and scrolled down in turn, as a card under the pointer changes its height:
+  // within the gap each ask is given the picture on screen, buttons and all, whichever way the view stands. Each such ask drawn afresh, on 19 Nov dozens of drawings ran at once, each 7-12 s, and a press of
+  // Mark as done or Close showed nothing for as long
+  const DOWN = { ...LIST, props: { ...LIST.props, scroll: { offset: 6, bodyRows: 20 } }, surface: 'desktop' }
+  const TOP = { ...LIST, surface: 'desktop' }
+  let pane = list
+  const viewAt = async (where: typeof DOWN | typeof TOP) => (await pane.unmount(), (pane = await $.ui.mount(where as never)))
+  await clock.advance(5000)
+  await viewAt(DOWN)
+  const shown = (await pane.findAll({ type: 'Button' })).map(b => b.key).join(' ')
+  const made = slow.n
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'f4', agentId: 'a2', text: 'Step 4 of the ears.' } as never)
+  for (const where of [TOP, DOWN, TOP, DOWN]) {
+    await viewAt(where)
+    expect((await pane.findAll({ type: 'Button' })).map(b => b.key).join(' ')).toBe(shown)
+  }
+  // (the new line, a call of the mod's own, drawn once at the first ask; the view's moves after it, none)
+  expect(slow.n - made).toBe(1)
+  expect(await pane.find({ type: 'Text', text: 'Step 4 of the ears.' })).toBeDefined()
+  await pane.unmount()
 })
 
 test('two asks for the panel or the bar that come together, as from two windows of a chat or the engine\'s push beside the mod\'s, ask for it again only for a drawing made afresh that the engine dropped, and that ask is given it as made: they never overtake each other without end, each drawing a new pane under the pointer whose hover goes out', async ($, on) => {
