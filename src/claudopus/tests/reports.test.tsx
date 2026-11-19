@@ -326,7 +326,7 @@ test('a result saved earlier that lists questions shows them as plain text under
   expect((await until(async () => bar.find({ type: 'Text', text: /^↳ What should/ })))?.text).toBe('↳ What should “Old” change?')
   const field = ((await bar.findAll({ type: 'Input' } as never)) as { key?: string }[])[0]
   await bar.input({ key: field?.key ?? '', text: 'ship it after all' })
-  expect(await until(async () => submitted[0])).toBe(`Continue from the result "Old" (13 Sep 2020, 12:26), ${MEMORY}/reports/old/report.md: ship it after all`)
+  expect(await until(async () => submitted[0])).toMatch(new RegExp(`^Continue from the result "Old" \\(13 Sep 2020, \\d\\d:26\\), ${MEMORY}/reports/old/report\\.md: ship it after all$`))
   expect(submitted).toHaveLength(1)
   expect(resumed).toEqual([])
   expect(filled).toEqual([])

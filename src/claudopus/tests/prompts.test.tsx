@@ -55,7 +55,7 @@ test("a prompt for a task's call is a Permission block on that task's card, ambe
   expect(texts.filter(one => one === 'Run this command?')).toHaveLength(1)
   expect(texts.filter(one => one.startsWith('Permission ·'))).toEqual([])
   // That card waits for the person: its edge is amber, and the head line counts it once
-  expect(await until(async () => list.find({ type: 'Text', text: /^1 question waiting for you/ }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: /^1 waiting for you/ }))).toBeDefined()
   expect((await list.findAll({ type: 'Box' })).filter(one => one.props.backgroundColor === AMBER)).toHaveLength(1)
   // The others see it in this chat's file, with the task it came from and nothing of the call beyond what the block shows
   await clock.advance(1000)
@@ -373,7 +373,7 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
   const deny = async () => list.press({ key: (await until(async () => (await list.findAll({ type: 'Button' })).find(one => /^ask-a1-deny-/.test(one.key ?? ''))))?.key ?? '' })
   await $.tool.call({ tool: 'Bash', agentId: 'a1', tool_use_id: 'b1', command: 'wc -l notes.md', description: 'Count the lines' } as never)
   await clock.advance(1000)
-  expect(await until(async () => list.find({ type: 'Text', text: BLOCKED }))).toBeDefined()
+  expect(['asked for the command', Boolean(await until(async () => list.find({ type: 'Text', text: BLOCKED })))]).toEqual(['asked for the command', true])
   expect(logLines('put to the person on its card')).toHaveLength(1)
   await deny()
   const told = await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('do not do it, nor reach its result by other means')))
@@ -386,7 +386,7 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
   await $.tool.call({ tool: 'Bash', agentId: 'a1', tool_use_id: 'b2', command: 'wc -c notes.md', description: 'Count the letters' } as never)
   files.delete('auto-refuse')
   await clock.advance(1000)
-  expect(await until(async () => list.find({ type: 'Text', text: BLOCKED }))).toBeDefined()
+  expect(['asked again for the next command', Boolean(await until(async () => list.find({ type: 'Text', text: BLOCKED })))]).toEqual(['asked again for the next command', true])
   agents.a1 = 'completed'
   await $.turn.complete({ answer: 'The notes are written, without the files Claude Code refused.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(1000)
@@ -433,24 +433,22 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('do not do it, nor reach its result by other means')))).toBeDefined()
   expect(pressRuns).toEqual([])
   // Nor does a task's own question with a button of that name, over the same command
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Shall I go on?', choices: ['Allow', 'Not now'], copy: 'dig +short NS example.org' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Shall I go on?', choices: ['Allow', 'Leave it'], copy: 'dig +short NS example.org' } as never)
   await pressOn('-choice-0-')
   await clock.advance(10_000)
   expect(pressRuns).toEqual([])
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: '' } as never)
   const command = "dig +short NS example.com @ns1.example.net | sort # it's the person's own"
   await refuse('b1', { command, description: 'Look up the name servers' })
-  // The block: a permission on the task's own card, amber, counted once; the command whole; why Claude Code blocked it (its
-  // reason alone, none of its words for the model) and where and how long Allow would run it; and the two buttons
+  // The block: a permission on the task's own card, amber, counted once; the command whole; one line under it of where and how
+  // long Allow would run it and why Claude Code blocked it (its reason alone, none of its words for the model); and the two buttons
   const question = await until(async () => list.find({ type: 'Text', text: BLOCKED }))
   expect([question?.props.color, question?.props.bold]).toEqual([AMBER, true])
   expect(await list.find({ type: 'Text', text: 'Permission' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: command })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: /^1 question waiting for you/ })).toBeDefined()
-  const about = (await details()).find(one => one.startsWith('Why: ')) ?? ''
-  expect(about).toContain("Why: Claude Code's auto mode blocked it (Unauthorized Access).")
-  expect(about).toMatch(/Allow runs it once, as yours, in .+, for at most 10 min, and the task gets what it printed\.$/)
-  expect(about).not.toMatch(/If you have other tasks|settings|Do it another way|Leave it out|it was Permission/)
+  expect(await list.find({ type: 'Text', text: /^1 waiting for you/ })).toBeDefined()
+  expect((await details()).filter(one => one.startsWith('Runs once in '))).toEqual([expect.stringMatching(/^Runs once in \S+, for at most 10 min · blocked as “Unauthorized Access”\.$/)])
+  expect((await details()).filter(one => /If you have other tasks|settings|Do it another way|Leave it out|it was Permission|Why: /.test(one))).toEqual([])
   expect(await buttons()).toEqual(['Allow', "Don't allow"])
   expect((await labelsOf(list)).filter(one => /^(Run it|Carry on without it|Send now|Copy|Open in Terminal|Allow once|Deny)$/.test(one))).toEqual([])
   // Nothing runs without the press, however long it waits, and the task's own call is still Claude Code's to decide
@@ -468,6 +466,8 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   // The task, still at work, is told it runs, where its output goes, and that its end comes as a message
   expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('pressed "Allow" on your card') && one.includes('it is running for them now') && one.includes(`What it prints goes to ${out}`)))).toBeDefined()
   expect((await check('chk-2')).decision).toBe('ask')
+  // (its next step reads that, so nothing of the press is left to send it when it ends)
+  await steps($, 1, 'm', 'a1')
   // The block went with the press: one grey line says what was pressed
   expect(await until(async () => ((await list.find({ type: 'Text', text: BLOCKED })) ? undefined : true))).toBe(true)
   expect((await pressedLines(list)).map(one => [one.text, one.props.dimColor])).toEqual([['✓ You pressed “Allow”', true]])
@@ -508,7 +508,7 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   expect(appended.filter(one => one.startsWith('a1: ') && one.includes('ns2.example.net.'))).toEqual([])
   // Its next step, started by whatever starts it, reads it there: what ran, how it ended, where the whole is, and that it is no permission
   agents.a1 = 'running'
-  await steps($, 1, 'm', 'a1')
+  await steps($, 2, 'm', 'a1')
   const woke = await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('ns2.example.net.')))
   expect(woke).toContain(`ran for them, exactly as shown, once, as their own, in /repo:\n${command}\nIt ended well after`)
   expect(woke).toContain(`Its whole output is in ${out}`)
@@ -519,7 +519,7 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   // One sent to the background runs an hour at most; Stop on its line stops it, and the task, at a step, is told at once
   await $.tool.call({ tool: 'Read', agentId: 'a1', file_path: '/repo/notes.md', tool_use_id: 'r1' } as never)
   await refuse('b2', { command: 'npm run soak', description: 'Run the soak test', run_in_background: true })
-  expect(await until(async () => (await details()).find(one => /for at most 1 hour, and the task gets what it printed\.$/.test(one)))).toBeDefined()
+  expect(await until(async () => (await details()).find(one => /^Runs once in \S+, for at most 1 hour · blocked as /.test(one)))).toBeDefined()
   await pressOn('-allow-')
   expect(await until(async () => (pressRuns.length === 2 ? true : undefined))).toBe(true)
   await pressOn('-stop-')

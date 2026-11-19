@@ -12651,7 +12651,7 @@ const barBox = ($: EngineInterface, ui: Ui, box: BarBox) => {
       {box.extra ?? null}
       <ui.Box key="band-box-foot" flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
         <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
-          <ui.Text dimColor wrap="truncate-end">{`Enter sends · ${box.secret ? 'Goes only to this command' : 'Send carries the task on'}`}</ui.Text>
+          <ui.Text dimColor wrap="wrap">{`Enter sends · ${box.secret ? 'Goes only to this command' : 'Send carries the task on'}`}</ui.Text>
         </ui.Box>
         <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
           <ui.Button key={`band-box-send-${presses}-${boxPresses}`} label="Send" variant="primary" onPress={() => send(typed())} />

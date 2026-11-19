@@ -589,7 +589,7 @@ test('a finished card in the middle of a dozen comes to the top at once, outline
     await end(id, reason)
     expect(await until(async () => ((await onCard(id)).length === 3 ? true : undefined))).toBe(true)
     expect(await list.find({ type: 'Text', text: said })).toBeDefined()
-    expect([id, await onCard(id)]).toEqual([id, [[`open-${id}`, true, undefined], ['Change something', true, true], ['Dismiss', true, true]]])
+    expect([id, await onCard(id)]).toEqual([id, [[`Piece ${id.slice(1)}`, true, undefined], ['Change something', true, true], ['Dismiss', true, true]]])
     const told = [appended.length, resumed.length, sent.length, submitted.length]
     const folded = Number(/\d+/.exec(String(await fold()))?.[0])
     await pressed(list, `dismiss-${id}`)

@@ -783,12 +783,12 @@ const countingSleeps = (on: On) => {
   }) as On
   return { on: counted, seen }
 }
-type Drawn = { findAll: (q: { type: string }) => Promise<readonly { key?: string | undefined; text?: unknown; props: Record<string, unknown> }[]> }
+type GateDrawn = { findAll: (q: { type: string }) => Promise<readonly { key?: string | undefined; text?: unknown; props: Record<string, unknown> }[]> }
 // Everything drawn in the colour of what is done: no press leaves a green box or line
-const greens = async (pane: Drawn) => [...(await pane.findAll({ type: 'Box' })), ...(await pane.findAll({ type: 'Text' }))].filter(one => ['color', 'borderColor', 'backgroundColor'].some(prop => one.props[prop] === 'success')).length
-const texts = async (pane: Drawn) => (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+const gateGreens = async (pane: GateDrawn) => [...(await pane.findAll({ type: 'Box' })), ...(await pane.findAll({ type: 'Text' }))].filter(one => ['color', 'borderColor', 'backgroundColor'].some(prop => one.props[prop] === 'success')).length
+const gateTexts = async (pane: GateDrawn) => (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
 // The labels of one gate's own buttons, in the order drawn
-const gateButtons = async (pane: Drawn, id: string) => (await pane.findAll({ type: 'Button' })).filter(one => (one.key ?? '').startsWith(`gate-${id}-`)).map(one => String(one.props.label ?? ''))
+const gateButtons = async (pane: GateDrawn, id: string) => (await pane.findAll({ type: 'Button' })).filter(one => (one.key ?? '').startsWith(`gate-${id}-`)).map(one => String(one.props.label ?? ''))
 const ALLOWED_LINE = '✓ You pressed “Allow”'
 const REFUSED_LINE = "✓ You pressed “Don't allow”"
 
@@ -854,7 +854,7 @@ test("asked each time: the call is held and its card has one block (Permission, 
   // The block: an amber outline, a dim label of its kind, the question in amber, the command whole in a row of its own, the buttons
   const boxes = (await list.findAll({ type: 'Box' })) as { key?: string; props: Record<string, unknown> }[]
   expect(boxes.filter(one => one.props.borderStyle === 'round' && one.props.borderColor === '#E5A50A').map(one => one.key)).toEqual(['need-gate-b1-0'])
-  const drawn = await texts(list)
+  const drawn = await gateTexts(list)
   expect(drawn.slice(drawn.indexOf('Permission'), drawn.indexOf('Permission') + 3)).toEqual(['Permission', 'Run this as admin on this Mac?', 'chmod 644 /etc/hosts'])
   expect((await list.find({ type: 'Text', text: 'Permission' }))?.props.dimColor).toBe(true)
   const question = await list.find({ type: 'Text', text: 'Run this as admin on this Mac?' })
@@ -866,7 +866,7 @@ test("asked each time: the call is held and its card has one block (Permission, 
   expect((await labels()).filter(one => ['Allow once', 'Allow for this task', 'Deny'].includes(one))).toEqual([])
   // Its card is amber and counted once as what waits
   expect(boxes.some(one => one.props.width === 1 && one.props.backgroundColor === '#E5A50A')).toBe(true)
-  expect((await list.find({ type: 'Text', text: '1 question waiting for you' }))?.props.color).toBe('#E5A50A')
+  expect((await list.findAll({ type: 'Text' })).filter(one => /waiting for you/.test(String(one.text ?? ''))).map(one => [one.text, one.props.color])).toEqual([['1 waiting for you', '#E5A50A']])
   // Said as a notification, and to the chat's model alone: the chat shows nothing of it (18 Nov: "garbage I don't need to read");
   // its Details tab has the same block
   expect(logged.some(line => line.includes('chmod 644 /etc/hosts'))).toBe(false)
@@ -892,8 +892,8 @@ test("asked each time: the call is held and its card has one block (Permission, 
   // In the block's place: one grey line of what was pressed, and nothing green
   expect(await list.find({ type: 'Text', text: 'Run this as admin on this Mac?' })).toBeUndefined()
   expect((await until(async () => list.find({ type: 'Text', text: ALLOWED_LINE })))?.props.dimColor).toBe(true)
-  expect((await texts(list)).filter(one => one.startsWith('✓ '))).toEqual([ALLOWED_LINE])
-  expect(await greens(list)).toBe(0)
+  expect((await gateTexts(list)).filter(one => one.startsWith('✓ '))).toEqual([ALLOWED_LINE])
+  expect(await gateGreens(list)).toBe(0)
   expect(await gateButtons(list, 'b1-0')).toEqual([])
   // The line goes by itself a minute on
   await clock.advance(61_000)
@@ -919,7 +919,7 @@ test("Don't allow refuses the call with a line that says the person refused it, 
   expect(grants()).toEqual([])
   expect(await list.find({ type: 'Text', text: 'Run this as admin on m4?' })).toBeUndefined()
   expect((await until(async () => list.find({ type: 'Text', text: REFUSED_LINE })))?.props.dimColor).toBe(true)
-  expect(await greens(list)).toBe(0)
+  expect(await gateGreens(list)).toBe(0)
   wake()
 })
 
@@ -1154,7 +1154,7 @@ test("the chat's own thread, doing its own work, is asked at the top of the pane
     expect((await call).result).toBe('ran')
     expect(await list.find({ type: 'Text', text: 'Permission · This chat' })).toBeUndefined()
     expect((await until(async () => list.find({ type: 'Text', text: ALLOWED_LINE })))?.props.dimColor).toBe(true)
-    expect(await greens(list)).toBe(0)
+    expect(await gateGreens(list)).toBe(0)
   }
   expect(w.admins.length).toBe(2)
   w.wake()
@@ -1182,7 +1182,7 @@ test('a release nobody pressed for is asked, once, for its own branch, with Allo
     const call = $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command: `hold x${id}; /plug/claudopus/bin/release${tail}` } as never) as Promise<{ deny?: string; result?: unknown }>
     expect(await until(async () => keyed(list, `gate-${id}-r0-once`))).toBeDefined()
     // Said in plain words: what is released in the question, its branch and where from in one line under it, and no command row
-    const drawn = await texts(list)
+    const drawn = await gateTexts(list)
     expect(drawn.slice(drawn.indexOf('Permission'), drawn.indexOf('Permission') + 2)).toEqual(['Permission', 'Release fix-it to main?'])
     expect((await list.find({ type: 'Text', text: 'Release fix-it to main?' }))?.props.color).toBe('#E5A50A')
     const under = (await list.findAll({ type: 'Markdown' })).map(one => String(one.props.text ?? ''))
@@ -1524,7 +1524,7 @@ test("a press on a gate takes its block away in the press's own drawing and leav
     expect((await w.list.findAll({ type: 'Button' })).some(b => (b.key ?? '').startsWith(`gate-${id}-`))).toBe(false)
     expect(await w.list.find({ type: 'Text', text: question })).toBeUndefined()
     expect(await w.list.find({ type: 'Text', text: 'Permission' })).toBeUndefined()
-    expect(await greens(w.list)).toBe(0)
+    expect(await gateGreens(w.list)).toBe(0)
     if (ends === 'held') (await until(async () => w.holding.get(`x${id}; /plug/claudopus/bin/release`)))?.('released')
     const r = (await call) as { deny?: string; result?: unknown }
     if (ends === 'refused') expect(r.deny).toContain('Refused by Sam')
@@ -1532,7 +1532,7 @@ test("a press on a gate takes its block away in the press's own drawing and leav
     // One wait was in flight while it was held, and the press started no other
     expect(counted.seen.sleeps - before).toBe(1)
     // The one line of the card is of the last press alone
-    expect((await texts(w.list)).filter(one => one.startsWith('✓ '))).toEqual([said])
+    expect((await gateTexts(w.list)).filter(one => one.startsWith('✓ '))).toEqual([said])
   }
   w.wake()
 })
@@ -1553,7 +1553,7 @@ test('two presses on a gate send one answer: the first, as drawn', async ($, on)
   const r = (await call) as { deny?: string }
   expect(r.deny).toBeUndefined()
   expect(admins.length).toBe(1)
-  expect((await texts(list)).filter(one => one.startsWith('✓ '))).toEqual([ALLOWED_LINE])
+  expect((await gateTexts(list)).filter(one => one.startsWith('✓ '))).toEqual([ALLOWED_LINE])
   wake()
 })
 
@@ -1577,7 +1577,7 @@ test('a gate allowed but not let through says so in its grey line, never a bare 
     expect(w.admins).toEqual([])
     expect((await until(async () => w.list.find({ type: 'Text', text: said })))?.props.dimColor).toBe(true)
     // (the line whole: nothing on the card says only that it was allowed)
-    expect((await texts(w.list)).filter(one => one.startsWith('✓ '))).toEqual([said])
-    expect(await greens(w.list)).toBe(0)
+    expect((await gateTexts(w.list)).filter(one => one.startsWith('✓ '))).toEqual([said])
+    expect(await gateGreens(w.list)).toBe(0)
   }
 })

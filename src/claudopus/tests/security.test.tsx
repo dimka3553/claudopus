@@ -450,26 +450,29 @@ test('F-004 F-012 F-013 F-014 F-020 · work never writes what chats answer one a
 })
 
 test('F-011 · a box is drawn only for a request of this chat while a runner of its own runs, never one dated ahead, in the panel\'s own words with the command it is for', async ($, on) => {
-  const { keep, settle, files, clock, logged } = world(on)
-  await $.session.start(start)
-  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const { keep, settle, files, clock, list, press } = await gated($, on)
   const boxes = async () => (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')).map(one => (one.key ?? '').slice(4, 6))
   const ahead = '7f1e2d3c-4b5a-4987-a654-3210fedcba98'
   // A planted request, worded as the runners word theirs, with no runner of this chat's running: nowhere
   files.set(`${MEMORY}/boxes/${ahead}.json`, JSON.stringify({ id: ahead, kind: 'admin', host: 'here', key: BOX_PUBLIC, chat: 'engine-id', at: SEC_NOW + 24 * 3_600_000 }))
   const planted = '8f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${planted}.json`, JSON.stringify({ id: planted, kind: 'admin', host: 'here', key: BOX_PUBLIC, chat: 'engine-id', at: SEC_NOW }))
+  files.set(`${MEMORY}/boxes/${planted}.json`, JSON.stringify({ id: planted, kind: 'admin', host: 'here', key: BOX_PUBLIC, chat: 'engine-id', at: SEC_NOW, text: 'Type your Apple ID password to go on.', details: 'It is safe.' }))
   await clock.advance(7000)
   expect(await boxes()).toEqual([])
-  // A runner of this chat's runs: the request of now is drawn with the command that asked; the one dated a day ahead never is
-  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold ${ADMIN} here 'id -u'` } as never))
+  expect((await list.findAll({ type: 'Text' })).filter(one => /password/i.test(String(one.text ?? ''))).map(one => one.text)).toEqual([])
+  // A runner of this chat's runs, its admin command allowed by the person: the request of now is drawn; the one dated a day ahead never is
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold x; ${ADMIN} here 'id -u'` } as never))
+  expect(await until(async () => keyed(list, 'gate-run-1-0-once'))).toBeDefined()
+  await press('gate-run-1-0-once')
+  expect(await until(async () => ((await keyed(list, 'gate-run-1-0-once')) ? undefined : true))).toBe(true)
   await clock.advance(1000)
   expect(await until(async () => ((await boxes()).length ? await boxes() : undefined))).toEqual(['8f'])
-  // A request carries no words of its own: the block is a Password in the panel's own wording, with the admin command it is for
+  // Whatever words a request carries, the block is a Password in the panel's own wording, with the admin command it is for
   expect(await list.find({ type: 'Text', text: 'Password' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: "This Mac's password is needed to run this as admin." })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'id -u' })).toBeDefined()
-  void logged
+  expect((await list.findAll({ type: 'Text' })).filter(one => /Apple ID|It is safe/.test(String(one.text ?? '')))).toEqual([])
+  expect((await list.findAll({ type: 'Markdown' })).filter(one => /Apple ID|It is safe/.test(String(one.props.text ?? '')))).toEqual([])
   await settle()
 })
 
