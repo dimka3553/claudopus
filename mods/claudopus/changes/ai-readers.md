@@ -1,0 +1,1 @@
+- claudopus.ai now tells search engines and AI assistants (ChatGPT, Claude, Perplexity, Google and others) plainly that they may read it, and gives them a short plain-text description of Claudopus with its GitHub link at claudopus.ai/llms.txt, so they can find it and name it correctly.
