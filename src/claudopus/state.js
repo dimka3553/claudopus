@@ -1,4 +1,4 @@
-// ---- One state for a task's card: done only once its report is in ----
+// ---- One stage for a task's card ----
 var __assign = (this && this.__assign) || function () {
     __assign = Object.assign || function(t) {
         for (var s, i = 1, n = arguments.length; i < n; i++) {
@@ -56,243 +56,94 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     return to.concat(ar || Array.prototype.slice.call(from));
 };
 var _this = this;
-// A server runs until it is stopped: it never ends by itself, so it never starts the work that left it again
+var stageOf = function (_list, card) {
+    if (card.status === 'failed' || card.status === 'stopped')
+        return card.status;
+    if (needsPerson(card))
+        return 'waiting';
+    return card.status === 'done' ? (card.up && !card.closedAt ? 'delivered' : 'done') : 'working';
+};
+// Just marked done by the person: for its two seconds the card stays where it was, green, before it goes under Finished
+// (19 Nov, the person: "Done stays exactly where the delivered was when you mark it as done. It should always play the green
+// animation")
+// Its two seconds count from the first drawing of the panel made that shows it, never from the press: right after an update the
+// panel's drawings came seconds late, so a moment counted from the press was over before any drawing showed it, and the card went straight
+// under Finished with no green, no octopus and no sound while the next delivered card, alike, slid into its place: the press seemed
+// to do nothing (19 Nov, the person: "I clicked Mark as done two times, and the animation didn't play. The sound didn't play")
+// Each press of this load's, until its moment is first drawn (shownAt 0), and from when; one never drawn is over DONE_UNSEEN on
+var doneMoments = new Map();
+var DONE_UNSEEN = 10000;
+var isDoneMoment = function (one, at) {
+    var moment = doneMoments.get(one.id);
+    if (one.status !== 'done' || !one.closedAt || !moment || moment.pressedAt !== one.closedAt)
+        return false;
+    // (a drawing begun before the first one showing it was made, as that very drawing, is in the moment too)
+    return at >= moment.pressedAt && (moment.shownAt ? at - moment.shownAt < LINGER : at - moment.pressedAt < DONE_UNSEEN);
+};
+// Whether it handed in its result: delivered, or marked done by the person
+var hasResult = function (stage) { return stage === 'delivered' || stage === 'done'; };
+// Each stage in the words a card says it with, and its colour
+var STAGE_WORD = { working: 'Working', waiting: 'Waiting for you', delivered: 'Delivered', done: 'Done', stopped: 'Stopped', failed: 'Failed' };
+var stageColor = function (stage) { return ({ working: LIVE, waiting: NEEDS, delivered: DELIVERED, done: DONE, stopped: undefined, failed: 'error' })[stage]; };
+// Why a card failed, where it says so
+var WHY_NO_RESULT = 'Ended without its result';
+var WHY_APP_CLOSED = 'The app closed while it worked';
+var WHY_ERROR = 'Ended with an error';
+var WHY_FLAGGED = 'Ended by a safety check';
+// A server runs until it is stopped: it never ends by itself, so a task may finish with one left for the person
 // (a build by a tool that also serves, as `vite build`, ends)
 var isServerRun = function (cmd, what) { return (SERVER_CMD.test(cmd !== null && cmd !== void 0 ? cmd : '') && !/\b(vite|next|nuxt|astro) build\b/.test(cmd !== null && cmd !== void 0 ? cmd : '')) || describedOf(what).kind === 'server'; };
-// What of its own starts the work again by itself once its step has ended: its commands in the background or detached that end
-// (a watch counts, as its lines reach it; a server does not), its helpers at work, and what it asked Claudopus to wake it for or a
-// heavy command held for its turn
-var wakesOf = function (list, card) {
-    var _a, _b;
-    var runs = __spreadArray(__spreadArray([], ((_a = card.bg) !== null && _a !== void 0 ? _a : []).filter(function (b) { return !isServerRun(b.cmd, b.what); }), true), ((_b = card.detached) !== null && _b !== void 0 ? _b : []).filter(function (d) { return !isServerRun(d.cmd, d.what); }), true);
-    var helpers = runningHelpers(list, card.id).length;
-    var isWoken = card.wakeWhen !== undefined || isTurnWaited(list, card.id);
-    return { runs: runs, helpers: helpers, isWoken: isWoken, isAny: runs.length > 0 || helpers > 0 || isWoken };
+// The commands of its own that end by themselves and still run: every row of its card but a server's
+var ownRuns = function (card) { var _a; return ((_a = card === null || card === void 0 ? void 0 : card.bg) !== null && _a !== void 0 ? _a : []).filter(function (b) { return !isServerRun(b.cmd, b.what); }); };
+// Its helpers at work
+var helpersAtWork = function (list, id) { return list.filter(function (one) { return one.parentId === id && one.status === 'working'; }); };
+// Whether something of its own runs: a command that ends by itself, or a helper at work
+var ownsWork = function (list, card) { return ownRuns(card).length > 0 || helpersAtWork(list, card.id).length > 0; };
+// Whether Claude Code pressed it for its report as its run ended, after its last call: the sign that its words reached no one (the
+// chat is told only that it "ended without delivering a report"). A run where the engine asks for no report, as headless ones, ends
+// with its words as its result
+var isPressedAtEnd = function (rows) {
+    if (!Array.isArray(rows))
+        return false;
+    for (var _i = 0, _a = __spreadArray([], rows, true).reverse(); _i < _a.length; _i++) {
+        var row = _a[_i];
+        var m = (row && typeof row === 'object' && 'message' in row ? row.message : row);
+        var blocks = Array.isArray(m === null || m === void 0 ? void 0 : m.content) ? m.content : [m === null || m === void 0 ? void 0 : m.content];
+        var texts = blocks.map(function (b) { var _a; return (typeof b === 'string' ? b : b && typeof b === 'object' ? String((_a = b.text) !== null && _a !== void 0 ? _a : '') + (typeof b.content === 'string' ? String(b.content) : '') : ''); });
+        if ((m === null || m === void 0 ? void 0 : m.role) === 'assistant' && blocks.some(function (b) { return b && typeof b === 'object' && b.type === 'tool_use'; }))
+            return false;
+        if ((m === null || m === void 0 ? void 0 : m.role) === 'user' && texts.some(function (text) { return text.includes(HANDBACK_PRESS); }))
+            return true;
+    }
+    return false;
 };
 // Whether Claude Code took the run's last words as its result: it never pressed it for a hand-back. Its messages unread, it may
 // have been pressed, so it has not
 var isUnpressed = function ($, id) { return __awaiter(_this, void 0, void 0, function () {
-    var rows, _a, _b;
-    return __generator(this, function (_c) {
-        switch (_c.label) {
+    var rows;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
             case 0: return [4 /*yield*/, $.session.messages({ as: 'api', agentId: id }).catch(function () { return undefined; })];
             case 1:
-                rows = _c.sent();
-                _a = Array.isArray(rows) && !isPressedAtEnd(rows);
-                if (!_a) return [3 /*break*/, 3];
-                _b = isLetEnd;
-                return [4 /*yield*/, read($, todos)];
-            case 2:
-                _a = !_b.apply(void 0, [(_c.sent()).find(function (one) { return one.id === id; })]);
-                _c.label = 3;
-            case 3: return [2 /*return*/, _a];
+                rows = _a.sent();
+                return [2 /*return*/, Array.isArray(rows) && !isPressedAtEnd(rows)];
         }
     });
 }); };
-// Claudopus received its report: it handed it back with SubagentHandback (or its unpressed run ended with it), and its turn ended
-// with that report as its result
+// Its result was received: handed in with SubagentHandback, or its run's last words where Claude Code took those as its result
 var hasReport = function (one) { return (one === null || one === void 0 ? void 0 : one.reportAt) !== undefined; };
-// The one place a task's state is read from
-var stateOf = function (list, one) {
-    if (one.status === 'done' || one.status === 'stopped' || one.status === 'failed')
-        return one.status;
-    if (needsPerson(one))
-        return 'waiting-you';
-    return one.endedStepAt !== undefined && wakesOf(list, one).isAny ? 'waiting-own' : 'working';
-};
-// ---- Done is shown only for a task that finished everything ----
-// A card kept as done is drawn, counted and announced as Done only when nothing stands between it and Done. Whatever path kept it
-// as done (a hand-back, the engine's word, a run Claudopus could not see, a card read back after a reload), the card is read
-// through here before anyone sees it:
-// - a command of its own that ends by itself still runs, or a helper of its is at work: it waits for its own work, in purple
-//   (a command it sent to the background, which Claude Code still holds its run for after its report, counts by `leftOwn`, kept as
-//   the card ended, its rows being gone by then; a server never ends by itself, so a card that left only a server is done)
-// - to-dos it never ticked or dropped: it is not done, in amber, and says how many are done
-// (18 Nov, the person: "Why is it done after four to-dos? Why does it have a command running when it's finished?" A task that
-// ran where Claudopus could not see it handed back past every check, its to-dos and its line left as they were; another card
-// kept a command for 47 minutes after its report)
-// - a release under way for it, Claudopus's on the person's press or its own runner in its background: Releasing, in purple, and
-//   Done once only, when that has finished (18 Nov, the person: "Until it's done releasing, it's not done. Why does it turn from
-//   purple to green to purple to green to purple?")
-// A command left in its background counts from the moment it hands back (`leftOwn`), not only once the engine's list says it holds
-// the run for it (`leftSince`), which came seconds later: green came in between
-// (`_asks` is no longer read: a result's question changes nothing of this)
-var shownAs = function (list, _asks) {
-    return list.map(function (one) {
-        var _a;
-        if (isOff || one.parentId || one.chat || one.status !== 'done')
-            return one;
-        // (one the person dismissed is under Finished and waits for nothing more, but with to-dos left it still never reads Done)
-        if (one.closedAt)
-            return isLeftUndone(one) ? __assign(__assign({}, one), { leftOpen: openItems(one).length }) : one;
-        var atWork = __assign(__assign({}, one), { status: 'working', wasDone: one.endedAt, endedAt: 0, endedStepAt: (_a = one.endedStepAt) !== null && _a !== void 0 ? _a : one.endedAt });
-        if (one.releasing)
-            return atWork;
-        // (a question of its own on its card comes first: it is Waiting for you, its command's row under it)
-        if (one.ask)
-            return one;
-        var _b = wakesOf(list, one), runs = _b.runs, helpers = _b.helpers;
-        if (runs.length || helpers || one.leftOwn)
-            return atWork;
-        // (to-dos left: not done, in amber, whatever its result asks; with every to-do done it is Done and green, though its result
-        // still asks the person something: the person, 18 Nov, "the ones that are not done should be yellow, the ones that are done
-        // should be green")
-        if (isLeftUndone(one))
-            return __assign(__assign({}, one), { leftOpen: openItems(one).length });
-        return one;
-    });
-};
-// Released on the person's press: whatever to-do it left was that release, and it is done (a card from before `released` was
-// kept says so on its line)
-var isReleased = function (one) { return one.released !== undefined || one.entries.some(function (entry) { return entry.kind === 'note' && entry.text.startsWith('Released · '); }); };
-// To-dos left on a card Claudopus saw end done under that rule, never released: it is not done. A card that ended before it, or
-// long ago, reads as it did then, and never comes back up as not done (18 Nov, the person: two tasks of the morning, one of them
-// released, came back to the top in amber after the update)
-var isLeftUndone = function (one) { return one.doneSeen !== undefined && !isReleased(one) && openItems(one).length > 0; };
-// The release runner, run by a task's own command (its status look asks nothing and releases nothing)
-var isReleaseRun = function (cmd) { return /\bbin\/release\b/.test(cmd !== null && cmd !== void 0 ? cmd : '') && !/\s--status\b/.test(cmd !== null && cmd !== void 0 ? cmd : ''); };
-// One card read so
-var shownOne = function (list, id, asks) { return shownAs(list, asks).find(function (one) { return one.id === id; }); };
-// What a task's card says while it waits on its own work, by what it waits for; '' in any other state
-var ownWorkWords = function (list, one) {
-    // (a card that handed back its result while a release or a command of its own still runs waits for it too: shownAs)
-    if (one.releasing && one.wasDone !== undefined)
-        return ['Releasing', one.releasing.branch].filter(Boolean).join(' ');
-    if ((stateOf(list, one) !== 'waiting-own' && one.wasDone === undefined))
-        return '';
-    var _a = wakesOf(list, one), runs = _a.runs, helpers = _a.helpers;
-    if (runs.some(function (run) { return isReleaseRun(run.cmd); }) && !helpers)
-        return 'Releasing';
-    if (one.wasDone !== undefined && !runs.length && !helpers)
-        return 'Waiting for its command';
-    var what = [runs.length ? (runs.length === 1 ? 'its command' : 'its commands') : '', helpers ? (helpers === 1 ? 'its helper' : 'its helpers') : ''].filter(Boolean).join(' and ');
-    return what ? "Waiting for ".concat(what) : 'Waiting to be started again';
-};
-// Every change to the cards goes through here: a task's card that would end done without its report stays at work, as it was before
-// the change, its step ended. Any path that ends a card (the end of its turn, the engine's list, a look after a reload) is held to it
-// The ids held so, for Claudopus to start each again that nothing of its own starts (doneHeld)
-var holdDone = function (before, next, now) {
-    var held = [];
+// Every change to the cards goes through here: a task's card cannot be kept as done without its received result, whatever path
+// would end it so. It stays as it was before the change
+var holdDone = function (before, next) {
     if (isOff)
-        return { list: next, held: held };
+        return next;
     var was = new Map(before.map(function (one) { return [one.id, one]; }));
-    var list = next.map(function (one) {
-        var _a;
+    return next.map(function (one) {
         var old = was.get(one.id);
+        var isHeld = !one.parentId && !one.chat && one.status === 'done' && !hasReport(one) && (old === null || old === void 0 ? void 0 : old.status) === 'working';
         // (what the person allowed it under "Ask once per piece of work" ends with it, and only once it really ends)
-        if ((old === null || old === void 0 ? void 0 : old.status) === 'working' && one.status !== 'working' && !(one.status === 'done' && !one.parentId && !one.chat && !hasReport(one)))
-            workAllowed.delete(one.id);
-        if (one.parentId || one.chat || one.status !== 'done' || hasReport(one))
-            return one;
-        // (only a card at work: one read back from the chat's records ended before Claudopus kept it, as its records say)
-        if ((old === null || old === void 0 ? void 0 : old.status) !== 'working')
-            return one;
-        held.push(one.id);
-        var base = old;
-        return __assign(__assign({}, base), { status: 'working', endedAt: 0, answer: one.answer || base.answer, answeredAt: undefined, endedStepAt: (_a = base.endedStepAt) !== null && _a !== void 0 ? _a : now });
+        if ((old === null || old === void 0 ? void 0 : old.status) === 'working' && one.status !== 'working' && !isHeld)
+            (workAllowed.delete(one.id), releaseAllowed.delete(one.id));
+        return isHeld && old ? __assign(__assign({}, old), { answer: one.answer || old.answer }) : one;
     });
-    // A task's card Claudopus sees end done is kept so (isLeftUndone): one done already, or only now read back, is not
-    var seen = list.map(function (one) { var _a; return (one.status === 'done' && !one.parentId && !one.chat && one.doneSeen === undefined && was.has(one.id) && ((_a = was.get(one.id)) === null || _a === void 0 ? void 0 : _a.status) !== 'done' ? __assign(__assign({}, one), { doneSeen: now }) : one); });
-    return { list: seen, held: held };
 };
-// Cards held from ending done without their report, each taken up once per stop (by its steps and the times it was carried on): one
-// whose run Claude Code never pressed ends done with its last words as its result, as at a heard end; one that waits on its own work
-// waits, and is taken up again if that work goes without starting it; one waiting for the person waits for them; one the person
-// stopped or held, or flagged, or given up on, ends stopped; any other is started again to carry on, as a task stopped partway is,
-// until it hands back its report or Claudopus gives up and ends it stopped
-var heldTaken = new Set();
-var doneHeld = function ($, ids) { return __awaiter(_this, void 0, void 0, function () {
-    var _loop_1, _i, ids_1, id;
-    var _a, _b, _c, _d;
-    return __generator(this, function (_e) {
-        switch (_e.label) {
-            case 0:
-                _loop_1 = function (id) {
-                    var list, one, _f, now_1, card_1, key, now_2;
-                    return __generator(this, function (_g) {
-                        switch (_g.label) {
-                            case 0: return [4 /*yield*/, read($, todos)];
-                            case 1:
-                                list = _g.sent();
-                                one = list.find(function (card) { return card.id === id; });
-                                if (!one || one.status !== 'working')
-                                    return [2 /*return*/, "continue"];
-                                _f = !(openItems(one).length && (!one.kind || WAITS_KINDS.has(one.kind)) && isStoppedShort(one, ''));
-                                if (!_f) return [3 /*break*/, 3];
-                                return [4 /*yield*/, isUnpressed($, id)];
-                            case 2:
-                                _f = (_g.sent());
-                                _g.label = 3;
-                            case 3:
-                                if (!_f) return [3 /*break*/, 9];
-                                return [4 /*yield*/, $.clock.now()];
-                            case 4:
-                                now_1 = _g.sent();
-                                return [4 /*yield*/, changeTodos($, function (cards) { return cards.map(function (card) { return (card.id === id && card.status === 'working' ? __assign(__assign({}, ended(card, 'done', now_1)), { reportAt: now_1 }) : card); }); })];
-                            case 5:
-                                _g.sent();
-                                return [4 /*yield*/, lookEnds($)];
-                            case 6:
-                                _g.sent();
-                                return [4 /*yield*/, replyUnread($, id).catch(function (err) { return log($, "reply not passed on: ".concat(String(err))); })];
-                            case 7:
-                                _g.sent();
-                                return [4 /*yield*/, read($, todos)];
-                            case 8:
-                                card_1 = (_g.sent()).find(function (c) { return c.id === id; });
-                                if ((card_1 === null || card_1 === void 0 ? void 0 : card_1.status) === 'done' && card_1.answer.trim())
-                                    $.clock.after(5, function () { return void saveReport($, card_1, card_1.answer).catch(function (err) { return log($, "report of ".concat(id, " not kept: ").concat(String(err))); }); });
-                                return [2 /*return*/, "continue"];
-                            case 9:
-                                if (wakesOf(list, one).isAny)
-                                    return [2 /*return*/, "continue"];
-                                key = "".concat(id, ":").concat((_a = one.steps) !== null && _a !== void 0 ? _a : 0, ":").concat((_c = (_b = one.carryOn) === null || _b === void 0 ? void 0 : _b.total) !== null && _c !== void 0 ? _c : 0);
-                                if (heldTaken.has(key))
-                                    return [2 /*return*/, "continue"];
-                                heldTaken.add(key);
-                                if (!needsPerson(one)) return [3 /*break*/, 11];
-                                return [4 /*yield*/, log($, "work ".concat(id, " would have ended done without its report: it waits for the person"))];
-                            case 10:
-                                _g.sent();
-                                return [2 /*return*/, "continue"];
-                            case 11:
-                                if (!(isHeld(one) || stoppedHere.has(id) || pressed.has(id) || one.flagged || ((_d = one.carryOn) === null || _d === void 0 ? void 0 : _d.gaveUp))) return [3 /*break*/, 16];
-                                return [4 /*yield*/, $.clock.now()];
-                            case 12:
-                                now_2 = _g.sent();
-                                return [4 /*yield*/, changeTodos($, function (cards) { return cards.map(function (card) { return (card.id === id && card.status === 'working' ? ended(card, 'stopped', now_2) : card); }); })];
-                            case 13:
-                                _g.sent();
-                                return [4 /*yield*/, log($, "work ".concat(id, " would have ended done without its report: ended stopped"))];
-                            case 14:
-                                _g.sent();
-                                return [4 /*yield*/, lookEnds($)];
-                            case 15:
-                                _g.sent();
-                                return [2 /*return*/, "continue"];
-                            case 16: return [4 /*yield*/, log($, "work ".concat(id, " would have ended done without its report: started again to carry on"))];
-                            case 17:
-                                _g.sent();
-                                return [4 /*yield*/, goOn($, id, 'its card would have ended done without its report', true)];
-                            case 18:
-                                _g.sent();
-                                return [2 /*return*/];
-                        }
-                    });
-                };
-                _i = 0, ids_1 = ids;
-                _e.label = 1;
-            case 1:
-                if (!(_i < ids_1.length)) return [3 /*break*/, 4];
-                id = ids_1[_i];
-                return [5 /*yield**/, _loop_1(id)];
-            case 2:
-                _e.sent();
-                _e.label = 3;
-            case 3:
-                _i++;
-                return [3 /*break*/, 1];
-            case 4: return [2 /*return*/];
-        }
-    });
-}); };

@@ -46,6 +46,17 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
         if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
     }
 };
+var __rest = (this && this.__rest) || function (s, e) {
+    var t = {};
+    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
+        t[p] = s[p];
+    if (s != null && typeof Object.getOwnPropertySymbols === "function")
+        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
+            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
+                t[p[i]] = s[p[i]];
+        }
+    return t;
+};
 var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
         if (ar || !(i in from)) {
@@ -125,15 +136,15 @@ function readConfig($, memory) {
 // Sets one key, or with undefined puts it back to what shipped; every other key, ones this tab does not know included, is kept
 function setConfig($, memory, key, value, role) {
     return __awaiter(this, void 0, void 0, function () {
-        var path, text, config, models_1;
-        var _a;
-        return __generator(this, function (_b) {
-            switch (_b.label) {
+        var path, text, config, old, _a, _gone, rest, models_1;
+        var _b;
+        return __generator(this, function (_c) {
+            switch (_c.label) {
                 case 0:
                     path = "".concat(memory, "/config.json");
                     return [4 /*yield*/, personText($, memory, 'config.json')];
                 case 1:
-                    text = _b.sent();
+                    text = _c.sent();
                     config = (function () {
                         try {
                             return JSON.parse(text || '{}');
@@ -145,8 +156,16 @@ function setConfig($, memory, key, value, role) {
                     // A file that does not parse is someone's edit under way: it is left as it is
                     if (!config || typeof config !== 'object' || Array.isArray(config))
                         throw new Error("Claudopus can't read config.json");
+                    old = config.lean;
+                    if (old && typeof old === 'object' && !Array.isArray(old) && 'chat' in old) {
+                        _a = old, _gone = _a.chat, rest = __rest(_a, ["chat"]);
+                        if (Object.keys(rest).length)
+                            config.lean = rest;
+                        else
+                            delete config.lean;
+                    }
                     if ((key === 'models' || key === 'lean') && role) {
-                        models_1 = __assign({}, ((_a = config[key]) !== null && _a !== void 0 ? _a : {}));
+                        models_1 = __assign({}, ((_b = config[key]) !== null && _b !== void 0 ? _b : {}));
                         if (value === undefined)
                             delete models_1[role];
                         else
@@ -162,10 +181,10 @@ function setConfig($, memory, key, value, role) {
                         config[key] = value;
                     return [4 /*yield*/, personWrote($, memory, 'config.json', "".concat(JSON.stringify(config, null, 2), "\n"))];
                 case 2:
-                    _b.sent();
+                    _c.sent();
                     return [4 /*yield*/, $.fs.write("".concat(memory, "/config.json"), "".concat(JSON.stringify(config, null, 2), "\n"))];
                 case 3:
-                    _b.sent();
+                    _c.sent();
                     return [2 /*return*/];
             }
         });
@@ -488,7 +507,15 @@ var configAct = function ($, what, act) {
     }); });
 };
 var configActs = function ($) { return ({
-    open: function (text) { return configAct($, "Couldn't open ".concat(text.name), function () { return editText($, $.plugin.root, dir, text.path); }); },
+    // Open file, beside Cancel while a text is edited in the tab: the edit there is left, and the person's own copy opens in their editor
+    open: function (text) {
+        return configAct($, "Couldn't open ".concat(text.name), function () { return __awaiter(_this, void 0, void 0, function () {
+            return __generator(this, function (_a) {
+                Object.assign(editing, { key: '', draft: '' });
+                return [2 /*return*/, editText($, $.plugin.root, dir, text.path)];
+            });
+        }); });
+    },
     // Edit opens the text in the tab itself; Save makes it the person's own copy
     edit: function (text, body) { return configAct($, '', function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
         return [2 /*return*/, void Object.assign(editing, { key: text.key, draft: body })];
@@ -531,6 +558,66 @@ var configActs = function ($) { return ({
             });
         }); });
     },
+    // A model as Config shows it: Same as most tasks for heavy work is Fable kept for when the person names it (lean.fable "named"), and
+    // any model picked turns an older Config's Fable for every task (lean.fable "all") into Most tasks on Fable, so what runs stays
+    model: function (role, value) {
+        return configAct($, "Couldn't save the setting", function () { return __awaiter(_this, void 0, void 0, function () {
+            var fable, _a, shipped;
+            return __generator(this, function (_b) {
+                switch (_b.label) {
+                    case 0:
+                        _a = leanOf;
+                        return [4 /*yield*/, readConfig($, dir)];
+                    case 1:
+                        fable = _a.apply(void 0, [_b.sent()]).fable;
+                        shipped = function (one) { var _a; return (_a = ROLES.find(function (r) { return r.key === one; })) === null || _a === void 0 ? void 0 : _a.shipped; };
+                        if (!(fable === 'all' && role !== 'work')) return [3 /*break*/, 3];
+                        return [4 /*yield*/, setConfig($, dir, 'models', 'fable' === shipped('work') ? undefined : 'fable', 'work')];
+                    case 2:
+                        _b.sent();
+                        _b.label = 3;
+                    case 3:
+                        if (!(role === 'heavy' && value === SAME)) return [3 /*break*/, 5];
+                        return [4 /*yield*/, setConfig($, dir, 'models', undefined, 'heavy')];
+                    case 4:
+                        _b.sent();
+                        return [2 /*return*/, setConfig($, dir, 'lean', 'named', 'fable')];
+                    case 5: return [4 /*yield*/, setConfig($, dir, 'models', value === shipped(role) ? undefined : value, role)];
+                    case 6:
+                        _b.sent();
+                        if (!(fable === 'all' || (fable === 'named' && role === 'heavy'))) return [3 /*break*/, 8];
+                        return [4 /*yield*/, setConfig($, dir, 'lean', undefined, 'fable')];
+                    case 7:
+                        _b.sent();
+                        _b.label = 8;
+                    case 8: return [2 /*return*/];
+                }
+            });
+        }); });
+    },
+    // When a task ends: one choice, written as the two keys, each on as shipped
+    alerts: function (value) {
+        return configAct($, "Couldn't save the setting", function () { return __awaiter(_this, void 0, void 0, function () {
+            var one;
+            var _a;
+            return __generator(this, function (_b) {
+                switch (_b.label) {
+                    case 0:
+                        one = (_a = ALERTS.find(function (a) { return a.value === value; })) !== null && _a !== void 0 ? _a : ALERTS[0];
+                        return [4 /*yield*/, setConfig($, dir, 'sound', one.sound ? undefined : false)];
+                    case 1:
+                        _b.sent();
+                        return [4 /*yield*/, setConfig($, dir, 'notifications', one.notifications ? undefined : false)];
+                    case 2:
+                        _b.sent();
+                        return [2 /*return*/];
+                }
+            });
+        }); });
+    },
+    more: function (isOpen) { return configAct($, '', function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+        return [2 /*return*/, void (configMore.isOpen = isOpen)];
+    }); }); }); },
     // Admin commands: each choice is sealed as it is made, and one that takes something back makes every earlier seal void
     gateMode: function (mode) { return configAct($, "Couldn't save the setting", function () { return regate($, { mode: mode }); }); },
     gateRemove: function (host, command) { return configAct($, "Couldn't remove the command", function () { return regate($, { remove: { host: host, command: command } }); }); },

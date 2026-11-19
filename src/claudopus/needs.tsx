@@ -306,7 +306,7 @@ const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boo
               {...(button.isPlain ? { plain: true } : n === 0 ? { variant: 'primary' as const } : {})}
               {...(button.hotkey ? { hotkey: button.hotkey } : {})}
               // A press that answers a block on a small card, where a pointer pressed it, holds its rows for a moment
-              onPress={isFolding && !button.isOpener && one ? press => (holdFold($, one.id, need.id, need.at, foldRows(need, room)), button.onPress(press)) : button.onPress}
+              onPress={isFolding && !button.isOpener && one ? press => (holdFold(one.id, need.id, need.at, foldRows(need, room)), button.onPress(press)) : button.onPress}
             />
           ))}
         </ui.Box>

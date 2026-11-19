@@ -1,15 +1,4 @@
 // The Results tab and each result's own tab: the list, a result drawn whole, put away and brought back
-var __assign = (this && this.__assign) || function () {
-    __assign = Object.assign || function(t) {
-        for (var s, i = 1, n = arguments.length; i < n; i++) {
-            s = arguments[i];
-            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
-                t[p] = s[p];
-        }
-        return t;
-    };
-    return __assign.apply(this, arguments);
-};
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -56,178 +45,46 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     return to.concat(ar || Array.prototype.slice.call(from));
 };
 var _this = this;
-// Puts a line naming the report in the chat's box, for the person to finish and send; where there is no box, nothing is sent for them
-var carryOn = function ($, r, now) { return __awaiter(_this, void 0, void 0, function () {
-    var text, typed, filled;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                text = "Continue from the result \"".concat(r.title, "\" (").concat(dated(r.at, now), "), ").concat(reportPath(r), "/report.md: ");
-                return [4 /*yield*/, $.prompt.read().catch(function () { return ({ text: '' }); })];
-            case 1:
-                typed = (_a.sent()).text;
-                return [4 /*yield*/, $.prompt.fill(typed.trim() ? { text: "\n".concat(text), mode: 'append' } : { text: text, mode: 'replace' }).catch(function () { return ({ isFilled: false }); })];
-            case 2:
-                filled = _a.sent();
-                if (!!filled.isFilled) return [3 /*break*/, 4];
-                return [4 /*yield*/, log($, 'the chat box was not filled from a report')];
-            case 3:
-                _a.sent();
-                _a.label = 4;
-            case 4: return [2 /*return*/];
-        }
-    });
-}); };
-// The person's answer to one thing a report waits on them for: Yes, No or one of its own answers goes to the task that asked, which
-// is started again to carry on with it (18 Nov: "A" pressed on a result's card went only to the chat, which had to hand the job to
-// another task by hand); Not now sets it aside. It clears that one alone. One only words answer puts a line naming it in the chat's
-// box, for them to finish: their message, sent, answers it (answeredInMessage). Only a result whose task this chat no longer keeps,
-// or one the person stopped, has its answer sent to the chat as their message
-var answering = new Set();
-var answerWait = function ($, r, index, said, now) {
-    var wait = waitsOf(r)[index];
-    // A second press before the answer is kept sends nothing more
-    if (!wait || wait.answer || answering.has("".concat(r.id, ":").concat(index)))
-        return Promise.resolve();
-    if (said === ANSWER_IN_WORDS)
-        return answerInWords($, r, index, now);
-    answering.add("".concat(r.id, ":").concat(index));
-    // (drawn as answered from the press itself, before the answer is kept: openResultWaits)
-    redraw($);
-    // The press's own hook waits for it, and starts the task again from inside itself (sendWakes)
-    var run = answerWaitNow($, r, index, wait, said, now);
+// Message on a result: the box above the chat opens (openBar), and what is typed there goes to the result's own task
+// while its card can be changed, else as the person's own message naming the result by its path, a real submit as Start again's is. Nothing is put in the chat's own box
+var CONTINUE_FROM = function (r, now, words) { return "Continue from the result \"".concat(r.title, "\" (").concat(dated(r.at, now), "), ").concat(reportPath(r), "/report.md: ").concat(words); };
+// (on its way from the press's own hook, which waits for it before it sends what the press left to send: answersOnWay)
+var continueFrom = function ($, id, words) {
+    var run = continueNow($, id, words);
     answersOnWay.add(run);
     void run.finally(function () { return answersOnWay.delete(run); }).catch(function () { return undefined; });
     return run;
 };
-// The task a result's answer goes to: the one that left it, while this chat keeps its card and the person has not stopped it
-var taskOfResult = function (list, r) { return list.find(function (one) { return one.id === r.agent && !one.parentId && !one.chat && !isHeld(one) && !one.flagged; }); };
-// Drawn at work from now, while the answer is on its way to start it again (asPressed); let go should nothing ever send it
-var drawWaking = function ($, card, now) {
-    if (card.status === 'working')
-        return;
-    resultWaking.set(card.id, now);
-    redraw($);
-    $.clock.after(WAKE_WAIT + HOOK_WAIT + 5000, function () { return void (resultWaking.get(card.id) === now && resultWaking.delete(card.id) && redraw($)); });
-};
-var answerWaitNow = function ($, r, index, wait, said, now) { return __awaiter(_this, void 0, void 0, function () {
-    var again, card, _a, _b;
-    return __generator(this, function (_c) {
-        switch (_c.label) {
-            case 0:
-                again = function (err) {
-                    answering.delete("".concat(r.id, ":").concat(index));
-                    redraw($);
-                    throw err;
-                };
-                if (!(said === 'Not now')) return [3 /*break*/, 1];
-                _a = undefined;
-                return [3 /*break*/, 3];
+var continueNow = function ($, id, words) { return __awaiter(_this, void 0, void 0, function () {
+    var r, card, _a, _b, _c, _d, _e;
+    return __generator(this, function (_f) {
+        switch (_f.label) {
+            case 0: return [4 /*yield*/, read($, reports)];
             case 1:
-                _b = taskOfResult;
-                return [4 /*yield*/, read($, todos).catch(again)];
-            case 2:
-                _a = _b.apply(void 0, [_c.sent(), r]);
-                _c.label = 3;
-            case 3:
-                card = _a;
-                if (!card) return [3 /*break*/, 4];
-                drawWaking($, card, now);
-                return [3 /*break*/, 6];
-            case 4:
-                if (!(said !== 'Not now')) return [3 /*break*/, 6];
-                return [4 /*yield*/, sendForPerson($, "From the Claudopus panel: ".concat(who(true), " pressed \"").concat(said, "\" to answer the question in the result \"").concat(r.title, "\" (").concat(dated(r.at, now), "): ").concat(wait.text, "\nThe result: ").concat(reportPath(r), "/report.md")).catch(again)
-                    // Not now kept nowhere can be pressed again, and so can an answer its task was not sent; one already sent to the chat is not sent twice
-                ];
-            case 5:
-                _c.sent();
-                _c.label = 6;
-            case 6: 
-            // Not now kept nowhere can be pressed again, and so can an answer its task was not sent; one already sent to the chat is not sent twice
-            return [4 /*yield*/, markReport($, r, function (stored) { return ({ waiting: waitsOf(stored).map(function (one, at) { return (at === index ? __assign(__assign({}, one), { answer: said }) : one); }) }); }).catch(function (err) {
-                    if (said === 'Not now' || card)
-                        answering.delete("".concat(r.id, ":").concat(index));
-                    redraw($);
-                    if (card && resultWaking.delete(card.id))
-                        redraw($);
-                    throw err;
-                })];
-            case 7:
-                // Not now kept nowhere can be pressed again, and so can an answer its task was not sent; one already sent to the chat is not sent twice
-                _c.sent();
-                if (!card) return [3 /*break*/, 9];
-                return [4 /*yield*/, answerToTask($, card, r, wait, said, false)];
-            case 8:
-                _c.sent();
-                _c.label = 9;
-            case 9: return [2 /*return*/];
-        }
-    });
-}); };
-// An answer to a result's question, to the task that asked: written into it while it works, else it is started again with it, from
-// inside a hook (toEnded). Each answer goes as it is given, so the task carries on with what it has; the chat is only told, with
-// no turn of its own, that the task has it
-var answerToTask = function ($, card, r, wait, said, isWords) { return __awaiter(_this, void 0, void 0, function () {
-    var at, left, _a, text, sent, told, _b;
-    var _c, _d;
-    return __generator(this, function (_e) {
-        switch (_e.label) {
-            case 0: return [4 /*yield*/, $.clock.now()];
-            case 1:
-                at = _e.sent();
-                _a = waitsOf;
-                return [4 /*yield*/, read($, reports)];
-            case 2:
-                left = _a.apply(void 0, [(_c = (_e.sent()).find(function (one) { return one.id === r.id; })) !== null && _c !== void 0 ? _c : r]).filter(function (one) { return !one.answer && one.text !== wait.text; }).length;
-                text = RESULT_ANSWER(r.title, "".concat(reportPath(r), "/report.md"), wait.text, said, isWords, left);
-                return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (one) { return (one.id === card.id ? __assign(__assign({}, one), { entries: __spreadArray(__spreadArray([], one.entries, true), [{ at: at, kind: 'steer', text: "".concat(said, " \u2014 to: ").concat(wait.text) }], false).slice(-ENTRIES_KEPT) }) : one); }); })];
-            case 3:
-                _e.sent();
-                sent = { text: said, ask: wait.text, at: at, line: lineOf(card), isCard: true };
+                r = (_f.sent()).find(function (one) { return one.id === id; });
+                if (!r || !words.trim())
+                    return [2 /*return*/];
+                if (!r.agent) return [3 /*break*/, 3];
                 return [4 /*yield*/, read($, todos)];
-            case 4:
-                if (!(((_d = (_e.sent()).find(function (one) { return one.id === card.id; })) === null || _d === void 0 ? void 0 : _d.status) === 'working')) return [3 /*break*/, 6];
-                return [4 /*yield*/, tell($, card.id, text)];
-            case 5:
-                _b = _e.sent();
-                return [3 /*break*/, 7];
-            case 6:
-                _b = undefined;
-                _e.label = 7;
-            case 7:
-                told = _b;
-                if (!(told && !told.deny)) return [3 /*break*/, 8];
-                (writtenIn($, card.id, card.id), sentReplies.set(card.id, __assign(__assign({}, sent), { to: 'work' })), redraw($));
-                return [3 /*break*/, 10];
-            case 8: return [4 /*yield*/, toEnded($, card, card.id, "".concat(text, "\n").concat(RESUMED_BY_ANSWER), sent)];
-            case 9:
-                _e.sent();
-                _e.label = 10;
-            case 10: return [4 /*yield*/, tellChat($, named(RESULT_ANSWERED(r.title, wait.text, "\u201C".concat(cut(said, 120), "\u201D"))))];
-            case 11:
-                _e.sent();
-                return [2 /*return*/];
-        }
-    });
-}); };
-var answerInWords = function ($, r, index, now) { return __awaiter(_this, void 0, void 0, function () {
-    var text, typed, filled;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                text = wordsLine(r, index + 1, now);
-                return [4 /*yield*/, $.prompt.read().catch(function () { return ({ text: '' }); })];
-            case 1:
-                typed = (_a.sent()).text;
-                return [4 /*yield*/, $.prompt.fill(typed.trim() ? { text: "\n".concat(text), mode: 'append' } : { text: text, mode: 'replace' }).catch(function () { return ({ isFilled: false }); })];
             case 2:
-                filled = _a.sent();
-                if (!!filled.isFilled) return [3 /*break*/, 4];
-                return [4 /*yield*/, log($, 'the chat box was not filled to answer a result in words')];
+                _a = (_f.sent()).find(function (one) { return one.id === r.agent && canChange(one); });
+                return [3 /*break*/, 4];
             case 3:
-                _a.sent();
-                _a.label = 4;
-            case 4: return [2 /*return*/];
+                _a = undefined;
+                _f.label = 4;
+            case 4:
+                card = _a;
+                if (card)
+                    return [2 /*return*/, changeTask($, card.id, words.trim())];
+                _b = sendForPerson;
+                _c = [$];
+                _d = CONTINUE_FROM;
+                _e = [r];
+                return [4 /*yield*/, $.clock.now()];
+            case 5: return [4 /*yield*/, _b.apply(void 0, _c.concat([_d.apply(void 0, _e.concat([_f.sent(), words.trim()]))]))];
+            case 6:
+                _f.sent();
+                return [2 /*return*/];
         }
     });
 }); };
@@ -738,13 +595,11 @@ var reportsView = function ($, ui, all, now, line, height) {
     var shown = reportsListed.length ? entriesOf(list).filter(function (entry) { return entry.some(function (r) { return reportsListed.includes(r.id); }); }).flat() : list;
     var entries = entriesOf(shown);
     var fresh = entriesOf(list).length - entries.length;
-    var waiting = entries.filter(function (entry) { return isOpenQuestion(entry[0]); });
-    var rest = entries.filter(function (entry) { return !isOpenQuestion(entry[0]); });
-    var _a = [rest.slice(0, RECENT), rest.slice(RECENT)], recent = _a[0], earlier = _a[1];
+    var _a = [entries.slice(0, RECENT), entries.slice(RECENT)], recent = _a[0], earlier = _a[1];
     // The app keeps each button it drew by its key, with the handle of its first drawing; the engine gives every button a new handle
     // whenever anything in the drawing changes (a result arriving, a fold, a time). A key that stayed then pressed a dead handle and
     // nothing opened, press after press. So every key here carries a mark of what the drawing shows, which moves whenever it changes
-    var gen = drawingMark(REPORTS_PANE, __spreadArray([presses, line, height, fresh, isEarlierOpen, isArchivedOpen, 'isTerminal' in ui], [waiting, recent, earlier, gone].map(function (group) { return group.map(function (entry) { return (entry[0] ? "".concat(entry[0].id, "|").concat(entry[0].title, "|").concat(when(entry[0].at, now)) : ''); }); }), true));
+    var gen = drawingMark(REPORTS_PANE, __spreadArray([presses, line, height, fresh, isEarlierOpen, isArchivedOpen, 'isTerminal' in ui], [recent, earlier, gone].map(function (group) { return group.map(function (entry) { return (entry[0] ? "".concat(entry[0].id, "|").concat(entry[0].title, "|").concat(when(entry[0].at, now)) : ''); }); }), true));
     var fold = function (key, label, isOpen, onPress) { return (<Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" alignItems="flex-start" flexShrink={0}>
       {/* In the rows' title column */}
       <Box width={1} flexShrink={0}/>
@@ -785,7 +640,6 @@ var reportsView = function ($, ui, all, now, line, height) {
         {fresh ? <Button key={"reports-fresh-".concat(gen)} label={"Show ".concat(fresh, " new ").concat(fresh === 1 ? 'result' : 'results')} onPress={function () { return void openReports($).catch(function (err) { return log($, "reports not opened: ".concat(String(err))); }); }}/> : null}
       </Box>
       {!shown.length && !gone.length ? <Text dimColor>No results yet.</Text> : null}
-      {waiting.length ? band(ui, 'reports-waiting', 'Waiting for you', "".concat(waiting.length), rows(waiting)) : null}
       {recent.length ? band(ui, 'reports-recent', 'Newest', '', rows(recent)) : null}
       {earlier.length || gone.length ? (<Box key="reports-folded" flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
           {earlier.length ? fold('earlier-fold', "Earlier ".concat(earlier.length), isEarlierOpen, function () { return (isEarlierOpen = !isEarlierOpen); }) : null}
@@ -811,10 +665,11 @@ var reportsView = function ($, ui, all, now, line, height) {
         </Box>) : null}
     </Box>);
 };
-var reportShown = function ($, ui, r, text, list, now, at, thumb, height, files) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+var reportShown = function ($, ui, r, text, list, now, at, thumb, height, files, surface) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     if (height === void 0) { height = 0; }
     if (files === void 0) { files = { made: [] }; }
+    if (surface === void 0) { surface = ''; }
     var Box = ui.Box, Button = ui.Button, Markdown = ui.Markdown, Text = ui.Text;
     var table = ui;
     // The other rounds of its work first, as the list shows them as one row; then what it started from or started, and the subject's others
@@ -827,7 +682,7 @@ var reportShown = function ($, ui, r, text, list, now, at, thumb, height, files)
     };
     var pane = paneOf(r);
     // As in the list: each key carries a mark of what this drawing shows, so the app never keeps a button whose handle is gone
-    var gen = drawingMark(pane, __spreadArray(__spreadArray(__spreadArray([presses, height, r, mark(text), at, JSON.stringify(files), __spreadArray([], openPiles, true).join(), facesMade, (_b = thumb === null || thumb === void 0 ? void 0 : thumb.source.length) !== null && _b !== void 0 ? _b : 0], pictures.map(function (one) { var _a; return (_a = pictureSaid.get(one.path)) !== null && _a !== void 0 ? _a : null; }), true), [dated(r.at, now), 'isTerminal' in ui], false), kin.map(function (one) { return "".concat(one.id, "|").concat(one.title, "|").concat(dated(one.at, now), "|").concat(how(one)); }), true));
+    var gen = drawingMark(pane, __spreadArray(__spreadArray(__spreadArray([presses, height, r, repliesInBar(surface), isBarOpen('continue', r.id), mark(text), at, JSON.stringify(files), __spreadArray([], openPiles, true).join(), facesMade, (_b = thumb === null || thumb === void 0 ? void 0 : thumb.source.length) !== null && _b !== void 0 ? _b : 0], pictures.map(function (one) { var _a; return (_a = pictureSaid.get(one.path)) !== null && _a !== void 0 ? _a : null; }), true), [dated(r.at, now), 'isTerminal' in ui], false), kin.map(function (one) { return "".concat(one.id, "|").concat(one.title, "|").concat(dated(one.at, now), "|").concat(how(one)); }), true));
     // Where pictures can be drawn, what the task made is tiles under the title, its pictures among them; the terminal keeps its rows
     var hasTiles = !('isTerminal' in ui) && Boolean(table.Svg) && (files.made.length > 0 || Boolean(files.code));
     var show = function (to) { var _a, _b; return void ((presses += 1), hasTiles ? void showPicture($, (_b = (_a = pictures[to]) === null || _a === void 0 ? void 0 : _a.path) !== null && _b !== void 0 ? _b : '', pane, '') : (pictureAt.set(pane, to), redraw($))); };
@@ -836,24 +691,16 @@ var reportShown = function ($, ui, r, text, list, now, at, thumb, height, files)
       <Box key="report-head" flexDirection="row" alignItems="flex-start" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
         <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Text bold wrap="wrap">{r.title}</Text>
-          <Text dimColor wrap="wrap">{[dated(r.at, now), r.subject && slug(r.subject) !== slug(r.title) ? r.subject : '', r.archived ? 'archived' : answeredOf(r)].filter(Boolean).join(' · ')}</Text>
+          <Text dimColor wrap="wrap">{[dated(r.at, now), r.subject && slug(r.subject) !== slug(r.title) ? r.subject : '', r.archived ? 'archived' : ''].filter(Boolean).join(' · ')}</Text>
         </Box>
         <Button key={"report-archive-".concat(gen)} label={r.archived ? 'Bring back' : 'Archive'} onPress={function () { return archiveReport($, r, !r.archived); }}/>
       </Box>
       {/* What its task made, right under its title: tiles side by side, each a press that opens it */}
-      {hasTiles ? band(ui, 'report-files', 'Files', '', (_c = madeTiles($, ui, files, pane, "report-files-".concat(r.id), undefined, "-".concat(gen))) !== null && _c !== void 0 ? _c : <Box />) : null}
-      {isOpenQuestion(r) || (!r.archived && waitsOf(r).some(byPerson))
-            ? band(ui, 'report-ask', isOpenQuestion(r) ? 'Waiting for you' : 'Answered', openWaits(r).length > 1 ? "".concat(openWaits(r).length) : '', 
-            // Each thing it waits on with its own answers; one answered says what was answered, and leaves the others
-            <Box flexDirection="column" gap={2}>
-              {waitsOf(r).map(function (wait, index) {
-                    return wait.answer ? (<Text key={"report-waited-".concat(index)} dimColor wrap="wrap">{"".concat(wait.text, " \u00B7 ").concat(answeredWords(wait))}</Text>) : (<Box key={"report-wait-".concat(index)} flexDirection="column" gap={1}>
-                    <Text wrap="wrap">{wait.text}</Text>
-                    <Box flexDirection="row" flexWrap="wrap" gap={1}>
-                      {answersOf(wait).map(function (said) { return (<Button key={"report-say-".concat(index, "-").concat(said, "-").concat(gen)} label={said} onPress={function () { return void ((presses += 1), answerWait($, r, index, said, now).catch(function (err) { return log($, "answer not kept: ".concat(String(err))); })); }}/>); })}
-                    </Box>
-                  </Box>);
-                })}
+      {hasTiles ? band(ui, 'report-files', 'Files', '', (_c = madeTiles($, ui, files, pane, "report-files-".concat(r.id), r.id, undefined, "-".concat(gen))) !== null && _c !== void 0 ? _c : <Box />) : null}
+      {/* A result kept from before that still lists questions: its lines, as text, with nothing to press */}
+      {waitsOf(r).length
+            ? band(ui, 'report-ask', 'Questions it left', '', <Box flexDirection="column">
+              {waitsOf(r).map(function (wait, index) { return (<Text key={"report-waited-".concat(index)} dimColor wrap="wrap">{wait.text}</Text>); })}
             </Box>)
             : null}
       {r.gist
@@ -887,8 +734,10 @@ var reportShown = function ($, ui, r, text, list, now, at, thumb, height, files)
                     show(to);
             }}/>)}
       {band(ui, 'report-carry', 'Follow-up', '', <Box flexDirection="column" alignItems="flex-start" gap={1}>
-          <Text dimColor wrap="wrap">Claudopus writes a line about this result where you type in the chat, for you to finish and send.</Text>
-          <Button key={"report-carry-".concat(gen)} label="Continue" onPress={function () { return void ((presses += 1), redraw($), carryOn($, r, now)); }}/>
+          {/* Message opens the box above the chat; where that bar takes no box (the terminal), the one field is here */}
+          {repliesInBar(surface) ? (<Button key={"report-carry-".concat(gen)} label={isBarOpen('continue', r.id) ? 'Close' : 'Message'} onPress={function (press) { return openBar($, isBarOpen('continue', r.id) ? undefined : { kind: 'continue', id: r.id }, press.surface); }}/>) : 'Input' in ui ? (<Box width="100%" flexDirection="column">
+              <ui.Input key={"report-carry-reply-".concat(r.id, "-").concat((_k = replies.get(r.id)) !== null && _k !== void 0 ? _k : 0)} placeholder="Type your message" submitLabel="Send" onInput={function () { return holdTimes($); }} onSubmit={function (value) { var _a; return void (value.trim() && (replies.set(r.id, ((_a = replies.get(r.id)) !== null && _a !== void 0 ? _a : 0) + 1), freeTimes($), redraw($), continueFrom($, r.id, value).catch(function (err) { return log($, "message from a result not sent: ".concat(String(err))); }))); }}/>
+            </Box>) : null}
           {kin.length ? (<Box flexDirection="column" alignItems="flex-start">
               {kin.map(function (one) { return (<Button key={"report-kin-".concat(one.id, "-").concat(gen)} label={[dated(one.at, now), one.title, how(one)].filter(Boolean).join(' · ')} plain dimColor onPress={function () { return openReport($, one.id); }}/>); })}
             </Box>) : null}

@@ -233,11 +233,16 @@ var startCatchUp = function ($) { return __awaiter(_this, void 0, void 0, functi
     });
 }); };
 var memoryHooks = function (on) {
-    // A reply that names a memory file: its links to memory open the mod's tab, since the app's file pane refuses ~/.claude. The
+    // A reply as the chat shows it. One that names a memory file: its links to memory open the mod's tab, since the app's file pane refuses ~/.claude. The
     // terminal opens such a path itself, so it keeps its own drawing
     on('ui.render', { component: 'AssistantMessage' }, function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
-        var _a, text, hrefs, Markdown;
+        var Box, _a, text, hrefs, Markdown;
         return __generator(this, function (_b) {
+            // The line that ends a turn the chat had nothing to say in (a paused task's notice, NO_ANSWER) is drawn as nothing
+            if (!isOff && !e.props.isSummary && e.props.text.trim() === NO_ANSWER) {
+                Box = uiOf($, e).Box;
+                return [2 /*return*/, <Box key={"quiet-".concat(mark(e.requestId))}/>];
+            }
             if (e.surface === 'terminal' || !dir || e.props.isSummary || !memoryPathIn().test(e.props.text))
                 return [2 /*return*/, next(e)];
             _a = memoryLinked(e.props.text), text = _a.text, hrefs = _a.hrefs;

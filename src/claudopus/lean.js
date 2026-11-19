@@ -59,9 +59,8 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
 var _this = this;
 // What every kind of the mod's agents is told before its task, in place of the engine's own agent prompt
 var AGENT_HEAD = 'You are an agent of Claude Code, working in the background on a task you are given. Use the tools you have to do it fully: no more than it asks, and not half done. Read files you know you need yourself; send calls that need nothing from each other together. Paths you give are absolute. When you are done, give your report: what was done, what you found, and what is not done or not checked, short, with the file paths that matter. Use no emojis.';
-// The panel's tools, which work keeps its card with, and the handback its report goes through. Each kind told to call `wake_me`
-// rather than wait has it: a task and a quick task to be started again, a helper to be told to hand back what it waits for instead
-var PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall', 'mcp__claudopus__wake_me'];
+// The panel's tools, which work keeps its card with, and the handback its report goes through
+var PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__update', 'mcp__claudopus__recall'];
 var READ_TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback'];
 // ToolSearch loads the ones among these the engine holds back until asked (Monitor, SendMessage, TaskStop and the like)
 var WORK_TOOLS = __spreadArray(['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEdit', 'Agent', 'SendMessage', 'TaskStop', 'Monitor', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback'], PANEL_TOOLS, true);
@@ -73,7 +72,7 @@ var KINDS = {
         tools: WORK_TOOLS,
         prompt: "".concat(AGENT_HEAD, "\nThis is a clearly stated job: do what the instructions say, in as few steps as it takes."),
     },
-    helper: { description: "A task's helper that builds a part beside others, on the task's own model.", tools: WORK_TOOLS.filter(function (one) { return one !== 'mcp__claudopus__update' && one !== 'mcp__claudopus__waits'; }), prompt: AGENT_HEAD },
+    helper: { description: "A task's helper that builds a part beside others, on the task's own model.", tools: WORK_TOOLS.filter(function (one) { return one !== 'mcp__claudopus__update'; }), prompt: AGENT_HEAD },
     reader: {
         description: "A task's helper that only searches and reads, and reports what it concluded.",
         tools: READ_TOOLS,
@@ -438,11 +437,11 @@ var chatCommandEnded = function ($, text) { return __awaiter(_this, void 0, void
 // Claude Code's notices that bring the chat nothing, each of which woke it for a turn of its own (16 Nov 17:00-20:30 UTC: 67 of the
 // chat's 152 turns, each answered "still in progress"): a task stopped after its report came as a message ("it is not repeated
 // here"); a task that ended its step with its own command still running and has no report yet ("is waiting on its own background
-// work"); and a task that ended its step to wait for its helpers or a wake_me, which Claude Code does not count as its own at work,
-// so says it "ended without delivering a report" while Claudopus knows it waits. Only a notice made of nothing but Claude Code's own
+// work"); and a task that paused by ending its step with nothing Claude Code counts as its own at work (its helpers, a question
+// on its card), of which it says it "ended without delivering a report" while its card is at work. Only a notice made of nothing but Claude Code's own
 // sentences for these is such a notice: a security warning, a refused report, an agent's own words, a note of a limit or of messages
 // that came late, a worktree, any line Claudopus does not know, keeps it. A prompt of only such notices costs the chat no turn of
-// the model's; beside anything else, each task in it that waits goes with the word that it is still at work (waitsText)
+// the model's
 var ENGINE_FILLER = [
     /This agent has not reported yet: it is waiting on its own background work and will deliver its report through \w+ when that finishes\./g,
     /This agent's report was delivered to you as a message from "[^"]*" \(its \w+ call\)\. Read it there; it is not repeated here\./g,
@@ -491,9 +490,9 @@ var reportsFor = function ($, ids) { return __awaiter(_this, void 0, void 0, fun
         }
     });
 }); };
-// `waiting`: the top work that waits on helpers the engine still lists at work, or on a wake_me still due (waitingNow); `given`: the
-// tasks whose report the chat was given with an earlier notice of their end (REPORT_FOR_CHAT), whose later notices repeat it
-var quietNotices = function (text, waiting, given) {
+// `atWork`: the chat's tasks whose cards are at work, which paused by ending a step and are not finished; `given`: the tasks whose
+// report the chat was given with an earlier notice of their end (REPORT_FOR_CHAT), whose later notices repeat it
+var quietNotices = function (text, atWork, given) {
     if (given === void 0) { given = new Set(); }
     var notices = __spreadArray([], text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g), true).map(function (m) { var _a; return (_a = m[1]) !== null && _a !== void 0 ? _a : ''; });
     var rest = text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').replace(NOTICE_HEADER, '').trim();
@@ -501,11 +500,9 @@ var quietNotices = function (text, waiting, given) {
     var isCompleted = function (body) { return /<status>completed<\/status>/.test(body) && isBareNotice(body); };
     var isRepeat = function (body) { return isCompleted(body) && (/not repeated here/.test(body) || (given.has(idOf(body)) && /ended without delivering a report|has not reported yet/.test(body))); };
     var isWaitingOwn = function (body) { return isCompleted(body) && /is waiting on its own background work<\/summary>/.test(body); };
-    var isEndedWaiting = function (body) { return /<status>completed<\/status>/.test(body) && /ended without delivering a report/.test(body) && waiting.has(idOf(body)); };
-    // Said to be still at work beside it whether or not the notice says more (a security warning stays, and is explained)
-    var waits = __spreadArray([], new Set(notices.filter(isEndedWaiting).map(idOf)), true);
-    var isQuiet = notices.length > 0 && !rest && notices.every(function (body) { return isRepeat(body) || isWaitingOwn(body) || (isCompleted(body) && isEndedWaiting(body)); });
-    return { isQuiet: isQuiet, isRepeat: isQuiet && notices.every(isRepeat), waits: waits };
+    var isPaused = function (body) { return /<status>completed<\/status>/.test(body) && /ended without delivering a report/.test(body) && atWork.has(idOf(body)); };
+    var isQuiet = notices.length > 0 && !rest && notices.every(function (body) { return isRepeat(body) || isWaitingOwn(body) || (isCompleted(body) && isPaused(body)); });
+    return { isQuiet: isQuiet, isRepeat: isQuiet && notices.every(isRepeat) };
 };
 // Such a prompt is let in and its turn answered with no model (workHooks' turn.step): Claude Code shows every prompt a hook drops
 // as a warning card, "Prompt dropped by a hook" (2.1.325), and asks the model again after an answer with no visible text ("Your
@@ -523,15 +520,9 @@ var isQuietTurn = function (text, quiet) {
     }
     return rest !== text && !rest.replace(NOTICE_HEADER, '').trim();
 };
-// ---- The last step on a go-ahead ----
-// A go-ahead to finish (Release it) on work that has ended: its last step is done without starting the work again. A repo with a
-// `.release` released by Claudopus itself, with no model, after the same allow box on the card a release always waits for; any other
-// step by a small fresh task given the folder, the branch and the step. The work is started again only when the step fails in a way
-// that needs what it knows
-var RELEASE_STEP = /^\s*(?:release|run (?:the )?release(?: runner)?|(?:cd \S+ && )?\S*bin\/release)\s*\.?\s*$/i;
-// How often a release Claudopus runs is looked at, and the longest it is waited for
-var STEP_LOOK = 10000;
-var STEP_LONGEST = 90 * 60000;
+// A line Claudopus writes in a card's log: what became of something the person pressed there. It is Claudopus's, never the task's
+// own: the card's line beside the dots says only what the task wrote itself (19 Nov: "Your command ended after 20s" stood there
+// in place of what the task was doing)
 var stepLine = function ($, id, text) { return __awaiter(_this, void 0, void 0, function () {
     var at;
     return __generator(this, function (_a) {
@@ -539,7 +530,7 @@ var stepLine = function ($, id, text) { return __awaiter(_this, void 0, void 0, 
             case 0: return [4 /*yield*/, $.clock.now()];
             case 1:
                 at = _a.sent();
-                return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (card) { return (card.id === id ? __assign(__assign({}, card), { entries: __spreadArray(__spreadArray([], card.entries, true), [{ at: at, kind: 'note', text: text }], false).slice(-ENTRIES_KEPT) }) : card); }); })];
+                return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (card) { return (card.id === id ? __assign(__assign({}, card), { entries: __spreadArray(__spreadArray([], card.entries, true), [{ at: at, kind: 'event', text: text }], false).slice(-ENTRIES_KEPT) }) : card); }); })];
             case 2:
                 _a.sent();
                 redraw($);
@@ -547,300 +538,6 @@ var stepLine = function ($, id, text) { return __awaiter(_this, void 0, void 0, 
         }
     });
 }); };
-// A go-ahead pressed while its work was still in the turn that asked (stepOnEnd) is done once its card has ended, looked for at
-// each turn's end (from that hook, so a small fresh task starts in a hook), each sync of the engine's list and right after the press
-// itself, should the turn have ended meanwhile; a release then takes the branch as the task left it. Taken off the card in the same
-// write that finds it, so it is done once. No step when the card asks something else by then, nor when you stopped it; a turn that
-// was stopped or failed puts the question back, to be pressed again. Claudopus's notice of a call Claude Code refused in that turn
-// is no question of the work's: it neither stops the step nor keeps the question from coming back. With no step done, what the work
-// recorded as waiting for that question is open again, as the press had answered it (answerCleared)
-var stepsAtEnd = function ($) { return __awaiter(_this, void 0, void 0, function () {
-    var due, _loop_3, _i, due_1, card;
-    var _a;
-    return __generator(this, function (_b) {
-        switch (_b.label) {
-            case 0: return [4 /*yield*/, read($, todos)];
-            case 1:
-                if (!(_b.sent()).some(function (one) { return one.stepOnEnd && one.status !== 'working'; }))
-                    return [2 /*return*/];
-                due = [];
-                return [4 /*yield*/, changeTodos($, function (list) { return ((due = list.filter(function (one) { return one.stepOnEnd && one.status !== 'working'; })), due.length ? list.map(function (one) { var _a; return (due.includes(one) ? __assign(__assign(__assign({}, one), { stepOnEnd: undefined }), (one.status !== 'done' && !one.byYou && (!one.ask || one.ask.refused) ? { ask: (_a = one.stepOnEnd) === null || _a === void 0 ? void 0 : _a.ask } : {})) : one); }) : list); })];
-            case 2:
-                _b.sent();
-                _loop_3 = function (card) {
-                    var held_1, id, isDone;
-                    return __generator(this, function (_c) {
-                        switch (_c.label) {
-                            case 0:
-                                held_1 = card.stepOnEnd;
-                                if (!held_1)
-                                    return [2 /*return*/, "continue"];
-                                id = card.id;
-                                isDone = !card.byYou && !(card.ask && !card.ask.refused && (card.ask.at !== held_1.ask.at || card.ask.text !== held_1.ask.text)) && card.status === 'done';
-                                if (!!isDone) return [3 /*break*/, 2];
-                                return [4 /*yield*/, unsettleAsked($, id, held_1.ask.at).catch(function (err) { return log($, "result's question not opened again for ".concat(id, ": ").concat(String(err))); })];
-                            case 1:
-                                _c.sent();
-                                _c.label = 2;
-                            case 2:
-                                if (!!isDone) return [3 /*break*/, 4];
-                                return [4 /*yield*/, releaseOver($, id).catch(function (err) { return log($, "release of ".concat(id, " not cleared: ").concat(String(err))); })];
-                            case 3:
-                                _c.sent();
-                                _c.label = 4;
-                            case 4:
-                                if (!card.byYou) return [3 /*break*/, 6];
-                                return [4 /*yield*/, stepLine($, id, "Claudopus didn't do \u201C".concat(held_1.said, "\u201D \u00B7 you stopped the task first"))];
-                            case 5:
-                                _c.sent();
-                                return [3 /*break*/, 15];
-                            case 6:
-                                if (!(card.ask && !card.ask.refused && (card.ask.at !== held_1.ask.at || card.ask.text !== held_1.ask.text))) return [3 /*break*/, 8];
-                                return [4 /*yield*/, stepLine($, id, "Claudopus didn't do \u201C".concat(held_1.said, "\u201D \u00B7 Claude asked something else first"))];
-                            case 7:
-                                _c.sent();
-                                return [3 /*break*/, 15];
-                            case 8:
-                                if (!(card.status !== 'done')) return [3 /*break*/, 13];
-                                // pressed again as a fresh answer, as when an answer could not be sent (answerNow)
-                                answeredAsks.delete("".concat(id, ":").concat(held_1.ask.at, ":").concat(held_1.ask.text));
-                                if (answeredAt.get(id) === held_1.ask.at)
-                                    answeredAt.delete(id);
-                                sentReplies.delete(id);
-                                return [4 /*yield*/, stepLine($, id, "Claudopus didn't do \u201C".concat(held_1.said, "\u201D \u00B7 Claude ").concat(card.status === 'stopped' ? 'stopped' : 'failed', " first, so the question is back"))
-                                    // The chat is shown it again too, the refusal notice it took the place of gone from the chat with it, so an answer to that
-                                    // notice is never taken for an answer to the question
-                                ];
-                            case 9:
-                                _c.sent();
-                                if (!((_a = card.ask) === null || _a === void 0 ? void 0 : _a.refused)) return [3 /*break*/, 11];
-                                return [4 /*yield*/, askGone($, card).catch(function (err) { return log($, "refusal notice not cleared in the chat: ".concat(String(err))); })];
-                            case 10:
-                                _c.sent();
-                                _c.label = 11;
-                            case 11: return [4 /*yield*/, askInChat($, __assign(__assign({}, card), { ask: held_1.ask })).catch(function (err) { return log($, "ask not shown in the chat: ".concat(String(err))); })];
-                            case 12:
-                                _c.sent();
-                                return [3 /*break*/, 15];
-                            case 13: return [4 /*yield*/, lastStep($, card, held_1.ask, held_1.said).catch(function (err) { return log($, "last step of ".concat(id, " not done: ").concat(String(err))); })];
-                            case 14:
-                                _c.sent();
-                                _c.label = 15;
-                            case 15: return [2 /*return*/];
-                        }
-                    });
-                };
-                _i = 0, due_1 = due;
-                _b.label = 3;
-            case 3:
-                if (!(_i < due_1.length)) return [3 /*break*/, 6];
-                card = due_1[_i];
-                return [5 /*yield**/, _loop_3(card)];
-            case 4:
-                _b.sent();
-                _b.label = 5;
-            case 5:
-                _i++;
-                return [3 /*break*/, 3];
-            case 6: return [2 /*return*/];
-        }
-    });
-}); };
-// A release under way for a card ends. Finished, every to-do it left counts as done, and it is Done from now, its green moment
-// with it, once; any other way (not allowed, not started, failed, or no release after all) it is as before the press, and a task
-// started again to look at a failure is at work
-var releaseOver = function ($_1, id_1) {
-    var args_1 = [];
-    for (var _i = 2; _i < arguments.length; _i++) {
-        args_1[_i - 2] = arguments[_i];
-    }
-    return __awaiter(_this, __spreadArray([$_1, id_1], args_1, true), void 0, function ($, id, isDone) {
-        var at;
-        if (isDone === void 0) { isDone = false; }
-        return __generator(this, function (_a) {
-            switch (_a.label) {
-                case 0: return [4 /*yield*/, $.clock.now()];
-                case 1:
-                    at = _a.sent();
-                    return [4 /*yield*/, changeTodos($, function (list) {
-                            return list.map(function (card) {
-                                return card.id !== id || (!card.releasing && !isDone)
-                                    ? card
-                                    : isDone
-                                        ? __assign(__assign(__assign({}, card), { releasing: undefined, released: at, notDone: undefined, items: card.items.map(function (item) { return (item.state === 'open' || item.state === 'doing' ? __assign(__assign({}, item), { state: 'done' }) : item); }) }), (card.status === 'done' ? { endedAt: at } : {})) : __assign(__assign({}, card), { releasing: undefined });
-                            });
-                        })];
-                case 2:
-                    _a.sent();
-                    redraw($);
-                    return [2 /*return*/];
-            }
-        });
-    });
-};
-var lastStep = function ($, one, ask, said) { return __awaiter(_this, void 0, void 0, function () {
-    var folder, step, git, repo, branch, wakeText, isFixed, _a, _b, prompt, wake;
-    var _c, _d, _e;
-    return __generator(this, function (_f) {
-        switch (_f.label) {
-            case 0:
-                folder = (_c = ask.folder) !== null && _c !== void 0 ? _c : '';
-                step = (_d = ask.lastStep) !== null && _d !== void 0 ? _d : '';
-                git = function (args) { return $.process.run(__spreadArray(['git', '-C', folder], args, true), { timeoutMs: 15000 }).then(function (r) { return (r.exitCode === 0 ? r.stdout.trim() : ''); }).catch(function () { return ''; }); };
-                return [4 /*yield*/, git(['rev-parse', '--show-toplevel'])];
-            case 1:
-                repo = _f.sent();
-                return [4 /*yield*/, git(['rev-parse', '--abbrev-ref', 'HEAD'])];
-            case 2:
-                branch = _f.sent();
-                wakeText = "".concat(who(true), " pressed \"").concat(said, "\" in answer to your question: ").concat(ask.text, "\n").concat(RESUMED_BY_ANSWER);
-                _a = Boolean;
-                _b = repo && branch && branch !== 'HEAD' && RELEASE_STEP.test(step);
-                if (!_b) return [3 /*break*/, 4];
-                return [4 /*yield*/, $.fs.stat("".concat(repo, "/.release")).catch(function () { return undefined; })];
-            case 3:
-                _b = ((_e = (_f.sent())) === null || _e === void 0 ? void 0 : _e.kind) === 'file';
-                _f.label = 4;
-            case 4:
-                isFixed = _a.apply(void 0, [_b]);
-                return [4 /*yield*/, log($, "last step of ".concat(one.id, " on ").concat(who(), "'s go-ahead: ").concat(isFixed ? 'the release, run by Claudopus' : 'a small fresh task'))
-                    // (a fresh task's release is on that task's own card)
-                ];
-            case 5:
-                _f.sent();
-                if (!!isFixed) return [3 /*break*/, 7];
-                return [4 /*yield*/, releaseOver($, one.id).catch(function (err) { return log($, "release of ".concat(one.id, " not cleared: ").concat(String(err))); })
-                    // held for the person's allow, so never awaited in the press's own hook
-                ];
-            case 6:
-                _f.sent();
-                _f.label = 7;
-            case 7:
-                // held for the person's allow, so never awaited in the press's own hook
-                if (isFixed)
-                    return [2 /*return*/, void releaseItself($, one, ask, said, repo, branch, wakeText).catch(function (err) { return log($, "release of ".concat(one.id, " not done: ").concat(String(err))); })];
-                prompt = named("Do the last step of the task \"".concat(titleOf(one), "\", which {name} just gave the go-ahead for by pressing \"").concat(said, "\" (to: ").concat(ask.text, "): ").concat(step, "\nWork in ").concat(folder).concat(branch && branch !== 'HEAD' ? ", on its branch ".concat(branch) : '', ". It is this one step: do only that, then report in one or two lines what happened. If it fails in a way that needs what the task that built it knows (a merge conflict, a failing check, a question only it can answer), send that task, \"").concat(one.id, "\", a message with SendMessage saying what failed and the last lines of the output, and end; do not fix it yourself."));
-                return [4 /*yield*/, stepLine($, one.id, "You pressed \u201C".concat(said, "\u201D \u00B7 Claudopus starts a new task for it: ").concat(cut(step, 160)))];
-            case 8:
-                _f.sent();
-                wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt: prompt, description: "".concat(cut(titleOf(one), 50), ": finishing"), subagentType: 'claudopus:quick', model: clearModel(models, lean), cwd: folder } };
-                wakes.push(wake);
-                void $.clock.after(WAKE_WAIT, function () {
-                    var at = wakes.indexOf(wake);
-                    if (at < 0)
-                        return;
-                    wakes.splice(at, 1);
-                    void sendWake($, wake, false);
-                });
-                return [2 /*return*/];
-        }
-    });
-}); };
-// The release with no model: the card's allow box first, as for any release, then the runner on its own, followed by the mod
-var releaseItself = function ($, one, ask, said, repo, branch, wakeText) { return __awaiter(_this, void 0, void 0, function () {
-    var at, common, name, id, gate, allowed, logFile, isLogged, grant, run, timer;
-    var _this = this;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0: return [4 /*yield*/, $.clock.now()];
-            case 1:
-                at = _a.sent();
-                return [4 /*yield*/, $.process.run(['git', '-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { timeoutMs: 15000 }).then(function (r) { return r.stdout.trim(); }).catch(function () { return ''; })];
-            case 2:
-                common = _a.sent();
-                name = (/\/\.git$/.test(common) ? common.replace(/\/\.git$/, '') : repo).split('/').pop() || repo;
-                id = "step-".concat(one.id, "-").concat(at);
-                gate = { id: id, call: id, kind: 'release', host: name, command: "".concat(branch, " from ").concat(repo), folder: repo, branch: branch, at: at, from: one.id };
-                return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (card) { var _a, _b; return (card.id === one.id ? __assign(__assign({}, card), { releasing: { at: (_b = (_a = card.releasing) === null || _a === void 0 ? void 0 : _a.at) !== null && _b !== void 0 ? _b : at, branch: branch, by: 'claudopus' } }) : card); }); })];
-            case 3:
-                _a.sent();
-                return [4 /*yield*/, stepLine($, one.id, "You pressed \u201C".concat(said, "\u201D \u00B7 Claudopus releases ").concat(branch, " once you allow it below"))];
-            case 4:
-                _a.sent();
-                return [4 /*yield*/, holdGate($, {}, gate, one.id)];
-            case 5:
-                allowed = _a.sent();
-                if (!(allowed !== 'once')) return [3 /*break*/, 7];
-                return [4 /*yield*/, releaseOver($, one.id)];
-            case 6: return [2 /*return*/, (_a.sent(), stepLine($, one.id, "Nothing was released \u00B7 ".concat(allowed === 'deny' ? 'you denied it' : "it wasn't allowed")))];
-            case 7:
-                logFile = "".concat(dir, "/releases/").concat(id, ".log");
-                return [4 /*yield*/, $.fs.write(logFile, '').then(function () { return true; }).catch(function () { return false; })];
-            case 8:
-                isLogged = _a.sent();
-                if (!!isLogged) return [3 /*break*/, 10];
-                return [4 /*yield*/, releaseOver($, one.id)];
-            case 9: return [2 /*return*/, (_a.sent(), stepLine($, one.id, "Nothing was released · Claudopus couldn't start the release"))];
-            case 10: return [4 /*yield*/, issueGrant($, id, { host: 'release', command: "".concat(repo, "\n").concat(branch) }, 'release-grant')];
-            case 11:
-                grant = _a.sent();
-                if (!!grant) return [3 /*break*/, 13];
-                return [4 /*yield*/, releaseOver($, one.id)];
-            case 12: return [2 /*return*/, (_a.sent(), stepLine($, one.id, "Nothing was released · Claudopus couldn't use its keychain key"))
-                // Detached, so it outlives the ten minutes a call of the mod may take; its exit is written as its last line
-            ];
-            case 13: return [4 /*yield*/, $.process
-                    .run(['/bin/sh', '-c', 'nohup /bin/sh -c \'"$1" > "$2" 2>&1; echo "claudopus-exit $?" >> "$2"\' sh "$1" "$2" > /dev/null 2>&1 &', 'sh', "".concat($.plugin.root, "/bin/release"), logFile], { cwd: repo, env: { CLAUDECODE: '1' }, timeoutMs: 15000 })
-                    .catch(function (err) { return ({ exitCode: 1, stderr: String(err) }); })];
-            case 14:
-                run = _a.sent();
-                if (!(run.exitCode !== 0)) return [3 /*break*/, 17];
-                return [4 /*yield*/, dropGrants($, [grant])];
-            case 15:
-                _a.sent();
-                return [4 /*yield*/, releaseOver($, one.id)];
-            case 16:
-                _a.sent();
-                return [2 /*return*/, stepLine($, one.id, "Nothing was released · Claudopus couldn't start the release")];
-            case 17: return [4 /*yield*/, log($, "release of ".concat(branch, " in ").concat(name, " started by Claudopus for ").concat(one.id))];
-            case 18:
-                _a.sent();
-                timer = everyLoad($, STEP_LOOK, function () {
-                    void (function () { return __awaiter(_this, void 0, void 0, function () {
-                        var text, exit, isLate, tail;
-                        var _a, _b;
-                        return __generator(this, function (_c) {
-                            switch (_c.label) {
-                                case 0:
-                                    // Its end only: a release's whole log can be over the 4 MB the engine gives whole, and then its last line was never seen
-                                    during('look at a release');
-                                    return [4 /*yield*/, fileEnd($, logFile, 64000)];
-                                case 1:
-                                    text = _c.sent();
-                                    exit = (_a = /claudopus-exit (\d+)\s*$/.exec(text)) === null || _a === void 0 ? void 0 : _a[1];
-                                    return [4 /*yield*/, $.clock.now()];
-                                case 2:
-                                    isLate = (_c.sent()) - at > STEP_LONGEST;
-                                    if (exit === undefined && !isLate)
-                                        return [2 /*return*/];
-                                    timer.cancel();
-                                    tail = text.replace(/claudopus-exit \d+\s*$/, '').replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n');
-                                    if (!(exit === '0')) return [3 /*break*/, 6];
-                                    return [4 /*yield*/, stepLine($, one.id, "Released \u00B7 ".concat(cut(oneLine((_b = tail.split('\n').at(-1)) !== null && _b !== void 0 ? _b : ''), 160)))];
-                                case 3:
-                                    _c.sent();
-                                    return [4 /*yield*/, releaseOver($, one.id, true)];
-                                case 4:
-                                    _c.sent();
-                                    return [4 /*yield*/, tellChat($, named("Claudopus released \"".concat(titleOf(one), "\" on {name}'s go-ahead. Its last lines:\n").concat(tail)))];
-                                case 5:
-                                    _c.sent();
-                                    return [2 /*return*/];
-                                case 6: return [4 /*yield*/, stepLine($, one.id, "The release ".concat(isLate ? 'is still running after 1h 30m' : 'failed', " \u00B7 Claudopus started Claude again to look at it"))];
-                                case 7:
-                                    _c.sent();
-                                    return [4 /*yield*/, releaseOver($, one.id)];
-                                case 8:
-                                    _c.sent();
-                                    return [4 /*yield*/, toEnded($, one, one.id, isLate ? "".concat(wakeText, "\nClaudopus started the release itself after the go-ahead, and it has run 90 minutes without ending. It may still be running: look at its log, ").concat(logFile, ", and at what is running, before anything else; do not start a second release while it runs. Its last lines:\n").concat(tail) : "".concat(wakeText, "\nClaudopus ran the release itself after the go-ahead, and it failed with exit ").concat(exit, ". Its log is ").concat(logFile, "; its last lines:\n").concat(tail, "\nSort out what it needs (exit 2: merge main and keep what both sides meant; exit 3: a build or check failed), then run the release as your rules say."), { text: said, ask: ask.text, at: at, line: '', isCard: true, askAt: ask.at })];
-                                case 9:
-                                    _c.sent();
-                                    return [2 /*return*/];
-                            }
-                        });
-                    }); })().catch(function (err) { return log($, "release of ".concat(one.id, " not followed: ").concat(String(err))); });
-                });
-                return [2 /*return*/];
-        }
-    });
-}); };
+// A line the task wrote itself, with its note tool: where it stands, or what it decided
+var isOwnEntry = function (entry) { return entry.kind === 'note' || entry.kind === 'decision'; };
+var ownNote = function (one) { return __spreadArray([], one.entries, true).reverse().find(function (entry) { return isOwnEntry(entry) && entry.text; }); };

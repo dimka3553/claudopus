@@ -5658,7 +5658,7 @@ const personSign = async ($: EngineInterface) => {
   return JSON.stringify([
     presses, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
     [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
-    [...pictureIn.keys()], isUpdating, loadMark,
+    [...pictureIn.keys()], isUpdating, loadMark, foldsHeld(momentAt),
     [...(await read($, todos)), ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
   ])
 }
@@ -6279,23 +6279,24 @@ const sentLine = (one: Todo, now: number, most = 60) => {
   if (sent.isPress) return `✓ You pressed “${cut(sent.text, most)}”`
   return `✓ You ${sent.ask === CHANGE_WHAT ? 'wrote' : 'answered'} “${cut(sent.text, most)}”${isHeld && !isActingOnReply(one) ? ' · the question is still open' : ''}`
 }
-const answerFolds = new Map<string, { need: string; came: number; rows: number; at: number }>()
+const answerFolds = new Map<string, { need: string; came: number; rows: number; at: number; pressed: number }>()
 const FOLD_HELD = 3000
-const holdFold = ($: EngineInterface, card: string, need: string, came: number, rows: number) => {
-  const fold = { need, came, rows, at: Infinity }
-  answerFolds.set(card, fold)
-  void $.clock
-    .now()
-    .then(at => {
-      if (answerFolds.get(card) === fold) answerFolds.set(card, { ...fold, at })
-      $.clock.after(FOLD_HELD + 50, () => (answerFolds.get(card)?.need === need && answerFolds.delete(card), drawAgain($)))
-    })
-    .catch(() => undefined)
-}
-const foldOf = (card: string, now: number, drawn: string[]) => {
+const FOLD_UNSEEN = 10_000
+const holdFold = (card: string, need: string, came: number, rows: number) => void answerFolds.set(card, { need, came, rows, at: Infinity, pressed: Date.now() })
+const foldOf = ($: EngineInterface, card: string, now: number, drawn: string[]) => {
   const fold = answerFolds.get(card)
-  return fold && now - fold.at < FOLD_HELD && !drawn.includes(fold.need) ? fold : undefined
+  if (!fold || drawn.includes(fold.need)) return undefined
+  if (fold.at === Infinity) {
+    if (Date.now() - fold.pressed > FOLD_UNSEEN) return void answerFolds.delete(card)
+    answerFolds.set(card, { ...fold, at: now })
+    $.clock.after(FOLD_HELD + 50, () => drawAgain($))
+    return fold
+  }
+  if (now - fold.at < FOLD_HELD) return fold
+  answerFolds.delete(card)
+  return undefined
 }
+const foldsHeld = (now: number) => [...answerFolds].filter(([, fold]) => now - fold.at < FOLD_HELD).map(([card]) => card)
 let loosePressed: { text: string; at: number }[] = []
 const pressedLine = ($: EngineInterface, card: string, label: string, said = '', whole = '') => {
   const sent: Sent = { text: label, ask: '', to: 'pressed', at: Infinity, isCard: true, ...(said ? { said } : {}), ...(whole ? { whole } : {}) }
@@ -8933,7 +8934,7 @@ const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boo
               label={button.label}
               {...(button.isPlain ? { plain: true } : n === 0 ? { variant: 'primary' as const } : {})}
               {...(button.hotkey ? { hotkey: button.hotkey } : {})}
-              onPress={isFolding && !button.isOpener && one ? press => (holdFold($, one.id, need.id, need.at, foldRows(need, room)), button.onPress(press)) : button.onPress}
+              onPress={isFolding && !button.isOpener && one ? press => (holdFold(one.id, need.id, need.at, foldRows(need, room)), button.onPress(press)) : button.onPress}
             />
           ))}
         </ui.Box>
@@ -12395,7 +12396,7 @@ const panelHooks = (on: On) => {
       )
     }
     const cardNeeds = (one: Todo, isWhole = false) => needsFor(one).filter(need => isWhole || !need.isActing)
-    const heldFold = (one: Todo) => (e.surface === 'desktop' ? foldOf(one.id, at, cardNeeds(one).map(need => need.id)) : undefined)
+    const heldFold = (one: Todo) => (e.surface === 'desktop' ? foldOf($, one.id, at, cardNeeds(one).map(need => need.id)) : undefined)
     const needBlocks = (one: Todo, isWhole = false) => {
       const fold = isWhole ? undefined : heldFold(one)
       const blocks = cardNeeds(one, isWhole).map(need => {
@@ -12404,7 +12405,7 @@ const panelHooks = (on: On) => {
         const node = needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(one, need.id, isWhole) : null, autoFocus })
         return { at: need.at, node: isWhole ? node : <Box key={`lead-${need.id}`} flexDirection="column" paddingLeft={lead}>{node}</Box> }
       })
-      const held = fold ? [{ at: fold.came, node: <Box key={`fold-${one.id}`} flexDirection="column" height={fold.rows} flexShrink={0}>{answeredRow(one) ?? null}</Box> }] : []
+      const held = fold ? [{ at: fold.came, node: <Box key={`fold-${one.id}`} flexDirection="column" height={Math.min(fold.rows, Math.max(4, e.props.scroll.bodyRows))} flexShrink={0}>{answeredRow(one) ?? null}</Box> }] : []
       return [...blocks, ...held].sort((a, b) => a.at - b.at).map(block => block.node)
     }
     const answeredRow = (one: Todo) =>

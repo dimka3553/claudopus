@@ -75,47 +75,58 @@ var commandHooks = function (on) {
     // A box the person moves the focus into holds the panel's drawing, so nothing is drawn under them as they start typing; the focus
     // moved by them anywhere else, or out of the pane, lets it go
     on('ui.focus', function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
-        var isInBarBox, isBarButton, isTabButton;
-        var _a;
-        return __generator(this, function (_b) {
-            switch (_b.label) {
+        var isInBarBox, isInPaneBox, isBarButton, isTabButton;
+        var _a, _b;
+        return __generator(this, function (_c) {
+            switch (_c.label) {
                 case 0:
                     isInBarBox = e.plugin === 'claudopus' && isBarBox(e.element);
                     if (!(isInBarBox && (e.origin.kind === 'person' || barBoxAt === 0))) return [3 /*break*/, 2];
-                    return [4 /*yield*/, $.clock.now()];
+                    return [4 /*yield*/, $.clock.now()
+                        // and a Details tab its message box (messageBox), the same way
+                    ];
                 case 1:
-                    barBoxAt = _b.sent();
-                    _b.label = 2;
+                    barBoxAt = _c.sent();
+                    _c.label = 2;
                 case 2:
-                    if (!(e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined))) return [3 /*break*/, 8];
-                    if (!(e.plugin === 'claudopus')) return [3 /*break*/, 4];
+                    isInPaneBox = e.plugin === 'claudopus' && isPaneBox(e.element);
+                    if (!(isInPaneBox && (e.origin.kind === 'person' || paneBoxAt === 0))) return [3 /*break*/, 4];
+                    return [4 /*yield*/, $.clock.now()];
+                case 3:
+                    ((paneBoxAt = _c.sent()), (paneBoxIn = (_a = e.requestId) !== null && _a !== void 0 ? _a : ''));
+                    _c.label = 4;
+                case 4:
+                    if (!(e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined))) return [3 /*break*/, 10];
+                    if (!(e.plugin === 'claudopus')) return [3 /*break*/, 6];
                     return [4 /*yield*/, engage($)
                         // A button the person put the focus on holds the panel's drawing until it is pressed (PRESS_HOLD)
                     ];
-                case 3:
-                    _b.sent();
-                    _b.label = 4;
-                case 4:
+                case 5:
+                    _c.sent();
+                    _c.label = 6;
+                case 6:
                     // A button the person put the focus on holds the panel's drawing until it is pressed (PRESS_HOLD)
                     if (e.plugin === 'claudopus' && isTypedBox(e.element))
                         holdTimes($);
                     else
                         freeTimes($);
                     isBarButton = e.plugin === 'claudopus' && e.component === 'AbovePrompt' && barIds.get('desktop') === e.requestId && !isBarBox(e.element);
-                    isTabButton = e.plugin === 'claudopus' && heldTabs.has((_a = e.requestId) !== null && _a !== void 0 ? _a : '') && !isTypedBox(e.element);
-                    if (!((e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element)) || isBarButton || isTabButton)) return [3 /*break*/, 6];
+                    isTabButton = e.plugin === 'claudopus' && heldTabs.has((_b = e.requestId) !== null && _b !== void 0 ? _b : '') && !isTypedBox(e.element);
+                    if (!((e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element)) || isBarButton || isTabButton)) return [3 /*break*/, 8];
                     return [4 /*yield*/, holdForPress($)];
-                case 5:
-                    _b.sent();
-                    return [3 /*break*/, 7];
-                case 6:
-                    pressFrom = 0;
-                    _b.label = 7;
                 case 7:
+                    _c.sent();
+                    return [3 /*break*/, 9];
+                case 8:
+                    pressFrom = 0;
+                    _c.label = 9;
+                case 9:
                     if (!isInBarBox)
                         barBoxAt = 0;
-                    _b.label = 8;
-                case 8: return [2 /*return*/, next(e)];
+                    if (!isInPaneBox)
+                        paneBoxAt = 0;
+                    _c.label = 10;
+                case 10: return [2 /*return*/, next(e)];
             }
         });
     }); });

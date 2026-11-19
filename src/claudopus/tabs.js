@@ -274,6 +274,24 @@ var tabHooks = function (on) {
             }
         });
     }); }).catch(function ($, e, next) { return (next.called ? next(e) : tabFailed($, e, next.error)); });
+    // A command's log, a pane of its own named after the command
+    on('ui.render', { component: 'Pane' }, function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
+        var _a;
+        return __generator(this, function (_b) {
+            if (!((_a = e.requestId) === null || _a === void 0 ? void 0 : _a.startsWith(LOG_PANE)))
+                return [2 /*return*/, next(e)];
+            return [2 /*return*/, logView($, uiOf($, e), e.requestId)];
+        });
+    }); }).catch(function ($, e, next) { return (next.called ? next(e) : tabFailed($, e, next.error)); });
+    // What changed in a file a task changed, a pane of its own named after the file
+    on('ui.render', { component: 'Pane' }, function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
+        var _a;
+        return __generator(this, function (_b) {
+            if (!((_a = e.requestId) === null || _a === void 0 ? void 0 : _a.startsWith(DIFF_PANE)))
+                return [2 /*return*/, next(e)];
+            return [2 /*return*/, diffView($, uiOf($, e), e.requestId)];
+        });
+    }); }).catch(function ($, e, next) { return (next.called ? next(e) : tabFailed($, e, next.error)); });
     // A report opened as a pane of its own, named after it
     on('ui.render', { component: 'Pane' }, function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
         var _a, Box, Text, kept, r, _b, _c, _d, at, file, picture, _e, _f, _g, _h, _j;
@@ -330,7 +348,7 @@ var tabHooks = function (on) {
                     _j = [$, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept];
                     return [4 /*yield*/, $.clock.now()];
                 case 12: return [2 /*return*/, (<Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {_h.apply(void 0, _j.concat([_p.sent(), at, picture, e.props.scroll.bodyRows, e.surface === 'terminal' ? { made: [] } : madeOfReport($, r, (_o = reportText.get(r.id)) !== null && _o !== void 0 ? _o : '')]))}
+        {_h.apply(void 0, _j.concat([_p.sent(), at, picture, e.props.scroll.bodyRows, e.surface === 'terminal' ? { made: [] } : madeOfReport($, r, (_o = reportText.get(r.id)) !== null && _o !== void 0 ? _o : ''), e.surface]))}
       </Box>)];
             }
         });

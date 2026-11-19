@@ -148,7 +148,7 @@ var forOtherMac = function (text) {
             return typeof rest.text === 'string' && rest.kind === 'allow' ? __assign(__assign({}, rest), { text: rest.text.split(': ')[0] }) : rest;
         };
         var each = function (list, fn) { return (Array.isArray(list) ? list.map(fn) : list); };
-        return JSON.stringify(__assign(__assign({}, one), { cards: each(one.cards, card), ended: each(one.ended, card), prompts: each(one.prompts, prompt_1), answeredPrompts: each(one.answeredPrompts, prompt_1) }));
+        return JSON.stringify(__assign(__assign({}, one), { cards: each(one.cards, card), ended: each(one.ended, card), prompts: each(one.prompts, prompt_1) }));
     }
     catch (_a) {
         return text;

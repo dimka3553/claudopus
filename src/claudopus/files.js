@@ -132,32 +132,29 @@ var repoTop = function ($, folder) { return __awaiter(_this, void 0, void 0, fun
 // How many lines a task added to and took from the files it changed in one repo, against the repo as it stood when the task began:
 // only the files it wrote itself are counted, so what a merge brought in is left out. A file new since then counts every line, as
 // does every file of a repo with no commit from before the task (one it made); a file it deleted is no longer there to count
-var COUNT_LINES = 'cd "$1" || exit 1; since=$2; shift 2; base=$(git rev-list -1 --before="$since" HEAD 2>/dev/null); [ -n "$base" ] || base=4b825dc642cb6eb9a060e54bf8d69288fbee4904; for f in "$@"; do if git cat-file -e "$base:$f" 2>/dev/null; then git diff --numstat "$base" -- "$f"; elif [ -f "$f" ]; then printf \'%s\\t0\\t%s\\n\' "$(grep -c \'\' "$f")" "$f"; fi; done';
+var COUNT_LINES = 'cd "$1" || exit 1; since=$2; shift 2; base=$(git rev-list -1 --before="$since" HEAD 2>/dev/null); [ -n "$base" ] || base=4b825dc642cb6eb9a060e54bf8d69288fbee4904; for f in "$@"; do if git cat-file -e "$base:$f" 2>/dev/null; then git diff --numstat "$base" -- "$f"; elif [ -f "$f" ]; then printf \'%s\\t0\\t%s\\tnew\\n\' "$(grep -c \'\' "$f")" "$f"; fi; done';
+// Each file listed, the most changed first, its counts kept with the whole
 var codeOf = function ($, byTop, since) { return __awaiter(_this, void 0, void 0, function () {
-    var count, plus, minus, _loop_1, _i, byTop_1, _a, top_1, paths;
+    var files, _loop_1, _i, byTop_1, _a, top_1, paths;
     return __generator(this, function (_b) {
         switch (_b.label) {
             case 0:
-                count = 0;
-                plus = 0;
-                minus = 0;
+                files = [];
                 _loop_1 = function (top_1, paths) {
-                    var r, _c, _d, line, _e, _f, added, _g, taken;
-                    return __generator(this, function (_h) {
-                        switch (_h.label) {
+                    var r, _c, _d, line, _e, _f, added, _g, taken, _h, inRepo, _j, isNew;
+                    return __generator(this, function (_k) {
+                        switch (_k.label) {
                             case 0: return [4 /*yield*/, $.process.run(__spreadArray(['sh', '-c', COUNT_LINES, 'sh', top_1, String(Math.floor(since / 1000))], paths.map(function (path) { return path.slice(top_1.length + 1); }), true), { timeoutMs: 8000 }).catch(function () { return undefined; })];
                             case 1:
-                                r = _h.sent();
+                                r = _k.sent();
                                 if ((r === null || r === void 0 ? void 0 : r.exitCode) !== 0)
                                     return [2 /*return*/, "continue"];
                                 for (_c = 0, _d = rows(r.stdout); _c < _d.length; _c++) {
                                     line = _d[_c];
-                                    _e = line.split('\t'), _f = _e[0], added = _f === void 0 ? '' : _f, _g = _e[1], taken = _g === void 0 ? '' : _g;
-                                    if (!/^(\d+|-)$/.test(added))
+                                    _e = line.split('\t'), _f = _e[0], added = _f === void 0 ? '' : _f, _g = _e[1], taken = _g === void 0 ? '' : _g, _h = _e[2], inRepo = _h === void 0 ? '' : _h, _j = _e[3], isNew = _j === void 0 ? '' : _j;
+                                    if (!/^(\d+|-)$/.test(added) || !inRepo)
                                         continue;
-                                    count += 1;
-                                    plus += Number(added) || 0;
-                                    minus += Number(taken) || 0;
+                                    files.push(__assign({ path: "".concat(top_1, "/").concat(inRepo), inRepo: inRepo, plus: Number(added) || 0, minus: Number(taken) || 0 }, (isNew === 'new' ? { isNew: true } : {})));
                                 }
                                 return [2 /*return*/];
                         }
@@ -175,7 +172,11 @@ var codeOf = function ($, byTop, since) { return __awaiter(_this, void 0, void 0
             case 3:
                 _i++;
                 return [3 /*break*/, 1];
-            case 4: return [2 /*return*/, count ? { count: count, plus: plus, minus: minus } : undefined];
+            case 4:
+                if (!files.length)
+                    return [2 /*return*/, undefined];
+                files.sort(function (a, b) { return b.plus + b.minus - (a.plus + a.minus); });
+                return [2 /*return*/, { count: files.length, plus: files.reduce(function (sum, one) { return sum + one.plus; }, 0), minus: files.reduce(function (sum, one) { return sum + one.minus; }, 0), files: files, since: Math.floor(since / 1000) }];
         }
     });
 }); };
@@ -502,9 +503,9 @@ var endingOf = function (path) {
     if (path === void 0) { path = ''; }
     return ((_b = (_a = /\.([a-z0-9]{1,4})$/i.exec(path)) === null || _a === void 0 ? void 0 : _a[1]) !== null && _b !== void 0 ? _b : '').toUpperCase();
 };
-var iconOf = function (kind, path) {
-    return kind === 'code' ? CODE_ICON : kind === 'link' ? LINK_ICON : pageIcon(kind === 'file' ? endingOf(path) : madeKindOf(kind).badge, madeKindOf(kind).color);
-};
+// A file of code shows its ending in its language's colour
+var ENDING_COLORS = { TS: '#3178C6', TSX: '#3178C6', JS: '#B8A11E', JSX: '#B8A11E', MJS: '#B8A11E', PY: '#3572A5', SH: '#4E9A2A', JSON: '#8A7A2E', CSS: '#663399', HTML: '#D24E2B', MD: '#6B6A65', SWIFT: '#E0583A', GO: '#00879A', RS: '#B7410E', RB: '#B22222', C: '#555BA8', H: '#555BA8', CPP: '#555BA8' };
+var iconOf = function (kind, path) { var _a; return kind === 'code' ? CODE_ICON : kind === 'link' ? LINK_ICON : pageIcon(kind === 'file' ? endingOf(path) : madeKindOf(kind).badge, kind === 'file' ? ((_a = ENDING_COLORS[endingOf(path)]) !== null && _a !== void 0 ? _a : madeKindOf(kind).color) : madeKindOf(kind).color); };
 var svgOfIcon = function (kind, width, height, path) { return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"".concat(width, "\" height=\"").concat(height, "\" viewBox=\"0 0 28 32\">").concat(iconOf(kind, path), "</svg>"); };
 var tileSvg = function (inner) { return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"".concat(TILE_W, "\" height=\"").concat(TILE_H, "\" viewBox=\"0 0 ").concat(TILE_W, " ").concat(TILE_H, "\">").concat(inner, "</svg>"); };
 // A small copy cut to its place from its top, with rounded corners; each tile's cut has a name of its own, should the app draw them
@@ -526,10 +527,26 @@ var pileTile = function (first, face) {
     return tileSvg("<rect x=\"8\" y=\"0\" width=\"".concat(TILE_W - 8, "\" height=\"").concat(TILE_H - 8, "\" rx=\"4\" fill=\"#55554f\"/><rect x=\"4\" y=\"4\" width=\"").concat(TILE_W - 8, "\" height=\"").concat(TILE_H - 8, "\" rx=\"4\" fill=\"#77766f\"/>") +
         (face ? tilePicture(face, 0, 8, TILE_W - 8, TILE_H - 8, clipId(first)) + (first.kind === 'video' ? tilePlay((TILE_W - 8) / 2, 8 + (TILE_H - 8) / 2) : '') : "<rect x=\"0\" y=\"8\" width=\"".concat(TILE_W - 8, "\" height=\"").concat(TILE_H - 8, "\" rx=\"4\" fill=\"#3b3b39\" stroke=\"#ffffff30\"/><g transform=\"translate(").concat((TILE_W - 8) / 2 - 17.5, " ").concat(8 + (TILE_H - 8) / 2 - 20, ") scale(1.25)\">").concat(iconOf(first.kind, first.path), "</g>")));
 };
-// Code: how many lines were added and taken away
-var codeTile = function (code) {
-    return tileSvg("<rect width=\"".concat(TILE_W, "\" height=\"").concat(TILE_H, "\" rx=\"4\" fill=\"#ffffff12\"/><text x=\"").concat(TILE_W / 2, "\" y=\"").concat(TILE_H / 2 - 3, "\" font-size=\"15\" ").concat(SVG_FONT, " font-weight=\"600\" fill=\"#57AB5A\" text-anchor=\"middle\">+").concat(code.plus.toLocaleString('en-US'), "</text><text x=\"").concat(TILE_W / 2, "\" y=\"").concat(TILE_H / 2 + 16, "\" font-size=\"15\" ").concat(SVG_FONT, " font-weight=\"600\" fill=\"#E5534B\" text-anchor=\"middle\">\u2212").concat(code.minus.toLocaleString('en-US'), "</text>"));
+// A changed file's size of change: a bar as long as its lines changed against the most changed file listed with it (by the square
+// root, so a small edit beside a large one still shows), green for the lines added and red for those removed, on a faint track
+var BAR_W = 64;
+var BAR_H = 8;
+var BAR_CELLS = 6;
+var ADDED = '#57AB5A';
+var REMOVED = '#E5534B';
+var barShare = function (one, most) { return (most > 0 ? Math.sqrt((one.plus + one.minus) / most) : 0); };
+var barSvg = function (one, most) {
+    var long = one.plus + one.minus ? Math.max(4, Math.round(BAR_W * barShare(one, most))) : 0;
+    var green = one.plus + one.minus ? Math.round((long * one.plus) / (one.plus + one.minus)) : 0;
+    return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"".concat(BAR_W, "\" height=\"").concat(BAR_H, "\" viewBox=\"0 0 ").concat(BAR_W, " ").concat(BAR_H, "\"><rect width=\"").concat(BAR_W, "\" height=\"").concat(BAR_H, "\" rx=\"2\" fill=\"#ffffff14\"/>").concat(green ? "<rect width=\"".concat(green, "\" height=\"").concat(BAR_H, "\" rx=\"2\" fill=\"").concat(ADDED, "\"/>") : '').concat(long - green ? "<rect x=\"".concat(green, "\" width=\"").concat(long - green, "\" height=\"").concat(BAR_H, "\" rx=\"2\" fill=\"").concat(REMOVED, "\"/>") : '', "</svg>");
 };
+// The same in a terminal, as cells: added, removed, then the track
+var barCells = function (one, most) {
+    var long = one.plus + one.minus ? Math.max(1, Math.round(BAR_CELLS * barShare(one, most))) : 0;
+    var green = one.plus + one.minus ? Math.round((long * one.plus) / (one.plus + one.minus)) : 0;
+    return { green: '■'.repeat(green), red: '■'.repeat(long - green), rest: '·'.repeat(BAR_CELLS - long) };
+};
+var linesWord = function (one) { return "".concat(one.plus.toLocaleString('en-US'), " added, ").concat(one.minus.toLocaleString('en-US'), " removed"); };
 // A file's name as a tile says it: without its ending, and without the start that the task's file names share, which says nothing
 var sharedStart = function (names) {
     var _a;
@@ -555,7 +572,26 @@ var thingsOf = function (files, opened) {
 };
 // A name too long for its place keeps its start and its end, which is what tells two apart: "vat-li…country", "os re…t 362"
 var middleCut = function (text, most) { return (text.length <= most ? text : "".concat(text.slice(0, Math.ceil((most - 1) / 2)), "\u2026").concat(text.slice(text.length - Math.floor((most - 1) / 2)))); };
-var countWord = function (code) { return "".concat(code.count.toLocaleString('en-US'), " code ").concat(code.count === 1 ? 'file' : 'files'); };
+var countWord = function (code) { return "".concat(code.count.toLocaleString('en-US'), " changed ").concat(code.count === 1 ? 'file' : 'files'); };
+// The files a task changed in a repo, by kind: its code, then its documents (plain text such as Markdown), each the most changed first
+var CODE_KINDS = [
+    { kind: 'code', title: 'Code', test: function (one) { return !TEXT_DOC.test(one.path); } },
+    { kind: 'docs', title: 'Documents', test: function (one) { return TEXT_DOC.test(one.path); } },
+];
+// The most files listed before "Show all"
+var CHANGED_MOST = 8;
+// Files by the folder they are in inside the repo, the folder of the most changed first, as they stand in the list; one at the
+// repo's top is under the repo's own name
+var foldersOf = function (list) {
+    var _a;
+    var by = new Map();
+    for (var _i = 0, list_1 = list; _i < list_1.length; _i++) {
+        var one = list_1[_i];
+        var folder = one.inRepo.includes('/') ? one.inRepo.slice(0, one.inRepo.lastIndexOf('/')) : fileName(one.path.slice(0, one.path.length - one.inRepo.length - 1));
+        by.set(folder, __spreadArray(__spreadArray([], ((_a = by.get(folder)) !== null && _a !== void 0 ? _a : []), true), [one], false));
+    }
+    return __spreadArray([], by.entries(), true);
+};
 // Opens what was pressed where the person is: a picture as the chat's pictures open, any other file or a link as the system opens it
 var openMade = function ($, one, pane, row, surface) { return __awaiter(_this, void 0, void 0, function () {
     var opened;
@@ -603,16 +639,20 @@ var madeChips = function ($, ui, one, key, onOpenWork) {
       {things.length > shown.length ? <Text key={"".concat(key, "-more")} dimColor>{"".concat(things.length - shown.length, " more")}</Text> : null}
       {files.code ? (<Box key={"".concat(key, "-code")} flexDirection="row" alignItems="center" gap={1} flexShrink={0} height={1} overflow="hidden">
           {icon('code', "".concat(key, "-code"))}
-          <Text>{countWord(files.code)}</Text>
-          <Text color="success">{"+".concat(files.code.plus.toLocaleString('en-US'))}</Text>
-          {files.code.minus ? <Text color="error">{"\u2212".concat(files.code.minus.toLocaleString('en-US'))}</Text> : null}
+          <Button key={"".concat(key, "-code-open-").concat(presses)} label={countWord(files.code)} plain hover={{ underline: true }} onPress={function () { return void ((presses += 1), onOpenWork()); }}/>
+          {/* (the counts drawn at the button's size, as in Details) */}
+          {table.Svg && !('isTerminal' in ui) ? (<table.Svg key={"".concat(key, "-code-counts")} source={chipCountsSvg(files.code)} alt={linesWord(files.code)} width={chipCountsW(files.code)} height={LIST_H}/>) : ([
+                <Text key={"".concat(key, "-code-plus")} color="success">{"+".concat(files.code.plus.toLocaleString('en-US'))}</Text>,
+                files.code.minus ? <Text key={"".concat(key, "-code-minus")} color="error">{"\u2212".concat(files.code.minus.toLocaleString('en-US'))}</Text> : null,
+            ])}
         </Box>) : null}
     </Box>);
 };
 // In a task's Details and in its result: the same things as tiles side by side, a small copy and a name each, each a press. A
 // stack opens out into a tile for each of its files. Where no picture can be drawn, a row each
 // `gen`, where the pane has one, is the mark of what its drawing shows, which every key carries
-var madeTiles = function ($, ui, files, pane, key, surface, gen) {
+// `owner`: the task or the result the files are of, which a file's tab goes back to
+var madeTiles = function ($, ui, files, pane, key, owner, surface, gen) {
     if (gen === void 0) { gen = ''; }
     if (!files.made.length && !files.code)
         return null;
@@ -647,14 +687,362 @@ var madeTiles = function ($, ui, files, pane, key, surface, gen) {
               <Button key={"".concat(row, "-open-").concat(presses).concat(gen)} label={canDraw ? middleCut(thing.label, TILE_COLUMNS) : cut(thing.label, 60)} plain onPress={press(thing, row)}/>
             </Box>);
         })}
-        {files.code ? (<Box key={"".concat(key, "-code")} flexDirection="column" alignItems="flex-start" width={canDraw ? TILE_COLUMNS : undefined} flexShrink={0}>
-            {canDraw && table.Svg ? <table.Svg key={"".concat(key, "-code-svg")} source={codeTile(files.code)} alt={countWord(files.code)} width={TILE_SHOWN_W} height={TILE_SHOWN_H}/> : null}
-            <Text dimColor wrap="truncate-end">{canDraw ? countWord(files.code) : "".concat(countWord(files.code), " \u00B7 +").concat(files.code.plus.toLocaleString('en-US'), " \u2212").concat(files.code.minus.toLocaleString('en-US'))}</Text>
-          </Box>) : null}
       </Box>
       {things.length > shown.length ? <Text dimColor>{"".concat(things.length - shown.length, " more")}</Text> : null}
       {fewer.length ? (<Box alignItems="flex-start">
           <Button key={"".concat(key, "-fewer-").concat(presses).concat(gen)} label="Show less" plain dimColor onPress={function () { return void ((presses += 1), fewer.forEach(function (kind) { return openPiles.delete("".concat(pane, ":").concat(kind)); }), redraw($)); }}/>
         </Box>) : null}
+      {files.code ? changedList($, ui, files.code, pane, key, canDraw, owner, gen) : null}
     </Box>);
 };
+// Under the tiles, the files the task changed in a repo, by kind: each kind's heading with its counts, then under a line for each
+// folder inside the repo a row a file: its icon, its name, then its counts and its bar at the right, which line up down the list.
+// The app draws a button's words at 14 pixels and other words at 16, so where it draws pictures every word but a file's name (a
+// button) is drawn in a picture at 14, and the list reads at one size. A press on a name shows the file in the app's Files pane. A
+// task counted before files were kept has only its counts
+var LIST_FONT = 14;
+var LIST_H = 20;
+// The counts' picture: `new` for a file the task made, the lines added and removed, each right-aligned in a column of its own, then
+// the bar
+var COUNTS_W = 200;
+var countsSvg = function (one, bar, isNew, isDim) {
+    var _a;
+    if (isNew === void 0) { isNew = false; }
+    if (isDim === void 0) { isDim = false; }
+    var y = LIST_H / 2 + LIST_FONT * 0.36;
+    var text = function (x, color, words, anchor) {
+        if (anchor === void 0) { anchor = 'end'; }
+        return "<text x=\"".concat(x, "\" y=\"").concat(y, "\" font-size=\"").concat(LIST_FONT, "\" ").concat(SVG_FONT, " fill=\"").concat(color, "\" text-anchor=\"").concat(anchor, "\">").concat(words, "</text>");
+    };
+    var shown = barSvg(__assign({ path: '', inRepo: '' }, one), (_a = bar === null || bar === void 0 ? void 0 : bar.most) !== null && _a !== void 0 ? _a : 0);
+    return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"".concat(COUNTS_W, "\" height=\"").concat(LIST_H, "\" viewBox=\"0 0 ").concat(COUNTS_W, " ").concat(LIST_H, "\">").concat(isNew ? text(0, '#9a9890', 'new', 'start') : '').concat(text(70, isDim ? '#57AB5A99' : ADDED, "+".concat(one.plus.toLocaleString('en-US')))).concat(text(118, one.minus && !isDim ? REMOVED : '#E5534B80', "\u2212".concat(one.minus.toLocaleString('en-US')))).concat(bar ? "<g transform=\"translate(".concat(COUNTS_W - BAR_W, " ").concat((LIST_H - BAR_H) / 2, ")\">").concat(shown.replace(/^<svg[^>]*>|<\/svg>$/g, ''), "</g>") : '', "</svg>");
+};
+// The same counts on a card, side by side from the left, as wide as they are (a figure is about 8.5 pixels at the list's size)
+var FIGURE_W = 8.5;
+var chipCountsW = function (one) { return Math.ceil(("+".concat(one.plus.toLocaleString('en-US')).length + 1 + "\u2212".concat(one.minus.toLocaleString('en-US')).length) * FIGURE_W) + 4; };
+var chipCountsSvg = function (one) {
+    var plus = "+".concat(one.plus.toLocaleString('en-US'));
+    var y = LIST_H / 2 + LIST_FONT * 0.36;
+    return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"".concat(chipCountsW(one), "\" height=\"").concat(LIST_H, "\" viewBox=\"0 0 ").concat(chipCountsW(one), " ").concat(LIST_H, "\"><text x=\"0\" y=\"").concat(y, "\" font-size=\"").concat(LIST_FONT, "\" ").concat(SVG_FONT, "><tspan fill=\"").concat(ADDED, "\">").concat(plus, "</tspan><tspan fill=\"").concat(one.minus ? REMOVED : '#E5534B80', "\" x=\"").concat(Math.ceil((plus.length + 1) * FIGURE_W), "\">\u2212").concat(one.minus.toLocaleString('en-US'), "</tspan></text></svg>");
+};
+// A line of words drawn at the list's size: a kind's heading (its name in white, its count in grey) or a folder (grey)
+var wordsSvg = function (parts, width) {
+    var y = LIST_H / 2 + LIST_FONT * 0.36;
+    return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"".concat(width, "\" height=\"").concat(LIST_H, "\" viewBox=\"0 0 ").concat(width, " ").concat(LIST_H, "\"><text x=\"0\" y=\"").concat(y, "\" font-size=\"").concat(LIST_FONT, "\" ").concat(SVG_FONT, ">").concat(parts.map(function (part) { return "<tspan fill=\"".concat(part.color, "\"").concat(part.bold ? ' font-weight="600"' : '', ">").concat(escapeXml(part.words), " </tspan>"); }).join(''), "</text></svg>");
+};
+var escapeXml = function (text) { return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+// The widths of a folder's line and a kind's heading, in pixels: a folder's 44 characters at most, a heading's few words
+var LINE_W = 320;
+var HEAD_W = 160;
+var changedList = function ($, ui, code, pane, key, canDraw, owner, gen) {
+    var _a;
+    var Box = ui.Box, Button = ui.Button, Text = ui.Text;
+    var table = ui;
+    var Svg = canDraw ? table.Svg : undefined;
+    var list = (_a = code.files) !== null && _a !== void 0 ? _a : [];
+    var isAll = openPiles.has("".concat(pane, ":code"));
+    var most = Math.max.apply(Math, __spreadArray([0], list.map(function (one) { return one.plus + one.minus; }), false));
+    var groups = CODE_KINDS.map(function (group) {
+        var all = list.filter(group.test);
+        return __assign(__assign({}, group), { all: all, sum: { plus: all.reduce(function (n, one) { return n + one.plus; }, 0), minus: all.reduce(function (n, one) { return n + one.minus; }, 0) } });
+    }).filter(function (group) { return group.all.length; });
+    var filesWord = function (n) { return "".concat(n.toLocaleString('en-US'), " ").concat(n === 1 ? 'file' : 'files'); };
+    // The counts at a row's right: a picture where the app draws them, else words and cells
+    var countsOf = function (one, at, bar, isNew, isDim) {
+        if (isNew === void 0) { isNew = false; }
+        if (isDim === void 0) { isDim = false; }
+        if (Svg)
+            return <Svg key={"".concat(at, "-counts")} source={countsSvg(one, bar, isNew, isDim)} alt={"".concat(isNew ? 'new, ' : '').concat(linesWord(one))} width={COUNTS_W} height={LIST_H}/>;
+        var cells = bar ? barCells(__assign({ path: '', inRepo: '' }, one), bar.most) : undefined;
+        return (<Box key={"".concat(at, "-counts")} flexDirection="row" gap={1}>
+        {isNew ? <Text dimColor>new</Text> : null}
+        <Text color="success" dimColor={isDim}>{"+".concat(one.plus.toLocaleString('en-US'))}</Text>
+        <Text color="error" dimColor={isDim || !one.minus}>{"\u2212".concat(one.minus.toLocaleString('en-US'))}</Text>
+        {cells ? (<Box flexDirection="row">
+            <Text color="success">{cells.green}</Text>
+            <Text color="error">{cells.red}</Text>
+            <Text dimColor>{cells.rest}</Text>
+          </Box>) : null}
+      </Box>);
+    };
+    if (!list.length)
+        return (<Box key={"".concat(key, "-code")} flexDirection="row" alignItems="center" gap={1}>
+        {Svg ? <Svg key={"".concat(key, "-code-word")} source={wordsSvg([{ words: countWord(code), color: '#9a9890' }], HEAD_W)} alt={countWord(code)} width={HEAD_W} height={LIST_H}/> : <Text dimColor>{countWord(code)}</Text>}
+        {countsOf(code, "".concat(key, "-code"))}
+      </Box>);
+    var left = isAll ? Infinity : CHANGED_MOST;
+    return (<Box key={"".concat(key, "-code")} flexDirection="column" gap={1}>
+      {groups.map(function (group) {
+            var rows = group.all.slice(0, Math.max(0, left));
+            left -= rows.length;
+            var heading = "".concat(group.title, " \u00B7 ").concat(filesWord(group.all.length));
+            return (<Box key={"".concat(key, "-").concat(group.kind)} flexDirection="column">
+            <Box flexDirection="row" alignItems="center" gap={1} minWidth={0}>
+              <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+                {Svg ? (<Svg key={"".concat(key, "-").concat(group.kind, "-head")} source={wordsSvg([{ words: group.title, color: '#ECEAE3', bold: true }, { words: filesWord(group.all.length), color: '#9a9890' }], HEAD_W)} alt={heading} width={HEAD_W} height={LIST_H}/>) : (<Text bold>{heading}</Text>)}
+              </Box>
+              <Box flexShrink={0}>{countsOf(group.sum, "".concat(key, "-").concat(group.kind, "-sum"), undefined, false, true)}</Box>
+            </Box>
+            {foldersOf(rows).map(function (_a) {
+                    var folder = _a[0], inFolder = _a[1];
+                    return (<Box key={"".concat(key, "-").concat(group.kind, "-in-").concat(mark(folder).replace(':', '-'))} flexDirection="column">
+                {Svg ? (<Box minWidth={0} overflow="hidden">
+                    <Svg key={"".concat(key, "-").concat(group.kind, "-folder-").concat(mark(folder).replace(':', '-'))} source={wordsSvg([{ words: middleCut(folder, 44), color: '#9a9890' }], LINE_W)} alt={folder} width={LINE_W} height={LIST_H}/>
+                  </Box>) : (<Text dimColor wrap="truncate-end">{folder}</Text>)}
+                {inFolder.map(function (one) {
+                            var row = "".concat(key, "-").concat(group.kind, "-").concat(mark(one.path).replace(':', '-'));
+                            return (<Box key={row} flexDirection="row" alignItems="center" gap={1} minWidth={0}>
+                      {Svg ? (<Box flexShrink={0}>
+                          <Svg key={"".concat(row, "-icon")} source={svgOfIcon('file', 16, 18, one.path)} alt={"".concat(endingOf(one.path) || 'Text', " file")} width={16} height={18}/>
+                        </Box>) : null}
+                      <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+                        <Button key={"".concat(row, "-open-").concat(presses).concat(gen)} label={fileName(one.path)} plain hover={{ underline: true }} onPress={function (press) { var _a; return void showFile($, one, (_a = code.since) !== null && _a !== void 0 ? _a : 0, owner, press.surface); }}/>
+                      </Box>
+                      <Box flexShrink={0}>{countsOf(one, row, { most: most }, Boolean(one.isNew))}</Box>
+                    </Box>);
+                        })}
+              </Box>);
+                })}
+          </Box>);
+        })}
+      {list.length > CHANGED_MOST ? (<Box alignItems="flex-start">
+          <Button key={"".concat(key, "-code-all-").concat(presses).concat(gen)} label={isAll ? 'Show less' : "Show all ".concat(list.length)} plain dimColor onPress={function () { return void ((presses += 1), isAll ? openPiles.delete("".concat(pane, ":code")) : openPiles.add("".concat(pane, ":code")), redraw($)); }}/>
+        </Box>) : null}
+    </Box>);
+};
+// A press on a changed file shows it in the desktop app's own Files pane, beside the chat, through the app's view tool. Where the
+// app has no Files pane (the terminal, an app without the tool) or will not show it (a file outside the chat's folders), what changed
+// in it opens in a tab of the panel instead
+var showFile = function ($, file, since, owner, surface) { return __awaiter(_this, void 0, void 0, function () {
+    var shown, said_2;
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0:
+                presses += 1;
+                if (!(surface !== 'terminal')) return [3 /*break*/, 3];
+                return [4 /*yield*/, $.mcp.call('ccd_view', 'show_pane', { pane: 'file', path: file.path }).catch(function (err) { return ({ isError: true, content: [{ type: 'text', text: String(err) }] }); })];
+            case 1:
+                shown = _a.sent();
+                said_2 = shown.content.map(function (one) { return ('text' in one ? String(one.text) : ''); }).join(' ');
+                if (!shown.isError)
+                    return [2 /*return*/];
+                return [4 /*yield*/, log($, "".concat(file.path, " not shown in the Files pane, its changes open in a tab: ").concat(cut(said_2, 160)))];
+            case 2:
+                _a.sent();
+                _a.label = 3;
+            case 3:
+                openDiff($, file, since, owner);
+                return [2 /*return*/];
+        }
+    });
+}); };
+// ---- What changed in one file, in a tab of the panel ----
+// The tab is named after the file: the file's name over its folder and counts, Details (or Result) to go back, Whole file or
+// Changes, then what changed, drawn by Claude Code itself as a diff, or the whole file. A file new since the task began is drawn
+// whole. The tab finds its file again after a reload in the paths its task wrote, or its result kept
+var DIFF_PANE = 'diff-';
+// The most characters of a diff or a file one drawing takes (the engine's Code takes 100000 in one drawing)
+var DIFF_CHARS = 90000;
+var diffPaneOf = function (path) { return "".concat(DIFF_PANE).concat(mark(path).replace(':', '-')); };
+var diffs = new Map();
+// The tabs showing their whole file rather than what changed
+var diffWhole = new Set();
+var openDiff = function ($, file, since, owner) {
+    var _a;
+    var id = diffPaneOf(file.path);
+    if (diffs.size > 100)
+        diffs.delete((_a = diffs.keys().next().value) !== null && _a !== void 0 ? _a : '');
+    diffs.set(id, { file: file, since: since, owner: owner });
+    void comingTab((function () { return __awaiter(_this, void 0, void 0, function () {
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0: return [4 /*yield*/, front($, id, cut(fileName(file.path), 30))];
+                case 1:
+                    _a.sent();
+                    redraw($);
+                    return [2 /*return*/];
+            }
+        });
+    }); })()).catch(function (err) { return log($, "changes of ".concat(file.path, " not opened: ").concat(String(err))); });
+};
+// After a reload: the card or the result whose listing holds the file
+var diffOf = function ($, id) { return __awaiter(_this, void 0, void 0, function () {
+    var known, _i, _a, _b, owner, kept, file, _c, _d, r, file, _e, _f, one, path;
+    var _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t;
+    return __generator(this, function (_u) {
+        switch (_u.label) {
+            case 0:
+                known = diffs.get(id);
+                if (known)
+                    return [2 /*return*/, known];
+                for (_i = 0, _a = __spreadArray([], madeOf.entries(), true).map(function (_a) {
+                    var one = _a[0], made = _a[1];
+                    return [one, made.files];
+                }).concat(__spreadArray([], madeOfOld.entries(), true)); _i < _a.length; _i++) {
+                    _b = _a[_i], owner = _b[0], kept = _b[1];
+                    file = (_h = (_g = kept.code) === null || _g === void 0 ? void 0 : _g.files) === null || _h === void 0 ? void 0 : _h.find(function (one) { return diffPaneOf(one.path) === id; });
+                    if (file)
+                        return [2 /*return*/, { file: file, since: (_k = (_j = kept.code) === null || _j === void 0 ? void 0 : _j.since) !== null && _k !== void 0 ? _k : 0, owner: owner }];
+                }
+                _c = 0;
+                return [4 /*yield*/, read($, reports)];
+            case 1:
+                _d = _u.sent();
+                _u.label = 2;
+            case 2:
+                if (!(_c < _d.length)) return [3 /*break*/, 4];
+                r = _d[_c];
+                file = (_o = (_m = (_l = r.made) === null || _l === void 0 ? void 0 : _l.code) === null || _m === void 0 ? void 0 : _m.files) === null || _o === void 0 ? void 0 : _o.find(function (one) { return diffPaneOf(one.path) === id; });
+                if (file)
+                    return [2 /*return*/, { file: file, since: (_r = (_q = (_p = r.made) === null || _p === void 0 ? void 0 : _p.code) === null || _q === void 0 ? void 0 : _q.since) !== null && _r !== void 0 ? _r : 0, owner: r.id }];
+                _u.label = 3;
+            case 3:
+                _c++;
+                return [3 /*break*/, 2];
+            case 4:
+                _e = 0;
+                return [4 /*yield*/, read($, todos)];
+            case 5:
+                _f = _u.sent();
+                _u.label = 6;
+            case 6:
+                if (!(_e < _f.length)) return [3 /*break*/, 8];
+                one = _f[_e];
+                path = ((_s = one.wrote) !== null && _s !== void 0 ? _s : []).find(function (path) { return diffPaneOf(path) === id; });
+                if (path)
+                    return [2 /*return*/, { file: { path: path, inRepo: '', plus: 0, minus: 0 }, since: Math.floor(((_t = one.begunAt) !== null && _t !== void 0 ? _t : one.startedAt) / 1000), owner: one.id }];
+                _u.label = 7;
+            case 7:
+                _e++;
+                return [3 /*break*/, 6];
+            case 8: return [2 /*return*/, undefined];
+        }
+    });
+}); };
+// What changed in the file since the task began, against the repo as it stood then, as unified-diff hunks; a file that was not
+// there then, the file itself
+var DIFF_OF = 'cd "$1" || exit 1; f=$3; base=$(git rev-list -1 --before="$2" HEAD 2>/dev/null); [ -n "$base" ] || base=4b825dc642cb6eb9a060e54bf8d69288fbee4904; if git cat-file -e "$base:$f" 2>/dev/null; then git diff --no-color --no-ext-diff -U3 "$base" -- "$f"; else echo NEW; fi; exit 0 # the changes tab';
+// A diff cut to fit: whole hunks while they fit, then the part of the next that fits, its header counted again so it still parses
+var diffCut = function (text, most) {
+    var _a, _b;
+    var lines = text.split('\n');
+    var from = lines.findIndex(function (line) { return line.startsWith('@@'); });
+    if (from < 0)
+        return { source: '', isCut: false };
+    var out = [];
+    var size = 0;
+    var hunk;
+    var close = function () {
+        if (hunk)
+            out[hunk.at] = "@@ -".concat(hunk.oldFrom, ",").concat(hunk.old, " +").concat(hunk.nowFrom, ",").concat(hunk.now, " @@");
+    };
+    for (var _i = 0, _c = lines.slice(from); _i < _c.length; _i++) {
+        var line = _c[_i];
+        if (size + line.length + 1 > most)
+            return (close(), { source: out.join('\n'), isCut: true });
+        size += line.length + 1;
+        var head = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+        if (head) {
+            close();
+            hunk = { at: out.length, old: 0, now: 0, oldFrom: (_a = head[1]) !== null && _a !== void 0 ? _a : '1', nowFrom: (_b = head[2]) !== null && _b !== void 0 ? _b : '1' };
+        }
+        else if (hunk && line.startsWith(' '))
+            ((hunk.old += 1), (hunk.now += 1));
+        else if (hunk && line.startsWith('-'))
+            hunk.old += 1;
+        else if (hunk && line.startsWith('+'))
+            hunk.now += 1;
+        out.push(line);
+    }
+    close();
+    return { source: out.join('\n').replace(/\n+$/, ''), isCut: false };
+};
+// What a tab last read, by the tab and the file as it stood, so a redraw reads nothing again
+var diffRead = new Map();
+var diffView = function ($, ui, paneId) { return __awaiter(_this, void 0, void 0, function () {
+    var Box, Button, Text, found, file, since, owner, stat, isWhole, got, readKey, top_3, r, _a, whole_1, isNew, diff, showsWhole, wholeText, wholeCut, card, result, _b, folder, table, lines, body;
+    var _c, _d, _e, _f, _g;
+    return __generator(this, function (_h) {
+        switch (_h.label) {
+            case 0:
+                Box = ui.Box, Button = ui.Button, Text = ui.Text;
+                return [4 /*yield*/, diffOf($, paneId)];
+            case 1:
+                found = _h.sent();
+                if (!found)
+                    return [2 /*return*/, <Text dimColor>This file is no longer listed.</Text>];
+                file = found.file, since = found.since, owner = found.owner;
+                return [4 /*yield*/, $.fs.stat(file.path).catch(function () { return undefined; })];
+            case 2:
+                stat = _h.sent();
+                isWhole = diffWhole.has(paneId);
+                got = diffRead.get(paneId);
+                readKey = "".concat(file.path, ":").concat(since, ":").concat((_c = stat === null || stat === void 0 ? void 0 : stat.mtimeMs) !== null && _c !== void 0 ? _c : 0);
+                if (!(stat && (!got || got.key !== readKey))) return [3 /*break*/, 8];
+                return [4 /*yield*/, repoTop($, file.path.slice(0, file.path.lastIndexOf('/')))];
+            case 3:
+                top_3 = _h.sent();
+                if (!top_3) return [3 /*break*/, 5];
+                return [4 /*yield*/, $.process.run(['sh', '-c', DIFF_OF, 'sh', top_3, String(since), file.path.slice(top_3.length + 1)], { timeoutMs: 8000 }).catch(function () { return undefined; })];
+            case 4:
+                _a = _h.sent();
+                return [3 /*break*/, 6];
+            case 5:
+                _a = undefined;
+                _h.label = 6;
+            case 6:
+                r = _a;
+                return [4 /*yield*/, $.fs.read(file.path).then(function (text) { return String(text); }, function () { return ''; })];
+            case 7:
+                whole_1 = _h.sent();
+                got = { key: readKey, text: (r === null || r === void 0 ? void 0 : r.exitCode) === 0 ? r.stdout : '', whole: whole_1 };
+                if (diffRead.size > 20)
+                    diffRead.delete((_d = diffRead.keys().next().value) !== null && _d !== void 0 ? _d : '');
+                diffRead.set(paneId, got);
+                _h.label = 8;
+            case 8:
+                isNew = (got === null || got === void 0 ? void 0 : got.text.trim()) === 'NEW';
+                diff = diffCut((_e = got === null || got === void 0 ? void 0 : got.text) !== null && _e !== void 0 ? _e : '', DIFF_CHARS);
+                showsWhole = isWhole || isNew;
+                wholeText = (_f = got === null || got === void 0 ? void 0 : got.whole) !== null && _f !== void 0 ? _f : '';
+                wholeCut = wholeText.length > DIFF_CHARS ? wholeText.slice(0, wholeText.lastIndexOf('\n', DIFF_CHARS)) : wholeText;
+                return [4 /*yield*/, read($, todos)];
+            case 9:
+                card = (_h.sent()).find(function (one) { return one.id === owner; });
+                if (!card) return [3 /*break*/, 10];
+                _b = undefined;
+                return [3 /*break*/, 12];
+            case 10: return [4 /*yield*/, read($, reports)];
+            case 11:
+                _b = (_h.sent()).find(function (r) { return r.id === owner; });
+                _h.label = 12;
+            case 12:
+                result = _b;
+                folder = file.inRepo.includes('/') ? file.inRepo.slice(0, file.inRepo.lastIndexOf('/')) : file.path.slice(0, file.path.lastIndexOf('/'));
+                table = ui;
+                lines = (showsWhole ? wholeCut : diff.source).split('\n');
+                body = !stat ? (<Text dimColor wrap="wrap">{"This file isn't here anymore."}</Text>) : showsWhole ? (table.Code ? <table.Code key="diff-whole" source={wholeCut} path={file.path} startLine={1}/> : lines.map(function (line, n) { return <Text key={"diff-line-".concat(n)} wrap="wrap">{line || ' '}</Text>; })) : !diff.source ? (<Text dimColor wrap="wrap">Nothing in it differs from when the task began.</Text>) : table.Code ? (<table.Code key="diff-changes" source={diff.source} path={file.path} format="diff"/>) : (lines.map(function (line, n) { return <Text key={"diff-line-".concat(n)} color={line.startsWith('+') ? 'success' : line.startsWith('-') ? 'error' : undefined} dimColor={line.startsWith('@@')} wrap="wrap">{line || ' '}</Text>; }));
+                return [2 /*return*/, (<Box key="diff" flexDirection="column" gap={1} flexGrow={1}>
+      <Box key="diff-head" flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+        <Text bold wrap="wrap">{fileName(file.path)}</Text>
+        <Box flexDirection="row" flexWrap="wrap" gap={1}>
+          {folder ? <Text dimColor>{"".concat(folder, " \u00B7")}</Text> : null}
+          {isNew || file.isNew ? <Text dimColor>new ·</Text> : null}
+          {file.inRepo ? <Text color="success">{"+".concat(file.plus.toLocaleString('en-US'))}</Text> : null}
+          {file.inRepo ? <Text color="error" dimColor={!file.minus}>{"\u2212".concat(file.minus.toLocaleString('en-US'))}</Text> : null}
+        </Box>
+        {card || result ? <Text dimColor wrap="wrap">{"of the task \u201C".concat(cut(card ? titleOf(card) : ((_g = result === null || result === void 0 ? void 0 : result.title) !== null && _g !== void 0 ? _g : ''), 40), "\u201D")}</Text> : null}
+        <Box flexDirection="row" gap={2} flexShrink={0}>
+          {card ? <Button key={"diff-details-".concat(presses)} label="Details" plain onPress={function () { return openWork($, card.id); }}/> : null}
+          {result ? <Button key={"diff-result-".concat(presses)} label="Result" plain onPress={function () { return openReport($, result.id); }}/> : null}
+          {stat && !isNew ? <Button key={"diff-whole-".concat(presses)} label={isWhole ? 'Changes' : 'Whole file'} plain onPress={function () { return void ((presses += 1), isWhole ? diffWhole.delete(paneId) : diffWhole.add(paneId), redraw($)); }}/> : null}
+        </Box>
+      </Box>
+      <Box key="diff-body" flexDirection="column" backgroundColor={OUTPUT_FILL} paddingX={1} paddingY={1} flexShrink={0}>
+        {(showsWhole ? wholeCut.length < wholeText.length : diff.isCut) ? <Text dimColor>{"The first ".concat(lines.length.toLocaleString('en-US'), " lines")}</Text> : null}
+        {body}
+      </Box>
+    </Box>)];
+        }
+    });
+}); };

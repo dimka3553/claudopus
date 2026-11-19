@@ -68,37 +68,36 @@ var STALE_END = 60000;
 // How each card and workflow of this chat's stood when last looked at, by id. Unset until the first look after the mod loads,
 // which only takes note, so a reload announces nothing
 var lastSeen;
-// Ends waiting to be announced together, with what waited on the person as the end was seen (its report takes that over soon
-// after), and when each was last announced, by id
+// Ends waiting to be announced together, and when each was last announced, by id
 var ready = [];
 var isSettling = false;
 var announced = new Map();
 // Work the person stopped with its Stop button: they saw it end, so it is not announced
 var pressed = new Set();
-var standing = function (status, endedAt) { return (status === 'working' ? 'working' : "".concat(status, ":").concat(endedAt)); };
+// How a card stands, by its stage: at work (working, or waiting for the person), or how and when it ended
+var standing = function (stage, endedAt) { return (stage === 'working' || stage === 'waiting' ? 'working' : "".concat(stage, ":").concat(endedAt)); };
 // Looks for work of this chat's that has ended since the last look; helpers are never listed, so never announced
 var lookEnds = function ($) { return __awaiter(_this, void 0, void 0, function () {
-    var mine, cards, _a, runs, now, all, was, _i, all_1, one, before;
-    var _b;
-    return __generator(this, function (_c) {
-        switch (_c.label) {
+    var mine, list, cards, runs, now, all, was, _i, all_1, one, before;
+    var _a;
+    return __generator(this, function (_b) {
+        switch (_b.label) {
             case 0: return [4 /*yield*/, sessionName($)
-                // (each as its card shows it: one that handed back while a command or helper of its own still runs has not ended yet, and is
-                // announced once that has ended, however long ago its report came)
+                // (each by its stage: one that waits for the person has not ended, and is announced once it has)
             ];
             case 1:
-                mine = _c.sent();
-                _a = shownAs;
+                mine = _b.sent();
                 return [4 /*yield*/, read($, todos)];
             case 2:
-                cards = _a.apply(void 0, [_c.sent(), function (one) { var _a; return ((_a = one.waits) !== null && _a !== void 0 ? _a : []).some(function (wait) { return !askedWait(wait).answer; }); }]).filter(function (one) { return !one.parentId; });
+                list = _b.sent();
+                cards = list.filter(function (one) { return !one.parentId; });
                 return [4 /*yield*/, read($, flows)];
             case 3:
-                runs = (_c.sent()).filter(function (f) { return f.session === mine; });
+                runs = (_b.sent()).filter(function (f) { return f.session === mine; });
                 return [4 /*yield*/, $.clock.now()];
             case 4:
-                now = _c.sent();
-                all = __spreadArray(__spreadArray([], cards.map(function (one) { return ({ id: one.id, status: one.status, endedAt: one.endedAt, waits: one.waits }); }), true), runs.map(function (f) { return ({ id: "flow:".concat(f.id), status: f.status, endedAt: f.endedAt, waits: undefined }); }), true);
+                now = _b.sent();
+                all = __spreadArray(__spreadArray([], cards.map(function (one) { return ({ id: one.id, status: hasResult(stageOf(list, one)) ? 'done' : stageOf(list, one), endedAt: one.endedAt }); }), true), runs.map(function (f) { return ({ id: "flow:".concat(f.id), status: f.status, endedAt: f.endedAt }); }), true);
                 was = lastSeen;
                 lastSeen = new Map(all.map(function (one) { return [one.id, standing(one.status, one.endedAt)]; }));
                 if (!was)
@@ -106,14 +105,14 @@ var lookEnds = function ($) { return __awaiter(_this, void 0, void 0, function (
                 for (_i = 0, all_1 = all; _i < all_1.length; _i++) {
                     one = all_1[_i];
                     before = was.get(one.id);
-                    if (one.status === 'working' || before === undefined || before === standing(one.status, one.endedAt) || cutPending.has(one.id))
+                    if (standing(one.status, one.endedAt) === 'working' || before === undefined || before === standing(one.status, one.endedAt))
                         continue;
-                    if ((now - one.endedAt > STALE_END && before !== 'working') || now - ((_b = announced.get(one.id)) !== null && _b !== void 0 ? _b : -Infinity) < AGAIN)
+                    if ((now - one.endedAt > STALE_END && before !== 'working') || now - ((_a = announced.get(one.id)) !== null && _a !== void 0 ? _a : -Infinity) < AGAIN)
                         continue;
                     announced.set(one.id, now);
                     if (pressed.delete(one.id))
                         continue;
-                    ready.push({ id: one.id, waits: one.waits });
+                    ready.push({ id: one.id });
                 }
                 if (ready.length && !isSettling) {
                     isSettling = true;
@@ -132,8 +131,8 @@ var fewWords = function (text) {
 };
 // What one ended piece of work or workflow says in a notification
 var readyOf = function (_a, cards, runs) {
-    var _b, _c, _d, _e, _f;
-    var id = _a.id, seen = _a.waits;
+    var _b, _c;
+    var id = _a.id;
     if (id.startsWith('flow:')) {
         var f = runs.find(function (one) { return "flow:".concat(one.id) === id; });
         if (!f)
@@ -144,26 +143,49 @@ var readyOf = function (_a, cards, runs) {
     var kept = cards.find(function (card) { return card.id === id; });
     if (!kept)
         return undefined;
-    var waits = ((_c = (_b = kept.waits) !== null && _b !== void 0 ? _b : seen) !== null && _c !== void 0 ? _c : []).filter(function (wait) { return !askedWait(wait).answer; });
-    // (as its card shows it: one that still waits for a command or helper of its own has not ended, and one that left to-dos is not done)
-    var one = (_d = shownOne(cards, id, function () { return waits.length > 0; })) !== null && _d !== void 0 ? _d : kept;
-    if (one.status === 'working')
+    var one = kept;
+    var stage = stageOf(cards, one);
+    if (stage === 'working' || stage === 'waiting')
         return undefined;
-    var said = (_f = (_e = __spreadArray([], one.entries, true).reverse().find(function (entry) { return entry.kind === 'note'; })) === null || _e === void 0 ? void 0 : _e.text) !== null && _f !== void 0 ? _f : '';
+    var said = (_c = (_b = __spreadArray([], one.entries, true).reverse().find(function (entry) { return entry.kind === 'note'; })) === null || _b === void 0 ? void 0 : _b.text) !== null && _c !== void 0 ? _c : '';
     var what = one.status === 'done'
-        ? waits.length
-            ? "Waiting for you: ".concat(fewWords(waits[0] ? askedWait(waits[0]).text : '')).concat(waits.length > 1 ? ", and ".concat(waits.length - 1, " more") : '')
-            : fewWords(one.answer) || fewWords(said) || 'Done.'
+        ? fewWords(one.answer) || fewWords(said) || 'Done.'
         : one.status === 'failed'
-            ? 'Failed.'
+            ? "Failed".concat(one.why ? " \u00B7 ".concat(one.why) : '', ".")
             : 'Stopped.';
-    if (one.leftOpen)
-        return { title: one.title || 'Task', isDone: false, what: "Not done: ".concat(one.leftOpen === 1 ? 'a to-do is' : "".concat(one.leftOpen, " to-dos are"), " left.") };
-    return { title: one.title || 'Task', isDone: one.status === 'done', isWaiting: one.status === 'done' && waits.length > 0, what: what };
+    return { title: one.title || 'Task', isDone: one.status === 'done', what: what };
 };
+// A card the person marked done: the same sound as its moment begins on screen, unless config.json switched the sound off
+var playDone = function ($) { return __awaiter(_this, void 0, void 0, function () {
+    var config, _a, _b, _c;
+    return __generator(this, function (_d) {
+        switch (_d.label) {
+            case 0:
+                config = {};
+                _d.label = 1;
+            case 1:
+                _d.trys.push([1, 3, , 4]);
+                _b = (_a = JSON).parse;
+                return [4 /*yield*/, readOr($, "".concat(dir, "/config.json"))];
+            case 2:
+                config = _b.apply(_a, [(_d.sent()) || '{}']);
+                return [3 /*break*/, 4];
+            case 3:
+                _c = _d.sent();
+                return [3 /*break*/, 4];
+            case 4:
+                if (!(config.sound !== false)) return [3 /*break*/, 6];
+                return [4 /*yield*/, $.audio.play({ asset: READY_SOUND }).catch(function (err) { return log($, "done sound not played: ".concat(String(err))); })];
+            case 5:
+                _d.sent();
+                _d.label = 6;
+            case 6: return [2 /*return*/];
+        }
+    });
+}); };
 // One sound for all that ended together, only when some finished; one notification naming them. config.json switches each off
 var announce = function ($) { return __awaiter(_this, void 0, void 0, function () {
-    var ids, config, _a, _b, _c, cards, runs, items, first, isWaiting, done, waiting, title, text;
+    var ids, config, _a, _b, _c, cards, runs, items, first, done, title, text;
     return __generator(this, function (_d) {
         switch (_d.label) {
             case 0:
@@ -196,11 +218,9 @@ var announce = function ($) { return __awaiter(_this, void 0, void 0, function (
                 if (config.notifications === false)
                     return [2 /*return*/];
                 first = items[0];
-                isWaiting = function (one) { return 'isWaiting' in one && Boolean(one.isWaiting); };
-                done = items.filter(function (one) { return one.isDone && !isWaiting(one); }).length;
-                waiting = items.filter(isWaiting).length;
-                title = items.length === 1 && first ? first.title : done === items.length ? "".concat(items.length, " tasks are done") : waiting ? "".concat(items.length, " tasks ended \u00B7 ").concat(waiting, " waiting for you") : "".concat(items.length, " tasks ended");
-                text = items.length === 1 && first ? first.what : items.map(function (one) { return "".concat(one.title, ": ").concat(isWaiting(one) ? 'waiting for you' : one.isDone ? 'done' : one.what.replace(/\.$/, '').toLowerCase()); }).join(' · ').slice(0, 300);
+                done = items.filter(function (one) { return one.isDone; }).length;
+                title = items.length === 1 && first ? first.title : done === items.length ? "".concat(items.length, " tasks are done") : "".concat(items.length, " tasks ended");
+                text = items.length === 1 && first ? first.what : items.map(function (one) { return "".concat(one.title, ": ").concat(one.isDone ? 'done' : one.what.replace(/\.$/, '').toLowerCase()); }).join(' · ').slice(0, 300);
                 return [4 /*yield*/, alertPerson($, 'ready', title, text, "ready-".concat(ids.map(function (one) { return one.id; }).join('-')))];
             case 7:
                 _d.sent();
@@ -480,9 +500,9 @@ var cardsNow = function ($) { return __awaiter(_this, void 0, void 0, function (
                     var note = (_b = __spreadArray([], one.entries, true).reverse().find(function (entry) { return entry.kind === 'note'; })) === null || _b === void 0 ? void 0 : _b.text;
                     var what = waits
                         ? "waiting for {name}: ".concat(cut(oneLine(waits.text), 160))
-                        : one.status === 'working'
+                        : stageOf(list, one) === 'working'
                             ? "working, ".concat(items.filter(function (item) { return item.state === 'done'; }).length, " of ").concat(items.length, " to-dos done").concat(doing ? ", doing \"".concat(cut(doing, 80), "\"") : '').concat(note ? ", last note \"".concat(cut(oneLine(note), 120), "\"") : '')
-                            : one.status;
+                            : "".concat(one.status).concat(one.status === 'failed' && one.why ? " (".concat(one.why.charAt(0).toLowerCase()).concat(one.why.slice(1), ")") : '');
                     return { one: one, waits: waits, what: what, row: "- \"".concat(cut(titleOf(one), 80), "\" (").concat(one.id, "): ").concat(waits ? "".concat(what.replace(/^waiting for \{name\}/, "waiting for {name} for ".concat(minutesSaid(Math.round((now - waits.at) / 60000))))) : one.status === 'working' ? what : "".concat(what, " ").concat(minutesSaid(Math.round((now - one.endedAt) / 60000)), " ago")) };
                 });
                 toName = facts.filter(function (_a) {

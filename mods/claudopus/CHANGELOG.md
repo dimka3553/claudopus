@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.225 · 19 November 2026
+- The empty space under your answer on a card now closes after three seconds, also while you keep using a panel that is scrolled down. Before, it could stay until you left the panel alone.
+- That space is never taller than the panel's visible height.
+
 ## 0.2.224 · 19 November 2026
 - Each command a task runs now has a clear name in plain words, such as "Test · Score smoothed heads against the 47 test films" instead of "Run: score". A small fast model (Haiku 5.5) writes it as the command starts, from the command, the task's own words for it and the end of its log.
 - A command's second line says what it is doing now in plain words, from its log, beside how far it is, and a command that runs in the cloud says so.

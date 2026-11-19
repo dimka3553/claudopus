@@ -124,10 +124,28 @@ var STEP_CHARS = 160;
 // What a to-do's box is filled with: a grey so faint it reads on a dark and on a light theme. The app rounds the corners of every
 // border it draws, so a box with square corners is a filled one
 var FILL = '#80808024';
+// A card's outline. The app rounds the corners of every border it draws, and a card's edge of to-dos is square and stuck out past
+// them, so the outline is four thin filled strips round the card instead, whose corners are square. It takes no room of the card's
+// own beyond the strips; with no colour the card is drawn as it is
+var OUTLINE = 0.15;
+var squareOutline = function (Box, color, key, card) {
+    return color ? (<Box key={"outline-".concat(key)} flexDirection="column" flexShrink={0}>
+      <Box key="outline-top" height={OUTLINE} flexShrink={0} backgroundColor={color}/>
+      <Box key="outline-row" flexDirection="row" flexShrink={0}>
+        <Box key="outline-left" width={OUTLINE} flexShrink={0} backgroundColor={color}/>
+        <Box key="outline-card" flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>{card}</Box>
+        <Box key="outline-right" width={OUTLINE} flexShrink={0} backgroundColor={color}/>
+      </Box>
+      <Box key="outline-bottom" height={OUTLINE} flexShrink={0} backgroundColor={color}/>
+    </Box>) : (card);
+};
 // A card's edge shows each to-do as a part of its own up to this many; more are one edge filled as far as they are done
 var EDGE_PARTS = 14;
 // How long a line of the log may be
 var NOTE_CHARS = 200;
+// What a delivered card lists of what its result leaves open: so many questions, each so long
+var QUESTIONS_KEPT = 6;
+var QUESTION_CHARS = 200;
 // How much of an answer the panel keeps
 var ANSWER_CHARS = 30000;
 // While the servers panel is open it looks again this often
@@ -148,8 +166,20 @@ var isLingering = function (one, at) { return one.status !== 'working' && one.en
 // work being started again with it (isWaking), and another chat's work until its own chat has taken the reply (actingOn). Only
 // once it stops again with the ask open does it wait on the person, with every answer back
 var isActingOnReply = function (one) { var _a, _b, _c, _d; return Boolean(one.ask) && ((Boolean((_a = one.ask) === null || _a === void 0 ? void 0 : _a.replied) && (one.status === 'working' || Boolean((_c = (_b = one.ask) === null || _b === void 0 ? void 0 : _b.replied) === null || _c === void 0 ? void 0 : _c.isWaking))) || actingOn.has("".concat(one.id, ":").concat((_d = one.ask) === null || _d === void 0 ? void 0 : _d.at))); };
-// An admin command held for the person's press needs them whatever else the work does
-var needsPerson = function (one) { var _a; return Boolean((_a = one.admins) === null || _a === void 0 ? void 0 : _a.length) || (Boolean(one.ask) && !isActingOnReply(one)); };
+// The words of the buttons every block of the panel answers with (docs/words.md)
+var ALLOW = 'Allow';
+var DONT_ALLOW = "Don't allow";
+var ALWAYS_ALLOW = 'Always allow this command';
+var TYPE_IT = 'Type it';
+var PASTE_IT = 'Paste it';
+var DONT_GIVE = "Don't give it";
+// A choice a task gives that would answer nothing: left out of its question's buttons (tools.tsx)
+var LEAVES_OPEN = /^(?:no,? )?(?:not (?:now|yet)|later|maybe later|skip|skip it|cancel|dismiss|close)$/;
+var ANSWER_IN_WORDS = 'Answer in words';
+// The one test of "something waits for the person on this card": its own question, a permission held for their press (an admin
+// command, a release, a change to a file of theirs), and what is drawn on it from the mod's own memory: Claude Code's prompt for a
+// call of its own, and the password or key box of a command of its own (needs.tsx). Another chat's card is read from its file
+var needsPerson = function (one) { var _a; return Boolean((_a = one.admins) === null || _a === void 0 ? void 0 : _a.length) || (Boolean(one.ask) && !isActingOnReply(one)) || (!one.chat && Boolean(one.id) && (waiting.some(function (p) { return p.card === one.id; }) || boxes.some(function (box) { return box.card === one.id; }))); };
 // The moments a pause ends that a redraw is already set for, so each pause gets one
 var lingerSet = new Set();
 // The engine's list of agents is read again this often, and the minutes move on
@@ -158,7 +188,7 @@ var FOLLOW_EVERY = 20000;
 var WORKING = ['pending', 'running', 'waiting'];
 // These listen on a port but serve no pages to open
 var NO_PAGES = /^(postgres|redis-server|mysqld|mongod)\b/;
-var me = atom({ plugin: 'claudopus', key: 'me' }, { id: '', title: '', tokens: 0, isChat: false, needsContext: false, roleSent: '', isListOpened: false, window: 0 }, { shape: 'me-6' });
+var me = atom({ plugin: 'claudopus', key: 'me' }, { id: '', title: '', tokens: 0, isChat: false, needsContext: false, isListOpened: false, window: 0 }, { shape: 'me-6' });
 var todos = atom({ plugin: 'claudopus', key: 'todos' }, [], { shape: 'todos-3' });
 var view = atom({ plugin: 'claudopus', key: 'view' }, { openId: '' }, { shape: 'view-5' });
 var servers = atom({ plugin: 'claudopus', key: 'servers' }, [], { shape: 'servers-2' });
@@ -182,37 +212,18 @@ var finishedAtTop = [];
 // few seconds while work ran (15 Nov, a minute of running work: seven writes, none of them a change). Should another write land
 // between the look and the write, the change is made again on what that write left
 var changeTodos = function ($, fn) { return __awaiter(_this, void 0, void 0, function () {
-    var now, before, at, held, hold, taken, next, r;
+    var now, before, hold, next;
     return __generator(this, function (_a) {
         switch (_a.label) {
             case 0: return [4 /*yield*/, read($, todos)];
             case 1:
                 now = _a.sent();
                 before = JSON.stringify(now);
-                return [4 /*yield*/, $.clock.now()];
-            case 2:
-                at = _a.sent();
-                held = [];
-                hold = function (list) {
-                    var r = holdDone(list, fn(list), at);
-                    held = r.held;
-                    return r.list;
-                };
-                taken = function () {
-                    if (!held.length)
-                        return;
-                    var ids = held;
-                    $.clock.after(0, function () { return void doneHeld($, ids).catch(function (err) { return log($, "work held from ending done not taken up: ".concat(String(err))); }); });
-                };
+                hold = function (list) { return holdDone(list, fn(list)); };
                 next = hold(now);
-                // (held so that nothing changed, it is still taken up)
                 if (JSON.stringify(next) === before)
-                    return [2 /*return*/, (taken(), now)];
-                return [4 /*yield*/, update($, todos, function (list) { return (JSON.stringify(list) === before ? next : hold(list)); })];
-            case 3:
-                r = _a.sent();
-                taken();
-                return [2 /*return*/, r];
+                    return [2 /*return*/, now];
+                return [2 /*return*/, update($, todos, function (list) { return (JSON.stringify(list) === before ? next : hold(list)); })];
         }
     });
 }); };
@@ -262,11 +273,13 @@ var takeCharge = function ($) { return __awaiter(_this, void 0, void 0, function
     });
 }); };
 var isLeft = false;
+// What a copy that was replaced lets go of the moment it finds out: its waits for a press (holdGate, holdPrompt)
+var whenLeft = new Set();
 var isReplaced = function ($) { return __awaiter(_this, void 0, void 0, function () {
-    var now;
-    var _a;
-    return __generator(this, function (_b) {
-        switch (_b.label) {
+    var now, _i, _a, stop_1;
+    var _b;
+    return __generator(this, function (_c) {
+        switch (_c.label) {
             case 0:
                 if (isLeft)
                     return [2 /*return*/, true];
@@ -274,9 +287,15 @@ var isReplaced = function ($) { return __awaiter(_this, void 0, void 0, function
                     return [2 /*return*/, false];
                 return [4 /*yield*/, $.state.get(loadNow).catch(function () { return undefined; })];
             case 1:
-                now = (_a = (_b.sent())) === null || _a === void 0 ? void 0 : _a.value;
-                if (typeof now === 'string' && now > thisLoad)
+                now = (_b = (_c.sent())) === null || _b === void 0 ? void 0 : _b.value;
+                if (typeof now === 'string' && now > thisLoad && !isLeft) {
                     isLeft = true;
+                    // What this copy holds for a press is let go at once: its drawings are no longer the ones shown
+                    for (_i = 0, _a = __spreadArray([], whenLeft, true); _i < _a.length; _i++) {
+                        stop_1 = _a[_i];
+                        stop_1();
+                    }
+                }
                 return [2 /*return*/, isLeft];
         }
     });

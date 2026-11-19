@@ -398,7 +398,7 @@ const panelHooks = (on: On) => {
     // need to keep showing the question")
     const cardNeeds = (one: Todo, isWhole = false) => needsFor(one).filter(need => isWhole || !need.isActing)
     // The rows a block just pressed on this small card took, held under its grey line for a moment (foldOf)
-    const heldFold = (one: Todo) => (e.surface === 'desktop' ? foldOf(one.id, at, cardNeeds(one).map(need => need.id)) : undefined)
+    const heldFold = (one: Todo) => (e.surface === 'desktop' ? foldOf($, one.id, at, cardNeeds(one).map(need => need.id)) : undefined)
     const needBlocks = (one: Todo, isWhole = false) => {
       const fold = isWhole ? undefined : heldFold(one)
       const blocks = cardNeeds(one, isWhole).map(need => {
@@ -408,8 +408,9 @@ const panelHooks = (on: On) => {
         // (on the small card each block starts at the title's left edge; the grey line is a press, which the app moves in itself)
         return { at: need.at, node: isWhole ? node : <Box key={`lead-${need.id}`} flexDirection="column" paddingLeft={lead}>{node}</Box> }
       })
-      // where the block stood among the others, its grey line at the top of the rows it held
-      const held = fold ? [{ at: fold.came, node: <Box key={`fold-${one.id}`} flexDirection="column" height={fold.rows} flexShrink={0}>{answeredRow(one) ?? null}</Box> }] : []
+      // where the block stood among the others, its grey line at the top of the rows it held: never more than the pane shows, as the
+      // pointer that pressed was within it
+      const held = fold ? [{ at: fold.came, node: <Box key={`fold-${one.id}`} flexDirection="column" height={Math.min(fold.rows, Math.max(4, e.props.scroll.bodyRows))} flexShrink={0}>{answeredRow(one) ?? null}</Box> }] : []
       return [...blocks, ...held].sort((a, b) => a.at - b.at).map(block => block.node)
     }
     // What the person last pressed or answered on a small card, in one grey line cut to one row, with the press that takes a

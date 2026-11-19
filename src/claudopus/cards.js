@@ -76,33 +76,24 @@ var started = function (id, parentId, title, words, at, isFork) {
     });
 };
 // Work that ends keeps its ask: what it needs of the person's hands outlives it, and goes only on their answer
-// What it kept of its own background work goes with it: started again, it keeps what it starts from then
-// What the person allowed it under "Ask once per piece of work" ends with it
+// What it kept of its own background work goes with it, but a server a finished task left for the person: its row stays under the
+// green card, with its Stop, until it is stopped
 // A reply its ask was held with has been acted on once the run it started ends: the ask waits on the person again, every answer back
-// (what the person allowed it goes once the change that ends it is kept, and not when holdDone keeps it at work)
-var ended = function (one, status, at) { var _a, _b, _c, _d; return (__assign(__assign(__assign(__assign({}, one), (((_b = (_a = one.ask) === null || _a === void 0 ? void 0 : _a.replied) === null || _b === void 0 ? void 0 : _b.isWaking) ? { ask: __assign(__assign({}, one.ask), { replied: { text: one.ask.replied.text, at: one.ask.replied.at } }) } : {})), { status: status, endedAt: at, bg: undefined, leftOwn: status === 'done' && ((_c = one.bg) === null || _c === void 0 ? void 0 : _c.some(function (b) { return !b.isWatch && !isServerRun(b.cmd, b.what); })) ? true : undefined, releasing: status === 'done' && ((_d = one.bg) === null || _d === void 0 ? void 0 : _d.some(function (b) { return isReleaseRun(b.cmd); })) ? { at: at, branch: '', by: 'task' } : one.releasing, waitsSince: undefined }), (status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }))); };
-// Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-var resumed = function (one, at) { var _a, _b, _c, _d, _e; return (__assign(__assign({}, one), { carryOn: ((_a = one.carryOn) === null || _a === void 0 ? void 0 : _a.gaveUp) || one.status === 'done' ? undefined : one.carryOn, byYou: undefined, begunAt: (_b = one.begunAt) !== null && _b !== void 0 ? _b : one.startedAt, ask: ((_d = (_c = one.ask) === null || _c === void 0 ? void 0 : _c.replied) === null || _d === void 0 ? void 0 : _d.isWaking) ? __assign(__assign({}, one.ask), { replied: { text: one.ask.replied.text, at: one.ask.replied.at } }) : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, reportAt: undefined, leftSince: undefined, leftOwn: undefined, releasing: ((_e = one.releasing) === null || _e === void 0 ? void 0 : _e.by) === 'task' ? undefined : one.releasing, released: undefined, doneSeen: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, ownWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, closedAt: undefined, newAt: at })); };
-// Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
-// a to-do of its is still being done. It is still at work; an answer it handed back on the way is no report. A watch it set is no
-// such command: it may run until stopped
-var goesOn = function (list, id) {
-    var _a;
-    var one = list.find(function (card) { return card.id === id; });
-    var isRunning = Boolean((_a = one === null || one === void 0 ? void 0 : one.bg) === null || _a === void 0 ? void 0 : _a.some(function (b) { return !b.isWatch; })) || list.some(function (kid) { return kid.parentId === id && kid.status === 'working'; });
-    return Boolean(one && isRunning && one.items.some(function (item) { return item.state === 'doing'; }));
+var ended = function (one, status, at) {
+    var _a, _b, _c;
+    var servers = status === 'done' ? ((_a = one.bg) !== null && _a !== void 0 ? _a : []).filter(function (b) { return isServerRun(b.cmd, b.what); }) : [];
+    return __assign(__assign(__assign({}, one), (((_c = (_b = one.ask) === null || _b === void 0 ? void 0 : _b.replied) === null || _c === void 0 ? void 0 : _c.isWaking) ? { ask: __assign(__assign({}, one.ask), { replied: { text: one.ask.replied.text, at: one.ask.replied.at } }) } : {})), { status: status, endedAt: at, up: true, why: undefined, bg: servers.length ? servers : undefined });
 };
-// How work that is stopped ends: done when Claudopus had already received its report and only its own background work held it
-// (the chat stops such work once its report is in), stopped otherwise
+// Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
+var resumed = function (one, at) { var _a, _b, _c; return (__assign(__assign({}, one), { byYou: undefined, begunAt: (_a = one.begunAt) !== null && _a !== void 0 ? _a : one.startedAt, ask: ((_c = (_b = one.ask) === null || _b === void 0 ? void 0 : _b.replied) === null || _c === void 0 ? void 0 : _c.isWaking) ? __assign(__assign({}, one.ask), { replied: { text: one.ask.replied.text, at: one.ask.replied.at } }) : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, questions: undefined, newAt: at })); };
+// How work that is stopped ends: done when its result was already received, stopped otherwise
 var stoppedAs = function (one) { return (hasReport(one) ? 'done' : 'stopped'); };
 // Work that called SubagentHandback in the turn now ending: what it ends that turn with is its report
 var handedBack = new Map();
-// Work whose card a handback ended, until it works again: a turn of words alone that what it left running wakes changes nothing
-var endedByHandback = new Set();
-// Work stopped by the chat or the panel: whatever the engine still lists of it is going, so it is never said to have left something running
+// Work stopped by the chat or the panel
 var stoppedHere = new Set();
-// Work the person stopped, by what it left running detached, until the chat has been told of the stop
-var stopLeft = new Map();
+// When each task was last asked to say on its card what it does now (NOTE_STALE), for this load
+var noteAsked = new Map();
 // Held stopped by the person: stopped with their own press, and no message of theirs has come since
 var isHeld = function (one) { return Boolean((one === null || one === void 0 ? void 0 : one.byYou) && !one.byYou.isLifted); };
 // The words a task is named by, to know the same work started afresh under another title
@@ -126,55 +117,19 @@ var heldFor = function (list, parent, resume, title, prompt) {
             list.find(function (one) { return isHeld(one) && (one.id === resume || (resume.length >= 6 && one.id.startsWith(resume)) || oneLine(one.title).toLowerCase() === oneLine(resume).toLowerCase()); })
         : list.find(function (one) { return isHeld(one) && (one.parentId || '') === parent && isSameTask(one, title, prompt); });
 };
-// Work that ended with nothing of its own running that the mod or the engine's stop knew of: the engine still listing it as held
-// (once, for a whole evening, on nothing any tool showed open) is no sign it left something running
-var leftNothing = new Set();
-// Nothing of its own runs: no command or watch it started that has not ended, no detached run it is followed on, no helper at work. The engine's list of what is in
-// flight as work stops is the whole session's, every other work's too, so it says nothing of this work's own (what it lists that
-// this work started is let go of from its card as it ends, at its stop)
-var ownsNothing = function (list, id) { var _a, _b, _c, _d; return !((_b = (_a = list.find(function (one) { return one.id === id; })) === null || _a === void 0 ? void 0 : _a.bg) === null || _b === void 0 ? void 0 : _b.length) && !((_d = (_c = list.find(function (one) { return one.id === id; })) === null || _c === void 0 ? void 0 : _c.detached) === null || _d === void 0 ? void 0 : _d.length) && !list.some(function (kid) { return kid.parentId === id && kid.status === 'working'; }); };
 // What a task still has to do: its to-dos neither done nor dropped
 var openItems = function (one) { var _a; return ((_a = one === null || one === void 0 ? void 0 : one.items) !== null && _a !== void 0 ? _a : []).filter(function (item) { return item.state === 'open' || item.state === 'doing'; }); };
-// Words at a step's end are its result only when it handed them back, or wrote them as long as a report with every to-do done: a
-// long word of how far it has got, with to-dos still to do, is no result (18 Nov: a task's progress note kept as its result while
-// 5 of its 7 to-dos were still to do, its card ended and nothing started it again for three and a half hours)
-var isWordsReport = function (one, answer, isHandback) {
-    if (isHandback === void 0) { isHandback = false; }
-    return isHandback || (answer.trim().length >= REPORT_LEAST && !openItems(one).length);
-};
-// Work stopped after its report, so ended done just now, keeps that report for good, as work that finished outright does
-var keepStoppedReports = function ($, now) { return __awaiter(_this, void 0, void 0, function () {
-    var _loop_1, _i, _a, card;
-    return __generator(this, function (_b) {
-        switch (_b.label) {
-            case 0:
-                _loop_1 = function (card) {
-                    $.clock.after(5, function () { return void saveReport($, card, card.answer).catch(function (err) { return log($, "report of ".concat(card.id, " not kept: ").concat(String(err))); }); });
-                };
-                _i = 0;
-                return [4 /*yield*/, read($, todos)];
-            case 1:
-                _a = (_b.sent()).filter(function (one) { return !one.parentId && one.status === 'done' && one.answeredAt && one.endedAt === now && one.answer.trim(); });
-                _b.label = 2;
-            case 2:
-                if (!(_i < _a.length)) return [3 /*break*/, 4];
-                card = _a[_i];
-                _loop_1(card);
-                _b.label = 3;
-            case 3:
-                _i++;
-                return [3 /*break*/, 2];
-            case 4: return [2 /*return*/];
-        }
-    });
-}); };
 // Work that has ended, the oldest first, then work under way: what `capped` forgets first comes first
 var byEnd = function (list) { return __spreadArray([], list, true).sort(function (a, b) { return (a.status === 'working' ? Infinity : a.endedAt) - (b.status === 'working' ? Infinity : b.endedAt) || 0; }); };
-// The list is kept short by forgetting work that has ended, the oldest first; work under way, and work still asking, is never forgotten
+// The list is kept short, at KEPT tasks, by forgetting work that has ended, the oldest first; work under way, and work still
+// asking, is never forgotten, and an ended card still up, which the person never dismissed, is forgotten only after every other
 // Helpers are not counted: each is kept as long as the work it runs under, and goes with it
+var staysUp = function (one) { return Boolean(one.up) && !one.parentId && !one.chat && one.status !== 'working' && !one.closedAt; };
 var capped = function (list) {
     var over = list.filter(function (one) { return !one.parentId; }).length - KEPT;
-    var kept = over > 0 ? list.filter(function (one) { return Boolean(one.parentId) || one.status === 'working' || Boolean(one.ask) || (over -= 1) < 0; }) : list;
+    var spare = over > 0 ? list.filter(function (one) { return !one.parentId && one.status !== 'working' && !one.ask; }) : [];
+    var gone = new Set(__spreadArray(__spreadArray([], spare.filter(function (one) { return !staysUp(one); }), true), spare.filter(staysUp), true).slice(0, Math.max(0, over)));
+    var kept = gone.size ? list.filter(function (one) { return !gone.has(one); }) : list;
     var tops = new Set(kept.filter(function (one) { return !one.parentId; }).map(function (one) { return one.id; }));
     var held = kept.some(function (one) { return one.parentId && one.status !== 'working' && !tops.has(topOf(kept, one.id)); }) ? kept.filter(function (one) { return !one.parentId || one.status === 'working' || tops.has(topOf(kept, one.id)); }) : kept;
     // Long work that keeps starting helpers keeps only its newest ended ones; one that still has a helper at work under it stays
@@ -216,7 +171,7 @@ var twigsOf = function (branches, isMore, depth, rails) {
     if (rails === void 0) { rails = []; }
     return branches.flatMap(function (b, i) {
         var isLast = i === branches.length - 1 && !isMore;
-        return __spreadArray([__assign(__assign({ one: b.one }, (b.job ? { job: b.job } : {})), { depth: depth, rails: rails, isLast: isLast, hasKids: b.kids.length > 0 })], twigsOf(b.kids, false, depth + 1, __spreadArray(__spreadArray([], rails, true), [!isLast], false)), true);
+        return __spreadArray([__assign(__assign(__assign(__assign({ one: b.one }, (b.job ? { job: b.job } : {})), (b.run ? { run: b.run } : {})), (b.ended ? { ended: b.ended } : {})), { depth: depth, rails: rails, isLast: isLast, hasKids: b.kids.length > 0 })], twigsOf(b.kids, false, depth + 1, __spreadArray(__spreadArray([], rails, true), [!isLast], false)), true);
     });
 };
 // The lines that join a row to the tree, as text. Each level is two letters wide; a row's own helpers hang from the second
@@ -247,6 +202,8 @@ var twigSvg = function (t, line, dot, isMoving, shape) {
         square: "<rect x=\"".concat(at - 3.5, "\" y=\"").concat(mid - 3.5, "\" width=\"7\" height=\"7\" rx=\"1\" fill=\"").concat(dot, "\"/>"),
         diamond: "<path d=\"M".concat(at, " ").concat(mid - 4.5, "L").concat(at + 4.5, " ").concat(mid, "L").concat(at, " ").concat(mid + 4.5, "L").concat(at - 4.5, " ").concat(mid, "Z\" fill=\"").concat(dot, "\"/>"),
         down: "<path d=\"M".concat(at - 4.5, " ").concat(mid - 3.5, "H").concat(at + 4.5, "L").concat(at, " ").concat(mid + 4, "Z\" fill=\"").concat(dot, "\"/>"),
+        hollow: "<rect x=\"".concat(at - 3.25, "\" y=\"").concat(mid - 3.25, "\" width=\"6.5\" height=\"6.5\" rx=\"1\" fill=\"none\" stroke=\"").concat(dot, "\" stroke-width=\"1.5\"/>"),
+        up: "<path d=\"M".concat(at - 4.5, " ").concat(mid + 3.5, "H").concat(at + 4.5, "L").concat(at, " ").concat(mid - 4, "Z\" fill=\"").concat(dot, "\"/>"),
         open: "<path d=\"M".concat(at, " ").concat(mid - 4, "L").concat(at + 4, " ").concat(mid, "L").concat(at, " ").concat(mid + 4, "L").concat(at - 4, " ").concat(mid, "Z\" fill=\"none\" stroke=\"").concat(dot, "\" stroke-width=\"1.5\"/>"),
     }[shape];
     var mark = dot
@@ -266,7 +223,7 @@ var railSvg = function (t, line) {
 var helpersChecked = new Set();
 // The engine's own list is the truth: work it runs is listed, and work that failed or was stopped ends no turn
 var sync = function ($) { return __awaiter(_this, void 0, void 0, function () {
-    var listed, live, now, known, _a, isUnseen, rows, _b, ownCalls, _i, live_1, one, unheardEnds;
+    var listed, live, now, known, _a, isUnseen, rows, _b, ownCalls, _i, live_1, one;
     return __generator(this, function (_c) {
         switch (_c.label) {
             case 0: return [4 /*yield*/, $.agent.list().catch(function () { return undefined; })];
@@ -305,182 +262,57 @@ var sync = function ($) { return __awaiter(_this, void 0, void 0, function () {
                         if (!one.parentId)
                             helpersChecked.add(one.id);
                     }
-                unheardEnds = new Set();
                 return [4 /*yield*/, changeTodos($, function (list) {
-                        var _a, _b, _c, _d, _e;
-                        unheardEnds.clear();
+                        var _a;
                         var cards = new Map(list.map(function (one) { return [one.id, one]; }));
                         var isChanged = false;
-                        var _loop_2 = function (one) {
+                        for (var _i = 0, live_2 = live; _i < live_2.length; _i++) {
+                            var one = live_2[_i];
                             var card = cards.get(one.id);
                             var next = !card
-                                ? // Work held on background work it left running ended its turn: the mod, had it seen that, would have ended its card
-                                    one.status === 'running' || one.status === 'pending'
-                                        ? // Work the mod never saw start: a copy of the chat was started for a message of the person's, anything else is some work's helper
-                                            started(one.id, (_a = one.parentId) !== null && _a !== void 0 ? _a : (one.type === 'fork' || ownCalls.has(one.description) ? '' : HELPER), one.description, '', now, one.type === 'fork')
-                                        : undefined
-                                : // Work that ended its step to let its helpers work, or for what it asked Claudopus to look for, is still at work: the engine
-                                    // lists it as completed, but a helper's result or the thing it waits for starts it again (16 Nov its card vanished meanwhile)
-                                    card.status === 'working' && one.status === 'completed' && !handedBack.has(card.id) && card.handedBackAt === undefined && (card.wakeWhen !== undefined || isTurnWaited(list, card.id) || list.some(function (kid) { return kid.parentId === card.id && kid.status === 'working'; }))
-                                        ? undefined
-                                        : // A task Claudopus starts again to carry on is left to that
-                                            card.status === 'working' && card.carryOn && !card.carryOn.gaveUp && card.endedStepAt === card.carryOn.at && (one.status === 'completed' || one.status === 'failed' || one.status === 'idle')
-                                                ? undefined
-                                                : // A task whose end the mod did not hear may have stopped partway: its last words are read first (below)
-                                                    card.status === 'working' && one.status !== 'killed' && (one.status === 'completed' || one.status === 'failed') && !turnEnding.has(card.id) && card.wakeWhen === undefined && !isTurnWaited(list, card.id) && isStoppedShort(card, '') && !carryTaken.has(carryKey(card)) && ownsNothing(list, card.id)
-                                                        ? ((unheardEnds.add(card.id)), undefined)
-                                                        : card.status === 'working' && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed')
-                                                            ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? stoppedAs(card) : 'done', now)
-                                                            : // A card listed from the engine alone, for work that is only held and has made no step since: its turn had ended
-                                                                card.status === 'working' && !card.steps && !card.entries.length && !card.words && one.status === 'idle' && !cutPending.has(card.id)
-                                                                    ? ended(card, 'done', now)
-                                                                    : // Work that handed in its report with a command of its own left in the background (or its release runner there) is done
-                                                                        // once the engine no longer holds it for that, from then, its green moment with it when Claudopus saw it held
-                                                                        !card.parentId && card.status === 'done' && (card.leftOwn || ((_b = card.releasing) === null || _b === void 0 ? void 0 : _b.by) === 'task') && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed' || stoppedHere.has(card.id) || leftNothing.has(card.id))
-                                                                            ? __assign(__assign(__assign({}, card), { leftSince: undefined, leftOwn: undefined, releasing: ((_c = card.releasing) === null || _c === void 0 ? void 0 : _c.by) === 'task' ? undefined : card.releasing }), (card.leftSince ? { endedAt: now } : {})) : // Work that handed in its report and that the engine still holds on its own background work left something running;
-                                                                            // once nothing does, or it was stopped, not
-                                                                            !card.parentId && card.status === 'done' && (one.status === 'waiting' && endedByHandback.has(card.id) && !stoppedHere.has(card.id) && !leftNothing.has(card.id)) !== Boolean(card.leftSince)
-                                                                                ? __assign(__assign({}, card), { leftSince: card.leftSince ? undefined : now }) : card.parentId === HELPER && !one.parentId && ownCalls.has(one.description)
-                                                                                ? __assign(__assign({}, card), { parentId: '', title: card.title || oneLine(one.description) }) : !card.title && one.description
-                                                                                ? __assign(__assign({}, card), { title: oneLine(one.description) }) : undefined;
+                                ? one.status === 'running' || one.status === 'pending'
+                                    ? // Work the mod never saw start: a copy of the chat was started for a message of the person's, anything else is some work's helper
+                                        started(one.id, (_a = one.parentId) !== null && _a !== void 0 ? _a : (one.type === 'fork' || ownCalls.has(one.description) ? '' : HELPER), one.description, '', now, one.type === 'fork')
+                                    : undefined
+                                : // Stopped from outside Claudopus, as by the app's own stop
+                                    card.status === 'working' && one.status === 'killed'
+                                        ? ended(card, stoppedAs(card), now)
+                                        : card.parentId === HELPER && !one.parentId && ownCalls.has(one.description)
+                                            ? __assign(__assign({}, card), { parentId: '', title: card.title || oneLine(one.description) }) : !card.title && one.description
+                                            ? __assign(__assign({}, card), { title: oneLine(one.description) }) : undefined;
                             if (next)
                                 cards.set(one.id, next);
                             isChanged || (isChanged = Boolean(next));
-                        };
-                        for (var _i = 0, live_2 = live; _i < live_2.length; _i++) {
-                            var one = live_2[_i];
-                            _loop_2(one);
-                        }
-                        var _loop_3 = function (card) {
-                            if (listed && (card.leftSince || card.leftOwn || ((_d = card.releasing) === null || _d === void 0 ? void 0 : _d.by) === 'task') && !live.some(function (one) { return one.id === card.id; }))
-                                ((isChanged = true), cards.set(card.id, __assign(__assign({}, card), { leftSince: undefined, leftOwn: undefined, releasing: ((_e = card.releasing) === null || _e === void 0 ? void 0 : _e.by) === 'task' ? undefined : card.releasing })));
-                        };
-                        // Finished work the engine no longer lists has nothing of its own left running
-                        for (var _f = 0, _g = cards.values(); _f < _g.length; _f++) {
-                            var card = _g[_f];
-                            _loop_3(card);
                         }
                         return isChanged ? capped(__spreadArray([], cards.values(), true)) : list;
-                    })];
+                    })
+                    // A run Claude Code lists as over, or no longer lists, whose card is still at work
+                ];
             case 7:
                 _c.sent();
-                return [4 /*yield*/, carryDue($, now).catch(function (err) { return log($, "carry-on notes not looked at: ".concat(String(err))); })];
+                if (!listed) return [3 /*break*/, 9];
+                return [4 /*yield*/, lookOver($, live, now).catch(function (err) { return log($, "runs that are over not looked at: ".concat(String(err))); })
+                    // A command run on the person's press that a reload left running is followed again by this load
+                ];
             case 8:
                 _c.sent();
-                if (!unheardEnds.size) return [3 /*break*/, 10];
-                return [4 /*yield*/, endedUnheardShort($, unheardEnds, live, now).catch(function (err) { return log($, "ends not heard not looked at: ".concat(String(err))); })];
-            case 9:
-                _c.sent();
-                _c.label = 10;
+                _c.label = 9;
+            case 9: 
+            // A command run on the person's press that a reload left running is followed again by this load
+            return [4 /*yield*/, followRuns($).catch(function (err) { return log($, "commands run on a press not followed: ".concat(String(err))); })];
             case 10:
-                if (!listed) return [3 /*break*/, 12];
-                return [4 /*yield*/, endUnheard($, live, now).catch(function (err) { return log($, "work that ended unheard not looked for: ".concat(String(err))); })
-                    // A go-ahead pressed during a turn whose end only the engine's list showed does its last step now
-                ];
-            case 11:
-                _c.sent();
-                _c.label = 12;
-            case 12: 
-            // A go-ahead pressed during a turn whose end only the engine's list showed does its last step now
-            return [4 /*yield*/, stepsAtEnd($).catch(function (err) { return log($, "last step not done: ".concat(String(err))); })
                 // A command run on the person's press that a reload left running is followed again by this load
-            ];
-            case 13:
-                // A go-ahead pressed during a turn whose end only the engine's list showed does its last step now
-                _c.sent();
-                // A command run on the person's press that a reload left running is followed again by this load
-                return [4 /*yield*/, followRuns($).catch(function (err) { return log($, "commands run on a press not followed: ".concat(String(err))); })];
-            case 14:
-                // A command run on the person's press that a reload left running is followed again by this load
-                _c.sent();
-                return [4 /*yield*/, keepStoppedReports($, now)];
-            case 15:
                 _c.sent();
                 return [4 /*yield*/, lookEnds($)];
-            case 16:
+            case 11:
                 _c.sent();
-                return [4 /*yield*/, saveKeep($).catch(function (err) { return log($, "work at work not kept for the keeper: ".concat(String(err))); })];
-            case 17:
+                return [4 /*yield*/, saveKeep($).catch(function (err) { return log($, "work at work not kept: ".concat(String(err))); })];
+            case 12:
                 _c.sent();
                 return [2 /*return*/];
         }
     });
 }); };
-// Tasks the engine lists as ended whose end the mod did not hear (it was reloading): one whose last words are no result is started
-// again to carry on, any other ends as the engine says, with its last words
-var endedUnheardShort = function ($, ids, live, now) { return __awaiter(_this, void 0, void 0, function () {
-    var chat, folder, _a, _loop_4, _i, ids_1, id;
-    var _b;
-    return __generator(this, function (_c) {
-        switch (_c.label) {
-            case 0: return [4 /*yield*/, read($, me)];
-            case 1:
-                chat = (_c.sent()).id;
-                if (!chat) return [3 /*break*/, 3];
-                return [4 /*yield*/, agentsFolder($, chat)];
-            case 2:
-                _a = _c.sent();
-                return [3 /*break*/, 4];
-            case 3:
-                _a = '';
-                _c.label = 4;
-            case 4:
-                folder = _a;
-                _loop_4 = function (id) {
-                    var card, f, _d, isReport, how;
-                    return __generator(this, function (_e) {
-                        switch (_e.label) {
-                            case 0: return [4 /*yield*/, read($, todos)];
-                            case 1:
-                                card = (_e.sent()).find(function (one) { return one.id === id; });
-                                if (!card || card.status !== 'working' || carryTaken.has(carryKey(card)))
-                                    return [2 /*return*/, "continue"];
-                                if (!folder) return [3 /*break*/, 3];
-                                return [4 /*yield*/, lastWordsOf($, folder, id, now)];
-                            case 2:
-                                _d = _e.sent();
-                                return [3 /*break*/, 4];
-                            case 3:
-                                _d = { at: now, answer: '', isReport: false, isHandback: false, isPressed: false };
-                                _e.label = 4;
-                            case 4:
-                                f = _d;
-                                isReport = isWordsReport(card, f.answer, f.isHandback);
-                                if (!(!isReport && (f.isPressed || isLetEnd(card)) && isStoppedShort(card, f.answer))) return [3 /*break*/, 6];
-                                return [4 /*yield*/, goOn($, id, 'its step ended while Claudopus was away')];
-                            case 5:
-                                _e.sent();
-                                return [2 /*return*/, "continue"];
-                            case 6:
-                                how = ((_b = live.find(function (one) { return one.id === id; })) === null || _b === void 0 ? void 0 : _b.status) === 'failed' ? 'failed' : 'done';
-                                return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (one) { var _a, _b; return (one.id === id && one.status === 'working' ? __assign(__assign(__assign(__assign({}, ended(one, how, now)), { answer: f.answer || one.answer }), (isReport ? { answeredAt: (_a = one.answeredAt) !== null && _a !== void 0 ? _a : now } : {})), (f.isHandback || (isReport && !f.isPressed) ? { reportAt: (_b = one.reportAt) !== null && _b !== void 0 ? _b : now } : {})) : one); }); })];
-                            case 7:
-                                _e.sent();
-                                return [2 /*return*/];
-                        }
-                    });
-                };
-                _i = 0, ids_1 = ids;
-                _c.label = 5;
-            case 5:
-                if (!(_i < ids_1.length)) return [3 /*break*/, 8];
-                id = ids_1[_i];
-                return [5 /*yield**/, _loop_4(id)];
-            case 6:
-                _c.sent();
-                _c.label = 7;
-            case 7:
-                _i++;
-                return [3 /*break*/, 5];
-            case 8: return [2 /*return*/];
-        }
-    });
-}); };
-// Work, or a helper, that ended while the mod was unloaded is never heard to end, and the engine drops it from its list a while
-// later: its card would be drawn at work, and warned about as stuck, for good (16 Nov a second look that handed back its report at
-// 17:25, while the mod was out from 17:24 to 17:26, was drawn at work for 47 minutes and held its task open). A card at work that
-// the engine no longer lists at all and whose saved record says it finished has ended: helpers first, then work with no helper at
-// work left and nothing it asked to be started again for. Looked at once a minute for each
 // The folder the engine keeps this chat's agents' records in
 var agentsFolder = function ($, chat) { return __awaiter(_this, void 0, void 0, function () { var _a; var _b; return __generator(this, function (_c) {
     switch (_c.label) {
@@ -488,13 +320,13 @@ var agentsFolder = function ($, chat) { return __awaiter(_this, void 0, void 0, 
             _a = "".concat;
             return [4 /*yield*/, $.env.get('HOME')];
         case 1: return [2 /*return*/, _a.apply("", [(_b = (_c.sent())) !== null && _b !== void 0 ? _b : '', "/.claude/projects/"]).concat(cwd.replace(/[^a-zA-Z0-9]/g, '-'), "/").concat(chat, "/subagents")
-            // An agent's last words from the end of its record: what it handed back, or the text of its last reply, whether that is a report,
-            // and when the record was last written
+            // An agent's last words from the end of its record: what it handed in, or the text of its last reply, whether Claude Code pressed
+            // it for a report after them, and when the record was last written
         ];
     }
 }); }); };
-// An agent's last words from the end of its record: what it handed back, or the text of its last reply, whether that is a report,
-// and when the record was last written
+// An agent's last words from the end of its record: what it handed in, or the text of its last reply, whether Claude Code pressed
+// it for a report after them, and when the record was last written
 var lastWordsOf = function ($, folder, agent, now) { return __awaiter(_this, void 0, void 0, function () {
     var path, stat, at, size, tail, _a, answer, isHandback, isPressed, _i, _b, row, o, blocks;
     var _c, _d, _e, _f;
@@ -529,182 +361,216 @@ var lastWordsOf = function ($, folder, agent, now) { return __awaiter(_this, voi
                     blocks = o.message.content;
                     isHandback = blocks.some(function (b) { return b.type === 'tool_use' && b.name === 'SubagentHandback'; });
                     answer = blocks.map(function (b) { var _a, _b; return (b.type === 'tool_use' && b.name === 'SubagentHandback' && typeof ((_a = b.input) === null || _a === void 0 ? void 0 : _a.message) === 'string' ? b.input.message : b.type === 'text' ? ((_b = b.text) !== null && _b !== void 0 ? _b : '') : ''); }).join('').trim();
-                    // (the line Claudopus answered Claude Code's press with is no words of its own)
+                    // (the line Claude Code's press was answered with is no words of its own)
                     if (answer === PRESS_ANSWER)
                         answer = '';
                     if (answer)
                         break;
                 }
-                return [2 /*return*/, { at: at, answer: answer.slice(0, ANSWER_CHARS), isReport: isHandback || answer.length >= REPORT_LEAST, isHandback: isHandback, isPressed: isPressed }];
+                return [2 /*return*/, { at: at, answer: answer.slice(0, ANSWER_CHARS), isHandback: isHandback, isPressed: isPressed }];
         }
     });
 }); };
-var UNHEARD_LOOK = 60000;
+// ---- A run that is over while its card is still at work ----
+// A task pauses by ending its step, and Claude Code starts its next step when a command or a helper of its own ends, or when the
+// person's answer or words reach it: its card stays at work meanwhile. A run is over for good only when nothing of its own runs
+// and nothing on its card waits for the person. Then its card ends: done when its result was received (handed in while Claudopus
+// was away, or its last words where Claude Code never pressed it for a hand-back, so took them as its result), and failed
+// otherwise, saying it ended without its result. A helper's card ends done either way: its words went to its task
+// A run only the list shows as over is given OVER_GRACE first, as Claude Code may be about to start its next step (a helper's
+// result on its way to it); one not listed at all must have been quiet for UNHEARD_QUIET, its record saying it finished
+var OVER_GRACE = 30000;
 var UNHEARD_QUIET = 60000;
-var unheardLooked = new Map();
-var endUnheard = function ($, live, now) { return __awaiter(_this, void 0, void 0, function () {
-    var id, isUnlisted, list, due, folder, finished, _i, due_1, one, meta, _a, _b, _c, _d, endedNow, short, _e, short_1, one, _loop_5, _f, endedNow_1, one;
-    return __generator(this, function (_g) {
-        switch (_g.label) {
-            case 0: return [4 /*yield*/, read($, me)];
-            case 1:
-                id = (_g.sent()).id;
-                if (!id || !dir)
+var overSince = new Map();
+var lookOver = function ($_1, live_3, now_1) {
+    var args_1 = [];
+    for (var _i = 3; _i < arguments.length; _i++) {
+        args_1[_i - 3] = arguments[_i];
+    }
+    return __awaiter(_this, __spreadArray([$_1, live_3, now_1], args_1, true), void 0, function ($, live, now, heard) {
+        var chat, list, statusOf, isOver, _loop_1, _a, _b, id, folder, _c, depth, endedNow, _loop_2, _d, _e, one, _f, endedNow_1, id;
+        var _g, _h;
+        if (heard === void 0) { heard = ''; }
+        return __generator(this, function (_j) {
+            switch (_j.label) {
+                case 0: return [4 /*yield*/, read($, me)];
+                case 1:
+                    chat = (_j.sent()).id;
+                    if (!dir || isOff)
+                        return [2 /*return*/];
+                    return [4 /*yield*/, read($, todos)];
+                case 2:
+                    list = _j.sent();
+                    statusOf = function (one) { var _a; return (_a = live.find(function (agent) { return agent.id === one.id; })) === null || _a === void 0 ? void 0 : _a.status; };
+                    isOver = function (one) { return one.status === 'working' && !one.chat && (one.id === heard || !turnEnding.has(one.id)) && !WORKING.includes(String(statusOf(one))) && statusOf(one) !== 'killed' && !ownsWork(list, one) && !needsPerson(one) && !waiting.some(function (p) { return p.agent === one.id; }); };
+                    _loop_1 = function (id) {
+                        if (!list.some(function (one) { return one.id === id && isOver(one); }))
+                            overSince.delete(id);
+                    };
+                    for (_a = 0, _b = __spreadArray([], overSince.keys(), true); _a < _b.length; _a++) {
+                        id = _b[_a];
+                        _loop_1(id);
+                    }
+                    if (!chat) return [3 /*break*/, 4];
+                    return [4 /*yield*/, agentsFolder($, chat)];
+                case 3:
+                    _c = _j.sent();
+                    return [3 /*break*/, 5];
+                case 4:
+                    _c = '';
+                    _j.label = 5;
+                case 5:
+                    folder = _c;
+                    depth = function (one) { return (one.parentId ? 1 : 0); };
+                    endedNow = [];
+                    _loop_2 = function (one) {
+                        var isListed, since, isHeard, _k, _l, _m, words, _o, isFailed, answer, isReceived, card;
+                        var _p;
+                        return __generator(this, function (_q) {
+                            switch (_q.label) {
+                                case 0:
+                                    isListed = statusOf(one) !== undefined;
+                                    if (one.id !== heard) {
+                                        since = (_g = overSince.get(one.id)) !== null && _g !== void 0 ? _g : now;
+                                        overSince.set(one.id, since);
+                                        if (isListed ? now - since < OVER_GRACE : now - Math.max(one.startedAt, (_h = one.newAt) !== null && _h !== void 0 ? _h : 0) < UNHEARD_QUIET)
+                                            return [2 /*return*/, "continue"];
+                                    }
+                                    isHeard = one.id === heard;
+                                    _k = !isListed && !isHeard;
+                                    if (!_k) return [3 /*break*/, 4];
+                                    _l = parsedOr;
+                                    if (!folder) return [3 /*break*/, 2];
+                                    return [4 /*yield*/, readOr($, "".concat(folder, "/agent-").concat(one.id, ".meta.json"))];
+                                case 1:
+                                    _m = _q.sent();
+                                    return [3 /*break*/, 3];
+                                case 2:
+                                    _m = '';
+                                    _q.label = 3;
+                                case 3:
+                                    _k = _l.apply(void 0, [_m, {}]).finished !== true;
+                                    _q.label = 4;
+                                case 4:
+                                    if (_k)
+                                        return [2 /*return*/, "continue"];
+                                    if (!(isListed || isHeard)) return [3 /*break*/, 6];
+                                    _p = { answer: '', isHandback: false };
+                                    return [4 /*yield*/, isUnpressed($, one.id)];
+                                case 5:
+                                    _o = (_p.isPressed = !(_q.sent()), _p.at = now, _p);
+                                    return [3 /*break*/, 8];
+                                case 6: return [4 /*yield*/, lastWordsOf($, folder, one.id, now)];
+                                case 7:
+                                    _o = _q.sent();
+                                    _q.label = 8;
+                                case 8:
+                                    words = _o;
+                                    isFailed = statusOf(one) === 'failed';
+                                    answer = words.answer || one.answer;
+                                    isReceived = !isFailed && (words.isHandback || (!words.isPressed && Boolean(answer.trim())));
+                                    return [4 /*yield*/, changeTodos($, function (all) {
+                                            return all.map(function (card) {
+                                                if (card.id !== one.id || card.status !== 'working' || ownsWork(all, card) || needsPerson(card))
+                                                    return card;
+                                                endedNow.push(card.id);
+                                                if (card.parentId)
+                                                    return __assign(__assign(__assign({}, ended(card, isFailed ? 'failed' : 'done', Math.min(words.at, now))), { answer: answer }), (isFailed ? { why: WHY_ERROR } : {}));
+                                                return isReceived ? __assign(__assign({}, ended(card, 'done', now)), { answer: answer, reportAt: now }) : __assign(__assign({}, ended(card, 'failed', now)), { answer: answer, why: isFailed ? WHY_ERROR : WHY_NO_RESULT });
+                                            });
+                                        })];
+                                case 9:
+                                    _q.sent();
+                                    overSince.delete(one.id);
+                                    return [4 /*yield*/, read($, todos)];
+                                case 10:
+                                    card = (_q.sent()).find(function (c) { return c.id === one.id; });
+                                    if (card && !card.parentId && card.status === 'done' && card.answer.trim())
+                                        $.clock.after(5, function () { return void saveReport($, card, card.answer).catch(function (err) { return log($, "report of ".concat(card.id, " not kept: ").concat(String(err))); }); });
+                                    return [2 /*return*/];
+                            }
+                        });
+                    };
+                    _d = 0, _e = list.filter(isOver).sort(function (a, b) { return depth(b) - depth(a); });
+                    _j.label = 6;
+                case 6:
+                    if (!(_d < _e.length)) return [3 /*break*/, 9];
+                    one = _e[_d];
+                    return [5 /*yield**/, _loop_2(one)];
+                case 7:
+                    _j.sent();
+                    _j.label = 8;
+                case 8:
+                    _d++;
+                    return [3 /*break*/, 6];
+                case 9:
+                    if (!endedNow.length)
+                        return [2 /*return*/];
+                    _f = 0, endedNow_1 = endedNow;
+                    _j.label = 10;
+                case 10:
+                    if (!(_f < endedNow_1.length)) return [3 /*break*/, 13];
+                    id = endedNow_1[_f];
+                    if (!(id !== heard)) return [3 /*break*/, 12];
+                    return [4 /*yield*/, replyUnread($, id).catch(function (err) { return log($, "reply not passed on: ".concat(String(err))); })];
+                case 11:
+                    _j.sent();
+                    _j.label = 12;
+                case 12:
+                    _f++;
+                    return [3 /*break*/, 10];
+                case 13: return [4 /*yield*/, log($, "runs that were over ended on their cards: ".concat(endedNow.join(', ')))];
+                case 14:
+                    _j.sent();
+                    return [4 /*yield*/, lookEnds($)];
+                case 15:
+                    _j.sent();
+                    redraw($);
                     return [2 /*return*/];
-                isUnlisted = function (one) { var _a; return one.status === 'working' && !one.chat && !live.some(function (agent) { return agent.id === one.id; }) && !cutPending.has(one.id) && !isHeld(one) && now - Math.max(one.startedAt, (_a = one.newAt) !== null && _a !== void 0 ? _a : 0) >= UNHEARD_QUIET; };
-                return [4 /*yield*/, read($, todos)];
-            case 2:
-                list = _g.sent();
-                due = list.filter(function (one) { var _a; return isUnlisted(one) && now - ((_a = unheardLooked.get(one.id)) !== null && _a !== void 0 ? _a : -Infinity) >= UNHEARD_LOOK; });
-                if (!due.length)
-                    return [2 /*return*/];
-                return [4 /*yield*/, agentsFolder($, id)];
-            case 3:
-                folder = _g.sent();
-                finished = new Map();
-                _i = 0, due_1 = due;
-                _g.label = 4;
-            case 4:
-                if (!(_i < due_1.length)) return [3 /*break*/, 8];
-                one = due_1[_i];
-                unheardLooked.set(one.id, now);
-                _a = parsedOr;
-                return [4 /*yield*/, readOr($, "".concat(folder, "/agent-").concat(one.id, ".meta.json"))];
-            case 5:
-                meta = _a.apply(void 0, [_g.sent(), {}]);
-                if (meta.finished !== true)
-                    return [3 /*break*/, 7];
-                _c = (_b = finished).set;
-                _d = [one.id];
-                return [4 /*yield*/, lastWordsOf($, folder, one.id, now)];
-            case 6:
-                _c.apply(_b, _d.concat([_g.sent()]));
-                _g.label = 7;
-            case 7:
-                _i++;
-                return [3 /*break*/, 4];
-            case 8:
-                if (!finished.size)
-                    return [2 /*return*/];
-                endedNow = [];
-                short = new Set();
-                return [4 /*yield*/, changeTodos($, function (all) {
-                        short.clear();
-                        var gone = new Set();
-                        var list = all;
-                        var _loop_6 = function (isMoved) {
-                            isMoved = false;
-                            list = list.map(function (one) {
-                                var _a, _b;
-                                var f = finished.get(one.id);
-                                if (!f || one.status !== 'working' || one.wakeWhen || isTurnWaited(list, one.id) || list.some(function (kid) { return kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id)); }))
-                                    return one;
-                                // (a task left stopped partway is started again to carry on, below)
-                                if (!one.parentId && !isWordsReport(one, f.answer, f.isHandback) && (f.isPressed || isLetEnd(one)) && isStoppedShort(one, f.answer))
-                                    return (short.add(one.id), one);
-                                gone.add(one.id);
-                                isMoved = true;
-                                // (its words count as a report only when it handed one back or wrote one as long, as at a heard end)
-                                var isTop = !one.parentId;
-                                var answer = f.answer || one.answer;
-                                return __assign(__assign(__assign(__assign(__assign({}, ended(one, 'done', isTop ? now : Math.min(f.at, now))), { answer: answer }), (isTop && isWordsReport(one, f.answer, f.isHandback) ? { answeredAt: (_a = one.answeredAt) !== null && _a !== void 0 ? _a : now } : {})), (isTop && (f.isHandback || (isWordsReport(one, f.answer) && !f.isPressed)) ? { reportAt: (_b = one.reportAt) !== null && _b !== void 0 ? _b : now } : {})), { stuckAt: undefined });
-                            });
-                            out_isMoved_1 = isMoved;
-                        };
-                        var out_isMoved_1;
-                        for (var isMoved = true; isMoved;) {
-                            _loop_6(isMoved);
-                            isMoved = out_isMoved_1;
-                        }
-                        endedNow = __spreadArray([], gone, true);
-                        return gone.size ? list : all;
-                    })];
-            case 9:
-                _g.sent();
-                _e = 0, short_1 = short;
-                _g.label = 10;
-            case 10:
-                if (!(_e < short_1.length)) return [3 /*break*/, 13];
-                one = short_1[_e];
-                return [4 /*yield*/, goOn($, one, 'its step ended while Claudopus was away')];
-            case 11:
-                _g.sent();
-                _g.label = 12;
-            case 12:
-                _e++;
-                return [3 /*break*/, 10];
-            case 13:
-                if (!endedNow.length)
-                    return [2 /*return*/];
-                return [4 /*yield*/, log($, "work that ended while the mod was out ended on its card: ".concat(endedNow.join(', ')))];
-            case 14:
-                _g.sent();
-                _loop_5 = function (one) {
-                    var card;
-                    return __generator(this, function (_h) {
-                        switch (_h.label) {
-                            case 0: return [4 /*yield*/, read($, todos)];
-                            case 1:
-                                card = (_h.sent()).find(function (todo) { return todo.id === one; });
-                                if (!((card === null || card === void 0 ? void 0 : card.parentId) && card.parentId !== HELPER)) return [3 /*break*/, 3];
-                                return [4 /*yield*/, passOnHelper($, one, card.answer, 'done', true).catch(function (err) { return log($, "helper ".concat(one, "'s result not passed on: ").concat(String(err))); })];
-                            case 2:
-                                _h.sent();
-                                _h.label = 3;
-                            case 3: return [2 /*return*/];
-                        }
-                    });
-                };
-                _f = 0, endedNow_1 = endedNow;
-                _g.label = 15;
-            case 15:
-                if (!(_f < endedNow_1.length)) return [3 /*break*/, 18];
-                one = endedNow_1[_f];
-                return [5 /*yield**/, _loop_5(one)];
-            case 16:
-                _g.sent();
-                _g.label = 17;
-            case 17:
-                _f++;
-                return [3 /*break*/, 15];
-            case 18:
-                redraw($);
-                return [2 /*return*/];
-        }
+            }
+        });
     });
-}); };
+};
 // Changes the to-do a piece of work belongs to; work the mod never saw start is looked up first, and a helper of unknown work changes nothing
-var change = function ($, agentId, fn) { return __awaiter(_this, void 0, void 0, function () {
-    var now;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0: return [4 /*yield*/, $.clock.now()];
-            case 1:
-                now = _a.sent();
-                return [4 /*yield*/, read($, todos)];
-            case 2:
-                if (!!(_a.sent()).some(function (one) { return one.id === agentId; })) return [3 /*break*/, 4];
-                return [4 /*yield*/, sync($)];
-            case 3:
-                _a.sent();
-                _a.label = 4;
-            case 4: return [4 /*yield*/, changeTodos($, function (list) {
-                    var id = topOf(list, agentId);
-                    return list.map(function (one) { return (one.id === id ? fn(one, now) : one); });
-                })
-                // Work that was running before the panel had ever opened brings it up with its first line
-            ];
-            case 5:
-                _a.sent();
-                // Work that was running before the panel had ever opened brings it up with its first line
-                return [4 /*yield*/, openList($)];
-            case 6:
-                // Work that was running before the panel had ever opened brings it up with its first line
-                _a.sent();
-                return [2 /*return*/];
-        }
+// (`isOwn`: a helper's own card where it has one, as for its to-dos, which are never the task's above it)
+var change = function ($_1, agentId_1, fn_1) {
+    var args_1 = [];
+    for (var _i = 3; _i < arguments.length; _i++) {
+        args_1[_i - 3] = arguments[_i];
+    }
+    return __awaiter(_this, __spreadArray([$_1, agentId_1, fn_1], args_1, true), void 0, function ($, agentId, fn, isOwn) {
+        var now;
+        if (isOwn === void 0) { isOwn = false; }
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0: return [4 /*yield*/, $.clock.now()];
+                case 1:
+                    now = _a.sent();
+                    return [4 /*yield*/, read($, todos)];
+                case 2:
+                    if (!!(_a.sent()).some(function (one) { return one.id === agentId; })) return [3 /*break*/, 4];
+                    return [4 /*yield*/, sync($)];
+                case 3:
+                    _a.sent();
+                    _a.label = 4;
+                case 4: return [4 /*yield*/, changeTodos($, function (list) {
+                        var id = isOwn && list.some(function (one) { return one.id === agentId; }) ? agentId : topOf(list, agentId);
+                        return list.map(function (one) { return (one.id === id ? fn(one, now) : one); });
+                    })
+                    // Work that was running before the panel had ever opened brings it up with its first line
+                ];
+                case 5:
+                    _a.sent();
+                    // Work that was running before the panel had ever opened brings it up with its first line
+                    return [4 /*yield*/, openList($)];
+                case 6:
+                    // Work that was running before the panel had ever opened brings it up with its first line
+                    _a.sent();
+                    return [2 /*return*/];
+            }
+        });
     });
-}); };
+};
 // The person dismisses the card of a task that has ended, whatever it still asks (18 Nov: "Either way, I should have the ability to
 // just close it"): it goes under Finished and stays there, kept on the card so a reload keeps it too, and comes back up only when
 // the task works again (resumed). Its result stays in Results, where its open questions are still answered
@@ -712,31 +578,51 @@ var isDismissed = function (one) { return one.status !== 'working' && Boolean(on
 // The cards pressed Dismiss on whose write has not landed: drawn dismissed from the press itself (asPressed), so a drawing the app
 // asks for between the press and the write, which the panel then keeps while the person uses it, never shows it at the top (18 Nov,
 // the person: "when I click this, the message should go below the finished")
-var dismissedNow = new Set();
+var dismissedNow = new Map();
 var dismiss = function ($, id) { return __awaiter(_this, void 0, void 0, function () {
-    var at;
+    var at, card;
     return __generator(this, function (_a) {
         switch (_a.label) {
-            case 0:
-                dismissedNow.add(id);
-                return [4 /*yield*/, $.clock.now()
-                    // (dismissed, it is done with: a question of its own on the card goes with it, and it is drawn at once, before it is kept)
-                ];
+            case 0: return [4 /*yield*/, $.clock.now()
+                // (a second press on a card already marked, as a double click or a press on a drawing from before, changes nothing)
+            ];
             case 1:
                 at = _a.sent();
+                return [4 /*yield*/, read($, todos)];
+            case 2:
+                card = (_a.sent()).find(function (one) { return one.id === id; });
+                if (!card || card.status === 'working' || card.closedAt || dismissedNow.has(id))
+                    return [2 /*return*/];
+                dismissedNow.set(id, at);
+                doneMoments.set(id, { pressedAt: at, shownAt: 0 });
+                redraw($);
+                // Its moment never drawn, as in a panel closed meanwhile, it is drawn again under Finished
+                $.clock.after(DONE_UNSEEN + 20, function () { return void (drawAgain($), update($, tick, function (n) { return n + 1; })); });
                 // (dismissed, it is done with: a question of its own on the card goes with it, and it is drawn at once, before it is kept)
                 return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (one) { return (one.id === id && one.status !== 'working' && !one.closedAt ? __assign(__assign({}, one), { closedAt: at, ask: undefined }) : one); }); }).finally(function () { return dismissedNow.delete(id); })];
-            case 2:
+            case 3:
                 // (dismissed, it is done with: a question of its own on the card goes with it, and it is drawn at once, before it is kept)
                 _a.sent();
                 redraw($);
                 return [4 /*yield*/, saveFinished($).catch(function (err) { return log($, "finished work not kept: ".concat(String(err))); })];
-            case 3:
+            case 4:
                 _a.sent();
                 return [2 /*return*/];
         }
     });
 }); };
+// The panel's first drawing made that shows a card marked done begins its moment: its two seconds, the happy octopus and the sound
+// start together, as the person sees it, and it is drawn again under Finished once they are over
+var beginDoneMoment = function ($, one, at) {
+    var moment = doneMoments.get(one.id);
+    if (!moment || moment.shownAt || !isDoneMoment(one, at))
+        return;
+    moment.shownAt = at;
+    $.clock.after(LINGER + 20, function () { return void (drawAgain($), update($, tick, function (n) { return n + 1; })); });
+    void playDone($);
+    // (how long the person waited for it, so a slow panel shows in the log)
+    void log($, "marked done: drawn green ".concat(at - moment.pressedAt, " ms after the press"));
+};
 // Writes a line into a piece of work's own chat, which it reads at its next step
 var tell = function ($, id, text) {
     return $.session.append({ message: { type: 'user', content: [{ type: 'text', text: text }] }, agentId: id }).catch(function (err) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
@@ -747,7 +633,7 @@ var tell = function ($, id, text) {
     }); }); });
 };
 var stop = function ($, id) { return __awaiter(_this, void 0, void 0, function () {
-    var r, before, card, isYours, under, _i, _a, b, left, _loop_7, at, now;
+    var r, before, card, isYours, under, _i, _a, b, _loop_3, at, now;
     return __generator(this, function (_b) {
         switch (_b.label) {
             case 0: return [4 /*yield*/, read($, todos)];
@@ -764,7 +650,7 @@ var stop = function ($, id) { return __awaiter(_this, void 0, void 0, function (
             case 3:
                 before = _b.sent();
                 card = before.find(function (one) { return one.id === id; });
-                isYours = Boolean(card && card.status === 'working' && !card.answeredAt);
+                isYours = Boolean(card && card.status === 'working');
                 under = __spreadArray([card], underOf(before, id), true).filter(function (one) { return Boolean(one); });
                 return [4 /*yield*/, stopHelpers($, id)];
             case 4:
@@ -775,7 +661,9 @@ var stop = function ($, id) { return __awaiter(_this, void 0, void 0, function (
             case 5:
                 if (!(_i < _a.length)) return [3 /*break*/, 8];
                 b = _a[_i];
-                return [4 /*yield*/, $.tool.call({ tool: 'TaskStop', task_id: b.id }).catch(function () { return undefined; })];
+                return [4 /*yield*/, $.tool.call({ tool: 'TaskStop', task_id: b.id }).catch(function () { return undefined; })
+                    // Answers that were on their way to it before the stop are dropped: none wakes it
+                ];
             case 6:
                 _b.sent();
                 _b.label = 7;
@@ -783,68 +671,57 @@ var stop = function ($, id) { return __awaiter(_this, void 0, void 0, function (
                 _i++;
                 return [3 /*break*/, 5];
             case 8:
-                left = isYours ? under.flatMap(function (one) { var _a; return (_a = one.detached) !== null && _a !== void 0 ? _a : []; }).map(function (d) { return "".concat(d.what || cut(d.cmd, 80)).concat(d.pid ? " (process ".concat(d.pid, ")") : '', ", its log ").concat(d.log); }) : [];
                 // Answers that were on their way to it before the stop are dropped: none wakes it
                 if (isYours) {
-                    _loop_7 = function (at) {
+                    _loop_3 = function (at) {
                         if (under.some(function (one) { var _a; return one.id === ((_a = wakes[at]) === null || _a === void 0 ? void 0 : _a.target); }))
                             wakes.splice(at, 1);
                     };
                     for (at = wakes.length - 1; at >= 0; at -= 1) {
-                        _loop_7(at);
+                        _loop_3(at);
                     }
                 }
-                return [4 /*yield*/, $.clock.now()
-                    // What finished work left running is stopped with it
-                ];
+                return [4 /*yield*/, $.clock.now()];
             case 9:
                 now = _b.sent();
-                // What finished work left running is stopped with it
                 return [4 /*yield*/, changeTodos($, function (list) {
                         return list.map(function (one) {
                             return one.id === id && one.status === 'working'
                                 ? __assign(__assign({}, ended(one, stoppedAs(one), now)), (isYours ? { byYou: { at: now }, ask: undefined } : {})) : isYours && one.id !== id && under.some(function (kid) { return kid.id === one.id; }) && one.status !== 'done'
                                 ? // Its helpers, stopped with it, are held with it
-                                 __assign(__assign({}, (one.status === 'working' ? ended(one, 'stopped', now) : one)), { byYou: { at: now } }) : one.id === id && one.leftSince
-                                ? __assign(__assign({}, one), { leftSince: undefined }) : one;
+                                 __assign(__assign({}, (one.status === 'working' ? ended(one, 'stopped', now) : one)), { byYou: { at: now } }) : one;
                         });
                     })
                     // A helper stopped so: the work above it is told in its own chat; the chat is told as the engine's notice of the stop comes
                 ];
             case 10:
-                // What finished work left running is stopped with it
                 _b.sent();
                 if (!(isYours && (card === null || card === void 0 ? void 0 : card.parentId) && card.parentId !== HELPER)) return [3 /*break*/, 12];
-                return [4 /*yield*/, tell($, card.parentId, named(STOPPED_BY_YOU(titleOf(card), id, left)))];
+                return [4 /*yield*/, tell($, card.parentId, named(STOPPED_BY_YOU(titleOf(card), id)))];
             case 11:
                 _b.sent();
                 _b.label = 12;
-            case 12:
-                if (isYours && card && !card.parentId)
-                    stopLeft.set(id, left);
-                return [4 /*yield*/, keepStoppedReports($, now)];
+            case 12: return [4 /*yield*/, lookEnds($)];
             case 13:
                 _b.sent();
-                return [4 /*yield*/, lookEnds($)];
+                return [4 /*yield*/, saveKeep($).catch(function (err) { return log($, "work at work not kept: ".concat(String(err))); })];
             case 14:
-                _b.sent();
-                return [4 /*yield*/, saveKeep($).catch(function (err) { return log($, "work at work not kept for the keeper: ".concat(String(err))); })];
-            case 15:
                 _b.sent();
                 return [2 /*return*/];
         }
     });
 }); };
-// Work the person stopped, started again by their press on its card: a message from the panel in their name, which lifts the hold
+// A task the person stopped, or one that failed, started again by their press on its card: a message from the panel in their
+// name, which lifts the hold. Nothing else starts it again
 var startAgain = function ($, id) { return __awaiter(_this, void 0, void 0, function () {
-    var one, target, _a, _b, _c;
+    var one, target, _a, _b, _c, why;
     var _d;
     return __generator(this, function (_e) {
         switch (_e.label) {
             case 0: return [4 /*yield*/, read($, todos)];
             case 1:
                 one = (_e.sent()).find(function (todo) { return todo.id === id; });
-                if (!one || one.status !== 'stopped' || !one.byYou)
+                if (!one || !((one.status === 'stopped' && one.byYou) || one.status === 'failed'))
                     return [2 /*return*/];
                 if (!(one.parentId && one.parentId !== HELPER)) return [3 /*break*/, 3];
                 _b = "the task \"".concat;
@@ -858,7 +735,8 @@ var startAgain = function ($, id) { return __awaiter(_this, void 0, void 0, func
                 _e.label = 4;
             case 4:
                 target = _a;
-                return [4 /*yield*/, sendForPerson($, "From the Claudopus panel: ".concat(who(true), " pressed \"Start again\" on \"").concat(titleOf(one), "\" (").concat(id, "), which they had stopped. Start it again: send ").concat(target, " \"").concat(titleOf(one), "\" (").concat(id, ") a message with SendMessage so it continues from where it stopped."))];
+                why = one.status === 'failed' ? "which had failed".concat(one.why ? " (".concat(one.why.charAt(0).toLowerCase()).concat(one.why.slice(1), ")") : '') : 'which they had stopped';
+                return [4 /*yield*/, sendForPerson($, "From the Claudopus panel: ".concat(who(true), " pressed \"Start again\" on \"").concat(titleOf(one), "\" (").concat(id, "), ").concat(why, ". Start it again: send ").concat(target, " \"").concat(titleOf(one), "\" (").concat(id, ") a message with SendMessage so it continues from where it stopped."))];
             case 5:
                 _e.sent();
                 return [2 /*return*/];
@@ -1039,7 +917,7 @@ var saveFinished = function ($) { return __awaiter(_this, void 0, void 0, functi
 // the chat's own thread started; what the person's words were for it is not recovered
 var isBare = function (card) { return card.status !== 'working' && card.endedAt === card.startedAt && !card.model; };
 var recoverEnded = function ($) { return __awaiter(_this, void 0, void 0, function () {
-    var id, list, live, home, folder, ids, metas, fresh, found, _loop_8, _i, fresh_1, _a, agentId, meta;
+    var id, list, live, home, folder, ids, metas, fresh, found, _loop_4, _i, fresh_1, _a, agentId, meta;
     var _this = this;
     var _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u;
     return __generator(this, function (_v) {
@@ -1101,8 +979,8 @@ var recoverEnded = function ($) { return __awaiter(_this, void 0, void 0, functi
                     return [2 /*return*/];
                 during('read back ended work');
                 found = [];
-                _loop_8 = function (agentId, meta) {
-                    var mtime, path, text, _w, _x, engine, one, first, last, model, tokens, items, entries, _loop_9, _y, _z, row, status_1, err_1;
+                _loop_4 = function (agentId, meta) {
+                    var mtime, path, text, _w, _x, engine, one, first, last, model, tokens, items, entries, _loop_5, _y, _z, row, status_1, err_1;
                     return __generator(this, function (_0) {
                         switch (_0.label) {
                             case 0:
@@ -1136,8 +1014,8 @@ var recoverEnded = function ($) { return __awaiter(_this, void 0, void 0, functi
                                 tokens = 0;
                                 items = [];
                                 entries = [];
-                                _loop_9 = function (row) {
-                                    var o, at, u, _loop_10, _1, _2, block;
+                                _loop_5 = function (row) {
+                                    var o, at, u, _loop_6, _1, _2, block;
                                     return __generator(this, function (_3) {
                                         switch (_3.label) {
                                             case 0: return [4 /*yield*/, breathe($)];
@@ -1162,7 +1040,7 @@ var recoverEnded = function ($) { return __awaiter(_this, void 0, void 0, functi
                                                 u = (_o = o.message) === null || _o === void 0 ? void 0 : _o.usage;
                                                 if (u)
                                                     tokens = ((_p = u.input_tokens) !== null && _p !== void 0 ? _p : 0) + ((_q = u.cache_read_input_tokens) !== null && _q !== void 0 ? _q : 0) + ((_r = u.cache_creation_input_tokens) !== null && _r !== void 0 ? _r : 0) + ((_s = u.output_tokens) !== null && _s !== void 0 ? _s : 0);
-                                                _loop_10 = function (block) {
+                                                _loop_6 = function (block) {
                                                     if (block.type !== 'tool_use' || !block.name)
                                                         return "continue";
                                                     var input = (_u = block.input) !== null && _u !== void 0 ? _u : {};
@@ -1177,7 +1055,7 @@ var recoverEnded = function ($) { return __awaiter(_this, void 0, void 0, functi
                                                 };
                                                 for (_1 = 0, _2 = Array.isArray((_t = o.message) === null || _t === void 0 ? void 0 : _t.content) ? o.message.content : []; _1 < _2.length; _1++) {
                                                     block = _2[_1];
-                                                    _loop_10(block);
+                                                    _loop_6(block);
                                                 }
                                                 return [2 /*return*/];
                                         }
@@ -1188,7 +1066,7 @@ var recoverEnded = function ($) { return __awaiter(_this, void 0, void 0, functi
                             case 6:
                                 if (!(_y < _z.length)) return [3 /*break*/, 9];
                                 row = _z[_y];
-                                return [5 /*yield**/, _loop_9(row)];
+                                return [5 /*yield**/, _loop_5(row)];
                             case 7:
                                 _0.sent();
                                 _0.label = 8;
@@ -1214,7 +1092,7 @@ var recoverEnded = function ($) { return __awaiter(_this, void 0, void 0, functi
             case 7:
                 if (!(_i < fresh_1.length)) return [3 /*break*/, 10];
                 _a = fresh_1[_i], agentId = _a.one, meta = _a.meta;
-                return [5 /*yield**/, _loop_8(agentId, meta)];
+                return [5 /*yield**/, _loop_4(agentId, meta)];
             case 8:
                 _v.sent();
                 _v.label = 9;
@@ -1248,8 +1126,8 @@ var loadFinished = function ($) { return __awaiter(_this, void 0, void 0, functi
                 if (!Array.isArray(kept) || !kept.length)
                     return [2 /*return*/];
                 return [4 /*yield*/, changeTodos($, function (list) {
-                        // What it left running is looked at afresh: the record of how it ended does not outlive the load
-                        var fresh = kept.filter(function (one) { return one.id && one.status !== 'working' && !list.some(function (card) { return card.id === one.id; }); }).map(function (one) { return (__assign(__assign({}, one), { leftSince: undefined, stuckAt: undefined, bg: undefined, waitsSince: undefined })); });
+                        // A command lasts while the app is open: what a finished card had running did not outlive the load
+                        var fresh = kept.filter(function (one) { return one.id && one.status !== 'working' && !list.some(function (card) { return card.id === one.id; }); }).map(function (one) { return (__assign(__assign({}, one), { stuckAt: undefined, bg: undefined })); });
                         return fresh.length ? capped(byEnd(__spreadArray(__spreadArray([], fresh, true), list, true))) : list;
                     })];
             case 3:
@@ -1271,35 +1149,26 @@ var follow = function ($) { return __awaiter(_this, void 0, void 0, function () 
                 return [4 /*yield*/, lookStuck($).catch(function (err) { return log($, "stuck work not looked for: ".concat(String(err))); })];
             case 3:
                 _b.sent();
-                return [4 /*yield*/, lookInDue($).catch(function (err) { return log($, "helpers not looked in on: ".concat(String(err))); })];
+                return [4 /*yield*/, saveFinished($).catch(function (err) { return log($, "finished work not kept: ".concat(String(err))); })];
             case 4:
                 _b.sent();
-                return [4 /*yield*/, lookHeld($).catch(function (err) { return log($, "held commands not looked at: ".concat(String(err))); })];
-            case 5:
-                _b.sent();
-                return [4 /*yield*/, lookWakes($).catch(function (err) { return log($, "wakes not looked at: ".concat(String(err))); })];
-            case 6:
-                _b.sent();
-                return [4 /*yield*/, saveFinished($).catch(function (err) { return log($, "finished work not kept: ".concat(String(err))); })];
-            case 7:
-                _b.sent();
                 return [4 /*yield*/, $.ui.panes().catch(function () { return []; })];
-            case 8:
+            case 5:
                 isShown = (_b.sent()).some(function (pane) { return pane.id === LIST; });
                 _a = isShown;
                 return [4 /*yield*/, read($, paneShown)];
-            case 9:
-                if (!(_a !== (_b.sent()))) return [3 /*break*/, 11];
+            case 6:
+                if (!(_a !== (_b.sent()))) return [3 /*break*/, 8];
                 return [4 /*yield*/, update($, paneShown, function () { return isShown; })
                     // Reports another chat kept since are listed here too
                 ];
-            case 10:
+            case 7:
                 _b.sent();
-                _b.label = 11;
-            case 11: 
+                _b.label = 8;
+            case 8: 
             // Reports another chat kept since are listed here too
             return [4 /*yield*/, loadReports($).catch(function () { return undefined; })];
-            case 12:
+            case 9:
                 // Reports another chat kept since are listed here too
                 _b.sent();
                 return [2 /*return*/];
