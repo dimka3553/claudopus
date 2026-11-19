@@ -1886,13 +1886,13 @@ test("work that finishes comes to the top, outlined for two seconds, and stays t
   await again.redraw()
   const greens = async () => [(await again.findAll({ type: 'Text', text: '✓ Done' })).map(one => one.props.color), (await again.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.borderColor === 'success').length]
   const isHappyNow = async () => (await again.findAll({ type: 'Svg' })).some(one => /<title>happy<\/title>/.test(String(one.props.source)))
-  // Through its moment it keeps its delivered shape, its line one row and its two presses at its bottom, which do nothing then, so a
-  // second click lands where the first did (19 Nov: the card shrank as its presses went, and the next click opened its helpers)
-  expect([await until(async () => ((await greens())[1] ? titles(again) : undefined)), await greens(), await fold(again), await offered(again, 'a1'), await isHappyNow(), played.slice(sounds)]).toEqual([before, [['success'], 1], undefined, ['Give feedback', 'Mark as done'], true, ['sounds/ready.wav']])
-  await pressed(again, 'dismiss-a1')
-  await pressed(again, 'change-a1')
+  // Through its moment it keeps its delivered shape, its line one row and the row of its presses, but the presses themselves are gone
+  // at once, the choice made, so nothing moves under the pointer and a second click lands on nothing (19 Nov, the person: "As soon
+  // as I click a button, the buttons should immediately disappear")
+  expect([await until(async () => ((await greens())[1] ? titles(again) : undefined)), await greens(), await fold(again), await offered(again, 'a1'), await isHappyNow(), played.slice(sounds)]).toEqual([before, [['success'], 1], undefined, [], true, ['sounds/ready.wav']])
+  expect((await again.findAll({ type: 'Box' })).filter(b => b.key === 'delivered-a1').map(b => b.props.height)).toEqual([1])
   await clock.advance(900)
-  expect([await titles(again), await greens(), await fold(again), await offered(again, 'a1'), await band.find({ type: 'Text', text: /^↳ / }), played.slice(sounds)]).toEqual([before, [['success'], 1], undefined, ['Give feedback', 'Mark as done'], undefined, ['sounds/ready.wav']])
+  expect([await titles(again), await greens(), await fold(again), await offered(again, 'a1'), await band.find({ type: 'Text', text: /^↳ / }), played.slice(sounds)]).toEqual([before, [['success'], 1], undefined, [], undefined, ['sounds/ready.wav']])
   await clock.advance(200)
   expect(await until(() => fold(again))).toBe('▸ Finished 1')
   expect(await titles(again)).toEqual(['Check the ears', 'Draw the eyes'])

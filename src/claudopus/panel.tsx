@@ -441,8 +441,8 @@ const panelHooks = (on: On) => {
       )
     }
     // Delivered, or in the green moment after Mark as done: through that moment the card keeps its delivered shape, its line one row,
-    // what it asked and its two presses at its bottom, which do nothing then, so nothing moves under the pointer and a second click
-    // lands where the first did (19 Nov: the card shrank as its presses went, and the person's next click opened its helpers)
+    // what it asked, and the row of its two presses, empty then, so nothing moves under the pointer and a second click lands on
+    // nothing (19 Nov: the card shrank as its presses went, and the person's next click opened its helpers)
     const looksDelivered = (one: Todo) => stage(one) === 'delivered' || isDoneMoment(one, at)
     const small = (one: Todo) => {
       // In the terminal, while the letters are keys, the first nine cards are numbered and the number opens the card's Details
@@ -457,7 +457,7 @@ const panelHooks = (on: On) => {
       // Just finished, in its moment at the top: outlined in the green of what is done, as an allowed notice is. The outline takes
       // none of the card's room (the app pads a box with a border by 12 by 16 px of its own), so nothing in it moves under the pointer
       const isMoment = isMomentNow && !isAbovePrompt
-      // (read as it is drawn: its presses then do nothing, whenever they come)
+      // (read as it is drawn)
       const isMarkedNow = isDoneMoment(one, at)
       return (
         <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isMoment ? { borderStyle: 'round' as const, borderColor: stageColor(stage(one)) ?? DONE, paddingX: 0, paddingY: 0 } : {})}>
@@ -565,12 +565,15 @@ const panelHooks = (on: On) => {
                 to just send one message for both the questions"). The reply is typed in the box above the chat, as every
                 message is, and puts the task back to work; Mark as done puts the card under Finished */}
             {looksDelivered(one) ? questionLines(one, `asks-${one.id}`, lead) : null}
-            {looksDelivered(one) && (canDismiss(one) || isDoneMoment(one, at) || (canChange(one) && 'Input' in table && repliesInBar(e.surface))) ? (
+            {/* Marked done, its presses go at once, the choice made: an empty row of their height holds the card's shape through its
+                green moment (19 Nov, the person: "As soon as I click a button, the buttons should immediately disappear") */}
+            {isMarkedNow ? <Box key={`delivered-${one.id}`} height={1} /> : null}
+            {!isMarkedNow && looksDelivered(one) && (canDismiss(one) || (canChange(one) && 'Input' in table && repliesInBar(e.surface))) ? (
               <Box key={`delivered-${one.id}`} flexDirection="row" flexWrap="wrap" gap={1} paddingLeft={lead}>
                 {canChange(one) && 'Input' in table && repliesInBar(e.surface) ? (
-                  <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : one.questions?.length ? 'Reply' : 'Give feedback'} variant={isBarOpen('change', one.id) ? undefined : 'primary'} onPress={press => (isMarkedNow ? undefined : openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface))} />
+                  <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : one.questions?.length ? 'Reply' : 'Give feedback'} variant={isBarOpen('change', one.id) ? undefined : 'primary'} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
                 ) : null}
-                {canDismiss(one) || isMarkedNow ? <Button key={`dismiss-${one.id}-${presses}`} label="Mark as done" onPress={() => void (isMarkedNow || ((presses += 1), dismiss($, one.id).catch(err => log($, `card not marked done: ${String(err)}`))))} /> : null}
+                {canDismiss(one) ? <Button key={`dismiss-${one.id}-${presses}`} label="Mark as done" onPress={() => void ((presses += 1), dismiss($, one.id).catch(err => log($, `card not marked done: ${String(err)}`)))} /> : null}
               </Box>
             ) : null}
           </Box>
