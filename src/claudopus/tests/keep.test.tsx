@@ -1,124 +1,24 @@
-// Work that goes on when the chat's process ends: what the keeper reads, the keeper started, cut-off work marked and started again
+// The chat's process: what is at work is recorded beside it, a card found at work after the process was replaced says the app
+// closed while it worked, and the watcher that brings Claudopus back
 
 const KEEP_AT = `${MEMORY}/keep/engine-id`
 const KEEP_NOW = 1_700_000_000_000
-// What the last process of this chat left: the work it had at work, and when the keeper saw it end
-const leftAtWork = (files: Map<string, string>, ids: string[], cutAt = KEEP_NOW - 60_000, pid = '4242') => {
-  files.set(`${KEEP_AT}.json`, JSON.stringify({ count: ids.length, ids, title: 'Contest', pid, at: cutAt - 5_000 }))
-  files.set(`${KEEP_AT}.state`, JSON.stringify({ cutAt, count: ids.length }))
-}
-const cardText = async ($: { ui: { mount: (q: never) => Promise<{ findAll: (q: object) => Promise<readonly { text?: string; props: Record<string, unknown> }[]>; unmount: () => Promise<void> }> } }, pattern: RegExp) => {
-  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  const found = (await pane.findAll({ type: 'Text', text: pattern })).map(one => ({ text: one.text, color: one.props.color }))
-  await pane.unmount()
-  return found
-}
 
-test('what is at work is kept for the keeper, with the process that runs it, and a chat run from another Mac starts one', SLOW, async ($, on) => {
+test("what is at work is recorded with the chat's process that runs it, each task by its title, and is taken out as it ends; no keeper is started, whatever runs the chat", SLOW, async ($, on) => {
+  // (a chat run from another Mac, which once started a keeper)
   const { files, clock } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
   await $.session.start(start)
-  expect(files.get(`${MEMORY}/log.md`)).toContain('keeper started for engine-id')
   await $.prompt.submit({ text: 'solve the cameras', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Solve the cameras', prompt: 'solve' } as never)
+  const kept = () => JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}') as { ids?: string[]; titles?: Record<string, string>; pid?: string }
+  expect(await until(async () => (kept().ids?.length ? kept() : undefined))).toMatchObject({ ids: ['a1'], titles: { a1: 'Solve the cameras' }, pid: '4242' })
+  // It hands in its result: nothing is at work
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'Solved: all 158 frames placed, and the report is written with every number.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(21_000)
-  expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ count: 1, ids: ['a1'] })
-  await $.turn.complete({ answer: 'Solved: all 158 frames placed, and the report is written with every number.'.repeat(4), durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
-  await clock.advance(21_000)
-  expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ count: 0, ids: [] })
-})
-
-test('a chat this Mac runs itself, and the copy the keeper started, start no keeper', async ($, on) => {
-  const { files } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1', CLAUDE_CODE_SESSION_KIND: 'bg' } })
-  await $.session.start(start)
-  expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain('keeper started')
-})
-
-test('work cut off as the process ended is started again with a message, its card says nothing of it, and the person is told', SLOW, async ($, on) => {
-  const { files, clock, resumed, logged } = world(on)
-  leftAtWork(files, ['a7', 'a8'])
-  await $.session.start(start)
-  // Nothing until Claude Code has had its moment to start what it starts itself
-  expect(resumed).toEqual([])
-  await clock.advance(31_000)
-  expect(resumed.map(one => one.split(':')[0])).toEqual(['a7', 'a8'])
-  expect(resumed[0]).toContain("this chat's process was ended at")
-  expect(resumed[0]).toContain('not by')
-  // Started again, the cards go on as they were: no line of when the chat stopped or since when they run again (18 Nov)
-  expect(await cardText($ as never, /Interrupted|running again/)).toEqual([])
-  // Nothing in the chat either
-  expect(logged.some(line => line.includes('after the chat stopped at'))).toBe(false)
-  expect(files.get(`${MEMORY}/log.md`)).toContain('cut-off notice pushed')
-  // The keeper's file says both are at work again
-  expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ count: 2 })
-})
-
-test('in the copy kept on this Mac, work Claude Code started again itself is only marked; one it could not is said in amber', SLOW, async ($, on) => {
-  const { files, clock, resumed, logged } = world(on, { env: { CLAUDE_CODE_SESSION_KIND: 'bg' }, agents: { a7: 'running' }, kinds: { a7: 'general-purpose' }, unresumable: new Set(['a8']) })
-  leftAtWork(files, ['a7', 'a8'])
-  await $.session.start(start)
-  await clock.advance(31_000)
-  expect(resumed).toEqual([])
-  const lines = await cardText($ as never, /^Interrupted at /)
-  const said = (end: string) => lines.find(one => one.text?.endsWith(end))
-  expect(lines.map(one => one.text?.replace(/\d\d:\d\d/g, 'hh:mm')).sort()).toEqual(["Interrupted at hh:mm when the chat stopped · Claudopus couldn't start it again"])
-  expect(said("couldn't start it again")?.color).toBe('#E5A50A')
-  expect(logged.some(line => line.includes("couldn't start"))).toBe(true)
-})
-
-test('a chat with no keeper starts nothing again, and a cut is taken up once, through a reload of the mod before it was done', SLOW, async ($, on) => {
-  const { files, clock, resumed } = world(on)
-  // Work left at work with no keeper to see its process end, as a chat quit on purpose days ago
-  files.set(`${KEEP_AT}.json`, JSON.stringify({ count: 1, ids: ['a6'], title: 'Contest', pid: '4242', at: KEEP_NOW - 5_000 }))
-  await $.session.start(start)
-  await clock.advance(31_000)
-  expect(resumed).toEqual([])
-  // A cut the keeper saw, and a reload 10 s into the new process: each piece is sent one message, not two
-  leftAtWork(files, ['a7'], KEEP_NOW + 31_000 - 60_000)
-  await $.session.start(start)
-  await clock.advance(10_000)
-  await $.session.start(start)
-  await clock.advance(31_000)
-  expect(resumed.map(one => one.split(':')[0])).toEqual(['a7'])
-  // Loaded again once it was done: nothing more
-  await $.session.start(start)
-  await clock.advance(31_000)
-  expect(resumed).toHaveLength(1)
-  // A day and more ago
-  leftAtWork(files, ['a9'], KEEP_NOW - 25 * 3600_000)
-  await $.session.start(start)
-  await clock.advance(31_000)
-  expect(resumed).toHaveLength(1)
-})
-
-test('the notice names each piece by its own title', SLOW, async ($, on) => {
-  const { files, clock, logged } = world(on, { unresumable: new Set(['a8']) })
-  const card = (id: string, title: string) => ({ id, parentId: '', isFork: false, tokens: 0, title, words: '', items: [], entries: [], answer: '', startedAt: KEEP_NOW - 600_000, endedAt: KEEP_NOW - 60_000, status: 'stopped' })
-  // Kept in the order the other way round from the keeper's file
-  files.set(`${MEMORY}/finished/engine-id.json`, JSON.stringify([card('a8', 'Train the splats'), card('a7', 'Solve the cameras')]))
-  leftAtWork(files, ['a7', 'a8'])
-  await $.session.start(start)
-  await clock.advance(31_000)
-  // (each is sent from a hook, a moment after the look)
-  const said = (await until(async () => logged.find(line => line.includes('after the chat stopped at')))) ?? ''
-  // Only the task that could not be started again is said in the chat
-  expect(said).toMatch(/^Claudopus couldn't start "Train the splats" again after the chat stopped at \d\d:\d\d\.$/)
-})
-
-test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper, its work counted as at work', SLOW, async ($, on) => {
-  const { files } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'train the splats', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, description: 'Train the splats', prompt: 'train' } as never)
-  // Another error is not a lapsed sign-in
-  await $.turn.complete({ answer: 'API Error: 529 overloaded', durationMs: 1, isAborted: false, turnId: 't0', reason: 'error', agentId: 'a1' } as never)
-  expect(files.has(`${KEEP_AT}.handover`)).toBe(false)
-  const lapse = (turnId: string) => $.turn.complete({ answer: 'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}', durationMs: 1, isAborted: false, turnId, reason: 'error', agentId: 'a1' } as never)
-  // Once is no lapse; twice within minutes is
-  await lapse('t1')
-  expect(files.has(`${KEEP_AT}.handover`)).toBe(false)
-  await lapse('t2')
-  expect(files.has(`${KEEP_AT}.handover`)).toBe(true)
-  expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ ids: ['a1'] })
+  expect(await until(async () => (kept().ids?.length === 0 ? kept() : undefined))).toMatchObject({ ids: [], pid: '4242' })
+  expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain('keeper')
+  expect([...files.keys()].filter(path => /\/keep\/engine-id\.(state|handover)$/.test(path))).toEqual([])
 })
 
 test('each chat beats for the watcher that brings Claudopus back, naming its process, the key its copy has in the settings, the settings file and its load, and starts the watcher', async ($, on) => {
@@ -139,33 +39,38 @@ test('each chat beats for the watcher that brings Claudopus back, naming its pro
   expect(files.get(beat)).toContain('4242')
 })
 
-test('a chat this Mac runs whose process ended with tasks at work, as when the app quits or drops it, has them and their helpers started again, each helper under its own task, and the chat is told not to start them itself; a task you stopped is left, and a reload in the same process starts nothing', SLOW, async ($, on) => {
-  const { files, clock, resumed, appended } = world(on, { unresumable: new Set(['a4']) })
-  // The last process wrote the file and beat until the moment it ended; no keeper saw it end. a3 had handed back its result a moment
-  // before; a4 cannot be started again, so its helper a2 is left too; a1 is a helper of a9's
-  files.set(`${KEEP_AT}.json`, JSON.stringify({ count: 5, ids: ['a7', 'a8', 'a6', 'a3', 'a4'], helpers: { a9: 'a7', a1: 'a9', a5: 'a6', a2: 'a4' }, titles: { a9: 'Lay out the frames' }, title: 'Contest', pid: '3131', at: KEEP_NOW - 600_000 }))
-  files.set(`${KEEP_AT}.beat`, '3131\tclaudopus@x\t/s/settings.json\n')
-  files.set(`mtime:${KEEP_AT}.beat`, String(KEEP_NOW - 60_000))
-  const card = (id: string, title: string, more = {}) => ({ id, parentId: '', isFork: false, tokens: 0, title, words: '', items: [], entries: [], answer: '', startedAt: KEEP_NOW - 900_000, endedAt: KEEP_NOW - 60_000, status: 'stopped', ...more })
-  files.set(`${MEMORY}/finished/engine-id.json`, JSON.stringify([card('a7', 'Solve the cameras'), card('a8', 'Train the splats'), card('a6', 'Sort the frames', { byYou: { at: KEEP_NOW - 60_000 } }), card('a3', 'Write it up', { status: 'done', handedBackAt: KEEP_NOW - 70_000 }), card('a4', 'Fit the lens')]))
+test('a card that was at work when the chat\'s process was replaced, as when the app quits or drops the chat, is failed with "The app closed while it worked" and offers Start again, a task this process has no card for under the title the last process kept; nothing is started again, what Claude Code itself runs again stays at work, and a reload in the same process fails nothing', SLOW, async ($, on) => {
+  // a8 is run again by Claude Code itself in the new process
+  const { files, clock, resumed, appended, submitted } = world(on, { agents: { a8: 'running' } })
+  const lastProcess = (pid: string) => files.set(`${KEEP_AT}.json`, JSON.stringify({ ids: ['a7', 'a8', 'a9'], titles: { a7: 'Solve the cameras', a8: 'Train the splats' }, pid, at: KEEP_NOW - 600_000 }))
+  const shown = async () => {
+    const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+    const texts = (await pane.findAll({ type: 'Text' })).map(one => ({ text: String(one.text ?? ''), color: one.props.color }))
+    const buttons = (await pane.findAll({ type: 'Button' })).map(one => String(one.props.label ?? ''))
+    await pane.unmount()
+    return { failed: texts.filter(one => one.text.startsWith('✕ Failed')), titles: texts.filter(one => /^(Solve the cameras|Train the splats)$/.test(one.text)).map(one => one.text), again: buttons.filter(label => label === 'Start again').length }
+  }
+  // The same process wrote it: a reload of the mod, which ends nothing
+  lastProcess('4242')
   await $.session.start(start)
+  await clock.advance(31_000)
+  expect(await shown()).toEqual({ failed: [], titles: [], again: 0 })
+  // Another process wrote it and is gone: its work ended with it
+  lastProcess('3131')
+  await $.session.start(start)
+  const now = await until(async () => ((await shown()).failed.length ? await shown() : undefined))
+  expect(now?.failed.map(one => one.text)).toEqual(['✕ Failed · The app closed while it worked'])
+  expect(now?.titles).toEqual(['Solve the cameras'])
+  expect(now?.again).toBe(1)
+  expect(files.get(`${MEMORY}/log.md`)).toContain("the chat's process was replaced (3131 to 4242) while work was at work: a7 ended with it")
+  // Nothing starts it again by itself, at the moment the old keeper took or later, and the chat is told to start nothing
+  await clock.advance(31_000)
+  await clock.advance(60_000)
   expect(resumed).toEqual([])
-  await clock.advance(31_000)
-  expect(resumed.map(one => one.split(':')[0]).sort()).toEqual(['a1', 'a7', 'a8', 'a9'])
-  expect(resumed.every(one => one.includes("this chat's process was ended at") && one.includes('Continue from where you were'))).toBe(true)
-  // The task whose helper is started again is told not to start it a second time
-  expect(resumed.find(one => one.startsWith('a7: '))).toContain('do not start them a second time')
-  expect(resumed.find(one => one.startsWith('a8: '))).not.toContain('helpers')
-  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  const cut = (await pane.findAll({ type: 'Text', text: /^Interrupted at / })).map(one => one.text?.replace(/\d\d:\d\d/g, 'hh:mm'))
-  // The helper, which this process had no card for, is back under its task by the title the last process kept
-  expect((await pane.findAll({ type: 'Button' })).map(one => one.props.label)).toContain('Lay out the frames')
-  await pane.unmount()
-  expect(cut.filter(line => line?.includes('running again'))).toHaveLength(0)
-  expect(cut.filter(line => line?.endsWith("Claudopus couldn't start it again"))).toHaveLength(1)
-  expect(appended.filter(line => line.includes('Claudopus has started "Solve the cameras", "Train the splats" again, with 2 helpers cut off under them') && line.includes('Do not start them again'))).toHaveLength(1)
-  // Loaded again in this process: nothing more
+  expect([...appended, ...submitted].filter(line => /again|cut off|process was ended/.test(line))).toEqual([])
+  // Loaded again in this process, the card is as it was: failed once, never a second card
   await $.session.start(start)
   await clock.advance(31_000)
-  expect(resumed).toHaveLength(4)
+  expect((await shown()).failed.map(one => one.text)).toEqual(['✕ Failed · The app closed while it worked'])
+  expect(resumed).toEqual([])
 })

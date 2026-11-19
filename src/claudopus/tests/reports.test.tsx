@@ -1,7 +1,7 @@
-// Results: kept, listed, opened, answered, put away and brought back, and rounds of one work
+// Results: kept, listed, opened, changed, put away and brought back, and rounds of one work
 
-test('finished work leaves a report for good: its pictures copied, listed under Reports, opened, answered, and named to the chat', async ($, on) => {
-  const { files, submitted, clock, copied, opened, resumed, appended } = world(on)
+test('finished work leaves a result for good that asks nothing: its pictures copied, listed under Results, opened, changed from the one box above the chat by its own task, named to the chat, and its card dismissed', async ($, on) => {
+  const { files, submitted, clock, copied, opened, resumed, kindTools } = world(on)
   // A write of the cards held until the test lets it land (below, a Dismiss)
   let isWriteHeld = false
   let writeHeld: (() => void) | undefined
@@ -9,23 +9,24 @@ test('finished work leaves a report for good: its pictures copied, listed under 
     if (isWriteHeld && (e as { key?: string }).key === 'todos') ((isWriteHeld = false), await new Promise<void>(go => (writeHeld = go)))
     return next(e)
   })
+  // Nothing is ever put in the chat's own box
   const filled: string[] = []
   on('prompt.fill', (_, e) => (filled.push(e.text), { isFilled: true }))
   files.set('/private/tmp/s/scratchpad/revenue.png', 'PNG')
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'tasks' } }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'how is revenue doing', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Weekly revenue', prompt: 'how is revenue doing' } as never)
   // A helper's answer is no report
   await $.agent.spawn({ subagentType: 'general-purpose', background: false, description: 'Count invoices', prompt: 'count', parentAgentId: 'a1' } as never)
-  // A helper records nothing over the work it answers to
-  expect((await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w2', items: ['Count again?'], agentId: 'a2' } as never)).result).toContain('A helper records nothing')
   await $.turn.complete({ agentId: 'a2', answer: 'There are 12 invoices.', durationMs: 1, isAborted: false, turnId: 't0', reason: 'answer' })
 
-  const report = 'Revenue rose 12% this week to $4,210.\n\nThe chart: /private/tmp/s/scratchpad/revenue.png\n\nNot done:\n- Sending it to the team needs your go-ahead.\n- The refunds are not checked.'
-  // What waits on the person is what the work recorded, wherever it is in the report, not its last line
-  expect((await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w1', items: ['Shall I send it to the team?', 'Post it in the channel too?'], agentId: 'a1' } as never)).result).toContain('Recorded 2')
-  // A helper records nothing over the work it answers to
+  // No kind of task has a tool that records questions for its result: a task asks on its card, before it finishes
+  expect(Object.keys(kindTools).filter(kind => kindTools[kind]?.includes('mcp__claudopus__ask')).length).toBeGreaterThan(0)
+  expect(Object.values(kindTools).flat().filter(tool => /waits/.test(tool))).toEqual([])
+  // and a call to the old one is no tool of the mod's: the engine's own answer comes back, and nothing is kept with the result
+  expect((await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w1', items: ['Shall I send it to the team?'], agentId: 'a1' } as never)).result).toBe('ran')
+
+  const report = 'Revenue rose 12% this week to $4,210.\n\nThe chart: /private/tmp/s/scratchpad/revenue.png\n\nNot done:\n- Sending it to the team needs your go-ahead.\n- The refunds are not checked.\n\nShall I send it to the team?'
   await $.turn.complete({ agentId: 'a1', answer: report, durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   await clock.advance(10)
 
@@ -34,10 +35,11 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(folder).toMatch(/reports\/\d{8}-\d{4}-weekly-revenue$/)
   expect(files.get(`${folder}/report.md`)).toBe(`${report}\n`)
   expect(copied).toEqual([`${folder}/revenue.png`])
-  const meta = JSON.parse(files.get(metaPath ?? '') ?? '{}') as { title: string; files: string[]; waiting?: { text: string; answer?: string }[]; question?: string; gist: string; folder: string }
+  const meta = JSON.parse(files.get(metaPath ?? '') ?? '{}') as { title: string; files: string[]; waiting?: unknown; question?: string; gist: string; folder: string }
   expect(meta.title).toBe('Weekly revenue')
   expect(meta.files).toEqual(['revenue.png'])
-  expect(meta.waiting).toEqual([{ text: 'Shall I send it to the team?' }, { text: 'Post it in the channel too?' }])
+  // A question in its text is text: the result keeps no list of what waits
+  expect(meta.waiting).toBeUndefined()
   expect(meta.question).toBeUndefined()
   expect(meta.gist).toBe('Revenue rose 12% this week to $4,210.')
   expect(meta.folder).toBe('/repo')
@@ -54,119 +56,131 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   await clock.advance(10)
   expect([...files.keys()].filter(path => path.endsWith('/meta.json'))).toHaveLength(1)
 
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
-  // On the Claudopus pane the reports are one small button, with no mark: the list's first group says what waits
+  // On the Claudopus pane the reports are one small button, with no mark
   expect(await pane.find({ type: 'Text', text: /^Results$/ })).toBeUndefined()
   expect((await keyed(pane, 'reports-open'))?.props.label).toBe('Results 1')
   expect(await pane.find({ type: 'Text', text: /^●$/ })).toBeUndefined()
-  // A finished task whose result asks something more is done, in green: its card stays at the top, never under Finished, with
-  // the first question and its answers, until it is answered or dismissed, and the header counts each question
-  expect(await pane.find({ type: 'Text', text: /^2 questions waiting for you/ })).toBeDefined()
-  const asking = await pane.find({ type: 'Text', text: 'Result ready · Shall I send it to the team?' })
-  expect([asking?.props.color, asking?.props.bold]).toEqual([undefined, true])
-  expect(await pane.find({ type: 'Text', text: /^Waiting for you · / })).toBeUndefined()
+  // Its task is done, in green, and waits for nobody: no question from its result on the card, nothing to press for one, and the
+  // header counts nothing as waiting
   expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Result ready|Shall I send it to the team/ })).toBeUndefined()
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === '#E5A50A').length).toBe(0)
-  expect((await pane.findAll({ type: 'Button' })).filter(b => /^result-ask-a1-say-/.test(b.key ?? '')).map(b => b.props.label)).toEqual(['Yes', 'No', 'Not now', 'Answer in words'])
-  expect((await pane.findAll({ type: 'Button' })).find(b => /^result-ask-a1-more-/.test(b.key ?? ''))?.props.label).toBe('Result')
-  expect(await pane.find({ type: 'Text', text: '1 more question' })).toBeDefined()
+  expect((await pane.findAll({ type: 'Button' })).filter(b => /^result-ask-/.test(b.key ?? '') || ['Yes', 'No', 'Not now', 'Answer in words'].includes(String(b.props.label)))).toEqual([])
   // Pressed, it opens the list as a pane of its own; the Claudopus pane stays as it was
   await pressed(pane, 'reports-open')
   expect(opened).toContain('reports')
   expect(await pane.find({ type: 'Text', text: /^Results$/ })).toBeUndefined()
   const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Reports', bodyColumns: 80 }, surface: 'desktop' } as never)
   expect((await list.find({ type: 'Text', text: /^Results$/ }))?.props.bold).toBe(true)
-  expect((await list.find({ type: 'Text', text: /^Waiting for you$/ }))?.props.bold).toBe(true)
-  // One line a row: its title, when, and Archive; nothing under it, and no mark: its group says it waits
+  expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeUndefined()
+  // One line a row: its title, when, and Archive; nothing under it, and no mark
   expect((await keyed(list, `report-${folder.split('/').pop()}`))?.props.label).toBe('Weekly revenue')
   expect(await list.find({ type: 'Text', text: /^\d\d:\d\d$/ })).toBeDefined()
   expect(await list.find({ type: 'Text', text: /^●$/ })).toBeUndefined()
   expect(await list.find({ type: 'Text', text: /Revenue rose/ })).toBeUndefined()
   expect((await keyed(list, `archive-${folder.split('/').pop()}`))?.props.label).toBe('Archive')
 
-  // A report opens as a pane of its own, named after it: the question first, then the finding, the pictures, the report, carry on
+  // A report opens as a pane of its own, named after it: what its task made, the finding, the report, how to go on from it
   await pressed(list, `report-${folder.split('/').pop()}`)
   const id = `report-${folder.split('/').pop()}`
   await until(async () => opened.includes(id) || undefined)
   const one = await $.ui.mount({ ...LIST, requestId: id, props: { ...LIST.props, title: 'Weekly revenue', bodyColumns: 80 }, surface: 'desktop' } as never)
   const heads = (await one.findAll({ type: 'Text' })).filter(text => text.props.bold).map(text => text.text)
-  // What its task made is right under its title, as tiles; its pictures are among them, so no Pictures part repeats them
-  expect(heads).toEqual(['Weekly revenue', 'Files', 'Waiting for you', 'Summary', 'In full', 'Follow-up'])
+  // What its task made is right under its title, as tiles; its pictures are among them, so no Pictures part repeats them. Nothing
+  // in it waits: no part of questions, and no answer to press
+  expect(heads).toEqual(['Weekly revenue', 'Files', 'Summary', 'In full', 'Follow-up'])
+  expect((await one.findAll({ type: 'Button' })).filter(b => /^report-say-/.test(b.key ?? '') || ['Yes', 'No', 'Not now', 'Answer in words'].includes(String(b.props.label)))).toEqual([])
   expect((await one.findAll({ type: 'Svg' })).map(svg => String(svg.props.alt))).toContain('revenue')
   expect((await one.find({ type: 'Markdown', text: /Revenue rose 12%/ }))?.props.text).toBe(`${report}\n`)
   // Its picture is shown in the pane, never handed to another app: where it cannot be drawn, its path is given as text
   expect(await keyed(one, 'report-page')).toBeUndefined()
   expect(await one.find({ type: 'Text', text: `${folder}/revenue.png` })).toBeUndefined()
+
+  // Message opens the one box above the chat: its heading names the result, then the field, what Enter and Send do,
+  // Send and Close. Nothing is typed in the result's own tab on the desktop, and nothing is put in the chat's own box
+  const inputsOf = async (site: typeof bar) => (await site.findAll({ type: 'Input' } as never)) as { key?: string; props: Record<string, unknown> }[]
+  const barLabels = async () => (await bar.findAll({ type: 'Button' })).map(b => String(b.props.label))
+  expect((await keyed(one, 'report-carry'))?.props.label).toBe('Message')
+  expect(await inputsOf(one as never)).toEqual([])
+  expect(await inputsOf(bar)).toEqual([])
   await pressed(one, 'report-carry')
-  expect(filled[0]).toContain(`${folder}/report.md`)
-  // Each waiting item has its own answers; answering one clears that one alone
-  expect(await one.find({ type: 'Text', text: 'Post it in the channel too?' })).toBeDefined()
-  // The answer goes to the task that asked, which is started again with it from the press's own hook, never from a timer (the
-  // clock has not moved), and the chat is asked nothing: it is only told the task has it (18 Nov: "A" pressed on a result went to
-  // the chat alone, which had to hand the job to another task)
-  const answers = () => resumed.filter(line => line.includes('to answer a question in your result'))
-  await pressed(one, 'report-say-0-Yes')
-  expect(answers()).toHaveLength(1)
-  expect(answers()[0]).toMatch(/^a1: The person pressed "Yes" to answer a question in your result "Weekly revenue" \(.*\/report\.md\): Shall I send it to the team\?\n1 other question of that result still waits for them/)
-  expect(answers()[0]).toContain('this answer starts you again')
-  expect(answers()[0]).not.toMatch(/\b(me|my)\b/)
-  expect(submitted).toHaveLength(0)
-  expect(appended.filter(line => line.includes('answered a question in the result "Weekly revenue"'))).toEqual([expect.stringContaining('Its task has the answer and carries on with it itself')])
-  // Its card is at work at once: Stop, no question, counted as working
+  const head = await until(async () => bar.find({ type: 'Text', text: /^↳ Message to/ }))
+  expect(head?.text).toBe('↳ Message to “Weekly revenue”')
+  const [field, ...moreFields] = await inputsOf(bar)
+  expect(moreFields).toEqual([])
+  expect(field?.props.placeholder).toBe('Type your message')
+  expect(await bar.find({ type: 'Text', text: /^Enter sends/ })).toBeUndefined()
+  expect((await barLabels()).filter(label => label === 'Send' || label === 'Close')).toEqual(['Send', 'Close'])
+  expect(await inputsOf(one as never)).toEqual([])
+  // (the button that opened it closes it again; opened once more, it is there as before)
+  expect(await until(async () => ((await keyed(one, 'report-carry'))?.props.label === 'Close' ? true : undefined))).toBe(true)
+  await pressed(one, 'report-carry')
+  expect(await until(async () => ((await inputsOf(bar)).length ? undefined : true))).toBe(true)
+  expect(await bar.find({ type: 'Text', text: /^↳ Message to/ })).toBeUndefined()
+  await pressed(one, 'report-carry')
+  const again = await until(async () => (await inputsOf(bar))[0])
+  // What is sent from it goes to the result's own task, whose card is still there to carry on from: it is started again with the
+  // person's words from the press's own hook (the clock has not moved), the chat is asked nothing, and the box goes
+  const changes = () => resumed.filter(line => line.startsWith('a1: ') && line.includes('pressed "Message"'))
+  await bar.input({ key: again?.key ?? '', text: 'send it to the team' })
+  expect(await until(async () => changes()[0])).toContain('wrote to you, in their own words: send it to the team\n')
+  expect(changes()).toHaveLength(1)
+  expect(submitted).toEqual([])
+  expect(await until(async () => ((await inputsOf(bar)).length ? undefined : true))).toBe(true)
+  // Its card is at work again at once, with Stop, and nothing waits
   expect(await until(async () => (await pane.find({ type: 'Button', key: 'stop-a1' })) ?? undefined)).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: /^1 task working/ })).toBeDefined()
-  expect(await keyed(pane, 'dismiss-a1')).toBeUndefined()
-  await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[0]?.answer ? true : undefined))
-  // It ends again with the other question still open: it waits for the person again
+  expect(await pane.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
   await $.turn.complete({ agentId: 'a1', answer: report, durationMs: 1, isAborted: false, turnId: 't4', reason: 'answer' })
   await clock.advance(10)
-  expect(JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting).toEqual([{ text: 'Shall I send it to the team?', answer: 'Yes' }, { text: 'Post it in the channel too?' }])
-  expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeDefined()
-  expect(await until(async () => ((await one.find({ type: 'Text', text: /^Shall I send it to the team\?$/ })) ? undefined : true))).toBe(true)
-  expect(await one.find({ type: 'Text', text: 'Post it in the channel too?' })).toBeDefined()
-  // The card goes on to the next question, the last one
-  expect(await until(async () => (await pane.find({ type: 'Text', text: 'Result ready · Post it in the channel too?' })) ?? undefined)).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^1 question waiting for you/ })).toBeDefined()
-  expect((await pane.findAll({ type: 'Button' })).some(b => /^result-ask-a1-more-/.test(b.key ?? ''))).toBe(false)
-  // Not now clears the other and sends nothing
-  await pressed(one, 'report-say-1-Not now')
-  await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[1]?.answer ? true : undefined))
-  expect(submitted).toHaveLength(0)
-  expect(answers()).toHaveLength(1)
-  await until(async () => ((await list.find({ type: 'Text', text: /^Waiting for you$/ })) ? undefined : true))
-  expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeUndefined()
-  expect(await one.find({ type: 'Text', text: /^Waiting for you$/ })).toBeUndefined()
-  // Nothing open, the card waits on nothing: the header and its line say so, and it is done
-  expect(await until(async () => ((await pane.find({ type: 'Text', text: /^Result ready/ })) ? undefined : true))).toBe(true)
-  expect(await pane.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeDefined()
+  expect(await until(async () => ((await keyed(one, 'report-carry'))?.props.label === 'Message' ? true : undefined))).toBe(true)
+  // In the terminal, whose bar draws no field, the result has its own field instead, and what is sent from it goes the same way
+  const termed = await $.ui.mount({ ...LIST, requestId: id, props: { ...LIST.props, title: 'Weekly revenue', bodyColumns: 80 }, surface: 'terminal' } as never)
+  expect(await keyed(termed, 'report-carry')).toBeUndefined()
+  const own = (await inputsOf(termed as never)).filter(input => /^report-carry-reply-/.test(input.key ?? ''))
+  expect(own.map(input => input.props.placeholder)).toEqual(['Type your message'])
+  await termed.input({ key: own[0]?.key ?? '', text: 'check the refunds' })
+  expect(await until(async () => changes()[1])).toContain('wrote to you, in their own words: check the refunds\n')
+  await termed.unmount()
+  await $.turn.complete({ agentId: 'a1', answer: report, durationMs: 1, isAborted: false, turnId: 't4b', reason: 'answer' })
+  await clock.advance(10)
+  expect(submitted).toEqual([])
+  expect(filled).toEqual([])
+  expect([...files.keys()].filter(path => path.endsWith('/meta.json'))).toHaveLength(1)
+  await bar.unmount()
 
   // The chat is told of the reports with each message, and reads one itself to answer from it
   const next = await $.prompt.submit({ text: 'what was revenue again', wait: false, origin: composer })
   expect(next.context?.join('\n')).toContain('Results saved')
   expect(next.context?.join('\n')).toContain(`${folder}/report.md`)
+  expect(next.context?.join('\n')).not.toContain('waiting on')
   expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r1', file_path: `${folder}/report.md` } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'r2', command: `cat ${folder}/report.md` } as never)).deny).toContain('Start a fresh agent')
 
-  // The person dismisses a card themselves, one that waits for them and one just done: it goes under Finished at once and stays
-  // there across a redraw and a reload of the cards, its question still open in its result (18 Nov: "Either way, I should have
-  // the ability to just close it")
+  // The person dismisses a card themselves, one that ended with its question open and one just done: it goes under Finished at
+  // once and stays there across a redraw and a reload of the cards (18 Nov: "Either way, I should have the ability to just close it")
   const finishedCount = async () => Number(/Finished (\d+)/.exec(String((await keyed(cards, 'finished-fold'))?.props.label))?.[1] ?? 0)
   await $.agent.spawn({ ...spawn, description: 'Pick an opening', prompt: 'pick an opening' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w4', items: ['Which opening should go out?'], agentId: 'a4' } as never)
-  await $.turn.complete({ agentId: 'a4', answer: 'Three openings are cut, A, B and C. Nothing is posted until one is picked.', durationMs: 1, isAborted: false, turnId: 't5', reason: 'answer' })
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a4', text: 'Which opening should go out?', choices: ['A', 'B', 'C'] } as never)
+  // (it hands in its result with the question still open: that, not its turn's end, ends a task)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h4', agentId: 'a4', message: 'Three openings are cut, A, B and C. Nothing is posted until one is picked.' } as never)
+  await $.turn.complete({ agentId: 'a4', answer: '', durationMs: 1, isAborted: false, turnId: 't5', reason: 'answer' })
   await clock.advance(3_000)
   await pane.unmount()
   const cards = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
-  expect(await until(async () => (await cards.find({ type: 'Text', text: 'Result ready · Which opening should go out?' })) ?? undefined)).toBeDefined()
-  // (the two that ended before it are under Finished once their two seconds are over)
+  expect((await until(async () => (await cards.find({ type: 'Text', text: 'Which opening should go out?' })) ?? undefined))?.props.color).toBe('#E5A50A')
+  expect(await cards.find({ type: 'Text', text: /^1 .*waiting for you/ })).toBeDefined()
+  // (the two that ended before it stay up, with nothing under Finished, until each is dismissed)
+  expect(await finishedCount()).toBe(0)
+  for (const id of ['a1', 'a3']) await pressed(cards, `dismiss-${id}`)
   await until(async () => ((await finishedCount()) === 2 ? true : undefined))
   const before = await finishedCount()
   expect(before).toBe(2)
   expect((await keyed(cards, 'dismiss-a4'))?.props.label).toBe('Dismiss')
   await pressed(cards, 'dismiss-a4')
-  expect(await until(async () => ((await cards.find({ type: 'Text', text: /^Result ready/ })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await cards.find({ type: 'Text', text: 'Which opening should go out?' })) ? undefined : true))).toBe(true)
   expect(await until(async () => ((await finishedCount()) === before + 1 ? true : undefined))).toBe(true)
   expect(await cards.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
   await $.agent.spawn({ ...spawn, description: 'Save another rule', prompt: 'save it' } as never)
@@ -203,17 +217,6 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(await after.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
   expect(Number(/Finished (\d+)/.exec(String((await keyed(after, 'finished-fold'))?.props.label))?.[1])).toBe(before + 3)
   expect((await after.findAll({ type: 'Button' })).some(b => /^dismiss-/.test(b.key ?? ''))).toBe(false)
-  // Its question is still open in its result
-  const kept = [...files.keys()].find(path => path.includes('pick-an-opening') && path.endsWith('/meta.json'))
-  expect(JSON.parse(files.get(kept ?? '') ?? '{}').waiting).toEqual([{ text: 'Which opening should go out?' }])
-  // Answered there in words, the answer goes to its task too, the chat is told only that, and the card is back up at work
-  const typed = await $.prompt.submit({ text: `About question 1 of the result "Pick an opening" (15 Nov, 02:13), ${(kept ?? '').replace('/meta.json', '')}/report.md: B, with the louder music`, wait: false, origin: composer })
-  expect(typed.context?.join('\n')).toContain('Claudopus sent this answer of the person\'s to the task that asked ("Pick an opening"), which carries on with it itself')
-  await clock.advance(5_000)
-  const words = await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('answered, in their own words, a question in your result "Pick an opening"')))
-  expect(words).toContain('Which opening should go out?\nTheir answer: B, with the louder music')
-  expect(await until(async () => (await after.find({ type: 'Button', key: 'stop-a4' })) ?? undefined)).toBeDefined()
-  expect(Number(/Finished (\d+)/.exec(String((await keyed(after, 'finished-fold'))?.props.label))?.[1])).toBe(before + 2)
 })
 
 test('work started from a report keeps its own report linked to it, beside the older one on the same subject', async ($, on) => {
@@ -241,7 +244,10 @@ test('work started from a report keeps its own report linked to it, beside the o
   // The older one is kept as it was
   expect(files.get(`${MEMORY}/reports/${old.id}/report.md`)).toBe('Revenue was flat.\n')
 
-  // The same work reporting again, and the report it started from, are one row: the newest
+  // The same work reporting again, and the report it started from, are one row: the newest (the person's words start it again:
+  // a task that is done reports again only from a run of its own)
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Sam: “count the refunds too”' } as never)
+  for await (const _ of $.turn.step({ turnId: 't2', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
   await $.turn.complete({ agentId: 'a1', answer: `Revenue rose 6% once the refunds are counted.\n\n${'Refunds are in the table. '.repeat(30)}`, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
   await clock.advance(70_000)
   await until(async () => ([...files.keys()].filter(path => path.endsWith('/meta.json')).length === 3 ? true : undefined))
@@ -278,12 +284,14 @@ test('a report opened when three are open closes the one opened longest ago', as
   expect(closed.filter(id => id.startsWith('report-'))).toEqual(['report-a'])
 })
 
-test('an older report waits by its one question, a report that only ends with a question waits on nothing, and the chat is told each open item', async ($, on) => {
-  const { files } = world(on)
+test('a result saved earlier that lists questions shows them as plain text under Questions it left, with nothing to press; the list has no group of what waits, the chat is told of no question, and a change asked of it goes as the person\'s message', async ($, on) => {
+  const { files, submitted, resumed } = world(on)
+  const filled: string[] = []
+  on('prompt.fill', (_, e) => (filled.push(e.text), { isFilled: true }))
   const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [], agent: '' }
   const reps = [
     { ...base, id: 'old', title: 'Old', at: 1_600_000_000_000, gist: 'Old one.', question: 'Ship the old one?' },
-    { ...base, id: 'two', title: 'Two', at: 1_600_000_100_000, gist: 'Two things.', waiting: [{ text: 'Delete the folder?', answer: 'No' }, { text: 'Make it public?' }] },
+    { ...base, id: 'two', title: 'Two', at: 1_600_000_100_000, gist: 'Two things.', waiting: [{ text: 'Delete the folder?', answer: 'No' }, { text: 'Make it public?', choices: ['Public', 'Private'] }] },
     { ...base, id: 'ends', title: 'Ends', at: 1_600_000_200_000, gist: 'Ends asking.' },
   ]
   for (const r of reps) {
@@ -291,46 +299,54 @@ test('an older report waits by its one question, a report that only ends with a 
     files.set(`${MEMORY}/reports/${r.id}/report.md`, `${r.gist}\n\nShall I go on?\n`)
   }
   await $.session.start(start)
+  // The panel counts none of them as waiting
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  expect((await keyed(pane, 'reports-open'))?.props.label).toBe('Results 3')
+  expect(await pane.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
+  await pane.unmount()
+  // The list is newest first, whatever a result lists
   const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Reports', bodyColumns: 80 }, surface: 'desktop' } as never)
   expect(await list.find({ type: 'Text', text: /^3$/ })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: /^2$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeUndefined()
+  expect((await list.findAll({ type: 'Button' })).filter(one => /^report-/.test(one.key ?? '')).map(one => one.props.label)).toEqual(['Ends', 'Two', 'Old'])
+  // Opened, each shows what it listed as dim text between its title and its summary, in the order it listed them, and no button
+  // but Archive and Continue; one that lists nothing has no such part
+  const cases: { id: string; heads: string[]; left: string[] }[] = [
+    { id: 'old', heads: ['Old', 'Questions it left', 'Summary', 'In full', 'Follow-up'], left: ['Ship the old one?'] },
+    { id: 'two', heads: ['Two', 'Questions it left', 'Summary', 'In full', 'Follow-up'], left: ['Delete the folder?', 'Make it public?'] },
+    { id: 'ends', heads: ['Ends', 'Summary', 'In full', 'Follow-up'], left: [] },
+  ]
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  for (const one of cases) {
+    const tab = await $.ui.mount({ ...LIST, requestId: `report-${one.id}`, props: { ...LIST.props, title: one.id, bodyColumns: 80 }, surface: 'desktop' } as never)
+    const texts = await tab.findAll({ type: 'Text' })
+    expect([one.id, texts.filter(text => text.props.bold).map(text => text.text)]).toEqual([one.id, one.heads])
+    expect([one.id, texts.filter(text => /\?$/.test(String(text.text))).map(text => [text.text, text.props.dimColor, text.props.color])]).toEqual([one.id, one.left.map(text => [text, true, undefined])])
+    expect([one.id, (await tab.findAll({ type: 'Button' })).map(button => String(button.props.label)).filter(label => !/ · /.test(label))]).toEqual([one.id, ['Archive', 'Message']])
+    await tab.unmount()
+  }
+  // Message on a result whose task has no card left to carry on from: what is sent from the box above the chat goes as
+  // the person's own message naming the result and its path, and nothing is put in the chat's own box
+  const tab = await $.ui.mount({ ...LIST, requestId: 'report-old', props: { ...LIST.props, title: 'Old', bodyColumns: 80 }, surface: 'desktop' } as never)
+  await pressed(tab, 'report-carry')
+  expect((await until(async () => bar.find({ type: 'Text', text: /^↳ Message to/ })))?.text).toBe('↳ Message to “Old”')
+  const field = ((await bar.findAll({ type: 'Input' } as never)) as { key?: string }[])[0]
+  await bar.input({ key: field?.key ?? '', text: 'ship it after all' })
+  expect(await until(async () => submitted[0])).toMatch(new RegExp(`^Continue from the result "Old" \\(13 Sep 2020, \\d\\d:26\\), ${MEMORY}/reports/old/report\\.md: ship it after all$`))
+  expect(submitted).toHaveLength(1)
+  expect(resumed).toEqual([])
+  expect(filled).toEqual([])
+  await tab.unmount()
+  await bar.unmount()
   const told = (await $.prompt.submit({ text: 'what waits', wait: false, origin: composer })).context?.join('\n') ?? ''
-  expect(told).toContain('waiting on: (1) Ship the old one?')
-  expect(told).toContain('waiting on: (2) Make it public?')
-  expect(told).not.toContain('Delete the folder?')
+  expect(told).toContain('reports/old/report.md')
+  expect(told).not.toContain('waiting on')
+  expect(told).not.toContain('Ship the old one?')
+  expect(told).not.toContain('Make it public?')
   expect(told).not.toContain('Shall I go on?')
 })
 
-test('a report handed back asking the person something it never recorded as waiting is refused once, so its card can show it waits; one that recorded it, or asks only in code, goes through', async ($, on) => {
-  world(on)
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'make three videos', wait: false, origin: composer })
-  const handback = async (agentId: string, message: string) => ((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: `h-${agentId}`, agentId, message } as never)) as { deny?: string }).deny
-  const cases: { title: string; message: string; waits?: string[]; kind?: string; refused: boolean }[] = [
-    // 18 Nov: the question was the report's first line, and nothing was recorded
-    { title: 'Three openings', message: 'Which opening should go out: A, B or C? Nothing is posted until you pick one.', refused: true },
-    { title: 'Life cycle', message: 'The picture is redrawn.\n\n**Waiting on you**\n- Yes or no to building it.', refused: true },
-    { title: 'Headed', message: 'Pushed.\n\n## Waiting on you\n- Yes or no to releasing it.', refused: true },
-    { title: 'Short', message: '1. Ship it to `main`?', refused: true },
-    { title: 'Recorded', message: 'Which opening should go out: A, B or C?', waits: ['Which opening should go out?'], refused: false },
-    { title: 'Nothing waits', message: 'Should the chat say more? It did not, so I left it.', waits: [], refused: false },
-    { title: 'Only code', message: 'The check `a?.b` and "Is it done?" are fixed. Pushed.', refused: false },
-    { title: 'Headings and tables', message: '## Why did it fail?\nIt timed out.\n\n| Passes? | Yes |\n\n    if (a ? b : c) return', refused: false },
-    // An agent with no waits tool is never told to call it
-    { title: 'Second look', message: 'Shall I look at the terminal too? I did not.', kind: 'claudopus:check', refused: false },
-  ]
-  for (const [n, one] of cases.entries()) {
-    const id = `a${n + 1}`
-    await $.agent.spawn({ ...spawn, description: one.title, prompt: one.title, ...(one.kind ? { subagentType: one.kind } : {}) } as never)
-    if (one.waits) await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: `w-${id}`, items: one.waits, agentId: id } as never)
-    expect([one.title, await handback(id, one.message)]).toEqual([one.title, one.refused ? expect.stringContaining('Not sent: your report asks') : undefined])
-    // Refused once a round: sent again, it goes through as it is
-    if (one.refused) expect(await handback(id, one.message)).toBeUndefined()
-  }
-})
-
-test('a result archived with one press leaves the list, its tab, the count and the note, waits on nothing, keeps its text, and comes back from the folded Archived row', async ($, on) => {
+test('a result archived with one press leaves the list, its tab, the count and the note, keeps its text, and comes back from the folded Archived row', async ($, on) => {
   const { files, closed } = world(on, { panes: ['claudopus', 'reports', 'report-b'] })
   const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [] }
   const reps = [
@@ -347,9 +363,8 @@ test('a result archived with one press leaves the list, its tab, the count and t
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Reports', bodyColumns: 80 }, surface: 'desktop' } as never)
   expect(await list.find({ type: 'Text', text: /^3$/ })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeDefined()
 
-  // From its tab: the tab closes, nothing in it waits, and the text stays as it was
+  // From its tab: the tab closes, and the text stays as it was
   const tab = await $.ui.mount({ ...LIST, requestId: 'report-b', surface: 'desktop' } as never)
   await pressed(tab, 'report-archive')
   await until(async () => closed.includes('report-b') || undefined)
@@ -366,7 +381,7 @@ test('a result archived with one press leaves the list, its tab, the count and t
   expect(await until(async () => list.find({ type: 'Text', text: /^1$/ }))).toBeDefined()
   expect(await keyed(list, 'report-a1')).toBeUndefined()
 
-  // The chat is told only of the one kept, and nothing waits
+  // The chat is told only of the one kept, and of no question
   const told = (await $.prompt.submit({ text: 'what is new', wait: false, origin: composer })).context?.join('\n') ?? ''
   expect(told).toContain('reports/c/report.md')
   expect(told).not.toContain('reports/b/')
@@ -380,8 +395,8 @@ test('a result archived with one press leaves the list, its tab, the count and t
   expect((await keyed(list, 'archived-fold'))?.props.label).toBe('▾ Archived 2')
   await pressed(list, 'unarchive-b')
   await until(async () => (JSON.parse(files.get(`${MEMORY}/reports/b/meta.json`) ?? '{}').archived ? undefined : true))
-  expect(await until(async () => list.find({ type: 'Text', text: /^Waiting for you$/ }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: /^2$/ })).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: /^2$/ }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeUndefined()
   expect((await keyed(list, 'archived-fold'))?.props.label).toBe('▾ Archived 1')
 
   // An archived one opened from the row says so, with Bring back in place of Archive
@@ -403,12 +418,12 @@ test('a result archived with one press leaves the list, its tab, the count and t
   expect(await until(async () => keyed(list, 'report-d'))).toBeDefined()
 })
 
-test('the results list is one line a row: what waits first, the five newest, the rest folded, rounds of one work as one row, archived and told as one', async ($, on) => {
+test('the results list is one line a row, newest first with no group of what waits: the five newest, the rest folded, rounds of one work as one row, archived and told as one', async ($, on) => {
   const { files } = world(on, { panes: ['claudopus', 'reports'] })
   const base = { chat: 'c', chatId: 'c', folder: '/repo', files: [], gist: 'A long line that no row shows.' }
   const at = (n: number) => 1_700_000_000_000 - n * 60_000
   const reps = [
-    // A video in three rounds by three pieces of work, each started from the one before: the newest waits, the older waits are its to ask again
+    // A video in three rounds by three pieces of work, each started from the one before, each saved earlier with a question listed
     { ...base, id: 'v1', title: 'Explainer video', subject: 'Claude workflow', at: at(60), agent: 'w1', waiting: [{ text: 'Keep the first cut?' }] },
     { ...base, id: 'v2', title: 'Video second cut', subject: 'Claude workflow', at: at(40), agent: 'w2', from: 'v1', waiting: [{ text: 'Keep the second cut?' }] },
     { ...base, id: 'v3', title: 'Video third cut', subject: 'Claude workflow', at: at(20), agent: 'w3', from: 'v2', waiting: [{ text: 'Keep the third cut?' }] },
@@ -427,10 +442,10 @@ test('the results list is one line a row: what waits first, the five newest, the
   const titles = async () => (await list.findAll({ type: 'Button' })).filter(one => /^report-/.test(one.key ?? '')).map(one => String(one.props.label))
   // 13 reports are 10 rows: the video one, the index one, eight panel changes
   expect(await list.find({ type: 'Text', text: /^10$/ })).toBeDefined()
-  expect((await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)).toEqual(['Results', 'Waiting for you', 'Newest'])
-  expect(await titles()).toEqual(['Video third cut', 'Panel change 0', 'Panel change 1', 'Panel change 2', 'Panel change 3', 'Panel change 4'])
-  // Nothing under a title: no finding, no subject, no line saying it waits, no mark; the time, Archive
-  expect(await list.find({ type: 'Text', text: /long line|waiting on you|Claude workflow/ })).toBeUndefined()
+  expect((await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)).toEqual(['Results', 'Newest'])
+  expect(await titles()).toEqual(['Video third cut', 'Panel change 0', 'Panel change 1', 'Panel change 2', 'Panel change 3'])
+  // Nothing under a title: no finding, no subject, no question it lists, no mark; the time, Archive
+  expect(await list.find({ type: 'Text', text: /long line|waiting|Keep the|Claude workflow/ })).toBeUndefined()
   expect((await list.findAll({ type: 'Text', text: /^●$/ })).length).toBe(0)
   const rowBoxes = (await list.drawn()) as unknown as { props?: { key?: string; height?: number }; children?: unknown[] }
   const heights: number[] = []
@@ -440,15 +455,16 @@ test('the results list is one line a row: what waits first, the five newest, the
     for (const child of one?.children ?? []) walk(child)
   }
   walk(rowBoxes)
-  expect(heights).toEqual([1, 1, 1, 1, 1, 1])
+  expect(heights).toEqual([1, 1, 1, 1, 1])
   // The rest is one row that unfolds
-  expect((await keyed(list, 'earlier-fold'))?.props.label).toBe('▸ Earlier 4')
+  expect((await keyed(list, 'earlier-fold'))?.props.label).toBe('▸ Earlier 5')
   await pressed(list, 'earlier-fold')
-  expect((await titles()).slice(6)).toEqual(['Panel change 5', 'Panel change 6', 'Panel change 7', 'Old-chat index: second'])
+  expect((await titles()).slice(5)).toEqual(['Panel change 4', 'Panel change 5', 'Panel change 6', 'Panel change 7', 'Old-chat index: second'])
 
-  // The chat is told what waits now: the newest round's item, not the older rounds' asked again
+  // The chat is told of the results, and of no question any of them lists
   const told = (await $.prompt.submit({ text: 'what waits', wait: false, origin: composer })).context?.join('\n') ?? ''
-  expect(told).toContain('Keep the third cut?')
+  expect(told).toContain('reports/v3/report.md')
+  expect(told).not.toContain('Keep the third cut?')
   expect(told).not.toContain('Keep the first cut?')
   expect(told).not.toContain('Keep the second cut?')
 
@@ -516,150 +532,10 @@ test('every button of the results list and of a result takes a new key whenever 
   const tab = await $.ui.mount({ ...LIST, requestId: 'report-header', props: { ...LIST.props, title: 'Rethink the panel header', bodyColumns: 80 }, surface: 'desktop' } as never)
   expect(await tab.find({ type: 'Text', text: /^Rethink the panel header$/ })).toBeDefined()
   const tabKeys = (await tab.findAll({ type: 'Button' })).map(one => String(one.key))
-  // The result's own tab follows the same rule: answered on another Mac, it changes with no press here, and every key moves
-  put({ id: 'header', title: 'Rethink the panel header', at: 1_699_000_100_000, waiting: [{ text: 'Reopen the M4 chat?', answer: 'Not now' } as { text: string }] })
+  // The result's own tab follows the same rule: changed on another Mac, it changes with no press here, and every key moves
+  expect(await tab.find({ type: 'Text', text: 'Reopen the M4 chat?' })).toBeDefined()
+  put({ id: 'header', title: 'Rethink the panel header', at: 1_699_000_100_000, waiting: [] })
   await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't2', query: 'found' } as never)
-  expect(await until(async () => ((await tab.findAll({ type: 'Button' })).some(one => one.props.label === 'Yes') ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await tab.find({ type: 'Text', text: 'Reopen the M4 chat?' })) ? undefined : true))).toBe(true)
   expect((await tab.findAll({ type: 'Button' })).map(one => String(one.key)).filter(key => tabKeys.includes(key))).toEqual([])
-})
-
-test("what a result waits on is answered however the person answers it, and only that: the ask on its card it repeats, a newer result of its work, the chat by number, their message by number", async ($, on) => {
-  const { files, clock } = world(on)
-  const metaOf = (id: string) => JSON.parse(files.get(`${MEMORY}/reports/${id}/meta.json`) ?? '{}') as { waiting?: { text: string; answer?: string }[] }
-  const answers = (id: string) => metaOf(id).waiting?.map(one => [one.text, one.answer ?? ''])
-  const reportOf = async (slugged: string, after = '') =>
-    ((await until(async () => [...files.keys()].filter(one => new RegExp(`reports/\\d{8}-\\d{4}-${slugged}[^/]*/meta\\.json$`).test(one)).find(one => one !== after))) ?? '').split('/').at(-2) ?? ''
-  const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [], agent: '', gist: 'Three things.' }
-  files.set(`${MEMORY}/reports/three/meta.json`, JSON.stringify({ ...base, id: 'three', title: 'Three', at: 1_600_000_100_000, waiting: [{ text: 'Delete the folder?' }, { text: 'Make it public?' }, { text: 'Rename it to "Shared"?' }] }))
-  files.set(`${MEMORY}/reports/three/report.md`, 'Three things.\n')
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'release it', wait: false, origin: composer })
-  // 16 Nov: the work asked on its card and recorded the same go-ahead as waiting a moment later, in other words, marked as that ask
-  await $.agent.spawn({ ...spawn, description: 'Waits fix', prompt: 'build it' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release 0.2.168?' } as never)
-  expect((await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w1', agentId: 'a1', items: [{ text: 'Release 0.2.168 with the waits fix?', asked: true }, 'Shall I redraw its icon?'] } as never)).result).toContain('One is the question on your card')
-  await $.turn.complete({ agentId: 'a1', answer: 'Built the waits fix.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
-  // The same line as its ask is that ask's without the mark; a question that only shares its words is another question
-  await $.agent.spawn({ ...spawn, description: 'Key box', prompt: 'build it' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Release the new key box?' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w2', agentId: 'a2', items: ['release the new key box', 'Should the new key box replace the old one in Settings?'] } as never)
-  await $.turn.complete({ agentId: 'a2', answer: 'Built the key box.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
-  await clock.advance(10)
-  const fix = await reportOf('waits-fix')
-  const box = await reportOf('key-box')
-  // The person answers each ask in the chat: exactly the item tied to it is answered
-  await $.prompt.submit({ text: 'yes, release both', wait: false, origin: composer })
-  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Sam: “yes, release both”' } as never)
-  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a2', message: 'Sam: “yes, release both”' } as never)
-  expect(await until(async () => metaOf(fix).waiting?.[0]?.answer)).toBe('In your words')
-  expect(await until(async () => metaOf(box).waiting?.[0]?.answer)).toBe('In your words')
-  await clock.advance(10)
-  expect(answers(fix)?.[1]).toEqual(['Shall I redraw its icon?', ''])
-  expect(answers(box)?.[1]).toEqual(['Should the new key box replace the old one in Settings?', ''])
-  // A newer result of a round that never said what waits leaves what the earlier one waited on
-  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2b', to: 'a2', message: 'Sam: “and a short guide”' } as never)
-  for await (const _ of $.turn.step({ turnId: 't2b', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a2' })) void _
-  await $.turn.complete({ agentId: 'a2', answer: `The guide is written.\n\n${'Each step is in the guide. '.repeat(30)}`, durationMs: 1, isAborted: false, turnId: 't2b', reason: 'answer' })
-  await clock.advance(10)
-  const guide = await reportOf('key-box', `${MEMORY}/reports/${box}/meta.json`)
-  expect(answers(guide)).toEqual([['Should the new key box replace the old one in Settings?', '']])
-  expect(answers(box)?.[1]).toEqual(['Should the new key box replace the old one in Settings?', 'Moved'])
-  // Started again, the work lists what waits now: its newer result takes the place of what the earlier one waited on. A question
-  // marked as the card's, with no ask open now, is tied to no older ask, answered or not
-  await $.prompt.submit({ text: 'add a dark mode too', wait: false, origin: composer })
-  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's3', to: 'a1', message: 'Sam: “add a dark mode too”' } as never)
-  for await (const _ of $.turn.step({ turnId: 't3', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
-  expect((await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w3', agentId: 'a1', items: ['Shall I turn the dark mode on for everyone?', { text: 'Release 0.2.168 to everyone?', asked: true }] } as never)).result).toContain('replaces what your earlier results waited on')
-  expect(answers(fix)?.[1]).toEqual(['Shall I redraw its icon?', ''])
-  await $.turn.complete({ agentId: 'a1', answer: 'Added a dark mode.', durationMs: 1, isAborted: false, turnId: 't3', reason: 'answer' })
-  await clock.advance(10)
-  const second = await reportOf('waits-fix', `${MEMORY}/reports/${fix}/meta.json`)
-  expect(answers(second)).toEqual([['Shall I turn the dark mode on for everyone?', ''], ['Release 0.2.168 to everyone?', '']])
-  expect(await until(async () => metaOf(fix).waiting?.[1]?.answer)).toBe('Replaced')
-  // The chat is told each result's open questions whole, by number, and marks those the person's words answered by their numbers
-  const told = (await $.prompt.submit({ text: 'delete it, and the name is fine', wait: false, origin: composer })).context?.join('\n') ?? ''
-  expect(told).toContain('waiting on: (1) Delete the folder? (2) Make it public? (3) Rename it to "Shared"?')
-  expect(told).toContain('the numbers of the questions they answered as `answered`')
-  const marked = (await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w5', result: `${MEMORY}/reports/three/report.md`, answered: [1, 3, 7] } as never)).result
-  expect(marked).toBe('"Three": 2 answered in the person\'s words; still waiting: (2) Make it public? Not an open question there, so not marked: 7.')
-  expect(answers('three')).toEqual([['Delete the folder?', 'In your words'], ['Make it public?', ''], ['Rename it to "Shared"?', 'In your words']])
-  // The line Answer in words puts in the box names the question by its number, and counts once words follow it
-  const line = `About question 2 of the result "Three" (14 Sep 2020, 12:28), ${MEMORY}/reports/three/report.md: `
-  await $.prompt.submit({ text: line, wait: false, origin: composer })
-  await clock.advance(10)
-  expect(metaOf('three').waiting?.[1]?.answer).toBeUndefined()
-  // One message may carry lines for several results: each counts only within its own part
-  await $.prompt.submit({ text: `About question 1 of the result "Waits fix" (15 Nov, 02:13), ${MEMORY}/reports/${second}/report.md: yes\n${line}not yet`, wait: false, origin: composer })
-  expect(await until(async () => metaOf('three').waiting?.[1]?.answer)).toBe('In your words')
-  expect(await until(async () => metaOf(second).waiting?.[0]?.answer)).toBe('In your words')
-  expect(metaOf(second).waiting?.[1]?.answer).toBeUndefined()
-  const after = (await $.prompt.submit({ text: 'what waits now', wait: false, origin: composer })).context?.join('\n') ?? ''
-  expect(after).toContain('waiting on: (2) Release 0.2.168 to everyone?')
-  expect(after).toContain('waiting on: (1) Should the new key box replace the old one in Settings?')
-  expect(after).not.toContain('Make it public?')
-  expect(after).not.toContain('redraw its icon')
-})
-
-test('an answer taken back from the card opens again the question its work recorded for it; words that are none of its buttons answer it, and it goes on to its result answered', async ($, on) => {
-  const { files, clock, appended } = world(on)
-  await $.session.start(start)
-  await $.agent.spawn({ ...spawn, description: 'Make the banner', prompt: 'banner' } as never)
-  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  const labels = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label))
-  const press = async (label: string) => list.press({ key: (await list.findAll({ type: 'Button' })).find(b => String(b.props.label) === label)?.key ?? '' })
-  // Recorded as the card's question before the work asks it: tied to the ask once it comes
-  await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w1', agentId: 'a1', items: [{ text: 'Shall I use banner 5 on your page?', asked: true }, 'Shall I make the banner taller?'] } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Use banner 5 on your page?', choices: ['Use it', 'Not now'] } as never)
-  expect(await until(async () => ((await labels()).includes('Use it') ? true : undefined))).toBe(true)
-  await press('Use it')
-  expect(await until(async () => ((await labels()).includes('↶ Take back “Use it”') ? true : undefined))).toBe(true)
-  await press('↶ Take back “Use it”')
-  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('took back their answer "Use it"')))).toBeDefined()
-  // Back on the card, the ask is answered in words that are none of its buttons: it stays while the work acts on them, and the
-  // question its work recorded for it is answered in their words, also once the work clears the ask
-  await $.prompt.submit({ text: 'only once it is bigger', wait: false, origin: composer })
-  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Sam: “only once it is bigger”' } as never)
-  for await (const _ of $.turn.step({ turnId: 't1', index: 1, model: 'claude-opus-5-5', messageCount: 3, agentId: 'a1' })) void _
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: '' } as never)
-  await $.turn.complete({ agentId: 'a1', answer: 'The banner is ready.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
-  await clock.advance(10)
-  const path = await until(async () => [...files.keys()].find(one => /reports\/\d{8}-\d{4}-make-the-banner\/meta\.json$/.test(one)))
-  const waiting = (JSON.parse(files.get(path ?? '') ?? '{}') as { waiting?: { text: string; answer?: string }[] }).waiting
-  expect(waiting?.map(one => [one.text, one.answer ?? ''])).toEqual([['Shall I use banner 5 on your page?', 'In your words'], ['Shall I make the banner taller?', '']])
-  await list.unmount()
-})
-
-test("every question of a result can be answered in words beside its own answers or Yes and No; Not now and No stay in view with what was said", async ($, on) => {
-  const { files, clock, opened } = world(on)
-  const filled: string[] = []
-  on('prompt.fill', (_, e) => (filled.push(e.text), { isFilled: true }))
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'plan the coupon move', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, description: 'Coupon move', prompt: 'plan the coupon move' } as never)
-  const items = ['Should Claude use Muse or Gemini?', { text: 'Should the 11 codes be settled by hand, or left behind?', choices: ['By hand', 'Leave them', 'Not now'] }, 'Which page is the complaint about?', 'Shall I release it?', { text: 'Shall I ship it?', choices: [] }, { text: 'Shall I tag it?', choices: ['Not now'] }]
-  expect((await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w1', agentId: 'a1', items } as never)).result).toContain('Recorded 6')
-  await $.turn.complete({ agentId: 'a1', answer: 'The move is planned.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
-  await clock.advance(10)
-  const path = await until(async () => [...files.keys()].find(one => /reports\/\d{8}-\d{4}-coupon-move\/meta\.json$/.test(one)))
-  const id = (path ?? '').split('/').at(-2) ?? ''
-  const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Reports', bodyColumns: 80 }, surface: 'desktop' } as never)
-  await pressed(list, `report-${id}`)
-  await until(async () => opened.includes(`report-${id}`) || undefined)
-  const one = await $.ui.mount({ ...LIST, requestId: `report-${id}`, props: { ...LIST.props, title: 'Coupon move', bodyColumns: 80 }, surface: 'desktop' } as never)
-  const labels = async (index: number) => (await one.findAll({ type: 'Button' })).filter(b => new RegExp(`^report-say-${index}-`).test(b.key ?? '')).map(b => b.props.label)
-  expect(await until(async () => ((await labels(0)).length ? labels(0) : undefined))).toEqual(['Yes', 'No', 'Not now', 'Answer in words'])
-  expect(await labels(1)).toEqual(['By hand', 'Leave them', 'Not now', 'Answer in words'])
-  // No answers of its own named is a yes-or-no question
-  expect(await labels(4)).toEqual(['Yes', 'No', 'Not now', 'Answer in words'])
-  expect(await labels(5)).toEqual(['Yes', 'No', 'Not now', 'Answer in words'])
-  // Answer in words puts a line naming it by its number in the chat's box; sent with the person's words, it answers it
-  await pressed(one, 'report-say-2-Answer in words')
-  const line = (await until(async () => filled.find(text => text.includes('About question 3 of the result')))) ?? ''
-  expect(line).toContain(`${MEMORY}/reports/${id}/report.md`)
-  await $.prompt.submit({ text: `${line}the pricing page`, wait: false, origin: composer })
-  expect(await until(async () => one.find({ type: 'Text', text: 'Which page is the complaint about? · you answered in words' }))).toBeDefined()
-  await pressed(one, 'report-say-3-Not now')
-  expect(await until(async () => one.find({ type: 'Text', text: 'Shall I release it? · you pressed Not now' }))).toBeDefined()
-  await pressed(one, 'report-say-0-No')
-  expect(await until(async () => one.find({ type: 'Text', text: 'Should Claude use Muse or Gemini? · you answered “No”' }))).toBeDefined()
 })

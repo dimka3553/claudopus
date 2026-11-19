@@ -62,12 +62,12 @@ test('in the terminal an ask is above the prompt with its answers numbered, and 
   world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Release it', prompt: 'release it' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release it?', choices: ['Approve', 'Not now'] } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release it?', choices: ['Approve', 'Refuse'] } as never)
 
   const band = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
   expect(await band.find({ type: 'Text', text: 'Release it?' })).toBeDefined()
   const answers = (await band.findAll({ type: 'Button' })).map(one => [one.props.label, one.props.hotkey, one.props.plain])
-  expect(answers).toEqual([['Approve', '1', true], ['Not now', '2', true]])
+  expect(answers).toEqual([['Approve', '1', true], ['Refuse', '2', true]])
   // A message may begin with a digit: the first press only picks the answer and says so, the same number again sends it
   await band.press({ key: String((await band.findAll({ type: 'Button' }))[0]?.key) })
   await until(async () => band.find({ type: 'Text', text: /Type 1 again to answer “Approve”/ }))

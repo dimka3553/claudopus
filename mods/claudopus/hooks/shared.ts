@@ -75,22 +75,16 @@ export const promptsOf = (list: unknown): Prompt[] =>
     .filter((one, i, all) => all.findIndex(other => other.id === one.id) === i)
     .slice(0, PROMPTS_SHARED)
     .map(one => {
-      const words = (key: 'detail' | 'yes' | 'no' | 'done', max: number) => (typeof one[key] === 'string' && plain(one[key] as string) ? { [key]: plain(one[key] as string).slice(0, max) } : {})
+      const words = (key: 'detail' | 'about', max: number) => (typeof one[key] === 'string' && plain(one[key] as string) ? { [key]: plain(one[key] as string).slice(0, max) } : {})
       return {
         id: one.id.slice(0, 80),
         text: plain(one.text).slice(0, 200),
         ...(typeof one.title === 'string' && plain(one.title) ? { title: plain(one.title).slice(0, 120) } : {}),
         at: one.at,
         ...(one.kind === 'allow' || one.kind === 'question' || one.kind === 'plan' ? { kind: one.kind } : {}),
+        ...words('about', 300),
         ...words('detail', 400),
-        ...words('yes', 200),
-        ...words('no', 200),
-        ...words('done', 60),
-        ...(one.answered === 'yes' || one.answered === 'no' || one.answered === 'stopped' ? { answered: one.answered } : {}),
-        ...(one.isRunning === true ? { isRunning: true } : {}),
-        ...(one.isCut === true ? { isCut: true } : {}),
         ...(one.isHeld === true ? { isHeld: true } : {}),
-        ...(typeof one.endedAt === 'number' ? { endedAt: one.endedAt } : {}),
       }
     })
 // Text from another chat's file with no control characters, so nothing in it can move or colour the terminal
@@ -110,12 +104,10 @@ export const sharedOf = (text: string, now: number, host = ''): Shared | undefin
     // Their helpers apart, under `helpers`, so a version that reads `cards` alone never lists a helper as work of its own
     const helpers = (Array.isArray(one.helpers) ? (one.helpers as unknown[]) : []).filter(isCard).filter(card => typeof card.parentId === 'string' && Boolean(card.parentId))
     // A chat waiting on its own prompt is listed whether or not it has work
-    const prompts = promptsOf(one.prompts).map(({ answered: _answered, isRunning: _running, isCut: _cut, endedAt: _ended, ...open }) => open)
-    // Prompts answered there lately, said for a minute, so a chat is listed for them too
-    const answeredPrompts = promptsOf(one.answeredPrompts).filter(p => p.answered)
-    if (!cards.length && !prompts.length && !answeredPrompts.length) return undefined
+    const prompts = promptsOf(one.prompts)
+    if (!cards.length && !prompts.length) return undefined
     const link = linkOf(one.link)
-    return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards, ...(helpers.length ? { helpers } : {}), ...(prompts.length ? { prompts } : {}), ...(answeredPrompts.length ? { answeredPrompts } : {}), ...(link ? { link } : {}) }
+    return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards, ...(helpers.length ? { helpers } : {}), ...(prompts.length ? { prompts } : {}), ...(link ? { link } : {}) }
   } catch {
     return undefined
   }
@@ -343,17 +335,17 @@ export const openUrl = (c: { host: string; link?: Link }, held = '') => {
 }
 
 // The panel's header: one line for everything the panel shows, every chat's, so it never says less than the cards under it.
-// What needs the person comes first; then what runs, here, in other chats, or both; then what just finished; else nothing
+// What waits for the person comes first; then what works, here, in other chats, or both; then what just finished; else that
+// nothing waits. Each count is of cards by their stage
 export type Head = { here: number; there: number; chats: number; asks: number; isDone: boolean }
-const tasks = (n: number) => (n === 1 ? '1 task' : `${n} tasks`)
 export const headLine = ({ here, there, chats, asks, isDone }: Head) => {
   const running = here + there
-  if (asks) return `${asks} ${asks === 1 ? 'question' : 'questions'} waiting for you${running ? ` · ${running} working` : ''}`
+  if (asks) return `${asks} waiting for you${running ? ` · ${running} working` : ''}`
   const others = chats === 1 ? '1 other chat' : `${chats} other chats`
-  if (here && there) return `${tasks(running)} working, here and in ${others}`
-  if (there) return `${tasks(there)} working in ${chats === 1 ? 'another chat' : others}`
-  if (here) return `${tasks(here)} working`
-  return isDone ? 'Just finished' : 'Nothing running'
+  if (here && there) return `${running} working, here and in ${others}`
+  if (there) return `${there} working in ${chats === 1 ? 'another chat' : others}`
+  if (here) return `${here} working`
+  return isDone ? 'Just finished' : 'Nothing waits for you'
 }
 // The octopus beside it: happy for the moment work finishes, whatever else goes on, so no finish passes unseen; else amber while
 // anything needs the person, at work while anything runs, resting only when nothing goes on anywhere

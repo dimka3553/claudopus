@@ -1,15 +1,21 @@
-// A Stop the person presses holds: the chat is told it was theirs, and nothing starts the work again until they ask
+// A Stop the person presses holds: the task stays stopped, grey, with its helpers and commands; the chat is told it was theirs, and
+// nothing starts the task again but their word or their press on Start again
 
 // The case of 15 Nov: a message sent by mistake started work, the person pressed Stop on its card, the engine's notice said it was
 // "stopped by Claude", and the chat sent it a message that started it again, twice
-test('work the person stopped on its card is not started again by the chat, a message, an answer or the mod until they ask', async ($, on) => {
-  const { stopped, resumed, sent } = world(on)
+test('a task the person stopped on its card stays stopped, grey, its helpers and commands stopped with it: the chat, a message, an answer and the mod start it again by no way, and only their word or their press on Start again does', SLOW, async ($, on) => {
+  const { stopped, resumed, sent, submitted, clock, files } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'The bar above the input box just disappeared completely now.', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Bar above the input box disappeared', prompt: 'Their words: "The bar above the input box just disappeared completely now."' } as never)
-  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  // A helper of its own at work, and a command each of them runs in the background
+  await $.agent.spawn({ ...spawn, description: 'Read the bar code', prompt: 'read', parentAgentId: 'a1' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'c1', agentId: 'a1', command: 'npm run build', description: 'Build the app', run_in_background: true } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'c2', agentId: 'a2', command: 'npm test', description: 'Run the tests', run_in_background: true } as never)
+  let pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await pane.press({ key: 'stop-a1' })
-  expect(stopped).toContain('a1')
+  // The task, its helper and the commands of both are stopped
+  expect([...stopped].sort()).toEqual(['a1', 'a2', 'bg-c1', 'bg-c2'])
 
   // The engine's notice of the stop: the chat is told it was the person's
   const notice = '<task-notification>\n<task-id>a1</task-id>\n<status>killed</status>\n<summary>Agent "Bar above the input box disappeared" was stopped by Claude</summary>\n</task-notification>'
@@ -30,8 +36,20 @@ test('work the person stopped on its card is not started again by the chat, a me
   expect(String(fresh.deny)).toContain('the person stopped')
   expect(resumed.filter(line => line.startsWith('a1: '))).toHaveLength(0)
 
-  // Its card says so and keeps where it stood, with a way to start it again
-  expect(await pane.find({ type: 'Text', text: /Stopped by you/ })).toBeDefined()
+  // Its card says Stopped, in grey, with no row of a command left under it, and a way to start it again
+  const line = async () => pane.find({ type: 'Text', text: 'Stopped' })
+  expect([(await line())?.props.color, (await line())?.props.dimColor]).toEqual([undefined, true])
+  expect(await pane.find({ type: 'Text', text: /Build the app|Run the tests|Building the app|Running the tests/ })).toBeUndefined()
+  expect(await keyed(pane, 'again-small-a1')).toBeDefined()
+  // and stays so: twenty minutes on it is still stopped, as the other chats read it too, nothing is at work, and nothing of
+  // Claudopus has started it or its helper, written to the chat about it or stopped anything more
+  await pane.unmount()
+  await clock.advance(20 * 60_000)
+  pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const mine = JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}') as { cards?: unknown[]; ended?: { id: string; status: string }[]; helpers?: { id: string; status: string }[] }
+  expect([mine.cards, mine.ended?.map(one => [one.id, one.status]), mine.helpers?.map(one => [one.id, one.status])]).toEqual([[], [['a1', 'stopped']], [['a2', 'stopped']]])
+  expect(await pane.find({ type: 'Text', text: 'Nothing waits for you' })).toBeDefined()
+  expect([resumed, submitted.filter(one => !one.startsWith('<task-notification>')), sent, stopped.length]).toEqual([[], [], [], 4])
 
   // Other work is not held
   const other = await $.tool.call({ tool: 'Agent', tool_use_id: 'm3', subagent_type: 'general-purpose', model: 'opus', description: 'Check the ears', prompt: 'check the ears' } as never)
@@ -42,6 +60,15 @@ test('work the person stopped on its card is not started again by the chat, a me
   expect((next.context ?? []).join('\n')).toContain('only if this message asks for that')
   const asked = await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm4', to: 'a1', message: 'Carry on with the bar work.' } as never)
   expect(asked.deny).toBeUndefined()
+
+  // Stopped again, it is held again; their press on Start again asks the chat in their name to send it a message
+  await $.agent.spawn({ ...spawn, resume: { agentId: 'a1' }, prompt: 'Carry on with the bar work.' } as never)
+  expect(await until(async () => pane.find({ key: 'stop-a1' }))).toBeDefined()
+  await pane.press({ key: 'stop-a1' })
+  expect(String((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm5', to: 'a1', message: 'And once more.' } as never)).deny)).toContain('the person stopped')
+  await pressed(pane, 'again-small-a1')
+  expect(await until(async () => submitted.find(one => one.includes('pressed "Start again" on "Bar above the input box disappeared" (a1), which they had stopped') && one.includes('SendMessage')))).toBeDefined()
+  await pane.unmount()
 })
 
 test('a stop that was not the person\'s, by the chat or the engine, is not held', async ($, on) => {
@@ -104,5 +131,8 @@ test('a stop holds while the chat\'s turn for that message is still open, by nam
   const notice = '<task-notification><task-id>a1</task-id><status>killed</status></task-notification>'
   const told = (await $.prompt.submit({ text: notice, wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[] }
   expect((told.context ?? []).join('\n')).not.toContain('stopped this')
-  expect(await pane.find({ type: 'Text', text: /Stopped by you/ })).toBeUndefined()
+  // Its card is stopped all the same, grey, but with no Start again: that is for a stop of the person's own
+  expect((await until(async () => pane.find({ type: 'Text', text: 'Stopped' })))?.props.dimColor).toBe(true)
+  expect(await keyed(pane, 'again-small-a1')).toBeUndefined()
+  await pane.unmount()
 })

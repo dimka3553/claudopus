@@ -1,4 +1,5 @@
-// The keys remembered: names and stores only, made again from the stores, read by work in keys.md, and an ask for a kept key refused
+// The keys remembered: names and stores only, made again from the stores, read by work in keys.md, and an ask for a kept key refused;
+// and how a password or a key a command waits for is asked and given
 
 // Made-up keys, as a person would have given them, in each store
 const keysLaid = (files: Map<string, string>) => {
@@ -103,7 +104,7 @@ test('an ask for a key the list has is refused with where it is; a key not kept 
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'f1', agentId: 'w1', command: "/plug/bin/secret ELEVENLABS_API_KEY here 'curl x'" } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'f2', agentId: 'w1', name: 'stripe-customers-key', label: 'Stripe' } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'f3', agentId: 'w1', text: 'Paste your Stripe key', details: 'x' } as never)).deny).toBeUndefined()
-  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'f4', agentId: 'w1', text: 'Release the list of keys?', details: 'It lists ElevenLabs and Kaggle.', choices: ['Release it', 'Not now'] } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'f4', agentId: 'w1', text: 'Release the list of keys?', details: 'It lists ElevenLabs and Kaggle.', choices: ['Release it'] } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'f5', agentId: 'w1', name: 'elevenlabs-key', label: 'x', agent: 'bot' } as never)).deny).toBeUndefined()
   // An ask made leaves its name in the list as asked, not given
   expect(files.get(`${MEMORY}/keys.md`)).toMatch(/\| stripe-customers-key \|[^\n]*asked, not given/)
@@ -140,4 +141,109 @@ test('work never writes the list of keys itself, by any tool', async ($, on) => 
   await $.session.start(start)
   expect((await $.tool.call({ tool: 'Write', tool_use_id: 'w1', agentId: 'w1', file_path: `${MEMORY}/keys.md`, content: 'X' } as never)).deny).toBeDefined()
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'w2', agentId: 'w1', command: 'echo x > ~/.claude/claudopus/keys.json' } as never)).deny).toBeDefined()
+})
+
+test("a password and a key a command waits for are each one block (its label, the question in amber, its buttons); typed in the box above the chat on the desktop and in the block's one field in the terminal; given or refused, one grey line says so and the value is nowhere on screen", async ($, on) => {
+  const { files, clock, keep, settle, keychain, logged } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Deploy the site', prompt: 'deploy it' } as never)
+  // One command of the task waits for a Mac's password, another for a key
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: "hold /plug/claudopus/bin/admin m4 'id -u'" } as never))
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-2', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret STRIPE_KEY here deploy' } as never))
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  type Site = typeof list
+  const PASSWORD = { kind: 'admin', host: 'm4', key: BOX_PUBLIC }
+  const KEY = { kind: 'secret', name: 'STRIPE_KEY' }
+  const PASSWORD_ASKS = 'The password of m4 is needed to run this as admin.'
+  const KEY_ASKS = "STRIPE_KEY is needed to run this task's command."
+  let made = 0
+  const asked = async (request: Record<string, unknown>) => {
+    const id = `${(made += 1)}a1e2d3c-4b5a-4987-a654-3210fedcba98`
+    files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, ...request, chat: 'engine-id', at: 1_700_000_000_000 }))
+    await clock.advance(1000)
+    return id
+  }
+  const buttons = async (site: Site, id: string) => (await site.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith(`box-${id}-`))
+  const fields = async (site: Site, id: string) => (await site.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').includes(id))
+  const all = async (site: Site) => (await site.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  const press = async (site: Site, id: string, label: string) => site.press({ key: (await until(async () => (await buttons(site, id)).find(b => b.props.label === label)))?.key ?? '' })
+  // Gone from the panel, with one grey line of what was done in its place, and nothing green
+  const gone = async (site: Site, id: string, line: string) => {
+    expect((await until(async () => site.find({ type: 'Text', text: line })))?.props.dimColor).toBe(true)
+    expect(await buttons(site, id)).toEqual([])
+    expect((await all(site)).filter(one => one.startsWith('✓ '))).toEqual([line])
+    expect([...(await site.findAll({ type: 'Box' })), ...(await site.findAll({ type: 'Text' }))].some(one => ['color', 'borderColor', 'backgroundColor'].some(prop => one.props[prop] === 'success'))).toBe(false)
+  }
+  for (const one of [
+    { request: PASSWORD, label: 'Password', asks: PASSWORD_ASKS, labels: ['Type it', "Don't allow"], open: 'Type it', head: '↳ The password of m4 for “Deploy the site”', placeholder: 'Type it here', typed: 'hunter-22', given: '✓ You gave the password', refuse: "Don't allow" },
+    { request: KEY, label: 'Key', asks: KEY_ASKS, labels: ['Paste it', "Don't give it", 'Answer in words'], open: 'Paste it', head: '↳ STRIPE_KEY for “Deploy the site”', placeholder: 'Paste it here', typed: 'sk_live_made_up_0042', given: '✓ You gave STRIPE_KEY', refuse: "Don't give it" },
+  ]) {
+    const id = await asked(one.request)
+    // The block, on its task's card: a dim label of its kind, the question in amber, then its buttons, and no field in the panel
+    const question = await until(async () => list.find({ type: 'Text', text: one.asks }))
+    expect([question?.props.color, question?.props.bold]).toEqual(['#E5A50A', true])
+    const drawn = await all(list)
+    expect(drawn.slice(drawn.indexOf(one.label), drawn.indexOf(one.label) + 2)).toEqual([one.label, one.asks])
+    expect(drawn.indexOf('Deploy the site')).toBeLessThan(drawn.indexOf(one.label))
+    expect((await list.find({ type: 'Text', text: one.label }))?.props.dimColor).toBe(true)
+    expect((await buttons(list, id)).map(b => b.props.label)).toEqual(one.labels)
+    expect(await list.findAll({ type: 'Input' } as never)).toEqual([])
+    expect((await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => ['Cancel', 'Paste the key', 'Reply in your own words', 'Close the reply box'].includes(label))).toEqual([])
+    // Its button opens the one box above the chat, which says what it is for and where what is typed goes
+    await press(list, id, one.open)
+    const field = await until(async () => (await fields(bar, id))[0])
+    expect(field?.props.placeholder).toBe(one.placeholder)
+    expect(await all(bar)).toEqual(expect.arrayContaining([one.head]))
+    expect((await all(bar)).filter(text => /^Enter sends/.test(String(text)))).toEqual([])
+    expect((await bar.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(expect.arrayContaining(['Send', 'Close']))
+    expect(await list.findAll({ type: 'Input' } as never)).toEqual([])
+    await bar.input({ key: field?.key ?? '', text: one.typed })
+    const kept = await until(async () => keychain.find(entry => entry.includes(id)))
+    // A password goes only sealed to its command's key; a key as it was pasted
+    if (one.request === PASSWORD) expect([kept?.includes(one.typed), kept?.includes(boxSealed(BOX_PUBLIC, one.typed))]).toEqual([false, true])
+    else expect(kept).toContain(`-w "${one.typed}"`)
+    await gone(list, id, one.given)
+    expect(await until(async () => ((await fields(bar, id)).length ? undefined : true))).toBe(true)
+    // Refused: the request goes, so its command ends without it, and the line says the button pressed
+    const refused = await asked(one.request)
+    await press(list, refused, one.refuse)
+    await gone(list, refused, `✓ You pressed “${one.refuse}”`)
+    expect(await until(async () => (files.has(`${MEMORY}/boxes/${refused}.json`) ? undefined : true))).toBe(true)
+    expect(keychain.some(entry => entry.includes(refused))).toBe(false)
+  }
+  // Words in place of a key go to the command that asked, never to the keychain
+  const worded = await asked(KEY)
+  await press(list, worded, 'Answer in words')
+  const words = await until(async () => (await fields(bar, worded))[0])
+  expect(words?.props.placeholder).toBe('Type your answer')
+  expect(await all(bar)).toContain('↳ Your answer in place of STRIPE_KEY')
+  await bar.input({ key: words?.key ?? '', text: 'It is in the vault under Stripe' })
+  expect(await until(async () => files.get(`${MEMORY}/boxes/${worded}.reply`))).toContain('in their own words: It is in the vault under Stripe')
+  await gone(list, worded, '✓ You answered “It is in the vault under Stripe”')
+  expect(keychain.some(entry => entry.includes(worded))).toBe(false)
+  // The chat was told only what is asked and where to type it
+  expect(logged).toEqual(expect.arrayContaining([`${PASSWORD_ASKS} Press Type it on it in the Claudopus panel (/claudopus opens it) and type it in the box above the chat, never in the chat itself.`]))
+  for (const value of ['hunter-22', 'sk_live_made_up_0042']) expect([...logged, ...(await all(list)), ...(await all(bar))].some(line => line.includes(value))).toBe(false)
+  await bar.unmount()
+  await list.unmount()
+  // In the terminal the bar draws no field: the block has the one field itself, and no button to open one
+  const term = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'terminal' } as never)
+  for (const one of [
+    { request: PASSWORD, label: 'Password', asks: PASSWORD_ASKS, labels: ["Don't allow"], placeholder: 'Type it here', typed: 'hunter-23', given: '✓ You gave the password' },
+    { request: KEY, label: 'Key', asks: KEY_ASKS, labels: ["Don't give it", 'Answer in words'], placeholder: 'Paste it here', typed: 'sk_live_made_up_0043', given: '✓ You gave STRIPE_KEY' },
+  ]) {
+    const id = await asked(one.request)
+    expect(await until(async () => term.find({ type: 'Text', text: one.asks }))).toBeDefined()
+    expect(await term.find({ type: 'Text', text: one.label })).toBeDefined()
+    expect((await buttons(term, id)).map(b => b.props.label)).toEqual(one.labels)
+    const own = await fields(term, id)
+    expect(own.map(field => [field.key?.startsWith(`box-${id}-field-`), field.props.placeholder])).toEqual([[true, one.placeholder]])
+    await term.input({ key: own[0]?.key ?? '', text: one.typed })
+    expect(await until(async () => keychain.find(entry => entry.includes(id)))).toBeDefined()
+    await gone(term, id, one.given)
+    expect(await fields(term, id)).toEqual([])
+  }
+  await settle()
 })

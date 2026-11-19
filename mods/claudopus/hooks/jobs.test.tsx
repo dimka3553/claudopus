@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { groupsOf, heavyOf, isNamedBy, leftoversOf, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, waitingOf, watcherOf, isWaiterTree, PLAIN_MOST } from './jobs'
+import { heavyOf, commandName, describedOf, endOf, expiresIn, leftSeconds, foldJobs, isOutputEnded, isOwnLongScript, isWaitOnly, jobKindOf, labelOf, latestOf, plainOf, portOf, waitOf, waitingOf, watcherOf, PLAIN_MOST } from './jobs'
 import type { WaitKind } from './jobs'
 import type { Job } from './jobs'
 
@@ -42,29 +42,36 @@ test("a run's raw line becomes a few plain words or nothing: no paths, file name
   expect(latestOf('progress: 3/6 steps fitting the face, eta 4m\n')).toMatchObject({ done: '3', total: '6 steps', words: 'fitting the face', left: '4m left' })
 })
 
-test('a long wait or script of its own that would give no progress is told apart from one that reports, a short one, a meter and the mod\'s own runners', async () => {
+test("a long script of its own asked for with a long time limit is told apart from a short one, a watch, a server, a program that is no script of its own and the mod's own runners, whatever it prints of how far it is; a time in its words decides nothing", async () => {
   const loop = 'until az group show -n rg 2>&1 | grep -q NotFound; do sleep 15; done'
-  const cases: [string, string, boolean, string[], string, number?][] = [
-    [loop, 'Wait for the Azure deletion to finish (about 8 min)', true, [], 'wait'],
-    // a for loop, and one held open with a long time limit and no time in its words
-    ['for i in $(seq 60); do az ml job show -n j | grep -q Completed && break; sleep 10; done', 'Wait for the training run', true, [], 'wait'],
-    [loop, 'Wait for the training run', false, [], 'wait', 600_000],
-    // a server, a watch, a quick script sent off, a script that prints a count, one whose only progress word turns it off
-    ['python serve.py', 'Serve the preview page', true, ['import http.server\n'], ''],
-    ['python watch.py', 'Watch the folder for new scans', true, ['import time\n'], ''],
-    ['node scripts/x.mjs', 'Run a quick check', true, ['console.log(1)\n'], ''],
-    ['python fit.py', 'Run the fit (about 20 min)', true, ['for i in range(n):\n  print(f"step {i}/{n} loss {l}")\n'], ''],
-    ['python fit.py', 'Run the fit (about 20 min)', true, ['# no progress bar here\nfor i in range(n): fit(i)\n'], 'script'],
-    [loop.replace('do ', 'do n=$((n+1)); echo "progress: $n tries waiting"; '), 'Wait for the Azure deletion to finish (about 8 min)', true, [], ''],
-    ['python3 sort.py', 'Run the sorting of the scans (about 6 min)', true, ['import os\nfor f in os.listdir("."):\n  pass\n'], 'script'],
-    ['python3 sort.py', 'Run the sorting of the scans (about 6 min)', true, ['for i, f in enumerate(fs):\n  print(f"progress: {i}/{len(fs)} scans", flush=True)\n'], ''],
-    ['python3 sort.py', 'Run the sorting of the scans', false, ['import os\n'], ''],
-    ['cd /w && nohup bash fetch.sh > fetch.log 2>&1 & echo $!', 'Download the scans', false, ['curl -L -o a.zip https://example.com/a.zip\n'], ''],
-    ['cd /w && nohup bash fetch.sh > fetch.log 2>&1 & echo $!', 'Download the scans', false, ['curl -sL -o a.zip https://example.com/a.zip\n'], 'script'],
-    ['npm run build', 'Run the build (about 3 min)', true, [], ''],
-    ['/p/bin/release', 'Run the release (about 5 min)', true, ['while true; do sleep 1; done\n'], ''],
+  const LONG = 600_000
+  const cases: [string, string, string[], number, boolean][] = [
+    // a script of its own with a long time limit: one that prints nothing of how far it is
+    ['python3 sort.py', 'Run the sorting of the scans', ['import os\nfor f in os.listdir("."):\n  pass\n'], LONG, true],
+    ['python fit.py', 'Run the fit', ['# no progress bar here\nfor i in range(n): fit(i)\n'], LONG, true],
+    // and one that prints the progress line, or a count of a total: what it prints is for its row, and lets nothing be held open
+    ['python3 sort.py', 'Run the sorting of the scans', ['for i, f in enumerate(fs):\n  print(f"progress: {i}/{len(fs)} scans", flush=True)\n'], LONG, true],
+    ['python fit.py', 'Run the fit', ['for i in range(n):\n  print(f"step {i}/{n} loss {l}")\n'], LONG, true],
+    // a short one, and one with no long time limit, whatever time its words say (a bracketed time is read by nothing)
+    ['node scripts/x.mjs', 'Run a quick check', ['console.log(1)\n'], 60_000, false],
+    ['python3 sort.py', 'Run the sorting of the scans (about 6 min)', ['import os\n'], 0, false],
+    ['python3 sort.py', 'Run the sorting of the scans (about 6 min)', ['import os\n'], 120_000, false],
+    // a watch (wait and poll words too) and a server are told by their own checks
+    [loop, 'Wait for the Azure deletion to finish', ['import time\n'], LONG, false],
+    ['python poll.py', 'Poll the queue until it is empty', ['import time\n'], LONG, false],
+    ['python watch.py', 'Watch the folder for new scans', ['import time\n'], LONG, false],
+    ['python serve.py', 'Serve the preview page', ['import http.server\n'], LONG, false],
+    ['npm run dev', 'Start the site', ['import os\n'], LONG, false],
+    // a script that runs a tool with a meter of its own, shown or silenced, is still a long script of its own
+    ['bash fetch.sh', 'Download the scans', ['curl -L -o a.zip https://example.com/a.zip\n'], LONG, true],
+    ['bash fetch.sh', 'Download the scans', ['curl -sL -o a.zip https://example.com/a.zip\n'], LONG, true],
+    // a program that is no script of its own, and the mod's own runners
+    ['npm run build', 'Run the build', [], LONG, false],
+    ['/p/bin/release', 'Run the release', ['while true; do sleep 1; done\n'], LONG, false],
   ]
-  for (const [command, description, isBackground, scripts, said, timeout] of cases) expect({ command, description, said: reportsOf(command, description, isBackground, scripts, timeout) }).toEqual({ command, description, said })
+  for (const [command, description, scripts, timeout, isLong] of cases) expect({ command, description, timeout, isLong: isOwnLongScript(command, description, scripts, timeout) }).toEqual({ command, description, timeout, isLong })
+  // with no time limit given it is never held long
+  expect(isOwnLongScript('python3 sort.py', 'Run the sorting of the scans', ['import os\n'])).toBe(false)
 })
 
 test('a job is told by its command: a server with its port, a download, else a script; its latest line is what a progress bar shows last', async () => {
@@ -87,24 +94,7 @@ test('a job is told by its command: a server with its port, a download, else a s
   expect(latestOf('Serving HTTP on :: port 8765 (http://[::]:8765/) ...\n').port).toBe('8765')
 })
 
-test('a command started detached is known by its log and folder; one that is not, or logs nowhere, is not', async () => {
-  expect(detachedOf('cd /w/run && nohup python train.py --epochs 40 > train.log 2>&1 & echo $!')).toEqual({ log: 'train.log', cd: '/w/run', core: 'python train.py --epochs 40' })
-  expect(detachedOf('nohup sh -c "make all" >> "/tmp/build log.txt" 2>&1 &')?.log).toBe('/tmp/build log.txt')
-  expect(detachedOf('setsid uvicorn app:api --port 8000 >/w/api.log 2>&1 < /dev/null &')?.log).toBe('/w/api.log')
-  expect(detachedOf('nohup sleep 100 > /dev/null 2>&1 &')).toBeUndefined()
-  expect(detachedOf('python train.py > train.log')).toBeUndefined()
-  expect(pidOf('48213\n')).toBe('48213')
-  expect(pidOf('started\n')).toBeUndefined()
-  // curl's http code when nothing answered is no process: kill -0 0 always succeeds
-  expect(pidOf('000\n')).toBeUndefined()
-  expect(pidOf('0123\n')).toBeUndefined()
-})
-
-test('a detached start is one sent off with & by nohup or setsid on this Mac; a wait is no job; a description drops the command it repeats', async () => {
-  expect(detachedOf('grep nohup notes.md > hits.txt')).toBeUndefined()
-  expect(detachedOf('nohup make > build.log 2>&1')).toBeUndefined()
-  expect(detachedOf("ssh m4 'nohup python train.py > t.log 2>&1 &'")).toBeUndefined()
-  expect(detachedOf('cd /w && nohup make > build.log 2>&1 && echo ok')).toBeUndefined()
+test('a call that only passes time is no job; a description drops the command it repeats', async () => {
   expect(isWaitOnly('sleep 500')).toBe(true)
   expect(isWaitOnly("python3 -c 'import time; time.sleep(480)'")).toBe(true)
   expect(isWaitOnly('python run_all.py')).toBe(false)
@@ -222,23 +212,6 @@ test('a command whose only job is to wait is known whatever shape it takes, by w
   expect(Date.now() - at).toBeLessThan(200)
 })
 
-test("a command's processes only wait when every one at the end of its tree passes time or follows something, whatever its words", async () => {
-  const at = 1_700_000_000_000
-  const ps = (lines: string[]) => procsOf(lines.join('\n'), at)
-  const shell = '100 1 S 00:30 /bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh && eval \'waitfor /x\''
-  // A function, a nested shell or a sleep by a variable: its shell waits on a sleep, or a log followed
-  expect(isWaiterTree(ps([shell, '101 100 S 00:02 sleep 5']), '100')).toBe(true)
-  expect(isWaiterTree(ps([shell, '101 100 S 00:20 bash -lc until', '102 101 S 00:01 /bin/sleep 3']), '100')).toBe(true)
-  expect(isWaiterTree(ps([shell, '101 100 S 00:20 tail -f /x/run.log', '102 100 S 00:20 grep -m1 done']), '100')).toBe(true)
-  expect(isWaiterTree(ps([shell, '101 100 S 00:20 docker logs -f web']), '100')).toBe(true)
-  // Work at the end of the tree, or beside a sleep, is work; so is a lone grep a pipe goes through, and a shell with nothing under it
-  expect(isWaiterTree(ps([shell, '101 100 S 00:20 grep --line-buffered -v DEBUG']), '100')).toBe(false)
-  expect(isWaiterTree(ps([shell, '101 100 S 00:20 python train.py']), '100')).toBe(false)
-  expect(isWaiterTree(ps([shell, '101 100 S 00:20 rclone copy /a remote:', '102 100 S 00:01 sleep 1']), '100')).toBe(false)
-  expect(isWaiterTree(ps([shell]), '100')).toBe(false)
-  expect(isWaiterTree(ps([shell, '101 100 S 00:02 sleep 5']), '999')).toBe(false)
-})
-
 test('a command made only of tail, grep and their kind only watches; one that follows a file never ends of itself; one that does anything more is no watcher', async () => {
   const cases: [string, { isFollow: boolean } | undefined][] = [
     // The rows of 16 Nov: one pipeline, its two processes found apart
@@ -268,32 +241,14 @@ test('a command made only of tail, grep and their kind only watches; one that fo
   for (const [cmd, want] of cases) expect([cmd, watcherOf(cmd)]).toEqual([cmd, want])
 })
 
-test('six alike waits are one row that says six; different jobs stay apart', async () => {
-  const wait = (id: string, at: number): Job => ({ id, label: 'Wait for the end-to-end rerun to finish', cmd: `until grep -q RERUN_DONE r.log; do sleep 15; done${at}`, kind: 'wait', at, waitsFor: 'RERUN_DONE in r.log' })
+test('alike watches are one row that says how many; different jobs stay apart', async () => {
+  const wait = (id: string, at: number): Job => ({ id, label: 'Wait for the end-to-end rerun to finish', cmd: 'until grep -q RERUN_DONE r.log; do sleep 15; done', kind: 'watch', at })
   const folded = foldJobs([wait('a', 1), wait('b', 5), wait('c', 3), { id: 'd', label: 'Mesh', cmd: 'python mesh.py', kind: 'script', at: 2 }])
   expect(folded).toHaveLength(2)
   expect(folded[0]).toMatchObject({ id: 'b', count: 3, at: 1 })
   expect(folded[1]?.count).toBeUndefined()
-})
-
-test("a background command is found in the engine's shells by its words: paused when a process under it is, missing when none runs it", async () => {
-  const snap = "/bin/zsh -c source /Users/x/.claude/shell-snapshots/snapshot-zsh-1-a.sh 2>/dev/null || true && eval "
-  const procs = procsOf([
-    `11021 94084 Ss   00:10 ${snap}'until grep -q "RERUN_DONE" /Users/x/contest/work/5/rerun.log; do sleep 15; done; date'`,
-    `74000 94084 Ss   00:09 ${snap}'cd /Users/x/contest/work/1 && for d in 8 9 10; do python src/poisson.py run/d1/dense.ply run/d1/poisson$d.ply $d; done'`,
-    '74030 74000 S    00:09 /bin/zsh -c x',
-    '77569 74030 T    00:08 /Users/x/env/bin/python src/poisson.py run/d1/dense.ply run/d1/poisson10.ply 10',
-  ].join('\n'), 1_000_000)
-  const shells = shellsOf(procs, [
-    { id: 'wait', cmd: 'until grep -q "RERUN_DONE" /Users/x/contest/work/5/rerun.log; do sleep 15; done; date', at: 990_000 },
-    { id: 'mesh', cmd: 'cd /Users/x/contest/work/1 && for d in 8 9 10; do python src/poisson.py run/d1/dense.ply run/d1/poisson$d.ply $d; done', at: 991_000 },
-    { id: 'gone', cmd: 'until grep -q "RERUN_DONE" /Users/x/contest/work/5/rerun.log; do sleep 15; done; date', at: 995_000 },
-  ])
-  expect(shells.get('wait')).toBe('11021')
-  expect(shells.get('mesh')).toBe('74000')
-  expect(shells.get('gone')).toBeNull()
-  expect(treeOf(procs, '74000').some(p => p.stat.startsWith('T'))).toBe(true)
-  expect(treeOf(procs, '11021').some(p => p.stat.startsWith('T'))).toBe(false)
+  // (the same words run by another command are another row)
+  expect(foldJobs([wait('a', 1), { ...wait('b', 2), cmd: 'until grep -q OTHER r.log; do sleep 15; done' }])).toHaveLength(2)
 })
 
 test('how far a run is, read from the progress tools print and the line work is told to print: done of all, percent, speed', async () => {
@@ -332,6 +287,15 @@ test('how far a run is, read from the progress tools print and the line work is 
   expect(of('| model-a | 12/50 | 24% |').done).toBeUndefined()
   expect(of('no progress: 3/6 were skipped').done).toBeUndefined()
   expect(of('progress: 7/6').done).toBeUndefined()
+  // The work's own line counts things done, never time: one whose unit is seconds or minutes says nothing of how far it is, on its
+  // own line or as the newest one above the last, while the same shapes counting things do
+  const timed = ['progress: 30/120 seconds', 'progress: 90s/300s waiting for the deploy', 'progress: 5/10 min', 'progress: 2 of 8 minutes', 'progress: 45 seconds waiting for the deploy', 'progress: 3 minutes', 'progress: 12 secs', 'progress: 2 hours in']
+  for (const line of timed) {
+    expect([line, of(line)]).toEqual([line, { pct: undefined, done: undefined, total: undefined, rate: undefined }])
+    expect([line, latestOf(`${line}\nstill going\n`).isEarlier]).toEqual([line, undefined])
+  }
+  expect(of('progress: 30/120 scans')).toEqual({ pct: '25%', done: '30', total: '120 scans', rate: undefined })
+  expect(of('progress: 45 tries waiting for the deploy').done).toBe('45 tries')
   // More shapes: Keras, a plain sentence, a count with what it counts after it, make's percent, az's long percent
   expect(of('450/1000 [=====>....] - ETA: 12s')).toMatchObject({ done: '450', total: '1,000', pct: '45%' })
   expect(of('Downloaded 460 MB of 1 GB (45%)')).toMatchObject({ done: '460 MB', total: '1 GB', pct: '45%' })
@@ -362,20 +326,6 @@ test('how far a run is, read from the progress tools print and the line work is 
   expect(latestOf('Rendering ━━━━━━━━━━  45% 0:00:10\n').pct).toBe('45%')
 })
 
-test('a detached start is followed only by the process `echo $!` printed and a log it can name: the 15 Nov download stayed blank for hours', async () => {
-  // Its log was under $S, set in the same command, and a curl after it printed "000", taken for the process
-  const command = `cd /w/a && S=/tmp/sp && nohup sh build.sh 1 > $S/build1.log 2>&1 & curl -s -o /dev/null -w "%{http_code}\\n" "https://x"`
-  expect(detachedOf(command)?.log).toBe('/tmp/sp/build1.log')
-  expect(pidOf('000\n')).toBeUndefined()
-  expect(pidOf('0\n')).toBeUndefined()
-  expect(detachedOf('nohup python t.py > $HOME/t.log 2>&1 & echo $!')?.log).toBe('~/t.log')
-  expect(detachedOf('nohup python t.py > $OUT/t.log 2>&1 & echo $!')).toBeUndefined()
-  expect(detachedOf('S=/tmp/x && nohup python a.py > ${S:-/y}/run.log 2>&1 & echo $!')).toBeUndefined()
-  expect(detachedOf('export S=/tmp/x && nohup python a.py > $S/run.log 2>&1 & echo $!')?.log).toBe('/tmp/x/run.log')
-  // A status code printed beside the process leaves it unknown
-  expect(pidOf('200\n48213\n')).toBeUndefined()
-})
-
 test('a row is named by what it does and its kind by its own program; time left is only what a run said; 15 Nov rows read "Download · Reload page" and "cd /private/tmp/..."', async () => {
   // `vercel curl` reads a page: vercel is the program, not curl
   expect(jobKindOf('cd /w && vercel curl /ct --deployment d -- -s -o ct3.html; timeout 25 vercel logs d | grep -i storage', 'Reload page and check function logs')).toBe('script')
@@ -400,15 +350,7 @@ test('a row is named by what it does and its kind by its own program; time left 
   expect(latestOf('Receiving objects:  45% (450/1000), 460.00 MiB | 10.20 MiB/s').left).toBeUndefined()
 })
 
-test('a command held open is found by its own shell however few its words; times past an hour, units and names read true', async () => {
-  // A real shell line as ps listed it on 15 Nov, quotes and new lines as ps writes them
-  const shell = (pid: string, etime: string, body: string) => `${pid}  1423 Ss      ${etime} /bin/zsh -c source /Users/x/.claude/shell-snapshots/snapshot-zsh-1-ab.sh 2>/dev/null || true && \\builtin setopt NO_EXTENDED_GLOB 2>/dev/null || true && eval '${body}' < /dev/null && pwd -P >| /tmp/claude-a9a2-cwd`
-  const now = 1_700_000_100_000
-  const procs = procsOf([shell('31654', '00:08', 'python3 train.py'), shell('31700', '00:08', 'python3 train.py --epochs 4'), shell('31800', '00:30', `bash -c '"'"'echo hi'"'"'\\012sleep 9`)].join('\n'), now)
-  expect(heldShellOf(procs, 'python3 train.py', now - 8_000)).toBe('31654')
-  expect(heldShellOf(procs, "bash -c 'echo hi' sleep 9", now - 30_000)).toBe('31800')
-  // never one started far from when the call began
-  expect(heldShellOf(procs, 'python3 train.py', now - 120_000)).toBeUndefined()
+test('times past an hour, units and names read true', async () => {
   // Time left past an hour, as it was said
   expect(latestOf('progress: 3/60 scans fitting eta 1:59:59').left).toBe('2h left')
   expect(latestOf('fit:   5%|  | 1/20 [00:08<1:59:40, 0.2it/s]').left).toBe('2h left')
@@ -424,9 +366,9 @@ test('a command held open is found by its own shell however few its words; times
   expect(jobKindOf('azcopy copy ./scans https://acct.blob.core.windows.net/c --recursive', 'Send the scans to Azure')).toBe('download')
 })
 
-test('a wait or check that reads pages with curl is no download: the 15 Nov "Download · Wait for deploy and verify the live pages"', async () => {
+test('a watch or check that reads pages with curl is no download: the 15 Nov "Download · Wait for deploy and verify the live pages"', async () => {
   const deploy = `for i in $(seq 1 50); do n=$(curl -s --max-time 30 "https://example.com/support/terms?v=$i" | grep -c 'Governors'); [ "$n" -gt 0 ] && break; sleep 10; done; for p in terms privacy; do printf "$p %s\\n" $(curl -s "https://example.com/support/$p" | tee /tmp/p.html | grep -o 'Governors' | wc -l); done`
-  expect(jobKindOf(deploy, 'Wait for deploy and verify the live pages')).toBe('wait')
+  expect(jobKindOf(deploy, 'Wait for deploy and verify the live pages')).toBe('watch')
   expect(jobKindOf(deploy, 'Verify the live pages')).toBe('script')
   expect(jobKindOf('curl -s https://example.com/health | grep ok', 'Look at the site')).toBe('script')
   expect(jobKindOf('wget --spider https://example.com/a.zip', 'See the file is there')).toBe('script')
@@ -443,24 +385,32 @@ test('a wait or check that reads pages with curl is no download: the 15 Nov "Dow
   expect(jobKindOf('gh release download v1 -D ~/Downloads', 'Get the release')).toBe('download')
 })
 
-test('the work names each run in one form, its kind first and how long it should take in brackets, and the card reads that as it is', async () => {
-  expect(describedOf('Download the CT scans (about 3 min)')).toEqual({ text: 'Download the CT scans', kind: 'download', expect: 180_000, expectText: '3m' })
-  expect(describedOf('Wait for the deploy to go live (about 90s)')).toMatchObject({ text: 'Wait for the deploy to go live', kind: 'wait', expect: 90_000 })
-  expect(describedOf('Upload the fits to Azure (~1h 30m)')).toMatchObject({ kind: 'download', expectText: '1h 30m' })
-  expect(describedOf('Run the fit on all scans (about 20 min)')).toMatchObject({ kind: 'script', expectText: '20m' })
-  // Its words decide its kind, whatever the command: a wait that polls with curl is a wait
-  expect(jobKindOf('for i in $(seq 1 50); do curl -L -o p.html https://e.com; sleep 10; done', 'Wait for the deploy to go live (about 2 min)')).toBe('wait')
+test('the work names each run in one form, its kind first, and the card reads that as it is: a time in brackets at its end is taken off and kept nowhere, and wait and poll words are a watch', async () => {
+  const cases: [string, string, string | undefined][] = [
+    ['Download the CT scans (about 3 min)', 'Download the CT scans', 'download'],
+    ['Download the CT scans (3 min)', 'Download the CT scans', 'download'],
+    ['Upload the fits to Azure (~1h 30m)', 'Upload the fits to Azure', 'download'],
+    ['Run the fit on all scans (about 20 min)', 'Run the fit on all scans', 'script'],
+    ['Serve the preview page (up to 90s)', 'Serve the preview page', 'server'],
+    // a wait or a poll is a watch, as it is written
+    ['Wait for the deploy to go live (about 90s)', 'Wait for the deploy to go live', 'watch'],
+    ['Waiting on Azure (about 2-3 min)', 'Waiting on Azure', 'watch'],
+    ['Poll the queue until it is empty', 'Poll the queue until it is empty', 'watch'],
+    ['Polling the run (roughly 0:45)', 'Polling the run', 'watch'],
+    ['Watch the queue (about 1h)', 'Watch the queue', 'watch'],
+    // brackets that hold no time stay: a count, words among the time
+    ['Run thumbnails (about 120 scans)', 'Run thumbnails (about 120 scans)', 'script'],
+    ['Run one more step (about 1 more min)', 'Run one more step (about 1 more min)', 'script'],
+    ['Run the fit (about 20 min) on all scans', 'Run the fit (about 20 min) on all scans', 'script'],
+    // words in another form keep their own name and have no kind
+    ['Redraw all pictures', 'Redraw all pictures', undefined],
+    ['Redraw all pictures (about 5 min)', 'Redraw all pictures', undefined],
+  ]
+  // Only its words and its kind are read: no time it should take is kept
+  for (const [what, text, kind] of cases) expect([what, describedOf(what)]).toEqual([what, { text, kind }])
+  // Its words decide its kind, whatever the command: a wait that polls with curl is a watch
+  expect(jobKindOf('for i in $(seq 1 50); do curl -L -o p.html https://e.com; sleep 10; done', 'Wait for the deploy to go live (about 2 min)')).toBe('watch')
   expect(jobKindOf('python3 fetch.py', 'Download the weights (about 5 min)')).toBe('download')
-  // Words in another form keep their own name and no time
-  expect(describedOf('Redraw all pictures')).toEqual({ text: 'Redraw all pictures', kind: undefined })
-})
-
-test('a description is read only as far as it is sure: a count in brackets is no time, a wait may say waiting, a range takes its end', async () => {
-  expect(describedOf('Run thumbnails (about 120 scans)')).toEqual({ text: 'Run thumbnails (about 120 scans)', kind: 'script' })
-  expect(describedOf('Run one more step (about 1 more min)').expect).toBeUndefined()
-  expect(describedOf('Download the CT scans (3 min)')).toMatchObject({ text: 'Download the CT scans', expectText: '3m' })
-  expect(describedOf('Waiting on Azure (about 2-3 min)')).toMatchObject({ kind: 'wait', expectText: '3m' })
-  expect(describedOf('Watch the queue (about 1h)')).toMatchObject({ kind: 'watch', expectText: '1h' })
   // a curl in a loop that keeps its files is still a download
   expect(jobKindOf('for i in 1 2; do curl -o f$i.bin https://e.com/f$i.bin; done', 'Get two files')).toBe('download')
 })
@@ -478,90 +428,6 @@ test('how a run ended, from the last line the engine writes on its output: finis
   expect(leftSeconds('55s left')).toBe(55)
   expect(isOutputEnded('1794640530\n\n[exited with code 0]\n')).toBe(true)
   expect(isOutputEnded('frame 81/120\n')).toBe(false)
-})
-
-test('what a command left running is told by the group it was seen to hold and by when it started, and by its number only where the command names it: old app helpers, other commands, runs still deciding and what a task out of sight started meanwhile are never taken for it (18 Nov: a finished task\'s card showed another task\'s 12 GB run for 47 minutes)', () => {
-  const now = 1_700_000_000_000
-  const at = now - 10_000
-  const ps = (lines: string[]) => procsOf(lines.join('\n'), now)
-  const span = { id: 'c1', from: 5000, to: 5100, at, endAt: now - 2_000, until: now - 2_000, cmd: 'python launch.py 8' }
-  // Left by the command: its group's leader (5050) is gone, it started while the command ran
-  const mine = '5060 1 5050 S 00:05 7000000 /u/bin/python fig4.py page PMC closed 0'
-  // An app helper orphaned 20 hours ago, whose dead group leader's number falls in the range after the numbers came round
-  const old = '5070 1 5040 S 20:01:00 90000 /Applications/Telegram.app/Contents/Frameworks/Helper'
-  const found = leftoversOf(ps([mine, old]), [span])
-  expect(found.map(l => l.top.pid)).toEqual(['5060'])
-  expect(memOf(found[0]?.tree ?? [])).toBe('6.7 GB')
-  // Numbers that wrapped round past the most macOS hands out
-  expect(leftoversOf(ps(['120 1 99990 S 00:05 1000 /u/bin/python fig4.py']), [{ ...span, from: 99_950, to: 300 }]).length).toBe(1)
-  // A run a command still running may have started waits for that one
-  const daemon = '5080 1 5080 S 00:05 1000 /u/bin/python daemon.py'
-  expect(leftoversOf(ps([daemon]), [span], new Set(), [{ from: 5070, at: now - 8_000 }]).length).toBe(0)
-  expect(leftoversOf(ps([daemon]), [span]).length).toBe(1)
-  // The rest of a pipeline whose last command is followed by its printed number is that run's
-  expect(leftoversOf(ps([mine, '5061 1 5050 S 00:05 1000 tee out.log']), [span], new Set(['5061'])).length).toBe(0)
-  // A command sent to the background takes what starts after it as long as it is open
-  expect(leftoversOf(ps(['5060 1 5050 S 00:01 1000 /u/bin/python fig4.py']), [{ ...span, until: undefined }]).length).toBe(1)
-  // Two commands at once: each group goes to the command whose first number is nearest below its leader, whichever is newer
-  const a = { ...span, id: 'a', from: 5000, to: 5200, at: now - 20_000, until: now - 1_000 }
-  const b = { ...span, id: 'b', from: 5100, to: 5150, at: now - 9_000, until: now - 6_000 }
-  const both = leftoversOf(ps(['5003 1 5002 S 00:08 1000 /u/bin/python fig4.py 600', '5110 1 5102 S 00:08 1000 /u/bin/python fig4.py 601']), [b, a])
-  expect(both.map(l => `${l.top.pid}>${l.span}`).sort()).toEqual(['5003>a', '5110>b'])
-  // Two tasks' commands at once, where the run's shell got its number after the other task's command began (16 Nov): the run goes
-  // to the command that names it, never to a code search beside it; one that no command names, between two tasks, goes to neither
-  const paint = { ...span, id: 'paint', agent: 'muse', from: 75_300, to: 75_420, at: now - 23_000, until: now - 20_000, cmd: `cd /w/scan-textures && export OUT=/d/open PYTHONWARNINGS=ignore; ${'x'.repeat(380)}; nohup ~/.venvs/tex/bin/python -u runall.py --set open --workers 2 --only scan-sonicom-P0065,scan-sonicom-P0066 > $OUT/trial.log 2>&1 & echo $!` }
-  const search = { ...span, id: 'search', agent: 'clipify', from: 75_340, to: 75_430, at: now - 21_000, until: now - 19_000, cmd: 'cd /w/clipify-coupon-ux && grep -rn "faceiq-affiliate-opening" --include="*.ts" . | head -30' }
-  const run = '75360 1 75355 S 00:20 2097152 /u/.venvs/tex/bin/python -u runall.py --set open --workers 2 --only scan-sonicom-P0065,scan-sonicom-P0066'
-  expect(leftoversOf(ps([run]), [paint, search]).map(l => l.span)).toEqual(['paint'])
-  expect(leftoversOf(ps(['75361 1 75356 S 00:20 1000 sleep 600']), [paint, search]).length).toBe(0)
-  // A process ps names only in brackets (the system's indexer, ending) is no command's
-  expect(leftoversOf(ps(['5090 1 5090 Z 00:05 0 (mdworker_shared)']), [span]).length).toBe(0)
-  // A call still open past the wrap holds back what it may have started
-  expect(leftoversOf(ps(['20 1 20 S 00:05 1000 /u/bin/python daemon.py']), [{ ...span, from: 99_990, to: 40 }], new Set(), [{ from: 99_995, at: now - 8_000 }]).length).toBe(0)
-  // An app's own helper forked away from it, its group's leader gone, is no command's, nor an updater in the person's Library
-  expect(leftoversOf(ps(['5060 1 5050 S 00:05 1000 /Applications/Google Chrome.app/Contents/Frameworks/Helpers/chrome_crashpad_handler', '5061 1 5061 S 00:05 1000 /Users/sam/Library/Application Support/Google/GoogleUpdater/GoogleUpdater.app/Contents/MacOS/GoogleUpdater --wake']), [span]).length).toBe(0)
-  // while an app's own program a script drives still is
-  expect(leftoversOf(ps(['5060 1 5050 S 00:05 1000 /Applications/Blender.app/Contents/MacOS/Blender -b scene.blend']), [{ ...span, cmd: 'python drive.py scene.blend' }]).length).toBe(1)
-  // Another task's command sent to the background still runs, its numbers long past: what starts beside a short command now, that
-  // the short command does not name, goes to neither
-  const shoot = { ...span, id: 'shoot', agent: 'pics', from: 60_000, to: 60_100, at: now - 900_000, until: undefined, cmd: 'node shoot.mjs' }
-  const push = { ...span, id: 'push', agent: 'fix', from: 5000, to: 5100, cmd: 'git push -q origin fix' }
-  expect(leftoversOf(ps(['5060 1 5050 S 00:05 1000 /u/.cache/chrome/Chrome for Testing.app/Contents/MacOS/Chrome for Testing --headless']), [shoot, push]).length).toBe(0)
-  // A task's long command held open, and a run a task out of sight started meanwhile (no command is kept for it): its number was
-  // handed out while the command ran, it started in time, and it is in another shell's group. Never the command's: not where the
-  // command's own shell was seen (were the run even the same program), nor where it never was, as the command does not name it
-  const shots = { ...span, id: 'shots', agent: 'icons', from: 61_300, to: 61_420, at: now - 91_000, endAt: now - 1_000, until: now - 1_000, cmd: 'cd /w && node shots.mjs both-cards' }
-  const stray = '61380 1 61376 S 00:50 12000000 /u/bin/python tools/run.py confirm 8'
-  expect(leftoversOf(ps([stray]), [{ ...shots, groups: ['61310'] }]).length).toBe(0)
-  expect(leftoversOf(ps([stray]), [shots]).length).toBe(0)
-  expect(leftoversOf(ps(['61380 1 61376 S 00:50 1000 /u/bin/node other.mjs']), [{ ...shots, groups: ['61310'] }]).length).toBe(0)
-  // What is in the group of the command's own shell is its, whatever its name: a launcher's training, the launcher gone
-  expect(leftoversOf(ps(['5060 1 5050 S 00:05 1000 /u/bin/python train.py']), [{ ...span, cmd: 'nohup ./launcher.sh > log 2>&1 &', groups: ['5050'] }]).map(l => l.span)).toEqual(['c1'])
-  // and so is what is in a group seen under that shell while it ran, whatever its number
-  expect(leftoversOf(ps(['7000 1 6990 S 00:05 1000 /u/chrome/chrome --headless']), [{ ...shots, groups: ['61310', '6990'] }]).length).toBe(1)
-  // A command still running holds back only its own groups once its shell is seen
-  expect(leftoversOf(ps([mine]), [span], new Set(), [{ from: 5010, at: now - 8_000, groups: ['5020'] }]).length).toBe(1)
-  expect(leftoversOf(ps([mine]), [span], new Set(), [{ from: 4000, at: now - 8_000, groups: ['5050'] }]).length).toBe(0)
-  // A command's groups, as the processes are listed while it runs: its own shell's (the engine's shell that runs its very words,
-  // handed its number after it began) and those of all under it; never a shell that is another command's, or older than it
-  const shell = (pid: number, cmd: string) => `${pid} 900 ${pid} S 00:03 1000 /bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh 2>/dev/null || true && eval '${cmd}' < /dev/null && pwd -P >| /tmp/claude-1-cwd`
-  const call = { cmd: shots.cmd, at: now - 4_000, from: 61_300 }
-  const listed = ps([shell(61_310, call.cmd), '61312 61310 61310 S 00:02 1000 node shots.mjs both-cards', '61320 61312 61320 S 00:02 1000 /u/chrome/chrome --headless', shell(61_376, 'cd /w && nohup python tools/run.py confirm 8 > confirm.log 2>&1 & echo $!')])
-  expect(groupsOf(listed, call)).toEqual(['61310', '61320'])
-  expect(groupsOf(listed, call, new Set(['61310']))).toBeUndefined()
-  expect(groupsOf(listed, { ...call, from: 61_350 })).toBeUndefined()
-  expect(groupsOf(listed, { ...call, cmd: 'cd /w' })).toBeUndefined()
-  // (kept once its shell has gone, and added to while it runs)
-  expect(groupsOf(ps([]), { ...call, groups: ['61310'] })).toEqual(['61310'])
-  expect(groupsOf(listed, { ...call, groups: ['61310', '6990'] })).toEqual(['61310', '6990', '61320'])
-  // A command names a process by its program or a word of its own, never by a word that only starts the same
-  const named: [string, string, boolean][] = [
-    ['/usr/bin/python3 daemon.py --serve', 'cd /w && python3 daemon.py --serve &', true],
-    ['/bin/sleep 600', 'nohup sleep 600 &', true],
-    ['/usr/bin/caffeinate -i', 'git push -q origin fix', false],
-    ['/usr/bin/python3 fig4.py page 3', 'python fig4.pyc', false],
-  ]
-  for (const [command, cmd, is] of named) expect([command, isNamedBy(command, cmd)]).toEqual([command, is])
 })
 
 test("a heavy command is one whose own program drives a browser, builds or renders, or runs a script that drives a browser; never a server, a word another program reads, or the mod's own release and tests (16 Nov: ten tasks shot pages with Playwright and headless Chrome at once)", async () => {

@@ -33,7 +33,7 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 ## What you see
 
 - Claudopus is on in every chat you open from then on, in every folder.
-- You send a message. A request of a few minutes or less the chat does itself, in its own thread, in few steps, and tells you what changed and where to look. A bigger one, or one that runs long, gets one line from the chat and a background task, and the chat is free for your next message. With **Short requests** set to **A task each** in Config, every request that changes a file or runs a command goes to a task, and the chat only reads.
+- You send a message. The chat answers in one line and starts a background task for it, then is free for your next message. If a few files can answer your question, such as what a function does, the chat reads them itself in its own thread (Read, Grep, Glob) and starts no task. If a request changes a file, runs a command or needs more than a few reads, the chat starts a task for it.
 - Each task uses its own tokens, so five tasks at once use tokens about five times as fast as one. On a subscription, that uses up your limits sooner. If you pay per token (an API key or other pay-per-use billing), it multiplies what you pay in that time.
 - If your message is about a task that's already running, the chat sends it to that task instead of starting a new one.
 
@@ -69,12 +69,11 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 - Claudopus cuts a question longer than 300 letters at a word, and shows the whole of it under the question.
 - Above the prompt, a question that has more says the rest is in the chat and on its card.
 - Next comes any text to paste, beside a Copy button. Claude asks you to type only a command it can't run itself, and gives it whole, with its folder. On the Mac you sit at, the card also has Open in Terminal. It opens Terminal with the command typed at the prompt, in its folder. It never runs the command, and only opens when you press it. In a chat on another Mac there's no such button. You type the command in your own session to that Mac.
-- You can answer three ways: with the buttons on the card (or Done and Not now when Claude gave none), and with a box to reply in your own words.
-- In the desktop app, the card's answers end with "Reply in your own words". It opens that box in the bar above the chat's prompt, named after the task it goes to, with Close beside it. The box isn't on the card, because the app keeps moving the panel back to a box that holds the cursor. In the bar, the panel scrolls freely while you type.
-- Close there, or "Close the reply box" on the card, takes the box away and saves what you typed for the next time you open it. If you press "Reply in your own words" on another card, the box moves to that card. While the box is open, it takes the place of the figures in that bar.
-- If the same task asks a new question, the box stays open with what you typed. What you send answers the question Claude asks then. The box goes when you close it, when its card is answered, or when the bar can no longer show it.
-- If the bar is folded, or one of the app's surveys is in it, the card has its own box again, with what you typed. The app may pull the panel back to that box while you type in it.
-- Any answer clears the amber right away, and the card says what you answered. Claude continues from your answer at its next step. The card turns amber again only if Claude asks again.
+- You answer with the buttons Claude gave, or with Answer in words. No button is added to Claude's own, and every button is an answer that carries the task on. To leave a question open, press nothing.
+- In the desktop app, Answer in words opens one box in the bar above the chat's prompt, named after the task it goes to, with Send and Close. A key, a password, a change to a finished task and continuing from a result are typed in that same box. Nothing is typed on the card, because the app keeps moving the panel back to a box that holds the cursor.
+- Close takes the box away and saves what you typed for the next time you open it. If the same task asks a new question, the box stays open with what you typed.
+- If the bar is folded, one of the app's surveys is in it, or the chat runs in a terminal, the block on the card has its own field instead.
+- Any answer takes the block away at once, and one grey line on the card says what you pressed or answered. Claude continues from your answer at its next step. The card turns amber again only if Claude asks again.
 - A question stays until you answer it, even after the task that asked it has finished. Then your answer starts that task again.
 - The chat that started the task also shows the question, as a notice from Claudopus. The notice says what the question is about, lists its answers, and gives the paths of any pictures it is about. The chat shows the pictures in its next reply. The notice is never a message in your place. If you answer there in your own words, the chat passes it to Claude, and that counts as an answer on the card. An answer you press on the card is noted in the chat too.
 - A question also raises a notification with the amber octopus, from a second small app of Claudopus's, Claudopus Asks. A short "needs you" sound plays with it (two quick notes, then a higher one). The sound is part of the notification, so macOS plays it as you set Claudopus Asks in System Settings, Notifications. It stays silent under a Focus that holds notifications back.
@@ -99,8 +98,8 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 
 ### When a task is done
 
-- When a task finishes, its card turns green with the happy octopus for a moment. Then the chat passes on its result, and the panel lists it under Finished.
-- If Claude gave its report while something it started in the background was still running, the task counts as finished when you stop it afterwards. A task you stopped, or one that failed, before that does not turn green.
+- When a task finishes, its card turns green with the happy octopus for a moment. Then the chat passes on its result. The card stays where it is, saying `✓ Done` and the task's last note, until you press Dismiss, which puts it under Finished. To change or continue what it made, say so in the chat or press Message: the same task carries on, on the same card. A working card has Message too, so you can write to a task at any time.
+- A task can't finish while a command it started still runs, except a server it leaves for you: that keeps its row under the Done card, with Stop.
 - If a task ends while Claudopus reloads, it gets its green moment once the panel draws again.
 - What a task left for you to read is listed under Results.
 - A finish plays a short quiet chime. A notification, with the purple octopus, names the task and the first words of its result, so you hear and see it when you're elsewhere. It comes from Claudopus with its octopus icon. Click it to open that chat in the Claude app (in a terminal, it brings the terminal forward). The first one makes macOS ask you once to allow Claudopus notifications.
@@ -124,10 +123,10 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 - What you type in that box shows as you type it. The panel locks it to a key that one run of `bin/admin` made and holds only in its memory. Claudopus uses it for that one command and drops it. It is never put in a chat, a command line, a file or a log.
 - Claudopus removes a password an earlier version saved as it loads.
 - Each command still waits for your Allow first, as the next points say.
-- The chat that asked shows a notice naming only what's needed, and brings the panel up. Cancel in the box ends the wait, and Claude waits up to about 10 minutes for you.
+- The chat that asked shows a notice naming only what's needed, and brings the panel up. Don't allow ends the wait, and Claude waits up to about 10 minutes for you.
 - Only a command with no chat open on this Mac to draw a panel (a `claude -p` command) asks in a macOS dialog on this Mac's screen instead. Over SSH it says that no panel is open.
-- Before an admin command runs, the task's card asks you. It shows the exact command and the Mac, with Allow once, Always allow this command and Deny. Only your press allows it, in the panel of the chat the task runs in. Nothing typed in a chat does, and other chats' panels show it without buttons.
-- Deny tells Claude you refused the command. Always allow saves that exact command for that Mac in `~/.claude/claudopus/admin-allowed.json`, and Config lists them, each with Remove.
+- Before an admin command runs, the task's card asks you. It shows the exact command and the Mac, with Allow, Don't allow and Always allow this command. Only your press allows it, in the panel of the chat the task runs in. Nothing typed in a chat does, and other chats' panels show it without buttons.
+- Don't allow tells Claude you refused the command. Always allow saves that exact command for that Mac in `~/.claude/claudopus/admin-allowed.json`, and Config lists them, each with Remove.
 - Config's "Ask before an admin command" (`admin`) chooses when you're asked. The options are: each time, as shipped; once for a task and its helpers, until it ends; or never, which is how it was before this setting existed.
 - The hook holds the command, and the admin tool itself runs nothing you didn't allow. So a script, another spelling of its path, or a command the shell builds is refused too.
 - What runs as root has the system's own `PATH`, never the one the caller set, so a program planted earlier on that path isn't the one run.
@@ -147,7 +146,7 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 ### Releases
 
 - Claude changes a repo only in its own git worktree, on a branch of its own. It never pushes or merges to main itself. Claude Code refuses it (`git push` naming main or master, `gh pr merge`), and the repo's `pre-push` hook refuses a plain push of main from inside Claude Code.
-- The one way is `bin/release`, run from the task's worktree. When the task is built and checked, Claude asks you whether to release it, with a Release it button. When you answer, Claude runs the release itself, and you never type it.
+- The one way is `bin/release`, run from the task's worktree. When the task is built and checked, Claude asks you whether to release it, with a Release it button. That one press answers Claude and allows the release, which Claude then runs itself: you never type it, and no second box asks. A release you did not press for is still asked on the card, with Allow and Don't allow.
 - Claudopus then holds that call on the task's card until you press Release there. `bin/release` releases nothing without that press, which counts once, for that worktree and branch, within two minutes. It reads that press from your own home folder as your user records name it, whatever `HOME` a command sets.
 - These are guards on the way Claudopus releases, not a wall. Claude runs as you, with your git and GitHub sign-in, so a program set on it could push main by itself, as you could. What stops that is the repository's own rules on GitHub (a ruleset on main that only a pull request, or a sign-in Claude doesn't hold, can pass).
 - A release you run yourself in a terminal outside Claude Code asks you there instead.
@@ -169,19 +168,10 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 
 ### A chat run on another Mac over SSH
 
-- When your Mac's Claude app runs a chat on another Mac over SSH, the chat keeps working when your Mac goes away. The app owns that chat's process there and its sign-in. It may end the process (it did when a closed laptop came back for a moment overnight), and with the app away, the sign-in it lends lapses.
-- So in such a chat, Claudopus starts a small keeper on that Mac, which outlives the process.
-- If the process ends while a task is working and the app doesn't start the chat again within a minute, the keeper starts the same chat again there. It runs as one of Claude Code's own background sessions, under that Mac's own sign-in, with the same model, effort, permission mode and plugins, and with Remote Control on.
-- If the process still runs but the sign-in the app lent it has lapsed (two turns within ten minutes end with the API's own 401 for it), Claudopus has the keeper end that process. The chat then goes on there right away, without the minute's wait.
-- Claude Code starts the interrupted task again itself. If the keeper's copy can't start something, Claudopus sends Claude a message that does.
-- Each such card says "Cut off at 00:14 as the chat's process ended; going again since 00:15", or, in amber, that it couldn't be started again. One notice says the same in the chat ("… has been going on this Mac by itself since 00:15"). It also goes to that Mac and, where Claude Code's push is on (`agentPushNotifEnabled`) and Remote Control is connected, to your phone.
-- While the copy runs, you can watch it from the Claude app's Remote Control or from a terminal: `ssh <that Mac> -t claude attach <its id>`. (`claude agents` lists it, named after the chat with "(kept on this Mac)".)
-- Once its tasks are done and it has been idle two minutes, the keeper stops the copy, and the chat opens in the app as before, with everything that ran meanwhile in it and on its cards.
-- If you open the chat in the app while the copy is still working, the keeper stops the copy right away so the app can have the chat. The app's first try may say the chat is running in the background. If so, send your message again, and Claudopus starts the interrupted task again in the app's chat.
-- A task started with a command held open loses that command when a process ends. So Claude starts anything longer than a few minutes detached and follows its log. That goes on through every change.
-- The keeper's record of each chat is in `keep/`.
-- The app ends the process the same way when you archive the chat or quit the app, so tasks still working then go on too. Stop them first if you don't want that.
-- A chat this Mac's own terminal runs, as in tmux, is never ended by the app and needs no keeper.
+- When your Mac's Claude app runs a chat on another Mac over SSH, the app owns that chat's process there. A task and its commands last only while that process does.
+- If the app ends the process (you quit the app or archive the chat, or a closed laptop comes back for a moment), a task that was working ends with it. Its card says `Failed · The app closed while it worked` and has **Start again**. Nothing starts it again by itself.
+- So work that must outlive the app runs in the cloud, and the task watches for its end.
+- `keep/` records which tasks were working, so the card can say why.
 
 ### In a terminal
 
@@ -193,9 +183,11 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 
 ### Rules and models
 
-Claudopus also adds a short set of working principles ([rules/CLAUDE.md](../rules/CLAUDE.md)) to every chat. They shape how Claude answers. They leave out what is one person's own call, such as when Claude may raise a concern or what counts as done. Add yours, or change any of them, in the Config tab, and your chats carry your copy.
+Claudopus also adds a short set of working principles ([rules/CLAUDE.md](../rules/CLAUDE.md)) to every chat. They shape how Claude answers. They leave out what is one person's own call, such as when Claude may raise a concern or what counts as done. Add yours, or change any of them, in the Config tab, and your new chats carry your copy.
 
-The chat picks a model for each task it starts: Opus for most, Sonnet for long searching and reading, Fable only for heavy tasks. A check of finished work runs on Opus, or on Fable for work built on Fable, never on Sonnet. Your account needs access to the model it picks.
+A chat keeps the rules it started with, and so does a task: the principles, the chat's rules and the models they name are fixed when the chat gets its first message, and a task's rules when it starts. A change you make in Config, or one an update brings, reaches new chats and new tasks. Claudopus keeps what each chat was told in `live/rules/` in its memory folder, and removes it once the chat has not been opened for a month.
+
+The chat picks a model for each task it starts: Opus for most, Sonnet for requests it can state exactly and for long searching and reading, Fable only for heavy tasks. A check of finished work runs on Opus, or on Fable for work built on Fable, never on Sonnet. Your account needs access to the model it picks.
 
 No task runs on an older model or on Haiku (unless you name Haiku in `models`). Claudopus refuses an agent started on one, whether the chat or a task starts it.
 
@@ -262,10 +254,10 @@ The settings are in `~/.claude/claudopus/config.json`. Every key is optional:
 | `notifications` | `false` stops the notification that names a task when it's done, stopped or failed. |
 | `admin` | When you're asked before an admin command runs: `each` time, once for a task (`work`) and its helpers until it ends, or `never`. `work` and `never` count only when chosen in Config, which seals them (`adminSealed`). Written by hand, every command still asks. |
 | `models` | Which model runs most tasks, long searching and reading and helpers, and heavy tasks (`opus`, `sonnet`, `fable` or `haiku`). Checks of finished work run on the most-tasks or heavy-tasks model, never on the long-searching one. |
-| `lean` | Who does a short request (`chat`: `itself`, the chat, or `tasks`, a task each), which tasks run on Fable (`fable`: `heavy`, `all` or `named`) and when a second helper checks (`second`: `asked`, `beyond` or `every`). Only what you changed is kept. |
+| `lean` | Which tasks run on Fable (`fable`: `heavy`, `all` or `named`) and when a second helper checks (`second`: `asked`, `beyond` or `every`). Only what you changed is kept. |
 | `macs` | Up to four other Macs, as `user@host` or a `Host` of `~/.ssh/config`, that this Mac's panel lists the chats of. It uses your own SSH, which must log in without asking. Each Mac needs Claudopus of this version or newer. That Mac's panels list this Mac's chats in turn, with nothing to set there: each visit hands it this Mac's chats, without the commands and texts their tasks run or send. Their questions are answered in their own chats. Results are saved the same on both, about every two minutes: each Mac gets the results it lacks, with paths moved onto its own home, and what you did to a result (archived, brought back, answered) reaches the other. Nothing is deleted or overwritten. Saved chats stay on the Mac they ran on. |
 
-`name`, `agents` and `macs` are read when a chat starts. `sound` and `notifications` are read each time a task ends or needs you.
+`name`, `agents` and `macs` are read when a chat starts. `models`, `lean` and your own copies of the rules reach new chats and new tasks. `sound` and `notifications` are read each time a task ends or needs you.
 
 ## Turn it off
 
@@ -301,7 +293,7 @@ Everything Claudopus saves is in `~/.claude/claudopus`, as plain files:
 | `live/` | Each open chat's running tasks and its Remote Control and app ids, rewritten at least every 20 seconds, for the other chats' panels and the panels of other Macs. With `macs`, it also holds what was last fetched from each of those Macs. On a Mac named by another, it holds the chats that Mac handed over (`live/pushed/`) and requests to open a chat waiting for it (`live/outbox/`). A chat removes its own file when it closes |
 | `rules/CLAUDE.md`, `roles/chat.md`, `roles/work.md` | Your own copies of the three texts, written only when you edit or save one in the Config tab. Reset moves your copy aside as `.old` |
 | `update-seen.json`, `update-steps.json`, `update-later.json`, `reloads/` | The version the last check saw on claudopus.ai (a number only), where Download and Install stand (a version, a stage, a commit and a fingerprint, never a text to show), a version put off with Not now, and marks that tell a reloaded chat what it moved from and keep a chat run over SSH from being reloaded by an older copy |
-| `keep/` | For a chat the app runs from another Mac: what's working (`<chat>.json`), and the keeper's times and log (`<chat>.state`, `<chat>.log`) |
+| `keep/` | Which tasks were working in each chat (`<chat>.json`), so a card can say the app closed while it worked; and the beat `bin/revive` reads |
 | `log.md` | Claudopus's own log |
 
 Delete the folder to start over. Claudopus writes nowhere else: no build, start-up or settings file of Claude Code or your projects.

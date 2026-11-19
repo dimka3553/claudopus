@@ -8,8 +8,6 @@ export type Me = {
   isChat: boolean
   // The role text goes out with the next message: at the start and after a compaction
   needsContext: boolean
-  // Which version of the role text this chat last received
-  roleSent: string
   // The to-do panel has opened by itself once: closed, it stays closed until asked for
   isListOpened: boolean
   // The size of this chat's context window, in tokens; `tokens` is how much of it is used
@@ -75,16 +73,11 @@ export type Todo = {
   subject?: string
   // The report it was started from, by id, when the person's message named one
   from?: string
-  // What it recorded with the `waits` tool as waiting on the person, each with its answers when it is not yes or no (a plain line
-  // was kept before answers were); its next report takes them
-  waits?: (Wait | string)[]
-  // It called the `waits` tool this round: once the round is done, what it recorded replaces what its earlier results waited on
-  waitsSet?: boolean
   // What it needs the person's own hands for now, said with the `ask` tool: what to do, and the exact text to copy for it. Its card
   // stands out with the ask in view until the work clears it or ends
   // `replied`: the person's reply in their own words that did not settle it; the ask stays while the work acts on it, with nothing to press or type, until the work clears it or asks again, or ends with it open, when every answer is back. `isWaking`: the work had ended and is being started again with the reply
-  // `isCommand`: `copy` is a command the person types in a terminal opened in `cwd`. `choices` are buttons the person answers with, sent back to `from`, the agent that asked (a helper's ask shows on its work's card). `pictures` are the picture files the ask is about, shown with it in the chat. `details` is what the ask is about, in full, shown with it on the card and in the chat. `refused`: Claudopus's notice of a call Claude Code refused, whose answer tells the work to carry on without it and never starts ended work again
-  ask?: { text: string; details?: string; lastStep?: string; folder?: string; copy?: string; isCommand?: boolean; cwd?: string; choices?: string[]; pictures?: string[]; from?: string; at: number; refused?: boolean; replied?: { text: string; at: number; isWaking?: boolean } }
+  // `isCommand`: `copy` is a command the person types in a terminal opened in `cwd`. `choices` are buttons the person answers with, sent back to `from`, the agent that asked (a helper's ask shows on its work's card). `pictures` are the picture files the ask is about, shown with it in the chat. `details` is what the ask is about, in full, shown with it on the card and in the chat. `release`: the worktree folder a press on its first choice allows one release run for. `refused`: Claudopus's notice of a call Claude Code refused, whose answer tells the work to carry on without it and never starts ended work again
+  ask?: { text: string; details?: string; release?: string; copy?: string; isCommand?: boolean; cwd?: string; choices?: string[]; pictures?: string[]; from?: string; at: number; refused?: boolean; replied?: { text: string; at: number; isWaking?: boolean } }
   // Admin commands it, or a helper of it, wants to run, each held until the person presses Allow or Deny on this card: the Mac
   // (`here` or an ssh host), the exact command, the agent that runs it, and whether Allow covers the whole piece of work
   // What waits for the person's press: an admin command, a release to main ('release'), or a change to a file of theirs ('file')
@@ -95,12 +88,10 @@ export type Todo = {
   begunAt?: number
   // 0 while it works
   endedAt: number
-  // When its turn last ended with its answer, finished, while its own background work still held it; absent once it steps again.
-  // Work stopped after that, by the chat, the panel or the engine, had finished: it ends done, not stopped
-  answeredAt?: number
-  // When its turn last ended by handing back its report: it has finished for good, so nothing it left running wakes it again
-  handedBackAt?: number
-  // When Claudopus received its report, handed back with SubagentHandback, as its turn ended: the one thing that makes it done
+  // Why it failed, in a few plain words its card says after Failed
+  why?: string
+  // When its result was received: handed in with SubagentHandback, or its run's last words where Claude Code took those as its
+  // result. The one thing that lets its card be done
   reportAt?: number
   // The report Claudopus took from its hand-back, until the chat is given it with Claude Code's notice that the task ended; then
   // `reportGiven`, so a later notice of the same end repeats nothing, until a message starts it again
@@ -109,8 +100,6 @@ export type Todo = {
   // The hand-back call whose report Claudopus took, until the task takes a step of its own: what comes next is that call's result,
   // or Claude Code's press for a report it did not see delivered, answered with no model
   tookReport?: string
-  // A go-ahead to finish pressed while the work was still in the turn that asked: its last step, done as that turn ends
-  stepOnEnd?: { ask: NonNullable<Todo['ask']>; said: string }
   // The call it has been running longest, while one runs: what it is in a few words, since when, and for a command, the command
   // and its own words for it
   running?: { what: string; at: number; cmd?: string; label?: string }
@@ -121,99 +110,26 @@ export type Todo = {
   // The chat was told it is stuck (Claudopus's word that it made no progress, or that it did not hand back what it has): when.
   // Once per time it is flagged stuck
   stuckTold?: number
-  // Finished work that its own background work still holds: since when the mod has seen it so. Absent once nothing holds it
-  leftSince?: number
-  // Kept as a card ends done: a command of its own that ends by itself was still in the background then, so while Claude Code
-  // holds its run for it (leftSince) the card is shown waiting for its command, not Done
-  leftOwn?: boolean
-  // Only on a card as it is shown, never kept (shownAs): when a card kept as done ended, while something of its own still runs and
-  // it is shown at work; and how many to-dos a card kept as done left, shown as not done
-  wasDone?: number
-  leftOpen?: number
-  // When Claudopus saw it end done, under the rule that a card with to-dos left is not done: a card that ended before that rule
-  // was kept, or ended where Claudopus never saw it, reads as it did then. Absent once it works again
-  doneSeen?: number
-  // A release under way for it: since the press on its go-ahead (by Claudopus, its branch once known) or since it handed back with
-  // the release runner still running in its background (by the task). It is Releasing, in purple, never Done, until that ends
-  releasing?: { at: number; branch: string; by: 'claudopus' | 'task' }
-  // When the release Claudopus ran on the person's press finished: every to-do it left counts as done
-  released?: number
-  // What it started in the background itself that wakes it when it ends (a command, a watch): the engine's task id, what it is
-  // in its own words, and since when, with the command itself. Dropped as it ends or is stopped
+  // What it started in the background itself, as Claude Code tracks it (a command, a watch, a server): the engine's task id, what
+  // it is in its own words, and since when, with the command itself. Dropped as it ends or is stopped; a server stays under a done card
   bg?: { id: string; what: string; at: number; isWatch?: boolean; cmd?: string; expiresAt?: number }[]
-  // What it ran in the background or detached that has ended, newest last: its words, when it began and ended, and how it ended
+  // What it ran in the background that has ended, newest last: its words, when it began and ended, and how it ended
   // (finished, failed with its exit code, killed, timed out at the engine's limit, stopped by the work, or ended as far as the mod
   // can tell). Its card sums these up in a row, and Details lists them
   endedRuns?: { id: string; what: string; at: number; endedAt: number; how: 'finished' | 'failed' | 'killed' | 'timed out' | 'stopped' | 'ended'; code?: string; count?: number }[]
   // In another chat's file only: how each of its jobs stands as that chat last read it (its latest line, how far, its last lines),
   // by the job's id, so its Details shows them as that chat's own does
   seenJobs?: Record<string, { latest: string; pct?: string; done?: string; total?: string; wroteAt?: number; tail?: string[]; words?: string; isOwn?: boolean; isEarlier?: boolean; isEmpty?: boolean; target?: string }>
-  // What it started detached (with nohup or setsid, its output to a log): its own words for it, since when, the command, the log
-  // it writes and its process, while that runs. Kept past its end, as such a job outlives it
-  // A run a command left going however it was started (a launcher's children, a job sent off with &, a pool), found by the
-  // process group its command's shell led: `isLeft`, with its log only where its output goes to a file, and `from` the background
-  // command that left it, when one did
-  // The rules it was last handed after its brief, by their text's hash, and whether a compaction has taken them from its context
-  rulesSent?: string
-  rulesDue?: boolean
   // Its own folder in the chat's scratchpad, by name, which its rules name
   scratch?: string
-  detached?: { id: string; what: string; at: number; cmd: string; log: string; pid?: string; isLeft?: boolean; from?: string }[]
-  // Its heavy commands (a browser it drives, a build, a render) that wait their turn while the Mac is busy: the call, its own words,
-  // the command, since when, and its place in the line of every piece of work's held commands
-  heldCalls?: { id: string; what: string; cmd: string; at: number; place: number }[]
-  // Its heavy command's turn came: until when its next heavy command runs at once
-  heavyPass?: number
-  // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
-  // so. It is still at work, and its card says what it waits for
-  waitsSince?: number
-  // What it asked Claudopus to start it again for (wake_me), in place of a command that only waits: in its own words, a file to
-  // appear, a line in that file, a page that answers, or only a time; when it asked, and the latest it is looked for
-  wakeWhen?: { what: string; file?: string; text?: string; url?: string; at: number; until: number }
-  // What it was last woken for when that look ran out, by its file, line and page: a look for the same again is refused
-  wakeMissed?: { key: string; what: string }
-  // When its step last ended with helpers of its still running; absent while it takes a step
-  endedStepAt?: number
-  // Its step ended while all its helpers sit silent: since when, and how many of the steps Claudopus takes on a fixed schedule are
-  // done (1 a check-in at 12 minutes, 2 the order to hand back at 24, 3 the chat told it is stuck at 36). Starts over only when a
-  // helper hands back a result or prints something new. `at`: when the last step was taken; steps come at least 12 minutes apart
-  helperWait?: { from: number; done: number; at?: number }
-  // Work whose step ended to wait with no helper at work (on its own command, a watch, or nothing Claudopus can see) and that nothing
-  // started again: how many times Claudopus started it to look at what it waits on (`done`), when it last did (`at`), and what it
-  // waited on then (`key`: its to-dos done, its commands ended and running), which starts the count over when it moves
-  ownWait?: { key: string; done: number; at: number }
   // How many reminders Claudopus sent of what waits on the person on it (its question, or the Allow its commands wait for), waiting since `at`
   reminded?: { at: number; times: number }
-  // Claudopus told it to hand back what it has (its wait ran out, or its helpers sat silent): since when. Its report goes through
-  // while helpers run, until it hands back
-  mayHandBack?: number
-  // Work cut off as the chat's process ended, not stopped by anyone: when, and when it went on again; `backAt` is absent while it
-  // could not be started again
-  cutAt?: number
-  backAt?: number
-  // Work that stopped partway, with no report, no question for the person and nothing of its own that starts it again, that
-  // Claudopus started again with a note to carry on: how many times in a row with little done between, how many in all, when
-  // last, and its step count then; `gaveUp` when it stopped so too often, or could not be started again, and was left stopped
-  carryOn?: { tries: number; total: number; at: number; steps: number; gaveUp?: number; isLost?: boolean }
-  // How many times Claudopus kept it from ending its step while its to-dos were not done: in a row with no call between (`tries`,
-  // its step count then `steps`), and in all since it last ticked a to-do (`total`, with how many were done then `done`)
-  keptOn?: { tries: number; steps: number; total: number; done: number }
-  // The to-dos not done it was told of when its report was refused, joined, and how many times its report was refused with them
-  toldOpen?: { key: string; times: number }
-  // The round (its start) whose report was refused once for asking something with nothing recorded as waiting
-  toldWaits?: number
   // When the person dismissed its card: it is under Finished, whatever it still asks, until the task works again
+  /** Ended, and kept up among the cards until the person dismisses it: nothing else moves it under Finished */
+  up?: true
   closedAt?: number
   // The kind of agent it was started as (claudopus:task, general-purpose, fork…), when the chat started it
   kind?: string
-  // The to-dos it handed back its report with still not done: shown on its card and added to its result
-  notDone?: string[]
-  // Work with helpers running: when the mod last looked in on them, how many ran and how many had shown nothing new for a while
-  lookedIn?: { at: number; running: number; quiet: number }
-  // A helper whose work was told it has shown nothing new: when it last had, so it is told once each quiet stretch
-  quietTold?: number
-  // A helper whose work was told it works through in order what could be split
-  serialTold?: boolean
   // Stopped by the person's own press on Stop, on its card or a helper's: when. Until `isLifted`, set by their next message, the chat
   // or the work above it may not start it again, message it or start the same work afresh, and nothing of the mod's wakes it
   byYou?: { at: number; isLifted?: boolean }
@@ -226,7 +142,7 @@ export type Todo = {
 
 // What one chat shares with the panels of the others, in ~/.claude/claudopus/live/<chat id>.json: its running work, and when it last
 // said so. `host` is the Mac it was fetched from, empty for this one
-export type Shared = { chat: string; title: string; folder: string; host: string; at: number; cards: Todo[]; helpers?: Todo[]; prompts?: Prompt[]; answeredPrompts?: Prompt[]; link?: Link }
+export type Shared = { chat: string; title: string; folder: string; host: string; at: number; cards: Todo[]; helpers?: Todo[]; prompts?: Prompt[]; link?: Link }
 // What opens a chat in the Claude app: its Remote Control id (session_…), which opens it from any Mac signed in to the same account,
 // and the app's own id for it (local_…), which opens it only on the Mac it runs on
 export type Link = { bridge: string; app: string }
@@ -234,27 +150,20 @@ export type Link = { bridge: string; app: string }
 // The app's own prompt open in a chat and waiting on the person: allow a command or a tool, answer its question, approve its plan.
 // `id` is the tool call's, `text` the prompt's own short description, `title` the work it came from when not the chat's own thread,
 // `at` when it opened. `link` on Shared opens that chat in the Claude app on its own Mac
-// `kind` says what the person does (allow a call, answer a question, approve a plan), `detail` what exactly (the command, the message,
-// the page), `yes` and `no` what each answer does. Once answered it moves to Shared's `answeredPrompts`: `answered` is what the person
-// did (yes, no, an answer to a question, or nothing as it ended first), `isRunning` while an allowed call still runs, `endedAt` when
-// it ended, after which it shows a minute more; `done` how its end is said once allowed ("it was sent"), `isCut` an allowed call
-// that was stopped before it finished; `isHeld` while the chat that raised it waits for a press on its card's Yes or No, which
-// answers it as Claude Code's own box would
+// `kind` says what the person does (allow a call, answer a question, approve a plan), `text` asks it in one line, `about` says
+// what it is for in the task's words, `detail` is what exactly (the command, the message, the page), shown whole. `isHeld` while the
+// chat that raised it waits for a press on its block's Allow or Don't allow, which answers it as Claude Code's own box would.
+// `card`: the task's card it is drawn on, when a task of this chat's raised it
 export type Prompt = {
   id: string
   text: string
   title?: string
   at: number
   kind?: 'allow' | 'question' | 'plan'
+  about?: string
   detail?: string
-  yes?: string
-  no?: string
-  done?: string
-  answered?: 'yes' | 'no' | 'stopped'
-  isCut?: boolean
-  isRunning?: boolean
-  endedAt?: number
   isHeld?: boolean
+  card?: string
 }
 
 // The card that has the pane to itself, by id; empty while the small cards show
@@ -288,11 +197,9 @@ export type Report = {
   agent: string
   // Tells one text from another, so the same report is not kept twice
   mark?: string
-  // What in it waits on the person, as the work that wrote it recorded: each one short line they answer from the panel
-  waiting?: Wait[]
-  // An older report's one question and its answer, read as its one waiting item
+  // The questions a result kept from before lists (`question`: an older one's single question): shown with it as plain text
+  waiting?: { text: string }[]
   question?: string
-  answer?: string
   // The report the work that wrote this one was started from
   from?: string
   // When the person put it away: it leaves the list and the chat's note, and nothing in it waits; its text stays
@@ -301,19 +208,11 @@ export type Report = {
   broughtBack?: number
 }
 
-// One thing a report leaves for the person to decide or do; open until it has an `answer`: what they pressed ("Yes", "No", one of
-// its `choices`, "Not now"), the answer to the work's ask it repeats, "In your words" for one their message answered, "Settled" once
-// the work said nothing waits, "Replaced" once a newer round of its work said what waits, or "Moved" once a newer result of a round
-// that said nothing of it took it over. `ask`: when the ask it repeats was made
-// (`isAsked` until one is asked in the same round); `byAsk`: the ask whose answer answered it, so that answer taken back opens it
-// again. `choices`: its answers when it is not yes or no
 // A command Claude Code refused a task, offered on its card's notice (`askAt`) to run on the person's press: the agent whose call
 // it was (`from`), the command whole, the folder it runs in, what the task called it, and the longest it may run. Once pressed:
 // when it started, its output file and the process group it runs as; once ended: when, how, and its exit, and while what it
 // printed waits to start its ended task again, the task and the message (kept, so a reload sends it still)
 export type PressRun = { card: string; from: string; askAt: number; command: string; cwd: string; description: string; limitMs: number; startedAt?: number; log?: string; pid?: string; endedAt?: number; end?: 'exited' | 'limit' | 'stopped' | 'lost'; exit?: number; last?: string; waiting?: { target: string; text: string } }
-
-export type Wait = { text: string; answer?: string; choices?: string[]; ask?: number; isAsked?: boolean; byAsk?: number }
 
 // A process on this Mac that listens on a port, started from one of the person's folders
 export type Server = {

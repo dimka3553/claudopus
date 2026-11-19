@@ -2,6 +2,33 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.206 · 19 November 2026
+- Everything that waits for you is one block, the same on the card, in Details and at the top of the panel: a small label (Permission, Question, Password or Key), the question in amber, what it is about, the command whole, and the buttons.
+- The buttons are Allow and Don't allow for a permission, Type it for a password, Paste it and Don't give it for a key, and for a question the task's own buttons with Answer in words. No Done, Yes or No is added.
+- After a press the block goes at once and one grey line says what you pressed. No green box follows it.
+- Typing happens in one box above the chat: an answer in words, a key, a password, and a change to a finished task or a result. Nothing is put into the chat's own box.
+- A result asks nothing. Questions an older result left are shown as plain text.
+- Release it is one press: it answers the task and allows that one release, with no second box. A release nobody pressed for is still asked.
+- Every button on a question is an answer that carries the task on. There is no Not now: a question you do not press stays open.
+- Every card of a task that works or has finished has a quiet Message button: what you write goes straight to that task, not through the chat. A finished card also has Dismiss, which sends nothing. A result has the same Message box.
+- An answer reaches its task from your press alone, with no timer behind it.
+- A task's card has five stages, each with one colour: Working (purple), Waiting for you (amber), Done (green), Stopped (grey) and Failed (red, saying why). Amber means only that something waits for you.
+- A task is Done only when it hands in its result with every to-do ticked or dropped and none of its commands running. A server it leaves for you keeps its row under the Done card, with Stop.
+- A task that ends without its result, or whose app closed while it worked, is Failed and says why, with Start again. Nothing starts a task again by itself.
+- A task may not stop with to-dos open and nothing running: it carries on, asks you, or hands in its result after dropping what it won't do.
+- Every command a task runs has a row with what it does, how long it has run, how far it is and Stop. Commands that would run out of sight are refused, and so are guessed times.
+- A task waiting for something far away runs a watch, shown as a row.
+- The chat no longer writes "No response requested." when a paused task's notice arrives.
+- The header counts tasks by stage: waiting for you, working.
+- A card that has ended stays where it is until you press Dismiss: nothing else moves it under Finished. A Done card says `✓ Done` and the task's last note, and offers Message and Dismiss.
+- When you carry on from what a task made, your words go to that same task, which works again on the same card. A second task is only for a new job.
+- A helper's result goes only to the task that started it, and no longer appears in the chat.
+- A helper's to-dos stay on its own row, not on its task's list.
+- A row shows a time left only when the command itself prints one.
+- A card's line about its model no longer names Claude Code or Claudopus.
+- The chat hands every change to a task again. The Short requests setting is gone from Config.
+- A change to the rules, the models or the second check reaches new chats and new tasks. A chat or task that is already open keeps what it started with.
+
 ## 0.2.205 · 18 November 2026
 - A task that finished before the update, or that Claudopus already released for you, no longer comes back to the top as Not done because a to-do was left unticked.
 - A card being released stays purple from your Release it until the release has finished, its line saying Claudopus is releasing it. It turns green and Done once, at the end, with the release's to-do ticked. A release that fails starts the task again, and the card never shows Done in between.

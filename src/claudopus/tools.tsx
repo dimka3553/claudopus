@@ -1,4 +1,4 @@
-// The mod's own tools: update, recall, todo, waits, ask and note
+// The mod's own tools: update, recall, todo, ask and note
 
 const toolHooks = (on: On) => {
 
@@ -33,7 +33,8 @@ const toolHooks = (on: On) => {
     return { result: `Files are under ${dir}.\n${lines.slice(0, 40).join('\n')}${more}` }
   })
 
-  // The work lists what it sets out to do under its to-do, ticks it, rewords it or marks it dropped
+  // The work lists what it sets out to do under its to-do, ticks it, rewords it or marks it dropped. A helper's list is its own,
+  // on its own row: never added to the list of the task that started it, whose count is of its own to-dos
   on('tool.call', { tool: 'mcp__claudopus__todo' }, async ($, e) => {
     const input = e as unknown as { item?: string; state?: string; was?: string }
     const text = oneLine(input.item ?? '').slice(0, 200)
@@ -48,88 +49,14 @@ const toolHooks = (on: On) => {
       // One thing is being done at a time: what was being done before waits again
       items = state === 'doing' ? next.map(item => (item.state === 'doing' && item.text !== text ? { ...item, state: 'open' as const } : item)) : next
       return { ...one, items }
-    })
+    }, true)
 
     return { result: items.map(item => `${item.state === 'done' ? '[x]' : item.state === 'dropped' ? '[dropped]' : item.state === 'doing' ? '[doing]' : '[ ]'} ${item.text}`).join('\n') }
   })
 
-  // A file, a page or a time nothing of the work's own makes is looked for by Claudopus, which starts the work again when it is
-  // there: no command of the work's ever only waits (lookWakes)
-  on('tool.call', { tool: 'mcp__claudopus__wake_me' }, async ($, e) => {
-    const input = e as unknown as { what?: unknown; file?: unknown; text?: unknown; url?: unknown; minutes?: unknown }
-    if (e.agentId === undefined) return { result: 'Only a background task is started again this way; the chat is started by the next message.' }
-    // A helper that ends its step has ended: it hands back what it found and what it waits for, and its task asks to be woken
-    if (!(await read($, todos)).some(one => one.id === e.agentId)) await sync($)
-    if ((await read($, todos)).find(one => one.id === e.agentId)?.parentId) return { result: 'A helper is not started again this way: hand back your result now, saying what you were waiting for, and the task that started you asks Claudopus to wake it.' }
-    const what = cut(oneLine(String(input.what ?? '')), 80)
-    if (!what) return { result: 'Say in a few words what you wait for.' }
-    const file = typeof input.file === 'string' && input.file.trim() ? input.file.trim() : undefined
-    const url = typeof input.url === 'string' && /^https?:\/\/\S+$/.test(input.url.trim()) ? input.url.trim() : undefined
-    const text = file && typeof input.text === 'string' && input.text.trim() ? input.text.trim().slice(0, 200) : undefined
-    if (typeof input.url === 'string' && input.url.trim() && !url) return { result: 'A page is named by its whole web address, starting http:// or https://.' }
-    if (file && !file.startsWith('/') && !file.startsWith('~/')) return { result: 'Name the file by its full path.' }
-    const minutes = Math.min(WAKE_MOST, Math.max(0.25, Number(input.minutes) > 0 ? Number(input.minutes) : file || url ? WAKE_LONGEST : 0))
-    if (!file && !url && !(Number(input.minutes) > 0)) return { result: 'Name a file, a page, or the minutes after which to start you again.' }
-    // A look for the same file, line or page ran out already: it is not coming, and the work hands back what it has
-    const missed = (await read($, todos)).find(one => one.id === e.agentId)?.wakeMissed
-    if ((file || url) && missed?.key === wakeKey({ file, text, url }))
-      return { result: `Refused by Claudopus: the look for ${missed.what} ran out already. Hand back your report now with what you have, saying what never came and why.` }
-    const at = await $.clock.now()
-    // (its own card: a helper's is its own, not its work's)
-    const agent = e.agentId
-    if (!(await read($, todos)).some(one => one.id === agent)) await sync($)
-    let isCard = false
-    await changeTodos($, list => list.map(one => (one.id === agent ? ((isCard = true), { ...one, wakeWhen: { what, ...(file ? { file } : {}), ...(text ? { text } : {}), ...(url ? { url } : {}), at, until: at + minutes * 60_000 } }) : one)))
-    if (!isCard) return { result: 'Claudopus has no card for you here, so it cannot start you again: carry on with what you can do now.' }
-    redraw($)
-    return { result: `Claudopus looks ${file ? `for ${text ? `"${text}" in ` : ''}${file}` : url ? `at ${url}` : `at the clock`} and starts you again ${file || url ? `the moment it is there, or after ${Math.round(minutes)} min with word that it never came` : `in ${Math.round(minutes)} min`}${Number(input.minutes) > minutes ? ` (at most ${WAKE_MOST} min)` : ''}. End your step now, or carry on with what needs nothing from it.` }
-  })
-
-  // The work says what in its report waits on the person: it knows best. Its next report takes them, one item each, each with its own
-  // answers when it is not yes or no: 16 Nov "settled by hand, or left behind?" came with Yes / No / Not now, which cannot answer it.
-  // Each call lists everything still waiting; one that repeats the question on the work's card is tied to that ask
-  on('tool.call', { tool: 'mcp__claudopus__waits' }, async ($, e) => {
-    const input = e as unknown as { items?: unknown; answered?: unknown; result?: unknown }
-    // The chat records, for the result it names, which of its numbered questions the person's own words answered
-    if (e.agentId === undefined) {
-      const given = typeof input.result === 'string' ? input.result.trim() : ''
-      const numbers = (Array.isArray(input.answered) ? input.answered : []).map(Number).filter(n => Number.isInteger(n) && n > 0)
-      if (!given) return { result: `Only a background task records what its result waits on. In the chat, once ${who()}'s own words have answered what a result waits on, name it as \`result\` (its report.md path) and give the numbers of the questions they answered as \`answered\`.` }
-      const r = (await loadReports($)).find(one => given.includes(`${reportPath(one)}/`) || given === reportPath(one) || given === one.id)
-      if (!r) return { result: `No result is "${cut(given, 120)}": give its report.md path from the results list.` }
-      const answered = await settleWaits($, r, (_, index) => (numbers.includes(index + 1) ? { answer: IN_WORDS } : undefined))
-      redraw($)
-      const now = (await read($, reports)).find(one => one.id === r.id) ?? r
-      const open = waitsOf(now).flatMap((one, n) => (one.answer ? [] : [`(${n + 1}) ${one.text}`]))
-      const unknown = numbers.filter(n => !waitsOf(r)[n - 1] || waitsOf(r)[n - 1]?.answer)
-      return {
-        result: `"${r.title}": ${answered ? `${answered} answered in ${who()}'s words` : 'nothing answered'}; ${open.length ? `still waiting: ${open.join(' ')}`.replace(/([^.?!])$/, '$1.') : 'nothing waits on them now.'}${unknown.length ? ` Not an open question there, so not marked: ${unknown.join(', ')}.` : ''}`,
-      }
-    }
-    // A helper's answer is no report: the work it answers to records what waits
-    if ((await read($, todos)).find(one => one.id === e.agentId)?.parentId) return { result: 'A helper records nothing here: say what waits in your answer, and the task that started you records it.' }
-    if (!Array.isArray(input.items)) return { result: `Nothing recorded: give \`items\`, everything still waiting on ${who()}, or [] when nothing does.` }
-    const asked: Wait[] = (Array.isArray(input.items) ? input.items : []).flatMap(one => {
-      const item = typeof one === 'string' ? { text: one } : one && typeof one === 'object' ? (one as { text?: unknown; choices?: unknown; asked?: unknown }) : {}
-      const text = typeof item.text === 'string' ? cut(oneLine(item.text), 200) : ''
-      const choices = Array.isArray(item.choices) ? [...new Set(item.choices.filter((c): c is string => typeof c === 'string').map(c => cut(oneLine(c), 40)).filter(c => c && plainWords(c) !== 'not now' && plainWords(c) !== plainWords(ANSWER_IN_WORDS)))].slice(0, 4) : undefined
-      return text ? [{ text, ...(choices?.length ? { choices } : {}), ...('asked' in item && item.asked === true ? { isAsked: true } : {}) }] : []
-    })
-    const items = asked.filter((one, n) => asked.findIndex(other => other.text === one.text) === n).slice(0, 12)
-    let tied = 0
-    await change($, e.agentId, one => {
-      const waits = items.map(wait => tiedTo(wait, one))
-      tied = waits.filter(wait => wait.ask).length
-      return { ...one, waits: waits.length ? waits : undefined, waitsSet: true }
-    })
-    redraw($)
-    const isTied = tied ? ` ${tied === 1 ? 'One is' : `${tied} are`} the question on your card, and answering it there answers ${tied === 1 ? 'it' : 'them'} here.` : ''
-    return { result: `${items.length ? `Recorded ${items.length} waiting on ${who()}; the panel shows them with your result.` : `Nothing waits on ${who()}.`}${isTied} Once you finish, this replaces what your earlier results waited on.` }
-  })
-
   // Work that needs the person's hands now: its card stands out with the ask and its Copy, until they answer or the work clears it
   on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
-    const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown; last_step?: unknown; folder?: unknown }
+    const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown; release?: unknown }
     if (e.agentId === undefined) return { result: `Only a background task asks through the panel; the chat asks ${who()} in its reply.` }
     // The question is one line; what it is about goes with it, whole, so the person never answers an ask whose reason has not reached
     // them yet (a report reaches the chat only after the work ends). A question too long for one line is cut at a word on the card and
@@ -154,7 +81,9 @@ const toolHooks = (on: On) => {
     const isProse = given.split(/\s+/).length > 8 && /[a-z]{3,} [a-z]{3,} [a-z]{3,}/i.test(given) && !/[\/=_$`@]|https?:/.test(given)
     const copy = command || (isProse || flat(text).includes(flat(given)) ? '' : given)
     const folder = typeof input.cwd === 'string' && input.cwd.startsWith('/') ? input.cwd : cwd
-    const choices = [...new Set((Array.isArray(input.choices) ? input.choices : []).filter((one): one is string => typeof one === 'string').map(one => oneLine(one).slice(0, 40)).filter(Boolean))].slice(0, 4)
+    // Every button is an answer that reaches the task: a choice that would only leave the question open is left out, as not
+    // pressing does that
+    const choices = [...new Set((Array.isArray(input.choices) ? input.choices : []).filter((one): one is string => typeof one === 'string').map(one => oneLine(one).slice(0, 40)).filter(Boolean))].filter(one => !LEAVES_OPEN.test(plainWords(one))).slice(0, 4)
     // Pictures the ask is about, by full path; one that is not a picture file on this Mac is left out
     const givenPics = [...new Set((Array.isArray(input.pictures) ? input.pictures : []).filter((one): one is string => typeof one === 'string').map(one => one.trim()).filter(one => IMAGE.test(one)))].slice(0, 8)
     const pictures: string[] = []
@@ -162,15 +91,11 @@ const toolHooks = (on: On) => {
     const at = await $.clock.now()
     const before = await read($, todos)
     const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask
-    // The step a go-ahead finishes with, which Claudopus does on the first choice without starting the task again: only a task's own
-    // ask with buttons, in a folder that is there
-    const stepGiven = typeof input.last_step === 'string' ? oneLine(input.last_step).slice(0, 400) : ''
-    const stepFolder = typeof input.folder === 'string' ? input.folder.trim() : ''
-    const isStepped = Boolean(stepGiven && choices.length && stepFolder.startsWith('/') && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(stepFolder).catch(() => undefined))?.kind === 'dir')
-    await change($, e.agentId, was => { const one = { ...was, ask: text ? { text, ...(isStepped ? { lastStep: stepGiven, folder: stepFolder } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), ...(pictures.length ? { pictures } : {}), at } : undefined }
-      // An item recorded as the question on the card, or the same line as it, is tied to this ask
-      return one.ask ? { ...one, ...(one.waits?.length ? { waits: one.waits.map(askedWait).map(wait => tiedTo(wait, one)) } : {}) } : one
-    })
+    // A go-ahead for a release: the worktree a press on its first choice allows one release run for (gate.tsx, allowRelease).
+    // Only a task's own question with buttons, for a folder that is there
+    const releaseGiven = typeof input.release === 'string' ? input.release.trim() : ''
+    const release = releaseGiven.startsWith('/') && choices.length && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(releaseGiven).catch(() => undefined))?.kind === 'dir' ? releaseGiven : ''
+    await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(release ? { release } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices } : {}), from: e.agentId, ...(pictures.length ? { pictures } : {}), at } : undefined }))
     const list = await read($, todos)
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     if (!text) {
@@ -182,16 +107,20 @@ const toolHooks = (on: On) => {
     if (card) await askInChat($, card)
     // A command for the person opens in a terminal only on their press of the card's button: nothing opens by itself
     const terminal = command ? (isRunFromAfar ? ` ${who(true)} is on another device: they type it in their own session to this Mac, and nothing opens a terminal here.` : isLinux ? ` Do not open a terminal for it: on Linux the card gives it with a Copy button, and ${who()} runs it in a terminal of their own.` : ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.`) : ''
-    const shown = [command ? `the whole command${command === given0 ? '' : ` (${command})`}, a Copy button${isRunFromAfar ? '' : ' and an Open in Terminal button'}` : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
+    const shown = [command ? `the whole command${command === given0 ? '' : ` (${command})`}, a Copy button${isRunFromAfar ? '' : ' and an Open in Terminal button'}` : copy ? 'a Copy button for the text' : '', `${choices.length ? `the buttons ${choices.join(', ')} and ` : ''}Answer in words`].filter(Boolean).join(' and ')
     const lost = givenPics.length - pictures.length
     // An ask that points at an explanation it does not carry: the person sees the ask before the work's report, so it is said back
     const long = text === asked ? '' : ` The question was longer than one line: the card shows it cut at a word, and it is whole at the top of its details.`
     const tooLong = whole.length > ASK_DETAILS ? ` Its details were longer than ${ASK_DETAILS} letters and were cut at a word: put what matters first.` : ''
     // A go-ahead asked with nothing to decide it on: said back, since ${who()} sees the ask before the report
+    // No buttons: said back, as nothing of Claudopus's is added to answer it with
+    const plain = choices.length ? '' : ` It has no buttons, so ${who()} can only answer in words: give \`choices\` when a press would answer it.`
+    const leftOut = (Array.isArray(input.choices) ? input.choices : []).some(one => typeof one === 'string' && LEAVES_OPEN.test(plainWords(one))) ? ' A choice that only leaves the question open (Not now, Later, Skip, Cancel) was left out: not pressing does that, and every button is an answer.' : ''
+    const released = release ? ` A press on ${choices[0]} also allows your next run of the release runner for ${release}, once, with no second question: run it then, in your background.` : releaseGiven ? ' `release` was left out: it needs buttons, and the full path of a folder that is there.' : ''
     const bare = choices.length && !details && !copy ? ` It carries no details: if deciding it needs more than this one line (what goes out, what it changes), ask it again with that in \`details\`; ${who()} sees the ask before your report.` : ''
     const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} drawn small on the card, each opening large on a press, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
     const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : ''
-    return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message the moment it is given, and starts you again if you have finished. Never wait for it with a command or a timer: with nothing else to do, end your step. Ask again if the answer leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
+    return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare}${plain}${leftOut}${released} It stays until ${who()} answers; the answer comes back to you as a message the moment it is given, at your next step or to you paused. Never wait for it with a command or a timer: with nothing else to do, end your step. Ask again if the answer leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
   })
 
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides

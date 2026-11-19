@@ -1,9 +1,8 @@
 // The running jobs a piece of work has, told apart and read: a server, a download or a script, from its command or its own words,
 // and the latest line it wrote, from the end of its output. Nothing here touches the engine
 
-export type JobKind = 'server' | 'download' | 'script' | 'watch' | 'wait'
-// A job as its row shows it: when its output last changed, whether its processes are paused, how many alike it stands for, and
-// for a wait, what it waits for and how that stands
+export type JobKind = 'server' | 'download' | 'script' | 'watch'
+// A job as its row shows it: when its output last changed and how many alike it stands for
 export type Job = {
   id: string
   // The last few lines its output ends with, as a terminal shows them; shown under its row in Details
@@ -24,21 +23,9 @@ export type Job = {
   // The plain words of the work's own progress line, after its numbers
   words?: string
   isEmpty?: boolean
-  // A run left going whose output goes to no file: it runs, and says nothing of how far it is
-  isUntold?: boolean
-  // The memory it and all it started hold, in words
-  mem?: string
-  // the same in KB, where it is known
-  memKb?: number
   isNamed?: boolean
-  expect?: number
-  expectText?: string
   wroteAt?: number
-  isPaused?: boolean
   count?: number
-  waitsFor?: string
-  waitFile?: string
-  target?: string
 }
 
 // How often the jobs' output is read, and how often a job that wrote something new counts as news for its card
@@ -50,12 +37,12 @@ export const JOBS_SHOWN = 4
 export const JOB_TAIL = 4000
 
 // Purple and a round dot are a helper's alone: a job has its own colour and shape, and its kind in words at the head of its row
-export const JOB_COLOR: Record<JobKind, string> = { server: '#4EBA65', download: '#5AA7E6', script: '#36B5A8', watch: '#9A9A9A', wait: '#9A9A9A' }
-export const JOB_GLYPH: Record<JobKind, string> = { server: '◆', download: '▼', script: '■', watch: '◇', wait: '◇' }
-export const JOB_WORD: Record<JobKind, string> = { server: 'Server running', download: 'Downloading', script: 'Command running', watch: 'Watching', wait: 'Waiting' }
-export const JOB_HEAD: Record<JobKind, string> = { server: 'Server', download: 'Download', script: 'Command', watch: 'Watch', wait: 'Wait' }
+export const JOB_COLOR: Record<JobKind, string> = { server: '#4EBA65', download: '#5AA7E6', script: '#36B5A8', watch: '#9A9A9A' }
+export const JOB_GLYPH: Record<JobKind, string> = { server: '◆', download: '▼', script: '■', watch: '◇' }
+export const JOB_WORD: Record<JobKind, string> = { server: 'Server running', download: 'Downloading', script: 'Command running', watch: 'Watching' }
+export const JOB_HEAD: Record<JobKind, string> = { server: 'Server', download: 'Download', script: 'Command', watch: 'Watch' }
 // Its mark on the tree, drawn: a square, a diamond, a down arrow, an open diamond, never a helper's round dot
-export const JOB_SHAPE: Record<JobKind, 'square' | 'diamond' | 'down' | 'open'> = { server: 'diamond', download: 'down', script: 'square', watch: 'open', wait: 'open' }
+export const JOB_SHAPE: Record<JobKind, 'square' | 'diamond' | 'down' | 'open'> = { server: 'diamond', download: 'down', script: 'square', watch: 'open' }
 // A job whose output has not changed for this long says, in amber, that it has gone quiet, and one that has printed nothing at all
 // says so: work is told to print progress at least every 10 seconds, so a few minutes of nothing is worth a look
 export const JOB_QUIET = 3 * 60_000
@@ -87,21 +74,17 @@ const isFetching = (step: string) => {
   return true
 }
 // The work's own words for a run, in the one form it is told to write them, so its card reads them as they are and guesses
-// nothing from the command: its kind first (Download, Upload, Wait for, Watch, Serve, Run), what it does, and how long it
-// should take in brackets: `Download the CT scans (about 3 min)`
+// nothing from the command: its kind first (Download, Upload, Watch, Serve, Run), then what it does: `Download the CT scans`
 const KIND_WORDS: [RegExp, JobKind][] = [
   [/^(download|upload|fetch|copy|sync|clone)\b/i, 'download'],
-  [/^(wait(ing)?|poll(ing)?)\b/i, 'wait'],
-  [/^watch\b/i, 'watch'],
+  [/^(watch|wait(ing)?|poll(ing)?)\b/i, 'watch'],
   [/^serve\b/i, 'server'],
   [/^run\b/i, 'script'],
 ]
 export const describedOf = (what: string) => {
-  // only a time in the brackets, never a count (about 120 scans): a range is taken at its end (about 2-3 min)
-  const m = what.match(new RegExp(String.raw`\s*\((?:about|around|roughly|up to|~)?\s*(?:\d+(?:\.\d+)?\s*[-–]\s*)?${TIME}\)\s*$`, 'i'))
-  const seconds = m ? secondsIn((m[1] ?? '').trim()) : undefined
-  const text = m ? what.slice(0, m.index).trim() : what.trim()
-  return { text, kind: KIND_WORDS.find(([re]) => re.test(text))?.[1], ...(seconds ? { expect: seconds * 1000, expectText: (leftText(seconds) ?? '').replace(/ left$/, '') } : {}) }
+  // (a time in brackets at its end, as descriptions once carried, is no part of what it does: a row never says a guessed time)
+  const text = what.replace(new RegExp(String.raw`\s*\((?:about|around|roughly|up to|~)?\s*(?:\d+(?:\.\d+)?\s*[-–]\s*)?${TIME}\)\s*$`, 'i'), '').trim()
+  return { text, kind: KIND_WORDS.find(([re]) => re.test(text))?.[1] }
 }
 // Words that lead a run's own name and say its kind already, so its row does not say it twice
 export const isKindSaid = (label: string) => KIND_WORDS.some(([re]) => re.test(label.trim()))
@@ -265,30 +248,14 @@ export const plainOf = (line: string | undefined, title = ''): string => {
   const cut = t.slice(0, PLAIN_MOST - 1)
   return `${cut.slice(0, cut.lastIndexOf(' ') > 30 ? cut.lastIndexOf(' ') : cut.length).replace(/[\s,;:]+$/, '')}…`
 }
-// A long command that would give no word of how far it is: a wait loop, or a script of the work's own (a file it runs, as read),
-// run in the background, detached, or said to take a minute or more, that prints no progress line and runs no tool with a meter of
-// its own. '' for any other: a short one, one that reports, or a program whose words the mod reads as they come (its row then
-// says when it last gave a sign of life). The mod's own runners report for themselves
-const METER = /\b(?:curl|wget|rsync|azcopy|pip3?|git\s+clone|hf\s+download|huggingface-cli|tqdm|rich\.progress|aria2c|docker\s+pull)\b/
-const SILENCED = /\bcurl\b[^|;&\n]*\s(?:-[a-zA-Z]*s[a-zA-Z]*|--silent)\b|\bwget\b[^|;&\n]*\s(?:-q\b|--quiet\b|-[a-zA-Z]*q[a-zA-Z]*O\b)|\btqdm\([^)\n]*disable\s*=\s*True/
-// A line it prints that the card reads as how far it is: a count of a total (`{i}/{n}`, `$i/$n`, `%d/%d`) or a percent
-const PRINTS_COUNT = /\b(?:print|echo|printf|log\w*|console\.log|write)\b[^\n]*(?:\{[^}\n]*\}\s*\/\s*\{|\$\{?\w+\}?\s*\/\s*\$|%[ds]\s*\/\s*%[ds]|\{[^}\n]*:\.?\d*%\}|%%)/
-// The word progress, once what only turns it off is taken out (# no progress bar, --no-progress, progress_bar=False)
-const saysProgress = (text: string) => /\bprogress\b/i.test(text.replace(/\bno[-_ ]progress[\w-]*|progress[-_ ]?bar\s*=\s*(?:False|off|0|None)\b/gi, ' '))
-export const reportsOf = (command: string, description: string, isBackground: boolean, scripts: string[], timeoutMs = 0): 'wait' | 'script' | '' => {
-  if (/\bbin\/(?:helpers|admin|secret|release|keyring)\b/.test(command)) return ''
+// A long command of the work's own script: a file it runs, as read, asked for with a long time limit. False for any other: a short
+// one, a watch or a server, or a program that is no script of its own (a long time limit alone says nothing: most such calls are a
+// push, a short test or a look). The mod's own runners are never told from here. What the script prints is not looked at
+export const isOwnLongScript = (command: string, description: string, scripts: string[], timeoutMs = 0) => {
+  if (/\bbin\/(?:helpers|admin|secret|release|keyring)\b/.test(command)) return false
   const said = describedOf(description)
-  // A server or a watch never says how far it is: its row says when it was last asked or its last event
-  if (said.kind === 'server' || said.kind === 'watch' || SERVER_CMD.test(command)) return ''
-  const isDetached = Boolean(detachedOf(command))
-  const isLongSaid = (said.expect ?? 0) >= 60_000 || timeoutMs > 2 * 60_000
-  const all = [command, ...scripts]
-  if (all.some(saysProgress)) return ''
-  // A wait loop sent off or held open for long: every loop that sleeps between its tries
-  if ((isBackground || isDetached || isLongSaid) && /\b(?:until|while|for)\b[\s\S]*?\bdo\b[\s\S]*?\bsleep\b/.test(command)) return 'wait'
-  // A script of its own said to take a minute or more, or started detached (sent to the background alone it may be short)
-  if (!(isDetached || isLongSaid) || !scripts.length) return ''
-  return all.some(text => (METER.test(text) && !SILENCED.test(text)) || PRINTS_COUNT.test(text)) ? '' : 'script'
+  if (said.kind === 'server' || said.kind === 'watch' || SERVER_CMD.test(command)) return false
+  return timeoutMs > 2 * 60_000 && scripts.length > 0
 }
 // The plain words after the numbers of a work's own progress line, without the time left it gives (said on its own)
 const ownWords = (rest: string) =>
@@ -357,6 +324,8 @@ const HELD = /\b(mem(ory)?|ram|vram|gpu|disk|used|free|avail(able)?|alloc(ated)?
 // A percent that is a score, not progress
 const SCORE = /\b(acc(uracy)?|score|coverage|precision|recall|f1|auc|iou|map|top-?\d|pass(ed)?|win|rate|util(i[sz]ation)?|cpu|gpu|mem(ory)?|load)\b[^%]{0,16}$/i
 // What follows the work's own `progress:` on a line (after a log's time or level), or undefined; "no progress:" is none
+// A unit of time: a `progress:` line counts things done, never seconds or minutes, and a row ignores one that counts time
+const TIME_UNIT = /^(?:s|secs?|seconds?|m|mins?|minutes?|h|hrs?|hours?|ms)$/i
 const ownOf = (line: string) => {
   const m = line.match(/(?:^|[\s\]|[])progress:\s*(.*)$/i)
   return m && !/\bno\s+progress:/i.test(line) ? (m[1] ?? '') : undefined
@@ -374,6 +343,7 @@ const lineProgress = (line: string): Progress | undefined => {
     if (m) {
       // Its own numbers and unit, as written; a word after the total is its unit only when it is a size or a thing counted
       const [, a = '', u1 = '', b = '', u2 = ''] = m
+      if (TIME_UNIT.test(u1) || TIME_UNIT.test(u2)) return undefined
       const na = Number(a.replace(/,/g, ''))
       const nb = Number(b.replace(/,/g, ''))
       const isSizeUnit = (u: string) => /^([KMGTP]i?B|B|bytes?)$/i.test(u)
@@ -383,6 +353,7 @@ const lineProgress = (line: string): Progress | undefined => {
     }
     // A count with no end known, as a wait counts its tries: progress: 7 tries waiting for the deploy
     const so = rest.match(/^(\d[\d,]*)\s+([a-z]{3,})\b/i)
+    if (so && TIME_UNIT.test(so[2] ?? '')) return undefined
     if (so) return { done: `${countText(Number(so[1]?.replace(/,/g, '')))} ${so[2]?.toLowerCase()}`, isOwn: true, words: ownWords(rest.slice(so[0].length)) }
   }
   // curl's meter: % Total % Received % Xferd Average-speeds Times Current-speed, sizes in 1024s
@@ -523,38 +494,6 @@ export const latestOf = (text: string) => {
   return { latest: line.replace(/\s+/g, ' ').trim().slice(0, 240), ...progress, port: portOf(clean) }
 }
 
-
-// A command started detached, with nohup or setsid and its output sent to a file: the command itself, the log as written, and the
-// folder a leading `cd` moved it to; undefined for any other command
-export const detachedOf = (command: string) => {
-  // Started on another Mac over ssh, its log and process are there, not here
-  if (/^\s*(\S*\/)?ssh\b/.test(command)) return undefined
-  // nohup or setsid at the head of a command, sent off with a lone &
-  if (!/(^|&&|;|\|\||\n)\s*(nohup|setsid)\s/.test(command) || !/(?<![>&<])&(?![&>\d])/.test(command)) return undefined
-  const written = command.match(/(?:^|[^0-9&2])>>?\s*("[^"]+"|'[^']+'|[^\s;&|]+)/)?.[1]?.replace(/^["']|["']$/g, '')
-  if (!written || written === '/dev/null') return undefined
-  // A log or folder named by a shell variable the command sets itself (S=/tmp/x && nohup ... > $S/run.log) is named whole; one
-  // named by any other variable is not followed, as a wrong file would leave its card blank for as long as the run lasts
-  const vars = new Map([...command.matchAll(/(?:^|&&|;|\n)\s*(?:export\s+)?([A-Za-z_]\w*)=("[^"$`]*"|'[^']*'|[^\s;&|$`]+)(?=\s*(?:&&|;|\n))/g)].map(m => [m[1] ?? '', (m[2] ?? '').replace(/^["']|["']$/g, '')]))
-  const expand = (text: string) => text.replace(/\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))/g, (all, braced: string | undefined, bare: string | undefined) => {
-    const name = braced ?? bare ?? ''
-    return name === 'HOME' ? '~' : (vars.get(name) ?? all)
-  })
-  const log = expand(written)
-  const cd = command.match(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)\s*&&/)?.[1]?.replace(/^["']|["']$/g, '')
-  if (log.includes('$') || cd?.includes('$')) return undefined
-  const core = (command.match(/\b(?:nohup|setsid)\s+(.*?)\s*(?:>|$)/)?.[1] ?? command).trim()
-  return { log, cd, core }
-}
-// The process id a detached start printed, as `echo $!` does
-// (never 0 or a number with a leading zero: on 15 Nov a curl's "000" in the same output was taken for one, and `kill -0 0` always
-// succeeds, so a run long ended stayed on its card for hours)
-// Only when it is the one number printed: a status code another command printed beside it could be taken for it
-export const pidOf = (stdout: string) => {
-  const numbers = stdout.split('\n').filter(line => /^\s*\d+\s*$/.test(line))
-  return numbers.length === 1 ? numbers[0]?.match(/^\s*([1-9]\d{1,6})\s*$/)?.[1] : undefined
-}
-export const isPid = (pid: string) => /^[1-9]\d{1,6}$/.test(pid)
 
 // A call that only waits (a sleep, a wait) is no job of its own
 export const isWaitOnly = (cmd: string) => /^\s*(sleep\s|wait\b|python3? -c ['"]import time; ?time\.sleep)/.test(cmd)
@@ -777,241 +716,16 @@ export const watcherOf = (cmd: string): { isFollow: boolean } | undefined => {
   return isLoneGrep ? { isFollow: false } : undefined
 }
 
-// A command's processes as they run, whatever its words: it only waits when every process at the end of its tree (one that started
-// no other) is one that only passes time or follows something (a sleep, a log followed, a tool made to wait), so a loop of any shape,
-// a function, a nested shell or a script that sleeps between its looks is seen for what it is while it runs
-const WAITER_PROC = /^(?:\S*\/)?(?:g?sleep|inotifywait|fswatch|wait4path|wait-on)(?:\s|$)|^(?:\S*\/)?u?grep\s+(?:-\S+\s+)*(?:-m\s?\d+|--max-count=\d+)(?:\s+-\S+)*\s+\S+$|^(?:\S*\/)?(?:docker|kubectl)\s+(?:\S+\s+)*logs\s.*(?:-f|--follow)\b|^(?:\S*\/)?journalctl\s.*(?:-f|--follow)\b|^(?:\S*\/)?kubectl\s+rollout\s+status\b|^(?:\S*\/)?gh\s+run\s+watch\b|^(?:\S*\/)?node\s+\S*wait-on\b/
-// (a lone grep sifting a pipe is no waiter: it may be what a training's output goes through; only one that stops at a line is)
-export const waiterLeavesOf = (procs: Proc[], top: string): Proc[] | undefined => {
-  const tree = treeOf(procs, top)
-  const leaves = tree.filter(p => !tree.some(child => child.ppid === p.pid) && p.pid !== top)
-  return leaves.length > 0 && leaves.every(p => WAITER_PROC.test(p.command) || watcherOf(p.command)?.isFollow) ? leaves : undefined
-}
-export const isWaiterTree = (procs: Proc[], top: string) => waiterLeavesOf(procs, top) !== undefined
-
-// Jobs alike (the same kind, words and command, or the same wait) are one row that says how many they are, from the first one's
-// start; the newest one's output stands for them
-// Memory in KB added up, said as memOf says it
-const memAdded = (kb: number) => (kb ? { memKb: kb, mem: kb >= 1024 * 1024 ? `${(kb / 1024 / 1024).toFixed(1)} GB` : `${Math.max(1, Math.round(kb / 1024))} MB` } : {})
-// The command a run left going came from, by its id (`left-<process>-<command>`); '' for any other run
-export const leftCommandOf = (id: string) => id.match(/^left-\d+-(.+)$/)?.[1] ?? ''
+// Jobs alike (the same kind, words and command) are one row that says how many they are, from the first one's start; the newest
+// one's output stands for them
 export const foldJobs = (jobs: Job[]): Job[] => {
-  // (what one command left going is one row, whatever programs it is: a browser and its helpers are one test, not 12 rows)
-  const keyOf = (job: Job) => (job.kind === 'wait' ? `wait|${job.label}|${job.waitsFor ?? ''}|${job.waitFile ?? ''}` : leftCommandOf(job.id) ? `left|${job.label}|${leftCommandOf(job.id)}` : `${job.kind}|${job.label}|${job.cmd}`)
+  const keyOf = (job: Job) => `${job.kind}|${job.label}|${job.cmd}`
   const groups = new Map<string, Job[]>()
   for (const job of jobs) groups.set(keyOf(job), [...(groups.get(keyOf(job)) ?? []), job])
   return [...groups.values()].map(group => {
     const newest = group.reduce((a, b) => (b.at >= a.at ? b : a))
     if (group.length === 1) return newest
     const wrote = group.flatMap(job => (job.wroteAt ? [job.wroteAt] : []))
-    return {
-      ...newest,
-      at: Math.min(...group.map(job => job.at)),
-      count: group.length,
-      ...(leftCommandOf(newest.id) && group.some(job => job.memKb) ? memAdded(group.reduce((sum, job) => sum + (job.memKb ?? 0), 0)) : {}),
-      isPaused: group.every(job => job.isPaused),
-      ...(wrote.length ? { wroteAt: Math.max(...wrote) } : {}),
-    }
+    return { ...newest, at: Math.min(...group.map(job => job.at)), count: group.length, ...(wrote.length ? { wroteAt: Math.max(...wrote) } : {}) }
   })
-}
-
-// The processes on this Mac as `ps -axww -o pid=,ppid=,stat=,etime=,command=` lists them, each with when it started, from the
-// time it has run ([[dd-]hh:]mm:ss) and when they were listed
-// (listed with its process group and resident memory, `ps -axww -o pid=,ppid=,pgid=,stat=,etime=,rss=,command=`, it has those too)
-export type Proc = { pid: string; ppid: string; stat: string; startAt: number; command: string; pgid?: string; rss?: number }
-const secondsOf = (etime: string) => {
-  const [days, rest = ''] = etime.includes('-') ? etime.split('-') : ['0', etime]
-  return Number(days) * 86400 + rest.split(':').reduce((sum, part) => sum * 60 + Number(part), 0)
-}
-export const PS_COLUMNS = 'pid=,ppid=,pgid=,stat=,etime=,rss=,command='
-export const procsOf = (text: string, now: number): Proc[] =>
-  text.split('\n').flatMap(line => {
-    const full = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+((?:\d+-)?[\d:]+)\s+(\d+)\s+(.*)$/)
-    if (full) return [{ pid: full[1] ?? '', ppid: full[2] ?? '', pgid: full[3] ?? '', stat: full[4] ?? '', startAt: now - secondsOf(full[5] ?? '0') * 1000, rss: Number(full[6] ?? 0), command: full[7] ?? '' }]
-    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+((?:\d+-)?[\d:]+)\s+(.*)$/)
-    return m ? [{ pid: m[1] ?? '', ppid: m[2] ?? '', stat: m[3] ?? '', startAt: now - secondsOf(m[4] ?? '0') * 1000, command: m[5] ?? '' }] : []
-  })
-// A process and everything it started
-export const treeOf = (procs: Proc[], pid: string): Proc[] => {
-  const top = procs.find(p => p.pid === pid)
-  if (!top) return []
-  const out = [top]
-  for (let n = 0; n < out.length; n++) out.push(...procs.filter(p => p.ppid === out[n]?.pid && !out.includes(p)))
-  return out
-}
-// The shell a command held open runs in, found by the command itself as the engine hands it to the shell (eval '...', its own
-// quotes written '"'"' and its new lines as ps writes them) and by when it started; undefined when none is. A command's words
-// alone are too few to tell most commands by (python3 train.py), so the command is matched whole, from its start
-const flat = (text: string) => text.replace(/\s+/g, ' ').replaceAll(' | ', ' / ').trim()
-// What the engine handed a shell to run, as ps writes it; '' where the process is no shell of the engine's
-const evalBodyOf = (p: Proc) => {
-  if (!/shell-snapshots\/snapshot-/.test(p.command) || p.ppid === '1') return ''
-  const start = p.command.indexOf(" eval '")
-  if (start < 0) return ''
-  const end = p.command.lastIndexOf("' < /dev/null")
-  return flat(p.command.slice(start + 7, end > start ? end : undefined).replaceAll(`'"'"'`, "'").replaceAll(`'\\''`, "'").replace(/\\012/g, '\n'))
-}
-export const heldShellOf = (procs: Proc[], cmd: string, at: number) => {
-  const want = flat(cmd).slice(0, 200)
-  if (!want) return undefined
-  return procs
-    .filter(p => /shell-snapshots\/snapshot-/.test(p.command) && p.ppid !== '1' && Math.abs(p.startAt - at) <= 20_000)
-    .filter(p => {
-      if (!p.command.includes(" eval '")) return false
-      const body = evalBodyOf(p)
-      return body.startsWith(want) || want.startsWith(body.slice(0, 200))
-    })
-    .sort((a, b) => Math.abs(a.startAt - at) - Math.abs(b.startAt - at))[0]?.pid
-}
-// Stopped (paused) as ps writes it
-export const isPausedProc = (p: Proc) => p.stat.startsWith('T')
-// The words of a command that stay as they are however the engine quotes it to run it: the longest few, to find its shell by
-const fragmentsOf = (cmd: string) =>
-  [...new Set(cmd.replace(/\s+\S*$/, '').split(/[\s'"\\$`;|&()<>]+/).filter(word => word.length >= 6 && /^[\w./:=,@%+-]+$/.test(word)))]
-    .sort((a, b) => b.length - a.length)
-    .slice(0, 3)
-// The shells the engine runs background commands in, matched to the commands by their words and by when they started: each shell to
-// the command kept nearest its start (a command kept as it went to the background may have started up to its time limit before).
-// A command left without a shell when some other shell still holds its words is taken as running (true), as is one whose words
-// are too few to tell it by (not listed); only one no shell holds is missing (null)
-const SHELL_BEFORE = 11 * 60_000
-const SHELL_AFTER = 15_000
-export const shellsOf = (procs: Proc[], jobs: { id: string; cmd: string; at: number }[]) => {
-  const shells = procs.filter(p => /shell-snapshots\/snapshot-/.test(p.command) && /\beval\b/.test(p.command) && p.ppid !== '1')
-  const found = new Map<string, string | true | null>()
-  const told = jobs.map(job => ({ job, words: fragmentsOf(job.cmd) })).filter(one => one.words.length >= 2)
-  const pairs = told
-    .flatMap(({ job, words }) =>
-      shells.filter(p => words.every(word => p.command.includes(word)) && p.startAt >= job.at - SHELL_BEFORE && p.startAt <= job.at + SHELL_AFTER).map(p => ({ id: job.id, pid: p.pid, gap: Math.abs(job.at - p.startAt) })),
-    )
-    .sort((a, b) => a.gap - b.gap)
-  const taken = new Set<string>()
-  for (const pair of pairs) if (!found.has(pair.id) && !taken.has(pair.pid)) (found.set(pair.id, pair.pid), taken.add(pair.pid))
-  for (const { job, words } of told) if (!found.has(job.id)) found.set(job.id, shells.some(p => !taken.has(p.pid) && words.every(word => p.command.includes(word))) ? true : null)
-  return found
-}
-
-// ---- What a command leaves running, however it was started ----
-// A command's shell leads a process group of its own, and what it starts keeps that group: sent off with &, under nohup, in a shell
-// loop, by xargs -P, by a launcher that exits, in a Python pool. Once the shell has ended, what still runs in its group belongs to
-// that command; so does what it started in a session of its own while it ran (setsid, start_new_session). A command is known here
-// by the process numbers handed out while it ran, from just before it to just after it, so nothing depends on how it was written
-// (on 15 Nov a launcher started with nohup but no `echo $!` drew 8 pages at once with 56 GB and no row on its card)
-// (`until`: the latest a process it left can have started; none while a command sent to the background may still start more)
-// (`agent`: whose command it is, where known)
-// A number handed out while a command ran proves nothing by itself: anything else of the same chat that no command is kept for (a
-// task out of sight, the chat itself, a helper, a hook) is handed numbers then too (18 Nov: a finished task's card showed another
-// task's 12 GB run for 47 minutes, started while its own long command was held open). So a command is tied to what it leaves by the
-// groups it was seen to hold while it ran (`groups`: its own shell's, found among the engine's shells by the command itself, and
-// those of all that ran under that shell). A group's leftover goes to the command seen to hold that group, and to no other. Only
-// where a command's shell was never seen (it ended before the processes were listed), and for a process that leads a group of its
-// own with no parent left (it may have left the shell's tree between two looks), does the number count, and then only for a
-// process the command names
-export type Span = { id: string; from: number; to: number; at: number; endAt: number; cmd: string; until?: number; agent?: string; groups?: string[] }
-// A command still running: what it starts is not given to another that ended meanwhile
-export type OpenCall = { from: number; at: number; cmd?: string; groups?: string[] }
-// Process numbers wrap round past this on macOS
-const PID_MOST = 99_999
-// (numbers handed out after one, counted round the wrap)
-const after = (n: number, from: number) => (n - from + PID_MOST + 1) % (PID_MOST + 1)
-// The groups a command still running is seen to hold, as the processes are listed now: its shell's first, then those of all under
-// it, added to what was seen before. Its shell is the engine's shell that runs the command itself (the same words), handed its number after the
-// command began and started no earlier, and no other command's (`taken`); the one handed its number soonest where several fit.
-// undefined while no shell of its own has been seen
-export const groupsOf = (procs: Proc[], call: { cmd: string; at: number; from: number; groups?: string[] }, taken: Set<string> = new Set()): string[] | undefined => {
-  const want = flat(call.cmd).slice(0, 200)
-  const isIts = (p: Proc) => {
-    const body = evalBodyOf(p)
-    const n = Number(p.pid)
-    return Boolean(body) && (p.pgid === undefined || p.pgid === p.pid) && !taken.has(p.pid) && p.startAt >= call.at - 2_000 && after(n, call.from) > 0 && after(n, call.from) < 50_000 && body.slice(0, 200) === want
-  }
-  const shell = call.groups?.[0] ?? (want ? procs.filter(isIts).sort((a, b) => after(Number(a.pid), call.from) - after(Number(b.pid), call.from))[0]?.pid : undefined)
-  if (!shell) return undefined
-  // (its shell gone from the list, or its number handed to another program since: nothing new is learnt)
-  const top = procs.find(p => p.pid === shell)
-  if (!top || (!call.groups && !isIts(top)) || (call.groups && !evalBodyOf(top))) return call.groups
-  return [...new Set([shell, ...(call.groups ?? []), ...treeOf(procs, shell).flatMap(p => (p.pgid ? [p.pgid] : []))])]
-}
-const inSpan = (pid: number, span: Pick<Span, 'from' | 'to'>) => (span.to >= span.from ? pid > span.from && pid < span.to : pid > span.from || (pid < span.to && pid <= PID_MOST))
-// The system's own programs, which launchd starts in sessions of their own whenever it likes, are never a command's
-// (and an app's own updaters and helpers in a Library folder, the person's own as well: GoogleUpdater, 17 Nov)
-const SYSTEM_PROG = /^(\/System\/|\/usr\/libexec\/|\/usr\/sbin\/|\/sbin\/|\/Library\/Apple\/|\/Applications\/|(\/Users\/[^/]+|\/home\/[^/]+|~)?\/Library\/Application Support\/)/
-// An app's own helper, updater or crash reporter: inside its bundle's frameworks or helpers, or in a Library folder of its own
-const APP_HELPER = /\.app\/Contents\/(Frameworks|Helpers|Library)\/|\/Library\/Application Support\/|crashpad_handler/
-export type Left = { span: string; top: Proc; tree: Proc[] }
-// What each command left running: the topmost of each group whose shell has gone (or a session it started of its own), with all it
-// started under it; never one already followed (`known`), nor what runs under one
-// A process counts only when it started while its command ran (or, for one sent to the background, after it began): app helpers
-// orphaned long ago keep a dead leader's group, and process numbers come round again within minutes, so a number alone proves
-// nothing (a second look on 15 Nov found Claude, Telegram and Discord helpers 20 hours old claimed by a fresh command)
-export const leftoversOf = (procs: Proc[], spans: Span[], known: Set<string> = new Set(), open: OpenCall[] = []): Left[] => {
-  if (!spans.length) return []
-  const pids = new Set(procs.map(p => p.pid))
-  const byPid = new Map(procs.map(p => [p.pid, p]))
-  // The groups of runs already followed: the rest of a pipeline sent off with `& echo $!` is that run's
-  const knownGroups = new Set(procs.filter(p => known.has(p.pid) && p.pgid).map(p => p.pgid))
-  const isTimely = (p: Proc, s: Span) => p.startAt >= s.at - 2_000 && (s.until === undefined || p.startAt <= s.until + 2_000)
-  // One a command still running may have started waits for that command to end: one in a group that command is seen to hold, and,
-  // where its shell is not yet seen or the process leads a group of its own, one handed its number after that command began
-  const isOpenOnes = (n: number, p: Proc, isOwnSession: boolean) =>
-    open.some(o => o.groups?.includes(p.pgid ?? '') || ((isOwnSession || !o.groups?.length) && after(n, o.from) > 0 && after(n, o.from) < 50_000 && p.startAt >= o.at - 2_000))
-  // The command seen to hold the process's group while it ran: the newest, should the number have come round
-  const holderOf = (p: Proc) => spans.filter(s => s.groups?.includes(p.pgid ?? '') && isTimely(p, s)).reduce<Span | undefined>((a, b) => (a && a.at > b.at ? a : b), undefined)
-  // A process under one already followed is that one's
-  const isUnderKnown = (p: Proc) => {
-    for (let at: Proc | undefined = p, n = 0; at && n < 64; at = byPid.get(at.ppid), n++) if (known.has(at.pid)) return true
-    return false
-  }
-  // Where no command was seen to hold its group: the command a number was handed out under that names the process, among those
-  // whose shell was never seen (any, for a process that leads its own group); where two ran at once, the one that holds the
-  // process's own words (its script or its arguments), else the one whose first number is nearest below
-  const spanOf = (pid: number, p: Proc, isOwnSession: boolean) => {
-    // A command sent to the background that still runs goes on being handed numbers after the one it had as it went there: every
-    // number since its first is in its range, so what another task's running command starts is never given to a short command
-    // beside it by its number alone (17 Nov: another task's screenshot script, sent to the background, started headless Chrome
-    // while a git push ran, and the push's card took its crash reporters)
-    // (as long as it runs, however far the numbers have gone: process numbers go round in minutes on a busy Mac. So a short command's
-    // own leftover that it does not name, started while another task's background command runs, goes to neither: a card shows
-    // nothing rather than another task's programs)
-    const fits = spans.filter(s => (isOwnSession || !s.groups?.length) && (inSpan(pid, s) || (s.until === undefined && after(pid, s.from) > 0)) && isTimely(p, s) && isNamedBy(p.command, s.cmd))
-    if (fits.length <= 1) return fits[0]
-    // The process's own words, past its program: a command that holds them started it. A session of its own also goes by the
-    // command's words it holds
-    const own = p.command.trim().split(/\s+/).slice(1).filter(word => word.length >= 6 && !word.startsWith('-') && /^[\w./:=,@%+-]+$/.test(word))
-    const worded = fits.filter(s => own.some(word => s.cmd.includes(word)) || (isOwnSession && fragmentsOf(s.cmd).some(word => p.command.includes(word.split('/').at(-1) ?? word))))
-    // Where no command names it and the commands are different tasks', it is no one's: a task's card shows nothing rather than a
-    // run another task started at the same moment (16 Nov a code search's row read another task's "0 of 2 heads · 2.0 GB memory")
-    if (!worded.length && new Set(fits.map(s => s.agent ?? '')).size > 1) return undefined
-    // A group's leader is its command's own shell, handed its number just after that command's first one: the command whose first
-    // number is nearest below is it
-    return (worded.length ? worded : fits).reduce((a, b) => (after(pid, b.from) < after(pid, a.from) ? b : a))
-  }
-  const out: Left[] = []
-  for (const p of procs) {
-    if (p.ppid !== '1' || !p.pgid || known.has(p.pid) || knownGroups.has(p.pgid) || isUnderKnown(p)) continue
-    const isOwnSession = p.pgid === p.pid
-    // (nor one ps can only name in brackets, as it does a process that is ending or not this person's: on 16 Nov the system's
-    // own indexer, "(mdworker_shared)", was taken for runs of four tasks)
-    // (nor an app's own helper in a group whose leader has gone: an app's crash reporter forks away from the app that started it, as
-    // Chrome's did on 17 Nov; an app's own program a script drives, such as Blender, still counts)
-    if (/^\(/.test(p.command.trim()) || (isOwnSession ? SYSTEM_PROG.test(p.command) : pids.has(p.pgid) || (SYSTEM_PROG.test(p.command) && APP_HELPER.test(p.command)))) continue
-    const n = Number(isOwnSession ? p.pid : p.pgid)
-    if (isOpenOnes(n, p, isOwnSession)) continue
-    const span = holderOf(p) ?? spanOf(n, p, isOwnSession)
-    if (span) out.push({ span: span.id, top: p, tree: treeOf(procs, p.pid) })
-  }
-  return out
-}
-// Whether a command names a process: its program, or a word of its own past its program (a script, a file it works on)
-export const isNamedBy = (command: string, cmd: string) => {
-  const words = command.trim().split(/\s+/)
-  const program = (words[0] ?? '').split('/').filter(Boolean).at(-1) ?? ''
-  const own = words.slice(1).filter(word => word.length >= 6 && !word.startsWith('-') && /^[\w./:=,@%+-]+$/.test(word)).map(word => word.split('/').filter(Boolean).at(-1) ?? word)
-  return [program, ...own].some(word => word.length >= 2 && new RegExp(`(^|[\\s/'"=])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[\\s'";|&)<>])`).test(cmd))
-}
-// The memory a process and all it started hold, in words (`7.1 GB`); undefined where ps gave none
-export const memOf = (tree: Proc[]) => {
-  const kb = tree.reduce((sum, p) => sum + (p.rss ?? 0), 0)
-  if (!kb) return undefined
-  return kb >= 1024 * 1024 ? `${(kb / 1024 / 1024).toFixed(1)} GB` : `${Math.max(1, Math.round(kb / 1024))} MB`
 }
