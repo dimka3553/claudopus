@@ -372,7 +372,7 @@ const releaseOver = async ($: EngineInterface, id: string, isDone = false) => {
       card.id !== id || (!card.releasing && !isDone)
         ? card
         : isDone
-          ? { ...card, releasing: undefined, released: at, notDone: undefined, items: card.items.map(item => (item.state === 'open' || item.state === 'doing' ? { ...item, state: 'done' as const } : item)), ...(card.status === 'done' ? { endedAt: at } : {}) }
+          ? { ...card, releasing: undefined, released: at, items: card.items.map(item => (item.state === 'open' || item.state === 'doing' ? { ...item, state: 'done' as const } : item)), ...(card.status === 'done' ? { endedAt: at } : {}) }
           : { ...card, releasing: undefined },
     ),
   )

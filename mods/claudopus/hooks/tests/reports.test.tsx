@@ -1014,7 +1014,10 @@ test('work started from a report keeps its own report linked to it, beside the o
   // The older one is kept as it was
   expect(files.get(`${MEMORY}/reports/${old.id}/report.md`)).toBe('Revenue was flat.\n')
 
-  // The same work reporting again, and the report it started from, are one row: the newest
+  // The same work reporting again, and the report it started from, are one row: the newest (the person's words start it again:
+  // a task that is done reports again only from a run of its own)
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Sam: “count the refunds too”' } as never)
+  for await (const _ of $.turn.step({ turnId: 't2', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
   await $.turn.complete({ agentId: 'a1', answer: `Revenue rose 6% once the refunds are counted.\n\n${'Refunds are in the table. '.repeat(30)}`, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
   await clock.advance(70_000)
   await until(async () => ([...files.keys()].filter(path => path.endsWith('/meta.json')).length === 3 ? true : undefined))
@@ -1283,11 +1286,14 @@ test("what a result waits on is answered however the person answers it, and only
   await $.agent.spawn({ ...spawn, description: 'Waits fix', prompt: 'build it' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release 0.2.168?' } as never)
   expect((await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w1', agentId: 'a1', items: [{ text: 'Release 0.2.168 with the waits fix?', asked: true }, 'Shall I redraw its icon?'] } as never)).result).toContain('One is the question on your card')
+  // (it hands its result in with the ask still open: a turn's end alone leaves a task that waits for the person at work)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'Built the waits fix.' } as never)
   await $.turn.complete({ agentId: 'a1', answer: 'Built the waits fix.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   // The same line as its ask is that ask's without the mark; a question that only shares its words is another question
   await $.agent.spawn({ ...spawn, description: 'Key box', prompt: 'build it' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Release the new key box?' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w2', agentId: 'a2', items: ['release the new key box', 'Should the new key box replace the old one in Settings?'] } as never)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h2', agentId: 'a2', message: 'Built the key box.' } as never)
   await $.turn.complete({ agentId: 'a2', answer: 'Built the key box.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
   await clock.advance(10)
   const fix = await reportOf('waits-fix')

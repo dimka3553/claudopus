@@ -8691,7 +8691,7 @@ const releaseOver = async ($: EngineInterface, id: string, isDone = false) => {
       card.id !== id || (!card.releasing && !isDone)
         ? card
         : isDone
-          ? { ...card, releasing: undefined, released: at, notDone: undefined, items: card.items.map(item => (item.state === 'open' || item.state === 'doing' ? { ...item, state: 'done' as const } : item)), ...(card.status === 'done' ? { endedAt: at } : {}) }
+          ? { ...card, releasing: undefined, released: at, items: card.items.map(item => (item.state === 'open' || item.state === 'doing' ? { ...item, state: 'done' as const } : item)), ...(card.status === 'done' ? { endedAt: at } : {}) }
           : { ...card, releasing: undefined },
     ),
   )
@@ -11909,7 +11909,7 @@ const panelHooks = (on: On) => {
     const answeredOf = (list: Prompt[] | undefined) => (list ?? []).filter(p => !p.endedAt || at - p.endedAt < PROMPT_SHOWN)
     const promptsAnswered = answeredShown(at)
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
-    const shownWork = own.filter(one => !isDismissed(one)).filter(one => stage(one) === 'working' || stage(one) === 'waiting' || isLingering(one, at) || runningOn(one.id).length > 0 || (stage(one) === 'failed' && at - one.endedAt < FAILED_UP) || (stage(one) === 'done' && Boolean(one.bg?.length)))
+    const shownWork = own.filter(one => !isDismissed(one)).filter(one => stage(one) === 'working' || stage(one) === 'waiting' || isLingering(one, at) || runningOn(one.id).length > 0 || (stage(one) === 'failed' && at - one.endedAt < FAILED_UP) || (stage(one) === 'done' && Boolean(one.bg?.length)) || resultWaits(one).length > 0)
     let onCards = new Map<string, { at: number; key: string; what: string; node: JSX.Element }[]>()
     let doneOnCards = new Map<string, { at: number; key: string; node: JSX.Element }[]>()
     let promptsLoose = promptsAnswered

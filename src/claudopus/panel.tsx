@@ -209,8 +209,8 @@ const panelHooks = (on: On) => {
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The cards kept up: every one working or waiting for the person, one that just ended for its pause, one that failed (it says
     // why, and has Start again) until it is dismissed or a day old, one that finished with a server left for the person, whose row
-    // and Stop are under it, and one a command run on a press still shows on. A card the person dismissed is under Finished
-    const shownWork = own.filter(one => !isDismissed(one)).filter(one => stage(one) === 'working' || stage(one) === 'waiting' || isLingering(one, at) || runningOn(one.id).length > 0 || (stage(one) === 'failed' && at - one.endedAt < FAILED_UP) || (stage(one) === 'done' && Boolean(one.bg?.length)))
+    // and Stop are under it, one whose result still asks the person something, and one a command run on a press still shows on. A card the person dismissed is under Finished
+    const shownWork = own.filter(one => !isDismissed(one)).filter(one => stage(one) === 'working' || stage(one) === 'waiting' || isLingering(one, at) || runningOn(one.id).length > 0 || (stage(one) === 'failed' && at - one.endedAt < FAILED_UP) || (stage(one) === 'done' && Boolean(one.bg?.length)) || resultWaits(one).length > 0)
     // A key box or a prompt of the app's that a task's own command raised, by that task's card: drawn on the card, never above it
     // (filled where the top of the panel is put together, below)
     let onCards = new Map<string, { at: number; key: string; what: string; node: JSX.Element }[]>()
