@@ -1,0 +1,2 @@
+- The chat hands every change to a task again. The Short requests setting is gone from Config.
+- A change to the rules, the models or the second check reaches new chats and new tasks. A chat or task that is already open keeps what it started with.
