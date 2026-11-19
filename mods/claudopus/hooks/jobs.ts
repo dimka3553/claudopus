@@ -558,6 +558,17 @@ export const labelOf = (what: string, cmd: string) => {
   return head !== what && first && what.slice(head.length + 2).startsWith(first.slice(0, 6)) ? head : what
 }
 
+// An ended command's name: its own words whole, as its row had them while it ran, or what it ran in a few words where it gave
+// none. One kept without its command has only `what`, its words or else the head of its shell line: words stay as they are, and
+// only what reads as a shell line is named by what it runs (19 Nov: every kept name was read as a shell line, so "Testing the card
+// tests" stood as "Testing the" and "Run the full check" as "Run the")
+const SHELLISH = /&&|\|\||[;|$=<>`]|\s-{1,2}\w|(?:^|\s)(?:\.{0,2}|~)\/\S|^(?:cd|until|while|for|if|export|source|bash|sh|zsh|python3?|node|npm|npx|pnpm|git|curl|az|ssh)\s/
+export const endedName = (what: string, cmd?: string) => {
+  const words = describedOf(what).text
+  if (cmd?.trim()) return labelOf(words, cmd) || 'A command'
+  return (SHELLISH.test(words) ? commandName(words) : words) || words || 'A command'
+}
+
 // What a shell line runs, in a few words: its first step that does more than move or set up, as its program and the file or word
 // it works on, each without its folders
 const LEAD = /^(cd|pushd|popd|export|source|\.|mkdir|set|unset|umask|ulimit|echo|printf|true|sleep|wait|clear)\b/

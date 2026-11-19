@@ -15,7 +15,7 @@ import { copyOf, download, FAILS, folderMarketplace, folderReady, install, insta
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, isKindSaid, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_NOW, JOB_SHAPE, whyOf, logLines, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, portOf, SERVER_CMD } from './jobs'
+import { DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, isKindSaid, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_NOW, JOB_SHAPE, whyOf, logLines, endedName, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, portOf, SERVER_CMD } from './jobs'
 import { isOwnLongScript, plainOf, SILENT_AFTER, SILENT_WARN } from './jobs'
 import { heavyOf, waitingOf, watcherOf } from './jobs'
 import type { HeavyKind, WaitKind } from './jobs'
@@ -9541,7 +9541,7 @@ type EndedRun = NonNullable<Todo['endedRuns']>[number]
 const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => ({ finished: 'done', failed: 'failed', killed: 'stopped', stopped: 'stopped', 'timed out': 'ran out of time', ended: 'ended' })[run.how] ?? run.how
 const endedLine = (run: Pick<EndedRun, 'how' | 'code'>, ran: string) =>
   run.how === 'finished' ? `Done in ${ran}` : `${{ failed: 'Failed', killed: 'Stopped', stopped: 'Stopped', 'timed out': 'Ran out of time', ended: 'Ended' }[run.how] ?? 'Ended'} after ${ran}`
-const runLabel = (run: Pick<EndedRun, 'what' | 'cmd'>) => labelOf(describedOf(String(run.what ?? '')).text, run.cmd ?? String(run.what ?? '')) || 'A command'
+const runLabel = (run: Pick<EndedRun, 'what' | 'cmd'>) => endedName(String(run.what ?? ''), run.cmd)
 const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how' | 'what' | 'cmd' | 'id' | 'endedAt'>[], shown = '', lost: string[] = []) => {
   const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
   const head = helpers && runs.length ? `${n(helpers, 'helper')} and ${n(runs.length, 'command')} ended` : helpers ? `${n(helpers, 'helper')} ended` : `${n(runs.length, 'command')} ended`
@@ -9554,10 +9554,6 @@ const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how' | 'what' | 'cm
   })
   const helpersBad = lost.length ? [`${n(lost.length, 'helper')} failed: ${lost.at(-1)}${lost.length > 1 ? ` and ${lost.length - 1} more` : ''}`] : []
   return [head, ...helpersBad, ...bad].join(' · ')
-}
-const failureOf = (runs: EndedRun[]) => {
-  const failed = runs.filter(r => r.how === 'failed').reduce<EndedRun | undefined>((a, b) => (!a || b.endedAt >= a.endedAt ? b : a), undefined)
-  return failed && !runs.some(r => r.how === 'finished' && r.endedAt >= failed.endedAt && r.what === failed.what) ? failed : undefined
 }
 const keepEnded = (one: Todo, runs: EndedRun[]) => (runs.length ? { endedRuns: [...(one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id)), ...runs].slice(-BG_KEPT) } : {})
 type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string; at?: number; why?: string }
@@ -12559,7 +12555,7 @@ const panelHooks = (on: On) => {
       const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
       const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
       const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
-      const words = plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, job.label)
+      const words = isFull ? '' : plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, job.label)
       const hasSaid = Boolean(words || full.length || pct.length)
       const live = job.live === 'busy' ? ' · still busy' : job.live === 'idle' ? ' · idle' : ''
       const [state, short]: [string, string] =
@@ -12700,42 +12696,6 @@ const panelHooks = (on: On) => {
       return twigRowOf(t, `ended-group-${id}`, text, true, '', () => ((endedFolded.has(id) ? endedFolded.delete(id) : endedFolded.add(id)), (presses += 1), redraw($)))
     }
     const withAll = (branches: Branch[]): Branch[] => branches.map(b => (b.job || b.run || b.ended ? b : { ...b, kids: [...jobBranches(b.one, true), ...withAll(b.kids), ...endedBranches(b.one)] }))
-    const failedRow = (t: Twig, run: EndedRun, owner: string) => {
-      const key = `failed-${owner}-${run.id}`
-      const width = perRow - 4 - t.depth * 2
-      const side = endedLine(run, took(run.endedAt - run.at))
-      const name = cut(runLabel(run), Math.max(12, width))
-      return (
-        <Box key={`job-${key}`} flexDirection="column" flexShrink={0}>
-          <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
-            {endedLines(t, `twig-lines-${key}`, run)}
-            <Box flexGrow={1} flexShrink={1} minWidth={0}>
-              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openEnded(run, owner)} />
-            </Box>
-          </Box>
-          {/* (that it failed and after how long, in red, then why, as a running row's second line says how it stands) */}
-          {twigUnder(
-            t,
-            `why-${key}`,
-            <Box flexDirection="row" flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-              <Box flexShrink={0}>
-                <Text color="error">{side}</Text>
-              </Box>
-              {run.why ? (
-                <Box flexShrink={0}>
-                  <Text dimColor>{' · '}</Text>
-                </Box>
-              ) : null}
-              {run.why ? (
-                <Box flexShrink={1} minWidth={0}>
-                  <Text dimColor wrap="truncate-end">{run.why}</Text>
-                </Box>
-              ) : null}
-            </Box>,
-          )}
-        </Box>
-      )
-    }
     const jobBranches = (card: Todo, isAll = false): Branch[] => {
       const jobs = jobsOf(card)
       if (isAll || jobs.length <= JOBS_SHOWN) return jobs.map(job => ({ one: card, job, kids: [] }))
@@ -12758,10 +12718,9 @@ const panelHooks = (on: On) => {
       const rest = under.length - twigs.filter(t => !t.job).length
       if (!rest && !runs.length) return twigsOf(branches).map(rowOf)
       const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
-      const failed = failureOf(runs)
       const onTree = new Set(twigs.flatMap(t => (!t.job && t.one ? [t.one.id] : [])))
       const lost = under.filter(kid => kid.status === 'failed' && !onTree.has(kid.id)).map(kid => titleOf(kid))
-      return [...twigs.map(rowOf), ...(failed ? [failedRow({ ...closing, isLast: false }, failed, one.id)] : []), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs, failed?.id, lost), true, '', () => openWork($, one.id))]
+      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs, '', lost), true, '', () => openWork($, one.id))]
     }
 
     const flowMine = await sessionName($)

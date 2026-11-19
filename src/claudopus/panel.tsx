@@ -770,7 +770,8 @@ const panelHooks = (on: On) => {
       // a count without its unit, for the narrowest line, so how far it is stays beside how long is left
       const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
       // Its own plain words for what it does now; a watch's are its last event
-      const words = plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, job.label)
+      // (none beside a full count: what a script said as it counted its last thing, "command finished", read against "still running")
+      const words = isFull ? '' : plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, job.label)
       const hasSaid = Boolean(words || full.length || pct.length)
       // Silent, whether its programs still use the processor: still busy, or idle (stuck, or waiting on something far away)
       const live = job.live === 'busy' ? ' · still busy' : job.live === 'idle' ? ' · idle' : ''
@@ -940,42 +941,6 @@ const panelHooks = (on: On) => {
     }
     // (every helper with what it has running, then its own helpers, then what of its has ended)
     const withAll = (branches: Branch[]): Branch[] => branches.map(b => (b.job || b.run || b.ended ? b : { ...b, kids: [...jobBranches(b.one, true), ...withAll(b.kids), ...endedBranches(b.one)] }))
-    const failedRow = (t: Twig, run: EndedRun, owner: string) => {
-      const key = `failed-${owner}-${run.id}`
-      const width = perRow - 4 - t.depth * 2
-      const side = endedLine(run, took(run.endedAt - run.at))
-      const name = cut(runLabel(run), Math.max(12, width))
-      return (
-        <Box key={`job-${key}`} flexDirection="column" flexShrink={0}>
-          <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
-            {endedLines(t, `twig-lines-${key}`, run)}
-            <Box flexGrow={1} flexShrink={1} minWidth={0}>
-              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openEnded(run, owner)} />
-            </Box>
-          </Box>
-          {/* (that it failed and after how long, in red, then why, as a running row's second line says how it stands) */}
-          {twigUnder(
-            t,
-            `why-${key}`,
-            <Box flexDirection="row" flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-              <Box flexShrink={0}>
-                <Text color="error">{side}</Text>
-              </Box>
-              {run.why ? (
-                <Box flexShrink={0}>
-                  <Text dimColor>{' · '}</Text>
-                </Box>
-              ) : null}
-              {run.why ? (
-                <Box flexShrink={1} minWidth={0}>
-                  <Text dimColor wrap="truncate-end">{run.why}</Text>
-                </Box>
-              ) : null}
-            </Box>,
-          )}
-        </Box>
-      )
-    }
     // Each branch with the jobs its helper has running first, under it, as the card's own come first under the card
     // At most JOBS_SHOWN each, the newest; the rest one row that says how many more run and opens the card's Details
     // In Details every one is shown
@@ -1008,13 +973,12 @@ const panelHooks = (on: On) => {
       const rest = under.length - twigs.filter(t => !t.job).length
       if (!rest && !runs.length) return twigsOf(branches).map(rowOf)
       const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
-      // The command that failed last, not yet run again and finished, has its own row over the closing one: what it was, that it
-      // failed and after how long, and why under it
-      const failed = failureOf(runs)
+      // A command that failed is named on the closing row with the others that ended, never a row of its own: one stood among
+      // what still ran long after it failed (19 Nov); how and why it failed is in Details and its log
       // (and the helpers that failed and have left the tree, by name)
       const onTree = new Set(twigs.flatMap(t => (!t.job && t.one ? [t.one.id] : [])))
       const lost = under.filter(kid => kid.status === 'failed' && !onTree.has(kid.id)).map(kid => titleOf(kid))
-      return [...twigs.map(rowOf), ...(failed ? [failedRow({ ...closing, isLast: false }, failed, one.id)] : []), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs, failed?.id, lost), true, '', () => openWork($, one.id))]
+      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs, '', lost), true, '', () => openWork($, one.id))]
     }
 
     // ---- A workflow's card, in blue: its stages in order with the one being run, who is in it, and its rounds ----

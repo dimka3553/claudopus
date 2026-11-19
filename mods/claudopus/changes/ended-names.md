@@ -1,0 +1,3 @@
+- An ended command is named by its own words, whole. In 0.2.216 a command kept from before that version had its words cut to two, such as "Testing the" and "Run the".
+- A command that failed no longer keeps a red row on its card among what still runs. The closing row names it: `5 commands ended · 1 failed: Run the scoring`. How and why it failed is in Details and its log.
+- A full count on a command that still runs says only `12 of 12 heads · still running`, without the script's last words after it.

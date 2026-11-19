@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { heavyOf, commandName, describedOf, endOf, expiresIn, leftSeconds, foldJobs, isOutputEnded, isOwnLongScript, isWaitOnly, jobKindOf, labelOf, latestOf, plainOf, portOf, waitOf, waitingOf, watcherOf, whyOf, logLines, PLAIN_MOST, WHY_MOST, JOB_GLYPH, JOB_SHAPE } from './jobs'
+import { heavyOf, commandName, describedOf, endOf, expiresIn, leftSeconds, foldJobs, isOutputEnded, isOwnLongScript, isWaitOnly, jobKindOf, labelOf, latestOf, plainOf, portOf, waitOf, waitingOf, watcherOf, whyOf, logLines, endedName, PLAIN_MOST, WHY_MOST, JOB_GLYPH, JOB_SHAPE } from './jobs'
 import type { WaitKind } from './jobs'
 import type { Job } from './jobs'
 
@@ -453,6 +453,20 @@ test('how a run ended, from the last line the engine writes on its output: finis
   // the engine's own last line
   expect(logLines('\nloading\r 10%\r 55%\n\x1b[31merror: no scans\x1b[0m\n\nbye\n\n[exited with code 1]\n')).toEqual([' 55%', 'error: no scans', '', 'bye'])
   expect(logLines('\n[killed]\n')).toEqual([])
+  // An ended command's name is its own words whole, with its command kept or not, and only a shell line is named by what it runs
+  // (19 Nov: twenty rows read "Testing the", "Run the", "Run read", their words taken for a program and its first word)
+  const names: [string, string | undefined, RegExp][] = [
+    ['Testing the card tests after the change', undefined, /^Testing the card tests after the change$/],
+    ['Testing everything once on the merged code', undefined, /^Testing everything once on the merged code$/],
+    ['Run the full check before the release', undefined, /^Run the full check before the release$/],
+    ['Run: read public DNS records and site security headers', undefined, /^Run: read public DNS records and site security headers$/],
+    ['Run settle (about 2 min)', undefined, /^Run settle$/],
+    ['Run the fit', 'python3 fit.py --all', /^Run the fit$/],
+    ['cd /Users/sam/Documents/GitHub; S=/private/tmp/x python3 read_settings.py', undefined, /^python3? read_settings\.py$/],
+    ['', 'cd /repo && python3 fit.py --all', /^python3? fit\.py$/],
+  ]
+  for (const [what, cmd, name] of names) expect(endedName(what, cmd)).toMatch(name)
+  expect(endedName('until [ -f /private/tmp/x/done ]; do date; done')).not.toMatch(/private|\[/)
   expect(endOf('it printed [killed] mid-line and goes on\n')).toBeUndefined()
   expect(isOutputEnded('\n[killed]\n')).toBe(true)
   expect(expiresIn('Monitor started (task b0zhjoyke, expires in 30m unless the source ends first')).toBe(1_800_000)
