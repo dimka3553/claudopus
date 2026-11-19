@@ -11577,8 +11577,8 @@ const panelHooks = (on: On) => {
     const boxHeld = paneId.startsWith(WORK_PANE) ? paneBoxHeld.get(`${paneId}|${e.surface}`) : undefined
     if (boxHeld && isPaneBoxHeld(paneId, heldAt) && boxHeld.shape === paneBoxShape(boxHeld.id)) return boxHeld.drawing as Awaited<ReturnType<typeof next>>
     const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
-    const line = `${paneId}|${e.surface}`
-    const recent = newestFor(line, shownKey)
+    const paneLine = `${paneId}|${e.surface}`
+    const recent = newestFor(paneLine, shownKey)
     if (recent && paneId === LIST && isPressHeld(heldAt)) return ((listHeldAt = heldAt), (isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
     const sign = paneId === LIST && e.surface === 'desktop' ? await personSign($) : ''
     if (recent && sign && !isTyping && isInUse(heldAt, e.props.scroll.offset) && shownSigns.get(shownKey) === sign && heldAt - (shownAts.get(shownKey) ?? 0) < ENGAGED) {
@@ -11588,8 +11588,8 @@ const panelHooks = (on: On) => {
     }
     if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt, false, false)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
     freshBegins(shownKey)
-    const askedNo = (shownAsked.get(line) ?? 0) + 1
-    shownAsked.set(line, askedNo)
+    const askedNo = (shownAsked.get(paneLine) ?? 0) + 1
+    shownAsked.set(paneLine, askedNo)
     const madeFrom = Date.now()
     let isMade = false
     try {
@@ -13049,10 +13049,10 @@ const panelHooks = (on: On) => {
       </Box>
     )
     })()
-    const newest = paneNewest.get(line)
-    if (newest?.key === shownKey && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), newest.drawing as Awaited<ReturnType<typeof next>>)
-    if ((shownKept.get(line) ?? 0) > askedNo && newest) return newest.drawing as Awaited<ReturnType<typeof next>>
-    shownKept.set(line, askedNo)
+    const newestMade = paneNewest.get(paneLine)
+    if (newestMade?.key === shownKey && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), newestMade.drawing as Awaited<ReturnType<typeof next>>)
+    if ((shownKept.get(paneLine) ?? 0) > askedNo && newestMade) return newestMade.drawing as Awaited<ReturnType<typeof next>>
+    shownKept.set(paneLine, askedNo)
     shownSigns.set(shownKey, sign)
     shownAts.set(shownKey, heldAt)
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
@@ -13061,7 +13061,7 @@ const panelHooks = (on: On) => {
       if (id) paneBoxHeld.set(`${paneId}|${e.surface}`, { id, shape: paneBoxShape(id), drawing })
       else paneBoxHeld.delete(`${paneId}|${e.surface}`)
     }
-    paneNewest.set(line, { key: shownKey, drawing })
+    paneNewest.set(paneLine, { key: shownKey, drawing })
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     isMade = true
     return drawing

@@ -2423,6 +2423,28 @@ test('a card never goes back to an older picture once a newer one was shown, how
   const later = await card()
   expect(later).toContain('Released as 1.2.3')
   for (const where of [DOWN, TOP, DOWN]) (await viewAt(where), expect(await card()).toEqual(later))
+  // The same through the rest of its life: handed in it is Delivered, Mark as done turns it green where it stands, and it then goes
+  // under Finished. Each of those is seen once, in that order, wherever the view is when the panel is asked for
+  await steps($, 1, 'claude-fable-5-2', 'a1')
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'Released as 1.2.3.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'turn-a1', reason: 'answer', agentId: 'a1' } as never)
+  const STAGES = ['working', 'delivered', 'done', 'finished']
+  const stageNow = async () => {
+    const words = (await card()).join(' | ')
+    return words.includes('◐ Delivered') ? 'delivered' : words.includes('✓ Done') ? 'done' : words.includes('Releas') ? 'working' : 'finished'
+  }
+  const seen: string[] = []
+  const look = async () => {
+    for (const where of [TOP, DOWN, TOP, DOWN]) (await viewAt(where), seen.push(await stageNow()))
+  }
+  await look()
+  expect(seen.at(-1)).toBe('delivered')
+  await pane.press({ key: (await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Mark as done')?.key ?? '' })
+  expect(await until(async () => ((await stageNow()) === 'done' ? true : undefined))).toBe(true)
+  for (let i = 0; i < 6; i += 1) (await look(), await clock.advance(500))
+  expect(seen.at(-1)).toBe('finished')
+  expect(seen.map(stage => STAGES.indexOf(stage))).toEqual([...seen.map(stage => STAGES.indexOf(stage))].sort((x, y) => x - y))
+  expect([...new Set(seen)]).toEqual(['delivered', 'done', 'finished'])
   await pane.unmount()
 })
 
