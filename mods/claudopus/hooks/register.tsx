@@ -958,7 +958,7 @@ const STILL_TO_DO = (items: string[]) =>
 const KEEP_GOING = (items: string[]) =>
   `From Claudopus, not {name}: don't end here, your task isn't finished. Still to do: ${quotedItems(items)}. Nothing of yours is running that would start you again (no command in the background, no detached command started with \`echo $!\` after it, no helper at work, no wake_me, no question on your card), so if your step ends now this work stops undone. Claude Code's note that your report has not been delivered doesn't apply yet: send your report only once every to-do is ticked. Carry on now with the first of them. If you expected something you started to be running, look at its log: it may have failed or ended. To wait for something, run it in the background or detached with \`echo $!\` after it, or call wake_me for a file, a page or a time, then end your step. Tick each to-do as soon as it is done. For one only {name} can do, ask with the ask tool and end your step.`
 const NOT_TICKED = (items: string[]) =>
-  `Not sent: ${items.length === 1 ? 'a to-do of yours is' : `${items.length} of your to-dos are`} still to do: ${quotedItems(items)}. Do ${items.length === 1 ? 'it' : 'each'} now, or tick it done if it is done already, or drop it if it will no longer be done and say why in your report, then hand back your report. One that only {name} can do or decide stays as it is: record it with the waits tool, name it in your report under "Not done", with what {name} needs to do, and send your report again. Claudopus then shows it as not done on your card and in your result, and your card never says Done while a to-do is left.`
+  `Not sent: ${items.length === 1 ? 'a to-do of yours is' : `${items.length} of your to-dos are`} still to do: ${quotedItems(items)}. Do ${items.length === 1 ? 'it' : 'each'} now, or tick it done if it is done already, or drop it if it will no longer be done and say why in your report, then hand back your report. One that only {name} can do or decide stays as it is: name it in your report under "Not done", with what {name} needs to do, and send your report again. Claudopus then shows it as not done on your card and in your result, and your card never says Done while a to-do is left.`
 const NOT_DONE_IN_CHAT = (title: string, items: string[]) =>
   `From Claudopus: the task "${title}" sent its result with ${items.length === 1 ? 'a to-do' : `${items.length} to-dos`} not done: ${quotedItems(items)}. When you pass its result on to {name}, say these are not done.`
 const REPORT_TAKEN = 'Report delivered to your caller: Claudopus gives it to the chat, which shows it to {name}. Your work is done: end your step now, writing nothing more.'
@@ -2385,11 +2385,17 @@ const welcomeCard = ($: EngineInterface, ui: Ui) => (
 
 
 const CONTINUE_FROM = (r: Report, now: number, words: string) => `Continue from the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: ${words}`
-const continueFrom = async ($: EngineInterface, id: string, words: string) => {
+const continueFrom = ($: EngineInterface, id: string, words: string) => {
+  const run = continueNow($, id, words)
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
+  return run
+}
+const continueNow = async ($: EngineInterface, id: string, words: string): Promise<void> => {
   const r = (await read($, reports)).find(one => one.id === id)
   if (!r || !words.trim()) return
   const card = r.agent ? (await read($, todos)).find(one => one.id === r.agent && canChange(one)) : undefined
-  if (card) return sendChange($, card.id, words)
+  if (card) return changeTask($, card.id, words.trim())
   await sendForPerson($, CONTINUE_FROM(r, await $.clock.now(), words.trim()))
 }
 
@@ -4457,11 +4463,9 @@ const announce = async ($: EngineInterface) => {
   if (config.sound !== false && items.some(one => one.isDone)) void $.audio.play({ asset: READY_SOUND }).catch(err => log($, `ready sound not played: ${String(err)}`))
   if (config.notifications === false) return
   const [first] = items
-  const isWaiting = (one: (typeof items)[number]) => 'isWaiting' in one && Boolean(one.isWaiting)
-  const done = items.filter(one => one.isDone && !isWaiting(one)).length
-  const waiting = items.filter(isWaiting).length
-  const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} tasks are done` : waiting ? `${items.length} tasks ended · ${waiting} waiting for you` : `${items.length} tasks ended`
-  const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${isWaiting(one) ? 'waiting for you' : one.isDone ? 'done' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
+  const done = items.filter(one => one.isDone).length
+  const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} tasks are done` : `${items.length} tasks ended`
+  const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${one.isDone ? 'done' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
   await alertPerson($, 'ready', title, text, `ready-${ids.map(one => one.id).join('-')}`)
 }
 
@@ -5705,6 +5709,13 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
   const told = working ? await tell($, target, to) : undefined
+  if (ask.refused && !isReply) {
+    if (told && !told.deny) writtenIn($, target, one.id)
+    else void log($, `${said} on a blocked command of ${target}, which is not at a step: it is not started again for it`)
+    sentReplies.set(one.id, { ...sent, to: 'pressed' })
+    redraw($)
+    return void askGone($, one, said)
+  }
   if (told && !told.deny) {
     writtenIn($, target, one.id)
     sentReplies.set(one.id, { ...sent, to: 'work' })

@@ -587,6 +587,15 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   // Marked on its way once written, so a step that began before it never counts as reading it
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
   const told = working ? await tell($, target, to) : undefined
+  // A press on a blocked command starts no task again and is never sent twice: a task at a step reads it there, and one that has
+  // ended hears what the command printed when it ends (runit.tsx), or nothing of a command that was not run
+  if (ask.refused && !isReply) {
+    if (told && !told.deny) writtenIn($, target, one.id)
+    else void log($, `${said} on a blocked command of ${target}, which is not at a step: it is not started again for it`)
+    sentReplies.set(one.id, { ...sent, to: 'pressed' })
+    redraw($)
+    return void askGone($, one, said)
+  }
   if (told && !told.deny) {
     writtenIn($, target, one.id)
     sentReplies.set(one.id, { ...sent, to: 'work' })

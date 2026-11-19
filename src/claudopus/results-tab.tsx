@@ -1,14 +1,21 @@
 // The Results tab and each result's own tab: the list, a result drawn whole, put away and brought back
 
-// Continue on a result: the box above the chat opens for what to do next (openBar), and what is typed there is sent as the
-// person's own message naming the result by its path, a real submit as Start again's is. Nothing is put in the chat's own box
+// Change something on a result: the box above the chat opens (openBar), and what is typed there goes to the result's own task
+// while its card can be changed, else as the person's own message naming the result by its path, a real submit as Start again's is. Nothing is put in the chat's own box
 const CONTINUE_FROM = (r: Report, now: number, words: string) => `Continue from the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: ${words}`
-const continueFrom = async ($: EngineInterface, id: string, words: string) => {
+// (on its way from the press's own hook, which waits for it before it sends what the press left to send: answersOnWay)
+const continueFrom = ($: EngineInterface, id: string, words: string) => {
+  const run = continueNow($, id, words)
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
+  return run
+}
+const continueNow = async ($: EngineInterface, id: string, words: string): Promise<void> => {
   const r = (await read($, reports)).find(one => one.id === id)
   if (!r || !words.trim()) return
   // To that result's own task while its card is still there to carry on from; else as the person's message naming the result
   const card = r.agent ? (await read($, todos)).find(one => one.id === r.agent && canChange(one)) : undefined
-  if (card) return sendChange($, card.id, words)
+  if (card) return changeTask($, card.id, words.trim())
   await sendForPerson($, CONTINUE_FROM(r, await $.clock.now(), words.trim()))
 }
 // ---- Reports in panes of their own: the list as "Reports", and each report opened as a pane titled with its name ----

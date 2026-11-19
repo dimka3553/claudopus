@@ -1001,7 +1001,7 @@ test('an answer to ended work that cannot be started again is left in the chat a
   await list.unmount()
 })
 
-test('in a chat the app runs on another Mac over ssh, a password or key the runners need is typed in the panel and goes only into the keychain', SLOW, async ($, on) => {
+test('in a chat the app runs on another Mac over ssh, a key the runners need is typed in the box above the chat and goes only into the keychain; a password or key the person refuses goes with one grey line', SLOW, async ($, on) => {
   const { keep, settle, files, logged, keychain, clock } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
   await $.session.start(start)
   await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
@@ -1010,17 +1010,24 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const boxButton = async (box: string, what: string) => until(async () => (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith(`box-${box}-${what}-`)))
+  const field = async (box: string) => until(async () => (await bar.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`band-${box}-reply-`)))
   await clock.advance(1000)
   // The chat is told only the name, and where to type it
-  expect(await until(async () => logged.find(line => line.includes('GITHUB_TOKEN')))).toContain('its box in the Claudopus panel')
-  const field = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${id}-field`)))
-  expect(field).toBeDefined()
-  expect((await list.find({ type: 'Text', text: GITHUB_BOX }))?.props.color).toBe('#E5A50A')
+  expect(await until(async () => logged.find(line => line.includes('GITHUB_TOKEN')))).toBe(`${GITHUB_ASKED} Press Paste it on it in the Claudopus panel (/claudopus opens it) and type it in the box above the chat, never in the chat itself. Or answer in words, such as where it already is.`)
+  // Its block: the dim label of its kind, what is asked in amber, and where it goes; nothing is typed in the panel
+  expect((await until(async () => list.find({ type: 'Text', text: GITHUB_ASKED })))?.props.color).toBe(AMBER)
+  expect((await list.find({ type: 'Text', text: 'Key' }))?.props.dimColor).toBe(true)
+  expect(await list.find({ type: 'Markdown', text: KEY_GOES })).toBeDefined()
+  expect(await list.findAll({ type: 'Input' } as never)).toEqual([])
+  await list.press({ key: (await boxButton(id, 'paste'))?.key ?? '' })
   const value = 'ghp_s3cret"with\\quote'
-  await list.input({ key: field?.key ?? '', text: value })
-  // It goes to the keychain under the box's id, escaped for security's own reading, and the box goes
+  await bar.input({ key: (await field(id))?.key ?? '', text: value })
+  // It goes to the keychain under the box's id, escaped for security's own reading, and the block goes, one grey line in its place
   expect(await until(async () => keychain.find(one => one.includes(id)))).toBe(`add-generic-password -U -s "claudopus-box" -a "${id}" -l "Claudopus box" -w "ghp_s3cret\\"with\\\\quote"\n`)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: GITHUB_BOX })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: GITHUB_ASKED })) ? undefined : true))).toBe(true)
+  expect((await until(async () => list.find({ type: 'Text', text: '✓ You gave GITHUB_TOKEN' })))?.props.dimColor).toBe(true)
   // Nowhere else: not the chat, its saved words, the log or any file
   expect(logged.some(line => line.includes('s3cret'))).toBe(false)
   expect([...files.values()].some(text => text.includes('s3cret'))).toBe(false)
@@ -1028,33 +1035,41 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   const third = '2f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${third}.json`, JSON.stringify({ id: third, kind: 'secret', name: 'NPM_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   await clock.advance(1000)
-  const curly = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${third}-field`)))
+  await list.press({ key: (await boxButton(third, 'paste'))?.key ?? '' })
+  const curly = await field(third)
   const before = keychain.length
-  await list.input({ key: curly?.key ?? '', text: 'it’s-mine' })
-  expect(await until(async () => (await list.findAll({ type: 'Text' })).find(one => (one.text ?? '').startsWith('That has a line break, a curly quote')))).toBeDefined()
-  // and one whose runner has stopped takes nothing
+  await bar.input({ key: curly?.key ?? '', text: 'it’s-mine' })
+  expect(await until(async () => (await bar.findAll({ type: 'Text' })).find(one => (one.text ?? '').startsWith('That has a line break, a curly quote')))).toBeDefined()
+  // in a new field, empty, to type it again; and one whose runner has stopped takes nothing
+  const again = await until(async () => (await bar.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`band-${third}-reply-`) && one.key !== curly?.key))
+  expect(again).toBeDefined()
   files.delete(`${MEMORY}/boxes/${third}.json`)
-  const again = (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${third}-field`))
-  await list.input({ key: again?.key ?? '', text: 'plain-value-1234' })
+  await bar.input({ key: again?.key ?? '', text: 'plain-value-1234' })
   await clock.advance(1000)
   expect(keychain.length).toBe(before)
-  // A box cancelled removes its request, which the runner takes as cancelled
+  // A password the person does not allow removes its request, which the runner takes as cancelled
   const other = '1f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${other}.json`, JSON.stringify({ id: other, kind: 'admin', host: 'here', key: BOX_PUBLIC, chat: 'engine-id', at: 1_700_000_000_000 }))
   await clock.advance(1000)
-  const cancel = await until(async () => (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith(`box-${other}-cancel`)))
+  const cancel = await boxButton(other, 'cancel')
+  expect(cancel?.props.label).toBe("Don't allow")
+  expect(await list.find({ type: 'Text', text: ADMIN_ASKED })).toBeDefined()
   await list.press({ key: cancel?.key ?? '' })
   expect(await until(async () => (files.has(`${MEMORY}/boxes/${other}.json`) ? undefined : true))).toBe(true)
-  // Its place says what was done, for a minute
-  expect(await until(async () => list.find({ type: 'Text', text: 'You cancelled it. Nothing was saved, and the command that asked stops without it.' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'The admin password of this Mac' })).toBeDefined()
+  // Its block goes at once, and one grey line says what was pressed, for a minute
+  expect(await list.find({ type: 'Text', text: ADMIN_ASKED })).toBeUndefined()
+  const PRESSED = /^✓ You pressed “Don.t allow”$/
+  expect((await until(async () => list.find({ type: 'Text', text: PRESSED })))?.props.dimColor).toBe(true)
   await clock.advance(61_000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'The admin password of this Mac' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: PRESSED })) ? undefined : true))).toBe(true)
+  await Promise.all([list.unmount(), bar.unmount()])
   await settle()
 })
 
-test("where the bar above the prompt takes a box, a key box has no field in the panel, whose window the app drags to a field that holds the cursor: Paste the key or Give a response instead opens its field in the bar; the key goes only to the keychain, a response only to the command that asked, and one that looks like the key itself is held until the person says which", async ($, on) => {
+test("where the bar above the prompt takes a box, a key or a password has no field in the panel, whose window the app drags to a field that holds the cursor: Paste it, Type it or Answer in words opens the one box in the bar; the key goes only to the keychain, a password only sealed to the command that asked, words only to that command, and words that look like the key itself are held until the person says which", async ($, on) => {
   const { keep, settle, files, logged, keychain, clock } = world(on, { panes: ['claudopus'] })
+  const filled: string[] = []
+  on('prompt.fill', (_, e) => (filled.push(e.text), { isFilled: true }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Deploy the site', prompt: 'deploy it' } as never)
@@ -1069,38 +1084,41 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
   const fieldsIn = async (site: Site, id: string) => (await site.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').includes(id))
   const labelled = async (site: Site, label: string) => (await site.findAll({ type: 'Button' })).filter(b => b.props.label === label)
   const press = async (site: Site, label: string) => site.press({ key: (await until(async () => (await labelled(site, label))[0]))?.key ?? '' })
+  // The buttons of a box's block, in the order drawn
+  const boxButtons = async (id: string) => (await list.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith(`box-${id}-`)).map(b => String(b.props.label))
   const ask = async (id: string) => (files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 })), await clock.advance(1000))
-  // The key: no field in the panel, two buttons and Cancel; Paste the key opens the field in the bar, and the box says where it is
+  // The key: no field in the panel; Paste it, Don't give it and Answer in words
   const key = '0a1e2d3c-4b5a-4987-a654-3210fedcba98'
   await ask(key)
-  expect(await until(async () => list.find({ type: 'Text', text: GITHUB_BOX }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: GITHUB_ASKED }))).toBeDefined()
   // On the card of the task whose command asked, under its title, its edge amber; counted once as what waits
   const order = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
   expect(order.indexOf('Deploy the site')).toBeGreaterThan(-1)
-  expect(order.indexOf('Deploy the site')).toBeLessThan(order.indexOf(GITHUB_BOX))
-  expect(order.indexOf(GITHUB_BOX)).toBeLessThan(order.indexOf('Sign the build'))
-  expect(order.find(one => /needs? you|waiting for you/.test(one))).toMatch(/^1 /)
-  expect(((await list.findAll({ type: 'Box' })) as { props: Record<string, unknown> }[]).some(one => one.props.width === 1 && one.props.backgroundColor === '#E5A50A')).toBe(true)
-  expect(await until(async () => ((await labelled(list, 'Answer in words')).length === 1 ? true : undefined))).toBe(true)
-  expect(await fieldsIn(list, key)).toEqual([])
-  expect((await labelled(list, 'Cancel')).length).toBe(1)
-  await press(list, 'Paste the key')
+  expect(order.indexOf('Deploy the site')).toBeLessThan(order.indexOf(GITHUB_ASKED))
+  expect(order.indexOf(GITHUB_ASKED)).toBeLessThan(order.indexOf('Sign the build'))
+  expect(order.find(one => /waiting for you/.test(one))).toMatch(/^1 /)
+  expect(((await list.findAll({ type: 'Box' })) as { props: Record<string, unknown> }[]).some(one => one.props.width === 1 && one.props.backgroundColor === AMBER)).toBe(true)
+  expect(await until(async () => ((await boxButtons(key)).length === 3 ? boxButtons(key) : undefined))).toEqual(['Paste it', "Don't give it", 'Answer in words'])
+  expect(await list.findAll({ type: 'Input' } as never)).toEqual([])
+  // Paste it opens the one box above the chat, named for the key and its task; the block offers to close it
+  await press(list, 'Paste it')
   const pasted = await until(async () => (await fieldsIn(bar, key))[0])
-  expect(await list.find({ type: 'Text', text: '✎ Type it in the box above the chat' })).toBeDefined()
-  expect(await fieldsIn(list, key)).toEqual([])
+  expect(await oneBox(bar)).toEqual({ head: '↳ GITHUB_TOKEN for “Deploy the site”', fields: ['Paste it here'], enter: SENDS_KEY, buttons: ['Send', 'Close'] })
+  expect(await until(async () => ((await boxButtons(key)).includes('Close') ? boxButtons(key) : undefined))).toEqual(['Close', "Don't give it"])
+  expect(await list.findAll({ type: 'Input' } as never)).toEqual([])
   await bar.input({ key: pasted?.key ?? '', text: 'ghp_kept0nlyInKeychain' })
   expect(await until(async () => keychain.find(one => one.includes(key)))).toContain('-w "ghp_kept0nlyInKeychain"')
   expect(await until(async () => ((await fieldsIn(bar, key)).length === 0 ? true : undefined))).toBe(true)
   expect(files.has(`${MEMORY}/boxes/${key}.reply`)).toBe(false)
-  // A response: its words go beside the request for the runner, which prints them to the command's caller; nothing is kept
+  expect((await until(async () => list.find({ type: 'Text', text: '✓ You gave GITHUB_TOKEN' })))?.props.dimColor).toBe(true)
+  // Answer in words: its words go beside the request for the runner, which prints them to the command's caller; nothing is kept
   const said = '1a1e2d3c-4b5a-4987-a654-3210fedcba98'
   await ask(said)
   await press(list, 'Answer in words')
   const words = await until(async () => (await fieldsIn(bar, said))[0])
-  // A key is one line; a response a box of four lines, as the reply box is, and neither has the small send button the app draws
-  // for a submitLabel
-  expect(pasted?.props.rows).toBeUndefined()
-  expect(words?.props.rows).toBe(4)
+  expect(await oneBox(bar)).toEqual({ head: '↳ Your answer in place of GITHUB_TOKEN', fields: ['Type your answer'], enter: SENDS_KEY, buttons: ['Send', 'Close'] })
+  // The one box is four lines whatever it is for, and has no small send button the app draws for a submitLabel
+  expect([pasted?.props.rows, words?.props.rows]).toEqual([4, 4])
   expect([pasted, words].some(one => 'submitLabel' in (one?.props ?? {}))).toBe(false)
   const kept = keychain.length
   // Sent with the row's Send, the big button first, Close the small one after it
@@ -1110,7 +1128,7 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
   expect(await until(async () => files.get(`${MEMORY}/boxes/${said}.reply`))).toBe('The person answered in the Claudopus panel instead of giving GITHUB_TOKEN, in their own words: It is already in /Users/sam/Documents/GitHub/3d-sandbox/.env.local as AI_GATEWAY_API_KEY, in the faceiq-labs branch too\n')
   expect(await until(async () => (files.has(`${MEMORY}/boxes/${said}.json`) ? undefined : true))).toBe(true)
   expect(keychain.length).toBe(kept)
-  expect(await until(async () => list.find({ type: 'Text', text: 'You answered in words. Your answer went to the command that asked, and nothing was saved.' }))).toBeDefined()
+  expect((await until(async () => list.find({ type: 'Text', text: /^✓ You answered “It is already in / })))?.props.dimColor).toBe(true)
   // Words that look like the key itself are held, sent nowhere, until the person keeps them as the key (the key's word alone, never
   // the words around it) or sends them anyway; a path, a setting's name and a branch's, above, are no key
   const slip = '2a1e2d3c-4b5a-4987-a654-3210fedcba98'
@@ -1124,37 +1142,60 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
   await press(bar, 'Save as the key')
   expect(await until(async () => keychain.find(one => one.includes(slip)))).toContain('-w "ghp_A1b2C3d4E5f6G7h8I9j0"')
   expect(files.has(`${MEMORY}/boxes/${slip}.reply`)).toBe(false)
-  // and an admin password box keeps its own field
+  // An admin password: Type it opens the same box, and what is typed goes to the keychain only sealed to its runner's key
   const admin = '3a1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${admin}.json`, JSON.stringify({ id: admin, kind: 'admin', host: 'here', key: BOX_PUBLIC, chat: 'engine-id', at: 1_700_000_000_000 }))
   await clock.advance(1000)
-  expect(await until(async () => (await fieldsIn(list, admin))[0])).toBeDefined()
+  expect(await until(async () => ((await boxButtons(admin)).length ? boxButtons(admin) : undefined))).toEqual(['Type it', "Don't allow"])
+  expect((await list.find({ type: 'Text', text: ADMIN_ASKED }))?.props.color).toBe(AMBER)
+  expect((await list.findAll({ type: 'Text' })).some(one => /^Password( · |$)/.test(String(one.text ?? '')) && one.props.dimColor)).toBe(true)
+  expect(await list.find({ type: 'Markdown', text: ADMIN_GOES })).toBeDefined()
+  expect(await list.findAll({ type: 'Input' } as never)).toEqual([])
+  await press(list, 'Type it')
+  const typedIn = await until(async () => (await fieldsIn(bar, admin))[0])
+  expect(await oneBox(bar)).toEqual({ head: expect.stringMatching(/^↳ This Mac's password/), fields: ['Type it here'], enter: SENDS_KEY, buttons: ['Send', 'Close'] })
+  await bar.input({ key: typedIn?.key ?? '', text: 'made-up-passw0rd' })
+  expect(await until(async () => keychain.find(one => one.includes(admin)))).toContain(`-w "${boxSealed(BOX_PUBLIC, 'made-up-passw0rd')}"`)
+  expect(keychain.some(one => one.includes('made-up-passw0rd'))).toBe(false)
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You gave the password' }))).toBeDefined()
+  // Nothing was ever put into the chat's own box
+  expect(filled).toEqual([])
   await list.unmount()
   await bar.unmount()
   await settle()
 })
 
-test('a chat on this Mac\'s own screen asks in the panel the same way, and opens the panel for it', async ($, on) => {
+test('a chat on this Mac\'s own screen is told of a key and its panel opened the same way; in the terminal, where the bar above the prompt draws no field, the key\'s block has the one field itself, which Answer in words turns to words and back', async ($, on) => {
   const { keep, settle, files, logged, keychain, clock, opened } = world(on)
   await $.session.start(start)
   // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
   void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
-  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
   await clock.advance(1000)
-  expect(await until(async () => logged.find(line => line.includes('GITHUB_TOKEN')))).toContain('its box in the Claudopus panel')
+  expect(await until(async () => logged.find(line => line.includes('GITHUB_TOKEN')))).toContain('Press Paste it on it in the Claudopus panel')
   // The chat takes the request, which tells the runner a panel asks, and brings the panel up with the field ready
   expect(opened.filter(one => one === 'claudopus').length).toBeGreaterThan(0)
-  const field = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${id}-field`)))
+  const fields = async () => (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith(`box-${id}-field`))
+  const buttons = async () => (await list.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith(`box-${id}-`))
+  expect((await until(async () => ((await fields()).length ? fields() : undefined)))?.map(one => one.props.placeholder)).toEqual(['Paste it here'])
+  expect((await buttons()).map(b => b.props.label)).toEqual(["Don't give it", 'Answer in words'])
+  // Answer in words turns the one field to words, and Paste it turns it back
+  await list.press({ key: (await buttons())[1]?.key ?? '' })
+  expect(await until(async () => ((await fields())[0]?.props.placeholder === 'Type your answer' ? true : undefined))).toBe(true)
+  expect((await buttons()).map(b => b.props.label)).toEqual(["Don't give it", 'Paste it'])
+  await list.press({ key: (await buttons())[1]?.key ?? '' })
+  const field = await until(async () => (await fields()).find(one => one.props.placeholder === 'Paste it here'))
   await list.input({ key: field?.key ?? '', text: 'made-up-local-k3y' })
   expect(await until(async () => keychain.find(one => one.includes(id)))).toContain('-w "made-up-local-k3y"')
   expect(logged.some(line => line.includes('local-k3y'))).toBe(false)
   expect([...files.values()].some(text => text.includes('local-k3y'))).toBe(false)
+  await list.unmount()
   await settle()
 })
 
-test("a request of another chat's, or of this chat's with no runner of its own running, is drawn nowhere here; this chat's own while its runner runs is drawn first", async ($, on) => {
+test("a request of another chat's, or of this chat's with no runner of its own running, is drawn nowhere here; this chat's own while its runner runs is drawn", async ($, on) => {
   const { keep, settle, files, logged, clock } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -1163,17 +1204,21 @@ test("a request of another chat's, or of this chat's with no runner of its own r
   files.set(`${MEMORY}/boxes/${older}.json`, JSON.stringify({ id: older, kind: 'secret', name: 'NPM_TOKEN', chat: 'another-chat', at: 1_700_000_000_000 }))
   files.set(`${MEMORY}/boxes/${mine}.json`, JSON.stringify({ id: mine, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_500 }))
   await clock.advance(7000)
+  // The blocks drawn, each by the start of its request's id
+  const drawn = async () => (await list.findAll({ type: 'Button' })).filter(b => /^box-.*-cancel-/.test(b.key ?? '')).map(b => (b.key ?? '').slice(4, 6))
   // No runner of this chat's runs: neither is drawn, nor told
-  expect((await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-'))).toEqual([])
+  expect(await drawn()).toEqual([])
+  expect(await list.find({ type: 'Text', text: 'Key' })).toBeUndefined()
   expect(logged.some(line => line.includes('NPM_TOKEN') || line.includes('GITHUB_TOKEN'))).toBe(false)
   // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
   void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   await clock.advance(1000)
-  const fields = await until(async () => { const all = (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')); return all.length ? all : undefined })
-  expect(fields?.map(one => [(one.key ?? '').slice(4, 6), one.props.autoFocus])).toEqual([['6f', true]])
-  // It says which command of this chat's asked
-  expect(await list.find({ type: 'Text', text: 'Command that asked: hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' })).toBeDefined()
+  expect(await until(async () => ((await drawn()).length ? drawn() : undefined))).toEqual(['6f'])
+  // It says what is asked and where it goes; the command that asked is the task's own and is not shown again
+  expect(await list.find({ type: 'Text', text: GITHUB_ASKED })).toBeDefined()
+  expect((await list.findAll({ type: 'Text' })).some(one => String(one.text ?? '').includes('bin/secret'))).toBe(false)
   await clock.advance(6000)
+  expect(await drawn()).toEqual(['6f'])
   expect(logged.some(line => line.includes('NPM_TOKEN'))).toBe(false)
   await settle()
 })
@@ -1199,7 +1244,8 @@ test("a hand-written request with made-up text shows the panel's own wording or 
     files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, chat: 'engine-id', at: 1_700_000_000_000, ...fields }))
     return id
   }
-  const shown = async () => (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')).map(one => (one.key ?? '').slice(4, 5))
+  // The blocks drawn, each by the first letter of its request's id
+  const shown = async () => (await list.findAll({ type: 'Button' })).filter(b => /^box-.*-cancel-/.test(b.key ?? '')).map(b => (b.key ?? '').slice(4, 5))
   const texts = async () => (await list.findAll({ type: 'Text' })).map(one => one.text ?? '').join('\n')
   // A known kind with made-up text beside it: the panel's own wording, and the text nowhere
   put(1, { kind: 'admin', host: 'here', key: BOX_PUBLIC, text: planted, title: planted, label: planted })
@@ -1218,18 +1264,20 @@ test("a hand-written request with made-up text shows the panel's own wording or 
   expect(await until(async () => ((await shown()).length ? await shown() : undefined))).toEqual(['1'])
   await clock.advance(6000)
   expect(await shown()).toEqual(['1'])
-  expect(await texts()).toContain(ADMIN_BOX)
+  expect(await texts()).toContain(ADMIN_ASKED)
+  expect((await list.findAll({ type: 'Markdown' })).map(one => one.text)).toEqual([ADMIN_GOES])
   expect(await texts()).not.toContain('Apple')
   expect(logged.some(line => line.includes('Apple'))).toBe(false)
   // The notice in the chat is the panel's wording too
-  expect(logged.find(line => line.includes('admin password of this Mac'))).toContain('its box in the Claudopus panel')
+  expect(logged.find(line => line.includes("This Mac's password"))).toBe(`${ADMIN_ASKED} Press Type it on it in the Claudopus panel (/claudopus opens it) and type it in the box above the chat, never in the chat itself.`)
   await settle()
 })
 
-test('the box words what the runners ask from its fields: a key by name, a Mac by host, why it asks again, and a key saved by hand by its name first', async ($, on) => {
+test('a block words what the runners ask from the fields of the request: a key by name, a Mac by host, why it asks again, and a key saved by hand by its name first; each kind with its own label and buttons', async ($, on) => {
   const { keep, settle, files, clock } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
   void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   const put = (n: number, fields: Record<string, unknown>) => {
@@ -1242,15 +1290,27 @@ test('the box words what the runners ask from its fields: a key by name, a Mac b
   put(4, { kind: 'secret', name: 'OPENAI_KEY', again: 'Type your Apple ID password' })
   put(5, { kind: 'secret' })
   await clock.advance(1000)
-  const texts = async () => (await list.findAll({ type: 'Text' })).map(one => one.text ?? '')
-  const all = await until(async () => ((await texts()).filter(one => one.startsWith('Claudopus needs') || one.includes('Claudopus needs') || one.startsWith('Name of')).length >= 5 ? await texts() : undefined))
-  expect(all).toContain(GITHUB_BOX)
-  expect(all).toContain("That password was wrong. Claudopus needs the admin password of dima@m4.local to run the command below. It goes only to that command and isn't saved, so the next one asks again.")
-  expect(all).toContain(`That was shorter than 4 characters. ${NPM_BOX}`)
-  // A reason it does not know is left out
-  expect(all).toContain("Claudopus needs OPENAI_KEY. Claudopus saves it only in this Mac's keychain. Claude uses it by name, and Claudopus hides it in anything a command shows.")
-  expect(all?.join('\n')).not.toContain('Apple')
-  expect(all).toContain('Name of the key to save, such as GITHUB_TOKEN. Claude uses it by this name.')
+  // Each block as drawn, in the order asked: its label, what it asks, where that goes, and its buttons
+  const blocks = async () => {
+    const texts = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+    const goes = (await list.findAll({ type: 'Markdown' })).map(one => String(one.text ?? ''))
+    const buttons = (await list.findAll({ type: 'Button' })).filter(b => /^box-/.test(b.key ?? ''))
+    const labels = texts.filter(one => /^(Key|Password)( · |$)/.test(one)).map(one => one.split(' · ')[0])
+    const asks = texts.filter(one => / is needed to run | should the key be saved /.test(one))
+    return [1, 2, 3, 4, 5].map((n, i) => [labels[i], asks[i], goes[i], buttons.filter(b => (b.key ?? '').startsWith(`box-${n}b1e`)).map(b => String(b.props.label))])
+  }
+  const KEY_BUTTONS = ['Paste it', "Don't give it", 'Answer in words']
+  expect(await until(async () => ((await blocks()).every(one => (one[3] as string[]).length >= 2) ? blocks() : undefined))).toEqual([
+    ['Key', GITHUB_ASKED, KEY_GOES, KEY_BUTTONS],
+    ['Password', 'That password was wrong. The password of dima@m4.local is needed to run this as admin.', ADMIN_GOES, ['Type it', "Don't allow"]],
+    ['Key', "That was shorter than 4 characters. NPM_TOKEN is needed to run this task's command.", KEY_GOES, KEY_BUTTONS],
+    // A reason it does not know is left out
+    ['Key', "OPENAI_KEY is needed to run this task's command.", KEY_GOES, KEY_BUTTONS],
+    ['Key', 'Which name should the key be saved under, such as GITHUB_TOKEN?', 'Commands use the key by this name.', ['Type it', "Don't give it", 'Answer in words']],
+  ])
+  expect((await list.findAll({ type: 'Text' })).map(one => one.text ?? '').join('\n')).not.toContain('Apple')
+  expect(await list.findAll({ type: 'Input' } as never)).toEqual([])
+  await Promise.all([list.unmount(), bar.unmount()])
   await settle()
 })
 

@@ -327,7 +327,8 @@ test("another chat's held prompt has no Allow or Don't allow here, only where to
 
 test("a call Claude Code refuses a background task with no prompt, as auto mode does, asks nothing when it is no command the person could run: nothing waits on the card and the task is told nothing more; a failing call whose output only holds those words is no refusal; a blocked command never replaces a question already on the card; Don't allow tells the task to carry on without it and never to reach it by other means, and pressed once the task has ended it does not start it again; and Claudopus never lets the call through itself", async ($, on) => {
   const agents: Record<string, string> = { a1: 'running' }
-  const { files, clock, resumed, appended, pressRuns } = world(on, { agents })
+  const ended = new Set<string>()
+  const { files, clock, resumed, appended, pressRuns } = world(on, { agents, ended })
   // Beneath the mod the engine would put each of the checks below to its mode, which settles the ask; the refused calls are Claude
   // Code's own to refuse, with no prompt
   on('tool.check', (_, e, next) => (String((e as { tool_use_id?: unknown }).tool_use_id).startsWith('chk') ? ({ decision: 'ask' } as never) : next(e)))
@@ -350,7 +351,7 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
   files.delete('auto-refuse')
   await clock.advance(1000)
   expect(await until(async () => (logLines('refusal of Edit for a1: nothing the person could run, so nothing is asked').length ? true : undefined))).toBe(true)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Write the notes' }))).toBeDefined()
+  expect(['its card is shown', Boolean(await until(async () => (await list.findAll({ type: 'Button' })).find(one => one.key === 'stop-a1')))]).toEqual(['its card is shown', true])
   const texts = await textsOf(list)
   expect(texts.filter(one => /Claude Code blocked|waiting for you|^Permission|^Question/.test(one))).toEqual([])
   expect((await list.findAll({ type: 'Box' })).filter(one => one.props.backgroundColor === AMBER)).toEqual([])
@@ -381,6 +382,8 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
   expect(told).toContain('Carry on without it, and say in your report what was left out.')
   expect(await until(async () => ((await list.find({ type: 'Text', text: BLOCKED })) ? undefined : true))).toBe(true)
   expect((await pressedLines(list)).map(one => [one.text, one.props.dimColor])).toEqual([["✓ You pressed “Don't allow”", true]])
+  // (its next step reads that, so nothing of the press is left to send it when it ends)
+  await steps($, 1, 'm', 'a1')
   await clock.advance(1000)
   // Pressed once the task has ended, nothing starts it again
   await $.tool.call({ tool: 'Bash', agentId: 'a1', tool_use_id: 'b2', command: 'wc -c notes.md', description: 'Count the letters' } as never)
@@ -388,6 +391,7 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
   await clock.advance(1000)
   expect(['asked again for the next command', Boolean(await until(async () => list.find({ type: 'Text', text: BLOCKED })))]).toEqual(['asked again for the next command', true])
   agents.a1 = 'completed'
+  ended.add('a1')
   await $.turn.complete({ answer: 'The notes are written, without the files Claude Code refused.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(1000)
   const before = appended.filter(one => one.startsWith('a1: ')).length
