@@ -297,6 +297,8 @@ const openJobOutput = async ($: EngineInterface, job: Pick<Job, 'id' | 'label'>,
 
 // A command's log is a tab of the panel, named after the command: what it is and how it stands, then the end of what it wrote,
 // drawn again as it writes; the same for one that has ended, from the file it left. A press on a command's name opens it
+// The tasks and helpers whose ended commands are folded away in Details
+const endedFolded = new Set<string>()
 const LOG_PANE = 'log-'
 const LOG_LINES = 300
 const logPaneOf = (id: string) => `${LOG_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)

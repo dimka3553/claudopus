@@ -222,7 +222,8 @@ const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how' | 'what' | 'cm
     const of = runs.filter(r => r.how === how)
     if (!of.length) return []
     const newest = of.reduce((a, b) => (b.endedAt >= a.endedAt ? b : a))
-    const name = of.some(r => r.id === shown) ? '' : runLabel(newest)
+    // (nor where its rows stand right under it, which gives it no name to say)
+    const name = of.some(r => r.id === shown) || (!String(newest.what ?? '').trim() && !newest.cmd) ? '' : runLabel(newest)
     return [`${of.length} ${endedWord({ how })}${name ? `: ${name}${of.length > 1 ? ` and ${of.length - 1} more` : ''}` : ''}`]
   })
   // (a helper that failed is named as a helper, so its name is never taken for a command's)

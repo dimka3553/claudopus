@@ -1238,14 +1238,14 @@ const topOf = (list: Todo[], id: string) => {
 const kidsOf = (list: Todo[], id: string) => list.filter(one => one.parentId === id).sort((a, b) => a.startedAt - b.startedAt)
 const underOf = (list: Todo[], id: string, depth = 1): Todo[] => (depth > TREE_DEEP ? [] : kidsOf(list, id).flatMap(one => [one, ...underOf(list, one.id, depth + 1)]))
 const TREE_DEEP = 8
-type Branch = { one: Todo; kids: Branch[]; job?: Job; run?: NonNullable<Todo['endedRuns']>[number] }
+type Branch = { one: Todo; kids: Branch[]; job?: Job; run?: NonNullable<Todo['endedRuns']>[number]; ended?: NonNullable<Todo['endedRuns']> }
 const branchesOf = (list: Todo[], id: string, keep: (one: Todo) => boolean, depth = 1): Branch[] =>
   depth > TREE_DEEP ? [] : kidsOf(list, id).map(one => ({ one, kids: branchesOf(list, one.id, keep, depth + 1) })).filter(b => keep(b.one) || b.kids.length > 0)
-type Twig = { one?: Todo; job?: Job; run?: NonNullable<Todo['endedRuns']>[number]; depth: number; rails: boolean[]; isLast: boolean; hasKids: boolean }
+type Twig = { one?: Todo; job?: Job; run?: NonNullable<Todo['endedRuns']>[number]; ended?: NonNullable<Todo['endedRuns']>; depth: number; rails: boolean[]; isLast: boolean; hasKids: boolean }
 const twigsOf = (branches: Branch[], isMore = false, depth = 1, rails: boolean[] = []): Twig[] =>
   branches.flatMap((b, i) => {
     const isLast = i === branches.length - 1 && !isMore
-    return [{ one: b.one, ...(b.job ? { job: b.job } : {}), ...(b.run ? { run: b.run } : {}), depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
+    return [{ one: b.one, ...(b.job ? { job: b.job } : {}), ...(b.run ? { run: b.run } : {}), ...(b.ended ? { ended: b.ended } : {}), depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
   })
 const railText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}${t.hasKids ? '│ ' : '  '} `
 const twigText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}`
@@ -9199,7 +9199,7 @@ const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how' | 'what' | 'cm
     const of = runs.filter(r => r.how === how)
     if (!of.length) return []
     const newest = of.reduce((a, b) => (b.endedAt >= a.endedAt ? b : a))
-    const name = of.some(r => r.id === shown) ? '' : runLabel(newest)
+    const name = of.some(r => r.id === shown) || (!String(newest.what ?? '').trim() && !newest.cmd) ? '' : runLabel(newest)
     return [`${of.length} ${endedWord({ how })}${name ? `: ${name}${of.length > 1 ? ` and ${of.length - 1} more` : ''}` : ''}`]
   })
   const helpersBad = lost.length ? [`${n(lost.length, 'helper')} failed: ${lost.at(-1)}${lost.length > 1 ? ` and ${lost.length - 1} more` : ''}`] : []
@@ -9497,6 +9497,7 @@ const openJobOutput = async ($: EngineInterface, job: Pick<Job, 'id' | 'label'>,
   if (r.exitCode !== 0) void log($, `output not opened: ${r.stderr.trim().slice(0, 160)}`)
 }
 
+const endedFolded = new Set<string>()
 const LOG_PANE = 'log-'
 const LOG_LINES = 300
 const logPaneOf = (id: string) => `${LOG_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)
@@ -12314,7 +12315,7 @@ const panelHooks = (on: On) => {
       const run = t.run
       if (!run) return null
       const key = `ended-${run.id}`
-      const side = endedLine(run, took(run.endedAt - run.at))
+      const side = run.how === 'finished' ? took(run.endedAt - run.at) : endedLine(run, took(run.endedAt - run.at))
       const name = cut(runLabel(run), Math.max(12, perRow - 4 - t.depth * 2 - side.length - 1))
       return (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
@@ -12328,8 +12329,16 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
-    const endedBranches = (card: Todo): Branch[] => [...(card.endedRuns ?? [])].sort((a, b) => b.endedAt - a.endedAt).map(run => ({ one: card, run, kids: [] }))
-    const withAll = (branches: Branch[]): Branch[] => branches.map(b => (b.job || b.run ? b : { ...b, kids: [...jobBranches(b.one, true), ...endedBranches(b.one), ...withAll(b.kids)] }))
+    const endedBranches = (card: Todo): Branch[] => {
+      const runs = [...(card.endedRuns ?? [])].sort((a, b) => b.endedAt - a.endedAt)
+      return runs.length ? [{ one: card, ended: runs, kids: endedFolded.has(card.id) ? [] : runs.map(run => ({ one: card, run, kids: [] })) }] : []
+    }
+    const endedGroupRow = (t: Twig) => {
+      const id = t.one?.id ?? ''
+      const text = `${endedSummary(0, (t.ended ?? []).map(run => ({ ...run, what: '', cmd: '' })))}${endedFolded.has(id) ? ' · show' : ''}`
+      return twigRowOf(t, `ended-group-${id}`, text, true, '', () => ((endedFolded.has(id) ? endedFolded.delete(id) : endedFolded.add(id)), (presses += 1), redraw($)))
+    }
+    const withAll = (branches: Branch[]): Branch[] => branches.map(b => (b.job || b.run || b.ended ? b : { ...b, kids: [...jobBranches(b.one, true), ...withAll(b.kids), ...endedBranches(b.one)] }))
     const failedRow = (t: Twig, run: EndedRun, owner: string) => {
       const key = `failed-${owner}-${run.id}`
       const width = perRow - 4 - t.depth * 2
@@ -12666,7 +12675,7 @@ const panelHooks = (on: On) => {
       )
     }
     const underTwig = (t: Twig) => {
-      if (t.run) return null
+      if (t.run || t.ended) return null
       if (t.job) {
         const tail: string[] = []
         if (!tail.length) return null
@@ -12711,7 +12720,7 @@ const panelHooks = (on: On) => {
     const helpersPart = (one: Todo) => {
       const list = one.chat ? helpersThere : all
       const under = underOf(list, one.id)
-      const branches = [...jobBranches(one, true), ...endedBranches(one), ...withAll(branchesOf(list, one.id, () => true))]
+      const branches = [...jobBranches(one, true), ...withAll(branchesOf(list, one.id, () => true)), ...endedBranches(one)]
       const jobs = [one, ...under].reduce((n, kid) => n + jobsOf(kid).reduce((sum, job) => sum + (job.count ?? 1), 0), 0)
       const runs = endedRunsOf(one, list)
       if (!under.length && !jobs && !runs.length) return null
@@ -12723,7 +12732,7 @@ const panelHooks = (on: On) => {
         'part-helpers',
         !jobs && !runs.length ? 'Helpers' : under.length ? 'Helpers and commands' : 'Commands',
         side,
-        <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.run ? endedRow(t) : t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>,
+        <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.ended ? endedGroupRow(t) : t.run ? endedRow(t) : t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>,
       )
     }
 

@@ -2237,8 +2237,16 @@ test('what a piece of work and its helpers have running is in its Details too, e
   expect(afterTexts.some(text => /^Stopped after \d+s$/.test(text))).toBe(true)
   expect(afterTexts).toContain('6 commands running · 1 helper working')
   expect(afterTexts).not.toContain('Commands ended')
+  // (they stand last under it, under a row of their own that says how many ended)
+  const group = buttons.find(b => b.label === '1 command ended')
+  expect(group).toBeDefined()
+  expect(buttons.indexOf(group as (typeof buttons)[number])).toBe(ended - 1)
   await after.press({ key: buttons[ended]?.key ?? '' })
   expect(await until(async () => tabs.find(one => /^log-bg-x1: python3? fit\.py$/.test(one)))).toBeDefined()
+  // A press on that row folds them away, and it then says it can show them
+  await after.press({ key: (await after.findAll({ type: 'Button' })).find(b => b.props.label === '1 command ended')?.key ?? '' })
+  expect(await until(async () => (await after.findAll({ type: 'Button' })).find(b => b.props.label === '1 command ended · show'))).toBeDefined()
+  expect((await after.findAll({ type: 'Button' })).some(b => String(b.key ?? '').startsWith('ended-open-'))).toBe(false)
   await after.unmount()
 })
 
@@ -2638,7 +2646,9 @@ test('only runs really running are listed: a watch the engine killed at its time
   expect(details.some(text => /^Failed after \dm \d\ds$/.test(text))).toBe(true)
   // (why it failed is on its card's row and in its log, not said again here)
   expect(details).not.toContain('Traceback: boom')
-  expect(details.some(text => /^Done in \dm \d\ds$/.test(text))).toBe(true)
+  // (one that finished says only how long it ran)
+  expect(details.some(text => /^\dm \d\ds$/.test(text))).toBe(true)
+  expect(details.some(text => /^Done in /.test(text))).toBe(false)
   // Later the wait is past the time its description gave too: its row still says only how long it has run
   for (let n = 0; n < 8; n++) await advance(MIN)
   const later = await texts()

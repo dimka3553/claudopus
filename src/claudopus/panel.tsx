@@ -891,8 +891,9 @@ const panelHooks = (on: On) => {
       const run = t.run
       if (!run) return null
       const key = `ended-${run.id}`
-      // (how it ended and how long it ran; when is in its log's tab, so its name keeps the room)
-      const side = endedLine(run, took(run.endedAt - run.at))
+      // (one that finished says only how long it ran, as a running row does, so its name keeps the room: the row over them says
+      // they ended, and its mark that it went well; one that did not says how it ended too. When is in its log's tab)
+      const side = run.how === 'finished' ? took(run.endedAt - run.at) : endedLine(run, took(run.endedAt - run.at))
       const name = cut(runLabel(run), Math.max(12, perRow - 4 - t.depth * 2 - side.length - 1))
       return (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
@@ -906,9 +907,20 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
-    const endedBranches = (card: Todo): Branch[] => [...(card.endedRuns ?? [])].sort((a, b) => b.endedAt - a.endedAt).map(run => ({ one: card, run, kids: [] }))
-    // (every helper with what it has running, then what of its has ended, then its own helpers)
-    const withAll = (branches: Branch[]): Branch[] => branches.map(b => (b.job || b.run ? b : { ...b, kids: [...jobBranches(b.one, true), ...endedBranches(b.one), ...withAll(b.kids)] }))
+    // What a task or helper ran that has ended is one group, last under it: a row that says how many ended and how many of them
+    // did not finish well, as its card's closing row does, with each of them a row under it, the newest first. A press on the
+    // group's row folds it away or opens it again (19 Nov: mixed in with what still ran, they read as one long list)
+    const endedBranches = (card: Todo): Branch[] => {
+      const runs = [...(card.endedRuns ?? [])].sort((a, b) => b.endedAt - a.endedAt)
+      return runs.length ? [{ one: card, ended: runs, kids: endedFolded.has(card.id) ? [] : runs.map(run => ({ one: card, run, kids: [] })) }] : []
+    }
+    const endedGroupRow = (t: Twig) => {
+      const id = t.one?.id ?? ''
+      const text = `${endedSummary(0, (t.ended ?? []).map(run => ({ ...run, what: '', cmd: '' })))}${endedFolded.has(id) ? ' · show' : ''}`
+      return twigRowOf(t, `ended-group-${id}`, text, true, '', () => ((endedFolded.has(id) ? endedFolded.delete(id) : endedFolded.add(id)), (presses += 1), redraw($)))
+    }
+    // (every helper with what it has running, then its own helpers, then what of its has ended)
+    const withAll = (branches: Branch[]): Branch[] => branches.map(b => (b.job || b.run || b.ended ? b : { ...b, kids: [...jobBranches(b.one, true), ...withAll(b.kids), ...endedBranches(b.one)] }))
     const failedRow = (t: Twig, run: EndedRun, owner: string) => {
       const key = `failed-${owner}-${run.id}`
       const width = perRow - 4 - t.depth * 2
@@ -1287,7 +1299,7 @@ const panelHooks = (on: On) => {
     // Under a helper at work, the step it is on and where it says it is; under a job, the last lines its output ends with, as a
     // terminal shows them. Both sit where the row's name starts; one that ended has nothing under it
     const underTwig = (t: Twig) => {
-      if (t.run) return null
+      if (t.run || t.ended) return null
       if (t.job) {
         // (its row says it in plain words, so the last line is here as it was printed too)
         // (a command's row says how it stands, and its log is a press on its name away: its last lines under it said the same
@@ -1336,7 +1348,7 @@ const panelHooks = (on: On) => {
       // Another chat's work has its helpers from that chat's file
       const list = one.chat ? helpersThere : all
       const under = underOf(list, one.id)
-      const branches = [...jobBranches(one, true), ...endedBranches(one), ...withAll(branchesOf(list, one.id, () => true))]
+      const branches = [...jobBranches(one, true), ...withAll(branchesOf(list, one.id, () => true)), ...endedBranches(one)]
       // (what one command left going counts as that one command, however many programs it is)
       const jobs = [one, ...under].reduce((n, kid) => n + jobsOf(kid).reduce((sum, job) => sum + (job.count ?? 1), 0), 0)
       const runs = endedRunsOf(one, list)
@@ -1351,7 +1363,7 @@ const panelHooks = (on: On) => {
         'part-helpers',
         !jobs && !runs.length ? 'Helpers' : under.length ? 'Helpers and commands' : 'Commands',
         side,
-        <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.run ? endedRow(t) : t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>,
+        <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.ended ? endedGroupRow(t) : t.run ? endedRow(t) : t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>,
       )
     }
 
