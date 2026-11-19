@@ -292,7 +292,8 @@ test('while the person types into an ask the panel holds its drawing whole, as o
 })
 
 test('while drawings of the panel are slow, as under seven tasks and their commands, one drawn afresh moments ago is given again as it was, buttons and all, until the gap is over, so a click amid a stream of changes names a button still there; a quick drawing and a press are drawn at once', async ($, on) => {
-  const { clock } = world(on)
+  // (its drawings timed by the wall clock, which the test world leaves out for every other test)
+  const { clock } = world(on, { env: { CLAUDOPUS_TIMING: 'test draws' } })
   // Each drawing of the panel takes 300 ms, as on 16 Nov with seven tasks at work
   const slow = { isOn: false, n: 0 }
   on('session.model', () => {
@@ -387,7 +388,7 @@ test('two asks for the panel or the bar that come together, as from two windows 
 })
 
 test('the bar above the prompt on the desktop, drawn as often as the panel under load, is given again as it was for a second after each drawing made afresh, and a tab of the mod\'s through a click on its buttons, so a click names one still there; both are then drawn afresh by themselves', async ($, on) => {
-  const { clock, files } = world(on)
+  const { clock, files } = world(on, { env: { CLAUDOPUS_TIMING: 'test draws' } })
   // Each drawing of the panel takes 300 ms, as on 16 Nov with seven tasks at work; the bar's own stay quick
   const slow = { isOn: false }
   on('session.model', () => {

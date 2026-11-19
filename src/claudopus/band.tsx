@@ -226,7 +226,7 @@ const bandHooks = (on: On) => {
       // A click begun while it was made: the bar on screen is given instead, and this one made again once the click is over
       if (recent && !isBarHeld && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent)
       paneNewest.set(line, { key, drawing })
-      made = { at, ms: Date.now() - madeFrom, fresh: freshness }
+      made = { at, ms: drawnFor(madeFrom), fresh: freshness }
       return drawing
     } finally {
       freshEnds($, key, made)

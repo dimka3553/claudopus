@@ -194,6 +194,8 @@ const isBehind = () => behindLooks > 0
 const begun: { at: number; name: string }[] = []
 const during = (name: string) => void (begun.push({ at: Date.now(), name }), begun.length > 40 && begun.splice(0, begun.length - 40))
 let isTimed = true
+let isDrawTimed = true
+const drawnFor = (from: number) => (isDrawTimed ? Date.now() - from : 0)
 const lookHold = ($: EngineInterface) => {
   const now = Date.now()
   const late = holdAt && isTimed ? now - holdAt - HOLD_LOOK : 0
@@ -9407,7 +9409,9 @@ const chatHooks = (on: On) => {
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
     holdAt = 0
-    isTimed = (await $.env.get('CLAUDOPUS_TIMING')) !== 'test'
+    const timing = (await $.env.get('CLAUDOPUS_TIMING')) ?? ''
+    isTimed = !/^test\b/.test(timing)
+    isDrawTimed = timing !== 'test'
     if (isTimed) everyLoad($, HOLD_LOOK, () => lookHold($))
     void registerKinds($)
     termLive = /truecolor|24bit/i.test((await $.env.get('COLORTERM')) ?? '') ? LIVE : DEEP_LIVE
@@ -12487,7 +12491,7 @@ const bandHooks = (on: On) => {
       const drawing = await drawBar()
       if (recent && !isBarHeld && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent)
       paneNewest.set(line, { key, drawing })
-      made = { at, ms: Date.now() - madeFrom, fresh: freshness }
+      made = { at, ms: drawnFor(madeFrom), fresh: freshness }
       return drawing
     } finally {
       freshEnds($, key, made)
@@ -12690,7 +12694,7 @@ const panelHooks = (on: On) => {
         if ((shownKept.get(line) ?? 0) > askedNo && paneNewest.has(line)) return paneNewest.get(line)?.drawing as typeof drawing
         shownKept.set(line, askedNo)
         paneNewest.set(line, { key: place, drawing })
-        made = { at, ms: Date.now() - madeFrom, fresh: freshness }
+        made = { at, ms: drawnFor(madeFrom), fresh: freshness }
         return drawing
       } finally {
         freshEnds($, place, made)
@@ -14312,7 +14316,7 @@ const panelHooks = (on: On) => {
     }
     return drawing
     } finally {
-      freshEnds($, place, isMade ? { at: heldAt, ms: Date.now() - madeFrom, fresh: freshness } : undefined)
+      freshEnds($, place, isMade ? { at: heldAt, ms: drawnFor(madeFrom), fresh: freshness } : undefined)
     }
     } finally {
       if (paneId === LIST) listDrawing -= 1

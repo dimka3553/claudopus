@@ -3,10 +3,12 @@
 const HOME = '/home/sam'
 // The mod's own folder on this machine: each area's tests are built into mods/claudopus/hooks/tests/
 const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '')
-// Every test may take a minute, not the kit's 5 seconds: the areas' files run side by side, and on a busy machine or GitHub's runner
-// (about twice as slow as a Mac) the longest scenarios, 4 to 8 seconds alone, passed or failed by the machine's load, not by the mod.
-// SLOW is that limit, kept for the tests that name it
-const SLOW = { timeoutMs: 60_000 }
+// Every test may take three minutes, not the kit's 5 seconds: the areas' files run side by side, and on a busy machine or GitHub's
+// runner (two to three times as slow as a Mac) the longest scenarios passed or failed by the machine's load, not by the mod. Those
+// that run the clock through hours fire the mod's timers each second of it, as in a chat: 10 to 20 seconds alone on a Mac, 30 to 60
+// on GitHub's, where a minute's limit failed them, and a test that ran out took its whole file's results with it ("the file did
+// not load"). SLOW is that limit, kept for the tests that name it
+const SLOW = { timeoutMs: 180_000 }
 // The test now running, for the world's clock (below): the tests of a file run one after another
 let driver: Parameters<TestBody>[0] | undefined
 function test(name: string, body: TestBody): void

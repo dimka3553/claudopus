@@ -264,6 +264,11 @@ const begun: { at: number; name: string }[] = []
 const during = (name: string) => void (begun.push({ at: Date.now(), name }), begun.length > 40 && begun.splice(0, begun.length - 40))
 // The test kit's clock moves only when a test moves it, so there the gaps in real time are the test's own: its world says so
 let isTimed = true
+// and how long a drawing takes by the wall clock is the test machine's speed, not the mod's: a drawing there takes no time, unless
+// its test asks for drawings to be timed (CLAUDOPUS_TIMING "test draws"). Timed, GitHub's slower runners drew the panel in 250 ms or
+// more, the mod held the next drawing behind a timer of the clock no test moved, and tests failed or their file never finished
+let isDrawTimed = true
+const drawnFor = (from: number) => (isDrawTimed ? Date.now() - from : 0)
 // Each look: the helper was held for as long as the timer came late
 const lookHold = ($: EngineInterface) => {
   const now = Date.now()

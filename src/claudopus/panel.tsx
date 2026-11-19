@@ -110,7 +110,7 @@ const panelHooks = (on: On) => {
         if ((shownKept.get(line) ?? 0) > askedNo && paneNewest.has(line)) return paneNewest.get(line)?.drawing as typeof drawing
         shownKept.set(line, askedNo)
         paneNewest.set(line, { key: place, drawing })
-        made = { at, ms: Date.now() - madeFrom, fresh: freshness }
+        made = { at, ms: drawnFor(madeFrom), fresh: freshness }
         return drawing
       } finally {
         freshEnds($, place, made)
@@ -2064,7 +2064,7 @@ const panelHooks = (on: On) => {
     return drawing
     } finally {
       // (a drawing given again from heldDrawings, or one that threw, counts as none made)
-      freshEnds($, place, isMade ? { at: heldAt, ms: Date.now() - madeFrom, fresh: freshness } : undefined)
+      freshEnds($, place, isMade ? { at: heldAt, ms: drawnFor(madeFrom), fresh: freshness } : undefined)
     }
     } finally {
       if (paneId === LIST) listDrawing -= 1

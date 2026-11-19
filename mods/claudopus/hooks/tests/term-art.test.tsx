@@ -10,10 +10,12 @@ import { timelineRows } from '../stats'
 const HOME = '/home/sam'
 // The mod's own folder on this machine: each area's tests are built into mods/claudopus/hooks/tests/
 const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '')
-// Every test may take a minute, not the kit's 5 seconds: the areas' files run side by side, and on a busy machine or GitHub's runner
-// (about twice as slow as a Mac) the longest scenarios, 4 to 8 seconds alone, passed or failed by the machine's load, not by the mod.
-// SLOW is that limit, kept for the tests that name it
-const SLOW = { timeoutMs: 60_000 }
+// Every test may take three minutes, not the kit's 5 seconds: the areas' files run side by side, and on a busy machine or GitHub's
+// runner (two to three times as slow as a Mac) the longest scenarios passed or failed by the machine's load, not by the mod. Those
+// that run the clock through hours fire the mod's timers each second of it, as in a chat: 10 to 20 seconds alone on a Mac, 30 to 60
+// on GitHub's, where a minute's limit failed them, and a test that ran out took its whole file's results with it ("the file did
+// not load"). SLOW is that limit, kept for the tests that name it
+const SLOW = { timeoutMs: 180_000 }
 // The test now running, for the world's clock (below): the tests of a file run one after another
 let driver: Parameters<TestBody>[0] | undefined
 function test(name: string, body: TestBody): void
@@ -860,7 +862,7 @@ test('in the terminal the octopus and the marks of work are cells that move in p
 
   // The app's drawing is as it was: its Svg, and no cells
   const app = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect((await app.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Claudopus, working')).toBe(true)
+  expect((await app.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Claudopus, Claude is working')).toBe(true)
   expect(await app.findAll({ type: 'Raster' })).toEqual([])
   await app.unmount()
 })
@@ -896,7 +898,7 @@ test('in the terminal a picture is not drawn: its row, pressed, opens it in the 
 test('in a terminal reached over ssh a picture pressed is sent to the device it is watched from, by Tailscale where both have it', async ($, on) => {
   const { tab, shown, dropped, svg } = await pictured($, on, { env: { SSH_CONNECTION: '100.72.19.2 65204 100.97.255.107 22', USER: 'sam' }, tailscale: '100.72.19.2\tsams-laptop\n100.86.184.91\tphone\toffline; last seen 4h ago\n' })
   await pressed(tab, 'pic-open-1-0')
-  await until(async () => tab.find({ type: 'Text', text: /Sent to sams-laptop by Tailscale/ }))
+  expect(await until(async () => tab.find({ type: 'Text', text: '✓ Claudopus sent it to sams-laptop with Tailscale. It’s in Downloads there.' }))).toBeDefined()
   expect(dropped.map(argv => argv.slice(1))).toEqual([['file', 'cp', svg, '100.72.19.2:']])
   // Nothing opens on this Mac, where nobody looks
   expect(shown.some(argv => argv.includes(svg))).toBe(false)

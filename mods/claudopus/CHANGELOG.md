@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.239 · 19 November 2026
+- On Linux, stopping a command a task runs now ends everything that command started, not only its first shell.
+- Claudopus's own tests pass again on GitHub's slower Linux and Mac machines, so a red check there now means something is really broken.
+
 ## 0.2.238 · 19 November 2026
 - A task's Details tab with a lot in it, such as many helpers and ended commands, no longer stays on "Nothing to show yet": it is drawn with its ended commands folded and fewer lines of its conversation, so the app draws it.
 - A tab that still holds more than the app can draw at once, or whose drawing fails, says so in plain words, with Back to the list.
