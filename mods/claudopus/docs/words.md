@@ -31,7 +31,7 @@ Every word Claudopus shows you (panel, cards, the bar, questions, notices, resul
 - A task being released stays in Working's purple, its line saying `Claudopus is releasing <branch>`, from the press on Release it until the release has finished; only then is it Done.
 - **Time running** `29m 40s`, over an hour `1h 05m`. **Expected** `of about 5m`. **Past it** `29m 40s · 24m over` (amber). **Ago** `2m ago`. **Left** `1m left`. **Dates** `11 Nov, 14:20`.
 - **Counts** `<n> of <total> <what>`: `2 of 6 stills`, `2 of 5 to-dos`.
-- **Buttons** are a verb of one to three words, the same word for the same act: Stop, Details, Result, Release it, Not now, Send, Open chat, Answer in words, Allow once, Deny.
+- **Buttons** are a verb of one to three words, the same word for the same act: Allow, Don't allow, Type it, Paste it, Don't give it, Answer in words, Release it, Not now, Send, Close, Stop, Change something, Dismiss, Details, Result, Open chat.
 - **Headings** are a noun: To-dos, Helpers and commands, Commands ended, Finished, Result.
 
 ## Every running thing has a progress line
@@ -47,6 +47,10 @@ A running command or helper is two lines:
 - Ended: `Done in 2m 05s`, `Failed after 2m 05s`, `Stopped after 1m`.
 
 ## Questions, notices, errors
-- **A question**: the question first, ending in "?"; then what happens, in short lines; then buttons that answer it, and Answer in words.
-- **A notice**: who did what, then what happens next. `You allowed it. Claude is releasing it now.`
+- **Everything that waits for you is one block**, the same on the card, in Details and at the top of the panel: a small label (Permission, Question, Password, Key), the question in amber ending in "?", then what it is about in short lines, the command whole, and the buttons.
+- **Permission**: `Allow`, `Don't allow`; an admin command also has `Always allow this command`. `Run this as admin on this Mac?` `Release <branch> to main?` `Claude Code blocked this command. Run it anyway?`
+- **Password**: `Type it`, `Don't allow`. **Key**: `Paste it`, `Don't give it`, `Answer in words`.
+- **Question**: the task's own buttons, then `Answer in words`. No button is added. `Not now` leaves the question open.
+- **Typing** happens in one box above the chat: a heading that says what it is for, the field, `Send` and `Close`; Enter sends.
+- **After a press** the block goes at once and one grey line says what you did: `✓ You pressed "Allow"`, `✓ You answered "…"`. No line says who took it or what runs now.
 - **An error**: what failed, then what happens next or what you can do. `Couldn't save the setting. Your old value stays.`

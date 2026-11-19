@@ -17,7 +17,7 @@ const isMarkerShown = async ($: EngineInterface, surface: string) =>
 const markerSign = async ($: EngineInterface, surface: string) => ((await isMarkerShown($, surface)) ? `${waitsAtTop}|${firstAtTop}|${isScrolled(surface)}|${finishedAtTop.join('|')}` : '')
 const markerWords = (surface: string) =>
   waitsAtTop > 0
-    ? `● ${waitsAtTop} ${waitsAtTop === 1 ? 'question' : 'questions'} waiting for you${firstAtTop ? ` · first: ${firstAtTop}` : ''}${isScrolled(surface) && finishedAtTop.length ? ` · ${finishedAtTop.length} done` : ''}`
+    ? `● ${waitsAtTop} waiting for you${firstAtTop ? ` · ${firstAtTop}` : ''}${isScrolled(surface) && finishedAtTop.length ? ` · ${finishedAtTop.length} done` : ''}`
     : `↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} is done` : `${finishedAtTop.length} tasks are done`}, at the top of the panel`
 const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
   (await isMarkerShown($, surface)) ? (
@@ -37,55 +37,102 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
       ) : null}
     </ui.Box>
   ) : null
-// The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: the work the reply goes to on a
-// line of its own, the box under it as wide as the bar and BOX_ROWS lines tall whatever it holds, and under it, a gap below it
-// what Enter does beside Send, the big one, and Close, small, which takes the box away again with what was typed kept for its card
-// (17 Nov, the person: the box was "very small" and "doesn't extend taller"; one row of a field drawn as narrow as the app makes
-// one, beside the title and buttons). The box names no submitLabel: the desktop app draws one as a second, small send button
-// beside it, and with one a box of several lines sends only on Cmd+Enter; without it Enter sends and Shift+Enter makes a new line.
-// Nothing in it follows the panel's scrolling. The box is the card's own: the same answer, and the same box through a new question
-// of its work, until the person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
-// Opened by Change something on a Done card (isChange), it is the same box for a card that asks nothing: what to change, sent to
-// that task, and Cancel in place of Close
-const barReply = ($: EngineInterface, ui: Ui, one: Todo, isChange = false) => {
-  const draft = isChange ? changeDraft(one.id) : barDraft(one.id)
-  const send = isChange ? (value: string) => void (value.trim() && ((barBoxAt = 0), (changeTo = ''), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendChange($, one.id, value).catch(err => log($, `change not sent: ${String(err)}`)))) : (value: string) => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
+// The one box above the chat, for everything that is typed for the panel (asking.tsx, barOpen): an answer in words, a key, a
+// password, a change to a done task, what to do next from a result. One heading line says what it is for; the field under it is as
+// wide as the bar and BOX_ROWS lines tall whatever it holds; under it, a gap between, what Enter does beside Send, the big one,
+// and Close, small, which takes the box away again (17 Nov, the person: the box was "very small" and "doesn't extend taller").
+// The field names no submitLabel: the desktop app draws one as a second, small send button beside it, and with one a box of
+// several lines sends only on Cmd+Enter; without it Enter sends. Nothing in it follows the panel's scrolling. It takes the cursor
+// when the person clicks anywhere in the bar (autoFocus)
+// `draft`: where what is typed and not sent is kept (an answer, a change, a result); a key or a password is kept nowhere but in
+// barKeyTyped while the box is open, for its Send button. `said`: what went wrong with what was last sent from it
+type BarBox = { head: string; placeholder: string; draft?: string; secret?: string; said?: string; extra?: JSX.Element | null; send: (value: string) => void }
+// The Done card the box was opened on by Change something, while it is still done: at work again, or asking, its box goes
+const changeTarget = (cards: Todo[]) => (barOpen?.kind === 'change' ? cards.find(one => one.id === barOpen?.id && canChange(asPressed(one))) : undefined)
+// What the open box is for, as it stands now; none once that is answered, gone or no longer open to it, and the box goes with it
+const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): BarBox | undefined => {
+  const open = barOpen
+  if (!open) return undefined
+  const sent = (id: string) => void ((barBoxAt = 0), dropDrafts($, id), replies.set(id, (replies.get(id) ?? 0) + 1), freeTimes($))
+  const forTask = (card: string | undefined) => {
+    const one = card ? cards.find(other => other.id === card) : undefined
+    return one ? ` for “${cut(titleOf(one), 50)}”` : ''
+  }
+  if (open.kind === 'answer') {
+    const one = barTarget(cards)
+    return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), send: value => void (sent(one.id), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`))) }
+  }
+  if (open.kind === 'change') {
+    const one = changeTarget(cards)
+    return one && { head: `↳ What should “${cut(titleOf(one), 50)}” change?`, placeholder: 'Type what to change', draft: barDraft(), send: value => void (sent(one.id), (barOpen = undefined), sendChange($, one.id, value).catch(err => log($, `change not sent: ${String(err)}`))) }
+  }
+  if (open.kind === 'continue') {
+    const r = kept.find(one => one.id === open.id)
+    return r && { head: `↳ What next from the result “${cut(r.title, 50)}”?`, placeholder: 'Type what to do next', draft: barDraft(), send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))) }
+  }
+  const box = boxes.find(one => one.id === open.id)
+  if (!box) return undefined
+  const mode: BoxMode = open.kind === 'words' ? 'reply' : 'key'
+  const head =
+    open.kind === 'words'
+      ? `↳ Your answer in place of ${box.name ?? (isNameBox(box) ? 'the name' : 'the key')}`
+      : open.kind === 'password'
+        ? `↳ ${box.host === 'here' || !box.host ? `${thisMac().replace(/^t/, 'T')}'s password` : `The password of ${box.host}`}${forTask(box.card)}`
+        : box.name
+          ? `↳ ${box.name}${forTask(box.card)}`
+          : `↳ The key's name`
+  return {
+    head,
+    placeholder: open.kind === 'words' ? 'Type your answer' : open.kind === 'password' || !box.name ? 'Type it here' : 'Paste it here',
+    secret: box.id,
+    ...(boxSaid.get(box.id) ? { said: boxSaid.get(box.id) } : {}),
+    extra: heldReplyButtons($, ui, box.id, 'band-key'),
+    // (a pasted key often ends in a line break, which is no part of it)
+    send: value => submitBox($, box.id, mode, mode === 'reply' ? value : value.replace(/[\r\n]+$/, '')),
+  }
+}
+const barBox = ($: EngineInterface, ui: Ui, box: BarBox) => {
+  const typed = () => (box.draft ? (drafts.get(box.draft) ?? '') : box.secret ? (barKeyTyped.get(box.secret) ?? '') : '')
+  const send = (value: string) => void (value.trim() && box.send(value))
   return (
-    <ui.Box key="band-reply" flexDirection="column" flexShrink={0} width="100%">
+    <ui.Box key="band-box" flexDirection="column" flexShrink={0} width="100%">
       <ui.Box flexDirection="row" height={1} overflow="hidden">
-        <ui.Text color={isChange ? undefined : NEEDS} bold wrap="truncate-end">{isChange ? `${cut(titleOf(one), 60)} · ${CHANGE_WHAT}` : `↳ Your answer to “${cut(titleOf(one), 60)}”`}</ui.Text>
+        <ui.Text color={NEEDS} bold wrap="truncate-end">{box.head}</ui.Text>
       </ui.Box>
       {'Input' in ui ? (
         <ui.Box flexDirection="column" width="100%" flexShrink={0}>
           <ui.Input
-            key={isChange ? changeBoxKey(one.id) : barBoxKey(one.id)}
-            placeholder={isChange ? 'Type what to change' : 'Type your reply'}
-            value={draftDrawn(draft)}
+            key={barBoxKey()}
+            placeholder={box.placeholder}
+            {...(box.draft ? { value: draftDrawn(box.draft) } : {})}
             rows={BOX_ROWS}
             autoFocus
-            onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
+            onInput={value => {
+              const { draft, secret } = box
+              if (draft) (drafts.set(draft, value), keepDraft($, draft, value))
+              else if (secret) ((value ? boxTyped.add(secret) : boxTyped.delete(secret)), barKeyTyped.set(secret, value))
+              holdTimes($)
+              void $.clock.now().then(at => (barBoxAt = at))
+            }}
             onSubmit={send}
           />
         </ui.Box>
       ) : null}
-      {barFoot($, ui, isChange ? 'band-change' : 'band-reply', presses, () => void ((drafts.get(draft) ?? '').trim() && send(drafts.get(draft) ?? '')), press => (isChange ? openChange($, undefined, press.surface) : openReply($, undefined, press.surface)), true, isChange ? 'Cancel' : 'Close')}
+      {box.said ? <ui.Text key="band-box-said" color={NEEDS} wrap="wrap">{box.said}</ui.Text> : null}
+      {box.extra ?? null}
+      <ui.Box key="band-box-foot" flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
+        <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <ui.Text dimColor wrap="truncate-end">Enter sends</ui.Text>
+        </ui.Box>
+        <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
+          <ui.Button key={`band-box-send-${presses}-${boxPresses}`} label="Send" variant="primary" onPress={() => send(typed())} />
+          <ui.Button key={`band-box-close-${presses}-${boxPresses}`} label="Close" plain dimColor onPress={press => openBar($, undefined, press.surface)} />
+        </ui.Box>
+      </ui.Box>
     </ui.Box>
   )
 }
-// Under a box in the bar: what Enter does, and Send, the big one, then Close, small
-const BOX_KEYS = 'Enter sends · Shift+Enter for a new line'
-const barFoot = ($: EngineInterface, ui: Ui, where: string, mark: number, onSend: () => void, onClose: (press: { surface: string }) => void, isLines = true, close = 'Close') => (
-  <ui.Box key={`${where}-foot`} flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
-    <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
-      <ui.Text dimColor wrap="truncate-end">{isLines ? BOX_KEYS : 'Enter sends'}</ui.Text>
-    </ui.Box>
-    <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-      <ui.Button key={`${where}-send-${mark}`} label="Send" variant="primary" onPress={onSend} />
-      <ui.Button key={`${where}-close-${mark}`} label={close} plain dimColor onPress={onClose} />
-    </ui.Box>
-  </ui.Box>
-)
-// The bar as last drawn on each surface while a reply box was in it: while the person types, and for as long as the box holds the
+// The bar as last drawn on each surface while its box was in it: while the person types, and for as long as the box holds the
 // cursor (barBoxAt), it is drawn as it was, whole, but for a change in what it holds, as a pane is (heldDrawings): each drawing is
 // a new box under the cursor, its ring drawn again and a selection or a half-composed letter lost
 // (17 Nov: the bar was drawn anew, and the box with it, each time any work wrote its cards, several times a second, as the bar
@@ -96,28 +143,20 @@ const barFoot = ($: EngineInterface, ui: Ui, where: string, mark: number, onSend
 // written. The cards are looked at once a second instead (lookBar), and the bar is drawn again when what it shows of them moved
 const barHeld = new Map<string, { shape: string; mark: string; drawing: unknown }>()
 // What a bar with a box open is drawn for, from the mod's own memory alone: which box, and what is said beside it
-const barShape = () => {
-  const keyBox = barKeyTarget()
-  if (boxOpen && keyBox) return `key|${barKeyBoxKey(keyBox.id, boxOpen.mode)}|${boxSaid.get(keyBox.id) ?? ''}|${boxHeldReply.has(keyBox.id)}`
-  if (changeTo) return `change|${changeBoxKey(changeTo)}|${barCardsDrawn}`
-  return replyTo ? `reply|${barBoxKey(replyTo)}|${barCardsDrawn}` : ''
-}
-// What the cards say of the box open in the bar as last looked at: its card, still asking, under its title. Part of the held shape,
-// so a card that stops asking (answered elsewhere, its question withdrawn, the work stopped) takes its box away within a second
+const barShape = () => (barOpen ? `${barOpen.kind}|${barBoxKey()}|${isBoxKind(barOpen.kind) ? `${boxSaid.get(barOpen.id) ?? ''}|${boxHeldReply.has(barOpen.id)}` : barCardsDrawn}` : '')
+// What the cards say of the box open in the bar as last looked at: its card, still asking or still done, under its title. Part
+// of the held shape, so a card that stops asking (answered elsewhere, its question withdrawn, the task stopped) takes its box
+// away within a second
 let barCardsDrawn = ''
-// The Done card the box was opened on by Change something, while it is still done: at work again, or asking, its box goes
-const changeTarget = (cards: Todo[]) => (changeTo ? cards.find(one => one.id === changeTo && canChange(asPressed(one))) : undefined)
 const barCardsSign = (cards: Todo[]) => {
-  const changing = changeTarget(cards)
-  if (changing) return `${changing.id}|${titleOf(changing)}`
-  const target = barTarget(cards)
-  return target?.ask ? `${target.id}|${titleOf(target)}` : ''
+  const one = changeTarget(cards) ?? barTarget(cards)
+  return one ? `${one.id}|${titleOf(one)}` : barOpen?.kind === 'continue' ? `result|${barOpen.id}` : ''
 }
 // Once a second while a bar holds a box (chat.tsx): the cards it shows moved, so it is drawn again, once for each change
 const lookBar = async ($: EngineInterface) => {
   // A redraw put off while the box held the cursor is made once it no longer does (drawFresh)
   if (isRedrawOwed && !isBoxHeld(await $.clock.now())) drawAgain($)
-  if (!barHeld.size || !(replyTo || changeTo)) return
+  if (!barHeld.size || !barOpen || isBoxKind(barOpen.kind)) return
   const sign = barCardsSign(await read($, todos))
   if (sign === barCardsDrawn) return
   barCardsDrawn = sign
@@ -146,8 +185,6 @@ const bandHooks = (on: On) => {
   // a newer drawing retires the buttons on screen, and a click on one already gone runs nothing. Never while its reply box is typed
   // into or holds the cursor: a bar with a box open keeps a drawing of its own (barHeld)
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    // A message that waits for a hook to start a task again goes from this drawing (sendHeld)
-    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     const drawBar = () => drawBarNow()
     if (e.surface !== 'desktop' || e.props.hasSurvey) return drawBar()
     const key = `bar|${e.requestId ?? ''}|${e.surface}|${e.props.bodyColumns}|${e.props.isCollapsed ? 1 : 0}`
@@ -179,7 +216,7 @@ const bandHooks = (on: On) => {
     const flipAt = await $.clock.now()
     // A box open and drawn as it is: given again as it was, reading no cards (barHeld)
     const kept = barHeld.get(e.surface)
-    if (kept && canBox && barBoxes.has(e.surface) && (replyTo || boxOpen || changeTo) && kept.shape === barShape()) {
+    if (kept && canBox && barBoxes.has(e.surface) && barOpen && kept.shape === barShape()) {
       const isHeldNow = isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)
       if (isHeldNow || kept.mark === (await markerSign($, e.surface))) return ((isBarSettling = false), kept.drawing as Awaited<ReturnType<typeof next>>)
     }
@@ -189,25 +226,24 @@ const bandHooks = (on: On) => {
       else barBoxes.delete(e.surface)
       // A box open in a bar that can no longer show it is closed, and stays closed when the bar is back; what was half typed in
       // it is drawn in the card's own box, and nothing is held as typed in any more
-      const open = canBox ? undefined : cards.find(one => one.id === replyTo)
-      if (open) (carryDraft($, open, barDraft(open.id)), freeTimes($))
-      if (!canBox) ((replyTo = ''), (replyMark = ''), (changeTo = ''), (boxOpen = undefined), barHeld.delete(e.surface))
+      const open = canBox || barOpen?.kind !== 'answer' ? undefined : cards.find(one => one.id === barOpen?.id)
+      if (open) (carryDraft($, open, barDraft()), freeTimes($))
+      if (!canBox) ((barOpen = undefined), barHeld.delete(e.surface))
       barBoxAt = 0
       // Only a card that asks is drawn differently for it
       // and a key box, whose buttons or field are drawn by it too
       // and a Done card, whose Change something is there only with the box
-      if ((asksForBar(cards).length || boxes.some(one => !one.key) || cards.some(one => canChange(asPressed(one)))) && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
+      if ((asksForBar(cards).length || boxes.length || barOpen || cards.some(one => canChange(asPressed(one)))) && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
     }
     if (e.props.hasSurvey) return next(e)
     const bandAt = await $.clock.now()
     const bandKept = await read($, reports)
     // (each card as it is shown: never done while something of its own runs or to-dos are left)
-    const shown = shownAs(cards, one => openResultWaits(one, bandKept, bandAt).length > 0)
+    const shown = shownAs(cards)
     const working = shown.filter(one => !one.parentId && one.status === 'working')
     // Work that just finished makes the octopus happy for its pause, the band staying that long even when nothing else runs;
     // the redraw set for the pause's end is read so the band leaves or goes back to work then
-    // (not for a task whose result asks the person something: that waits for them)
-    const happy = isHappy(shown.filter(one => !one.leftOpen && !openResultWaits(one, bandKept, bandAt).length), bandAt)
+    const happy = isHappy(shown.filter(one => !one.leftOpen), bandAt)
     if (happy) await read($, tick)
     const ui = uiOf($, e)
     const { Box, Button, Text } = ui
@@ -222,7 +258,8 @@ const bandHooks = (on: On) => {
       const [first] = asking
       const ask = first?.ask
       if (first && ask) {
-        const answers = (ask.choices?.length ? ask.choices : DEFAULT_ANSWERS).slice(0, 9)
+        // The same block as on its card (needBlock), compact: its own buttons numbered, and nothing typed here
+        const answers = (ask.choices ?? []).slice(0, 9)
         const id = `${first.id}:${ask.at}`
         const picked = bandPick?.id === id ? bandPick.n : -1
         const press = (n: number, choice: string) => {
@@ -232,48 +269,46 @@ const bandHooks = (on: On) => {
           // Left alone, the pick is let go
           $.clock.after(BAND_PICK, () => void (bandPick === pick && ((bandPick = undefined), $.ui.invalidate('ui.render'))))
         }
+        const more = asking.filter(needsPerson).length - Number(needsPerson(first))
+        const need: Need = {
+          id: `band-ask-${first.id}`,
+          kind: ask.refused ? 'permission' : 'question',
+          at: ask.at,
+          from: titleOf(first),
+          text: cut(oneLine(ask.text), Math.max(80, e.props.bodyColumns * 3)),
+          ...(ask.copy ? { command: oneLine(ask.copy) } : {}),
+          isActing: isActingOnReply(first),
+          // Acted on after the person's reply in words: that reply, and nothing to press
+          ...(isActingOnReply(first)
+            ? { line: sentLine(first, await $.clock.now()) || `✓ You answered “${cut(ask.replied?.text ?? '', 60)}”` }
+            : { where: `${ask.details ? 'The details are on its card · ' : ''}${picked >= 0 ? `Type ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `${answers.length ? 'Type its number twice in an empty box · ' : ''}${more > 0 ? `${more} more waiting · ` : ''}/claudopus to answer in words`}` }),
+          buttons: isActingOnReply(first) || ask.refused ? [] : answers.map((choice, n) => ({ key: `band-ask-${first.id}-${ask.at}-${n}`, label: choice, hotkey: String(n + 1), isPlain: true, onPress: () => press(n, choice) })),
+        }
         return (
           <Box flexDirection="column">
             {await waitMarker($, ui, e.surface)}
             <Box flexDirection="row" gap={1}>
-              {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, waiting for you' : 'Claudopus, Claude is working on your reply', $, { surface: e.surface, requestId: e.requestId })}
-              <Box flexShrink={1} minWidth={0}>
-                <Text wrap="wrap">
-                  <Text dimColor>{`${titleOf(first)}: `}</Text>
-                  <Text color={needsPerson(first) ? NEEDS : LIVE} bold>{cut(oneLine(ask.text), Math.max(80, e.props.bodyColumns * 3))}</Text>
-                </Text>
+              {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, waiting for you' : 'Claudopus, working on your answer', $, { surface: e.surface, requestId: e.requestId })}
+              <Box flexShrink={1} minWidth={0} flexDirection="column">
+                {needBlock($, ui, need, { isCompact: true, surface: e.surface })}
               </Box>
             </Box>
-            {/* Acted on after the person's reply in words: that reply, and nothing to press */}
-            {isActingOnReply(first) ? (
-              <Text key="band-ask-replied" dimColor wrap="truncate-end">{`    ${sentLine(first, await $.clock.now()) || `✓ You replied “${cut(ask.replied?.text ?? '', 60)}”`}`}</Text>
-            ) : (
-              <Box flexDirection="column">
-                {/* The chat's notice is the question alone: what it is about is on its card */}
-                {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{'    The details are on its card'}</Text> : null}
-                {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
-                <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
-                  {answers.map((choice, n) => (
-                    <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => press(n, choice)} />
-                  ))}
-                  <Text dimColor={picked < 0} color={picked < 0 ? undefined : needsPerson(first) ? NEEDS : LIVE}>
-                    {picked >= 0 ? `Type ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `Type its number twice in an empty box${asking.filter(needsPerson).length > Number(needsPerson(first)) ? ` · ${asking.filter(needsPerson).length - Number(needsPerson(first))} more waiting` : ''} · /claudopus to answer in words`}
-                  </Text>
-                </Box>
-              </Box>
-            )}
           </Box>
         )
       }
     }
-    // A key box's field the person opened from its box in the panel, while the box waits: held as drawn while it is typed in or
-    // holds the cursor, as the reply box is below
-    const keyBox = canBox ? barKeyTarget() : undefined
-    if (boxOpen && canBox && !keyBox) boxOpen = undefined
-    if (keyBox && boxOpen) {
+    // The one box, while what it was opened for still waits; that answered or gone, the box goes with it
+    const box = canBox ? barBoxOf($, ui, cards, bandKept) : undefined
+    if (barOpen && canBox && !box) barOpen = undefined
+    if (box) {
+      // Drawn as it was while the box is typed in or holds the cursor: only what it is for draws it anew, so neither the panel
+      // scrolled under the cursor nor work starting or ending puts a new box under it. The box takes the place of the figures
+      // while it is open: figures drawn under a held box would stand still, and a row that came and went would move the box
+      barCardsDrawn = barCardsSign(cards)
       const shape = barShape()
+      // What waits at the top of a panel scrolled away is still pointed at, as the bar is drawn; not while the box is held
       const marker = await waitMarker($, ui, e.surface)
-      const row = barKeyRow($, ui, keyBox, boxOpen.mode)
+      const row = barBox($, ui, box)
       const drawing = marker ? (
         <Box flexDirection="column">
           {marker}
@@ -281,32 +316,6 @@ const bandHooks = (on: On) => {
         </Box>
       ) : (
         row
-      )
-      barHeld.set(e.surface, { shape, mark: await markerSign($, e.surface), drawing })
-      settleBar($)
-      return drawing
-    }
-    // The reply box the person opened from a card, while that card still asks; its ask answered or gone, the box goes with it
-    const changing = canBox ? changeTarget(cards) : undefined
-    if (changeTo && canBox && !changing) changeTo = ''
-    const target = changing ?? (canBox ? barTarget(cards) : undefined)
-    if (replyTo && canBox && !target) ((replyTo = ''), (replyMark = ''))
-    if (changing || target?.ask) {
-      // Drawn as it was while the box is typed in or holds the cursor: only the card it is for draws it anew, so neither the panel
-      // scrolled under the cursor nor work starting or ending puts a new box under it. The row takes the place of the figures
-      // while it is open: figures drawn under a held box would stand still, and a row that came and went would move the box
-      barCardsDrawn = barCardsSign(cards)
-      const shape = barShape()
-      // What waits at the top of a panel scrolled away is still pointed at, as the bar is drawn; not while the box is held
-      const marker = await waitMarker($, ui, e.surface)
-      const reply = barReply($, ui, target as Todo, Boolean(changing))
-      const drawing = marker ? (
-        <Box flexDirection="column">
-          {marker}
-          {reply}
-        </Box>
-      ) : (
-        reply
       )
       barHeld.set(e.surface, { shape, mark: await markerSign($, e.surface), drawing })
       settleBar($)

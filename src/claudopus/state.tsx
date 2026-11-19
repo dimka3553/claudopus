@@ -66,7 +66,6 @@ const shownAs = (list: Todo[], _asks?: (one: Todo) => boolean): Todo[] =>
     // (one the person dismissed is under Finished and waits for nothing more, but with to-dos left it still never reads Done)
     if (one.closedAt) return isLeftUndone(one) ? { ...one, leftOpen: openItems(one).length } : one
     const atWork = { ...one, status: 'working' as const, wasDone: one.endedAt, endedAt: 0, endedStepAt: one.endedStepAt ?? one.endedAt }
-    if (one.releasing) return atWork
     // (a question of its own on its card comes first: it is Waiting for you, its command's row under it)
     if (one.ask) return one
     const { runs, helpers } = wakesOf(list, one)
@@ -79,13 +78,11 @@ const shownAs = (list: Todo[], _asks?: (one: Todo) => boolean): Todo[] =>
   })
 // Released on the person's press: whatever to-do it left was that release, and it is done (a card from before `released` was
 // kept says so on its line)
-const isReleased = (one: Todo) => one.released !== undefined || one.entries.some(entry => entry.kind === 'note' && entry.text.startsWith('Released · '))
+const isReleased = (one: Todo) => one.entries.some(entry => entry.kind === 'note' && entry.text.startsWith('Released · '))
 // To-dos left on a card Claudopus saw end done under that rule, never released: it is not done. A card that ended before it, or
 // long ago, reads as it did then, and never comes back up as not done (18 Nov, the person: two tasks of the morning, one of them
 // released, came back to the top in amber after the update)
 const isLeftUndone = (one: Todo) => one.doneSeen !== undefined && !isReleased(one) && openItems(one).length > 0
-// The release runner, run by a task's own command (its status look asks nothing and releases nothing)
-const isReleaseRun = (cmd: string | undefined) => /\bbin\/release\b/.test(cmd ?? '') && !/\s--status\b/.test(cmd ?? '')
 // One card read so
 const shownOne = (list: Todo[], id: string, asks?: (one: Todo) => boolean) => shownAs(list, asks).find(one => one.id === id)
 
@@ -99,7 +96,7 @@ const holdDone = (before: Todo[], next: Todo[], now: number) => {
   const list = next.map(one => {
     const old = was.get(one.id)
     // (what the person allowed it under "Ask once per piece of work" ends with it, and only once it really ends)
-    if (old?.status === 'working' && one.status !== 'working' && !(one.status === 'done' && !one.parentId && !one.chat && !hasReport(one))) workAllowed.delete(one.id)
+    if (old?.status === 'working' && one.status !== 'working' && !(one.status === 'done' && !one.parentId && !one.chat && !hasReport(one))) (workAllowed.delete(one.id), releaseAllowed.delete(one.id))
     if (one.parentId || one.chat || one.status !== 'done' || hasReport(one)) return one
     // (only a card at work: one read back from the chat's records ended before Claudopus kept it, as its records say)
     if (old?.status !== 'working') return one

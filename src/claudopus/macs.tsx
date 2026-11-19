@@ -32,7 +32,7 @@ const ownFiles = async ($: EngineInterface, now: number) => {
 const AS_COMMAND = 'a command'
 const forOtherMac = (text: string) => {
   try {
-    const one = JSON.parse(text) as { cards?: unknown; ended?: unknown; prompts?: unknown; answeredPrompts?: unknown }
+    const one = JSON.parse(text) as { cards?: unknown; ended?: unknown; prompts?: unknown }
     type Run = { what?: unknown; cmd?: unknown; label?: unknown; log?: unknown; pid?: unknown }
     // The work's own words for what runs, never a line of the command itself
     const said = (run: Run) => {
@@ -68,7 +68,7 @@ const forOtherMac = (text: string) => {
       return typeof rest.text === 'string' && rest.kind === 'allow' ? { ...rest, text: rest.text.split(': ')[0] } : rest
     }
     const each = (list: unknown, fn: (one: unknown) => unknown) => (Array.isArray(list) ? list.map(fn) : list)
-    return JSON.stringify({ ...one, cards: each(one.cards, card), ended: each(one.ended, card), prompts: each(one.prompts, prompt), answeredPrompts: each(one.answeredPrompts, prompt) })
+    return JSON.stringify({ ...one, cards: each(one.cards, card), ended: each(one.ended, card), prompts: each(one.prompts, prompt) })
   } catch {
     return text
   }

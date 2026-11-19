@@ -1,0 +1,8 @@
+- Everything that waits for you is one block, the same on the card, in Details and at the top of the panel: a small label (Permission, Question, Password or Key), the question in amber, what it is about, the command whole, and the buttons.
+- The buttons are Allow and Don't allow for a permission, Type it for a password, Paste it and Don't give it for a key, and for a question the task's own buttons with Answer in words. No Done, Yes or No is added.
+- After a press the block goes at once and one grey line says what you pressed. No green box follows it.
+- Typing happens in one box above the chat: an answer in words, a key, a password, a change to a finished task, and continuing from a result. Nothing is put into the chat's own box.
+- A result asks nothing. Questions an older result left are shown as plain text.
+- Release it is one press: it answers the task and allows that one release, with no second box. A release nobody pressed for is still asked.
+- Not now leaves a question open.
+- An answer reaches its task from your press alone, with no timer behind it.

@@ -13,9 +13,8 @@ const STALE_END = 60_000
 // How each card and workflow of this chat's stood when last looked at, by id. Unset until the first look after the mod loads,
 // which only takes note, so a reload announces nothing
 let lastSeen: Map<string, string> | undefined
-// Ends waiting to be announced together, with what waited on the person as the end was seen (its report takes that over soon
-// after), and when each was last announced, by id
-let ready: { id: string; waits?: Todo['waits'] }[] = []
+// Ends waiting to be announced together, and when each was last announced, by id
+let ready: { id: string }[] = []
 let isSettling = false
 const announced = new Map<string, number>()
 // Work the person stopped with its Stop button: they saw it end, so it is not announced
@@ -27,10 +26,10 @@ const lookEnds = async ($: EngineInterface) => {
   const mine = await sessionName($)
   // (each as its card shows it: one that handed back while a command or helper of its own still runs has not ended yet, and is
   // announced once that has ended, however long ago its report came)
-  const cards = shownAs(await read($, todos), one => (one.waits ?? []).some(wait => !askedWait(wait).answer)).filter(one => !one.parentId)
+  const cards = shownAs(await read($, todos)).filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
-  const all = [...cards.map(one => ({ id: one.id, status: one.status, endedAt: one.endedAt, waits: one.waits })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt, waits: undefined as Todo['waits'] }))]
+  const all = [...cards.map(one => ({ id: one.id, status: one.status, endedAt: one.endedAt })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt }))]
   const was = lastSeen
   lastSeen = new Map(all.map(one => [one.id, standing(one.status, one.endedAt)]))
   if (!was) return
@@ -40,7 +39,7 @@ const lookEnds = async ($: EngineInterface) => {
     if ((now - one.endedAt > STALE_END && before !== 'working') || now - (announced.get(one.id) ?? -Infinity) < AGAIN) continue
     announced.set(one.id, now)
     if (pressed.delete(one.id)) continue
-    ready.push({ id: one.id, waits: one.waits })
+    ready.push({ id: one.id })
   }
   if (ready.length && !isSettling) {
     isSettling = true
@@ -56,7 +55,7 @@ const fewWords = (text: string) => {
 }
 
 // What one ended piece of work or workflow says in a notification
-const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, cards: Todo[], runs: Flow[]) => {
+const readyOf = ({ id }: { id: string }, cards: Todo[], runs: Flow[]) => {
   if (id.startsWith('flow:')) {
     const f = runs.find(one => `flow:${one.id}` === id)
     if (!f) return undefined
@@ -65,21 +64,18 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
   }
   const kept = cards.find(card => card.id === id)
   if (!kept) return undefined
-  const waits = (kept.waits ?? seen ?? []).filter(wait => !askedWait(wait).answer)
   // (as its card shows it: one that still waits for a command or helper of its own has not ended, and one that left to-dos is not done)
-  const one = shownOne(cards, id, () => waits.length > 0) ?? kept
+  const one = shownOne(cards, id) ?? kept
   if (one.status === 'working') return undefined
   const said = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text ?? ''
   const what =
     one.status === 'done'
-      ? waits.length
-        ? `Waiting for you: ${fewWords(waits[0] ? askedWait(waits[0]).text : '')}${waits.length > 1 ? `, and ${waits.length - 1} more` : ''}`
-        : fewWords(one.answer) || fewWords(said) || 'Done.'
+      ? fewWords(one.answer) || fewWords(said) || 'Done.'
       : one.status === 'failed'
         ? 'Failed.'
         : 'Stopped.'
   if (one.leftOpen) return { title: one.title || 'Task', isDone: false, what: `Not done: ${one.leftOpen === 1 ? 'a to-do is' : `${one.leftOpen} to-dos are`} left.` }
-  return { title: one.title || 'Task', isDone: one.status === 'done', isWaiting: one.status === 'done' && waits.length > 0, what }
+  return { title: one.title || 'Task', isDone: one.status === 'done', what }
 }
 
 // One sound for all that ended together, only when some finished; one notification naming them. config.json switches each off

@@ -252,14 +252,12 @@ const workHooks = (on: On) => {
         if (isPersonWatched && !isPersonEnded) await personCheck($, e).catch(() => undefined)
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
-        settle($, e.tool_use_id, e.agentId, e.tool, outcomeOf(r as never), e as never)
+        settle($, e.tool_use_id, e.agentId, e.tool, e as never)
         // A call Claude Code refused a task with no prompt is put to the person on its card
         if (e.agentId !== undefined) void refusedByClaudeCode($, e.agentId, e.tool, e as never, r as never).catch(err => log($, `refusal not put to the person: ${String(err)}`))
         // A grant its admin command did not take goes with the call; one sent to the background takes its own in its own time
         if (grants.length && !(call as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
         runnerEnded(e.tool_use_id, Boolean((call as { run_in_background?: unknown }).run_in_background), await $.clock.now())
-        // A note of what the person allowed for this call goes as it ends
-        await noteCallEnded($, e.tool_use_id).catch(() => undefined)
       }
     }
     let grants: string[] = []
@@ -387,14 +385,11 @@ const workHooks = (on: On) => {
     }
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
-      // A call refused after a press (another of its commands denied, a grant not sealed) ends here: its note goes with it
-      if (gated.deny) return (await callRefused($, e.tool_use_id), await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: gated.deny })
+      if (gated.deny) return { deny: gated.deny }
       grants = gated.grants
       const released = await gateRelease($, e, raw as never)
       if (released.deny) {
         await dropGrants($, grants)
-        await callRefused($, e.tool_use_id)
-        await noteCallEnded($, e.tool_use_id).catch(() => undefined)
         return { deny: released.deny }
       }
       grants = [...grants, ...released.grants]
@@ -403,7 +398,7 @@ const workHooks = (on: On) => {
     }
     if (!isRefusedHere) {
       const fileSaid = await gateOwnFile($, e, raw as never)
-      if (fileSaid) return (await dropGrants($, grants), await callRefused($, e.tool_use_id), await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: fileSaid })
+      if (fileSaid) return (await dropGrants($, grants), { deny: fileSaid })
     }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
@@ -412,7 +407,7 @@ const workHooks = (on: On) => {
     const next = async (asked: typeof e) => {
       // (never one the person has just allowed as admin or as a release: what they allowed lasts two minutes)
       const held = dir && !isOff && e.agentId !== undefined && asked.tool === 'Bash' && !grants.length ? await turnHeavy($, asked) : {}
-      if (held.deny) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: held.deny } as Awaited<ReturnType<typeof raw>>)
+      if (held.deny) return { deny: held.deny } as Awaited<ReturnType<typeof raw>>
       try {
         return await nextHere(asked)
       } finally {
@@ -576,9 +571,6 @@ const workHooks = (on: On) => {
       // Its report with to-dos still to do: refused once, so it does them or names them as not done
       const unticked = await untickedAtHandback($, e.agentId, String((e as { message?: unknown }).message ?? '')).catch(() => '')
       if (unticked) return { deny: unticked }
-      // Its report asks the person something it never recorded as waiting on them: refused once, so it records it
-      const unrecorded = flowAgents.has(e.agentId) ? '' : await unrecordedAtHandback($, e.agentId, String((e as { message?: unknown }).message ?? '')).catch(() => '')
-      if (unrecorded) return { deny: unrecorded }
       const isLetGoNow = isLetGo(await read($, todos), e.agentId)
       // A task's report goes to the chat as its own reply, not in Claude Code's box (REPORT_TAKEN): Claudopus answers the hand-back
       // itself, keeps the report as one that went through, and gives it to the chat with Claude Code's notice that the task ended
@@ -669,8 +661,6 @@ const workHooks = (on: On) => {
 
   // How full this chat's context is, as the app counts it, each time it moves
   on('session.measure', async ($, e, next) => {
-    if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
-    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     const tokens = e.context.tokens
     if (tokens !== undefined) await update($, me, one => (one.tokens === tokens && one.window ? one : { ...one, tokens, window: one.window || e.context.window }))
 

@@ -22,9 +22,9 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // What the person allowed it under "Ask once per piece of work" ends with it
 // A reply its ask was held with has been acted on once the run it started ends: the ask waits on the person again, every answer back
 // (what the person allowed it goes once the change that ends it is kept, and not when holdDone keeps it at work)
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, leftOwn: status === 'done' && one.bg?.some(b => !b.isWatch && !isServerRun(b.cmd, b.what)) ? true : undefined, releasing: status === 'done' && one.bg?.some(b => isReleaseRun(b.cmd)) ? { at, branch: '', by: 'task' as const } : one.releasing, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, leftOwn: status === 'done' && one.bg?.some(b => !b.isWatch && !isServerRun(b.cmd, b.what)) ? true : undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp || one.status === 'done' ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, reportAt: undefined, leftSince: undefined, leftOwn: undefined, releasing: one.releasing?.by === 'task' ? undefined : one.releasing, released: undefined, doneSeen: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, ownWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, closedAt: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, carryOn: one.carryOn?.gaveUp || one.status === 'done' ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, reportAt: undefined, leftSince: undefined, leftOwn: undefined, doneSeen: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, ownWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, notDone: undefined, closedAt: undefined, newAt: at })
 // Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
 // a to-do of its is still being done. It is still at work; an answer it handed back on the way is no report. A watch it set is no
 // such command: it may run until stopped
@@ -235,8 +235,8 @@ const sync = async ($: EngineInterface) => {
             ? ended(card, 'done', now)
           : // Work that handed in its report with a command of its own left in the background (or its release runner there) is done
             // once the engine no longer holds it for that, from then, its green moment with it when Claudopus saw it held
-            !card.parentId && card.status === 'done' && (card.leftOwn || card.releasing?.by === 'task') && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed' || stoppedHere.has(card.id) || leftNothing.has(card.id))
-            ? { ...card, leftSince: undefined, leftOwn: undefined, releasing: card.releasing?.by === 'task' ? undefined : card.releasing, ...(card.leftSince ? { endedAt: now } : {}) }
+            !card.parentId && card.status === 'done' && card.leftOwn && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed' || stoppedHere.has(card.id) || leftNothing.has(card.id))
+            ? { ...card, leftSince: undefined, leftOwn: undefined, ...(card.leftSince ? { endedAt: now } : {}) }
           : // Work that handed in its report and that the engine still holds on its own background work left something running;
             // once nothing does, or it was stopped, not
             !card.parentId && card.status === 'done' && (one.status === 'waiting' && endedByHandback.has(card.id) && !stoppedHere.has(card.id) && !leftNothing.has(card.id)) !== Boolean(card.leftSince)
@@ -250,14 +250,12 @@ const sync = async ($: EngineInterface) => {
       isChanged ||= Boolean(next)
     }
     // Finished work the engine no longer lists has nothing of its own left running
-    for (const card of cards.values()) if (listed && (card.leftSince || card.leftOwn || card.releasing?.by === 'task') && !live.some(one => one.id === card.id)) ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined, leftOwn: undefined, releasing: card.releasing?.by === 'task' ? undefined : card.releasing }))
+    for (const card of cards.values()) if (listed && (card.leftSince || card.leftOwn) && !live.some(one => one.id === card.id)) ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined, leftOwn: undefined }))
     return isChanged ? capped([...cards.values()]) : list
   })
   await carryDue($, now).catch(err => log($, `carry-on notes not looked at: ${String(err)}`))
   if (unheardEnds.size) await endedUnheardShort($, unheardEnds, live, now).catch(err => log($, `ends not heard not looked at: ${String(err)}`))
   if (listed) await endUnheard($, live, now).catch(err => log($, `work that ended unheard not looked for: ${String(err)}`))
-  // A go-ahead pressed during a turn whose end only the engine's list showed does its last step now
-  await stepsAtEnd($).catch(err => log($, `last step not done: ${String(err)}`))
   // A command run on the person's press that a reload left running is followed again by this load
   await followRuns($).catch(err => log($, `commands run on a press not followed: ${String(err)}`))
   await keepStoppedReports($, now)

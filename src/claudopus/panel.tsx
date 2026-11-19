@@ -27,10 +27,6 @@ const topPlaces = new Map<string, number>()
 // waits is all another chat's); one that asks again after that goes to the end, as anything new does
 const topClosed = new Map<string, number>()
 const KEPT_MOST = 10 * 60_000
-// When each card's admin commands first came, kept once they are answered, so its answered note stays where the box was
-const gatePartAt = new Map<string, number>()
-// How far apart two admin commands of a card come for the second to be a part of its own: more than any batch of one step
-const GATE_PART_GAP = 60_000
 // The last drawing made of each pane on each surface, what a press under way keeps on screen (isPressHeld)
 const lastShown = new Map<string, unknown>()
 // Each pane's drawings made afresh are numbered as they are asked for: one that finishes after a newer one (the engine dropped its
@@ -104,8 +100,6 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
-    // A message that waits for a hook to start a task again goes from this drawing (sendHeld)
-    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     if (paneId === LIST) ((listDrawing += 1), (listSurface = e.surface))
     if (paneId === LIST) await holdTest($)
     try {
@@ -187,14 +181,8 @@ const panelHooks = (on: On) => {
     // Every piece of work this chat keeps; its own are the ones the chat's thread started, the rest are their helpers
     // A card whose ask or gate was just pressed is drawn answered, from the press itself (asPressed)
     // (each read as it stands, never as Done while something of its own runs or to-dos are left: shownAs)
-    const shownKept = await read($, reports)
-    const shownAt = await $.clock.now()
-    const all = shownAs((await read($, todos)).map(asPressed), one => openResultWaits(one, shownKept, shownAt).length > 0)
+    const all = shownAs((await read($, todos)).map(asPressed))
     const own = all.filter(one => !one.parentId)
-    // What a finished task's results still ask the person (openResultWaits): its card stays at the top, green, never under
-    // Finished, until each is answered
-    const resultsKept = await read($, reports)
-    const resultWaits = (one: Todo) => openResultWaits(one, resultsKept, at)
     // The work of the other chats, by chat; an ask answered here leaves its card at once
     const otherChats = await read($, others)
     // A reply in words left here holds its ask as acted on until that chat's own file carries it; from then its file says
@@ -204,20 +192,16 @@ const panelHooks = (on: On) => {
     const helpersThere = helpersOf(otherChats)
     const chat = await read($, me)
     const at = await $.clock.now()
-    // Prompts answered here and in other chats, for a minute after their call ended
-    const answeredOf = (list: Prompt[] | undefined) => (list ?? []).filter(p => !p.endedAt || at - p.endedAt < PROMPT_SHOWN)
-    const promptsAnswered = answeredShown(at)
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
     // (a card the person dismissed is under Finished whatever it still asks or left, until its task works again)
-    const shownWork = own.filter(one => !isDismissed(one)).filter(one => one.status === 'working' || isLingering(one, at) || one.ask || resultWaits(one).length > 0 || one.admins?.length || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD) || isLeftStopped(one, at) || isLeftOpen(one, at))
-    // A key box or a prompt of the app's that a task's own command raised, by that task's card: drawn on the card, never above it
-    // (filled where the top of the panel is put together, below)
-    let onCards = new Map<string, { at: number; key: string; what: string; node: JSX.Element }[]>()
-    // And once answered, what came of it, on the same card for its minute: a line of what was done, never a row of its own between
-    // the cards (17 Nov, the person's screenshot: "You allowed it · it was started / This chat itself" loose under a card)
-    let doneOnCards = new Map<string, { at: number; key: string; node: JSX.Element }[]>()
-    let promptsLoose = promptsAnswered
+    const shownWork = own.filter(one => !isDismissed(one)).filter(one => one.status === 'working' || isLingering(one, at) || one.ask || needsPerson(one) || one.leftSince || runningOn(one.id).length || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD) || isLeftStopped(one, at) || isLeftOpen(one, at))
+    // What waits on a card for the person, each a block (needs.tsx): its own question, the permissions held for its commands,
+    // Claude Code's prompt for a call of its own, the password or key box of a command of its own
+    const keysHeldNow = () => e.surface === 'terminal' && Boolean(keysAsk && hasDraft(keysAsk))
+    // (a prompt or a box of a card that is not among the cards shown, as one the person dismissed, is drawn at the top instead)
+    const shownIds = new Set(shownWork.map(one => one.id))
+    const needsFor = (one: Todo) => needsOf($, one, e.surface, at, !keysHeldNow()).filter(need => one.chat || shownIds.has(one.id) || !/^(?:box|prompt)-/.test(need.id))
     // The cards kept among what waits at the top, as last put together
     let keptUpNow = new Set<string>()
     // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of a chat does.
@@ -228,7 +212,7 @@ const panelHooks = (on: On) => {
     // then it goes under Finished. Work stopped or stopped by an error is not: it pauses in its place, in its own look
     // In the few rows above the prompt a narrow terminal gives the panel, the outline would take two of them
     const isAbovePrompt = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
-    const isFinishMoment = (one: Todo) => one.status === 'done' && !one.leftOpen && !one.ask && !resultWaits(one).length && lingers(one, at)
+    const isFinishMoment = (one: Todo) => one.status === 'done' && !one.leftOpen && !needsPerson(one) && lingers(one, at)
     const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
     // Work under way says nothing of its state: the moving dots do
     const stood: Record<Todo['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
@@ -323,12 +307,8 @@ const panelHooks = (on: On) => {
         (e.surface === 'terminal' ? termDots(table, $, paneId, key) : null) ?? <Text color={LIVE}>▸</Text>
       )
 
-    // What a piece of work needs the person's hands for now, in its colour, with the exact text to copy beside one Copy button, then
-    // the same three ways to answer on every ask, on the small card as in Details: the work's own buttons, or Done and Not now when
-    // it gave none, and a box for a reply in the person's own words, which the desktop app has in the bar above the prompt and
-    // not on the card (repliesInBar). The list's times stand still while the person types (holdTimes)
-    // In the terminal the first ask's reply box holds the keys as the panel takes them: what is typed then is the person's words,
-    // never a button's letter, and Tab leaves it for the buttons and their keys
+    // In the terminal the first question's own field holds the keys as the panel takes them: what is typed then is the person's
+    // words, never a button's letter, and Tab leaves it for the buttons and their keys
     let askFocused = false
     // The small pictures every ask in this drawing draws, in characters: together they stay under ASK_PICS_CHARS, and in Details under
     // what the app draws in one tab beside the chat's own small pictures; one past that is a row that opens it
@@ -378,135 +358,14 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
-    const askBlock = (one: Todo, key: string, isWhole = false) => {
-      const ask = one.ask
-      if (!ask) return null
-      // The card's own box: how many lines tall it is drawn, and its send
-      // (the terminal keeps its one line, Enter sending: how a terminal draws a box of rows is not known here)
-      const rows = e.surface === 'terminal' ? undefined : BOX_ROWS
-      const sendCard = (value: string) =>
-        void (value.trim() && (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`))))
-      const answers = ask.choices?.length ? ask.choices : DEFAULT_ANSWERS
-      const lost = sentLine(one, at)
-      // Answered in the person's own words and acted on: its question, with their reply under it, and nothing to press or type
-      if (isActingOnReply(one))
-        return (
-          <Box key={key} flexDirection="column" gap={1}>
-            <Text wrap="wrap" color={LIVE} bold>{withLinks(table.Link, isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6)), `${key}-text`, ask.text)}</Text>
-            {lost ? <Text key={`${key}-sent`} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{lost}</Text> : null}
-          </Box>
-        )
-      return (
-        <Box key={key} flexDirection="column" gap={1}>
-          {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
-          <Text wrap="wrap" color={needsPerson(one) ? NEEDS : LIVE} bold>{withLinks(table.Link, isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6)), `${key}-text`, ask.text)}</Text>
-          {/* What the ask is about, under its question: whole in Details, and on the small card up to DETAILS_ON_CARD */}
-          {ask.details ? (
-            <Box key={`${key}-details`} flexDirection="column" minWidth={0}>
-              <Markdown text={isWhole || ask.details.length <= DETAILS_ON_CARD ? ask.details : `${cut(ask.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`} />
-            </Box>
-          ) : null}
-          {/* The pictures it is about, each drawn small with a row that opens it large, so it is decided here */}
-          {askPictures(one, key, isWhole)}
-          {ask.copy ? (
-            <Box flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingLeft={2}>
-              <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                <Text mono wrap="wrap">{withLinks(table.Link, ask.copy, `${key}-copy`)}</Text>
-              </Box>
-              <Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} />
-            </Box>
-          ) : null}
-          {/* A command Claude Code refused, to run on the person's press: where and for how long at most */}
-          {runWhere(table, one, key)}
-          {/* A command to type: Terminal opens with it typed, not run, only on this press; not beside Run it */}
-          {canOpenTerminal(one) && !offeredRun(one) ? (
-            <Box flexDirection="row">
-              <Button key={`${key}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Typed into Terminal, not run yet' : 'Open in Terminal'} onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} />
-            </Box>
-          ) : null}
-          {/* Another chat's ask is answered only in its own chat: no file carries an answer there */}
-          {one.chat ? (
-            <Text key={`${key}-elsewhere`} dimColor wrap="wrap">{`Answer it in its own chat, “${one.chat.title || 'another chat'}”${one.chat.host ? `, on ${one.chat.host}` : ''}.`}</Text>
-          ) : null}
-          {one.chat ? null : (
-          <Box flexDirection="row" flexWrap="wrap" gap={1}>
-            {runButton($, table, one, key)}
-            {answers.map((choice, n) => (
-              <Button key={`${key}-choice-${n}-${askMark(ask)}-${loadMark}`} label={choice} variant={n === 0 ? 'primary' : undefined} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
-            ))}
-            {/* Where the bar above the prompt holds the reply box, the last answer opens it there for this card, and closes it again */}
-            {'Input' in table && repliesInBar(e.surface) ? (
-              isReplyOpen(one) ? (
-                <Button key={`${key}-inbar-close-${presses}`} label="Close" onPress={press => openReply($, undefined, press.surface)} />
-              ) : (
-                <Button key={`${key}-inbar-${presses}`} label="Answer in words" plain onPress={press => openReply($, one, press.surface)} />
-              )
-            ) : null}
-          </Box>
-          )}
-          {/* Where the bar above the prompt holds the reply box, the card has none: a box typed in here is what the app drags the
-              panel to. Once opened it says where to type: the app puts the cursor there only on the person's own click */}
-          {'Input' in table && !one.chat && repliesInBar(e.surface) ? (
-            isReplyOpen(one) ? (
-              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Type it in the box above the chat</Text>
-            ) : null
-          ) : 'Input' in table && !one.chat ? (
-            // The card's own box, where the bar takes none (the terminal, a folded bar, a survey): as wide as the card and as tall as
-            // BOX_ROWS lines whatever it holds; on the desktop with Send under it, a gap between, and no submitLabel, which the app draws
-            // as a small send button and with which a box of several lines sends only on Cmd+Enter
-            <Box width="100%" flexDirection="column">
-              <table.Input
-                key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
-                autoFocus={e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
-                placeholder="Or answer in words"
-                value={draftShown(one.id, ask)}
-                rows={rows}
-                submitLabel={e.surface === 'terminal' ? 'send' : undefined}
-                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($))}
-                onSubmit={value => sendCard(value)}
-              />
-              {e.surface === 'terminal' ? null : (
-                <Box flexDirection="row" alignItems="center" gap={2} marginTop={1}>
-                  <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                    <Text dimColor wrap="truncate-end">Shift+Enter: new line</Text>
-                  </Box>
-                  <Button key={`${key}-send-${presses}`} label="Send" variant="primary" onPress={() => sendCard(drafts.get(draftOf(one.id, ask)) ?? '')} />
-                </Box>
-              )}
-            </Box>
-          ) : null}
-          {/* An answer that could not be left for another Mac says so, under the ask that is back */}
-          {lost ? <Text key={`${key}-sent`} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{lost}</Text> : null}
-        </Box>
-      )
-    }
-
-    // What a finished task's result still asks, on its card: "Result ready" and the first open question in amber, its answers (the
-    // same buttons as in the result, answered the same way), and a press to the result for the rest
-    const resultAskBlock = (one: Todo, key: string) => {
-      const open = resultWaits(one)
-      const [first] = open
-      if (!first) return null
-      const { r, wait, index } = first
-      return (
-        <Box key={key} flexDirection="column" gap={1}>
-          <Text wrap="wrap" color={one.leftOpen ? NEEDS : undefined} bold>{`Result ready · ${cut(wait.text, Math.round(room * 1.6))}`}</Text>
-          {r ? (
-            <Box flexDirection="row" flexWrap="wrap" gap={1}>
-              {answersOf(wait).map((said, n) => (
-                <Button key={`${key}-say-${r.id}-${index}-${n}-${presses}`} label={said} variant={n === 0 ? 'primary' : undefined} {...(said === ANSWER_IN_WORDS ? { plain: true } : {})} onPress={() => void ((presses += 1), answerWait($, r, index, said, at).catch(err => log($, `answer not kept: ${String(err)}`)))} />
-              ))}
-            </Box>
-          ) : null}
-          {r && open.length > 1 ? (
-            <Box flexDirection="row" alignItems="center" gap={1}>
-              <Text dimColor>{`${open.length - 1} more ${open.length === 2 ? 'question' : 'questions'}`}</Text>
-              <Button key={`${key}-more-${r.id}-${presses}`} label="Result" plain onPress={() => void openReport($, r.id)} />
-            </Box>
-          ) : null}
-        </Box>
-      )
-    }
+    // A card's blocks, one under the other in the order they came; a newer one goes under the older, so nothing already on the
+    // card moves. Each is the one drawing (needBlock), on the small card as in Details
+    const needBlocks = (one: Todo, isWhole = false) =>
+      needsFor(one).map(need => {
+        const isOwnField = Boolean(need.field && need.card)
+        const autoFocus = isOwnField && e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : false
+        return needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(one, need.id, isWhole) : null, autoFocus })
+      })
     // The small card: its title, which opens its Details, with Stop at the far end of that row; where it stands and how many
     // to-dos are done; the to-do marked doing, while one is; the line the work last wrote beside the three dots; its helpers. Each
     // part has a fixed number of rows and is clipped to them, so a card changes height only as that to-do row comes and goes
@@ -531,17 +390,9 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
-    // When a card's admin commands came: the earliest still open, else as first seen
-    const gatesAt = (one: Todo) => {
-      const open = Math.min(...(one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).map(gate => gate.at), Infinity)
-      // a new admin command after the earlier ones were answered: where it came, not where they did
-      if (Number.isFinite(open) && (!gatePartAt.has(one.id) || (gatePartAt.get(one.id) ?? 0) < open - GATE_PART_GAP)) gatePartAt.set(one.id, open)
-      if (!one.admins?.length && !cardNotesOf(one.id, at).length) gatePartAt.delete(one.id)
-      return gatePartAt.get(one.id) ?? open
-    }
     // A card of this chat's that has ended and is not under Finished can be dismissed there; one at work has Stop, and one a
     // command waits on for the person's Allow stays
-    const canDismiss = (one: Todo) => !one.chat && !one.parentId && one.status !== 'working' && shownWork.some(up => up.id === one.id) && !isActingOnReply(one) && !one.admins?.length
+    const canDismiss = (one: Todo) => !one.chat && !one.parentId && one.status !== 'working' && shownWork.some(up => up.id === one.id) && !isActingOnReply(one) && !one.admins?.length && !needsFor(one).some(need => need.kind !== 'question')
     const small = (one: Todo) => {
       // In the terminal, while the letters are keys, the first nine cards are numbered and the number opens the card's Details
       // A card in its moment at the top is not numbered, so the others keep their numbers through it
@@ -573,9 +424,9 @@ const panelHooks = (on: On) => {
                 ) : null}
                 {/* Done, at the top or under Finished: a press opens the box above the chat for what to change, where that bar
                     takes a box; the same task then carries on with what is typed */}
-                {(canChange(one) && !resultWaits(one).length) && 'Input' in table && repliesInBar(e.surface) ? (
+                {canChange(one) && 'Input' in table && repliesInBar(e.surface) ? (
                   <Box flexShrink={0}>
-                    <Button key={`change-${one.id}-${presses}`} label="Change something" plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openChange($, one, press.surface)} />
+                    <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : 'Change something'} plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
                   </Box>
                 ) : null}
                 {/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again */}
@@ -595,38 +446,19 @@ const panelHooks = (on: On) => {
             ) : null}
             {/* The to-do it is on, numbered by how many are done, as the edge's lighter part is, so the edge, the count and the row agree */}
             {stepLine(one, kept, done)}
-            {/* Every part under the title starts at the title's own left edge (lead). What the card waits on, each in the order it
-                came: its question, its admin commands, the key box and the app's prompt its own commands raised. A newer one goes
-                under the older, so nothing already on the card moves */}
-            {[
-              ...(one.ask ? [{ at: one.ask.at, node: (
-                <Box key={`ask-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
-                  {askBlock(one, `ask-${one.id}`)}
-                </Box>
-              ) }] : []),
-              // what its result still asks: the first question with its answers, as its result offers them, and how many more
-              ...(resultWaits(one).length ? [{ at: one.endedAt, node: (
-                <Box key={`result-ask-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
-                  {resultAskBlock(one, `result-ask-${one.id}`)}
-                </Box>
-              ) }] : []),
-              // a command the person ran on a press: where it began
-              ...(runningOn(one.id).length && !one.chat ? [{ at: Math.min(...runningOn(one.id).map(run => run.startedAt ?? 0)), node: (
-                <Box key={`run-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
-                  {runBlock($, table, one, `runs-${one.id}`, at)}
-                </Box>
-              ) }] : []),
-              ...(one.admins?.length || cardNotesOf(one.id, at).length ? [{ at: gatesAt(one), node: (
-                <Box key={`gate-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
-                  {adminBlock($, table, one, `gates-${one.id}`, at)}
-                </Box>
-              ) }] : []),
-              ...[...(onCards.get(one.id) ?? []), ...(doneOnCards.get(one.id) ?? [])].map(row => ({ at: row.at, node: (
-                <Box key={`own-lead-${row.key}`} flexDirection="column" paddingLeft={lead}>
-                  {row.node}
-                </Box>
-              ) })),
-            ].sort((a, b) => a.at - b.at).map(part => part.node)}
+            {/* Every part under the title starts at the title's own left edge (lead). What the card waits on, each a block, in
+                the order it came */}
+            {needsFor(one).length ? (
+              <Box key={`needs-lead-${one.id}`} flexDirection="column" gap={1} paddingLeft={lead}>
+                {needBlocks(one)}
+              </Box>
+            ) : null}
+            {/* A command the person allowed, while it runs or its output is kept for the task's next step */}
+            {runningOn(one.id).length && !one.chat ? (
+              <Box key={`run-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
+                {runBlock($, table, one, `runs-${one.id}`, at)}
+              </Box>
+            ) : null}
             {/* A card says its stage, its to-do and what it does now, and in amber what needs the person. What Claudopus did on the
                 way (started it again after the chat stopped or after it stopped partway, the command it waits for, the time it starts
                 it again, the helpers it was told to check on) is never on the card (18 Nov) */}
@@ -654,14 +486,27 @@ const panelHooks = (on: On) => {
                 <Text color={NEEDS} wrap="wrap">{notDoneLine(one)}</Text>
               </Box>
             ) : null}
-            {/* A result's question is all a card waiting for its answer says: no line of what Claude last did */}
-            {resultWaits(one).length ? null : (
-            <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden" paddingLeft={lead}>
+            {/* What the person last pressed or answered here, in one grey line, with the press that takes a button's answer back */}
+            {!one.ask && sentLine(one, at) ? (
+              <Box key={`pressed-${one.id}`} flexDirection="row" gap={2} paddingLeft={lead} height={1} overflow="hidden">
+                <Box flexShrink={1} minWidth={0}>
+                  <Text dimColor wrap="truncate-end">{sentLine(one, at)}</Text>
+                </Box>
+                {canTakeBack(one, at) ? (
+                  <Box flexShrink={0}>
+                    <Button key={`take-back-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label="Take back" plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} />
+                  </Box>
+                ) : null}
+              </Box>
+            ) : null}
+            {/* A card that waits says so with its block alone: no line of what the task last did under it */}
+            {needsPerson(one) ? null : (
+            <Box flexDirection="row" alignItems="flex-start" gap={1} height={2} overflow="hidden" paddingLeft={lead}>
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* Ended, the line begins with how it ended, in a word: green when it finished, amber when not done, plain when
                     it was stopped; then what it last said */}
-                {!one.ask && one.status !== 'working' && !isActingOnReply(one) ? (
+                {one.status !== 'working' && !isActingOnReply(one) ? (
                   <Box flexDirection="row" minWidth={0}>
                     <Text wrap="truncate-end" color={one.leftOpen ? NEEDS : one.status === 'done' ? DONE : one.status === 'failed' ? 'error' : undefined} dimColor={one.status !== 'done' && one.status !== 'failed' && !one.leftOpen}>
                       {one.leftOpen ? 'Not done' : one.status === 'done' ? '✓ Done' : one.status === 'failed' ? '✕ Failed' : one.byYou ? 'Stopped by you' : 'Stopped'}
@@ -669,21 +514,11 @@ const panelHooks = (on: On) => {
                     {!leftLine(one, at) && noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}
                   </Box>
                 ) : (
-                  <Box flexDirection="column" minWidth={0}>
-                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(noteOf(one), room) || (one.status === 'working' ? (one.ask ? 'Waiting for you' : at - one.startedAt < 60_000 ? 'Starting' : 'Working') : "Claude hasn't said what it's doing")}</Text>
-                    {/* Held where it was after an answer, once a newer line of the work's took the answer's place: why it is still up there */}
-                    {!one.ask && !sentLine(one, at) && heldAnswer(one, at) && heldAnswer(one, at)?.to !== 'ran' && !heldAnswer(one, at)?.isRun ? <Text key={`held-answer-${one.id}`} dimColor wrap="truncate-end">{`✓ You answered “${cut(heldAnswer(one, at)?.text ?? '', 60)}”`}</Text> : null}
-                  </Box>
+                  <Text wrap="wrap" dimColor={one.status !== 'working'}>{cut(noteOf(one), room) || (one.status === 'working' ? (at - one.startedAt < 60_000 ? 'Starting' : 'Working') : '')}</Text>
                 )}
               </Box>
             </Box>
             )}
-            {/* A button's answer, while the card says it: a press to take it back, the question back on the card */}
-            {canTakeBack(one, at) ? (
-              <Box key={`take-back-${one.id}`} paddingLeft={lead} flexDirection="row">
-                <Button key={`take-back-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label={`↶ Take back “${cut(heldAnswer(one, at)?.text ?? '', 30)}”`} plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} />
-              </Box>
-            ) : null}
             {/* Finished, with something it started still running: what, how long, and a way to stop it */}
             {leftLine(one, at) && !one.chat ? (
               <Box key={`left-${one.id}`} flexDirection="column" gap={1} paddingLeft={lead}>
@@ -709,7 +544,7 @@ const panelHooks = (on: On) => {
       if (one.status === 'failed') return <Box width={1} flexShrink={0} backgroundColor="error" />
       if (one.status !== 'working' && one.status !== 'done') return <Box width={1} flexShrink={0} />
       // (amber for one that waits on the person to go on, or that left to-dos; a done one whose result asks something more is green)
-      const isNeeded = needsPerson(one) || (onCards.get(one.id)?.length ?? 0) > 0 || Boolean(one.leftOpen)
+      const isNeeded = needsPerson(one) || Boolean(one.leftOpen)
       if (isNeeded || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={isNeeded ? NEEDS : one.status === 'working' || isActingOnReply(one) ? LIVE : DONE} />
       const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
       return count > EDGE_PARTS ? (
@@ -1593,12 +1428,11 @@ const panelHooks = (on: On) => {
           </Box>
           {/* What it made, right under its title, while it works and once it is done */}
           {madeNow($, one)?.made.length || madeNow($, one)?.code ? part('part-files', 'Files', '', madeTiles($, table, madeNow($, one) ?? { made: [] }, paneId, `files-${one.id}`, e.surface) ?? <Box />) : null}
-          {one.admins?.length || cardNotesOf(one.id, at).length ? (
-            <Box key="part-gates" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-              <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
+          {needsFor(one).length ? (
+            <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
+              <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE} />
               <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-                <Text bold dimColor>Waiting for you</Text>
-                {adminBlock($, table, one, `gates-big-${one.id}`, at)}
+                {needBlocks(one, true)}
               </Box>
             </Box>
           ) : null}
@@ -1607,19 +1441,11 @@ const panelHooks = (on: On) => {
               {runBlock($, table, one, `runs-big-${one.id}`, at)}
             </Box>
           ) : null}
-          {one.ask ? (
-            <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-              <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE} />
-              <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-                <Text bold dimColor>{needsPerson(one) ? 'Waiting for you' : 'Claude is working on your reply'}</Text>
-                {askBlock(one, `ask-big-${one.id}`, true)}
-              </Box>
-            </Box>
-          ) : sentLine(one, at) ? (
+          {!one.ask && sentLine(one, at) ? (
             <Box key="part-answered" flexDirection="row" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
-              <Box flexDirection="column" gap={1} minWidth={0}>
+              <Box flexDirection="row" gap={2} minWidth={0}>
                 <Text dimColor wrap="wrap">{sentLine(one, at)}</Text>
-                {canTakeBack(one, at) ? <Button key={`take-back-big-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label={`↶ Take back “${cut(heldAnswer(one, at)?.text ?? '', 30)}”`} plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} /> : null}
+                {canTakeBack(one, at) ? <Button key={`take-back-big-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label="Take back" plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} /> : null}
               </Box>
             </Box>
           ) : null}
@@ -1634,70 +1460,6 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
-
-    // The app's own prompt open in a chat, amber at the top of that chat's cards, in plain words: which work asks, what it asks, exactly
-    // what (the command, the message), what a yes and a no each do, and Yes and No that answer it while its chat holds it. Not held
-    // (a question, a plan, a chat of an older version), it says where to answer it, and a chat of the Claude app on this Mac opens at a
-    // press. Another chat's prompt has no Yes or No here: it is answered in that chat, and a press on Open that chat takes the person there
-    const promptButtons = (p: Prompt, key: string) => {
-      const press = (said: 'yes' | 'no') => () => void (answerPrompt($, p.id, said), redraw($))
-      return (
-        <Box key={`prompt-buttons-${key}`} flexDirection="row" gap={1}>
-          <Button key={`prompt-yes-${key}-${presses}`} label="Yes" variant="primary" onPress={press('yes')} />
-          <Button key={`prompt-no-${key}-${presses}`} label="No" onPress={press('no')} />
-        </Box>
-      )
-    }
-    // Only this chat's own prompt, while this chat holds it: another chat's is answered in that chat, as no file may answer one
-    const isHeldHere = (p: Prompt, c?: Shared) => Boolean(!c && p.isHeld && promptHeld.has(p.id))
-    // Drawn as Claude Code draws its permission asks, as the admin gate's are: an outlined box with the kind of ask at its top, never
-    // a filled card with an edge as work's cards are
-    // On its own work's card it leaves out the work's title, which the card says above it
-    const promptCard = (p: Prompt, key: string, where: string, c?: Shared, isOnCard = false) => (
-      <Box key={`prompt-${key}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
-        <Box flexDirection="column">
-          <Text dimColor wrap="truncate-end">{`${p.kind === 'question' ? 'Question' : p.kind === 'plan' ? 'Plan' : 'Permission'} · ${isHeldHere(p, c) || !c ? 'waiting for you' : 'waiting in another chat'}`}</Text>
-          {isOnCard ? null : <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>}
-          {/* At the top, away from its chat's name: which chat it is */}
-          {c ? <Text key={`prompt-${key}-chat`} dimColor wrap="truncate-end">{`In the chat “${chatName(c)}”${c.host ? ` on ${macName(c.host)}` : ''}`}</Text> : null}
-          <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Has a question for you' : p.kind === 'plan' ? 'Wants you to approve its plan' : 'Needs your permission'}</Text>
-        </Box>
-        <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
-        {p.detail ? (
-          <Box backgroundColor={FILL} paddingLeft={2} paddingRight={1}>
-            <Text mono wrap="wrap">{p.detail}</Text>
-          </Box>
-        ) : null}
-        {p.yes || p.no ? (
-          <Box flexDirection="column">
-            {p.yes ? <Text wrap="wrap">{p.yes}</Text> : null}
-            {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
-          </Box>
-        ) : null}
-        {isHeldHere(p, c) ? promptButtons(p, key) : <Text dimColor wrap="wrap">{where}</Text>}
-        {c && pressOf(c) && !isHeldHere(p, c) ? (
-          <Box flexDirection="row">
-            <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
-          </Box>
-        ) : null}
-      </Box>
-    )
-    // Where a prompt is answered: in this chat, the box Claude Code shows at its bottom
-    const answerHere = (p: Prompt) => (p.kind === 'question' ? 'Pick your answer in the box at the bottom of this chat.' : 'Answer Yes or No in the box at the bottom of this chat.')
-    // The same prompt once answered, for a minute after its call ends: what the person said and what is happening now, in the colour
-    // of what came of it (purple while it runs, grey once over)
-    const saidOf = (p: Prompt) => {
-      if (p.answered === 'stopped') return 'It ended before you answered · nothing happened'
-      if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · Claude got no answer and is waiting for you' : p.kind === 'plan' ? 'You said no · Claude keeps planning' : p.title ? "You said no · it didn't run, and Claudopus told Claude" : "You said no · it didn't run, and Claude is waiting for what you say next"
-      if (p.kind === 'question') return p.isRunning ? 'You answered · Claude has your answer' : 'You answered · Claude is continuing with your answer'
-      if (p.kind === 'plan') return 'You approved the plan · Claude is carrying it out'
-      if (p.isCut) return 'You allowed it · it stopped before it finished'
-      return p.isRunning ? 'You allowed it · it is running now' : `You allowed it · ${p.done ?? 'it ran and is done'}`
-    }
-    // Once answered it is a line of what was done, as the gate's notes are: no box, fill or edge
-    // On its own work's card, without the work's title
-    const answeredCard = (p: Prompt, key: string, c?: Shared, isOnCard = false) =>
-      reportLine(table, `answered-${key}`, p.answered !== 'no' && p.answered !== 'stopped' && !p.isCut, saidOf(p), isOnCard ? [p.text] : [p.title || (c ? 'That chat itself' : 'This chat itself'), p.text])
 
     // The name of a chat above its cards, with its folder and the Mac it runs on when another. Another chat's name opens that chat in
     // the Claude app when pressed, where its link opens here
@@ -1738,8 +1500,8 @@ const panelHooks = (on: On) => {
     // Each other chat's cards under its name: running, asking, or in the pause after ending. A chat with none of these and no prompt
     // is not listed at all, however many are open: the app's own list of chats has them
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
-    const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length || answeredOf(c.answeredPrompts).length)
-    const finished = [...own.filter(one => isDismissed(one) || (one.status !== 'working' && !isLingering(one, at) && !one.ask && !resultWaits(one).length && !isLeftStopped(one, at) && !isLeftOpen(one, at))), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
+    const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
+    const finished = [...own.filter(one => isDismissed(one) || (one.status !== 'working' && !isLingering(one, at) && !needsPerson(one) && !isLeftStopped(one, at) && !isLeftOpen(one, at))), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
         <Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
@@ -1897,48 +1659,16 @@ const panelHooks = (on: On) => {
     const isInline = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
     // Everything that waits on the person, every chat's, together at the top under the header, in the order it came: the oldest
     // first, and what comes later under it, so nothing waiting moves down as more comes (17 Nov, the person: the yellow "jumps
-    // around"). A key box or a prompt a task's own command raised is drawn on that task's card; what belongs to no card shown here
-    // (a box or a prompt of the chat itself, a gate with no card, another chat's prompt) is a notice of its own among the cards
-    const shownIds = new Set(shownWork.map(one => one.id))
-    const cardOfAgent = (agent?: string) => {
-      const id = agent ? topOf(all, agent) : ''
-      return id && shownIds.has(id) ? id : ''
-    }
-    const keysHeld = e.surface === 'terminal' && Boolean(keysAsk && hasDraft(keysAsk))
-    onCards = new Map()
-    const putOnCard = (card: string, row: { at: number; key: string; what: string; node: JSX.Element }) => void onCards.set(card, [...(onCards.get(card) ?? []), row])
-    for (const row of boxRows($, ui, keysHeld, e.surface, one => Boolean(cardOfAgent(one.agent)), true)) putOnCard(cardOfAgent(row.one.agent), { at: row.at, key: `box-${row.one.id}`, what: boxHead(row.one.text), node: row.node })
-    // The chat's own prompt to start a task belongs, once answered, to the card that task started: the one its words name
-    const startedCard = (p: Waiting) => {
-      if (p.agent || (p.tool !== 'Agent' && p.tool !== 'Task') || p.answered === 'no' || p.answered === 'stopped') return ''
-      const words = oneLine(p.input?.description ?? '')
-      const begun = shownWork.filter(one => !one.chat && oneLine(titleOf(one)) === words && one.startedAt >= p.at - 5000).sort((a, b) => a.startedAt - b.startedAt)
-      return begun[0]?.id ?? ''
-    }
-    doneOnCards = new Map()
-    for (const p of promptsAnswered) {
-      const card = cardOfAgent(p.agent) || startedCard(p)
-      if (card) doneOnCards.set(card, [...(doneOnCards.get(card) ?? []), { at: p.at, key: `answered-${p.id}`, node: answeredCard(p, `this-${p.id}`, undefined, true) }])
-    }
-    promptsLoose = promptsAnswered.filter(p => !cardOfAgent(p.agent) && !startedCard(p))
-    for (const p of waiting.filter(p => cardOfAgent(p.agent))) putOnCard(cardOfAgent(p.agent), { at: p.at, key: `prompt-${p.id}`, what: p.text, node: promptCard(p, `this-${p.id}`, answerHere(p), undefined, true) })
-    const notices = [
-      // A box that comes while the person types a reply in the terminal leaves the keys with that reply
-      ...boxRows($, ui, keysHeld, e.surface, one => !cardOfAgent(one.agent)).map(row => ({ at: row.at, what: boxHead(row.one.text), node: row.node })),
-      ...looseGates.map(gate => ({ at: gate.at, what: gateWhat(gate), node: gateRow($, ui, gate, `gate-${gate.id}`, false) })),
-      ...waiting.filter(p => !cardOfAgent(p.agent)).map(p => ({ at: p.at, what: p.text, node: promptCard(p, `this-${p.id}`, answerHere(p)) })),
-      ...otherChats.flatMap(c => {
-        const url = pressOf(c)
-        return (c.prompts ?? []).map(p => ({ at: p.at, what: p.text, node: promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', c) }))
-      }),
-    ]
-    // A work that waits on the person comes to the top whole, its ask, its gate, its key box or its prompt in it as ever; once a gate
-    // is answered, what was done shows in the card, outlined green, and the card stays at the top until that goes
+    // around"). What a task's own command raised is a block on that task's card; what belongs to no card shown here (a box or a
+    // prompt of the chat itself, a gate with no card, another chat's prompt) is the same block among the cards
+    // (a box that comes while the person types a reply in the terminal leaves the keys with that reply)
+    const notices = looseNeeds($, e.surface, card => Boolean(card && shownIds.has(card)), otherChats, !keysHeldNow()).map(need => ({ at: need.at, what: need.text, node: needBlock($, ui, need, { room, surface: e.surface }) }))
+    // A task that waits on the person comes to the top whole, its blocks in it; once one is answered, one grey line says what was
+    // pressed, and the card keeps its place while it says so
     const isAsking = (one: Todo) => Boolean(one.ask) && !isActingOnReply(one)
-    const isWaitingPress = (one: Todo) => one.status === 'working' && Boolean(one.admins?.length)
-    const ownCount = (one: Todo) => (one.chat ? 0 : (onCards.get(one.id)?.length ?? 0))
     // Each thing that waits, counted once: a card with a question and a key box waits on two
-    const waitsOn = (one: Todo) => (isAsking(one) ? 1 : 0) + resultWaits(one).length + (isWaitingPress(one) ? (one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).length : 0) + ownCount(one)
+    const waiting2 = (one: Todo) => needsFor(one).filter(need => !need.isActing)
+    const waitsOn = (one: Todo) => waiting2(one).length
     const isOpen = (one: Todo) => waitsOn(one) > 0
     // An ask answered on its card keeps the card where it was, its answer said in it, for ANSWER_SHOWN: a press or a reply never
     // takes the card from under the person's eyes, as a gate answered on its card does not
@@ -1959,9 +1689,9 @@ const panelHooks = (on: On) => {
     const isWaits = (one: Todo) => isOpen(one) || answeredSince(one) > 0 || (isAnyOpen && isKeptPlace(one))
     // A card that waited and now only says what was done (a gate answered) keeps its place too while it says so: what comes later
     // goes under it, never above
-    const isKeptUp = (one: Todo) => isWaits(one) || (!one.chat && cardNotesOf(one.id, at).length > 0 && isKeptPlace(one))
+    const isKeptUp = (one: Todo) => isWaits(one)
     // Where a card stands among what waits: where it first came, kept for as long as it stays up there
-    const cameAt = (one: Todo) => Math.min(isAsking(one) ? (one.ask?.at ?? Infinity) : Infinity, resultWaits(one).length ? one.endedAt : Infinity, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : (onCards.get(one.id) ?? []).map(row => row.at)))
+    const cameAt = (one: Todo) => Math.min(...waiting2(one).map(need => need.at), Infinity)
     const placeOf = (one: Todo) => topPlaces.get(placeKey(one)) ?? (Number.isFinite(cameAt(one)) ? cameAt(one) : answeredPlace(one) || at)
     // Just finished: up at the top, right under what waits, the newest first, each for its own two seconds
     const isFinishing = (one: Todo) => !isWaits(one) && isFinishMoment(one)
@@ -1969,8 +1699,8 @@ const panelHooks = (on: On) => {
     // Finished but left something running: after its moment it stays up, under what waits, with its Stop it, never back among the rest
     const isLeftUp = (one: Todo) => !one.chat && one.status !== 'working' && Boolean(one.leftSince) && !isWaits(one) && !isFinishing(one)
     // A command you ran on a press, while it runs or its output waits for its ended task: up with what it is and its press
-    const isUp = (one: Todo) => isWaits(one) || isFinishing(one) || isLeftUp(one) || (!one.chat && (cardNotesOf(one.id, at).length > 0 || runningOn(one.id).length > 0))
-    const upSince = (one: Todo) => Math.max(...(one.chat ? [] : runningOn(one.id).map(run => run.startedAt ?? 0)), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)), 0)
+    const isUp = (one: Todo) => isWaits(one) || isFinishing(one) || isLeftUp(one) || (!one.chat && runningOn(one.id).length > 0)
+    const upSince = (one: Todo) => Math.max(...(one.chat ? [] : runningOn(one.id).map(run => run.startedAt ?? 0)), 0)
     const askingHere = shownWork.filter(isUp)
     const askingThere = listedChats.flatMap(c => shownOf(c).filter(isUp))
     const askCards = [...askingHere, ...askingThere]
@@ -1994,7 +1724,8 @@ const panelHooks = (on: On) => {
     // What waits first, notices and cards in the order they came; under it what just finished, the newest first; then cards that only
     // say what was allowed or left something running. A card is drawn when the panel is
     const finishingFlows = shownFlows.filter(isFlowMoment)
-    const whatOf = (one: Todo) => (isAsking(one) ? oneLine(one.ask?.text ?? '') : resultWaits(one)[0] ? oneLine(resultWaits(one)[0]?.wait.text ?? '') : (onCards.get(one.id)?.[0]?.what ?? (one.admins?.[0] ? gateWhat(one.admins[0]) : '')))
+    // What the first thing waiting on a card asks, under its task's name, for the line above the chat
+    const whatOf = (one: Todo) => (waiting2(one)[0] ? `${cut(titleOf(one), 40)}: ${oneLine(waiting2(one)[0]?.text ?? '')}` : '')
     const top = [
       ...notices.map(one => ({ rank: 0, at: one.at, what: one.what, draw: () => one.node })),
       ...askCards.map(one => (isKeptUp(one) ? { rank: 0, at: placeOf(one), what: isOpen(one) ? whatOf(one) : '', draw: () => small(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: () => small(one) } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: () => small(one) })),
@@ -2013,7 +1744,7 @@ const panelHooks = (on: On) => {
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
       // Each thing at the top counts once, as the line above the prompt counts them
       asks: waitsCount,
-      isDone: isHappy(own.filter(one => !one.leftOpen && !resultWaits(one).length), at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
+      isDone: isHappy(own.filter(one => !one.leftOpen), at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
     }
     const mood = headMood(head)
     // A letter for each header button, in the terminal alone, and only while the panel has no password box to type in: there the
@@ -2094,7 +1825,12 @@ const panelHooks = (on: On) => {
           </Box>
         ) : null}
         {!alone ? top.map(one => one.draw()) : null}
-        {!alone ? doneNotesPart(ui, at) : null}
+        {/* What was pressed on a block that belonged to no task, in one grey line where it was */}
+        {!alone ? loosePressedShown(at).map((one, n) => (
+          <Box key={`pressed-loose-${n}`} paddingX={2} flexShrink={0}>
+            <Text dimColor wrap="wrap">{one.text}</Text>
+          </Box>
+        )) : null}
         {!alone ? afarPart(ui) : null}
         {!alone && isWelcomeOpen ? welcomeCard($, ui) : null}
         {alone
@@ -2102,14 +1838,12 @@ const panelHooks = (on: On) => {
           : [
               // This chat's work first, named as this chat's once another chat's is shown, in the order it began; what waits on the
               // person is above, at the top. Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
-              ...(listedChats.length && (restHere.length || restFlows.length || promptsLoose.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
-              ...promptsLoose.map(p => answeredCard(p, `this-${p.id}`)),
+              ...(listedChats.length && (restHere.length || restFlows.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
               ...[...restHere.map(one => ({ at: begun(one), card: () => small(one) })), ...restFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, with what is left of it once its asks are at the top
               ...listedChats.flatMap(c => {
                 const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => begun(a) - begun(b))
-                const answered = answeredOf(c.answeredPrompts).map(p => answeredCard(p, `${c.host}-${c.chat}-${p.id}`, c))
-                return cards.length || answered.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...answered, ...cards.map(one => small(one))] : []
+                return cards.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...cards.map(one => small(one))] : []
               }),
             ]}
         {/* The Finished row sits at the pane's bottom edge, under everything else */}

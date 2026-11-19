@@ -2,7 +2,7 @@
 
 // config.json's "admin" says when the person is asked: "each" (as shipped) before every admin command, "work" once for a piece of
 // work and its helpers until it ends, "never" not at all, as before the gate. The tool.call hook holds a Bash call that runs
-// bin/admin and its work's card shows the exact command and the Mac, with Allow once, Always allow this command and Deny. The answer
+// bin/admin and its work's card shows the exact command and the Mac, with Allow, Don't allow and Always allow this command. The answer
 // is a press in this chat's own panel, kept only in this code's memory: no file, message or typed reply allows anything.
 // What a press allows reaches bin/admin as a grant: a file naming the Mac and the exact command, sealed with a key kept in this Mac's
 // keychain (GATE_SERVICE). bin/admin runs a command only with a grant whose seal is right, and takes it once, so an admin command
@@ -21,13 +21,19 @@ type AdminCall = { host: string; command: string }
 const GATE_SERVICE = 'claudopus-admin-gate'
 // The gates this copy of the mod holds a call for, and what was pressed for each: both only in memory
 const gateHeld = new Set<string>()
-const gateSaid = new Map<string, GateSaid>()
+// What each held gate's wait ends with: the press on its block, or 'gone' as its call was aborted or this copy replaced
+const gateWaits = new Map<string, (said: GateSaid | 'gone') => void>()
+// A hook has ten seconds of its own time, and only time spent in a call on the engine is not counted: so while a hook waits for a
+// press, one sleep run by the engine is in flight, and the wait itself is the promise the press resolves, raced with it. The press
+// ends the wait at once; the sleep only keeps the clock stopped, and is started again each HELD_STEP while nothing is pressed
+const HELD_STEP = 60
+const heldStep = ($: EngineInterface) => $.process.run(['/bin/sleep', String(HELD_STEP)], { timeoutMs: (HELD_STEP + 10) * 1000 }).then(() => undefined, () => undefined)
 // A gate of the chat's own thread, which has no card (a chat that does its own work): drawn at the top of the panel
 let looseGates: Gate[] = []
 // The pieces of work allowed under "work", by card: taken out as the work ends (ended, in cards), so one that comes back asks again
 const workAllowed = new Set<string>()
 const GATE_DENIED = (gate?: Pick<Gate, 'kind'>) =>
-  named(`Refused by {name}: {name} pressed Deny on this ${gate?.kind === 'release' ? "release, so nothing was released. Don't try to release it another way" : gate?.kind === 'file' ? "change, so the file was not changed. Don't try to change it another way" : "admin command, so it didn't run. Don't try to run it another way"}. Continue without it, or say what it is needed for and ask again.`)
+  named(`Refused by {name}: {name} pressed Don't allow on this ${gate?.kind === 'release' ? "release, so nothing was released. Don't try to release it another way" : gate?.kind === 'file' ? "change, so the file was not changed. Don't try to change it another way" : "admin command, so it didn't run. Don't try to run it another way"}. Continue without it, or say what it is needed for and ask again.`)
 const gateThing = (gate?: Pick<Gate, 'kind'>) => (gate?.kind === 'release' ? 'This release did not run' : gate?.kind === 'file' ? 'This change was not made' : 'This admin command did not run')
 const GATE_GONE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: the wait for {name} to allow it was interrupted. Run it again if it is still needed.`)
 const GATE_LATE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: {name} didn't answer in time. Run it again when it is needed, and Claudopus will ask {name} again.`)
@@ -36,10 +42,11 @@ const GATE_UNSEALED = () => `This admin command did not run: Claudopus could not
 const NO_GATE_TOUCH = () =>
   named('Claude never reads or writes the list of admin commands {name} always allows, what {name} allowed, or the key that locks them. Only {name} adds to them, with a press on a card or in Config.')
 
-// What a gate asks, in words, by its kind: the act, and the question on its card
+// What a gate asks, in words, by its kind: the act, for a notification, and the one amber line of its block
 const gateAct = (gate: Gate) =>
   gate.isUndone ? `Make the change to ${gate.host} again` : gate.kind === 'release' ? `Release ${gate.host} to main` : gate.kind === 'file' ? `Change ${gate.host}` : `Run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
-const gateWhat = (gate: Gate) => `${gateAct(gate)}?`
+const gateWhat = (gate: Gate) =>
+  gate.isUndone ? `Make the change to ${gate.host} again?` : gate.kind === 'release' ? `Release ${gate.branch || gate.host} to main?` : gate.kind === 'file' ? `Change ${gate.host}?` : `Run this as admin on ${gate.host === 'here' ? 'this Mac' : gate.host}?`
 
 // The admin commands a Bash command runs, as the shell splits it: bin/admin by any spelling of its path, after what runs a
 // command it is handed, and inside a shell's -c or an eval. What the shell would build (a variable, a substitution) is read as
@@ -258,65 +265,56 @@ const clearGates = async ($: EngineInterface) => {
   if ((await read($, todos)).some(one => one.admins?.some(gate => !gateHeld.has(gate.id))))
     await changeTodos($, list => list.map(one => (one.admins ? { ...one, admins: one.admins.filter(gate => gateHeld.has(gate.id)).length ? one.admins.filter(gate => gateHeld.has(gate.id)) : undefined } : one)))
 }
-// Holds the call until the person presses. A hook's own time is bounded, and time spent in a call on the engine is not counted:
-// the wait is a one-second sleep run by the engine, again and again, the press read from memory between them
+// Holds the call until the person presses: the wait is a promise the press resolves (answerGate), ended also by the call's
+// abort and by this copy of the mod being replaced, with no loop that looks for the press (heldStep)
 const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget?: { remainingMs: number } }, gate: Gate, top: string): Promise<GateSaid | 'gone' | 'late' | 'blind'> => {
   if (!(await $.session.surfaces().catch(() => [])).length) return 'blind'
+  const wait: { said?: GateSaid | 'gone' | 'late' } = {}
+  let end: (said: GateSaid | 'gone') => void = () => undefined
+  const pressed = new Promise<void>(resolve => (end = said => void (wait.said === undefined && ((wait.said = said), resolve()))))
+  const stop = () => end('gone')
   gateHeld.add(gate.id)
+  gateWaits.set(gate.id, end)
   // A gate held afresh waits for a press of its own: a mark an earlier one of the same id left never hides it
   gatePressed.delete(gate.id)
-  await setGates($, top, list => [...list.filter(one => one.id !== gate.id), gate])
-  await openList($).catch(() => undefined)
-  const card = top ? (await read($, todos)).find(one => one.id === top) : undefined
-  const text = `${gateAct(gate)}: ${cut(oneLine(gate.command), 200)}`
-  await (card ? askAloud($, card, text) : aloud($, 'ask', 'This chat has a question for you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
-  const act = gateAct(gate)
-  // The press is on the card or at the top of the panel, which the notification above points to: the chat shows nothing of it, and
-  // its model is told only so it knows, should the person ask (18 Nov: a line in the chat for each release was "garbage I don't need")
-  await tellChat($, named(GATE_IN_CHAT(card ? titleOf(card) : '', `${act.charAt(0).toLowerCase()}${act.slice(1)}`, cut(oneLine(gate.command), 120))))
-  let said: GateSaid | 'gone' | 'late' | undefined
+  next.signal?.addEventListener('abort', stop, { once: true })
+  whenLeft.add(stop)
   try {
-    for (;;) {
-      said = gateSaid.get(gate.id)
-      if (said) break
-      if (next.signal?.aborted || (await isReplaced($))) said = 'gone'
-      else if ((next.budget?.remainingMs ?? Infinity) < 1500) said = 'late'
-      if (said) break
-      await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined)
+    await setGates($, top, list => [...list.filter(one => one.id !== gate.id), gate])
+    await openList($).catch(() => undefined)
+    const card = top ? (await read($, todos)).find(one => one.id === top) : undefined
+    const text = `${gateAct(gate)}: ${cut(oneLine(gate.command), 200)}`
+    await (card ? askAloud($, card, text) : aloud($, 'ask', 'This chat has a question for you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
+    const act = gateAct(gate)
+    // The press is on the card or at the top of the panel, which the notification above points to: the chat shows nothing of it, and
+    // its model is told only so it knows, should the person ask (18 Nov: a line in the chat for each release was "garbage I don't need")
+    await tellChat($, named(GATE_IN_CHAT(card ? titleOf(card) : '', `${act.charAt(0).toLowerCase()}${act.slice(1)}`, cut(oneLine(gate.command), 120))))
+    while (wait.said === undefined) {
+      if (next.signal?.aborted || (await isReplaced($))) wait.said ??= 'gone'
+      else if ((next.budget?.remainingMs ?? Infinity) < 1500) wait.said ??= 'late'
+      else await Promise.race([pressed, heldStep($)])
     }
   } finally {
+    whenLeft.delete(stop)
     gateHeld.delete(gate.id)
-    gateSaid.delete(gate.id)
+    if (gateWaits.get(gate.id) === end) gateWaits.delete(gate.id)
     await setGates($, top, list => list.filter(one => one.id !== gate.id)).catch(() => undefined)
   }
-  // A press the wait did not take (it stopped waiting as the press came) is said as such where its note was
-  const pressed = gatePressed.get(gate.id)
+  const said = wait.said ?? 'gone'
+  // A press the wait did not take (it stopped waiting as the press came) is said as such where its line is
+  const press = gatePressed.get(gate.id)
   gatePressed.delete(gate.id)
-  if (pressed && pressed !== said) await gateNoteFailed($, gate, top, `It had stopped waiting when you pressed. ${gate.kind === 'release' ? 'Nothing was released.' : gate.kind === 'file' ? 'Nothing changed.' : "It didn't run."}`)
-  await log($, `${gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on'} ${gate.host}: ${said === 'once' ? 'allowed once' : said === 'always' ? 'always allowed' : said === 'deny' ? 'denied' : 'not answered'}`)
+  if (press && press !== said) pressedLine($, top, gateLabel(press), `it had stopped waiting, so ${gateNothing(gate)}`)
+  await log($, `${gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on'} ${gate.host}: ${said === 'once' ? 'allowed once' : said === 'always' ? 'always allowed' : said === 'deny' ? 'not allowed' : 'not answered'}`)
   return said
 }
-// What a gate's note heads with: the kind of thing it let through, and where
-const gateHead = (gate: Gate) => (gate.kind === 'release' ? `Release of ${gate.branch ?? gate.host}` : gate.kind === 'file' ? `Change to ${gate.host}` : `Admin command on ${gate.host === 'here' ? thisMac() : gate.host}`)
-const gateWhatLine = (gate: Gate) => (gate.kind === 'release' && gate.folder ? `from ${shortPath(gate.folder)}` : gate.kind === 'file' ? '' : cut(oneLine(gate.command), 200))
-// The gates pressed and not yet let go by their wait, with what was pressed: the panel draws each answered from the press itself,
-// before the wait (a one-second sleep the engine runs) reads it, which kept the amber box and its buttons up to a second after the
-// press (15 Nov). Only the first press counts: a second, on a drawing a moment old, sends nothing
+// The words of each press on a gate's block, and what did not happen when one came to nothing
+const gateLabel = (said: GateSaid) => (said === 'deny' ? DONT_ALLOW : said === 'always' ? ALWAYS_ALLOW : ALLOW)
+const gateNothing = (gate: Pick<Gate, 'kind'>) => (gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing changed' : "it didn't run")
+// The gates pressed and not yet let go by their wait, with what was pressed: the panel draws each answered from the press itself.
+// Only the first press counts: a second, on a drawing a moment old, sends nothing
 const gatePressed = new Map<string, GateSaid>()
-// What a gate's note says when what it said was allowed did not come about, in the same place, grey: never a false "allowed"
-const gateNoteFailed = ($: EngineInterface, gate: Gate, card: string, said: string) =>
-  doneNotes.some(one => one.id === `gate-${gate.id}`)
-    ? noteDone($, { id: `gate-${gate.id}`, ...(gate.call ? { call: gate.call } : {}), ...(card ? { card } : {}), endedAt: 0, head: gateHead(gate), said, what: gateWhatLine(gate), isOn: false }).catch(() => undefined)
-    : Promise.resolve()
-// A call refused after a press, by another of its commands denied or not let through: nothing in it runs, so a gate of it already
-// allowed says so in grey, never green
-const callRefused = async ($: EngineInterface, call: string) => {
-  for (const one of doneNotes.filter(note => note.call === call && note.isOn && note.id.startsWith('gate-'))) {
-    const { at: _at, ...rest } = one
-    await noteDone($, { ...rest, endedAt: 0, isOn: false, said: "It didn't run: another part of the same command was denied, so none of it ran." }).catch(() => undefined)
-  }
-}
-// `card` names the work whose card the gate is on: what was done is said in that card, where the gate was
+// `card` names the work whose card the gate is on: one grey line there says what was pressed, where the block was
 const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') => {
   presses += 1
   const id = gate.id
@@ -324,34 +322,17 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') =
   if (gate.isUndone) {
     if (gatePressed.has(id)) return
     gatePressed.set(id, said)
+    pressedLine($, card, gateLabel(said))
     redraw($)
     return void answerUndone($, gate, said)
       .catch(err => log($, `undone change not answered: ${String(err)}`))
       .finally(() => (gatePressed.delete(id), redraw($)))
   }
-  if (gateHeld.has(id) && !gatePressed.has(id)) {
+  const end = gateWaits.get(id)
+  if (gateHeld.has(id) && !gatePressed.has(id) && end) {
     gatePressed.set(id, said)
-    gateSaid.set(id, said)
-    void noteDone($, {
-      id: `gate-${id}`,
-      ...(gate.call ? { call: gate.call } : {}),
-      ...(card ? { card } : {}),
-      // Refused, nothing runs: what it says is over at once
-      ...(said === 'deny' ? { endedAt: 0 } : {}),
-      head: gateHead(gate),
-      said:
-        said === 'deny'
-          ? `You denied it. ${gate.kind === 'release' ? 'Nothing was released' : gate.kind === 'file' ? 'Nothing changed' : "It didn't run"}, and Claudopus told Claude.`
-          : gate.kind
-            ? `You allowed it. ${gate.kind === 'release' ? (gate.call?.startsWith('step-') ? 'Claudopus is releasing it now.' : 'Claude is releasing it now.') : 'Claude is making the change now.'}`
-            : said === 'always'
-            ? "You always allow this command. It runs now, and Claudopus won't ask again."
-            : gate.isWork
-              ? 'You allowed admin commands for this task. This one runs now.'
-              : 'You allowed it. It runs now.',
-      what: gateWhatLine(gate),
-      isOn: said !== 'deny',
-    }).catch(() => undefined)
+    pressedLine($, card, gateLabel(said))
+    end(said)
   }
   redraw($)
 }
@@ -380,14 +361,13 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
       if (said === 'always')
         await allowAlways($, call).catch(async err => {
           await log($, `admin command not always allowed: ${String(err)}`)
-          const gate = { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: 0 }
-          if (doneNotes.some(one => one.id === `gate-${gate.id}`)) await noteDone($, { id: `gate-${gate.id}`, call: e.tool_use_id, ...(card ? { card: top } : {}), head: gateHead(gate), said: "You allowed it. It runs now, but Claudopus couldn't save it as always allowed.", what: gateWhatLine(gate), isOn: true })
+          pressedLine($, card ? top : '', ALWAYS_ALLOW, "it runs now, but it couldn't be saved as always allowed")
         })
       if (isWork) workAllowed.add(top)
     }
     const grant = await issueGrant($, `${e.tool_use_id}-${n}`, call)
     if (!grant) {
-      await gateNoteFailed($, { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: 0 }, card ? top : '', "Claudopus couldn't use its keychain key. It didn't run, and Claudopus told Claude.")
+      pressedLine($, card ? top : '', ALLOW, "the keychain key couldn't be used, so it didn't run")
       await dropGrants($, grants)
       return { deny: GATE_UNSEALED(), grants: [] }
     }
@@ -449,6 +429,22 @@ const releaseCalls = (command: string, root: string, from: string): ReleaseCall[
   }
   return found
 }
+// What a press on a task's own go-ahead allows (asking.tsx, answerCleared): that card's next run of the release runner for that
+// worktree and its branch, once, within RELEASE_ALLOWED of the press and only until the card ends (state.tsx). Kept only in this
+// code's memory, as every press is: no file, message or typed reply allows a release
+const RELEASE_ALLOWED = 60 * 60_000
+const RELEASE_IT = 'Release it'
+const releaseAllowed = new Map<string, { folder: string; branch: string; at: number }>()
+const allowRelease = async ($: EngineInterface, card: string, folder: string) => {
+  const git = (args: string[]) => $.process.run(['git', '-C', folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '')
+  const repo = await git(['rev-parse', '--show-toplevel'])
+  const branch = await git(['rev-parse', '--abbrev-ref', 'HEAD'])
+  // Only a worktree on a branch, of a repo that says how it is released
+  if (!repo || !branch || branch === 'HEAD' || (await $.fs.stat(`${repo}/.release`).catch(() => undefined))?.kind !== 'file') return false
+  releaseAllowed.set(card, { folder: repo, branch, at: await $.clock.now() })
+  await log($, `release of ${branch} from ${repo} allowed once for ${card} by ${who()}'s press on its go-ahead`)
+  return true
+}
 const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
   const calls = releaseCalls(String((e as { command?: unknown }).command ?? ''), $.plugin.root, cwd || dir.replace(/\/\.claude\/claudopus$/, ''))
   if (!calls.length || !dir) return { grants: [] }
@@ -466,7 +462,14 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
     // Named by the repo itself, not the worktree's folder: a worktree's git folder is inside the repo's own
     const common = await git(['rev-parse', '--path-format=absolute', '--git-common-dir'])
     const name = (/\/\.git$/.test(common) ? common.replace(/\/\.git$/, '') : repo).split('/').pop() || repo
-    const said = await holdGate($, next, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
+    // The person's press on this task's own go-ahead for this folder is the permission: no second box (allowRelease). It is
+    // used once, by this card alone, within RELEASE_ALLOWED; any other release is asked on its card
+    const now = await $.clock.now()
+    const allowed = card ? releaseAllowed.get(top) : undefined
+    const isPressed = Boolean(allowed && allowed.folder === repo && allowed.branch === branch && now - allowed.at < RELEASE_ALLOWED)
+    if (allowed && (isPressed || now - allowed.at >= RELEASE_ALLOWED)) releaseAllowed.delete(top)
+    if (isPressed) await log($, `release of ${branch} in ${name}: allowed by the press on its task's go-ahead`)
+    const said = isPressed ? 'once' : await holdGate($, next, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: now, ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
     if (said !== 'once') {
       await dropGrants($, grants)
       const gate = { kind: 'release' as const }
@@ -474,7 +477,7 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
     }
     const grant = await issueGrant($, id, { host: 'release', command: `${repo}\n${branch}` }, 'release-grant')
     if (!grant) {
-      await gateNoteFailed($, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: 0 }, card ? top : '', "Claudopus couldn't use its keychain key. Nothing was released, and Claudopus told Claude.")
+      pressedLine($, card ? top : '', isPressed ? RELEASE_IT : ALLOW, "the keychain key couldn't be used, so nothing was released")
       await dropGrants($, grants)
       return { deny: GATE_UNSEALED(), grants: [] }
     }
@@ -786,7 +789,7 @@ const offerUndone = async ($: EngineInterface, by: ToolCallInput | undefined, na
   gatePressed.delete(id)
   await setGates($, card ? top : '', gates => [...gates.filter(one => one.id !== id), { id, kind: 'file', isUndone: true, ...(by ? {} : { isOutside: true }), host: what, command: cut(text ?? '(the file was removed)', 2000), at, ...(by?.agentId ? { from: by.agentId } : {}) }])
   await openList($).catch(() => undefined)
-  $.ui.log(`${card ? `A command of "${titleOf(card)}" changed` : by ? 'A command changed' : 'Something outside Claudopus changed'} ${what}, so Claudopus undid it. To make the change again, press Allow once ${card ? 'on its card in' : 'at the top of'} the Claudopus panel. Deny keeps it undone.`)
+  $.ui.log(`${card ? `A command of "${titleOf(card)}" changed` : by ? 'A command changed' : 'Something outside Claudopus changed'} ${what}, so Claudopus undid it. To make the change again, press Allow ${card ? 'on its card in' : 'at the top of'} the Claudopus panel. Don't allow keeps it undone.`)
 }
 const undoneOffers = new Map<string, { name: string; text: string | null; top: string }>()
 const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
@@ -801,60 +804,6 @@ const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
   await log($, `change to ${gate.host}: made again, as allowed`)
 }
 
-// On the card: what it wants to run, whole, and the three presses. Another chat's panel shows it with no buttons: only the chat
-// that holds the call allows it
-// Drawn as Claude Code draws its own permission asks: an outlined box with the kind of ask at its top, never a filled card with an
-// edge as work's cards are, so an ask is not taken for one more piece of work
-const gateKind = (gate: Gate) => (gate.isUndone ? 'Change undone' : gate.kind === 'release' ? 'Release' : gate.kind === 'file' ? 'Change to your files' : 'Admin command')
-const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean, card = '') => (
-  <ui.Box key={key} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
-    <ui.Text wrap="truncate-end" dimColor>{`${gateKind(gate)} · ${gateHeld.has(gate.id) && !isElsewhere ? 'waiting for you' : isElsewhere ? 'waiting in another chat' : 'no longer waiting'}`}</ui.Text>
-    <ui.Text wrap="wrap" color={NEEDS} bold>{gateWhat(gate)}</ui.Text>
-    {gate.kind === 'release' && gate.folder ? (
-      <ui.Box flexDirection="column">
-        <ui.Text wrap="truncate-end">{`Branch ${gate.branch ?? ''}`}</ui.Text>
-        <ui.Text dimColor wrap="truncate-start">{`from ${shortPath(gate.folder)}`}</ui.Text>
-      </ui.Box>
-    ) : gate.command ? (
-      <ui.Box backgroundColor={FILL} paddingLeft={2}>
-        <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
-      </ui.Box>
-    ) : (
-      <ui.Text dimColor wrap="wrap">Its details show only on its own Mac.</ui.Text>
-    )}
-    <ui.Text wrap="wrap">
-      {gate.kind === 'release'
-        ? 'Allow once: Claude merges this branch into main, checks it and pushes it with its version and tag. Deny: nothing is released, and Claudopus tells Claude.'
-        : gate.isUndone && gate.isOutside
-          ? 'Something outside Claudopus changed this file, maybe you in an editor or a program a command left running, so Claudopus undid it. Allow once: Claudopus makes the change again. If you made it, allow it. Deny: the file stays as it was. Either way Claudopus keeps the changed text beside it as a .put-back copy.'
-          : gate.isUndone
-          ? 'A command wrote to this file, so Claudopus undid it: Claude changes it only with Edit or Write, which ask you first. Allow once: Claudopus makes the change again. If you made it, allow it. Deny: the file stays as it was. Either way Claudopus keeps the changed text beside it as a .put-back copy.'
-          : gate.kind === 'file'
-          ? 'Allow once: Claude makes this change to your file. Deny: the file stays as it is, and Claudopus tells Claude.'
-          : `${gate.isWork ? "Allow for this task: it runs as admin, and so do this task's next admin commands, without asking" : 'Allow once: it runs as admin'}. Deny: it doesn't run, and Claudopus tells Claude.`}
-    </ui.Text>
-    {gateHeld.has(gate.id) && !isElsewhere ? (
-      <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-        <ui.Button key={`${key}-once-${loadMark}`} label={gate.isWork ? 'Allow for this task' : 'Allow once'} variant="primary" onPress={() => answerGate($, gate, 'once', card)} />
-        {gate.kind ? null : <ui.Button key={`${key}-always-${loadMark}`} label="Always allow this command" onPress={() => answerGate($, gate, 'always', card)} />}
-        <ui.Button key={`${key}-deny-${loadMark}`} label="Deny" onPress={() => answerGate($, gate, 'deny', card)} />
-      </ui.Box>
-    ) : (
-      <ui.Text dimColor wrap="wrap">{isElsewhere ? 'Allow or deny it on its card in its own chat.' : "It's no longer waiting for you."}</ui.Text>
-
-    )}
-  </ui.Box>
-)
-// The gates on a work's card, and once one is answered, what was done in the same place, outlined green (grey once refused)
-const adminBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number) =>
-  one.admins?.some(gate => !gatePressed.has(gate.id)) || cardNotesOf(one.id, at).length ? (
-    <ui.Box key={key} flexDirection="column" gap={1}>
-      {(one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).map(gate => gateRow($, ui, gate, `gate-${gate.id}`, Boolean(one.chat), one.chat ? '' : one.id))}
-      {cardNotesPart(ui, one.id, at)}
-    </ui.Box>
-  ) : null
-// A gate with no card, at the top of the panel
-const gatesPart = ($: EngineInterface, ui: Ui) => looseGates.filter(gate => !gatePressed.has(gate.id)).map(gate => gateRow($, ui, gate, `gate-${gate.id}`, false))
 // A path in one line: the home folder as ~, and the middle left out past `room` characters, keeping its last folders
 const shortPath = (path: string, room = 44) => {
   const home = dir.replace(/\/\.claude\/claudopus$/, '')

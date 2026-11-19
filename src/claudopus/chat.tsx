@@ -149,8 +149,6 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   await lookEnds($)
   // A reply it never read goes to the chat; work that waits for its helpers reads it at its next step
   if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
-  // A go-ahead pressed during this turn does its last step now, before the wakes go, so its small task starts from this hook
-  await stepsAtEnd($).catch(err => log($, `last step not done: ${String(err)}`))
   if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
   // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
   // held on its own background work leaves it once it ends (keepStoppedReports)
@@ -286,7 +284,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'ask',
       description: named(
-        "For background tasks: when a step needs {name}'s own hands or go-ahead now (a code to paste, a box to fill, a key or button to press, an approval), puts your question at the top of the panel on your card and in the chat as a notice; {Name} answers with a button or in their own words. {Name} sees it before your report, so it must carry everything needed to decide and never point at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile continue with what does not depend on it, or end your step saying what you are waiting for. Ask again if the answer leaves something open; call it with empty `text` only once you have seen it done. Never open a terminal for a command yourself.",
+        "For background tasks: when a step needs {name}'s own hands or go-ahead now (a code to paste, a box to fill, a key or button to press, an approval), puts your question at the top of the panel on your card and in the chat as a notice; {Name} answers with one of the buttons you give in `choices`, or in their own words. {Name} sees it before your report, so it must carry everything needed to decide and never point at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile continue with what does not depend on it, or end your step saying what you are waiting for. Ask again if the answer leaves something open; call it with empty `text` only once you have seen it done. Never open a terminal for a command yourself.",
       ),
       inputSchema: {
         type: 'object',
@@ -294,12 +292,11 @@ const chatHooks = (on: On) => {
           text: { type: 'string', description: 'What to do, in one plain line, speaking to them as "you"; empty once it is done' },
           details: { type: 'string', description: 'What it is about, in full: what changes, what it costs, what is not done. Short plain lines and "- " lists with a blank line after, no tables or bold: the card is narrow and the chat shows plain text' },
           copy: { type: 'string', description: 'Only text they must paste elsewhere, such as a one-time code or a link' },
-          choices: { type: 'array', items: { type: 'string' }, description: 'Buttons to answer with, such as Approve and Not now (Done and Not now when left out)' },
+          choices: { type: 'array', items: { type: 'string' }, description: 'The buttons to answer with, in your words for this question, such as Approve and Not now: give them, as none are added. Not now leaves the question open and sends you nothing' },
           command: { type: 'string', description: 'A command only they can run, never one you can run yourself: one line, whole, shown with a Copy button' },
           cwd: { type: 'string', description: 'The full path of the folder the command runs in, when it has relative paths' },
           pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the pictures the question is about, shown with it on the card and in the chat' },
-          last_step: { type: 'string', description: 'For a go-ahead to finish (the first choice, such as Release it): what you would do on it, in one sentence for this repo, or `release` for the release runner. Claudopus does it on the press without starting you again' },
-          folder: { type: 'string', description: 'With last_step: the full path of your worktree, where it is done' },
+          release: { type: 'string', description: 'Only when you ask for the go-ahead to release: the full path of your worktree. A press on the first choice (Release it) reaches you as the answer and allows your next run of the release runner from that folder, once, with no second question' },
         },
         required: ['text'],
       },
@@ -320,38 +317,6 @@ const chatHooks = (on: On) => {
           minutes: { type: 'number', description: 'With nothing else: start you after this many minutes. With a file or page: the longest to look, after which you are started with word that it never came (15 when left out, at most 60). Should it never come, you are started again and hand back what you have' },
         },
         required: ['what'],
-      },
-      isDeferred: false,
-    })
-    await $.tool.register({
-      name: 'waits',
-      description: named(
-        "For background tasks, before you finish: records what in your report waits on {name}, each as one short question. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. Each call lists everything still waiting: once you finish, it replaces what your earlier results waited on, and [] says nothing does. The panel answers each with Yes / No, or the answers you name in `choices` when it is not yes or no, and always with Not now and Answer in words. Mark a question you also asked on your card with the `ask` tool with `asked: true`: answering it there answers it here. In the chat: once {name}'s own words have answered what a result waits on, call it with that result's report.md path as `result` and the numbers of the questions they answered as `answered`.",
-      ),
-      inputSchema: {
-        type: 'object',
-        properties: {
-          items: {
-            type: 'array',
-            items: {
-              anyOf: [
-                { type: 'string', description: 'A yes-or-no question of at most 140 characters, in plain words, speaking to them as "you"' },
-                {
-                  type: 'object',
-                  properties: {
-                    text: { type: 'string', description: 'The question, at most 140 characters, in plain words, speaking to them as "you"' },
-                    choices: { type: 'array', items: { type: 'string' }, description: 'Its answers when it is not yes or no, a few words each (at most 4)' },
-                    asked: { type: 'boolean', description: 'true when it is the question you asked on your card with the `ask` tool' },
-                  },
-                  required: ['text'],
-                },
-              ],
-            },
-          },
-          answered: { type: 'array', items: { type: 'number' }, description: named("Only in the chat: the numbers of the result's questions {name}'s words answered") },
-          result: { type: 'string', description: named("Only in the chat: the report.md path of the result whose questions {name}'s words answered") },
-        },
-        required: [],
       },
       isDeferred: false,
     })
@@ -503,7 +468,6 @@ const chatHooks = (on: On) => {
     await holdTest($)
     // The texts a message is answered with are the ones known: a change made since is put back first
     if (dir) await personCheck($).catch(err => log($, `files not compared as a message came: ${String(err)}`))
-    if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
     // The notice that a workflow ended ends its card
     if (dir && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) await flowEnded($, e.text).catch(err => log($, `workflow end not read: ${String(err)}`))
     // The engine's notice that work the person stopped has ended says it was stopped "by Claude": the chat is told it was them
@@ -601,9 +565,6 @@ const chatHooks = (on: On) => {
     heard = [...heard, text]
     // A message that names a report starts work from it: that work's own report is kept linked to it
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
-    // One that names a result and quotes what in it waits answers that, as "Answer in words" on the result starts it
-    // (and goes to the task that asked, which carries on with it: the chat is told so with the message)
-    context.push(...(await answeredInMessage($, text).catch(err => (void log($, `results answered in words not marked: ${String(err)}`), [] as string[]))))
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
     await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
 

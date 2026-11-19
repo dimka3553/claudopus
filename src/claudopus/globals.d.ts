@@ -45,7 +45,6 @@ declare global {
   export import Shared = M1.Shared
   export import Stream = M1.Stream
   export import Todo = M1.Todo
-  export import Wait = M1.Wait
   export import capOf = M2.capOf
   export import doing = M2.doing
   export import endOf = M2.endOf

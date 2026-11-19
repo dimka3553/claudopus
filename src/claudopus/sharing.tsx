@@ -58,21 +58,18 @@ const shareMine = async ($: EngineInterface) => {
     return Object.keys(seen).length ? { ...one, seenJobs: seen } : one
   }
   // (each as this chat shows it: never done to another chat while a command or helper of its own runs or to-dos are left)
-  const sharedKept = await read($, reports)
-  const cards = shareable(shownAs(list, one => openResultWaits(one, sharedKept, now).length > 0), now).map(withSeen)
+  const cards = shareable(shownAs(list), now).map(withSeen)
   const helpers = shareableHelpers(list, cards).map(withSeen)
   const jobsSign = [...cards, ...helpers].map(one => Object.values(one.seenJobs ?? {}).map(s => `${s.latest}:${s.tail?.at(-1) ?? ''}:${Math.floor((s.wroteAt ?? 0) / 30_000)}:${s.target ?? ''}`).join('|')).join(' ')
-  const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, input: _input, ...p }: Waiting): Prompt => p
+  const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, input: _input, card: _card, ...p }: Waiting): Prompt => p
   const prompts: Prompt[] = waiting.map(shareOf)
-  // Answered prompts go apart, so a chat of an older version, which reads only `prompts`, never shows one as still open
-  const answeredNow: Prompt[] = answeredShown(now).map(shareOf)
   // Helpers are signed by what their Details shows, not by the context they hold, which moves at every step
   const helpersSign = JSON.stringify(helpers.map(one => [one.id, one.status, one.items, one.entries.at(-1)?.text ?? '']))
-  const core = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${prompts.map(one => one.id).join(' ')}\n${answeredNow.map(one => `${one.id}:${one.answered}:${one.isRunning ? 1 : 0}`).join(' ')}`
+  const core = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${prompts.map(one => one.id).join(' ')}`
   const sign = `${core}\n${helpersSign}\n${jobsSign}`
   if (sign === sharedSign && now - sharedAt < BEAT) return
   if (core === sharedCore && now - sharedAt < LOOK_EVERY) return
-  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(helpers.length ? { helpers } : {}), ...(prompts.length ? { prompts } : {}), ...(answeredNow.length ? { answeredPrompts: answeredNow } : {}), ...(myLink ? { link: myLink } : {}) }
+  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(helpers.length ? { helpers } : {}), ...(prompts.length ? { prompts } : {}), ...(myLink ? { link: myLink } : {}) }
   // Ended work is written apart, under `ended`: a chat still running a version from before ended work was shared reads `cards` only,
   // and would show what is there as running for good
   const isLive = (one: Todo) => one.status === 'working' || Boolean(one.ask)
@@ -205,7 +202,7 @@ const readOthers = async ($: EngineInterface) => {
     // A card gone from its chat's list went with that chat, which is closed: nothing reads an answer left for it, so its ask goes too
     if (!s?.cards.some(card => remoteId(s, card.id) === key) && !vanished.has(key)) vanished.set(key, { chat: was.chat, card: { ...was.card, status: 'done', endedAt: now, ask: undefined }, at: now, of: was.of })
   }
-  for (const s of found) for (const card of s.cards.filter(one => one.status === 'working')) lastRunning.set(remoteId(s, card.id), { chat: chatKey(s), card, at: now, of: { ...s, cards: [], prompts: undefined, answeredPrompts: undefined } })
+  for (const s of found) for (const card of s.cards.filter(one => one.status === 'working')) lastRunning.set(remoteId(s, card.id), { chat: chatKey(s), card, at: now, of: { ...s, cards: [], prompts: undefined } })
   for (const [key, one] of [...vanished]) {
     const s = present.get(one.chat)
     if (!open.has(one.chat) || now - one.at > LINGER + LOOK_EVERY || s?.cards.some(card => remoteId(s, card.id) === key)) vanished.delete(key)
