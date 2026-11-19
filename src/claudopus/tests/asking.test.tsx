@@ -2264,6 +2264,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   expect(await until(async () => ((await changeBox()) ? undefined : true))).toBe(true)
   // At work, its card keeps Message beside Stop: what is sent goes straight to the task as the person's words, between its steps,
   // and the chat is asked nothing
+  for await (const _ of $.turn.step({ turnId: 'turn-a3-0', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a3' })) void _
   await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 'td-a3', agentId: 'a3', item: 'Lengthen the tip', state: 'doing' } as never)
   expect((await until(async () => (await key('change-a3')) ?? undefined))?.props.label).toBe('Message')
   await list.press({ key: (await key('change-a3'))?.key ?? '' })
@@ -2286,6 +2287,15 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   const heads = (await view3.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
   expect(heads.lastIndexOf('Message')).toBeGreaterThan(heads.indexOf('Conversation'))
   expect(await footOf(view3, 'details-a3-')).toEqual(['Attach', 'Paste', 'Stop and send', 'Send'])
+  // What was sent is listed above the box, numbered, with whether the task has read it and what it waits behind; the small card says
+  // it too for as long as it is not read, and Details does not say it again at its top (20 Nov: the person could not tell whether a
+  // message had arrived, nor in what order the task would read them, and sent it again)
+  const viewTexts = async () => (await view3.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  expect(await until(async () => ((await viewTexts()).includes('Not read yet') ? true : undefined))).toBe(true)
+  expect(await viewTexts()).toContain('Keep the tuft')
+  expect((await viewTexts()).some(text => text.startsWith('The task reads messages between its steps.'))).toBe(true)
+  expect((await viewTexts()).some(text => text.startsWith('✓ You wrote'))).toBe(false)
+  expect((await list.findAll({ type: 'Text' })).some(one => String(one.text ?? '').includes('“Keep the tuft” · not read yet'))).toBe(true)
   // Typed in, while the task writes its card: the same box, never drawn anew under the person (its ring would flash, and the app
   // pulls the tab back to it at every drawing)
   const viewNumber = async () => {
@@ -2330,12 +2340,18 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   await view3.press({ key: (await view3.findAll({ type: 'Button' })).find(b => b.props.label === 'Stop and send')?.key ?? '' })
   expect(await until(async () => (stopped.length > wasStopped ? stopped.at(-1) : undefined))).toBe('a3')
   const now = await until(async () => resumed.find(line => line.startsWith('a3: ') && line.includes('stopped you to write to you from your card')))
-  expect(now).toContain('in their own words: Shorter ears, like /Users/me/Desktop/ref\\ shot.mov\n')
+  // with the message it had not read yet before it, in the order sent: Claude Code would give that one only after it
+  expect(now).toContain('Their messages, in the order they sent them, in their own words:\n1. Keep the tuft\n2. Shorter ears, like /Users/me/Desktop/ref\\ shot.mov\n')
   expect(now).toContain('- /Users/me/Desktop/ears.png (open it with Read)')
   expect(now).toContain('- /Users/me/Desktop/ref shot.mov (take stills from it')
   expect(now).not.toContain('ears.mov')
   expect(await until(async () => (await list.find({ type: 'Button', key: 'stop-a3' })) ?? undefined)).toBeDefined()
   expect(await until(async () => ((await chips()).length === 0 && !(await viewBox())?.props.value ? true : undefined))).toBe(true)
+  // The task's next step holds both: each is read from then, the second said to have stopped its step
+  for await (const _ of $.turn.step({ turnId: 'turn-a3', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a3' })) void _
+  expect(await until(async () => ((await viewTexts()).filter(text => text.startsWith('✓ Read ')).length === 3 ? true : undefined))).toBe(true)
+  expect((await viewTexts()).some(text => /^✓ Read \d\d:\d\d · you stopped its step to send it$/.test(text))).toBe(true)
+  expect(await viewTexts()).not.toContain('Not read yet')
   // It finishes again, and can be asked for a change again
   await $.turn.complete({ agentId: 'a3', answer: 'The tip is longer now.', durationMs: 1, isAborted: false, turnId: 'c2', reason: 'answer' })
   expect(await until(async () => (await key('change-a3')) ?? undefined)).toBeDefined()

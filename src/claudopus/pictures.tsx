@@ -330,7 +330,7 @@ const loadWork = async ($: EngineInterface, id: string) => {
   try {
     const one = (await read($, todos)).find(card => card.id === id)
     if (!one) return
-    const key = [one.id, one.steps, one.tokens, one.entries.length, one.status].join(':')
+    const key = [one.id, one.steps, one.tokens, one.entries.length, one.entries.filter(entry => entry.readAt).length, one.status].join(':')
     const kept = await read($, reports)
     const shotsKey = `${key}:${kept.length}`
     const now = await $.clock.now()
@@ -407,7 +407,7 @@ const loadTheirs = async ($: EngineInterface, one: Todo) => {
   let isChanged = false
   try {
     // Read again when it has made a step, said where it is, or ended: not as its context grows
-    const key = [one.steps ?? 0, one.entries.at(-1)?.text ?? '', one.status, one.items.length, one.endedAt].join(':')
+    const key = [one.steps ?? 0, one.entries.at(-1)?.text ?? '', one.entries.filter(entry => entry.readAt).length, one.status, one.items.length, one.endedAt].join(':')
     const now = await $.clock.now()
     const was = talks.get(id)
     if (was?.key === key && (was.lines || now - (was.at ?? 0) < RETRY_READ)) return

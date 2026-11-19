@@ -316,8 +316,13 @@ const CHANGE_WHAT = 'your message'
 const MESSAGE_SENT = (said: string) =>
   `${who(true)} wrote to you from your card, in their own words: ${said}\nThese are their own words to you, as a message of theirs in the chat would be: bring your to-dos in line with them first, then carry on.`
 // Stop and send: the task was stopped mid-step to read this, which ended its commands and helpers
-const MESSAGE_NOW = (said: string) =>
-  `${who(true)} stopped you to write to you from your card, in their own words: ${said}\nWhat you were doing was cut off where it stood, and the commands and helpers you had running were stopped with it. Bring your to-dos in line with their words first, then carry on, starting again whatever they still need.`
+// Messages sent before it that the task had not read yet go with it, in the order sent: Claude Code would give them only after it
+const MESSAGE_NOW = (said: string, earlier: string[] = []) =>
+  `${
+    earlier.length
+      ? `${who(true)} stopped you to write to you from your card. They had written to you before that, and you hadn't read it yet. Their messages, in the order they sent them, in their own words:\n${[...earlier, said].map((one, n) => `${n + 1}. ${one}`).join('\n')}\nThe earlier ones may reach you again after this: they are the same messages, not new ones.`
+      : `${who(true)} stopped you to write to you from your card, in their own words: ${said}`
+  }\nWhat you were doing was cut off where it stood, and the commands and helpers you had running were stopped with it. Bring your to-dos in line with their words first, then carry on, starting again whatever they still need.`
 const CHANGE_ASKED = (said: string) =>
   `${who(true)} wrote to you from the card of your finished task, in their own words: ${said}\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
 const CHANGE_TOLD = (title: string, said: string) => `✓ {Name} wrote to the task "${title}" on its card: ${said}. The task has their words and carries on with them itself: start nothing for it.`

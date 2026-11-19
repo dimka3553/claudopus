@@ -1138,10 +1138,12 @@ test("a pressed card shows the work's own chat: what it was told, what it wrote,
     expect((await tab.find({ type: 'Text', text: /^Fit the nostril again \(/ }))?.text).toBe('Fit the nostril again (failed)')
     expect((await tab.find({ type: 'Text', text: /^search/ }))?.text).toBe('search: nose')
     expect((await tab.find({ type: 'Text', text: /^Done: / }))?.text).toBe('Done: Fit the nostril again')
-    // My steer sits once, before what the work did about it: its to-do and the line it then wrote
+    // My steer sits once, before what the work did about it: its to-do and the line it then wrote. It says when I sent it, and that no
+    // step of the task has read it yet (20 Nov: "not yet answered" stood there after the task had read and answered it)
     const texts = (await tab.findAll({ type: 'Text' })).map(one => one.text)
-    expect(texts.indexOf('You')).toBe(texts.indexOf('search: nose') + 1)
-    expect(texts.indexOf('Done: Fit the nostril again')).toBeGreaterThan(texts.indexOf('You'))
+    const you = texts.findIndex(text => /^You · sent \d\d:\d\d · not read yet$/.test(String(text)))
+    expect(you).toBe(texts.indexOf('search: nose') + 1)
+    expect(texts.indexOf('Done: Fit the nostril again')).toBeGreaterThan(you)
     // Pressed again, a run folds
     await pressed(tab, 'run-1')
     expect(await tab.find({ type: 'Text', text: /^Read/ })).toBeUndefined()
