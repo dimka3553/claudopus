@@ -1,7 +1,8 @@
 // The hidden boxes of bin/secret and bin/admin, in every chat: on this Mac's own screen and from another Mac over ssh alike
 
-// The runner leaves a request in boxes/: what it needs, never a value. The panel draws it at its top with a field; what is typed
-// there goes from the field straight into this Mac's keychain on security's stdin, under the request's id, where the runner takes it
+// The runner leaves a request in boxes/: what it needs, never a value. The panel draws it as a block on its task's card (at its top
+// when no task's command asked), and what is typed for it, in the box above the chat, goes straight into this Mac's keychain on
+// security's stdin, under the request's id, where the runner takes it
 // and removes it. It never reaches the chat, a notice, the saved words, a file or the log. The chat that asked (the request names it)
 // takes the request first; any other chat with a screen after BOX_GRACE. Taking it leaves the .told mark, which tells the runner a
 // panel asks: with none in its first seconds, nothing on this Mac draws one (a -p run with no chat open) and it falls back to its own
@@ -10,8 +11,9 @@
 // word (a host on a key, a name on a password), a kind it does not know or a host or name it would not take, is drawn as nothing;
 // any other field is left unread. A planted request so shows only what the runners would ask. This stops slips and common tricks;
 // it is no wall against code set on getting round it
-// agent: the task whose command asked, so the box is drawn on that task's card
-type Asked = { id: string; text: string; at: number; chat?: string; command?: string; key?: string; call?: string; agent?: string }
+// agent: the task whose command asked; card: that task's card, where the block is drawn. kind: a password (an admin command's, of
+// the Mac `host`) or a key (`name`, none for the box that asks a key's name). text asks in one line, details says where it goes
+type Asked = { id: string; kind: 'password' | 'key'; name?: string; host?: string; text: string; details: string; at: number; chat?: string; command?: string; key?: string; call?: string; agent?: string; card?: string }
 // The Bash calls of this chat that run bin/admin or bin/secret, by call id, with their command: a box is drawn only for a request of
 // this chat's own while one of them runs (one sent to the background for BOX_OLD after it began), and says which command asked. A
 // request no runner of this chat could have made, however it is worded, is drawn nowhere
@@ -70,103 +72,32 @@ const BOX_AGAIN: Record<string, string> = {
   control: 'That had a line break or another special character. ',
 }
 // The wording for a request, or undefined for one the panel does not draw
-const boxWording = (one: Record<string, unknown>): string | undefined => {
+const boxWording = (one: Record<string, unknown>): Pick<Asked, 'kind' | 'name' | 'host' | 'text' | 'details'> | undefined => {
   // A reason it does not know is left out
   const again = typeof one.again === 'string' && Object.hasOwn(BOX_AGAIN, one.again) ? BOX_AGAIN[one.again]! : ''
   if (one.kind === 'admin') {
     // A password is sent only sealed to the key the runner made for this one request: a request with none is drawn nowhere
     if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined || typeof one.key !== 'string' || !BOX_KEY.test(one.key)) return undefined
-    const mac = one.host === 'here' ? thisMac() : one.host
-    return `${again}Claudopus needs the admin password of ${mac} to run the command below. It goes only to that command and isn't saved, so the next one asks again.`
+    const mac = one.host === 'here' ? "This Mac's password" : `The password of ${one.host}`
+    return { kind: 'password', host: one.host, text: `${again}${mac} is needed to run this as admin.`, details: 'It goes only to this command and is never saved.' }
   }
   if (one.kind === 'secret') {
     if (one.host !== undefined) return undefined
     // No name: the first box of a key saved by hand asks its name
-    if (one.name === undefined) return 'Name of the key to save, such as GITHUB_TOKEN. Claude uses it by this name.'
+    if (one.name === undefined) return { kind: 'key', text: 'Which name should the key be saved under, such as GITHUB_TOKEN?', details: 'Commands use the key by this name.' }
     if (typeof one.name !== 'string' || !BOX_NAME.test(one.name)) return undefined
-    return `${again}Claudopus needs ${one.name}. Claudopus saves it only in ${keptWhere()}. Claude uses it by name, and Claudopus hides it in anything a command shows.`
+    return { kind: 'key', name: one.name, text: `${again}${one.name} is needed to run this task's command.`, details: `It goes only into ${keptWhere()}.` }
   }
   return undefined
 }
 let boxes: Asked[] = []
-// What the person just did with a box or an admin command, shown a minute at the top of the panel where it was: what they did and
-// what happens now, so nothing that needed them just vanishes
-// A note tied to the call the press let go (`call`) goes once that call ends, never before DONE_LEAST so it can be read, and at
-// most DONE_LONGEST while it runs; one with no call is shown DONE_SHOWN
-// `card`: the work whose card held the gate; the note is drawn in that card, not at the top
-type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean; call?: string; endedAt?: number; card?: string }
-let doneNotes: DoneNote[] = []
-const DONE_SHOWN = 60_000
-const DONE_LEAST = 15_000
-const DONE_LONGEST = 30 * 60_000
-const isNoteShown = (one: DoneNote, at: number) =>
-  !one.call ? at - one.at < DONE_SHOWN : one.endedAt === undefined ? at - one.at < DONE_LONGEST : at < Math.max(one.endedAt, one.at + DONE_LEAST)
-// The calls that have ended, so a note made after its call ended (a runner sent to the background) is over from the start
-const callsEnded = new Set<string>()
-const noteDone = async ($: EngineInterface, note: Omit<DoneNote, 'at'>) => {
-  // Drawn from the press itself: in the list before anything is awaited, shown until the clock dates it a moment later
-  doneNotes = [...doneNotes.filter(one => one.id !== note.id), { ...note, at: Infinity }]
-  drawAgain($)
-  const at = await $.clock.now()
-  const made = { ...note, at, ...(note.call && note.endedAt === undefined && callsEnded.has(note.call) ? { endedAt: at } : {}) }
-  doneNotes = [...doneNotes.filter(one => one.id !== note.id && isNoteShown(one, at)), made].slice(-6)
-  drawAgain($)
-  // Drawn again as its time ends, so it goes with nothing else to redraw the panel
-  $.clock.after((!made.call ? DONE_SHOWN : made.endedAt !== undefined ? DONE_LEAST : DONE_LONGEST) + 100, () => drawAgain($))
-}
-// The call a note tells of has ended: what it said is over, so the note goes (after DONE_LEAST from its press)
-const noteCallEnded = async ($: EngineInterface, call: string) => {
-  callsEnded.add(call)
-  if (callsEnded.size > 200) callsEnded.delete(callsEnded.values().next().value ?? '')
-  if (!doneNotes.some(one => one.call === call && one.endedAt === undefined)) return
-  const at = await $.clock.now()
-  doneNotes = doneNotes.map(one => (one.call === call && one.endedAt === undefined ? { ...one, endedAt: at } : one))
-  drawAgain($)
-  const last = Math.max(...doneNotes.filter(one => one.call === call).map(one => one.at + DONE_LEAST))
-  $.clock.after(Math.max(0, last - at) + 100, () => drawAgain($))
-}
-// What was done is a line, as Claude Code reports a call's result under it: a mark and the words, with no box, fill or edge, so it is
-// never taken for a card of work. Green once allowed or given, grey once refused or cancelled
-const reportLine = (ui: Ui, key: string, isOn: boolean, said: string, lines: string[]) => (
-  <ui.Box key={key} flexDirection="row" gap={1} paddingX={2} flexShrink={0}>
-    <ui.Text color={isOn ? DONE : undefined} dimColor={!isOn}>{isOn ? '✓' : '✕'}</ui.Text>
-    <ui.Box flexDirection="column" minWidth={0} flexGrow={1} flexShrink={1}>
-      <ui.Text wrap="wrap">{said}</ui.Text>
-      {lines.filter(Boolean).map((line, n) => <ui.Text key={`${key}-${n}`} dimColor wrap="truncate-end">{line}</ui.Text>)}
-    </ui.Box>
-  </ui.Box>
-)
-const doneNotesPart = (ui: Ui, at: number) =>
-  doneNotes.filter(one => !one.card && isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [one.head, one.what]))
-// What was done with a gate on a work's card, in that card where the amber box was: the same outlined box, green once allowed, grey
-// once refused, saying what was allowed, until its note goes
-const cardNotesOf = (card: string, at: number) => doneNotes.filter(one => one.card === card && isNoteShown(one, at))
-const cardNotesPart = (ui: Ui, card: string, at: number) =>
-  cardNotesOf(card, at).map(one => (
-    <ui.Box key={`done-${one.id}`} flexDirection="column" borderStyle="round" borderColor={one.isOn ? DONE : '#808080'} paddingX={1} flexShrink={0}>
-      <ui.Text wrap="truncate-end" dimColor>{one.head}</ui.Text>
-      <ui.Box flexDirection="row" gap={1}>
-        <ui.Text color={one.isOn ? DONE : undefined} dimColor={!one.isOn}>{one.isOn ? '✓' : '✕'}</ui.Text>
-        <ui.Box flexShrink={1} minWidth={0}>
-          <ui.Text wrap="wrap" color={one.isOn ? DONE : undefined} bold={one.isOn}>{one.said}</ui.Text>
-        </ui.Box>
-      </ui.Box>
-      {one.what ? <ui.Text key={`done-${one.id}-what`} dimColor wrap="truncate-end">{one.what}</ui.Text> : null}
-    </ui.Box>
-  ))
-// What a box asks for, in a few words, for its note once answered
-const boxHead = (text: string) => {
-  const name = text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1]
-  const mac = text.match(/admin password of (.+?) to run/)?.[1]
-  return mac ? `The admin password of ${mac}` : name ? `The key ${name}` : 'A key to save'
-}
 // What is typed in a box is kept by the surface alone, never here or drawn back: a drawing that carried it put older letters over
 // newer ones. Each try that left the box to be typed again gives its field a new key, so the field starts empty
 const boxTries = new Map<string, number>()
 // The boxes something is typed in, unsent, so an ask's reply box does not take the keys from them
 const boxTyped = new Set<string>()
-// What is typed in the bar's key box while it is open, only so its Send button can send it: never written anywhere, and gone once
-// it is sent, closed or the box moves
+// What is typed for a box in the box above the chat while it is open, only so its Send button can send it: never written
+// anywhere, and gone once it is sent, closed or the box moves
 const barKeyTyped = new Map<string, string>()
 // A line under a box: what went wrong with what was sent
 const boxSaid = new Map<string, string>()
@@ -184,7 +115,7 @@ const boxesDir = () => `${dir}/boxes`
 // Another chat's request is left to it this long, so its own chat tells it, when that chat is open
 const BOX_GRACE = 5000
 // In the chat only the name of what is asked, once per box, in the chat that asked or else whichever chat sees it first
-const BOX_TOLD = (text: string) => `${text} Type it in its box in the Claudopus panel, not in this chat. /claudopus opens the panel. What you type there goes only into ${keptWhere()}${text.includes('admin password') ? '' : '. Or answer in words, such as where it already is'}.`
+const BOX_TOLD = (one: Pick<Asked, 'kind' | 'text'>) => `${one.text} Press ${one.kind === 'password' ? TYPE_IT : PASTE_IT} on it in the Claudopus panel (/claudopus opens it) and type it in the box above the chat, never in the chat itself${one.kind === 'password' ? '' : ". Or answer in words, such as where it already is"}.`
 // This chat's own id, as the runner reads it from CLAUDE_CODE_SESSION_ID, read at each look (a /clear can change it)
 let boxChat = ''
 // Requests this chat has told or seen told
@@ -198,6 +129,7 @@ const lookBoxes = async ($: EngineInterface) => {
   const now = await $.clock.now()
   const found: Asked[] = []
   const entries = await $.fs.list(boxesDir()).catch(() => [])
+  const cards = entries.length ? await read($, todos) : []
   for (const entry of entries) {
     // A mark left after its request went (a chat that marked it as the runner ended) goes too
     const marked = entry.name.replace(/\.told$/, '')
@@ -209,13 +141,15 @@ const lookBoxes = async ($: EngineInterface) => {
     if (!entry.name.endsWith('.json') || !BOX_ID.test(id) || boxSent.has(id)) continue
     try {
       const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Record<string, unknown>
-      const text = one && typeof one === 'object' ? boxWording(one) : undefined
+      const words = one && typeof one === 'object' ? boxWording(one) : undefined
       // Only this chat's own request, dated no later than now, while a runner of this chat's that could have made it runs
       const runner = typeof one.at === 'number' ? runnerFor(one, one.at, now) : undefined
       const key = typeof one.key === 'string' ? one.key : undefined
       if (key && !boxKeys.has(id)) boxKeys.set(id, key)
       const isKeySame = !key || boxKeys.get(id) === key
-      if (one.id === id && text && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, text, at: one.at, chat: one.chat, command: runner.command, call: runner.call, ...(runner.agent ? { agent: runner.agent } : {}), ...(one.kind === 'admin' && key ? { key } : {}) })
+      // (on the card of the task whose command asked, while this chat keeps one for it)
+      const card = runner?.agent ? cards.find(other => other.id === topOf(cards, runner.agent ?? ''))?.id : undefined
+      if (one.id === id && words && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, ...words, at: one.at, chat: one.chat, command: runner.command, call: runner.call, ...(runner.agent ? { agent: runner.agent } : {}), ...(card ? { card } : {}), ...(one.kind === 'admin' && key ? { key } : {}) })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && (now - one.at >= BOX_OLD || one.at - now > BOX_SKEW)) {
@@ -242,11 +176,12 @@ const lookBoxes = async ($: EngineInterface) => {
       await log($, `box ${one.id} given back: the panel is not drawn here${opened && !opened.isPlaced ? ` (${opened.reason})` : ''}`)
       continue
     }
-    $.ui.log(BOX_TOLD(one.text))
+    $.ui.log(BOX_TOLD(one))
   }
   for (const id of boxTold) if (!found.some(one => one.id === id)) boxTold.delete(id)
   for (const id of boxKeys.keys()) if (!entries.some(entry => entry.name === `${id}.json`)) boxKeys.delete(id)
   for (const id of [...boxTries.keys(), ...boxSaid.keys(), ...boxTyped, ...boxModes.keys(), ...boxHeldReply.keys()]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id), barKeyTyped.delete(id), boxModes.delete(id), boxHeldReply.delete(id))
+  if (barOpen && isBoxKind(barOpen.kind) && !found.some(one => one.id === barOpen?.id)) closeBarOf(barOpen.id)
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
   drawAgain($)
@@ -265,7 +200,7 @@ const boxKeyring = async ($: EngineInterface, what: 'set' | 'has' | 'delete', id
 // Into the keychain under the box's id, on security's stdin as bin/secret keeps a value, so it is never in a command line
 const sendBox = async ($: EngineInterface, id: string, value: string) => {
   if (!value) return
-  const refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? `That's longer than ${BOX_LONGEST} characters, so Claudopus didn't send it.` : /[^\x20-\x7E]/.test(value) ? "That has a line break, a curly quote or another special character, so Claudopus didn't send it. Type it again." : ''
+  const refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? `That's longer than ${BOX_LONGEST} characters, so it wasn't sent.` : /[^\x20-\x7E]/.test(value) ? "That has a line break, a curly quote or another special character, so it wasn't sent. Type it again." : ''
   if (refused) {
     boxSaid.set(id, refused)
     boxPresses += 1
@@ -274,12 +209,12 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   }
   const request = `${boxesDir()}/${id}.json`
   // A runner that has stopped, or a box answered in another chat, takes nothing: its value would stay in the keychain
-  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'The command had stopped waiting. Nothing was saved.'))
+  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'the command had stopped waiting, so nothing was saved'))
   // An admin password goes only sealed to its runner's key: what sits in the keychain a moment is of no use to anything else
   const asked = boxes.find(other => other.id === id)
   const sent = asked?.key ? await sealedFor($, asked.key, value) : value
   if (!sent) {
-    boxSaid.set(id, "Claudopus couldn't encrypt it for the command that asked, so it didn't send it.")
+    boxSaid.set(id, "It couldn't be encrypted for the command that asked, so it wasn't sent.")
     boxPresses += 1
     boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
     return void drawAgain($)
@@ -299,44 +234,41 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   boxPresses += 1
   boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
   if (!isKept) {
-    boxSaid.set(id, `Claudopus couldn't save it in ${keptWhere()}. Try again.`)
+    boxSaid.set(id, `It couldn't be saved in ${keptWhere()}. Try again.`)
     await log($, `box ${id} not kept: security ended ${r.exitCode}`)
   } else {
     boxSent.add(id)
     boxSaid.delete(id)
     boxHeldReply.delete(id)
-    if (boxOpen?.id === id) ((boxOpen = undefined), (barBoxAt = 0))
+    closeBarOf(id)
     const one = boxes.find(other => other.id === id)
     boxes = boxes.filter(other => other.id !== id)
-    if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: one.key ? 'You gave it. It went only to the command that asked, which carries on now.' : `You gave it. Claudopus saved it in ${keptWhere()}, and the command that asked carries on now.`, what: '', isOn: true })
+    if (one) pressedLine($, one.card ?? '', '', '', one.kind === 'password' ? 'You gave the password' : one.name ? `You gave ${one.name}` : 'You named the key')
     await log($, `box ${id} sent to the keychain`)
   }
   drawAgain($)
 }
-// Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
-const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled it. Nothing was saved, and the command that asked stops without it.') => {
+// Don't allow, or Don't give it: the request goes, and the runner, finding it gone, ends as when a box is cancelled
+const cancelBox = async ($: EngineInterface, id: string, said = '') => {
   boxSent.add(id)
   barKeyTyped.delete(id)
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
-  if (boxOpen?.id === id) ((boxOpen = undefined), (barBoxAt = 0))
+  closeBarOf(id)
   boxHeldReply.delete(id)
-  // The box goes in the press's own drawing, before its request is removed
+  // The block goes in the press's own drawing, before its request is removed, and one grey line says what was pressed
+  if (one) pressedLine($, one.card ?? '', one.kind === 'password' ? DONT_ALLOW : DONT_GIVE, said)
   drawAgain($)
   await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
-  // Cancelled, nothing more comes of it: it is over at once
-  if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call, endedAt: 0 } : {}), head: boxHead(one.text), said, what: '' })
   drawAgain($)
 }
 
-// Where a key box is typed in. A box in the pane is what the desktop app drags the pane's window back to (asking.tsx, barBoxes),
-// so where the bar above the prompt takes a box a key box has no field of its own: it has Paste the key and Give a response
-// instead, and either opens its field in that bar, as an ask's reply box is. Elsewhere (the terminal, a folded bar) the box keeps
-// its field in the panel, which a button turns from the key to a response and back. An admin password box keeps its own field
-// A response is the person's own words in place of the key, such as where the key already is: it goes to the command that asked,
-// which prints it and ends without the key (bin/secret, exit 4), so the work that ran it reads it as the command's result
+// Where a box is typed in: the one box above the chat (band.tsx), opened by the block's Type it, Paste it or Answer in words. Only
+// where that bar draws no field (the terminal, a folded bar) does the block keep one field of its own, which Answer in words turns
+// from the key to words and back (boxModes).
+// Words in place of a key, such as where the key already is, go to the command that asked, which prints them and ends without the
+// key (bin/secret, exit 4), so the task that ran it reads them as the command's result
 type BoxMode = 'key' | 'reply'
-let boxOpen: { id: string; mode: BoxMode } | undefined
 // The mode of a box drawn with its own field, where it differs from the key
 const boxModes = new Map<string, BoxMode>()
 // A response that looked like a key itself, held a moment so the person decides: sent anyway, kept as the key, or neither
@@ -345,8 +277,8 @@ const boxHeldReply = new Map<string, string>()
 const boxRepliedAt = new Map<string, number>()
 const BOX_REPLY_TAKEN = 60_000
 // The name a key box asks for, none for the box that asks a key's name
-const boxNameOf = (one: Asked) => one.text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1]
-const isNameBox = (one: Asked) => one.text.startsWith('Name of the key to save')
+const boxNameOf = (one: Asked) => one.name
+const isNameBox = (one: Asked) => one.kind === 'key' && !one.name
 // The words of a response that look like a key rather than about one: a word that starts as the distinctive keys and tokens do, a
 // short prefix (sk-, npm_) with digits after it, a key shaped as a UUID, a password inside an address, or a long run of letters and
 // digits that is no path, address or hyphenated name. Ordinary words, paths and names of settings pass
@@ -364,28 +296,11 @@ const keyWords = (text: string) =>
       return (/[A-Za-z]/.test(bare) && (bare.match(/\d/g)?.length ?? 0) >= 3) || (bare.length >= 32 && /[a-z]/.test(bare) && /[A-Z]/.test(bare))
     })
 const looksLikeKey = (text: string) => keyWords(text).length > 0
-const BOX_LOOKS_KEY = (where: string) => `That looks like the key itself. An answer in words goes into the chat, where Claude reads it. Save it as the key to keep it only in ${where}, or send it as an answer anyway.`
-// Opens a key box's field in the bar above the prompt, for the key or a response, or closes it. One box in the bar at a time:
-// an ask's reply box open there closes (openReply does the same the other way). The cursor is asked into the field
-const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surface: string) => {
-  if (id && replyTo) (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''))
-  if (id) changeTo = ''
-  boxOpen = id ? { id, mode } : undefined
-  barKeyTyped.clear()
-  if (id) (boxHeldReply.delete(id), boxSaid.delete(id))
-  barBoxAt = 0
-  isBarSettling = false
-  boxPresses += 1
-  drawAgain($)
-  const bar = barIds.get(surface)
-  if (!id || !bar) return
-  void $.ui
-    .focus({ requestId: bar, key: barKeyBoxKey(id, mode) })
-    .then(r => recordEvent($, 'focus-call', { deny: r.deny ?? null }))
-    .catch(err => recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }))
-}
-// The bar's field for a key box: named as the bar's reply boxes are (isBarBox), so a click in it holds the bar as drawn
-const barKeyBoxKey = (id: string, mode: BoxMode) => `band-box-${id}-reply-${mode}-${boxTries.get(id) ?? 0}`
+const BOX_LOOKS_KEY = (where: string) => `That looks like the key itself. An answer in words is read by the task that asked. Save it as the key to keep it only in ${where}, or send it as an answer anyway.`
+// The kinds of the box above the chat that are a password or key box's (asking.tsx, barOpen)
+const isBoxKind = (kind: BarKind) => kind === 'key' || kind === 'words' || kind === 'password'
+// The box above the chat as a password or key block opens it: for the key or password itself, or for words in place of a key
+const barKindOf = (one: Asked, mode: BoxMode): BarKind => (one.kind === 'password' ? 'password' : mode === 'reply' ? 'words' : 'key')
 // The person's words in place of the key: left beside the request for its runner, which finds the request gone, prints them and
 // ends without the key. Nothing goes to the keychain. Words that look like the key itself are held until the person says which
 const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure = false) => {
@@ -400,7 +315,7 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
   }
   boxHeldReply.delete(id)
   const request = `${boxesDir()}/${id}.json`
-  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, "The command had stopped waiting. Your answer wasn't sent."))
+  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, "the command had stopped waiting, so your answer wasn't sent"))
   const name = boxNameOf(one)
   const asked = name ? `giving ${name}` : isNameBox(one) ? 'naming a key to save' : 'giving the key'
   const isWritten = await $.fs
@@ -409,17 +324,17 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
     .catch(() => false)
   if (isWritten) boxRepliedAt.set(id, await $.clock.now())
   if (!isWritten) {
-    boxSaid.set(id, "Claudopus couldn't pass your answer to the command that asked. Try again.")
+    boxSaid.set(id, "Your answer couldn't be passed to the command that asked. Try again.")
     boxPresses += 1
     return void drawAgain($)
   }
   boxSent.add(id)
   boxSaid.delete(id)
   boxes = boxes.filter(other => other.id !== id)
-  if (boxOpen?.id === id) ((boxOpen = undefined), (barBoxAt = 0))
+  closeBarOf(id)
+  pressedLine($, one.card ?? '', '', '', `You answered “${cut(oneLine(said), 60)}”`)
   drawAgain($)
   await $.process.run(['rm', '-f', request]).catch(() => undefined)
-  await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: 'You answered in words. Your answer went to the command that asked, and nothing was saved.', what: `“${cut(oneLine(said), 160)}”`, isOn: true })
   await log($, `box ${id} answered in words`)
 }
 // What is typed in a key's field goes by its mode: the key to the keychain, a response to the command that asked
@@ -437,7 +352,7 @@ const keepHeldAsKey = ($: EngineInterface, id: string, surface: string) => {
   const words = keyWords(boxHeldReply.get(id) ?? '')
   boxHeldReply.delete(id)
   if (words.length === 1) return void sendBox($, id, words[0] ?? '').catch(() => log($, `box ${id} not sent`))
-  if (repliesInBar(surface)) openBox($, id, 'key', surface)
+  if (repliesInBar(surface)) openBar($, { kind: 'key', id }, surface)
   else (boxModes.set(id, 'key'), (boxPresses += 1))
   boxSaid.set(id, 'More than one word looks like a key. Paste only the key.')
   drawAgain($)
@@ -450,92 +365,3 @@ const heldReplyButtons = ($: EngineInterface, ui: Ui, id: string, where: string)
       <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send as answer" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)} />
     </ui.Box>
   ) : null
-// The box in the bar above the prompt for the key box opened there: what goes where on a line of its own, the field under it as wide
-// as the bar, and Send, the big one, and Close, small, under that, as the reply box is (band.tsx, barReply). A key is one line; a
-// response BOX_ROWS lines. No submitLabel: the app draws one as a second, small send button, and
-// with one a box of several lines sends only on Cmd+Enter
-const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
-  const name = boxNameOf(one)
-  const head = mode === 'reply' ? `↳ Instead of ${name ?? (isNameBox(one) ? 'the name' : 'the key')}` : name ? `↳ ${name}` : `↳ The key's name`
-  const key = barKeyBoxKey(one.id, mode)
-  return (
-    <ui.Box key="band-key" flexDirection="column" flexShrink={0} width="100%">
-      <ui.Box flexDirection="row" height={1} overflow="hidden">
-        <ui.Text color={NEEDS} bold wrap="truncate-end">{head}</ui.Text>
-      </ui.Box>
-      {'Input' in ui ? (
-        <ui.Box flexDirection="column" width="100%" flexShrink={0}>
-          <ui.Input
-            key={key}
-            placeholder={mode === 'reply' ? 'Type your answer' : isNameBox(one) ? 'Type the name' : 'Paste the key'}
-            rows={mode === 'reply' ? BOX_ROWS : undefined}
-            autoFocus
-            onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
-            onSubmit={value => submitBox($, one.id, mode, value)}
-          />
-        </ui.Box>
-      ) : null}
-      {boxSaid.get(one.id) ? <ui.Text key="band-key-said" color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
-      {heldReplyButtons($, ui, one.id, 'band-key')}
-      {barFoot($, ui, 'band-key', boxPresses, () => void (barKeyTyped.get(one.id) && submitBox($, one.id, mode, barKeyTyped.get(one.id) ?? '')), press => openBox($, undefined, mode, press.surface), mode === 'reply')}
-    </ui.Box>
-  )
-}
-// The key box open in the bar on a surface that takes one, none once it is answered, cancelled or gone
-const barKeyTarget = () => (boxOpen ? boxes.find(one => one.id === boxOpen?.id && !one.key) : undefined)
-
-// Each box with when it was asked and the box itself: the panel draws a box of a task's command on that task's card, and any other
-// among what waits on the person, in the order they came (only: the boxes wanted)
-const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false, surface = '', only: (one: Asked) => boolean = () => true, isOnCard = false) => {
-  if (!boxes.length || !('Input' in ui)) return []
-  // This chat's own first request holds the keys, so a value typed for the notice it told goes to its own box, wherever it is drawn
-  const shown = [...boxes.filter(one => one.chat === boxChat), ...boxes.filter(one => one.chat !== boxChat)]
-  const isBar = repliesInBar(surface)
-  return shown.flatMap((one, n) => {
-    if (!only(one)) return []
-    const isKey = !one.key
-    const name = boxNameOf(one)
-    const inBar = isKey && isBar
-    const mode: BoxMode = (inBar ? undefined : boxModes.get(one.id)) ?? 'key'
-    const isOpen = inBar && boxOpen?.id === one.id
-    const what = isNameBox(one) ? 'the name' : 'the key'
-    return [{ at: one.at, one, node: (
-    <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
-      <ui.Text dimColor wrap="truncate-end">{isKey ? 'Key · waiting for you' : 'Admin password · waiting for you'}</ui.Text>
-      <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
-      {one.command ? <ui.Text dimColor wrap="wrap">{`Command that asked: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
-      <ui.Text dimColor wrap="wrap">{
-        !isKey ? "You can see what you type here. It goes only to the command that asked, never into a chat, and isn't saved."
-        : inBar ? `Paste ${what} in the box above the chat. It goes only into ${keptWhere()}, never into a chat. Or answer in words, such as where ${name ?? 'the key'} already is, and the command that asked gets your words.`
-        : mode === 'reply' ? 'Your answer goes to the command that asked, in place of the key. Nothing is saved.'
-        : `You can see what you type here. It goes only into ${keptWhere()}, never into a chat.`
-      }</ui.Text>
-      {inBar ? null : (
-      <ui.Box width="100%" flexDirection="column">
-        <ui.Input
-          key={`box-${one.id}-field-${mode === 'reply' ? 'reply-' : ''}${boxTries.get(one.id) ?? 0}`}
-          placeholder={mode === 'reply' ? 'Type your answer' : 'Type or paste it here'}
-          submitLabel="Send"
-          autoFocus={n === 0 && !isKeysHeld ? true : undefined}
-          onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($))}
-          onSubmit={value => submitBox($, one.id, mode, value)}
-        />
-      </ui.Box>
-      )}
-      {isOpen ? <ui.Text key={`box-${one.id}-inbar`} dimColor wrap="wrap">✎ Type it in the box above the chat</ui.Text> : null}
-      {boxSaid.get(one.id) && !isOpen ? <ui.Text key={`box-${one.id}-said`} color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
-      {isOpen ? null : heldReplyButtons($, ui, one.id, 'box')}
-      <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-        {inBar && isOpen ? <ui.Button key={`box-${one.id}-close-${boxPresses}`} label="Close" onPress={press => openBox($, undefined, 'key', press.surface)} /> : null}
-        {inBar && !isOpen ? <ui.Button key={`box-${one.id}-paste-${boxPresses}`} label={isNameBox(one) ? 'Type the name' : 'Paste the key'} variant="primary" onPress={press => openBox($, one.id, 'key', press.surface)} /> : null}
-        {inBar && !isOpen ? <ui.Button key={`box-${one.id}-respond-${boxPresses}`} label="Answer in words" plain onPress={press => openBox($, one.id, 'reply', press.surface)} /> : null}
-        {isKey && !inBar ? (
-          <ui.Button key={`box-${one.id}-mode-${boxPresses}`} label={mode === 'reply' ? `Type ${what} instead` : 'Answer in words'}
- onPress={() => void (boxModes.set(one.id, mode === 'reply' ? 'key' : 'reply'), boxHeldReply.delete(one.id), boxSaid.delete(one.id), (boxPresses += 1), drawAgain($))} />
-        ) : null}
-        <ui.Button key={`box-${one.id}-cancel-${boxPresses}`} label="Cancel" plain dimColor onPress={() => void cancelBox($, one.id)} />
-      </ui.Box>
-    </ui.Box>
-  ) }]
-  })
-}

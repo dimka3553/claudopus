@@ -1,80 +1,22 @@
 // The Results tab and each result's own tab: the list, a result drawn whole, put away and brought back
 
-// Puts a line naming the report in the chat's box, for the person to finish and send; where there is no box, nothing is sent for them
-const carryOn = async ($: EngineInterface, r: Report, now: number) => {
-  const text = `Continue from the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: `
-  // What the person had typed stays: the line goes after it
-  const typed = (await $.prompt.read().catch(() => ({ text: '' }))).text
-  const filled = await $.prompt.fill(typed.trim() ? { text: `\n${text}`, mode: 'append' } : { text, mode: 'replace' }).catch(() => ({ isFilled: false }))
-  if (!filled.isFilled) await log($, 'the chat box was not filled from a report')
-}
-// The person's answer to one thing a report waits on them for: Yes, No or one of its own answers goes to the task that asked, which
-// is started again to carry on with it (18 Nov: "A" pressed on a result's card went only to the chat, which had to hand the job to
-// another task by hand); Not now sets it aside. It clears that one alone. One only words answer puts a line naming it in the chat's
-// box, for them to finish: their message, sent, answers it (answeredInMessage). Only a result whose task this chat no longer keeps,
-// or one the person stopped, has its answer sent to the chat as their message
-const answering = new Set<string>()
-const answerWait = ($: EngineInterface, r: Report, index: number, said: string, now: number) => {
-  const wait = waitsOf(r)[index]
-  // A second press before the answer is kept sends nothing more
-  if (!wait || wait.answer || answering.has(`${r.id}:${index}`)) return Promise.resolve()
-  if (said === ANSWER_IN_WORDS) return answerInWords($, r, index, now)
-  answering.add(`${r.id}:${index}`)
-  // (drawn as answered from the press itself, before the answer is kept: openResultWaits)
-  redraw($)
-  // The press's own hook waits for it, and starts the task again from inside itself (sendWakes)
-  const run = answerWaitNow($, r, index, wait, said, now)
+// Change something on a result: the box above the chat opens (openBar), and what is typed there goes to the result's own task
+// while its card can be changed, else as the person's own message naming the result by its path, a real submit as Start again's is. Nothing is put in the chat's own box
+const CONTINUE_FROM = (r: Report, now: number, words: string) => `Continue from the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: ${words}`
+// (on its way from the press's own hook, which waits for it before it sends what the press left to send: answersOnWay)
+const continueFrom = ($: EngineInterface, id: string, words: string) => {
+  const run = continueNow($, id, words)
   answersOnWay.add(run)
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
   return run
 }
-// The task a result's answer goes to: the one that left it, while this chat keeps its card and the person has not stopped it
-const taskOfResult = (list: Todo[], r: Report) => list.find(one => one.id === r.agent && !one.parentId && !one.chat && !isHeld(one) && !one.flagged)
-// Drawn at work from now, while the answer is on its way to start it again (asPressed); let go should nothing ever send it
-const drawWaking = ($: EngineInterface, card: Todo, now: number) => {
-  if (card.status === 'working') return
-  resultWaking.set(card.id, now)
-  redraw($)
-  $.clock.after(WAKE_WAIT + HOOK_WAIT + 5000, () => void (resultWaking.get(card.id) === now && resultWaking.delete(card.id) && redraw($)))
-}
-const answerWaitNow = async ($: EngineInterface, r: Report, index: number, wait: Wait, said: string, now: number) => {
-  // (an answer that could not even be sent on can be pressed again: its question comes back on the card)
-  const again = (err: unknown) => {
-    answering.delete(`${r.id}:${index}`)
-    redraw($)
-    throw err
-  }
-  const card = said === 'Not now' ? undefined : taskOfResult(await read($, todos).catch(again), r)
-  if (card) drawWaking($, card, now)
-  else if (said !== 'Not now') await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "${said}" to answer the question in the result "${r.title}" (${dated(r.at, now)}): ${wait.text}\nThe result: ${reportPath(r)}/report.md`).catch(again)
-  // Not now kept nowhere can be pressed again, and so can an answer its task was not sent; one already sent to the chat is not sent twice
-  await markReport($, r, stored => ({ waiting: waitsOf(stored).map((one, at) => (at === index ? { ...one, answer: said } : one)) })).catch(err => {
-    if (said === 'Not now' || card) answering.delete(`${r.id}:${index}`)
-    redraw($)
-    if (card && resultWaking.delete(card.id)) redraw($)
-    throw err
-  })
-  if (card) await answerToTask($, card, r, wait, said, false)
-}
-// An answer to a result's question, to the task that asked: written into it while it works, else it is started again with it, from
-// inside a hook (toEnded). Each answer goes as it is given, so the task carries on with what it has; the chat is only told, with
-// no turn of its own, that the task has it
-const answerToTask = async ($: EngineInterface, card: Todo, r: Report, wait: Wait, said: string, isWords: boolean) => {
-  const at = await $.clock.now()
-  const left = waitsOf((await read($, reports)).find(one => one.id === r.id) ?? r).filter(one => !one.answer && one.text !== wait.text).length
-  const text = RESULT_ANSWER(r.title, `${reportPath(r)}/report.md`, wait.text, said, isWords, left)
-  await changeTodos($, list => list.map(one => (one.id === card.id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: `${said} — to: ${wait.text}` }].slice(-ENTRIES_KEPT) } : one)))
-  const sent = { text: said, ask: wait.text, at, line: lineOf(card), isCard: true }
-  const told = (await read($, todos)).find(one => one.id === card.id)?.status === 'working' ? await tell($, card.id, text) : undefined
-  if (told && !told.deny) (writtenIn($, card.id, card.id), sentReplies.set(card.id, { ...sent, to: 'work' }), redraw($))
-  else await toEnded($, card, card.id, `${text}\n${RESUMED_BY_ANSWER}`, sent)
-  await tellChat($, named(RESULT_ANSWERED(r.title, wait.text, `“${cut(said, 120)}”`)))
-}
-const answerInWords = async ($: EngineInterface, r: Report, index: number, now: number) => {
-  const text = wordsLine(r, index + 1, now)
-  const typed = (await $.prompt.read().catch(() => ({ text: '' }))).text
-  const filled = await $.prompt.fill(typed.trim() ? { text: `\n${text}`, mode: 'append' } : { text, mode: 'replace' }).catch(() => ({ isFilled: false }))
-  if (!filled.isFilled) await log($, 'the chat box was not filled to answer a result in words')
+const continueNow = async ($: EngineInterface, id: string, words: string): Promise<void> => {
+  const r = (await read($, reports)).find(one => one.id === id)
+  if (!r || !words.trim()) return
+  // To that result's own task while its card is still there to carry on from; else as the person's message naming the result
+  const card = r.agent ? (await read($, todos)).find(one => one.id === r.agent && canChange(one)) : undefined
+  if (card) return changeTask($, card.id, words.trim())
+  await sendForPerson($, CONTINUE_FROM(r, await $.clock.now(), words.trim()))
 }
 // ---- Reports in panes of their own: the list as "Reports", and each report opened as a pane titled with its name ----
 
@@ -316,13 +258,11 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
   const shown = reportsListed.length ? entriesOf(list).filter(entry => entry.some(r => reportsListed.includes(r.id))).flat() : list
   const entries = entriesOf(shown)
   const fresh = entriesOf(list).length - entries.length
-  const waiting = entries.filter(entry => isOpenQuestion(entry[0] as Report))
-  const rest = entries.filter(entry => !isOpenQuestion(entry[0] as Report))
-  const [recent, earlier] = [rest.slice(0, RECENT), rest.slice(RECENT)]
+  const [recent, earlier] = [entries.slice(0, RECENT), entries.slice(RECENT)]
   // The app keeps each button it drew by its key, with the handle of its first drawing; the engine gives every button a new handle
   // whenever anything in the drawing changes (a result arriving, a fold, a time). A key that stayed then pressed a dead handle and
   // nothing opened, press after press. So every key here carries a mark of what the drawing shows, which moves whenever it changes
-  const gen = drawingMark(REPORTS_PANE, [presses, line, height, fresh, isEarlierOpen, isArchivedOpen, 'isTerminal' in ui, ...[waiting, recent, earlier, gone].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))])
+  const gen = drawingMark(REPORTS_PANE, [presses, line, height, fresh, isEarlierOpen, isArchivedOpen, 'isTerminal' in ui, ...[recent, earlier, gone].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))])
   const fold = (key: string, label: string, isOpen: boolean, onPress: () => void) => (
     <Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" alignItems="flex-start" flexShrink={0}>
       {/* In the rows' title column */}
@@ -369,7 +309,6 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
         {fresh ? <Button key={`reports-fresh-${gen}`} label={`Show ${fresh} new ${fresh === 1 ? 'result' : 'results'}`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
       </Box>
       {!shown.length && !gone.length ? <Text dimColor>No results yet.</Text> : null}
-      {waiting.length ? band(ui, 'reports-waiting', 'Waiting for you', `${waiting.length}`, rows(waiting)) : null}
       {recent.length ? band(ui, 'reports-recent', 'Newest', '', rows(recent)) : null}
       {earlier.length || gone.length ? (
         <Box key="reports-folded" flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
@@ -403,7 +342,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
 // A report opened in its own pane: what it is and when; the question it waits on, with its answers; what it found; its pictures,
 // with the one press that opens them all; the report itself; then how to carry on from it, and the other rounds of its work
 type Thumb = { source: string; width: number; height: number } | null
-const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb, height = 0, files: FilesMade = { made: [] }) => {
+const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb, height = 0, files: FilesMade = { made: [] }, surface = '') => {
   const { Box, Button, Markdown, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   // The other rounds of its work first, as the list shows them as one row; then what it started from or started, and the subject's others
@@ -415,7 +354,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
     [one.id === r.from ? 'this result came from it' : one.from === r.id ? 'came from this result' : rounds.includes(one) ? (one.at < r.at ? 'earlier result' : 'later result') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
   const pane = paneOf(r)
   // As in the list: each key carries a mark of what this drawing shows, so the app never keeps a button whose handle is gone
-  const gen = drawingMark(pane, [presses, height, r, mark(text), at, JSON.stringify(files), [...openPiles].join(), facesMade, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
+  const gen = drawingMark(pane, [presses, height, r, repliesInBar(surface), isBarOpen('continue', r.id), mark(text), at, JSON.stringify(files), [...openPiles].join(), facesMade, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
   // Where pictures can be drawn, what the task made is tiles under the title, its pictures among them; the terminal keeps its rows
   const hasTiles = !('isTerminal' in ui) && Boolean(table.Svg) && (files.made.length > 0 || Boolean(files.code))
   const show = (to: number) => void ((presses += 1), hasTiles ? void showPicture($, pictures[to]?.path ?? '', pane, '') : (pictureAt.set(pane, to), redraw($)))
@@ -425,34 +364,23 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
       <Box key="report-head" flexDirection="row" alignItems="flex-start" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
         <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Text bold wrap="wrap">{r.title}</Text>
-          <Text dimColor wrap="wrap">{[dated(r.at, now), r.subject && slug(r.subject) !== slug(r.title) ? r.subject : '', r.archived ? 'archived' : answeredOf(r)].filter(Boolean).join(' · ')}</Text>
+          <Text dimColor wrap="wrap">{[dated(r.at, now), r.subject && slug(r.subject) !== slug(r.title) ? r.subject : '', r.archived ? 'archived' : ''].filter(Boolean).join(' · ')}</Text>
         </Box>
         <Button key={`report-archive-${gen}`} label={r.archived ? 'Bring back' : 'Archive'} onPress={() => archiveReport($, r, !r.archived)} />
       </Box>
       {/* What its task made, right under its title: tiles side by side, each a press that opens it */}
       {hasTiles ? band(ui, 'report-files', 'Files', '', madeTiles($, ui, files, pane, `report-files-${r.id}`, undefined, `-${gen}`) ?? <Box />) : null}
-      {isOpenQuestion(r) || (!r.archived && waitsOf(r).some(byPerson))
+      {/* A result kept from before that still lists questions: its lines, as text, with nothing to press */}
+      {waitsOf(r).length
         ? band(
             ui,
             'report-ask',
-            isOpenQuestion(r) ? 'Waiting for you' : 'Answered',
-            openWaits(r).length > 1 ? `${openWaits(r).length}` : '',
-            // Each thing it waits on with its own answers; one answered says what was answered, and leaves the others
-            <Box flexDirection="column" gap={2}>
-              {waitsOf(r).map((wait, index) =>
-                wait.answer ? (
-                  <Text key={`report-waited-${index}`} dimColor wrap="wrap">{`${wait.text} · ${answeredWords(wait)}`}</Text>
-                ) : (
-                  <Box key={`report-wait-${index}`} flexDirection="column" gap={1}>
-                    <Text wrap="wrap">{wait.text}</Text>
-                    <Box flexDirection="row" flexWrap="wrap" gap={1}>
-                      {answersOf(wait).map(said => (
-                        <Button key={`report-say-${index}-${said}-${gen}`} label={said} onPress={() => void ((presses += 1), answerWait($, r, index, said, now).catch(err => log($, `answer not kept: ${String(err)}`)))} />
-                      ))}
-                    </Box>
-                  </Box>
-                ),
-              )}
+            'Questions it left',
+            '',
+            <Box flexDirection="column">
+              {waitsOf(r).map((wait, index) => (
+                <Text key={`report-waited-${index}`} dimColor wrap="wrap">{wait.text}</Text>
+              ))}
             </Box>,
           )
         : null}
@@ -519,8 +447,14 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         'Follow-up',
         '',
         <Box flexDirection="column" alignItems="flex-start" gap={1}>
-          <Text dimColor wrap="wrap">Claudopus writes a line about this result where you type in the chat, for you to finish and send.</Text>
-          <Button key={`report-carry-${gen}`} label="Continue" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))} />
+          {/* Change something opens the box above the chat; where that bar takes no box (the terminal), the one field is here */}
+          {repliesInBar(surface) ? (
+            <Button key={`report-carry-${gen}`} label={isBarOpen('continue', r.id) ? 'Close' : 'Change something'} onPress={press => openBar($, isBarOpen('continue', r.id) ? undefined : { kind: 'continue', id: r.id }, press.surface)} />
+          ) : 'Input' in ui ? (
+            <Box width="100%" flexDirection="column">
+              <ui.Input key={`report-carry-reply-${r.id}-${replies.get(r.id) ?? 0}`} placeholder="Type what to change" submitLabel="Send" onInput={() => holdTimes($)} onSubmit={value => void (value.trim() && (replies.set(r.id, (replies.get(r.id) ?? 0) + 1), freeTimes($), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))))} />
+            </Box>
+          ) : null}
           {kin.length ? (
             <Box flexDirection="column" alignItems="flex-start">
               {kin.map(one => (

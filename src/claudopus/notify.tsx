@@ -13,9 +13,8 @@ const STALE_END = 60_000
 // How each card and workflow of this chat's stood when last looked at, by id. Unset until the first look after the mod loads,
 // which only takes note, so a reload announces nothing
 let lastSeen: Map<string, string> | undefined
-// Ends waiting to be announced together, with what waited on the person as the end was seen (its report takes that over soon
-// after), and when each was last announced, by id
-let ready: { id: string; waits?: Todo['waits'] }[] = []
+// Ends waiting to be announced together, and when each was last announced, by id
+let ready: { id: string }[] = []
 let isSettling = false
 const announced = new Map<string, number>()
 // Work the person stopped with its Stop button: they saw it end, so it is not announced
@@ -31,7 +30,7 @@ const lookEnds = async ($: EngineInterface) => {
   const cards = list.filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
-  const all: { id: string; status: string; endedAt: number; waits: Todo['waits'] }[] = [...cards.map(one => ({ id: one.id, status: stageOf(list, one), endedAt: one.endedAt, waits: one.waits })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt, waits: undefined as Todo['waits'] }))]
+  const all: { id: string; status: string; endedAt: number }[] = [...cards.map(one => ({ id: one.id, status: stageOf(list, one), endedAt: one.endedAt })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt }))]
   const was = lastSeen
   lastSeen = new Map(all.map(one => [one.id, standing(one.status, one.endedAt)]))
   if (!was) return
@@ -41,7 +40,7 @@ const lookEnds = async ($: EngineInterface) => {
     if ((now - one.endedAt > STALE_END && before !== 'working') || now - (announced.get(one.id) ?? -Infinity) < AGAIN) continue
     announced.set(one.id, now)
     if (pressed.delete(one.id)) continue
-    ready.push({ id: one.id, waits: one.waits })
+    ready.push({ id: one.id })
   }
   if (ready.length && !isSettling) {
     isSettling = true
@@ -57,7 +56,7 @@ const fewWords = (text: string) => {
 }
 
 // What one ended piece of work or workflow says in a notification
-const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, cards: Todo[], runs: Flow[]) => {
+const readyOf = ({ id }: { id: string }, cards: Todo[], runs: Flow[]) => {
   if (id.startsWith('flow:')) {
     const f = runs.find(one => `flow:${one.id}` === id)
     if (!f) return undefined
@@ -66,20 +65,17 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: Todo['waits'] }, car
   }
   const kept = cards.find(card => card.id === id)
   if (!kept) return undefined
-  const waits = (kept.waits ?? seen ?? []).filter(wait => !askedWait(wait).answer)
   const one = kept
   const stage = stageOf(cards, one)
   if (stage === 'working' || stage === 'waiting') return undefined
   const said = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text ?? ''
   const what =
     one.status === 'done'
-      ? waits.length
-        ? `Waiting for you: ${fewWords(waits[0] ? askedWait(waits[0]).text : '')}${waits.length > 1 ? `, and ${waits.length - 1} more` : ''}`
-        : fewWords(one.answer) || fewWords(said) || 'Done.'
+      ? fewWords(one.answer) || fewWords(said) || 'Done.'
       : one.status === 'failed'
         ? `Failed${one.why ? ` · ${one.why}` : ''}.`
         : 'Stopped.'
-  return { title: one.title || 'Task', isDone: one.status === 'done', isWaiting: one.status === 'done' && waits.length > 0, what }
+  return { title: one.title || 'Task', isDone: one.status === 'done', what }
 }
 
 // One sound for all that ended together, only when some finished; one notification naming them. config.json switches each off
@@ -100,12 +96,9 @@ const announce = async ($: EngineInterface) => {
   if (config.sound !== false && items.some(one => one.isDone)) void $.audio.play({ asset: READY_SOUND }).catch(err => log($, `ready sound not played: ${String(err)}`))
   if (config.notifications === false) return
   const [first] = items
-  // (a task whose result asks something is waiting for the person, not done)
-  const isWaiting = (one: (typeof items)[number]) => 'isWaiting' in one && Boolean(one.isWaiting)
-  const done = items.filter(one => one.isDone && !isWaiting(one)).length
-  const waiting = items.filter(isWaiting).length
-  const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} tasks are done` : waiting ? `${items.length} tasks ended · ${waiting} waiting for you` : `${items.length} tasks ended`
-  const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${isWaiting(one) ? 'waiting for you' : one.isDone ? 'done' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
+  const done = items.filter(one => one.isDone).length
+  const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} tasks are done` : `${items.length} tasks ended`
+  const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${one.isDone ? 'done' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
   await alertPerson($, 'ready', title, text, `ready-${ids.map(one => one.id).join('-')}`)
 }
 

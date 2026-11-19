@@ -3,7 +3,7 @@
 // commit with no second look started)
 
 // The calls that keep the card and the memory: they ride along with a work call and are never a step's work
-const BOOK = ['todo', 'note', 'update', 'waits', 'recall', 'ask']
+const BOOK = ['todo', 'note', 'update', 'recall', 'ask']
 const isBook = (tool: string) => BOOK.some(name => isTool(tool, name)) || tool === 'ToolSearch' || tool === 'TodoWrite'
 // A lookup: a read of one file or one search, which a step can send several of at once
 const LOOKUP_TOOLS = ['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch']

@@ -882,16 +882,17 @@ test("pressed by Claude Code for its report, a task is answered with no model, b
 
   // A question open for the person: it can give no report, so the press costs no model and draws nothing
   await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a4', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a4', text: 'May I delete the old repo?', choices: ['Approve', 'Keep it'] } as never)
   expect(await pressedFor('a4', 'I asked whether the old repo may go.')).toEqual(HIDDEN)
 
   // A permission open for the person, on a command of its own: the same
   await $.agent.spawn({ ...spawn, description: 'Clean the build', prompt: 'clean up the build' } as never)
   const asked = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf build', description: 'Clear the build folder' }, agent_id: 'a5' } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => button(list, 'prompt-no-this-'))).toBeDefined()
+  const dontAllow = async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === "Don't allow")
+  expect(await until(dontAllow)).toBeDefined()
   expect(await pressedFor('a5', 'The build folder is next.')).toEqual(HIDDEN)
-  await list.press({ key: (await button(list, 'prompt-no-this-'))?.key ?? '' })
+  await list.press({ key: (await dontAllow())?.key ?? '' })
   await asked
   await list.unmount()
 

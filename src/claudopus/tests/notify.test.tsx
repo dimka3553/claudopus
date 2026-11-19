@@ -1,6 +1,6 @@
 // Sounds and notifications, each by the card's stage: a task that is done, one that failed, and one that needs the person
 
-test('a task that is done plays one sound and raises one notification, once, as its result is handed in; a helper, a pause, a second result within seconds, a Stop press and a reload make none; one that waits for the person says so, a failed one says Failed and why with no sound, and a stopped one makes no sound', SLOW, async ($, on) => {
+test('a task that is done plays one sound and raises one notification, once, as its result is handed in; a helper, a pause, a second result within seconds, a Stop press and a reload make none; a failed one says Failed and why with no sound, and a stopped one makes no sound', SLOW, async ($, on) => {
   // Whether the app takes notifications from a mod
   const app = { noSurface: false, claudopus: 0 }
   const agents: Record<string, string> = {}
@@ -40,21 +40,19 @@ test('a task that is done plays one sound and raises one notification, once, as 
   await clock.advance(1_000)
   expect([played.length, notified.length]).toEqual([1, 1])
 
-  // Two that finish together: one sound and one notification naming both; what waits on the person comes first
+  // Two that finish together: one sound and one notification naming both
   await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
   await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w1', agentId: 'a3', items: ['Do you want the left ear bigger?'] } as never)
   await handIn('a3')
   await clock.advance(300)
   await handIn('a4')
   await clock.advance(1_000)
-  // (one whose result asks something waits for the person: it is not called done)
-  expect([played.length, notified.slice(1)]).toEqual([2, ['2 tasks ended · 1 waiting for you | Check the ears: waiting for you · Draw the eyes: done']])
+  // (a result asks nothing: a task that handed in is done)
+  expect([played.length, notified.slice(1)]).toEqual([2, ['2 tasks are done | Check the ears: done · Draw the eyes: done']])
   await $.agent.spawn({ ...spawn, description: 'Check the chin', prompt: 'check the chin' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w2', agentId: 'a5', items: ['Do you want the chin rounder?'] } as never)
-  await handIn('a5')
+  await handIn('a5', 'The chin is checked.')
   await clock.advance(1_000)
-  expect(notified.at(-1)).toBe('Check the chin | Waiting for you: Do you want the chin rounder?')
+  expect(notified.at(-1)).toBe('Check the chin | The chin is checked.')
   expect(played).toHaveLength(3)
 
   // A failed task: a notification that says Failed and why, and no sound. One whose step ended with an error

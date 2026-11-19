@@ -21,7 +21,7 @@ const tabHooks = (on: On) => {
     } finally {
       if (isTerminal) await tabMoves.finish(move => runTabMove($, move), ms => $.clock.sleep(ms))
     }
-    // An answer the press gave to work that had ended starts it again from here, inside the press's own hook (sendWakes)
+    // An answer the press gave to a task that is not at a step is sent to it from here, inside the press's own hook (sendWakes)
     if (e.plugin === 'claudopus' && (answersOnWay.size || wakes.length)) await sendWakes($, true).catch(err => log($, `answer not sent: ${String(err)}`))
     if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     return r
@@ -113,7 +113,7 @@ const tabHooks = (on: On) => {
     const picture = e.surface === 'terminal' ? null : RASTER.test(file) ? await thumbOf($, thumbPath(r, file)) : /\.svg$/i.test(file) ? await svgOf($, `${reportPath(r)}/${file}`) : null
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows, e.surface === 'terminal' ? { made: [] } : madeOfReport($, r, reportText.get(r.id) ?? ''))}
+        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows, e.surface === 'terminal' ? { made: [] } : madeOfReport($, r, reportText.get(r.id) ?? ''), e.surface)}
       </Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))

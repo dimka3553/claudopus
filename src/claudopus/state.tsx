@@ -66,7 +66,7 @@ const holdDone = (before: Todo[], next: Todo[]) => {
     const old = was.get(one.id)
     const isHeld = !one.parentId && !one.chat && one.status === 'done' && !hasReport(one) && old?.status === 'working'
     // (what the person allowed it under "Ask once per piece of work" ends with it, and only once it really ends)
-    if (old?.status === 'working' && one.status !== 'working' && !isHeld) workAllowed.delete(one.id)
+    if (old?.status === 'working' && one.status !== 'working' && !isHeld) (workAllowed.delete(one.id), releaseAllowed.delete(one.id))
     return isHeld && old ? { ...old, answer: one.answer || old.answer } : one
   })
 }

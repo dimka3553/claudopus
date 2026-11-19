@@ -5,9 +5,7 @@
 // call just runs and ends. So a prompt goes when its call ends (refused, interrupted or run), when the terminal draws its running
 // pill, or, for a command, as soon as a process running it is seen on this Mac. A prompt to allow a call is also answered by a press
 // on its card: the engine runs its PermissionRequest hooks beside its own box, and the first answer, the box's or the hook's, stands
-// `isPressedNo` marks one refused by a press on its card: if Claude Code's own box had answered first and the call goes on, its end
-// says so in place of the press
-type Waiting = Prompt & { tool: string; agent: string; snippet: string; seen?: number; isTold?: boolean; input?: Record<string, string>; isPressedNo?: boolean }
+type Waiting = Prompt & { tool: string; agent: string; snippet: string; seen?: number; isTold?: boolean; input?: Record<string, string> }
 let waiting: Waiting[] = []
 // The tool calls whose permission check asked, newest last, so the prompt that follows is known by its call's id: the one of the same
 // loop, tool and input, else the newest of the same loop and tool
@@ -20,12 +18,10 @@ const askedFor = (agent: string | undefined, tool: string, input: unknown) => {
   if (one) asked = asked.filter(other => other !== one)
   return one?.id
 }
-// What the prompt asks, in plain words and never a tool's own name: what is asked, exactly what (the command, the message, the page),
-// and what a yes and a no each do. A message names the task it goes to, by its card
-type Asks = Pick<Prompt, 'text' | 'kind' | 'detail' | 'yes' | 'no' | 'done'>
-const NO_SKIPS = "No: it doesn't run, and the chat waits for what you say next."
-const NO_TOLD = "No: it doesn't run, and Claudopus tells Claude you said no."
-const promptOf = (tool: string, input: unknown, list: Todo[], isWork = false): Asks => {
+// What the prompt asks, in plain words and never a tool's own name: one line that asks it, what it is for in the task's own words,
+// and exactly what (the command, the message, the page), shown whole. A message names the task it goes to, by its card
+type Asks = Pick<Prompt, 'text' | 'kind' | 'about' | 'detail'>
+const promptOf = (tool: string, input: unknown, list: Todo[]): Asks => {
   const given = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
   const field = (key: string) => (typeof given[key] === 'string' ? oneLine(given[key] as string) : '')
   const whole = (key: string, max: number) => (typeof given[key] === 'string' ? cut((given[key] as string).trim(), max) : '')
@@ -36,48 +32,30 @@ const promptOf = (tool: string, input: unknown, list: Todo[], isWork = false): A
     const card = list.find(one => one.id === id) ?? list.find(one => id.startsWith(one.id))
     return card ? `the task “${titleOf(card)}”` : 'another task'
   }
-  const allow = (text: string, yes: string, detail = '', no = isWork ? NO_TOLD : NO_SKIPS): Asks => ({ text, kind: 'allow', ...(detail ? { detail } : {}), yes: `Yes: ${yes}`, no })
-  if (tool === 'Bash' || tool === 'PowerShell')
-    return allow(`Run a command: ${cut(field('description'), 90) || cut(field('command'), 90) || 'no description'}`, 'the command runs on its Mac.', whole('command', 400))
-  if (tool === 'Write') return allow(`Write the file ${file(field('file_path')) || 'a file'}`, 'Claude saves the file, replacing any file of that name.', field('file_path'))
-  if (tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit')
-    return allow(`Change the file ${file(field('file_path') || field('notebook_path')) || 'a file'}`, 'Claude changes the file.', field('file_path') || field('notebook_path'))
-  if (tool === 'Read') return allow(`Read the file ${file(field('file_path')) || 'a file'}`, 'Claude reads the file and changes nothing.', field('file_path'))
-  if (tool === 'Glob' || tool === 'Grep') return allow(`Search files for ${cut(field('pattern'), 80) || 'a pattern'}`, 'Claude searches and changes nothing.', field('path'))
-  if (tool === 'WebFetch') return allow(`Open a web page on ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'the web'}`, 'Claude reads the page and sends nothing but its address.', field('url'))
-  if (tool === 'WebSearch') return allow(`Search the web for “${cut(field('query'), 80)}”`, 'Claude searches the web and reads the results.')
+  const allow = (text: string, detail = '', about = ''): Asks => ({ text: `${text}?`, kind: 'allow', ...(about ? { about } : {}), ...(detail ? { detail } : {}) })
+  if (tool === 'Bash' || tool === 'PowerShell') return allow('Run this command', whole('command', 400), cut(field('description'), 160))
+  if (tool === 'Write') return allow(`Write the file ${file(field('file_path')) || 'a file'}`, field('file_path'))
+  if (tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit') return allow(`Change the file ${file(field('file_path') || field('notebook_path')) || 'a file'}`, field('file_path') || field('notebook_path'))
+  if (tool === 'Read') return allow(`Read the file ${file(field('file_path')) || 'a file'}`, field('file_path'))
+  if (tool === 'Glob' || tool === 'Grep') return allow(`Search files for ${cut(field('pattern'), 80) || 'a pattern'}`, field('path'))
+  if (tool === 'WebFetch') return allow(`Open a web page on ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'the web'}`, field('url'))
+  if (tool === 'WebSearch') return allow(`Search the web for “${cut(field('query'), 80)}”`)
   if (tool === 'SendMessage') {
     const to = workNamed(field('to'))
-    return {
-      ...allow(
-        to === 'its chat' ? 'Send a message to its chat' : `Send a message to ${to}`,
-        to === 'its chat' ? 'its chat gets the message.' : 'that task gets the message and acts on it.',
-        whole('message', 400) || field('summary'),
-        isWork ? "No: it isn't sent, and Claudopus tells Claude you said no." : "No: it isn't sent, and the chat waits for what you say next.",
-      ),
-      done: 'Claude sent it',
-    }
+    return allow(to === 'its chat' ? 'Send this message to its chat' : `Send this message to ${to}`, whole('message', 400) || field('summary'))
   }
-  if (tool === 'Agent' || tool === 'Task')
-    return { ...allow(`Start a task: ${cut(field('description'), 90) || 'with no title'}`, 'the task starts in the background and gets a card here.', whole('prompt', 300), isWork ? NO_TOLD : "No: it doesn't start, and the chat waits for what you say next."), done: 'Claude started it' }
-  if (tool === 'TaskStop')
-    return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that task stops where it is.', '', isWork ? 'No: that task keeps running, and Claudopus tells Claude you said no.' : 'No: that task keeps running, and the chat waits for what you say next.'), done: 'Claude stopped it' }
-  if (tool === 'Skill') return allow(`Use the skill “${field('skill') || field('name')}”`, 'Claude loads those instructions and follows them.')
+  if (tool === 'Agent' || tool === 'Task') return allow(`Start the task “${cut(field('description'), 90) || 'with no title'}”`, whole('prompt', 300))
+  if (tool === 'TaskStop') return allow(`Stop ${workNamed(field('task_id') || field('id'))}`)
+  if (tool === 'Skill') return allow(`Use the skill “${field('skill') || field('name')}”`)
   if (tool === 'AskUserQuestion') {
     const first = Array.isArray(given.questions) ? (given.questions[0] as { question?: unknown } | undefined)?.question : undefined
-    return {
-      text: typeof first === 'string' && first.trim() ? `Answer a question: ${cut(oneLine(first), 120)}` : 'Answer a question',
-      kind: 'question',
-      yes: 'Pick an answer: Claude gets it and carries on.',
-      no: 'Skip it: Claude gets no answer and waits for what you say next.',
-    }
+    return { text: typeof first === 'string' && first.trim() ? cut(oneLine(first), 160) : 'It has a question for you', kind: 'question' }
   }
-  if (tool === 'ExitPlanMode')
-    return { text: 'Approve a plan', kind: 'plan', detail: whole('plan', 400), yes: 'Yes: Claude starts doing what the plan says.', no: 'No: Claude keeps planning. Say what to change.' }
+  if (tool === 'ExitPlanMode') return { text: 'Approve this plan?', kind: 'plan', detail: whole('plan', 400) }
   const mcp = tool.match(/^mcp__(.+?)__(.+)$/)
   const words = field('description') || field('text') || field('query') || field('title') || field('name') || field('url')
-  if (mcp) return allow(`Use “${(mcp[2] ?? '').replace(/_/g, ' ')}” from ${(mcp[1] ?? '').replace(/^plugin_[^_]+_/, '').replace(/[_-]/g, ' ')}`, 'that action runs.', cut(words, 300))
-  return allow(words ? `Use a tool: ${cut(words, 90)}` : 'Use one of its tools', 'that tool runs.', '')
+  if (mcp) return allow(`Use “${(mcp[2] ?? '').replace(/_/g, ' ')}” from ${(mcp[1] ?? '').replace(/^plugin_[^_]+_/, '').replace(/[_-]/g, ' ')}`, '', cut(words, 300))
+  return allow('Use one of its tools', '', cut(words, 160))
 }
 // The start of a command up to its first quote, `$` or line break, as a running shell shows it whatever the quoting
 const snippetOf = (tool: string, input: unknown) => {
@@ -98,7 +76,7 @@ const opened = async ($: EngineInterface, agent: string | undefined, tool: strin
   const list = await read($, todos)
   const card = agent !== undefined ? list.find(one => one.id === topOf(list, agent)) : undefined
   const strings = Object.fromEntries(Object.entries(input && typeof input === 'object' ? input : {}).filter(([, value]) => typeof value === 'string')) as Record<string, string>
-  const one: Waiting = { id, ...promptOf(tool, input, list, Boolean(agent)), ...(card ? { title: titleOf(card) } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input), input: strings }
+  const one: Waiting = { id, ...promptOf(tool, input, list), ...(card ? { title: titleOf(card), card: card.id } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input), input: strings }
   waiting = [...waiting.filter(other => other.id !== id), one]
   redraw($)
   void shareMine($).catch(() => undefined)
@@ -119,83 +97,26 @@ const tellWaiting = async ($: EngineInterface) => {
   const chat = title.trim() || cwd.split('/').filter(Boolean).pop() || 'A chat'
   for (const one of due) await aloud($, 'prompt', `${one.title ?? chat} has a question for you`, one.text, `prompt-${one.id}`).catch(err => log($, `prompt not told: ${String(err)}`))
 }
-// The prompt of a call goes: by its id, else the oldest one of the same loop and tool whose id was not known. With what came of it,
-// it stays, answered: allowed and running, then ended (allowed and run, refused, or ended before an answer) for PROMPT_SHOWN more.
-// Without (a settings hook answered it), it goes at once: nothing was put to the person
-type Outcome = 'running' | 'ran' | 'no' | 'stopped'
-let answeredPrompts: Waiting[] = []
-const PROMPT_SHOWN = 15_000
-// An allowed call whose end is never seen is taken as over this long after it was seen running, so nothing stays purple for good
-const RUNNING_LONGEST = 15 * 60_000
-const answeredShown = (at: number) => answeredPrompts.filter(one => (one.endedAt ? at - one.endedAt < PROMPT_SHOWN : at - one.at < RUNNING_LONGEST))
-const settle = ($: EngineInterface, id: string, agent?: string, tool?: string, outcome?: Outcome, args?: Record<string, unknown>) => {
+// The prompt of a call goes as its call ends or is seen running: by its id, else the oldest one of the same loop and tool whose id
+// was not known. A wait for its press ends with it (promptWaits)
+const settle = ($: EngineInterface, id: string, agent?: string, tool?: string, args?: Record<string, unknown>) => {
   const byTool = (one: Waiting) => one.id.startsWith('pr-') && one.tool === tool && one.agent === (agent ?? '')
   // The same call as the prompt asked about: every word it asked with is the call's own
   const isSameCall = (one: Waiting) => Boolean(args) && Object.keys(one.input ?? {}).length > 0 && Object.entries(one.input ?? {}).every(([key, value]) => args?.[key] === value)
-  // Its own id first, open or answered; only then the oldest open one of the same loop and tool whose id was not known. That one says
-  // what came of it only when the call asked with the very same words; else it may be another call's, and it goes with no word
-  const exact = waiting.find(one => one.id === id)
-  const isOpen = (one: Waiting) => !one.endedAt || one.isPressedNo
-  let was = exact ? undefined : answeredPrompts.find(one => one.id === id && isOpen(one))
-  const sameOpen = exact || was || !tool ? undefined : waiting.find(one => byTool(one) && isSameCall(one))
-  // One answered on its card, whose id was not known, is the same call only when it asked with the very same words, and only when no
-  // open prompt did
-  if (!exact && !was && !sameOpen && tool) was = answeredPrompts.find(one => isOpen(one) && (one.isRunning || one.isPressedNo) && byTool(one) && isSameCall(one))
-  const guessed = exact || was || !tool ? undefined : (sameOpen ?? waiting.find(byTool))
-  const gone = exact ?? guessed
-  if (!gone && !was) return
-  if (gone) waiting = waiting.filter(one => one !== gone)
-  const before = exact ?? was ?? (guessed && isSameCall(guessed) ? guessed : undefined)
-  if (outcome && before) {
-    void $.clock.now().then(now => {
-      const isEnd = outcome !== 'running'
-      // A no pressed on the card stands unless the call went on: then Claude Code's own box had said yes first
-      if (before.isPressedNo && outcome !== 'running' && outcome !== 'ran') return
-      const wasAllowed = before.answered === 'yes'
-      const answered: Prompt['answered'] = outcome === 'no' ? 'no' : outcome === 'stopped' && !wasAllowed ? 'stopped' : 'yes'
-      const { isHeld: _held, isPressedNo: _pressed, ...base } = before
-      const after: Waiting = { ...base, ...(outcome === 'no' && pressedNo.has(before.id) ? { isPressedNo: true } : {}), answered, isRunning: !isEnd, ...(isEnd ? { endedAt: now } : { at: now }), ...(outcome === 'stopped' && wasAllowed ? { isCut: true } : {}) }
-      answeredPrompts = [...answeredShown(now).filter(one => one.id !== before.id), after].slice(-10)
-      redraw($)
-      void shareMine($).catch(() => undefined)
-      $.clock.after((isEnd ? PROMPT_SHOWN : RUNNING_LONGEST) + 100, () => (redraw($), void shareMine($).catch(() => undefined)))
-    })
-  }
+  const gone = waiting.find(one => one.id === id) ?? (tool ? (waiting.find(one => byTool(one) && isSameCall(one)) ?? waiting.find(byTool)) : undefined)
+  if (!gone) return
+  waiting = waiting.filter(one => one !== gone)
+  promptWaits.get(gone.id)?.(undefined)
   redraw($)
   void shareMine($).catch(() => undefined)
 }
-// What came of a call, as it ended: the person said no, it ended before it ran (interrupted, timed out, the turn or session ended), or
-// it ran. The engine says most endings in words, in the result or its text, often with isError
-const REFUSED_WORDS = /doesn't want to proceed|tool use was rejected|user (denied|rejected)|permission to use .{1,80} (has been|was) denied/i
-const NOT_RUN_WORDS = /\[(tool call (not|did not) complete|request interrupted)|interrupted by user|the (turn|session) (was )?ended|approval request expired/i
-const outcomeOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isError?: unknown } | undefined): Outcome => {
-  if (!r) return 'stopped'
-  // Only a call that did not end well is read for words: a command that ran may print anything
-  if (!r.deny && !r.isError && typeof r.result !== 'string') return 'ran'
-  const words = [typeof r.deny === 'string' ? r.deny : '', typeof r.text === 'string' ? r.text : '', typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? '').slice(0, 2000)].join('\n')
-  if (REFUSED_WORDS.test(words)) return 'no'
-  if (NOT_RUN_WORDS.test(words)) return 'stopped'
-  if (r.deny) return 'no'
-  return r.isError ? 'stopped' : 'ran'
-}
-// The mod's own message, once on its way: a prompt it raised that no hook of the mod saw (one of its own tools, by a plugin's call
-// id) is over with it
-// The mod's own message to work: a prompt it raises is over once it is on its way
-// It goes out only from inside one of the mod's hooks. Claude Code marks whatever a mod's code starts with that code's place: from
-// inside a hook, only that one hook is left out of what the started task then does; from a timer or a button's own handler, with no
-// hook around it, every hook of the mod is left out for the whole run the message starts. A task started so runs unseen: its panel
-// tools answer "no tool.call hook answered", Claude Code's requests for its result are not answered for it, its commands and
-// helpers are never taken up, and the end of its turn is never heard, so nothing starts it again (18 Nov: a task told to build was
-// started again to carry on from a timer, ran unseen, was asked for its result until its run ended, and its card ended done with
-// no build and no report). So a message sent from outside a hook waits here for the next hook that may send it, and Claudopus
-// asks for a drawing, which is one; its sender waits with it and is told how it went, as from inside a hook. `isStill` says, as
-// it goes, whether it is still wanted. With no such hook for HOOK_WAIT (no panel or bar drawn, nothing at work in the chat), it
-// goes from the timer after all, saying so to the task, which then finishes without the panel instead of waiting unseen
+// The mod's own message to a task. It goes out only from inside one of the mod's hooks: Claude Code marks whatever a mod's code
+// starts with that code's place, and from a timer or a button's own handler, with no hook around it, every hook of the mod is left
+// out for the whole run the message starts, so a task started so runs unseen (18 Nov). A press's answer is sent from the press's own
+// hook (tabs.tsx). One sent from anywhere else waits here for the next hook that may send it (sendHeld), and never goes from a timer
 type SendResult = Awaited<ReturnType<EngineInterface['session']['send']>>
 type OwnMessage = { to: { agentId: string }; text: string }
 const IN_HOOK = 'CLAUDOPUS_IN_HOOK'
-const HOOK_WAIT = 60_000
-const UNSEEN_RUN = `From Claudopus: this message starts you where Claudopus cannot see you, as nothing of its own ran for a minute to send it from. In this run its panel tools (todo, note, ask, waits) do not answer, and nothing starts you again once your step ends. So do not end your step to wait for anything: do what you can now, then hand back your report with SubagentHandback, saying what is left.`
 // Asked of the engine itself: the mod's own hook answers this name (promptHooks), and the engine leaves that hook out exactly
 // where it would leave the mod's hooks out of a task started from here
 const isInHook = async ($: EngineInterface) => (await $.env.get('CLAUDOPUS_IN_HOOK').catch(() => undefined)) === 'hook'
@@ -219,17 +140,6 @@ const sendOwn = async ($: EngineInterface, message: OwnMessage, isStill?: () => 
   heldSends.push(one)
   redraw($)
   void log($, `a message for ${message.to.agentId} waits for a hook of the mod: sent from here, the task would run unseen by Claudopus`)
-  $.clock.after(HOOK_WAIT, () => {
-    const at = heldSends.indexOf(one)
-    if (at < 0) return
-    heldSends.splice(at, 1)
-    // (a copy of the mod a reload replaced sends nothing: the copy in charge takes its tasks up)
-    void isReplaced($).then(isOld => {
-      if (isOld) return one.resolve({ isDelivered: false, reason: 'this copy of the mod was replaced by a reload' } as SendResult)
-      void log($, `the message for ${message.to.agentId} goes from a timer after all: no hook of the mod came in ${HOOK_WAIT / 1000} s, so its task runs unseen and is told so`)
-      void sendOne($, one, `${message.text}\n\n${UNSEEN_RUN}`)
-    })
-  })
   return one.result
 }
 // (never to a task the person stopped while it waited, nor one no longer wanted)
@@ -278,72 +188,81 @@ const lookForStarted = async ($: EngineInterface) => {
   try {
     const lines = await running($)
     if (!lines) return
-    for (const one of sought) if (countOf(lines, one.snippet) > (one.seen ?? 0)) settle($, one.id, undefined, undefined, 'running')
+    for (const one of sought) if (countOf(lines, one.snippet) > (one.seen ?? 0)) settle($, one.id)
   } finally {
     isLooking = false
   }
 }
 
-// A press on a prompt's card, by the prompt's id, read by its hold between two looks; the prompts held now
-const promptSaid = new Map<string, 'yes' | 'no'>()
+// What each held prompt's wait ends with: Allow or Don't allow pressed on its block, or nothing as its call ended first
+const promptWaits = new Map<string, (said: 'yes' | 'no' | undefined) => void>()
 const promptHeld = new Set<string>()
-const pressedNo = new Set<string>()
 // The longest a prompt waits for a press: past it the hook hands the prompt back to whatever else answers it
 const HOLD_LONGEST = 10 * 60_000
-const PRESSED_NO = "The person said no to this on its card in the Claudopus panel. It didn't run. Wait for what they say next."
-const PRESSED_NO_WORK = "The person said no to this on its card in the Claudopus panel. It didn't run: don't try it another way; continue without it."
+const PRESSED_NO = "The person pressed Don't allow on this in the Claudopus panel. It didn't run. Wait for what they say next."
+const PRESSED_NO_WORK = "The person pressed Don't allow on this in the Claudopus panel. It didn't run: don't try it another way; continue without it."
 const markHeld = ($: EngineInterface, id: string, isHeld: boolean) => {
   waiting = waiting.map(one => (one.id !== id ? one : isHeld ? { ...one, isHeld: true } : (({ isHeld: _held, ...rest }) => rest)(one)))
   redraw($)
   void shareMine($).catch(() => undefined)
 }
-// Holds the prompt until a press on its card, its call ends (the box was answered), the engine gives up on the hook, or this copy of
-// the mod is replaced. As the admin gate does, the wait is a one-second sleep run by the engine, whose time the hook's own budget
-// does not count. Its buttons show only while it is held. Claude Code's box answers beside it, and that answer is seen only as the
-// call runs or ends; a press after it changes nothing, and the card then says what the call did
+// Holds the prompt until a press on its block, its call ends (Claude Code's own box was answered), the engine gives up on the hook,
+// or this copy of the mod is replaced. The wait is a promise the press resolves, as the admin gate's is (heldStep keeps the hook's
+// own clock stopped meanwhile). Its buttons show only while it is held
 const holdPrompt = async ($: EngineInterface, next: { signal?: AbortSignal; budget?: { remainingMs: number } }, id: string): Promise<'yes' | 'no' | undefined> => {
-  const since = await $.clock.now()
   promptHeld.add(id)
   markHeld($, id, true)
+  let isOver = false
   let said: 'yes' | 'no' | undefined
+  let end: (said: 'yes' | 'no' | undefined) => void = () => undefined
+  const pressed = new Promise<'yes' | 'no' | undefined>(resolve => (end = one => ((isOver = true), (said = one), resolve(one))))
+  promptWaits.set(id, end)
+  const stop = () => end(undefined)
+  next.signal?.addEventListener('abort', stop, { once: true })
+  whenLeft.add(stop)
+  $.clock.after(HOLD_LONGEST, stop)
   try {
-    for (;;) {
-      said = promptSaid.get(id)
-      if (said) break
+    while (!isOver) {
       if (!waiting.some(one => one.id === id) || next.signal?.aborted || (next.budget?.remainingMs ?? Infinity) < 1500 || (await isReplaced($))) break
-      if ((await $.clock.now()) - since > HOLD_LONGEST) break
-      await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined)
+      await Promise.race([pressed, heldStep($)])
     }
   } finally {
+    whenLeft.delete(stop)
     promptHeld.delete(id)
-    promptSaid.delete(id)
+    if (promptWaits.get(id) === end) promptWaits.delete(id)
     if (waiting.some(one => one.id === id)) markHeld($, id, false)
   }
   return said
 }
-// A press on Yes or No on its card in this chat's own panel, the only answer the mod gives: the prompt is answered at once and its card says so, as one answered in the box
+// A press on Allow or Don't allow on its block in this chat's own panel, the only answer the mod gives: the block goes in the
+// press's own drawing, one grey line says what was pressed, and the wait for it ends at once. Only the first press counts
 const answerPrompt = ($: EngineInterface, id: string, said: 'yes' | 'no') => {
   presses += 1
-  if (!promptHeld.has(id) || promptSaid.has(id)) return false
+  const end = promptWaits.get(id)
   const one = waiting.find(other => other.id === id)
-  if (!one) return false
-  promptSaid.set(id, said)
-  if (said === 'no') pressedNo.add(id)
-  settle($, id, one.agent || undefined, one.tool, said === 'yes' ? 'running' : 'no')
+  if (!promptHeld.has(id) || !end || !one) return false
+  promptWaits.delete(id)
+  waiting = waiting.filter(other => other !== one)
+  pressedLine($, one.card ?? '', said === 'yes' ? ALLOW : DONT_ALLOW)
+  end(said)
+  redraw($)
+  void shareMine($).catch(() => undefined)
   return true
 }
 
 // Work an allowed Agent call started: its prompt was answered, so it leaves the amber and its buttons go
 const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
-  if (toolUseId && waiting.some(one => one.id === toolUseId)) settle($, toolUseId, undefined, undefined, 'running')
+  if (toolUseId && waiting.some(one => one.id === toolUseId)) settle($, toolUseId)
 }
 
-// ---- A call Claude Code refused a background task with no prompt for the person: a notice on the task's card ----
+// ---- A command Claude Code blocked a background task from running, with no prompt for the person ----
 // A background task or helper has no box of the app's own: Claude Code's auto mode, its safety checks, or a call that needs a person
 // in a run nobody can be asked in refuse the call outright, and no PermissionRequest is raised for it (16 Nov: 47 refusals that
-// way, none put to the person). Its task's card says what was refused and why, and that the task carries on without it. Claudopus
-// never lets a refused call through, and nothing it says invites the task to reach what was refused another way
-const CARRY_ON = 'Carry on without it'
+// way, none put to the person). A command so blocked is asked on its task's card as any permission is: Allow runs that very
+// command once, as the person's own (runit.tsx), and Don't allow leaves it. Claudopus never lets the refused call itself through.
+// A blocked call that is no command the person could run leaves nothing to decide, so nothing waits for them: the task was told
+// by Claude Code and carries on without it
+const BLOCKED_ASK = 'Claude Code blocked this command. Run it anyway?'
 // Claude Code's own refusals, as its result or its deny begins (its texts in 2.1.325), and who refused, for the card
 const CC_REFUSALS: [string, string][] = [
   ['Permission for this action was denied by the Claude Code auto mode classifier', "Claude Code's auto mode blocked it"],
@@ -375,33 +294,24 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   const top = list.find(one => one.id === topOf(list, agent))
   const own = list.find(one => one.id === agent)
   if (!top || top.chat) return
-  const what = promptOf(tool, call, list, true)
-  const who = own?.parentId ? `a helper of this task ("${titleOf(own)}")` : 'this task'
-  const text = cut(`Claude Code blocked ${who}: ${what.text}.`, ASK_TEXT)
-  // A command is shown whole, to copy or for the person to run on their own press (runit.tsx)
+  // Only a command, short enough to read, shown whole: what the person's press would run (runit.tsx)
   const runnable = runnableOf(tool, call)
-  const details = [
-    what.detail && !runnable ? `What it is: ${what.detail}` : '',
-    `Why: ${refusal.who}${refusal.reason ? ` (${refusal.reason})` : ''}.`,
-    runnable ? runDetails() : "Claude carries on without it and won't try another way.",
-  ]
-    .filter(Boolean)
-    .join('\n\n')
+  if (!runnable) return void (await log($, `refusal of ${tool} for ${agent}: nothing the person could run, so nothing is asked`))
+  const details = [runDetails(runnable, refusal.reason), own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : ''].filter(Boolean).join('\n\n')
   const at = await $.clock.now()
   // A question waiting on the person, there already or put up meanwhile, is never replaced: the refusal is in the task's own result
   let isPut = false
-  const command = runnable ? { copy: runnable.command, isCommand: true, cwd: runnable.cwd } : {}
-  await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text, details, ...command, choices: [CARRY_ON], from: agent, at, refused: true } }))
+  await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text: BLOCKED_ASK, details, copy: runnable.command, isCommand: true, cwd: runnable.cwd, from: agent, at, refused: true } }))
   if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: its card asks something already`))
-  if (runnable) await offerRun($, top.id, agent, at, runnable)
+  await offerRun($, top.id, agent, at, runnable)
   await log($, `refusal of ${tool} for ${agent} put to the person on its card`)
   const card = (await read($, todos)).find(one => one.id === top.id)
-  if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
+  if (card) await askAloud($, card, BLOCKED_ASK).catch(err => log($, `ask not told: ${String(err)}`))
   if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
 }
 // What the task is told of the person's answer to that card: what was refused stays refused
-const REFUSAL_ANSWERED = (asked: string, said: string, isReply: boolean) =>
-  `${isReply ? `${who(true)} replied, in their own words, to the notice that Claude Code refused your call ("${asked}"): ${said}` : `${who(true)} saw the notice that Claude Code refused your call ("${asked}").`} What Claude Code refused stays refused: do not do it, nor reach its result by other means. Carry on without it, and say in your report what was left out.`
+const REFUSAL_ANSWERED = (command: string, said: string, isReply: boolean) =>
+  `${isReply ? `${who(true)} replied, in their own words, when asked whether to run the command Claude Code refused you (${cut(oneLine(command), 200)}): ${said}` : `${who(true)} pressed "${DONT_ALLOW}" when asked whether to run the command Claude Code refused you (${cut(oneLine(command), 200)}).`} What Claude Code refused stays refused: do not do it, nor reach its result by other means. Carry on without it, and say in your report what was left out.`
 
 const OWN_CALLS = ['SendMessage', 'TaskStop']
 const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
@@ -456,7 +366,7 @@ const promptHooks = (on: On) => {
   // running pill
   on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => {
     const id = e.props.tool_use_id
-    if (waiting.some(one => one.id === id)) void Promise.resolve().then(() => settle($, id, undefined, undefined, 'running'))
+    if (waiting.some(one => one.id === id)) void Promise.resolve().then(() => settle($, id))
     return next(e)
   })
 

@@ -82,8 +82,21 @@ const isLingering = (one: { id: string; status: string; endedAt: number }, at: n
 // once it stops again with the ask open does it wait on the person, with every answer back
 const isActingOnReply = (one: { id?: string; status: string; ask?: { at?: number; replied?: { isWaking?: boolean } } }) =>
   Boolean(one.ask) && ((Boolean(one.ask?.replied) && (one.status === 'working' || Boolean(one.ask?.replied?.isWaking))) || actingOn.has(`${one.id}:${one.ask?.at}`))
-// An admin command held for the person's press needs them whatever else the work does
-const needsPerson = (one: { id?: string; status: string; ask?: { at?: number; replied?: { isWaking?: boolean } }; admins?: unknown[] }) => Boolean(one.admins?.length) || (Boolean(one.ask) && !isActingOnReply(one))
+// The words of the buttons every block of the panel answers with (docs/words.md)
+const ALLOW = 'Allow'
+const DONT_ALLOW = "Don't allow"
+const ALWAYS_ALLOW = 'Always allow this command'
+const TYPE_IT = 'Type it'
+const PASTE_IT = 'Paste it'
+const DONT_GIVE = "Don't give it"
+// A choice a task gives that would answer nothing: left out of its question's buttons (tools.tsx)
+const LEAVES_OPEN = /^(?:no,? )?(?:not (?:now|yet)|later|maybe later|skip|skip it|cancel|dismiss|close)$/
+const ANSWER_IN_WORDS = 'Answer in words'
+// The one test of "something waits for the person on this card": its own question, a permission held for their press (an admin
+// command, a release, a change to a file of theirs), and what is drawn on it from the mod's own memory: Claude Code's prompt for a
+// call of its own, and the password or key box of a command of its own (needs.tsx). Another chat's card is read from its file
+const needsPerson = (one: { id?: string; status: string; chat?: unknown; ask?: { at?: number; replied?: { isWaking?: boolean } }; admins?: unknown[] }) =>
+  Boolean(one.admins?.length) || (Boolean(one.ask) && !isActingOnReply(one)) || (!one.chat && Boolean(one.id) && (waiting.some(p => p.card === one.id) || boxes.some(box => box.card === one.id)))
 // The moments a pause ends that a redraw is already set for, so each pause gets one
 const lingerSet = new Set<string>()
 // The engine's list of agents is read again this often, and the minutes move on
@@ -150,11 +163,17 @@ const takeCharge = async ($: EngineInterface) => {
   isMarked = false
 }
 let isLeft = false
+// What a copy that was replaced lets go of the moment it finds out: its waits for a press (holdGate, holdPrompt)
+const whenLeft = new Set<() => void>()
 const isReplaced = async ($: EngineInterface) => {
   if (isLeft) return true
   if (!isMarked) return false
   const now = (await $.state.get(loadNow).catch(() => undefined))?.value
-  if (typeof now === 'string' && now > thisLoad) isLeft = true
+  if (typeof now === 'string' && now > thisLoad && !isLeft) {
+    isLeft = true
+    // What this copy holds for a press is let go at once: its drawings are no longer the ones shown
+    for (const stop of [...whenLeft]) stop()
+  }
   return isLeft
 }
 // A timer of this load: it stops for good the first time it fires after a newer load took charge

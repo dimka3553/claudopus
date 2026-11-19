@@ -772,6 +772,28 @@ const otherChat = (at: number, chat = 'chat-b', title = 'Billing page') =>
 
 // The admin gate: an admin command waits for the person's press on its work's card
 
+// The waits the engine was asked to run for a held call (`/bin/sleep`, which the world ends only on wake()): a press must end the
+// hold with no more than the one that was in flight, and with no wake()
+const countingSleeps = (on: On) => {
+  const seen = { sleeps: 0 }
+  const counted = new Proxy(on, {
+    apply: (to, self, args: unknown[]) => {
+      const [name, handle] = args as [string, (c: unknown, e: { argv?: readonly string[] }) => unknown]
+      const run = name !== 'process.run' ? handle : (c: unknown, e: { argv?: readonly string[] }) => (e.argv?.[0] === '/bin/sleep' && (seen.sleeps += 1), handle(c, e))
+      return Reflect.apply(to as never, self, [name, run])
+    },
+  }) as On
+  return { on: counted, seen }
+}
+type GateDrawn = { findAll: (q: { type: string }) => Promise<readonly { key?: string | undefined; text?: unknown; props: Record<string, unknown> }[]> }
+// Everything drawn in the colour of what is done: no press leaves a green box or line
+const gateGreens = async (pane: GateDrawn) => [...(await pane.findAll({ type: 'Box' })), ...(await pane.findAll({ type: 'Text' }))].filter(one => ['color', 'borderColor', 'backgroundColor'].some(prop => one.props[prop] === 'success')).length
+const gateTexts = async (pane: GateDrawn) => (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+// The labels of one gate's own buttons, in the order drawn
+const gateButtons = async (pane: GateDrawn, id: string) => (await pane.findAll({ type: 'Button' })).filter(one => (one.key ?? '').startsWith(`gate-${id}-`)).map(one => String(one.props.label ?? ''))
+const ALLOWED_LINE = '✓ You pressed “Allow”'
+const REFUSED_LINE = "✓ You pressed “Don't allow”"
+
 test('an admin command is held however the runner is reached, and nothing else is taken for one', async ($, on) => {
   const { press, bash, held, admins, list } = await gated($, on)
   let n = 0
@@ -821,8 +843,9 @@ test('an admin command is held however the runner is reached, and nothing else i
   for (const command of [`git commit -m "bin/admin here 'id -u' now asks"`, `echo ${ADMIN} here id`, `${ADMIN} here --forget`, `${ADMIN}`, 'django-admin migrate', 'ls bin/admin', `cat ${ADMIN}`, '/usr/local/bin/admin here now', 'vendor/bin/admin migrate up']) expect((await bash(`n${(n += 1)}`, command)).result).toBe('ran')
 })
 
-test('asked each time: the call is held, its card shows the exact command and the Mac with three buttons, and Allow once lets that one command run', async ($, on) => {
-  const { press, list, bash, labels, held, grants, admins, logged, appended, notified, files } = await gated($, on)
+test("asked each time: the call is held and its card has one block (Permission, the question in amber, the command whole, Allow, Don't allow and Always allow this command); Allow lets that one command run at once, and one grey line says what was pressed", async ($, on) => {
+  const counted = countingSleeps(on)
+  const { list, bash, labels, held, grants, admins, logged, appended, notified, files, clock, wake } = await gated($, counted.on)
   let done = false
   const call = bash('b1', `${ADMIN} here 'chmod 644 /etc/hosts'`).then(r => ((done = true), r))
   expect(await held('b1')).toBeDefined()
@@ -830,19 +853,36 @@ test('asked each time: the call is held, its card shows the exact command and th
   expect(done).toBe(false)
   expect(admins).toEqual([])
   expect(grants()).toEqual([])
-  expect((await list.find({ type: 'Text', text: 'Run an admin command on this Mac?' }))?.props.color).toBe('#E5A50A')
+  // The block: an amber outline, a dim label of its kind, the question in amber, the command whole in a row of its own, the buttons
+  const boxes = (await list.findAll({ type: 'Box' })) as { key?: string; props: Record<string, unknown> }[]
+  expect(boxes.filter(one => one.props.borderStyle === 'round' && one.props.borderColor === '#E5A50A').map(one => one.key)).toEqual(['need-gate-b1-0'])
+  const drawn = await gateTexts(list)
+  expect(drawn.slice(drawn.indexOf('Permission'), drawn.indexOf('Permission') + 3)).toEqual(['Permission', 'Run this as admin on this Mac?', 'chmod 644 /etc/hosts'])
+  expect((await list.find({ type: 'Text', text: 'Permission' }))?.props.dimColor).toBe(true)
+  const question = await list.find({ type: 'Text', text: 'Run this as admin on this Mac?' })
+  expect([question?.props.color, question?.props.bold]).toEqual(['#E5A50A', true])
   expect((await list.find({ type: 'Text', text: 'chmod 644 /etc/hosts' }))?.props.mono).toBe(true)
-  expect(await list.find({ type: 'Text', text: "Allow once: it runs as admin. Deny: it doesn't run, and Claudopus tells Claude." })).toBeDefined()
-  expect((await labels()).filter(one => ['Allow once', 'Always allow this command', 'Deny'].includes(one))).toEqual(['Allow once', 'Always allow this command', 'Deny'])
+  expect(await gateButtons(list, 'b1-0')).toEqual(['Allow', "Don't allow", 'Always allow this command'])
+  // Nothing under the question when there is nothing more to say, and none of the words the block had before
+  expect((await list.findAll({ type: 'Markdown' })).map(one => String(one.props.text ?? '')).filter(text => /Allow|admin/.test(text))).toEqual([])
+  expect((await labels()).filter(one => ['Allow once', 'Allow for this task', 'Deny'].includes(one))).toEqual([])
+  // Its card is amber and counted once as what waits
+  expect(boxes.some(one => one.props.width === 1 && one.props.backgroundColor === '#E5A50A')).toBe(true)
+  expect((await list.findAll({ type: 'Text' })).filter(one => /waiting for you/.test(String(one.text ?? ''))).map(one => [one.text, one.props.color])).toEqual([['1 waiting for you', '#E5A50A']])
   // Said as a notification, and to the chat's model alone: the chat shows nothing of it (18 Nov: "garbage I don't need to read");
-  // its Details tab has it at the top
+  // its Details tab has the same block
   expect(logged.some(line => line.includes('chmod 644 /etc/hosts'))).toBe(false)
   expect(appended.some(line => line.startsWith('undefined: From Claudopus: the task "Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts.'))).toBe(true)
   expect(notified).toContain('Fix the hosts file has a question for you | Run an admin command on this Mac: chmod 644 /etc/hosts')
   const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
-  expect(await details.find({ type: 'Text', text: 'Waiting for you' })).toBeDefined()
-  await press('gate-b1-0-once')
+  expect(await details.find({ type: 'Text', text: 'Run this as admin on this Mac?' })).toBeDefined()
+  expect(await gateButtons(details, 'b1-0')).toEqual(['Allow', "Don't allow", 'Always allow this command'])
+  await details.unmount()
+  // The press itself ends the hold: the call returns with no second let pass (no wake, no move of the clock), and no wait was
+  // started but the one in flight
+  await pressed(list, 'gate-b1-0-once')
   expect((await call).result).toBe('ran')
+  expect(counted.seen.sleeps).toBe(1)
   // It ran with one grant, for this Mac and this exact command, sealed with the keychain's key; the grant goes with the call
   expect(admins.length).toBe(1)
   const [grant] = admins[0]?.grants ?? []
@@ -850,33 +890,43 @@ test('asked each time: the call is held, its card shows the exact command and th
   expect({ host: grant?.host, command: grant?.command }).toEqual({ host: 'here', command: 'chmod 644 /etc/hosts' })
   expect(grant?.seal).toBe(fakeSeal(files.get('keychain:gate') ?? '', `grant\n${grant?.id}\n${grant?.at}\nhere\nchmod 644 /etc/hosts`))
   expect(grants()).toEqual([])
-  expect(await list.find({ type: 'Text', text: 'Run an admin command on this Mac?' })).toBeUndefined()
-  // In its place for a minute: what the person pressed and what happens now
-  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it. It runs now.' }))).toBeDefined()
   expect(files.has(ALLOWED)).toBe(false)
+  // In the block's place: one grey line of what was pressed, and nothing green
+  expect(await list.find({ type: 'Text', text: 'Run this as admin on this Mac?' })).toBeUndefined()
+  expect((await until(async () => list.find({ type: 'Text', text: ALLOWED_LINE })))?.props.dimColor).toBe(true)
+  expect((await gateTexts(list)).filter(one => one.startsWith('✓ '))).toEqual([ALLOWED_LINE])
+  expect(await gateGreens(list)).toBe(0)
+  expect(await gateButtons(list, 'b1-0')).toEqual([])
+  // The line goes by itself a minute on
+  await clock.advance(61_000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: ALLOWED_LINE })) ? undefined : true))).toBe(true)
   // Once is once: the same command again is held again
-  void bash('b2', `${ADMIN} here 'chmod 644 /etc/hosts'`)
+  const again = bash('b2', `${ADMIN} here 'chmod 644 /etc/hosts'`)
   expect(await held('b2')).toBeDefined()
   expect(admins.length).toBe(1)
+  await pressed(list, 'gate-b2-0-deny')
+  expect((await again).deny).toContain('Refused by Sam')
+  wake()
 })
 
-test('Deny refuses the call with a line that says the person refused it, and nothing runs or is granted', async ($, on) => {
-  const { press, list, bash, held, grants, admins } = await gated($, on)
+test("Don't allow refuses the call with a line that says the person refused it, and nothing runs or is granted", async ($, on) => {
+  const { list, bash, held, grants, admins, wake } = await gated($, on)
   const call = bash('b1', `${ADMIN} m4 'rm -rf /Library/Caches/x'`)
   expect(await held('b1')).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Run an admin command on m4?' })).toBeDefined()
-  await press('gate-b1-0-deny')
+  expect(await list.find({ type: 'Text', text: 'Run this as admin on m4?' })).toBeDefined()
+  await pressed(list, 'gate-b1-0-deny')
   const r = await call
-  expect(r.deny).toBe("Refused by Sam: Sam pressed Deny on this admin command, so it didn't run. Don't try to run it another way. Continue without it, or say what it is needed for and ask again.")
+  expect(r.deny).toBe("Refused by Sam: Sam pressed Don't allow on this admin command, so it didn't run. Don't try to run it another way. Continue without it, or say what it is needed for and ask again.")
   expect(admins).toEqual([])
   expect(grants()).toEqual([])
-  expect(await list.find({ type: 'Text', text: 'Run an admin command on m4?' })).toBeUndefined()
-  expect(await until(async () => list.find({ type: 'Text', text: "You denied it. It didn't run, and Claudopus told Claude." }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Admin command on m4' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Run this as admin on m4?' })).toBeUndefined()
+  expect((await until(async () => list.find({ type: 'Text', text: REFUSED_LINE })))?.props.dimColor).toBe(true)
+  expect(await gateGreens(list)).toBe(0)
+  wake()
 })
 
-test('no way to the runner gets past the press: another spelling, a shell, a helper, and two commands in one call each wait', async ($, on) => {
-  const { press, list, bash, held, admins, labels } = await gated($, on)
+test('no way to the runner gets past the press: another spelling, a shell, a helper, and two things to allow in one call each wait', async ($, on) => {
+  const { press, list, bash, held, admins, labels, grants, files } = await gated($, on)
   // A helper's call shows on the card of the work it helps
   await $.agent.spawn({ ...spawn, description: 'Look at the file', prompt: 'look', parentAgentId: 'a1' } as never)
   let n = 0
@@ -888,21 +938,32 @@ test('no way to the runner gets past the press: another spelling, a shell, a hel
     await press(`gate-${id}-0-deny`)
     expect((await call).deny).toContain('Refused by Sam')
   }
-  // Two in one call: the first allowed, the second asked in its turn; denied, neither runs and the first grant is taken back
-  const both = bash('t1', `${ADMIN} here 'id -u' && ${ADMIN} here 'whoami'`)
-  expect(await held('t1')).toBeDefined()
-  await press('gate-t1-0-once')
-  expect(await until(async () => keyed(list, 'gate-t1-1-deny'))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'whoami' })).toBeDefined()
-  await press('gate-t1-1-deny')
-  expect((await both).deny).toContain('Refused by Sam')
-  expect(admins.length).toBe(0)
-  expect(await labels()).not.toContain('Deny')
+  // Two in one call, an admin command and then another or a release: the first allowed, the second asked in its turn; refused,
+  // neither runs, the first grant is taken back, and the card says the refusal, never that anything was allowed
+  files.set('git:top', '/repo/wt')
+  files.set('git:branch', 'fix-it')
+  for (const [id, command, second, shown] of [
+    ['t1', `${ADMIN} here 'id -u' && ${ADMIN} here 'whoami'`, 'gate-t1-1-deny', 'whoami'],
+    ['t2', `${ADMIN} here 'id -u'; /plug/claudopus/bin/release`, 'gate-t2-r0-deny', 'Release fix-it to main?'],
+  ] as const) {
+    const both = bash(id, command)
+    expect(await held(id)).toBeDefined()
+    await press(`gate-${id}-0-once`)
+    expect(await until(async () => keyed(list, second))).toBeDefined()
+    expect(await list.find({ type: 'Text', text: shown })).toBeDefined()
+    await press(second)
+    expect((await both).deny).toContain('Refused by Sam')
+    expect(admins.length).toBe(0)
+    expect(grants()).toEqual([])
+    expect(await labels()).not.toContain("Don't allow")
+    expect(await until(async () => list.find({ type: 'Text', text: REFUSED_LINE }))).toBeDefined()
+    expect(await list.find({ type: 'Text', text: ALLOWED_LINE })).toBeUndefined()
+  }
   // Words typed in the chat and passed on by the chat allow nothing: only the press does
   const waiting = bash('w1', `${ADMIN} here 'id -u'`)
   expect(await held('w1')).toBeDefined()
-  await $.prompt.submit({ text: 'Allow once', wait: false, origin: composer })
-  await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm1', to: 'a1', message: 'Allow once' } as never)
+  await $.prompt.submit({ text: 'Allow', wait: false, origin: composer })
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm1', to: 'a1', message: 'Allow' } as never)
   expect(await keyed(list, 'gate-w1-0-once')).toBeDefined()
   expect(admins.length).toBe(0)
   await press('gate-w1-0-deny')
@@ -979,7 +1040,7 @@ test('work never reads or writes the allowed list, the grants or the key that se
 })
 
 test('asked once per piece of work: one Allow covers that work and its helpers until it ends, and no other work', async ($, on) => {
-  const { press, list, bash, held, admins, files, labels, tabs } = await gated($, on)
+  const { press, list, bash, held, admins, files, tabs } = await gated($, on)
   // The setting is chosen in Config, which seals it
   await pressed(list, 'config-open')
   expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBeDefined()
@@ -994,8 +1055,9 @@ test('asked once per piece of work: one Allow covers that work and its helpers u
   await $.agent.spawn({ ...spawn, description: 'Update the other Mac', prompt: 'update the other Mac' } as never)
   const first = bash('b1', `${ADMIN} here 'id -u'`)
   expect(await held('b1')).toBeDefined()
-  expect(await labels()).toContain('Allow for this task')
-  expect(await labels()).not.toContain('Allow once')
+  // The same three buttons, and under the question what this Allow covers
+  expect(await gateButtons(list, 'b1-0')).toEqual(['Allow', "Don't allow", 'Always allow this command'])
+  expect((await list.findAll({ type: 'Markdown' })).map(one => one.props.text)).toContain("Allow also covers this task's next admin commands.")
   await press('gate-b1-0-once')
   expect((await first).result).toBe('ran')
   // Its later commands, and its helper's, run without another press, each with its own grant
@@ -1042,7 +1104,8 @@ test('never asked, as Config sealed it: the call goes through as it was made, wi
   expect([...files.keys()].filter(path => !path.endsWith('log.md') && !path.includes('/live/')).sort()).toEqual(before.filter(path => !path.includes('/live/')))
   expect(logged.some(line => line.includes('admin command'))).toBe(false)
   expect(notified.some(line => line.includes('admin command'))).toBe(false)
-  expect(await list.find({ type: 'Text', text: 'Run an admin command on this Mac?' })).toBeUndefined()
+  expect(await list.find({ type: 'Text', text: 'Permission' })).toBeUndefined()
+  expect(await list.find({ type: 'Text', text: 'Run this as admin on this Mac?' })).toBeUndefined()
   // Config's Reset puts the asking back, and makes a new key
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   await pressed(config, 'config-admin-mode-back')
@@ -1072,7 +1135,7 @@ test('F-008 F-009 · no admin password is kept: Config has no setting to keep on
   expect(admins.length).toBe(1)
 })
 
-test("the chat's own thread, doing its own work, is asked at the top of the panel, each time even under once per piece of work", async ($, on) => {
+test("the chat's own thread, doing its own work, is asked at the top of the panel, each time even under once per piece of work, and its press is said there in one grey line", async ($, on) => {
   const w = world(on)
   w.files.set('keychain:gate', 'kept-key')
   w.files.set(`${MEMORY}/config.json`, JSON.stringify({ name: 'Sam', agents: false, admin: 'work', adminSealed: fakeSeal('kept-key', 'mode\nwork') }))
@@ -1082,15 +1145,21 @@ test("the chat's own thread, doing its own work, is asked at the top of the pane
   for (const id of ['c1', 'c2']) {
     const call = $.tool.call({ tool: 'Bash', tool_use_id: id, command: `${ADMIN} here 'id -u'` } as never)
     expect(await until(async () => keyed(list, `gate-${id}-0-deny`))).toBeDefined()
-    expect(await list.find({ type: 'Text', text: 'Run an admin command on this Mac?' })).toBeDefined()
-    // No piece of work to allow it for: the chat's thread never ends, so it is asked each time
-    expect((await list.findAll({ type: 'Button' })).map(one => one.props.label)).toContain('Allow once')
-    expect((await list.findAll({ type: 'Button' })).map(one => one.props.label)).not.toContain('Allow for this task')
+    // Whose it is stands beside its kind, as it is on no task's card
+    expect((await list.find({ type: 'Text', text: 'Permission · This chat' }))?.props.dimColor).toBe(true)
+    expect(await list.find({ type: 'Text', text: 'Run this as admin on this Mac?' })).toBeDefined()
+    // No piece of work to allow it for: the chat's thread never ends, so it is asked each time, and Allow covers this one alone
+    expect(await gateButtons(list, `${id}-0`)).toEqual(['Allow', "Don't allow", 'Always allow this command'])
+    expect((await list.findAll({ type: 'Markdown' })).map(one => String(one.props.text ?? '')).filter(text => text.includes('also covers'))).toEqual([])
+    // The press ends the hold by itself
     await pressed(list, `gate-${id}-0-once`)
-    w.wake()
     expect((await call).result).toBe('ran')
+    expect(await list.find({ type: 'Text', text: 'Permission · This chat' })).toBeUndefined()
+    expect((await until(async () => list.find({ type: 'Text', text: ALLOWED_LINE })))?.props.dimColor).toBe(true)
+    expect(await gateGreens(list)).toBe(0)
   }
   expect(w.admins.length).toBe(2)
+  w.wake()
 })
 
 test("another chat's panel shows an admin command that waits, with no button: only the chat that holds the call allows it", async ($, on) => {
@@ -1101,51 +1170,92 @@ test("another chat's panel shows an admin command that waits, with no button: on
   await clock.advance(5000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'softwareupdate -i -a' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Run an admin command on this Mac?' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Allow or deny it on its card in its own chat.' })).toBeDefined()
-  expect((await list.findAll({ type: 'Button' })).some(one => ['Allow once', 'Always allow this command', 'Deny'].includes(String(one.props.label)))).toBe(false)
+  expect(await list.find({ type: 'Text', text: 'Permission' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Run this as admin on this Mac?' })).toBeDefined()
+  expect((await list.find({ type: 'Text', text: 'Allow it on its card in its own chat.' }))?.props.dimColor).toBe(true)
+  expect((await list.findAll({ type: 'Button' })).some(one => ['Allow', 'Always allow this command', "Don't allow"].includes(String(one.props.label)) || (one.key ?? '').startsWith('gate-'))).toBe(false)
 })
 
-test('a release whose output goes to a log asks once, for its own branch: the 15 Nov run-progress-rows release asked twice, first for a branch called ">"', async ($, on) => {
-  const { list, press, files, grants, holding } = await gated($, on)
+test('a release nobody pressed for is asked, once, for its own branch, with Allow and Don\'t allow alone: the 15 Nov run-progress-rows release, its output sent to a log, asked twice, first for a branch called ">"', async ($, on) => {
+  const { list, files, grants, holding, wake } = await gated($, on)
   files.set('git:top', '/repo/wt')
   files.set('git:branch', 'fix-it')
   for (const [id, tail] of [['rl1', ' > /tmp/release.log 2>&1'], ['rl2', ' 2>/tmp/release.log'], ['rl3', '>/tmp/release.log']] as const) {
     const call = $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command: `hold x${id}; /plug/claudopus/bin/release${tail}` } as never) as Promise<{ deny?: string; result?: unknown }>
     expect(await until(async () => keyed(list, `gate-${id}-r0-once`))).toBeDefined()
-    // Said in plain words: what is released, its branch, and where from in one line
-    expect(await list.find({ type: 'Text', text: 'Branch fix-it' })).toBeDefined()
-    expect((await list.findAll({ type: 'Text' })).some(one => /^>|> from/.test(String(one.text ?? '')))).toBe(false)
-    await press(`gate-${id}-r0-once`)
+    // Said in plain words: what is released in the question, its branch and where from in one line under it, and no command row
+    const drawn = await gateTexts(list)
+    expect(drawn.slice(drawn.indexOf('Permission'), drawn.indexOf('Permission') + 2)).toEqual(['Permission', 'Release fix-it to main?'])
+    expect((await list.find({ type: 'Text', text: 'Release fix-it to main?' }))?.props.color).toBe('#E5A50A')
+    const under = (await list.findAll({ type: 'Markdown' })).map(one => String(one.props.text ?? ''))
+    expect(under).toContain('Branch fix-it · from /repo/wt')
+    expect([...drawn, ...under].some(one => /^>|> from/.test(one))).toBe(false)
+    expect(drawn.some(one => one === 'fix-it from /repo/wt')).toBe(false)
+    // A release is asked each time: nothing to always allow
+    expect(await gateButtons(list, `${id}-r0`)).toEqual(['Allow', "Don't allow"])
+    await pressed(list, `gate-${id}-r0-once`)
     const granted = await until(async () => (grants().length ? grants() : undefined))
     expect(granted?.map(path => (({ host, command }) => [host, command])(JSON.parse(files.get(path) ?? '{}')))).toEqual([['release', '/repo/wt\nfix-it']])
-    holding.get(`x${id}; /plug/claudopus/bin/release${tail}`)?.('released')
+    expect(await until(async () => list.find({ type: 'Text', text: ALLOWED_LINE }))).toBeDefined()
+    ;(await until(async () => holding.get(`x${id}; /plug/claudopus/bin/release${tail}`)))?.('released')
     expect((await call).deny).toBeUndefined()
   }
+  wake()
 })
 
-test('a press is answered by a line, not a card: an ask is an outlined box, what was done a line with no fill or edge that goes once its call ends', async ($, on) => {
-  const { press, bash, held, list, clock } = await gated($, on)
-  const call = bash('b1', `${ADMIN} here 'chmod 644 /etc/hosts'`)
-  expect(await held('b1')).toBeDefined()
-  const boxes = async () => (await list.findAll({ type: 'Box' })) as { props: Record<string, unknown> }[]
-  // The ask: an outlined box in the colour of what needs the person, the kind of ask at its top
-  expect((await boxes()).some(one => one.props.borderStyle === 'round' && one.props.borderColor === '#E5A50A')).toBe(true)
-  expect(await list.find({ type: 'Text', text: 'Admin command · waiting for you' })).toBeDefined()
-  await press('gate-b1-0-once')
-  await call
-  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it. It runs now.' }))).toBeDefined()
-  const edges = async () => (await boxes()).filter(one => one.props.backgroundColor === '#8A63F0' || one.props.backgroundColor === '#80808024').length
-  const withNote = await edges()
-  // Its call has ended: once it could be read, it goes, well before a minute
-  await clock.advance(16_000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'You allowed it. It runs now.' })) ? undefined : true))).toBe(true)
-  // It had no fill or purple edge of its own, as a piece of work has
-  expect(await edges()).toBe(withNote)
+test("the press on a task's go-ahead for a release lets that task's next release of that folder through with no block, once: a second run, another folder and another task are asked", async ($, on) => {
+  const { list, files, grants, holding, appended, resumed, wake, press } = await gated($, on)
+  files.set('git:top', '/repo/wt')
+  files.set('git:branch', 'fix-it')
+  files.set('/repo/wt/.release', 'main\n')
+  await $.agent.spawn({ ...spawn, description: 'Tidy the logs', prompt: 'tidy the logs' } as never)
+  let asks = 0
+  const goAhead = async () => {
+    const text = `Release the hosts fix, round ${(asks += 1)}?`
+    await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k${asks}`, agentId: 'a1', text, details: 'It changes one line.', choices: ['Release it'], release: '/repo/wt' } as never)
+    const button = await until(async () => (await list.findAll({ type: 'Button' })).find(one => one.props.label === 'Release it'))
+    await list.press({ key: button?.key ?? '' })
+    expect(await until(async () => [...appended, ...resumed].find(line => line.includes('pressed "Release it"') && line.includes(text)))).toBeDefined()
+  }
+  const release = (id: string, agentId: string) => $.tool.call({ tool: 'Bash', tool_use_id: id, agentId, command: `hold x${id}; /plug/claudopus/bin/release` } as never) as Promise<{ deny?: string }>
+  // Let through: its grant is made with nothing asked
+  const through = async (id: string) => {
+    const call = release(id, 'a1')
+    const run = await until(async () => holding.get(`x${id}; /plug/claudopus/bin/release`))
+    expect(run).toBeDefined()
+    expect(grants().map(path => (({ host, command }) => [host, command])(JSON.parse(files.get(path) ?? '{}')))).toEqual([['release', '/repo/wt\nfix-it']])
+    expect(await keyed(list, `gate-${id}-r0-once`)).toBeUndefined()
+    expect(await list.find({ type: 'Text', text: 'Release fix-it to main?' })).toBeUndefined()
+    run?.('released')
+    expect((await call).deny).toBeUndefined()
+  }
+  // Asked on its card, as a release nobody pressed for, and refused there
+  const asked = async (id: string, agentId = 'a1') => {
+    const call = release(id, agentId)
+    expect(await until(async () => keyed(list, `gate-${id}-r0-deny`))).toBeDefined()
+    expect(await gateButtons(list, `${id}-r0`)).toEqual(['Allow', "Don't allow"])
+    expect(grants()).toEqual([])
+    await press(`gate-${id}-r0-deny`)
+    expect((await call).deny).toBe("Refused by Sam: Sam pressed Don't allow on this release, so nothing was released. Don't try to release it another way. Continue without it, or say what it is needed for and ask again.")
+  }
+  await goAhead()
+  await through('r1')
+  // Once: the press allowed one run
+  await asked('r2')
+  // A new press, and still only that folder's release by that task: another worktree's and another task's are asked, and neither
+  // uses the press up
+  await goAhead()
+  files.set('git:top', '/repo/other')
+  await asked('r3')
+  files.set('git:top', '/repo/wt')
+  await asked('r4', 'a2')
+  await through('r5')
+  await asked('r6')
+  wake()
 })
 
 // A long list of another chat's running work, two of whose cards wait on a gate and one on an ask: what the 15 Nov panel drew below
-// the fold, where the person had to scroll to find Allow once
+// the fold, where the person had to scroll to find its Allow
 const longList = (at: number, gates: Record<string, number>, asks: Record<string, number> = {}) =>
   JSON.stringify({
     chat: 'chat-b', title: 'Billing page', folder: '/repo/billing', host: '', at,
@@ -1157,7 +1267,7 @@ const longList = (at: number, gates: Record<string, number>, asks: Record<string
   })
 const textOrder = async (pane: { findAll: (q: { type: string }) => Promise<{ text?: unknown }[]> }) => (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
 
-test('a work that waits for a press comes to the top whole, its amber box in it, the oldest first with the cards that asked; answered, it keeps its place while anything else waits, and goes back once nothing does', async ($, on) => {
+test('a work that waits for a press comes to the top whole, its amber block in it, the oldest first with the cards that asked; answered, it keeps its place while anything else waits, and goes back once nothing does', async ($, on) => {
   const { files, clock } = world(on)
   await $.session.start(start)
   const at = 1_700_000_000_000
@@ -1195,18 +1305,18 @@ test('a work that waits for a press comes to the top whole, its amber box in it,
   expect(await until(async () => ((await textOrder(list)).filter(one => /^Card /.test(one)).join('|') === 'Card one|Card two|Card three|Card four|Card five|Card six' ? true : undefined))).toBe(true)
 })
 
-test('a gate answered on its card says what was allowed in that same card, outlined green, while the card stays at the top', async ($, on) => {
+test('a gate answered on its card says what was pressed in that same card, in one grey line with no box of its own, while the card stays at the top', async ($, on) => {
   const { press, bash, held, list } = await gated($, on)
   const call = bash('b1', `${ADMIN} here 'chmod 644 /etc/hosts'`)
   expect(await held('b1')).toBeDefined()
   await press('gate-b1-0-once')
   await call
-  const green = await until(async () => ((await list.findAll({ type: 'Box' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.borderStyle === 'round' && one.props.borderColor === 'success'))
-  expect(green?.key).toBe('done-gate-b1-0')
-  const texts = await textOrder(list)
+  expect(await until(async () => list.find({ type: 'Text', text: ALLOWED_LINE }))).toBeDefined()
+  expect(((await list.findAll({ type: 'Box' })) as { key?: string; props: Record<string, unknown> }[]).filter(one => one.props.borderStyle === 'round' || (one.key ?? '').startsWith('done-gate-'))).toEqual([])
+  const drawn = await textOrder(list)
   // In its card, under the work's title, not a line of its own at the top
-  expect(texts.indexOf('Fix the hosts file')).toBeLessThan(texts.indexOf('You allowed it. It runs now.'))
-  expect(texts.filter(one => one === 'You allowed it. It runs now.').length).toBe(1)
+  expect(drawn.indexOf('Fix the hosts file')).toBeLessThan(drawn.indexOf(ALLOWED_LINE))
+  expect(drawn.filter(one => one === ALLOWED_LINE).length).toBe(1)
   // Another work's gate comes in: its card is drawn under the answered one, which keeps its place while anything waits
   await $.agent.spawn({ ...spawn, description: 'Tidy the logs', prompt: 'tidy the logs' } as never)
   const call2 = bash('b2', `${ADMIN} here 'id -u'`, 'a2')
@@ -1214,7 +1324,8 @@ test('a gate answered on its card says what was allowed in that same card, outli
   const now = await textOrder(list)
   expect(now.indexOf('Tidy the logs')).toBeGreaterThan(-1)
   expect(now.indexOf('Fix the hosts file')).toBeLessThan(now.indexOf('Tidy the logs'))
-  void call2.catch(() => undefined)
+  await press('gate-b2-0-deny')
+  await call2
 })
 
 test('on the desktop the line above the prompt says how many wait and what the first asks, scrolled or not, and Show takes a scrolled list to the top; in the terminal it comes only once scrolled', async ($, on) => {
@@ -1224,7 +1335,7 @@ test('on the desktop the line above the prompt says how many wait and what the f
   files.set(`${MEMORY}/live/chat-b.json`, longList(at, { w5: at - 2000, w6: at - 1000 }))
   await clock.advance(5000)
   // The first is the card whose gate came first: w5's
-  const MARK = /^● 2 questions waiting for you · first: /
+  const MARK = /^● 2 waiting for you · /
   const show = async (band: { findAll: (q: { type: string }) => Promise<{ props: Record<string, unknown> }[]> }) => (await band.findAll({ type: 'Button' })).some(one => one.props.label === 'Show')
   for (const surface of ['desktop', 'terminal']) {
     const down = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 40, bodyRows: 20 } }, surface } as never)
@@ -1252,7 +1363,7 @@ test("in the terminal, an ask that comes in while one is typed in never takes th
   await $.prompt.submit({ text: 'two things', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
   await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve'] } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
   const focused = async () => (await list.findAll({ type: 'Input' } as never)).filter(one => one.props.autoFocus).map(one => (one.key ?? '').split('-reply')[0])
   expect(await until(async () => ((await focused()).length ? focused() : undefined))).toEqual([expect.stringContaining('a1')])
@@ -1282,7 +1393,7 @@ test('in the terminal, a password box that comes while a reply is being typed le
   await $.session.start(start)
   await $.prompt.submit({ text: 'two things', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve'] } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
   const inputs = async () => (await list.findAll({ type: 'Input' } as never)).map(one => ({ key: one.key ?? '', focus: Boolean(one.props.autoFocus) }))
   const reply = await until(async () => (await inputs()).find(one => one.focus))
@@ -1309,7 +1420,7 @@ test('in the terminal, an ask that comes while a password is being typed leaves 
   const inputs = async () => (await list.findAll({ type: 'Input' } as never)).map(one => ({ key: one.key ?? '', focus: Boolean(one.props.autoFocus) }))
   const box = await until(async () => (await inputs()).find(one => one.key.startsWith('box-')))
   await list.input({ key: box?.key ?? '', text: 'hunt', kind: 'change' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve'] } as never)
   expect(await until(async () => ((await inputs()).some(one => one.key.startsWith('ask-')) ? true : undefined))).toBe(true)
   expect((await inputs()).filter(one => one.focus).map(one => one.key)).toEqual([box?.key])
   await w.settle()
@@ -1334,7 +1445,7 @@ const askingFourth = async ($: Parameters<TestBody>[0], on: On, choices?: string
 }
 
 test('Release it on an ended ask leaves its card where it was, saying the answer, and the work started again keeps its place, never the end', async ($, on) => {
-  const { list, order, clock, resumed } = await askingFourth($, on, ['Release it', 'Not now'], true)
+  const { list, order, clock, resumed } = await askingFourth($, on, ['Release it'], true)
   const release = ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Release it')
   await list.press({ key: release?.key ?? '' })
   expect(await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('pressed "Release it"')))).toBeDefined()
@@ -1347,8 +1458,8 @@ test('Release it on an ended ask leaves its card where it was, saying the answer
 })
 
 const answeredStays = async ($: Parameters<TestBody>[0], on: On, how: 'press' | 'reply') => {
-  const { list, order, clock } = await askingFourth($, on)
-  if (how === 'press') await pressed(list, ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Done')?.key ?? '')
+  const { list, order, clock } = await askingFourth($, on, ['Go on'])
+  if (how === 'press') await list.press({ key: ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Go on')?.key ?? '' })
   else await list.input({ key: ((await list.findAll({ type: 'Input' } as never)) as { key?: string }[]).find(one => /-reply-/.test(one.key ?? ''))?.key ?? '', text: 'It is pasted' })
   expect(await until(async () => list.find({ type: 'Text', text: /You answered/ } as never))).toBeDefined()
   expect(await order()).toEqual(['Piece 4', 'Piece 1', 'Piece 2', 'Piece 3', 'Piece 5'])
@@ -1359,22 +1470,22 @@ const answeredStays = async ($: Parameters<TestBody>[0], on: On, how: 'press' | 
   expect(await until(async () => ((await order())[0] === 'Piece 1' ? true : undefined))).toBe(true)
   expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5'])
 }
-test('Done on an ask leaves the card at the top saying the answer for a minute, then in its own place', async ($, on) => answeredStays($, on, 'press'))
+test("a press on an ask's own button leaves the card at the top saying the answer for a minute, then in its own place", async ($, on) => answeredStays($, on, 'press'))
 test('an answer sent from an ask\'s box leaves the card at the top saying the answer for a minute, then in its own place', async ($, on) => answeredStays($, on, 'reply'))
 test('answering one of two asks at the top leaves both cards where they were, the oldest first, for as long as the other still waits; once nothing waits they go back to their places', async ($, on) => {
-  const { list, order, clock } = await askingFourth($, on)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Release piece two?', choices: ['Release it', 'Not now'] } as never)
+  const { list, order, clock } = await askingFourth($, on, ['Go on'])
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Release piece two?', choices: ['Release it'] } as never)
   await clock.advance(5000)
   // The newer ask goes under the older one, never above it
   expect(await until(async () => ((await order())[1] === 'Piece 2' ? true : undefined))).toBe(true)
   expect(await order()).toEqual(['Piece 4', 'Piece 2', 'Piece 1', 'Piece 3', 'Piece 5'])
   // The older ask, first at the top, is answered: it stays first, and it still says the answer under the line its work then writes
-  await pressed(list, ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Done')?.key ?? '')
-  expect(await until(async () => list.find({ type: 'Text', text: /You answered “Done”/ } as never))).toBeDefined()
+  await list.press({ key: ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Go on')?.key ?? '' })
+  expect(await until(async () => list.find({ type: 'Text', text: /You answered “Go on”/ } as never))).toBeDefined()
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n4', agentId: 'a4', text: 'Now doing the next part' } as never)
   await clock.advance(5000)
   expect(await order()).toEqual(['Piece 4', 'Piece 2', 'Piece 1', 'Piece 3', 'Piece 5'])
-  expect(await list.find({ type: 'Text', text: /You answered “Done”/ } as never)).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /You answered “Go on”/ } as never)).toBeDefined()
   // Past its minute, with the other ask still waiting, it keeps its place: nothing moves by itself
   await clock.advance(65_000)
   expect(await order()).toEqual(['Piece 4', 'Piece 2', 'Piece 1', 'Piece 3', 'Piece 5'])
@@ -1385,89 +1496,92 @@ test('answering one of two asks at the top leaves both cards where they were, th
   expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
   // Both are answered: a minute on, both go back to where they began
   const labelled = async (label: string) => ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === label)?.key ?? ''
-  await pressed(list, await labelled('Not now'))
-  await pressed(list, await labelled('Yes'))
+  await list.press({ key: await labelled('Release it') })
+  await list.press({ key: await labelled('Yes') })
   await clock.advance(65_000)
   expect(await until(async () => ((await order())[0] === 'Piece 1' ? true : undefined))).toBe(true)
   expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5'])
 })
 
-// 15 Nov: Allow once was pressed and the amber box with its buttons stayed up to a second, until the gate's wait (a one-second
-// sleep the engine runs) read the press; only then did the green box come
-const pressedFirst = async ($: Parameters<TestBody>[0], on: On, button: 'once' | 'always' | 'deny', said: string, isRelease = false) => {
-  const w = await gated($, on)
-  if (isRelease) (w.files.set('git:top', '/repo/wt'), w.files.set('git:branch', 'fix-it'))
-  const call = w.bash('p1', isRelease ? 'hold xp1; /plug/claudopus/bin/release' : `${ADMIN} here 'chmod 644 /etc/hosts'`)
-  const base = `gate-p1-${isRelease ? 'r' : ''}0-${button}`
-  expect(await until(async () => keyed(w.list, base))).toBeDefined()
-  // Pressed, and the wait not yet let go: the drawing that follows the press shows the answer, with nothing left to press
-  await pressed(w.list, base)
-  expect(await w.list.find({ type: 'Text', text: said })).toBeDefined()
-  expect((await w.list.findAll({ type: 'Button' })).some(b => (b.key ?? '').startsWith('gate-p1-'))).toBe(false)
-  expect(await w.list.find({ type: 'Text', text: /· waiting for you$/ })).toBeUndefined()
+// 15 Nov: Allow was pressed and the amber block with its buttons stayed up to a second, until the gate's wait (a one-second
+// sleep the engine ran) read the press. Now the block goes in the press's own drawing, and the press itself ends the wait
+test("a press on a gate takes its block away in the press's own drawing and leaves one grey line of what was pressed, with no buttons left and nothing green; the held call then ends with no second let pass", async ($, on) => {
+  const counted = countingSleeps(on)
+  const w = await gated($, counted.on)
+  w.files.set('git:top', '/repo/wt')
+  w.files.set('git:branch', 'fix-it')
+  for (const [id, command, button, question, said, ends] of [
+    ['p1', `${ADMIN} here 'chmod 644 /etc/hosts'`, '0-once', 'Run this as admin on this Mac?', ALLOWED_LINE, 'ran'],
+    ['p2', `${ADMIN} here 'chmod 600 /etc/hosts'`, '0-always', 'Run this as admin on this Mac?', '✓ You pressed “Always allow this command”', 'ran'],
+    ['p3', `${ADMIN} here 'chmod 755 /etc/hosts'`, '0-deny', 'Run this as admin on this Mac?', REFUSED_LINE, 'refused'],
+    ['p4', 'hold xp4; /plug/claudopus/bin/release', 'r0-once', 'Release fix-it to main?', ALLOWED_LINE, 'held'],
+    ['p5', 'hold xp5; /plug/claudopus/bin/release', 'r0-deny', 'Release fix-it to main?', REFUSED_LINE, 'refused'],
+  ] as const) {
+    const before = counted.seen.sleeps
+    const call = w.bash(id, command)
+    const base = `gate-${id}-${button}`
+    expect(await until(async () => keyed(w.list, base))).toBeDefined()
+    expect(await w.list.find({ type: 'Text', text: question })).toBeDefined()
+    // Pressed: the very next look at the panel has the line, with nothing left to press and nothing that still asks
+    await pressed(w.list, base)
+    expect((await w.list.find({ type: 'Text', text: said }))?.props.dimColor).toBe(true)
+    expect((await w.list.findAll({ type: 'Button' })).some(b => (b.key ?? '').startsWith(`gate-${id}-`))).toBe(false)
+    expect(await w.list.find({ type: 'Text', text: question })).toBeUndefined()
+    expect(await w.list.find({ type: 'Text', text: 'Permission' })).toBeUndefined()
+    expect(await gateGreens(w.list)).toBe(0)
+    if (ends === 'held') (await until(async () => w.holding.get(`x${id}; /plug/claudopus/bin/release`)))?.('released')
+    const r = (await call) as { deny?: string; result?: unknown }
+    if (ends === 'refused') expect(r.deny).toContain('Refused by Sam')
+    else expect(r.deny).toBeUndefined()
+    // One wait was in flight while it was held, and the press started no other
+    expect(counted.seen.sleeps - before).toBe(1)
+    // The one line of the card is of the last press alone
+    expect((await gateTexts(w.list)).filter(one => one.startsWith('✓ '))).toEqual([said])
+  }
   w.wake()
-  if (isRelease) (await until(async () => w.holding.get('xp1; /plug/claudopus/bin/release')))?.('released')
-  await call
-}
-test("Allow once on a gate draws it answered in the press's own drawing, before the wait reads it: green, with no buttons left", ($, on) => pressedFirst($, on, 'once', 'You allowed it. It runs now.'))
-test("Always allow on a gate draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'always', "You always allow this command. It runs now, and Claudopus won't ask again."))
-test("Deny on a gate draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'deny', "You denied it. It didn't run, and Claudopus told Claude."))
-test("Allow once on a release draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'once', 'You allowed it. Claude is releasing it now.', true))
+})
 
-test('two presses on a gate before its wait reads them send one answer: the first, as drawn', async ($, on) => {
-  const { list, bash, held, wake } = await gated($, on)
+test('two presses on a gate send one answer: the first, as drawn', async ($, on) => {
+  const { list, bash, held, wake, admins } = await gated($, on)
   const call = bash('d1', `${ADMIN} here 'chmod 644 /etc/hosts'`)
   expect(await held('d1')).toBeDefined()
   // Both keys as the panel last drew them, pressed one after the other, as a double click on a drawing a moment old does
   const once = (await keyed(list, 'gate-d1-0-once'))?.key ?? ''
   const deny = (await keyed(list, 'gate-d1-0-deny'))?.key ?? ''
   await list.press({ key: once })
-  expect(await list.find({ type: 'Text', text: 'You allowed it. It runs now.' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: ALLOWED_LINE })).toBeDefined()
   await list.press({ key: deny }).catch(() => undefined)
   // The second press changed nothing: the card still says what the first one did
-  expect(await list.find({ type: 'Text', text: 'You allowed it. It runs now.' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: ALLOWED_LINE })).toBeDefined()
   await list.press({ key: once }).catch(() => undefined)
-  wake()
   const r = (await call) as { deny?: string }
   expect(r.deny).toBeUndefined()
-  expect((await list.findAll({ type: 'Text' })).filter(t => /^You (allowed|denied|always)/.test(String(t.text ?? ''))).length).toBe(1)
-  expect(await list.find({ type: 'Text', text: 'You allowed it. It runs now.' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: /^You denied it/ })).toBeUndefined()
+  expect(admins.length).toBe(1)
+  expect((await gateTexts(list)).filter(one => one.startsWith('✓ '))).toEqual([ALLOWED_LINE])
+  wake()
 })
 
-test('a gate allowed but not let through says so where its green box was, never a false "allowed"', async ($, on) => {
-  const w = await gated($, on)
-  const call = w.bash('f1', `${ADMIN} here 'chmod 644 /etc/hosts'`)
-  expect(await w.held('f1')).toBeDefined()
-  // The seal for the grant cannot be made, as a keychain that refuses: the command does not run
-  w.files.set('keychain:refused', '1')
-  await w.press('gate-f1-0-once')
-  const r = (await call) as { deny?: string }
-  expect(r.deny).toBeDefined()
-  expect(w.grants()).toEqual([])
-  expect(await until(async () => w.list.find({ type: 'Text', text: "Claudopus couldn't use its keychain key. It didn't run, and Claudopus told Claude." }))).toBeDefined()
-  expect(await w.list.find({ type: 'Text', text: 'You allowed it. It runs now.' })).toBeUndefined()
-  expect(await w.list.find({ type: 'Text', text: /^You allowed it/ })).toBeUndefined()
-})
-
-// Found on a second look: one Bash call with two commands to allow, the first allowed and the second refused, ran nothing yet left
-// "You allowed it once" green for the first
-test('a call refused after one of its commands was allowed says in grey that nothing in it ran, never green', SLOW, async ($, on) => {
+test('a gate allowed but not let through says so in its grey line, never a bare "Allow"', async ($, on) => {
   const w = await gated($, on)
   w.files.set('git:top', '/repo/wt')
   w.files.set('git:branch', 'fix-it')
-  for (const [id, command, second] of [
-    ['m1', `${ADMIN} here 'id -u'; ${ADMIN} here 'id -g'`, 'gate-m1-1-deny'],
-    ['m2', `${ADMIN} here 'id -u'; /plug/claudopus/bin/release`, 'gate-m2-r0-deny'],
+  // The seal for the grant cannot be made, as a keychain that refuses: nothing runs
+  for (const [id, command, button, said] of [
+    ['f1', `${ADMIN} here 'chmod 644 /etc/hosts'`, 'gate-f1-0-once', "✓ You pressed “Allow” · the keychain key couldn't be used, so it didn't run"],
+    ['f2', '/plug/claudopus/bin/release', 'gate-f2-r0-once', "✓ You pressed “Allow” · the keychain key couldn't be used, so nothing was released"],
   ] as const) {
+    w.files.delete('keychain:refused')
     const call = w.bash(id, command)
-    expect(await w.held(id)).toBeDefined()
-    await w.press(`gate-${id}-0-once`)
-    expect(await until(async () => keyed(w.list, second))).toBeDefined()
-    await w.press(second)
-    expect(((await call) as { deny?: string }).deny).toBeDefined()
+    expect(await until(async () => keyed(w.list, button))).toBeDefined()
+    w.files.set('keychain:refused', '1')
+    await w.press(button)
+    const r = (await call) as { deny?: string }
+    expect(r.deny).toContain('could not secure what was allowed')
+    expect(w.grants()).toEqual([])
     expect(w.admins).toEqual([])
-    expect(await until(async () => w.list.find({ type: 'Text', text: "It didn't run: another part of the same command was denied, so none of it ran." }))).toBeDefined()
-    expect(await w.list.find({ type: 'Text', text: 'You allowed it. It runs now.' })).toBeUndefined()
+    expect((await until(async () => w.list.find({ type: 'Text', text: said })))?.props.dimColor).toBe(true)
+    // (the line whole: nothing on the card says only that it was allowed)
+    expect((await gateTexts(w.list)).filter(one => one.startsWith('✓ '))).toEqual([said])
+    expect(await gateGreens(w.list)).toBe(0)
   }
 })

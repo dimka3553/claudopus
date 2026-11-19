@@ -102,7 +102,7 @@ The panel's header has these buttons (Results once there is a result):
 
 | Page | What it holds |
 | --- | --- |
-| **Results** | What finished tasks found, newest first, with what's waiting for you at the top (each with Yes, No and Not now). Each one opens with a tile for each file its task made, then its finding. |
+| **Results** | What finished tasks found, newest first, Each one opens with a tile for each file its task made, then its finding. |
 | **Stats** | Tokens, cost at API prices, tasks done and time saved, from Claude Code's own records. |
 | **Memory** | Opens the memory folder `~/.claude/claudopus`: your messages word for word, results, notes on each topic, and a list of the keys you've given by name and where each is saved (never a value). |
 | **Config** | Every setting, and the rules (below). Each shows what is in force, and **Reset** puts it back to what shipped. |
@@ -118,12 +118,12 @@ The panel's header has these buttons (Results once there is a result):
 ### Keys, passwords and admin commands
 
 - Claudopus asks for a key or token once, in a box at the top of the panel, and saves it in the macOS keychain (on Linux, in a file only you can read). It is never put in a chat, and its value is hidden in anything a command prints. If Claude asks for a key you've already given, Claudopus tells Claude where it is.
-- Before Claude runs a command as administrator, the task's card shows the exact command and the machine, with **Allow once** (or **Allow for this task**), **Always allow this command** and **Deny**. In Config you choose whether Claudopus asks each time, once per task, or never. Config also lists what you always allow. Claudopus never saves an admin password. Each admin command asks for it, in macOS's own box on this Mac, or otherwise in a box at the top of the panel.
+- Before Claude runs a command as administrator, the task's card shows the exact command and the machine, with **Allow**, **Don't allow** and **Always allow this command**. In Config you choose whether Claudopus asks each time, once per task, or never. Config also lists what you always allow. Claudopus never saves an admin password. Each admin command asks for it, in macOS's own box on this Mac, or otherwise in a box at the top of the panel.
 - These boxes catch mistakes and common tricks, but code running as you on your machine could still get around them.
 
 ### One release at a time
 
-Claudopus tells Claude to change a repo only in the task's own worktree and branch. A task reaches main only through one release command. The command waits its turn, numbers the version, builds, checks and pushes, and only after you press **Allow once** on its card. Claudopus refuses a task's own push to main.
+Claudopus tells Claude to change a repo only in the task's own worktree and branch. A task reaches main only through one release command. The command waits its turn, numbers the version, builds, checks and pushes, and only after you press **Release it** on the task's question, or **Allow** on its card. Claudopus refuses a task's own push to main.
 
 Every detail is in the [full guide](mods/claudopus/docs/guide.md#what-you-see).
 
