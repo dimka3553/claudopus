@@ -70,30 +70,23 @@ var tasksMissedAt = 0;
 // The file each row's output was last read from, by its id, so a press on the row can show it whole
 var jobFiles = new Map();
 // A job as its row shows it, from its command and words: a watch is what waits for something far away and ends when it is there
-// (with its title and kind in plain words where the small model gave them, and what it does now)
-var jobOf = function (id, what, cmd, at, isWatch, theirs, named) {
-    var _a, _b, _c;
+var jobOf = function (id, what, cmd, at, isWatch, theirs) {
+    var _a, _b;
     if (isWatch === void 0) { isWatch = false; }
     var seen = (_a = jobLog.get(id)) !== null && _a !== void 0 ? _a : theirs;
     var said = describedOf(what);
-    // (one the small model says is a cloud job runs on another computer, whatever its line looks like)
-    var told = isWatch ? 'watch' : jobKindOf(cmd, what);
-    var kind = told === 'script' && (named === null || named === void 0 ? void 0 : named.kind) === 'cloud job' ? 'remote' : told;
+    var kind = isWatch ? 'watch' : jobKindOf(cmd, what);
     var label = labelOf(said.text || cmd, cmd);
-    var now = (_b = namedNow.get(id)) !== null && _b !== void 0 ? _b : theirs === null || theirs === void 0 ? void 0 : theirs.now;
-    return __assign(__assign(__assign(__assign({ id: id, label: label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd: cmd, kind: kind, at: at }, (seen !== null && seen !== void 0 ? seen : {})), { port: (_c = portOf(cmd)) !== null && _c !== void 0 ? _c : seen === null || seen === void 0 ? void 0 : seen.port }), ((named === null || named === void 0 ? void 0 : named.title) ? __assign({ title: named.title }, (named.kind ? { namedKind: named.kind } : {})) : {})), (now ? { now: now } : {}));
+    return __assign(__assign({ id: id, label: label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd: cmd, kind: kind, at: at }, (seen !== null && seen !== void 0 ? seen : {})), { port: (_b = portOf(cmd)) !== null && _b !== void 0 ? _b : seen === null || seen === void 0 ? void 0 : seen.port });
 };
 // The rows a card has: what it sent to the background and Claude Code still tracks, and nothing else; jobs alike are one
-var jobsOf = function (one) { var _a; return foldJobs(((_a = one.bg) !== null && _a !== void 0 ? _a : []).map(function (b) { var _a, _b; return jobOf(b.id, b.what, (_a = b.cmd) !== null && _a !== void 0 ? _a : b.what, b.at, b.isWatch, (_b = one.seenJobs) === null || _b === void 0 ? void 0 : _b[b.id], b.named); })); };
+var jobsOf = function (one) { var _a; return foldJobs(((_a = one.bg) !== null && _a !== void 0 ? _a : []).map(function (b) { var _a, _b; return jobOf(b.id, b.what, (_a = b.cmd) !== null && _a !== void 0 ? _a : b.what, b.at, b.isWatch, (_b = one.seenJobs) === null || _b === void 0 ? void 0 : _b[b.id]); })); };
 // A job's name on its row: what kind, a server's port, and its own words
 // Its kind leads in words, so it is never taken for a helper, then how many alike it stands for
 var jobHead = function (job) {
     if (job.id.startsWith('more-'))
         return job.label;
     var many = job.count && job.count > 1 ? " \u00D7".concat(job.count) : '';
-    // Named by the small model: its kind in its words, then its title
-    if (job.title)
-        return "".concat(namedHead({ title: job.title, kind: job.namedKind })).concat(job.kind === 'server' && job.port && !job.title.includes(job.port) ? " :".concat(job.port) : '').concat(many);
     var kind = "".concat(JOB_HEAD[job.kind]).concat(job.kind === 'server' && job.port ? " :".concat(job.port) : '').concat(many);
     // Its own words alone when they say its kind already (Download the CT scans, Watch the cloud jobs)
     // (only when they say the kind it is: a watch named Check that… still leads with Watch)
@@ -125,7 +118,7 @@ var findTasks = function ($) { return __awaiter(_this, void 0, void 0, function 
 // Looked at as the list is followed: the end of each background job's output, read in one go. A card whose job wrote something
 // new has news
 var lookJobs = function ($) { return __awaiter(_this, void 0, void 0, function () {
-    var now, list, owned, _loop_1, _i, _a, id, _loop_2, _b, _c, owner, sid, asked, files, ended, endedAs, texts, _d, list_1, one, _e, _f, b, isChanged, moved, mtime, script, r, parts, _loop_3, n, quiet, _g, asked_1, o, r, _loop_4, _h, _j, m, _k, ended_1, id, _l, _m, _o, moved_1, owner;
+    var now, list, owned, _loop_1, _i, _a, id, _loop_2, _b, _c, owner, sid, asked, files, ended, endedAs, _d, list_1, one, _e, _f, b, isChanged, moved, mtime, script, r, parts, _loop_3, n, quiet, _g, asked_1, o, r, _loop_4, _h, _j, m, _k, ended_1, id, _l, _m, _o, moved_1, owner;
     var _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2;
     return __generator(this, function (_3) {
         switch (_3.label) {
@@ -178,7 +171,6 @@ var lookJobs = function ($) { return __awaiter(_this, void 0, void 0, function (
                 asked.forEach(function (o, n) { var _a; return jobFiles.set(o.id, (_a = files[n]) !== null && _a !== void 0 ? _a : ''); });
                 ended = [];
                 endedAs = {};
-                texts = {};
                 // A watch well past the time limit the engine set it has ended, whether or not its last line was read
                 for (_d = 0, list_1 = list; _d < list_1.length; _d++) {
                     one = list_1[_d];
@@ -204,7 +196,6 @@ var lookJobs = function ($) { return __awaiter(_this, void 0, void 0, function (
                     var job = asked[(n - 1) / 2];
                     var id = (_q = job === null || job === void 0 ? void 0 : job.id) !== null && _q !== void 0 ? _q : '';
                     var text = (_r = parts[n + 1]) !== null && _r !== void 0 ? _r : '';
-                    texts[id] = text;
                     var m = Number((_t = (_s = parts[n]) === null || _s === void 0 ? void 0 : _s.split(' ')[0]) !== null && _t !== void 0 ? _t : 0) * 1000;
                     // One that ended, by the engine's last line on its output, and when: as that output last changed
                     var end = runEndOf(text);
@@ -274,8 +265,6 @@ var lookJobs = function ($) { return __awaiter(_this, void 0, void 0, function (
                 }
                 _3.label = 9;
             case 9:
-                // Each command that needs it is named afresh in plain words, in the background: never waited for here
-                void nameJobs($, list, texts, endedAs).catch(function (err) { return log($, "commands not named: ".concat(String(err))); });
                 if (!ended.length) return [3 /*break*/, 11];
                 return [4 /*yield*/, dropBackground($, ended, endedAs)];
             case 10:
@@ -641,7 +630,7 @@ var logOf = function ($, paneId) { return __awaiter(_this, void 0, void 0, funct
                 one = _a[_i];
                 b = (_d = one.bg) === null || _d === void 0 ? void 0 : _d.find(function (b) { return logPaneOf(b.id) === paneId; });
                 if (b)
-                    return [2 /*return*/, { one: one, job: jobOf(b.id, b.what, (_e = b.cmd) !== null && _e !== void 0 ? _e : b.what, b.at, b.isWatch, (_f = one.seenJobs) === null || _f === void 0 ? void 0 : _f[b.id], b.named), run: undefined, file: jobFiles.get(b.id) || (tasksDir ? "".concat(tasksDir, "/").concat(b.id, ".output") : '') }];
+                    return [2 /*return*/, { one: one, job: jobOf(b.id, b.what, (_e = b.cmd) !== null && _e !== void 0 ? _e : b.what, b.at, b.isWatch, (_f = one.seenJobs) === null || _f === void 0 ? void 0 : _f[b.id]), run: undefined, file: jobFiles.get(b.id) || (tasksDir ? "".concat(tasksDir, "/").concat(b.id, ".output") : '') }];
                 run = (_g = one.endedRuns) === null || _g === void 0 ? void 0 : _g.find(function (r) { return logPaneOf(r.id) === paneId; });
                 if (!run) return [3 /*break*/, 7];
                 if (!(run.file || one.chat)) return [3 /*break*/, 3];
@@ -668,36 +657,35 @@ var logOf = function ($, paneId) { return __awaiter(_this, void 0, void 0, funct
     });
 }); };
 var logView = function ($, ui, paneId) { return __awaiter(_this, void 0, void 0, function () {
-    var Box, Button, Text, found, one, job, run, file, now, label, why, kind, state, r, _a, all, lines, isFailed;
-    var _b, _c, _d, _e, _f;
-    return __generator(this, function (_g) {
-        switch (_g.label) {
+    var Box, Button, Text, found, one, job, run, file, now, label, kind, state, r, _a, all, lines, isFailed;
+    var _b, _c, _d;
+    return __generator(this, function (_e) {
+        switch (_e.label) {
             case 0:
                 Box = ui.Box, Button = ui.Button, Text = ui.Text;
                 return [4 /*yield*/, logOf($, paneId)];
             case 1:
-                found = _g.sent();
+                found = _e.sent();
                 if (!found)
                     return [2 /*return*/, <Text dimColor>This log is no longer available.</Text>];
                 one = found.one, job = found.job, run = found.run, file = found.file;
                 return [4 /*yield*/, $.clock.now()];
             case 2:
-                now = _g.sent();
-                label = job ? ((_b = job.title) !== null && _b !== void 0 ? _b : job.label) : run ? runLabel(run) : 'A command';
-                why = (run === null || run === void 0 ? void 0 : run.how) === 'failed' ? (_c = run.named) === null || _c === void 0 ? void 0 : _c.why : undefined;
-                kind = (_e = (_d = job === null || job === void 0 ? void 0 : job.kind) !== null && _d !== void 0 ? _d : run === null || run === void 0 ? void 0 : run.kind) !== null && _e !== void 0 ? _e : 'script';
+                now = _e.sent();
+                label = job ? job.label : run ? runLabel(run) : 'A command';
+                kind = (_c = (_b = job === null || job === void 0 ? void 0 : job.kind) !== null && _b !== void 0 ? _b : run === null || run === void 0 ? void 0 : run.kind) !== null && _c !== void 0 ? _c : 'script';
                 state = job ? "".concat(JOB_NOW[kind], " \u00B7 ").concat(took(now - job.at)) : run ? "".concat(endedLine(run, took(run.endedAt - run.at)), " \u00B7 ").concat(shortAgo(now - run.endedAt), " ago") : '';
                 if (!(file && canOpenFile(file))) return [3 /*break*/, 4];
                 return [4 /*yield*/, $.process.run(['sh', '-c', 'tail -n "$2" "$1" 2>/dev/null # the log tab', 'sh', file, String(LOG_LINES + 1)], { timeoutMs: 5000 }).catch(function () { return undefined; })];
             case 3:
-                _a = _g.sent();
+                _a = _e.sent();
                 return [3 /*break*/, 5];
             case 4:
                 _a = undefined;
-                _g.label = 5;
+                _e.label = 5;
             case 5:
                 r = _a;
-                all = logLines((_f = r === null || r === void 0 ? void 0 : r.stdout) !== null && _f !== void 0 ? _f : '');
+                all = logLines((_d = r === null || r === void 0 ? void 0 : r.stdout) !== null && _d !== void 0 ? _d : '');
                 lines = all.slice(-LOG_LINES);
                 isFailed = (run === null || run === void 0 ? void 0 : run.how) === 'failed';
                 return [2 /*return*/, (<Box key="log" flexDirection="column" gap={1} flexGrow={1}>
@@ -710,7 +698,7 @@ var logView = function ($, ui, paneId) { return __awaiter(_this, void 0, void 0,
             <Text bold wrap="wrap">{label}</Text>
           </Box>
         </Box>
-        {isFailed ? <Text color="error" wrap="wrap">{why ? "".concat(state, " \u00B7 ").concat(why) : state}</Text> : null}
+        {isFailed ? <Text color="error" wrap="wrap">{state}</Text> : null}
         <Text dimColor wrap="wrap">{[isFailed ? '' : state, "of the task \u201C".concat(cut(titleOf(one), 40), "\u201D")].filter(Boolean).join(' · ')}</Text>
         <Box flexDirection="row" gap={2} flexShrink={0}>
           {job && canStopJob(job) ? <Button key={"log-stop-".concat(presses)} label={stoppingJobs.has(job.id) ? 'Stopping' : 'Stop'} plain onPress={function () { return void stopJob($, one.id, job).catch(function (err) { return log($, "run not stopped: ".concat(String(err))); }); }}/> : null}

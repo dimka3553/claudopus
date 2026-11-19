@@ -245,7 +245,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
             case 43:
                 _23.sent();
                 _t = expect;
-                return [4 /*yield*/, pane.find({ type: 'Text', text: /^1 working$/ })];
+                return [4 /*yield*/, pane.find({ type: 'Text', text: /^1 task working$/ })];
             case 44:
                 _t.apply(void 0, [_23.sent()]).toBeDefined();
                 // Kept in a file of its own, for the chat that started this session
@@ -334,7 +334,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
                 _7 = expect;
                 return [4 /*yield*/, pane.findAll({ type: 'Box' })];
             case 61:
-                _7.apply(void 0, [(_23.sent()).filter(function (b) { var _a; return !((_a = b.key) === null || _a === void 0 ? void 0 : _a.startsWith('outline-')) && b.props.backgroundColor === 'success'; }).length]).toBe(1);
+                _7.apply(void 0, [(_23.sent()).filter(function (b) { return b.props.backgroundColor === 'success'; }).length]).toBe(1);
                 _8 = expect;
                 return [4 /*yield*/, pane.find({ type: 'Button', key: 'flow-stop-wf_1' })];
             case 62:

@@ -776,7 +776,6 @@ var panelHooks = function (on) {
                                         return /ing$/.test(first) && first.toLowerCase() !== ((_b = label.trim().split(/\s+/)[0]) !== null && _b !== void 0 ? _b : '').toLowerCase() ? first : '';
                                     };
                                     jobStand = function (job, width) {
-                                        var _a;
                                         // A count that is full while the command still runs says so in place of its percent: 100% beside a running row read as
                                         // done (19 Nov "7 of 7 heads · 100% · started, finishing", from a script that counted what it had started)
                                         var isFull = job.pct === '100%' || Boolean(job.done && job.total && job.done === job.total);
@@ -804,20 +803,17 @@ var panelHooks = function (on) {
                                         var bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? ["".concat(job.done, "/").concat(job.total.split(' ')[0])] : compact;
                                         // Its own plain words for what it does now; a watch's are its last event
                                         // (none beside a full count: what a script said as it counted its last thing, "command finished", read against "still running")
-                                        // (the script's own fresh words first, then what the small model said it does now, then its last line made plain)
-                                        var isOwnNow = job.isOwn && !job.isEarlier;
-                                        var nowSaid = job.now ? (/^[A-Z][a-z]/.test(job.now) ? job.now.charAt(0).toLowerCase() + job.now.slice(1) : job.now) : '';
-                                        var words = isFull ? '' : (isOwnNow ? plainOf(job.words, job.label) : '') || nowSaid || (isOwnNow ? '' : plainOf(job.latest, job.label));
+                                        var words = isFull ? '' : plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, job.label);
                                         var hasSaid = Boolean(words || full.length || pct.length);
                                         // Silent, whether its programs still use the processor: still busy, or idle (stuck, or waiting on something far away)
                                         var live = job.live === 'busy' ? ' · still busy' : job.live === 'idle' ? ' · idle' : '';
                                         // Quiet never stands alone (17 Nov "nothing printed for 29m 30s" said nothing of what it did): the last thing it said stays,
                                         // marked as the last, or that it has shown no output or no progress at all
-                                        var _b = job.kind === 'server' || job.kind === 'watch' ? ['', '']
+                                        var _a = job.kind === 'server' || job.kind === 'watch' ? ['', '']
                                             : !isSilent ? ['', '']
                                                 : hasSaid ? ["nothing new for ".concat(ago(still)).concat(live), "nothing new for ".concat(shortAgo(still)).concat(live)]
                                                     : !job.wroteAt || job.isEmpty ? ["No output yet \u00B7 started ".concat(shortAgo(ran), " ago").concat(live), "No output yet \u00B7 ".concat(shortAgo(ran)).concat(live)]
-                                                        : ["No progress shown \u00B7 nothing new for ".concat(ago(still)).concat(live), "No progress for ".concat(shortAgo(still)).concat(live)], state = _b[0], short = _b[1];
+                                                        : ["No progress shown \u00B7 nothing new for ".concat(ago(still)).concat(live), "No progress for ".concat(shortAgo(still)).concat(live)], state = _a[0], short = _a[1];
                                         // (in amber only where nothing says it still works)
                                         var isWarn = isSilent && job.live !== 'busy';
                                         // A server or a watch leads with what it does, then the last thing it said
@@ -828,7 +824,7 @@ var panelHooks = function (on) {
                                         // How far it is comes first, then its sign of life: the fullest counts with each tail, then any
                                         var tries = __spreadArray(__spreadArray([], numbers.slice(0, 2).flatMap(function (nums) { return tails.map(function (tail) { return ({ nums: nums, tail: tail }); }); }), true), tails.flatMap(function (tail) { return numbers.map(function (nums) { return ({ nums: nums, tail: tail }); }); }), true);
                                         for (var _i = 0, tries_1 = tries; _i < tries_1.length; _i++) {
-                                            var _c = tries_1[_i], nums = _c.nums, tail = _c.tail;
+                                            var _b = tries_1[_i], nums = _b.nums, tail = _b.tail;
                                             var fixed = __spreadArray(__spreadArray([], nums, true), tail, true).join(' · ');
                                             if (lead.length + fixed.length > width)
                                                 continue;
@@ -845,7 +841,7 @@ var panelHooks = function (on) {
                                             var kindLead = job.kind === 'server' ? 'Serving' : job.kind === 'watch' ? 'Watching' : '';
                                             var shownLead = kindLead ? "".concat(kindLead, " \u00B7 ").concat(said_1 ? 'last: ' : '') : lead && (nums.length || said_1) ? lead : '';
                                             var line = "".concat(shownLead).concat(text);
-                                            return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : (job.kind === 'script' && (job.title || job.isNamed) ? nowWord((_a = job.title) !== null && _a !== void 0 ? _a : job.label) : '') || JOB_NOW[job.kind], isWarn: isWarn };
+                                            return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : (job.kind === 'script' && job.isNamed ? nowWord(job.label) : '') || JOB_NOW[job.kind], isWarn: isWarn };
                                         }
                                         return { text: short, isWarn: isWarn };
                                     };
@@ -867,7 +863,7 @@ var panelHooks = function (on) {
           {jobLines(t, "twig-lines-".concat(key), job)}
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
             {/* A press shows its output whole in a Terminal window, where this Mac can open one */}
-            {isMore(job) && owner ? (<Button key={"more-".concat(key, "-").concat(presses)} label={name} plain hover={{ scope: "twig-".concat(key), underline: true }} onPress={function () { return openWork($, owner); }}/>) : canOpenJob(job) ? (<Button key={"output-".concat(key, "-").concat(presses)} label={name} plain hover={{ scope: "twig-".concat(key), underline: true }} onPress={function () { var _a; return openLog($, job.id, (_a = job.title) !== null && _a !== void 0 ? _a : job.label); }}/>) : (<Text wrap="truncate-end">{name}</Text>)}
+            {isMore(job) && owner ? (<Button key={"more-".concat(key, "-").concat(presses)} label={name} plain hover={{ scope: "twig-".concat(key), underline: true }} onPress={function () { return openWork($, owner); }}/>) : canOpenJob(job) ? (<Button key={"output-".concat(key, "-").concat(presses)} label={name} plain hover={{ scope: "twig-".concat(key), underline: true }} onPress={function () { return openLog($, job.id, job.label); }}/>) : (<Text wrap="truncate-end">{name}</Text>)}
           </Box>
           <Box flexShrink={0}>
             <Text dimColor>{time}</Text>
@@ -923,7 +919,6 @@ var panelHooks = function (on) {
                                     canOpenEnded = function (run, owner) { return !isRunFromAfar && (Boolean(run.file) || !(owner === null || owner === void 0 ? void 0 : owner.chat)); };
                                     openEnded = function (run, owner) { return (canOpenEnded(run, all.find(function (one) { return one.id === owner; })) ? openLog($, run.id, runLabel(run)) : openWork($, owner)); };
                                     endedRow = function (t) {
-                                        var _a;
                                         var run = t.run;
                                         if (!run)
                                             return null;
@@ -932,7 +927,7 @@ var panelHooks = function (on) {
                                         // they ended, and its mark that it went well; one that did not says how it ended too. When is in its log's tab)
                                         var side = run.how === 'finished' ? took(run.endedAt - run.at) : endedLine(run, took(run.endedAt - run.at));
                                         var name = cut(runLabel(run), Math.max(12, perRow - 4 - t.depth * 2 - side.length - 1));
-                                        var head = (<Box key={"twig-".concat(key)} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+                                        return (<Box key={"twig-".concat(key)} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
           {endedLines(t, "twig-lines-".concat(key), run)}
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
             <Button key={"ended-open-".concat(run.id, "-").concat(presses)} label={name} plain dimColor hover={{ scope: "twig-".concat(key), underline: true }} onPress={function () { var _a, _b; return openEnded(run, (_b = (_a = t.one) === null || _a === void 0 ? void 0 : _a.id) !== null && _b !== void 0 ? _b : ''); }}/>
@@ -940,14 +935,6 @@ var panelHooks = function (on) {
           <Box flexShrink={0}>
             <Text dimColor={run.how !== 'failed'} color={run.how === 'failed' ? 'error' : undefined}>{side}</Text>
           </Box>
-        </Box>);
-                                        // One that failed says why under its name, in plain words, where the small model said
-                                        var why = run.how === 'failed' ? (_a = run.named) === null || _a === void 0 ? void 0 : _a.why : undefined;
-                                        if (!why)
-                                            return head;
-                                        return (<Box key={"ended-box-".concat(key)} flexDirection="column" flexShrink={0}>
-          {head}
-          {twigUnder(t, "why-".concat(key), <Text color="error" wrap="truncate-end">{why}</Text>)}
         </Box>);
                                     };
                                     endedBranches = function (card) {

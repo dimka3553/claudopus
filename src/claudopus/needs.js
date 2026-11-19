@@ -186,7 +186,7 @@ var needBlock = function ($, ui, need, opts) {
     var terminalButton = one && ask && !ask.refused && canOpenTerminal(one) ? <ui.Button key={"".concat(need.id, "-terminal-").concat(presses)} label={openedKey === "".concat(one.id, ":").concat(ask.at, ":").concat(ask.copy) ? '✓ Typed, not run yet' : 'Open in Terminal'} plain onPress={function () { return void openTerminal($, one).catch(function (err) { return log($, "terminal not opened: ".concat(String(err))); }); }}/> : null;
     return squareOutline(ui.Box, opts.isCompact ? undefined : need.isActing ? LIVE : NEEDS, "need-outline-".concat(need.id), (
     // (compact, in the terminal's bar above the prompt, which has a few rows: no outline and no gaps)
-    <ui.Box key={"need-".concat(need.id)} flexDirection="column" flexShrink={0} {...(opts.isCompact ? {} : { gap: 1, paddingX: 1, paddingY: 1 })}>
+    <ui.Box key={"need-".concat(need.id)} flexDirection="column" flexShrink={0} {...(opts.isCompact ? {} : { gap: 1, paddingX: 1 })}>
       <ui.Text dimColor wrap="truncate-end">{"".concat(NEED_LABEL[need.kind]).concat(need.from ? " \u00B7 ".concat(need.from) : '')}</ui.Text>
       {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
       <ui.Text wrap="wrap" color={need.isActing ? LIVE : NEEDS} bold>{withLinks(Link, isWhole ? need.text : cut(need.text, Math.round(room * 1.6)), "".concat(need.id, "-text"), need.text)}</ui.Text>

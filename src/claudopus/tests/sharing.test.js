@@ -1,5 +1,4 @@
-// Every chat's work in every panel: other chats listed, each card by its stage, the header counting by stage and the octopus
-// agreeing, ended work shared, names opening chats
+// Every chat's work in every panel: other chats listed, answered from here, the header agreeing, ended work shared, names opening chats
 var __assign = (this && this.__assign) || function () {
     __assign = Object.assign || function(t) {
         for (var s, i = 1, n = arguments.length; i < n; i++) {
@@ -103,21 +102,21 @@ test("the panel shows every open chat's running work under that chat's name, thi
                 return [4 /*yield*/, list.find({ type: 'Text', text: 'billing' })];
             case 7:
                 _b.apply(void 0, [_o.sent()]).toBeDefined();
-                // The header counts every chat's cards by stage: what waits for the person first, then all that works, here and there
+                // The header counts every chat's: the ask first, then all that runs, here and there
                 _c = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: '1 waiting for you · 2 working' })];
+                return [4 /*yield*/, list.find({ type: 'Text', text: '1 question waiting for you · 2 working' })];
             case 8:
-                // The header counts every chat's cards by stage: what waits for the person first, then all that works, here and there
+                // The header counts every chat's: the ask first, then all that runs, here and there
                 _c.apply(void 0, [_o.sent()]).toBeDefined();
                 return [4 /*yield*/, list.findAll({ type: 'Button' })];
             case 9:
                 buttons = (_o.sent()).map(function (one) { var _a; return (_a = one.key) !== null && _a !== void 0 ? _a : ''; });
                 expect(buttons.filter(function (key) { return key.startsWith('stop-'); })).toEqual(['stop-a1']);
                 expect(buttons.some(function (key) { return key.startsWith('model-r-'); })).toBe(false);
-                // The chat's own task hands in its result: its file says it is done at once, so the others show it done as this chat does
-                return [4 /*yield*/, $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb1', agentId: 'a1', message: 'Done.' })];
+                // The chat's own work ends: its file says so at once, so the others show it finished as this chat does
+                return [4 /*yield*/, $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', agentId: 'a1' })];
             case 10:
-                // The chat's own task hands in its result: its file says it is done at once, so the others show it done as this chat does
+                // The chat's own work ends: its file says so at once, so the others show it finished as this chat does
                 _o.sent();
                 return [4 /*yield*/, clock.advance(1000)];
             case 11:
@@ -312,41 +311,37 @@ test("with another Mac named in config.json, its chats' work shows here under it
         }
     });
 }); });
-test("the header says in one line what every chat's cards say, counted by stage, and the octopus beside it agrees", function () {
-    // [working here, working in other chats, how many chats those are in, waiting for the person, one just finished], its line, the octopus
-    var cases = [
-        [[0, 0, 0], 'Nothing waits for you', 'mark'],
-        [[1, 0, 0], '1 working', 'working'],
-        [[2, 0, 0], '2 working', 'working'],
-        [[0, 1, 1], '1 working in another chat', 'working'],
-        [[0, 3, 2], '3 working in 2 other chats', 'working'],
-        [[1, 1, 1], '2 working, here and in 1 other chat', 'working'],
-        [[2, 3, 2], '5 working, here and in 2 other chats', 'working'],
-        [[0, 0, 0, 1], '1 waiting for you', 'asking'],
-        [[0, 0, 0, 3], '3 waiting for you', 'asking'],
-        [[1, 2, 1, 2], '2 waiting for you · 3 working', 'asking'],
-        // A finish shows on the octopus for its moment whatever else goes on, the line still saying what waits for the person or works
-        [[0, 0, 0, 1, true], '1 waiting for you', 'happy'],
-        [[0, 1, 1, 0, true], '1 working in another chat', 'happy'],
-        [[0, 0, 0, 0, true], 'Just finished', 'happy'],
-    ];
-    for (var _i = 0, cases_1 = cases; _i < cases_1.length; _i++) {
-        var _a = cases_1[_i], _b = _a[0], here = _b[0], there = _b[1], chats = _b[2], _c = _b[3], asks = _c === void 0 ? 0 : _c, _d = _b[4], isDone = _d === void 0 ? false : _d, line = _a[1], mood = _a[2];
+test("the header says in one line what every chat's cards say, and the octopus beside it agrees", function () {
+    var head = function (here, there, chats, asks, isDone) {
+        if (asks === void 0) { asks = 0; }
+        if (isDone === void 0) { isDone = false; }
         var one = { here: here, there: there, chats: chats, asks: asks, isDone: isDone };
-        expect([headLine(one), headMood(one)]).toEqual([line, mood]);
-    }
+        return [headLine(one), headMood(one)];
+    };
+    expect(head(0, 0, 0)).toEqual(['Nothing running', 'mark']);
+    expect(head(1, 0, 0)).toEqual(['1 task working', 'working']);
+    expect(head(2, 0, 0)).toEqual(['2 tasks working', 'working']);
+    expect(head(0, 1, 1)).toEqual(['1 task working in another chat', 'working']);
+    expect(head(0, 3, 2)).toEqual(['3 tasks working in 2 other chats', 'working']);
+    expect(head(1, 1, 1)).toEqual(['2 tasks working, here and in 1 other chat', 'working']);
+    expect(head(2, 3, 2)).toEqual(['5 tasks working, here and in 2 other chats', 'working']);
+    expect(head(0, 0, 0, 1)).toEqual(['1 question waiting for you', 'asking']);
+    expect(head(1, 2, 1, 2)).toEqual(['2 questions waiting for you · 3 working', 'asking']);
+    // A finish shows on the octopus for its moment whatever else goes on, the line still saying what needs the person or runs
+    expect(head(0, 0, 0, 1, true)).toEqual(['1 question waiting for you', 'happy']);
+    expect(head(0, 1, 1, 0, true)).toEqual(['1 task working in another chat', 'happy']);
+    expect(head(0, 0, 0, 0, true)).toEqual(['Just finished', 'happy']);
 });
-test("with work only in another chat the header and octopus are at work, amber while it asks, happy as it finishes, then at rest; another chat's cards are shown and counted by stage, done, failed with why and stopped alike, with nothing of what an older version kept on them", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, files, clock, drawn, file, list, _b, _c, _d, asks, _e, _f, _g, _h, _j, at, card, staged, lineOf, _k, _l, _m, _o, _p, said, _q, _r, _s, _t;
+test("with work only in another chat the header and octopus are at work, amber while it asks, happy as it finishes, then at rest", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, files, clock, drawn, file, list, _b, _c, _d, asks, _e, _f, _g, _h, _j;
     var _this = this;
-    var _u;
-    return __generator(this, function (_v) {
-        switch (_v.label) {
+    return __generator(this, function (_k) {
+        switch (_k.label) {
             case 0:
                 _a = world(on, { art: true }), files = _a.files, clock = _a.clock;
                 return [4 /*yield*/, $.session.start(start)];
             case 1:
-                _v.sent();
+                _k.sent();
                 drawn = function (view) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                     switch (_a.label) {
                         case 0: return [4 /*yield*/, view.findAll({ type: 'Svg' })];
@@ -358,157 +353,70 @@ test("with work only in another chat the header and octopus are at work, amber w
                 files.set("".concat(MEMORY, "/live/chat-b.json"), JSON.stringify(__assign(__assign({}, file), { cards: file.cards.slice(1) })));
                 return [4 /*yield*/, clock.advance(5000)];
             case 2:
-                _v.sent();
+                _k.sent();
                 return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { surface: 'desktop' }))];
             case 3:
-                list = _v.sent();
+                list = _k.sent();
                 _b = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        return [2 /*return*/, list.find({ type: 'Text', text: '1 working in another chat' })];
+                        return [2 /*return*/, list.find({ type: 'Text', text: '1 task working in another chat' })];
                     }); }); })];
             case 4:
-                _b.apply(void 0, [_v.sent()]).toBeDefined();
+                _b.apply(void 0, [_k.sent()]).toBeDefined();
                 _c = expect;
                 return [4 /*yield*/, drawn(list)];
             case 5:
-                _c.apply(void 0, [_v.sent()]).toEqual(['working']);
+                _c.apply(void 0, [_k.sent()]).toEqual(['working']);
                 _d = expect;
                 return [4 /*yield*/, list.find({ type: 'Text', text: /^Nothing/ })];
             case 6:
-                _d.apply(void 0, [_v.sent()]).toBeUndefined();
+                _d.apply(void 0, [_k.sent()]).toBeUndefined();
                 // It asks: the line turns amber and says so, and the octopus waves amber
                 files.set("".concat(MEMORY, "/live/chat-b.json"), JSON.stringify(__assign(__assign({}, file), { at: NOW + 5000 })));
                 return [4 /*yield*/, clock.advance(5000)];
             case 7:
-                _v.sent();
+                _k.sent();
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        return [2 /*return*/, list.find({ type: 'Text', text: '1 waiting for you · 1 working' })];
+                        return [2 /*return*/, list.find({ type: 'Text', text: '1 question waiting for you · 1 working' })];
                     }); }); })];
             case 8:
-                asks = _v.sent();
+                asks = _k.sent();
                 expect(asks === null || asks === void 0 ? void 0 : asks.props.color).toBe('#E5A50A');
                 _e = expect;
                 return [4 /*yield*/, drawn(list)];
             case 9:
-                _e.apply(void 0, [_v.sent()]).toEqual(['wave']);
-                // Both finish: happy, "Just finished", for the pause; then at rest, "Nothing waits for you"
+                _e.apply(void 0, [_k.sent()]).toEqual(['wave']);
+                // Both finish: happy, "Just finished", for the pause; then at rest, "Nothing is running"
                 files.set("".concat(MEMORY, "/live/chat-b.json"), JSON.stringify(__assign(__assign({}, file), { at: NOW + 11000, cards: file.cards.map(function (card) { return (__assign(__assign({}, card), { status: 'done', endedAt: NOW + 10500, ask: undefined })); }) })));
                 return [4 /*yield*/, clock.advance(5000)];
             case 10:
-                _v.sent();
+                _k.sent();
                 _f = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         return [2 /*return*/, list.find({ type: 'Text', text: 'Just finished' })];
                     }); }); })];
             case 11:
-                _f.apply(void 0, [_v.sent()]).toBeDefined();
+                _f.apply(void 0, [_k.sent()]).toBeDefined();
                 _g = expect;
                 return [4 /*yield*/, drawn(list)];
             case 12:
-                _g.apply(void 0, [_v.sent()]).toEqual(['happy']);
+                _g.apply(void 0, [_k.sent()]).toEqual(['happy']);
                 return [4 /*yield*/, clock.advance(3000)];
             case 13:
-                _v.sent();
+                _k.sent();
                 _h = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        return [2 /*return*/, list.find({ type: 'Text', text: 'Nothing waits for you' })];
+                        return [2 /*return*/, list.find({ type: 'Text', text: 'Nothing running' })];
                     }); }); })];
             case 14:
-                _h.apply(void 0, [_v.sent()]).toBeDefined();
+                _h.apply(void 0, [_k.sent()]).toBeDefined();
                 _j = expect;
                 return [4 /*yield*/, drawn(list)];
             case 15:
-                _j.apply(void 0, [_v.sent()]).toEqual(['mark']);
-                at = NOW + 20000;
-                card = function (id, title, status, more) {
-                    if (more === void 0) { more = {}; }
-                    return (__assign({ id: id, parentId: '', isFork: false, tokens: 0, title: title, words: '', items: [], entries: [], answer: '', startedAt: at - 60000, endedAt: status === 'working' ? 0 : at - 500, status: status }, more));
-                };
-                staged = [
-                    card('s1', 'Train the splats', 'working', { detached: [{ id: 'd1', what: 'Trainer left running', at: at, cmd: 'nohup python train.py &', log: '/tmp/train.log', isLeft: true }], waitsSince: at, leftSince: at, leftOwn: true, notDone: true }),
-                    card('s2', 'Send the invoices', 'working', { ask: { text: 'May I send 12 invoices?', choices: ['Send', 'Not now'], from: 's2', at: at } }),
-                    card('s3', 'Check the totals', 'done', { items: [{ text: 'Add up March', state: 'done' }, { text: 'Add up April', state: 'open' }], leftOpen: 1, answer: 'March adds up.' }),
-                    card('s4', 'Solve the cameras', 'failed', { why: 'The app closed while it worked' }),
-                    card('s5', 'Draw the chart', 'stopped', { byYou: { at: at } }),
-                ];
-                files.set("".concat(MEMORY, "/live/chat-b.json"), JSON.stringify(__assign(__assign({}, file), { at: at, cards: staged.slice(0, 2), ended: staged.slice(2) })));
-                // (to this panel's next look at the other chats, from which their pause runs)
-                return [4 /*yield*/, clock.advance(2000)
-                    // Each ended one says its stage in its colour for its pause: green done, red failed with why, grey stopped
-                ];
-            case 16:
-                // (to this panel's next look at the other chats, from which their pause runs)
-                _v.sent();
-                lineOf = function (text) { return __awaiter(_this, void 0, void 0, function () {
-                    var one;
-                    var _this = this;
-                    return __generator(this, function (_a) {
-                        switch (_a.label) {
-                            case 0: return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                                    return [2 /*return*/, list.find({ type: 'Text', text: text })];
-                                }); }); })];
-                            case 1:
-                                one = _a.sent();
-                                return [2 /*return*/, [one === null || one === void 0 ? void 0 : one.props.color, Boolean(one === null || one === void 0 ? void 0 : one.props.dimColor)]];
-                        }
-                    });
-                }); };
-                _k = expect;
-                return [4 /*yield*/, lineOf('✓ Done')];
-            case 17:
-                _k.apply(void 0, [_v.sent()]).toEqual(['success', false]);
-                _l = expect;
-                return [4 /*yield*/, lineOf('✕ Failed · The app closed while it worked')];
-            case 18:
-                _l.apply(void 0, [_v.sent()]).toEqual(['error', false]);
-                _m = expect;
-                return [4 /*yield*/, lineOf('Stopped')];
-            case 19:
-                _m.apply(void 0, [_v.sent()]).toEqual([undefined, true]);
-                // The header counts one waiting and one working, and none of the three that ended; the octopus is happy for the one done
-                _o = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: '1 waiting for you · 1 working' })];
-            case 20:
-                // The header counts one waiting and one working, and none of the three that ended; the octopus is happy for the one done
-                _o.apply(void 0, [(_u = (_v.sent())) === null || _u === void 0 ? void 0 : _u.props.color]).toBe('#E5A50A');
-                _p = expect;
-                return [4 /*yield*/, drawn(list)];
-            case 21:
-                _p.apply(void 0, [_v.sent()]).toEqual(['happy']);
-                return [4 /*yield*/, list.findAll({ type: 'Text' })];
-            case 22:
-                said = (_v.sent()).map(function (one) { var _a; return String((_a = one.text) !== null && _a !== void 0 ? _a : ''); });
-                expect(said.filter(function (text) { return /Not done|Trainer left running|nohup|left running|Waiting for its command/.test(text); })).toEqual([]);
-                expect(said).toEqual(expect.arrayContaining(['Train the splats', 'Send the invoices', 'Check the totals', 'Solve the cameras', 'Draw the chart']));
-                // After their pause the three are under Finished, and the header and octopus say only what waits and works
-                return [4 /*yield*/, clock.advance(3000)];
-            case 23:
-                // After their pause the three are under Finished, and the header and octopus say only what waits and works
-                _v.sent();
-                _q = expect;
-                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        switch (_a.label) {
-                            case 0: return [4 /*yield*/, list.find({ type: 'Text', text: '✓ Done' })];
-                            case 1: return [2 /*return*/, ((_a.sent()) ? undefined : true)];
-                        }
-                    }); }); })];
-            case 24:
-                _q.apply(void 0, [_v.sent()]).toBe(true);
-                _r = expect;
-                return [4 /*yield*/, list.findAll({ type: 'Button' })];
-            case 25:
-                _r.apply(void 0, [(_v.sent()).some(function (b) { return /Finished 3/.test(String(b.props.label)); })]).toBe(true);
-                _s = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: '1 waiting for you · 1 working' })];
-            case 26:
-                _s.apply(void 0, [_v.sent()]).toBeDefined();
-                _t = expect;
-                return [4 /*yield*/, drawn(list)];
-            case 27:
-                _t.apply(void 0, [_v.sent()]).toEqual(['wave']);
+                _j.apply(void 0, [_k.sent()]).toEqual(['mark']);
                 return [4 /*yield*/, list.unmount()];
-            case 28:
-                _v.sent();
+            case 16:
+                _k.sent();
                 return [2 /*return*/];
         }
     });
@@ -546,7 +454,7 @@ test("open chats with nothing going on are listed nowhere, on any Mac and howeve
             case 5:
                 _c.apply(void 0, [_l.sent()]).toBeDefined();
                 _d = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: '1 waiting for you · 1 working' })];
+                return [4 /*yield*/, list.find({ type: 'Text', text: '1 question waiting for you · 1 working' })];
             case 6:
                 _d.apply(void 0, [_l.sent()]).toBeDefined();
                 return [4 /*yield*/, list.findAll({ type: 'Text' })];
@@ -684,17 +592,17 @@ test("work that ends in another chat turns happy in this panel for its pause, th
         }
     });
 }); });
-test("while the person types a reply into an ask, work finishing here and in another chat still turns green and happy for its pause; after it this chat's card stays among the cards, done, and the other chat's leaves", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, files, clock, drawn, list, _b, box, doneCards, outlined, _c, _d, _e, _f, _g, _h, _j, file, n, _k, _l, _m, _o, _p, _q;
+test("while the person types a reply into an ask, work finishing here and in another chat still turns green and happy for its pause, then leaves", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, files, clock, drawn, list, _b, box, _c, _d, _e, file, n, _f, _g, _h, _j, _k;
     var _this = this;
-    var _r, _s, _t;
-    return __generator(this, function (_u) {
-        switch (_u.label) {
+    var _l, _m, _o, _p;
+    return __generator(this, function (_q) {
+        switch (_q.label) {
             case 0:
                 _a = world(on, { art: true }), files = _a.files, clock = _a.clock;
                 return [4 /*yield*/, $.session.start(start)];
             case 1:
-                _u.sent();
+                _q.sent();
                 drawn = function (view) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                     switch (_a.label) {
                         case 0: return [4 /*yield*/, view.findAll({ type: 'Svg' })];
@@ -704,168 +612,125 @@ test("while the person types a reply into an ask, work finishing here and in ano
                 files.set("".concat(MEMORY, "/live/chat-b.json"), otherChat(NOW));
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Submit the mod', prompt: 'submit the mod' }))];
             case 2:
-                _u.sent();
+                _q.sent();
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Draw the eyes', prompt: 'draw the eyes' }))];
             case 3:
-                _u.sent();
+                _q.sent();
                 return [4 /*yield*/, clock.advance(5000)];
             case 4:
-                _u.sent();
+                _q.sent();
                 return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { surface: 'desktop' }))];
             case 5:
-                list = _u.sent();
+                list = _q.sent();
                 _b = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         return [2 /*return*/, list.find({ type: 'Text', text: 'Billing page' })];
                     }); }); })];
             case 6:
-                _b.apply(void 0, [_u.sent()]).toBeDefined();
+                _b.apply(void 0, [_q.sent()]).toBeDefined();
                 return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Submit it to the plugin directory.' })];
             case 7:
-                _u.sent();
+                _q.sent();
                 return [4 /*yield*/, list.findAll({ type: 'Input' })];
             case 8:
-                box = (_u.sent()).find(function (one) { var _a; return /-reply-/.test((_a = one.key) !== null && _a !== void 0 ? _a : ''); });
-                return [4 /*yield*/, list.input({ key: (_r = box === null || box === void 0 ? void 0 : box.key) !== null && _r !== void 0 ? _r : '', text: 'Not y', kind: 'change' })
-                    // The cards that say Done, and those in their moment at the top, outlined green
+                box = (_q.sent()).find(function (one) { var _a; return /-reply-/.test((_a = one.key) !== null && _a !== void 0 ? _a : ''); });
+                return [4 /*yield*/, list.input({ key: (_l = box === null || box === void 0 ? void 0 : box.key) !== null && _l !== void 0 ? _l : '', text: 'Not y', kind: 'change' })
+                    // This chat's work finishes mid-typing: green and happy at once, then gone after its pause, the times still held
                 ];
             case 9:
-                _u.sent();
-                doneCards = function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                    switch (_a.label) {
-                        case 0: return [4 /*yield*/, list.findAll({ type: 'Text' })];
-                        case 1: return [2 /*return*/, (_a.sent()).filter(function (one) { return (one.text === '◐ Delivered' && one.props.color === '#4C9AFF') || (one.text === '✓ Done' && one.props.color === 'success'); }).length];
-                    }
-                }); }); };
-                outlined = function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                    switch (_a.label) {
-                        case 0: return [4 /*yield*/, list.findAll({ type: 'Box' })];
-                        case 1: return [2 /*return*/, (_a.sent()).filter(function (b) { return b.key === 'outline-top' && b.props.backgroundColor === '#4C9AFF'; }).length
-                            // This chat's task hands in its result mid-typing: green and happy at once; after its pause the moment is over and its card is
-                            // still among the cards, done, the times still held
-                        ];
-                    }
-                }); }); };
-                // This chat's task hands in its result mid-typing: green and happy at once; after its pause the moment is over and its card is
-                // still among the cards, done, the times still held
-                return [4 /*yield*/, $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'a2', message: 'Done.' })];
+                _q.sent();
+                // This chat's work finishes mid-typing: green and happy at once, then gone after its pause, the times still held
+                return [4 /*yield*/, $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' })];
             case 10:
-                // This chat's task hands in its result mid-typing: green and happy at once; after its pause the moment is over and its card is
-                // still among the cards, done, the times still held
-                _u.sent();
+                // This chat's work finishes mid-typing: green and happy at once, then gone after its pause, the times still held
+                _q.sent();
                 _c = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        return [2 /*return*/, list.find({ type: 'Text', text: '◐ Delivered' })];
+                        return [2 /*return*/, list.find({ type: 'Text', text: '✓ Done' })];
                     }); }); })];
             case 11:
-                _c.apply(void 0, [(_s = (_u.sent())) === null || _s === void 0 ? void 0 : _s.props.color]).toBe('#4C9AFF');
+                _c.apply(void 0, [(_m = (_q.sent())) === null || _m === void 0 ? void 0 : _m.props.color]).toBe('success');
                 _d = expect;
                 return [4 /*yield*/, drawn(list)];
             case 12:
-                _d.apply(void 0, [_u.sent()]).toContain('happy');
-                _e = expect;
-                return [4 /*yield*/, outlined()];
-            case 13:
-                _e.apply(void 0, [_u.sent()]).toBe(1);
+                _d.apply(void 0, [_q.sent()]).toContain('happy');
                 return [4 /*yield*/, clock.advance(2100)];
-            case 14:
-                _u.sent();
-                _f = expect;
+            case 13:
+                _q.sent();
+                _e = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         switch (_a.label) {
-                            case 0: return [4 /*yield*/, outlined()];
-                            case 1: return [2 /*return*/, ((_a.sent()) ? undefined : 'moment over')];
+                            case 0: return [4 /*yield*/, list.find({ type: 'Text', text: /Draw the eyes/ })];
+                            case 1: return [2 /*return*/, ((_a.sent()) ? undefined : true)];
                         }
                     }); }); })];
-            case 15:
-                _f.apply(void 0, [_u.sent()]).toBe('moment over');
-                _g = expect;
-                return [4 /*yield*/, drawn(list)];
-            case 16:
-                _g.apply(void 0, [_u.sent()]).not.toContain('happy');
-                _h = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: /Draw the eyes/ })];
-            case 17:
-                _h.apply(void 0, [_u.sent()]).toBeDefined();
-                _j = expect;
-                return [4 /*yield*/, doneCards()];
-            case 18:
-                _j.apply(void 0, [_u.sent()]).toBe(1);
+            case 14:
+                _e.apply(void 0, [_q.sent()]).toBe(true);
                 file = JSON.parse(otherChat(NOW));
                 files.set("".concat(MEMORY, "/live/chat-b.json"), JSON.stringify(__assign(__assign({}, file), { at: NOW + 8000, cards: file.cards.map(function (card) { return (__assign(__assign({}, card), { status: 'done', endedAt: NOW + 7500, ask: undefined })); }) })));
-                return [4 /*yield*/, list.input({ key: (_t = box === null || box === void 0 ? void 0 : box.key) !== null && _t !== void 0 ? _t : '', text: 'Not ye', kind: 'change' })
+                return [4 /*yield*/, list.input({ key: (_o = box === null || box === void 0 ? void 0 : box.key) !== null && _o !== void 0 ? _o : '', text: 'Not ye', kind: 'change' })
                     // This panel reads the other chats every few seconds: the pause runs from the look that saw the end
-                    // (that chat's two cards end together, so with this chat's three say Done)
                 ];
-            case 19:
-                _u.sent();
+            case 15:
+                _q.sent();
                 n = 0;
-                _u.label = 20;
-            case 20:
-                _k = n < 6;
-                if (!_k) return [3 /*break*/, 22];
-                return [4 /*yield*/, doneCards()];
-            case 21:
-                _k = (_u.sent()) < 3;
-                _u.label = 22;
-            case 22:
-                if (!_k) return [3 /*break*/, 25];
+                _q.label = 16;
+            case 16:
+                _f = n < 6;
+                if (!_f) return [3 /*break*/, 18];
+                return [4 /*yield*/, list.find({ type: 'Text', text: '✓ Done' })];
+            case 17:
+                _f = !(_q.sent());
+                _q.label = 18;
+            case 18:
+                if (!_f) return [3 /*break*/, 21];
                 return [4 /*yield*/, clock.advance(1000)];
-            case 23:
-                _u.sent();
-                _u.label = 24;
-            case 24:
+            case 19:
+                _q.sent();
+                _q.label = 20;
+            case 20:
                 n += 1;
-                return [3 /*break*/, 20];
-            case 25:
-                _l = expect;
+                return [3 /*break*/, 16];
+            case 21:
+                _g = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        switch (_a.label) {
-                            case 0: return [4 /*yield*/, doneCards()];
-                            case 1: return [2 /*return*/, ((_a.sent()) === 3 ? 'all done' : undefined)];
-                        }
+                        return [2 /*return*/, list.find({ type: 'Text', text: '✓ Done' })];
                     }); }); })];
-            case 26:
-                _l.apply(void 0, [_u.sent()]).toBe('all done');
-                _m = expect;
+            case 22:
+                _g.apply(void 0, [(_p = (_q.sent())) === null || _p === void 0 ? void 0 : _p.props.color]).toBe('success');
+                _h = expect;
                 return [4 /*yield*/, drawn(list)];
-            case 27:
-                _m.apply(void 0, [_u.sent()]).toContain('happy');
-                // After their pause the other chat's cards have left, and this chat's is still there
+            case 23:
+                _h.apply(void 0, [_q.sent()]).toContain('happy');
                 return [4 /*yield*/, clock.advance(3000)];
-            case 28:
-                // After their pause the other chat's cards have left, and this chat's is still there
-                _u.sent();
-                _o = expect;
+            case 24:
+                _q.sent();
+                _j = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         switch (_a.label) {
-                            case 0: return [4 /*yield*/, doneCards()];
-                            case 1: return [2 /*return*/, ((_a.sent()) === 1 ? 'others left' : undefined)];
+                            case 0: return [4 /*yield*/, list.find({ type: 'Text', text: '✓ Done' })];
+                            case 1: return [2 /*return*/, ((_a.sent()) ? undefined : true)];
                         }
                     }); }); })];
-            case 29:
-                _o.apply(void 0, [_u.sent()]).toBe('others left');
-                _p = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: /Draw the eyes/ })];
-            case 30:
-                _p.apply(void 0, [_u.sent()]).toBeDefined();
+            case 25:
+                _j.apply(void 0, [_q.sent()]).toBe(true);
                 // The half reply is still in its box: while typing the box holds the letters itself, and once typing stops it is drawn with them
                 return [4 /*yield*/, clock.advance(31000)];
-            case 31:
+            case 26:
                 // The half reply is still in its box: while typing the box holds the letters itself, and once typing stops it is drawn with them
-                _u.sent();
-                _q = expect;
+                _q.sent();
+                _k = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { var _a; return __generator(this, function (_b) {
                         switch (_b.label) {
                             case 0: return [4 /*yield*/, list.findAll({ type: 'Input' })];
                             case 1: return [2 /*return*/, (((_a = (_b.sent()).find(function (one) { var _a; return /-reply-/.test((_a = one.key) !== null && _a !== void 0 ? _a : ''); })) === null || _a === void 0 ? void 0 : _a.props.value) === 'Not ye' ? true : undefined)];
                         }
                     }); }); })];
-            case 32:
-                _q.apply(void 0, [_u.sent()]).toBe(true);
+            case 27:
+                _k.apply(void 0, [_q.sent()]).toBe(true);
                 return [4 /*yield*/, list.unmount()];
-            case 33:
-                _u.sent();
+            case 28:
+                _q.sent();
                 return [2 /*return*/];
         }
     });
@@ -1028,7 +893,7 @@ test("a chat of this Mac with work opens by the app's own id when it has no Remo
         }
     });
 }); });
-test("Details of another chat's work on this Mac is as deep as this chat's own: every to-do, its helpers with the step each is on, how each of its commands stands, and its chat read from that chat's own file", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+test("Details of another chat's work on this Mac is as deep as this chat's own: every to-do, its helpers with the step each is on, its commands' last lines, and its chat read from that chat's own file", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
     var _a, files, clock, opened, at, card, helper, line, list, _b, _c, id, tab, said, _d, texts, _i, _e, item, _f, helperKey, _g;
     var _this = this;
     var _h, _j, _k, _l, _m;
@@ -1102,8 +967,8 @@ test("Details of another chat's work on this Mac is as deep as this chat's own: 
                 _f.apply(void 0, [(_o.sent()).some(function (b) { return String(b.props.label).startsWith("Check the M4's plugin"); })]).toBe(true);
                 expect(texts).toContain('To-do 1 of 2 · List the caches');
                 expect(texts).toContain('Listing the caches.');
-                // How its command stands, as that chat read it: its row's own line, and no last lines under it (they are in its log)
-                expect(texts).not.toContain('Updating marketplace claudopus');
+                // Its command's last lines, as that chat read them
+                expect(texts).toContain('Updating marketplace claudopus');
                 expect(texts).toContain('Fetching the mod');
                 // The chat's name, and no line in place of its chat
                 expect(texts.some(function (t) { return t === null || t === void 0 ? void 0 : t.startsWith('From the chat "M4 setup"'); })).toBe(true);

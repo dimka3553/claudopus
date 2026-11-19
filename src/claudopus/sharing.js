@@ -173,7 +173,7 @@ var shareMine = function ($) { return __awaiter(_this, void 0, void 0, function 
                     var seen = Object.fromEntries(((_a = one.bg) !== null && _a !== void 0 ? _a : []).flatMap(function (job) {
                         var _a;
                         var s = jobLog.get(job.id);
-                        return s ? [[job.id, __assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign({ latest: s.latest }, (s.pct ? { pct: s.pct } : {})), (s.done ? { done: s.done } : {})), (s.total ? { total: s.total } : {})), (s.wroteAt ? { wroteAt: s.wroteAt } : {})), (((_a = s.tail) === null || _a === void 0 ? void 0 : _a.length) ? { tail: s.tail } : {})), (s.words ? { words: s.words } : {})), (s.isOwn ? { isOwn: true } : {})), (s.isEarlier ? { isEarlier: true } : {})), (s.isEmpty ? { isEmpty: true } : {})), (namedNow.get(job.id) ? { now: namedNow.get(job.id) } : {}))]] : [];
+                        return s ? [[job.id, __assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign({ latest: s.latest }, (s.pct ? { pct: s.pct } : {})), (s.done ? { done: s.done } : {})), (s.total ? { total: s.total } : {})), (s.wroteAt ? { wroteAt: s.wroteAt } : {})), (((_a = s.tail) === null || _a === void 0 ? void 0 : _a.length) ? { tail: s.tail } : {})), (s.words ? { words: s.words } : {})), (s.isOwn ? { isOwn: true } : {})), (s.isEarlier ? { isEarlier: true } : {})), (s.isEmpty ? { isEmpty: true } : {}))]] : [];
                     }));
                     return Object.keys(seen).length ? __assign(__assign({}, one), { seenJobs: seen }) : one;
                 };
