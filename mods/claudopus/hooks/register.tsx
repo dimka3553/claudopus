@@ -93,8 +93,9 @@ const PASTE_IT = 'Paste it'
 const DONT_GIVE = "Don't give it"
 const LEAVES_OPEN = /^(?:no,? )?(?:not (?:now|yet)|later|maybe later|skip|skip it|cancel|dismiss|close)$/
 const ANSWER_IN_WORDS = 'Answer in words'
-const needsPerson = (one: { id?: string; status: string; chat?: unknown; ask?: { at?: number; replied?: { isWaking?: boolean } }; admins?: unknown[] }) =>
-  Boolean(one.admins?.length) || (Boolean(one.ask) && !isActingOnReply(one)) || (!one.chat && Boolean(one.id) && (waiting.some(p => p.card === one.id) || boxes.some(box => box.card === one.id)))
+const isGateActing = (gate: { talk?: { by: string }[] }) => gate.talk?.at(-1)?.by === 'you'
+const needsPerson = (one: { id?: string; status: string; chat?: unknown; ask?: { at?: number; replied?: { isWaking?: boolean } }; admins?: { talk?: { by: string }[] }[] }) =>
+  Boolean(one.admins?.some(gate => !isGateActing(gate))) || (Boolean(one.ask) && !isActingOnReply(one)) || (!one.chat && Boolean(one.id) && (waiting.some(p => p.card === one.id) || boxes.some(box => box.card === one.id)))
 const lingerSet = new Set<string>()
 const FOLLOW_EVERY = 20_000
 const WORKING = ['pending', 'running', 'waiting']
@@ -4819,7 +4820,7 @@ const waitingOnPerson = (one: Todo) =>
     ? undefined
     : one.ask && !isActingOnReply(one) && !one.ask.refused
       ? { text: one.ask.text, at: Math.max(one.ask.at, one.ask.replied?.at ?? 0) }
-      : one.admins?.length
+      : one.admins?.some(gate => !isGateActing(gate))
         ? {
             text: one.admins.some(a => a.kind === 'release')
               ? 'A release waits for you to allow it on its card.'
@@ -5676,7 +5677,7 @@ const draftDrawn = (key: string) => {
 }
 const paneShape = async ($: EngineInterface, paneId: string) => {
   const at = await $.clock.now()
-  const card = (one: Todo) => [one.id, one.status, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => gate.id), one.stuckAt ?? 0, one.running?.at ?? 0, jobsOf(one).length]
+  const card = (one: Todo) => [one.id, one.status, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running?.at ?? 0, jobsOf(one).length]
   const own = await read($, todos)
   const chats = await read($, others)
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
@@ -5726,7 +5727,7 @@ const isInUse = (at: number, offset: number) => isEngaged(at) && offset > 0
 const personSign = async ($: EngineInterface) => {
   const chats = await read($, others)
   const cards = await read($, todos)
-  const asks = [...cards, ...cardsOf(chats), ...helpersOf(chats)].filter(one => one.ask || one.admins?.length).map(one => [one.id, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, (one.admins ?? []).map(gate => gate.id)])
+  const asks = [...cards, ...cardsOf(chats), ...helpersOf(chats)].filter(one => one.ask || one.admins?.length).map(one => [one.id, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`)])
   const momentAt = await $.clock.now()
   const own = [cards.filter(one => one.closedAt).map(one => one.id), [...dismissedNow.keys()], cards.filter(one => isDoneMoment(one, momentAt)).map(one => one.id)]
   return JSON.stringify([
@@ -8955,6 +8956,7 @@ const askNeed = ($: EngineInterface, one: Todo, surface: string, now: number): N
     const run = offeredRun(one)
     const talk = talkText(ask.talk)
     const words = wordsOn($, `${id}-words`, one.id, inBar, isReplyOpen(one), { kind: 'answer', id: one.id, one }, value => void sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
+    if (isActingOnReply(one)) return { ...base, ...(talk ? { details: [ask.details, talk].filter(Boolean).join('\n\n') } : {}), kind: 'permission', isActing: true, buttons: [] }
     return {
       ...base,
       ...(talk ? { details: [ask.details, talk].filter(Boolean).join('\n\n') } : {}),
@@ -9020,6 +9022,7 @@ const releaseAbout = (gate: Gate) => {
 const gateNeed = ($: EngineInterface, gate: Gate, card: string, elsewhere: boolean, from = '', surface = ''): Need => {
   const id = `gate-${gate.id}`
   const isHeld = (gateHeld.has(gate.id) || gateParked.has(gate.id)) && !elsewhere
+  const isActing = isHeld && isGateActing(gate)
   const about = gate.isUndone
     ? `${gate.isOutside ? 'Something outside the panel changed this file, maybe you in an editor' : 'A command wrote to this file'}, so the change was undone. ${ALLOW} makes it again. Either way the changed text is kept beside the file as a .put-back copy.`
     : gate.kind === 'release'
@@ -9040,7 +9043,8 @@ const gateNeed = ($: EngineInterface, gate: Gate, card: string, elsewhere: boole
     ...(details ? { details } : {}),
     ...(gate.kind !== 'release' && gate.command ? { command: gate.command } : {}),
     ...(isHeld ? {} : { where: elsewhere ? 'Allow it on its card in its own chat.' : "It's no longer waiting for you." }),
-    buttons: isHeld
+    ...(isActing ? { isActing: true } : {}),
+    buttons: isHeld && !isActing
       ? [
           { key: `${id}-once-${loadMark}`, label: ALLOW, onPress: () => answerGate($, gate, 'once', card) },
           { key: `${id}-deny-${loadMark}`, label: DONT_ALLOW, onPress: () => answerGate($, gate, 'deny', card) },
@@ -9048,7 +9052,7 @@ const gateNeed = ($: EngineInterface, gate: Gate, card: string, elsewhere: boole
           ...(words?.buttons ?? []),
         ]
       : [],
-    ...(words?.field ? { field: words.field } : {}),
+    ...(words?.field && !isActing ? { field: words.field } : {}),
   }
 }
 
@@ -11973,6 +11977,8 @@ const toolHooks = (on: On) => {
       const answer = { by: 'task' as const, text: cut([asked, given1].filter(Boolean).join('\n\n'), ASK_DETAILS) }
       if (parked) await setGates($, own.id, list => list.map(gate => (gate.id === parked.id ? { ...gate, talk: [...(gate.talk ?? []), answer].slice(-PERMIT_TALK_KEPT) } : gate)))
       else await changeTodos($, list => list.map(one => (one.id === own.id && one.ask && one.ask.at === refused?.at ? { ...one, ask: { ...one.ask, talk: [...(one.ask.talk ?? []), answer].slice(-PERMIT_TALK_KEPT), replied: undefined } } : one)))
+      sentReplies.delete(own.id)
+      redraw($)
       await askAloud($, own, text).catch(err => log($, `answer not told: ${String(err)}`))
       return { result: `Shown inside the permission on your card, under ${who()}'s words. It keeps Allow and Don't allow until ${who()} presses one, and that press comes back to you as a message. Don't run it again before then. With nothing else to do, end your step.` }
     }

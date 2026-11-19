@@ -116,8 +116,10 @@ const ANSWER_IN_WORDS = 'Answer in words'
 // The one test of "something waits for the person on this card": its own question, a permission held for their press (an admin
 // command, a release, a change to a file of theirs), and what is drawn on it from the mod's own memory: Claude Code's prompt for a
 // call of its own, and the password or key box of a command of its own (needs.tsx). Another chat's card is read from its file
-const needsPerson = (one: { id?: string; status: string; chat?: unknown; ask?: { at?: number; replied?: { isWaking?: boolean } }; admins?: unknown[] }) =>
-  Boolean(one.admins?.length) || (Boolean(one.ask) && !isActingOnReply(one)) || (!one.chat && Boolean(one.id) && (waiting.some(p => p.card === one.id) || boxes.some(box => box.card === one.id)))
+// A permission the person answered in words, whose task is answering them: nothing to press until it has (gate.tsx, wordsOnGate)
+const isGateActing = (gate: { talk?: { by: string }[] }) => gate.talk?.at(-1)?.by === 'you'
+const needsPerson = (one: { id?: string; status: string; chat?: unknown; ask?: { at?: number; replied?: { isWaking?: boolean } }; admins?: { talk?: { by: string }[] }[] }) =>
+  Boolean(one.admins?.some(gate => !isGateActing(gate))) || (Boolean(one.ask) && !isActingOnReply(one)) || (!one.chat && Boolean(one.id) && (waiting.some(p => p.card === one.id) || boxes.some(box => box.card === one.id)))
 // The moments a pause ends that a redraw is already set for, so each pause gets one
 const lingerSet = new Set<string>()
 // The engine's list of agents is read again this often, and the minutes move on

@@ -102,6 +102,9 @@ const toolHooks = (on: On) => {
       const answer = { by: 'task' as const, text: cut([asked, given1].filter(Boolean).join('\n\n'), ASK_DETAILS) }
       if (parked) await setGates($, own.id, list => list.map(gate => (gate.id === parked.id ? { ...gate, talk: [...(gate.talk ?? []), answer].slice(-PERMIT_TALK_KEPT) } : gate)))
       else await changeTodos($, list => list.map(one => (one.id === own.id && one.ask && one.ask.at === refused?.at ? { ...one, ask: { ...one.ask, talk: [...(one.ask.talk ?? []), answer].slice(-PERMIT_TALK_KEPT), replied: undefined } } : one)))
+      // The block is back with its buttons, so the grey line of what the person wrote goes: the block shows their words
+      sentReplies.delete(own.id)
+      redraw($)
       await askAloud($, own, text).catch(err => log($, `answer not told: ${String(err)}`))
       return { result: `Shown inside the permission on your card, under ${who()}'s words. It keeps Allow and Don't allow until ${who()} presses one, and that press comes back to you as a message. Don't run it again before then. With nothing else to do, end your step.` }
     }

@@ -125,7 +125,7 @@ const draftDrawn = (key: string) => {
 // tab's own to-dos
 const paneShape = async ($: EngineInterface, paneId: string) => {
   const at = await $.clock.now()
-  const card = (one: Todo) => [one.id, one.status, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => gate.id), one.stuckAt ?? 0, one.running?.at ?? 0, jobsOf(one).length]
+  const card = (one: Todo) => [one.id, one.status, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`), one.stuckAt ?? 0, one.running?.at ?? 0, jobsOf(one).length]
   const own = await read($, todos)
   const chats = await read($, others)
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
@@ -200,7 +200,7 @@ const personSign = async ($: EngineInterface) => {
   const chats = await read($, others)
   // (only the cards that ask or wait on a gate: a card that merely starts or ends waits)
   const cards = await read($, todos)
-  const asks = [...cards, ...cardsOf(chats), ...helpersOf(chats)].filter(one => one.ask || one.admins?.length).map(one => [one.id, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, (one.admins ?? []).map(gate => gate.id)])
+  const asks = [...cards, ...cardsOf(chats), ...helpersOf(chats)].filter(one => one.ask || one.admins?.length).map(one => [one.id, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, (one.admins ?? []).map(gate => `${gate.id}:${gate.talk?.length ?? 0}`)])
   // (and what the person's own presses change once their write lands: a card dismissed, a result's question answered or set aside,
   // a task their answer starts again. Without them, a drawing made between the press and its write was kept while they used the
   // panel, and the card stayed at the top with its buttons for 15 seconds after each move)

@@ -1331,16 +1331,29 @@ test("a permission on a task's card is answered in words before any press: the h
   expect(said).toContain('neither allowed nor refused it, and wrote to you about it instead, in their own words: “What is this for?”')
   expect(said).toContain("Don't run it again until then")
   expect(grants()).toEqual([])
-  // Still waiting for the press, with every button
-  expect(await gateButtons(list, 'w1-0')).toEqual(['Allow', "Don't allow", 'Always allow this command'])
-  // The task's answer, given with no buttons, goes inside the permission under the words, never as a question of its own
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'It checks which user the server runs as.', details: 'It changes nothing.' } as never)
+  // While the task answers, the card folds the permission to the one grey line of the words, with nothing to press (19 Nov, the
+  // person: "it didn't remove the buttons that I already answered"), and the card waits on nobody
+  const answeredLines = async () => (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(one => one.startsWith('✓ You answered'))
+  expect(await until(async () => ((await gateButtons(list, 'w1-0')).length ? undefined : true))).toBe(true)
+  expect(await list.find({ type: 'Text', text: 'Run this as admin on this Mac?' })).toBeUndefined()
+  expect(await answeredLines()).toEqual(['✓ You answered “What is this for?”'])
+  expect(await list.find({ type: 'Text', text: '1 waiting for you' })).toBeUndefined()
+  const answer = async (id: string, text: string, details?: string) => {
+    await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: id, agentId: 'a1', text, ...(details ? { details } : {}) } as never)
+    expect(await until(async () => ((await gateButtons(list, 'w1-0')).length ? true : undefined))).toBe(true)
+  }
+  // The task's answer, given with no buttons, goes inside the permission under the words, never as a question of its own, and
+  // brings back its buttons, with no grey line of the words beside the block that shows them
+  await answer('k1', 'It checks which user the server runs as.', 'It changes nothing.')
   expect(await until(async () => (await list.findAll({ type: 'Markdown' })).map(one => String(one.props.text ?? '')).find(one => one.includes('**The answer:**')))).toBe('**You asked:** What is this for?\n\n**The answer:** It checks which user the server runs as.\n\nIt changes nothing.')
+  expect(await gateButtons(list, 'w1-0')).toEqual(['Allow', "Don't allow", 'Always allow this command'])
+  expect(await answeredLines()).toEqual([])
   expect(await list.find({ type: 'Text', text: 'Question' })).toBeUndefined()
-  // More words go to the task as a message, and the block keeps waiting
+  // More words go to the task as a message, and fold it again until the task answers them
   await words('w1-0', 'And why now?')
   expect(await told('wrote to you again about the admin command that waits on your card')).toContain('“And why now?”')
-  expect(await gateButtons(list, 'w1-0')).toEqual(['Allow', "Don't allow", 'Always allow this command'])
+  expect(await until(async () => ((await gateButtons(list, 'w1-0')).length ? undefined : true))).toBe(true)
+  await answer('k2', 'The server moves to a new user today.')
   // Allow: the task is told to run it again, and that very command goes through with nothing asked, once
   await press('gate-w1-0-once')
   expect(await told('pressed Allow on the admin command that waited on your card')).toBeDefined()
@@ -1362,6 +1375,8 @@ test("a permission on a task's card is answered in words before any press: the h
   expect(await until(async () => keyed(list, 'gate-w4-r0-once'))).toBeDefined()
   await words('w4-r0', 'What does it fix?')
   expect((await release).deny).toContain('This release did not run yet')
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'It fixes the hosts file.' } as never)
+  await until(async () => keyed(list, 'gate-w4-r0-deny'))
   await press('gate-w4-r0-deny')
   expect(await told("pressed Don't allow on this release")).toBeDefined()
   expect(await until(async () => ((await keyed(list, 'gate-w4-r0-deny')) ? undefined : true))).toBe(true)

@@ -1,0 +1,1 @@
+- Once you answer a permission in words, its buttons go and the card shows one grey line of your words while the task answers. Allow and Don't allow come back with the task's answer, inside the permission, and the grey line goes then.

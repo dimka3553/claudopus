@@ -209,7 +209,7 @@ const waitingOnPerson = (one: Todo) =>
     ? undefined
     : one.ask && !isActingOnReply(one) && !one.ask.refused
       ? { text: one.ask.text, at: Math.max(one.ask.at, one.ask.replied?.at ?? 0) }
-      : one.admins?.length
+      : one.admins?.some(gate => !isGateActing(gate))
         ? {
             text: one.admins.some(a => a.kind === 'release')
               ? 'A release waits for you to allow it on its card.'
