@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.214 · 19 November 2026
+- Mark as done takes the card's buttons away the moment you press it, so you can't press them twice; the card keeps its size through its green moment, so nothing moves under the pointer.
+
 ## 0.2.213 · 19 November 2026
 - A press on a command's name opens its log in a tab of the panel instead of the Terminal app: what the command is, how it stands, Stop, and the end of what it wrote, drawn again as it writes. It works for a command that has ended too, on its card and under Commands ended in Details.
 - A command that has written nothing for a minute says whether its programs still use the processor: `still busy`, or in amber `idle`. Tasks are told the same, and to write logs a person can follow: a line as each stage starts and what came out at the end.
