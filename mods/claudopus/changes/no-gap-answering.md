@@ -1,0 +1,1 @@
+- When you answer a question on a card, the card closes up at once under the grey line of your answer. No empty space is left under it or under the list, scrolled or not, by a button, Answer in words, Allow or Release it.

@@ -391,23 +391,19 @@ const panelHooks = (on: On) => {
     // card moves. Each is the one drawing (needBlock), on the small card as in Details
     // A question the person answered, by a press or in their own words, is gone from the small card at once: one grey line says
     // the answer in its place (answeredRow), and Details keeps the question whole (19 Nov, the person: "when I answer, there is no
-    // need to keep showing the question")
+    // need to keep showing the question"). The card closes up at once, with no space held under the line: a space held for a moment
+    // so nothing moved under the pointer was still seen as a gap after every answer (19 Nov, Dima: "Can you make it so that there is
+    // no gap when I answer?"), and a press on a block that moved under the pointer is guarded on its own
     const cardNeeds = (one: Todo, isWhole = false) => needsFor(one).filter(need => isWhole || !need.isActing)
-    // The rows a block just pressed on this small card took, held under its grey line for a moment (foldOf)
-    const heldFold = (one: Todo) => (e.surface === 'desktop' ? foldOf($, one.id, at, cardNeeds(one).map(need => need.id)) : undefined)
     const needBlocks = (one: Todo, isWhole = false) => {
-      const fold = isWhole ? undefined : heldFold(one)
       const blocks = cardNeeds(one, isWhole).map(need => {
         const isOwnField = Boolean(need.field && need.card)
         const autoFocus = isOwnField && e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : false
         const node = needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(one, need.id, isWhole) : null, autoFocus })
         // (on the small card each block starts at the title's left edge; the grey line is a press, which the app moves in itself)
-        return { at: need.at, node: isWhole ? node : <Box key={`lead-${need.id}`} flexDirection="column" paddingLeft={lead}>{node}</Box> }
+        return isWhole ? node : <Box key={`lead-${need.id}`} flexDirection="column" paddingLeft={lead}>{node}</Box>
       })
-      // where the block stood among the others, its grey line at the top of the rows it held: never more than the pane shows, as the
-      // pointer that pressed was within it
-      const held = fold ? [{ at: fold.came, node: <Box key={`fold-${one.id}`} flexDirection="column" height={Math.min(fold.rows, Math.max(4, e.props.scroll.bodyRows))} flexShrink={0}>{answeredRow(one) ?? null}</Box> }] : []
-      return [...blocks, ...held].sort((a, b) => a.at - b.at).map(block => block.node)
+      return blocks
     }
     // What the person last pressed or answered on a small card, in one grey line cut to one row, with the press that takes a
     // button's answer back. The line opens the card's Details, where the question and the answer are whole
@@ -538,7 +534,7 @@ const panelHooks = (on: On) => {
             {stepLine(one, kept, done)}
             {/* Every part under the title starts at the title's own left edge (lead). What the card waits on, each a block, in
                 the order it came */}
-            {cardNeeds(one).length || heldFold(one) ? (
+            {cardNeeds(one).length ? (
               <Box key={`needs-lead-${one.id}`} flexDirection="column" gap={1}>
                 {needBlocks(one)}
               </Box>
@@ -550,8 +546,8 @@ const panelHooks = (on: On) => {
               </Box>
             ) : null}
             {/* A card says its stage, its to-do and what it does now, and in amber only what waits for the person */}
-            {/* What the person last pressed or answered here, in one grey line, where no block just pressed holds it */}
-            {heldFold(one) ? null : answeredRow(one)}
+            {/* What the person last pressed or answered here, in one grey line */}
+            {answeredRow(one)}
             {/* A card that waits says so with its block alone: no line of what the task last did under it. A delivered card's line is
                 one row: what it asks and its presses come right under it */}
             {needsPerson(one) ? null : (
@@ -1629,7 +1625,7 @@ const panelHooks = (on: On) => {
                 label={`${isOpen ? '▾' : '▸'} Finished ${finished.length + endedFlows.length}`}
                 plain
                 hotkey={keyed ? 'f' : undefined}
-                onPress={() => void ((presses += 1), isOpen && (foldPress = presses), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
+                onPress={() => void ((presses += 1), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
               />
             </Box>
             <Text dimColor>{endedElsewhere.length ? 'all chats' : 'this chat'}</Text>
@@ -1867,14 +1863,8 @@ const panelHooks = (on: On) => {
     // Where updating stands for this chat: a small box under the header's lines, its steps each a press
     const outCard = alone ? null : (await noticeCard($, ui, await noticeNow($, versions.version, versions.installed).catch(() => undefined), versions.version).catch(() => null)) ?? screen ?? null
 
-    // While the person uses the list scrolled down, it is drawn at least as tall as the bottom of what they see, so a card that
-    // shrinks under them (their own answer) never snaps the view up. Blank space shows only where a card shrank inside the view, and
-    // only until the list is drawn again once they leave it alone. The height the app reports is no guide: it
-    // is this drawing's own, held height included, and kept as the most it had ever been it left the list at the length of its
-    // longest moment of the chat, blank under three cards (16 Nov, Dima's screenshot). Folding Finished is not held (foldPress)
-    const heldRows = paneId === LIST && e.surface === 'desktop' && isInUse(at, e.props.scroll.offset) && presses !== foldPress ? e.props.scroll.offset + e.props.scroll.bodyRows : 0
     return (
-      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={Math.max(e.props.scroll.bodyRows, heldRows)}>
+      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={e.props.scroll.bodyRows}>
         {!alone ? (
           // The mark and its lines across the whole width, so the chat's size is read whole; the buttons on a row of their own under
           // them, which wraps onto a second row in a narrow pane rather than cutting anything off

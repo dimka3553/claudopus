@@ -22,6 +22,12 @@ const oneBox = async (bar: Drawn) => {
 // (no line under the box says what Enter does)
 const SENDS = ''
 const SENDS_KEY = ''
+// The empty space a drawing of the list holds: any part held taller than the two rows of a card's line, and the list held taller
+// than the view (`rows`). None, at any moment after an answer (19 Nov, Dima's screenshot: "There is still a gap")
+const emptySpace = async (pane: Drawn, rows: number) => [
+  ...(await pane.findAll({ type: 'Box' })).filter(one => Number(one.props.height ?? 0) > 2).map(one => `${one.key ?? 'a part'} held ${String(one.props.height)} rows`),
+  ...(await pane.findAll({ type: 'Box' })).filter(one => Number(one.props.minHeight ?? 0) > rows).map(one => `the list held at ${String(one.props.minHeight)} rows`),
+]
 // An answer in words on the desktop: Answer in words on the card's block opens the one box above the chat, and what is sent
 // from it is the answer. Gives the box it was typed in
 const inWords = async (pane: Drawn, bar: Drawn, card: string, text: string) => {
@@ -739,18 +745,15 @@ test('once the person has answered, by a button or in their own words, the quest
   expect(again?.key).not.toBe(box?.key)
   expect(await list.find({ type: 'Text', text: /^✓ You answered/ })).toBeUndefined()
   expect(await until(async () => (relays() === 2 ? true : undefined))).toBe(true)
-  // A button pressed: the ask goes whole, nothing left to press or type. Its grey line stands where the question stood, over the
-  // rows the question took, held so nothing below moves up under the pointer, until they close up a moment later
+  // A button pressed: the ask goes whole, nothing left to press or type. Its grey line stands where the question stood, and the card
+  // closes up under it at once, with no space held
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Stop it')?.key ?? '' })
   expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('"Stop it"')))).toBeDefined()
   expect(await until(async () => ((await list.find({ type: 'Text', text: ASK })) ? undefined : true))).toBe(true)
   expect(await labels()).toEqual([])
   expect(await until(async () => ((await inputs()).length ? undefined : true))).toBe(true)
   expect((await until(async () => list.find({ type: 'Text', text: '✓ You answered “Stop it”' })))?.props.dimColor).toBe(true)
-  expect(Number((await list.find({ type: 'Box', key: 'fold-a1' }))?.props.height ?? 0)).toBeGreaterThan(3)
-  await clock.advance(3_100)
-  expect(await until(async () => ((await list.find({ type: 'Box', key: 'fold-a1' })) ? undefined : true))).toBe(true)
-  expect(await list.find({ type: 'Text', text: '✓ You answered “Stop it”' })).toBeDefined()
+  expect(await emptySpace(list, 50)).toEqual([])
   // and Details, opened from it, has the question and its details whole, with the answer
   const pressedThere = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   expect(await until(async () => pressedThere.find({ type: 'Text', text: ASK }))).toBeDefined()
@@ -1620,9 +1623,9 @@ test('while the person uses the panel its running times stand still, and move ag
   expect(title).toBeDefined()
   await list.press({ key: title?.key ?? '' })
   await list.findAll({ type: 'Text' })
-  // Scrolled down by the person, who sees rows 20 to 70 of a list the app says is 90 rows tall: drawn at least as tall as the bottom
-  // of what they see while they use it, so a card that shrinks never snaps the view up under them; and never taller, whatever the
-  // list once was or the app says (16 Nov: held at its longest moment, it left blank space under three cards)
+  // Scrolled down by the person, who sees rows 20 to 70 of a list the app says is 90 rows tall: drawn at its own height, never held
+  // taller, whatever the list once was or the app says (16 Nov: held at its longest moment, it left blank space under three cards;
+  // 19 Nov: held at the bottom of the view, it left blank under the list after an answer)
   await ($.ui as any).scroll({ component: 'Pane', requestId: LIST.requestId, offset: 20, by: 20, bodyRows: 50, contentRows: 90, origin: { kind: 'person' } }).catch(() => undefined)
   const tall = async () => Number((await list.find({ type: 'Box' }))?.props.minHeight ?? 0)
   counting.isOn = true
@@ -1635,7 +1638,14 @@ test('while the person uses the panel its running times stand still, and move ag
   // An ask comes: shown at once all the same
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a2', text: 'May I go on?', choices: ['Approve'] } as never)
   expect(await list.find({ type: 'Text', text: 'May I go on?' })).toBeDefined()
-  expect(await tall()).toBe(70)
+  expect(await tall()).toBe(50)
+  // Answered there, scrolled down and in use, with cards above and below it: the card closes up at once under its grey line, and
+  // no empty space is left in it or under the list at any moment after (19 Nov, Dima's screenshot: a working card's "✓ You
+  // answered" with a pane's height of blank under it)
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')?.key ?? '' })
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “Approve”' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'May I go on?' })).toBeUndefined()
+  for (let i = 0; i < 4; i++) (expect(await emptySpace(list, 50)).toEqual([]), await clock.advance(1000))
   // Left alone, the times move again
   const asked = JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))
   await clock.advance(30_000)
@@ -1648,7 +1658,7 @@ test('while the person uses the panel its running times stand still, and move ag
 
 // One line of pictures for a pane: the app asks for the panel with the view at the top and scrolled down in turn as a card changes
 // its height, and each once kept a picture of its own age
-test('a card never goes back to an older picture once a newer one was shown, however the view moves between the top and scrolled down, and the space its answered question held closes while the person uses it: the 19 Nov card that "went big, then small, then big again" after Release it, and the space after Release it that never closed', async ($, on) => {
+test('a card never goes back to an older picture once a newer one was shown, however the view moves between the top and scrolled down, and its answered question leaves no space: the 19 Nov card that "went big, then small, then big again" after Release it, and the space after Release it', async ($, on) => {
   const { files, appended, clock } = world(on)
   files.set('/repo/wt/.release', 'mods/claudopus/bin/release')
   files.set('git:top', '/repo/wt')
@@ -1671,8 +1681,8 @@ test('a card never goes back to an older picture once a newer one was shown, how
   await pane.press({ key: release?.key ?? '' })
   expect(await until(async () => appended.find(line => line.includes('pressed "Release it"')))).toBeDefined()
   expect(await until(async () => pane.find({ type: 'Text', text: '✓ You answered “Release it”' }))).toBeDefined()
-  // with the space the question took held under it for a moment
-  expect(Number((await pane.find({ type: 'Box', key: 'fold-a1' } as never))?.props.height ?? 0)).toBeGreaterThan(0)
+  // with no space held under it
+  expect(await emptySpace(pane, 20)).toEqual([])
   await clock.advance(1000)
   const answered = await card()
   expect(answered).toContain('Built and tested.')
@@ -1681,11 +1691,6 @@ test('a card never goes back to an older picture once a newer one was shown, how
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n2', agentId: 'a1', text: 'Releasing the nose fix.' } as never)
   // Scrolled down and in use, the picture on screen stays as it was
   expect(await card()).toEqual(answered)
-  // but for the held space, which closes after its moment while the person still uses the panel (19 Nov: the space after Release it
-  // never closed while they moved about the panel)
-  await ($.ui as any).scroll({ component: 'Pane', requestId: LIST.requestId, offset: 6, by: 1, bodyRows: 20, contentRows: 40, origin: { kind: 'person' } }).catch(() => undefined)
-  await clock.advance(2_100)
-  expect(await until(async () => ((await pane.find({ type: 'Box', key: 'fold-a1' } as never)) ? undefined : true))).toBe(true)
   // The view comes to the top, as when the list gets shorter under it: the card as it is now
   await viewAt(TOP)
   const now = await card()
@@ -1721,36 +1726,6 @@ test('a card never goes back to an older picture once a newer one was shown, how
   expect(seen.map(stage => STAGES.indexOf(stage))).toEqual([...seen.map(stage => STAGES.indexOf(stage))].sort((x, y) => x - y))
   expect([...new Set(seen)]).toEqual(['delivered', 'done', 'finished'])
   await pane.unmount()
-})
-
-test('folding Finished while scrolled down draws one card and the fold at their own height, even after the list was long', async ($, on) => {
-  const { clock } = world(on)
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'five pieces of work', wait: false, origin: composer })
-  for (const what of ['ears', 'nose', 'chin', 'eyes', 'mouth']) await $.agent.spawn({ ...spawn, description: `Check the ${what}`, prompt: what } as never)
-  for (const n of [2, 3, 4, 5]) await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: `t${n}`, reason: 'answer', agentId: `a${n}` } as never)
-  await clock.advance(2_100)
-  // (each ended card stays up until the person dismisses it: they dismissed all four)
-  const first = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  for (const n of [2, 3, 4, 5]) (expect(await until(async () => keyed(first, `dismiss-a${n}`))).toBeDefined(), await pressed(first, `dismiss-a${n}`))
-  await clock.advance(2_100)
-  expect(await until(async () => (await first.findAll({ type: 'Button' })).find(b => /Finished 4$/.test(String(b.props.label))))).toBeDefined()
-  await first.unmount()
-  // (and left the panel alone since: a drawing is held while they use it)
-  await clock.advance(31_000)
-  // The person opened Finished, the list ran to 300 rows as the app said, and they scrolled down to its fold, 200 rows in
-  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 200, bodyRows: 50 } }, surface: 'desktop' } as never)
-  const fold = async () => (await list.findAll({ type: 'Button' })).find(b => /Finished 4$/.test(String(b.props.label)))
-  await list.press({ key: String((await fold())?.key) })
-  expect(await until(async () => ((await fold())?.props.label === '▾ Finished 4' ? true : undefined))).toBe(true)
-  await ($.ui as any).scroll({ component: 'Pane', requestId: LIST.requestId, offset: 200, by: 20, bodyRows: 50, contentRows: 300, origin: { kind: 'person' } }).catch(() => undefined)
-  // They fold it: one card and the fold are left, drawn at the pane's own height, so the view comes back to them and no blank runs
-  // under them to scroll through (17 Nov, Dima's screenshot: one card, the fold at the bottom and blank down to it. Held at the
-  // list's longest moment on 0.2.170, and with the hold at the bottom of the view alone, blank down to where the fold was pressed)
-  await list.press({ key: String((await fold())?.key) })
-  expect(await until(async () => ((await fold())?.props.label === '▸ Finished 4' ? true : undefined))).toBe(true)
-  expect(Number((await list.find({ type: 'Box' }))?.props.minHeight ?? 0)).toBe(50)
-  await list.unmount()
 })
 
 test('with only a Details tab in front, or the Servers tab open, the mod still asks for no more than a drawing every ten seconds', async ($, on) => {
