@@ -33,7 +33,7 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 ## What you see
 
 - Claudopus is on in every chat you open from then on, in every folder.
-- You send a message. A request of a few minutes or less the chat does itself, in its own thread, in few steps, and tells you what changed and where to look. A bigger one, or one that runs long, gets one line from the chat and a background task, and the chat is free for your next message. With **Short requests** set to **A task each** in Config, every request that changes a file or runs a command goes to a task, and the chat only reads.
+- You send a message. The chat answers in one line and starts a background task for it, then is free for your next message. If a few files can answer your question, such as what a function does, the chat reads them itself in its own thread (Read, Grep, Glob) and starts no task. If a request changes a file, runs a command or needs more than a few reads, the chat starts a task for it.
 - Each task uses its own tokens, so five tasks at once use tokens about five times as fast as one. On a subscription, that uses up your limits sooner. If you pay per token (an API key or other pay-per-use billing), it multiplies what you pay in that time.
 - If your message is about a task that's already running, the chat sends it to that task instead of starting a new one.
 
@@ -193,9 +193,11 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 
 ### Rules and models
 
-Claudopus also adds a short set of working principles ([rules/CLAUDE.md](../rules/CLAUDE.md)) to every chat. They shape how Claude answers. They leave out what is one person's own call, such as when Claude may raise a concern or what counts as done. Add yours, or change any of them, in the Config tab, and your chats carry your copy.
+Claudopus also adds a short set of working principles ([rules/CLAUDE.md](../rules/CLAUDE.md)) to every chat. They shape how Claude answers. They leave out what is one person's own call, such as when Claude may raise a concern or what counts as done. Add yours, or change any of them, in the Config tab, and your new chats carry your copy.
 
-The chat picks a model for each task it starts: Opus for most, Sonnet for long searching and reading, Fable only for heavy tasks. A check of finished work runs on Opus, or on Fable for work built on Fable, never on Sonnet. Your account needs access to the model it picks.
+A chat keeps the rules it started with, and so does a task: the principles, the chat's rules and the models they name are fixed when the chat gets its first message, and a task's rules when it starts. A change you make in Config, or one an update brings, reaches new chats and new tasks. Claudopus keeps what each chat was told in `live/rules/` in its memory folder, and removes it once the chat has not been opened for a month.
+
+The chat picks a model for each task it starts: Opus for most, Sonnet for requests it can state exactly and for long searching and reading, Fable only for heavy tasks. A check of finished work runs on Opus, or on Fable for work built on Fable, never on Sonnet. Your account needs access to the model it picks.
 
 No task runs on an older model or on Haiku (unless you name Haiku in `models`). Claudopus refuses an agent started on one, whether the chat or a task starts it.
 
@@ -262,10 +264,10 @@ The settings are in `~/.claude/claudopus/config.json`. Every key is optional:
 | `notifications` | `false` stops the notification that names a task when it's done, stopped or failed. |
 | `admin` | When you're asked before an admin command runs: `each` time, once for a task (`work`) and its helpers until it ends, or `never`. `work` and `never` count only when chosen in Config, which seals them (`adminSealed`). Written by hand, every command still asks. |
 | `models` | Which model runs most tasks, long searching and reading and helpers, and heavy tasks (`opus`, `sonnet`, `fable` or `haiku`). Checks of finished work run on the most-tasks or heavy-tasks model, never on the long-searching one. |
-| `lean` | Who does a short request (`chat`: `itself`, the chat, or `tasks`, a task each), which tasks run on Fable (`fable`: `heavy`, `all` or `named`) and when a second helper checks (`second`: `asked`, `beyond` or `every`). Only what you changed is kept. |
+| `lean` | Which tasks run on Fable (`fable`: `heavy`, `all` or `named`) and when a second helper checks (`second`: `asked`, `beyond` or `every`). Only what you changed is kept. |
 | `macs` | Up to four other Macs, as `user@host` or a `Host` of `~/.ssh/config`, that this Mac's panel lists the chats of. It uses your own SSH, which must log in without asking. Each Mac needs Claudopus of this version or newer. That Mac's panels list this Mac's chats in turn, with nothing to set there: each visit hands it this Mac's chats, without the commands and texts their tasks run or send. Their questions are answered in their own chats. Results are saved the same on both, about every two minutes: each Mac gets the results it lacks, with paths moved onto its own home, and what you did to a result (archived, brought back, answered) reaches the other. Nothing is deleted or overwritten. Saved chats stay on the Mac they ran on. |
 
-`name`, `agents` and `macs` are read when a chat starts. `sound` and `notifications` are read each time a task ends or needs you.
+`name`, `agents` and `macs` are read when a chat starts. `models`, `lean` and your own copies of the rules reach new chats and new tasks. `sound` and `notifications` are read each time a task ends or needs you.
 
 ## Turn it off
 

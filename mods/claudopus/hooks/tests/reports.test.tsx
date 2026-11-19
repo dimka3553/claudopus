@@ -205,7 +205,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     const text = e.tool === 'get_session' ? JSON.stringify({ sessionId: 'local_1', title: 'Old title' }) : '[]'
     return { value: { content: [{ type: 'text', text }], isError: false } }
   })
-  on('session.id', () => ({ value: 'engine-id' }))
+  // (another chat, where the test lays session:id)
+  on('session.id', () => ({ value: files.get('session:id') ?? 'engine-id' }))
   // The mod's pause in a long step (breathe): answered after the test's own timers have had their turn, as the engine answers from
   // outside the helper
   on('session.turns', async () => (await new Promise(done => setTimeout(() => done(undefined), 0)), { value: 1 }))
@@ -490,8 +491,6 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(files.has('git:top') ? `${files.get('git:top')}\n` : '', files.has('git:top') ? 0 : 128)
     // and where the repo a worktree belongs to keeps its git folder, as git:common lays it
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--git-common-dir')) return ok(files.has('git:common') ? `${files.get('git:common')}\n` : '', files.has('git:common') ? 0 : 128)
-    // (a folder's own branch, where the test lays git:branch:<folder>)
-    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref') && files.has(`git:branch:${rest[rest.indexOf('-C') + 1]}`)) return ok(`${files.get(`git:branch:${rest[rest.indexOf('-C') + 1]}`)}\n`)
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref')) return ok(files.has('git:branch') ? `${files.get('git:branch')}\n` : '', files.has('git:branch') ? 0 : 128)
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
@@ -782,7 +781,6 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   const filled: string[] = []
   on('prompt.fill', (_, e) => (filled.push(e.text), { isFilled: true }))
   files.set('/private/tmp/s/scratchpad/revenue.png', 'PNG')
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'tasks' } }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'how is revenue doing', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Weekly revenue', prompt: 'how is revenue doing' } as never)

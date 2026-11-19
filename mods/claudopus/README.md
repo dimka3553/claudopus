@@ -22,7 +22,7 @@
 
 **Claude Code, with eight arms.** One chat runs many tasks at once, on your own Mac or Linux machine.
 
-The chat does a short request itself, in few steps, and starts a task in the background for a longer one, so the chat is free for your next message. A panel beside the chat shows each task as a card. Measured on eight practice requests, this way scored higher than plain Claude Code, in less time and at lower cost. It adds to Claude Code. It doesn't replace it. macOS and Linux · free · MIT.
+Each message you send starts a task that Claude does in the background, so the chat is free for your next message straight away. A panel beside the chat shows each task as a card, and the chat stays small because the tasks run elsewhere. It adds to Claude Code. It doesn't replace it. macOS and Linux · free · MIT.
 
 Each task uses its own tokens, so five tasks at once use tokens about five times as fast as one. On a subscription, that uses up your limits sooner. With an API key or other pay-per-use billing, it multiplies what you pay in that time.
 
@@ -61,11 +61,11 @@ Claudopus never updates by itself. Every hour (or as often as Config says), it c
 
 ### The chat and its tasks
 
-- You send a message. If it takes a few minutes or less (a change, a few fixes, a new part, a file to make, a push of its branch), the chat does it itself and tells you what changed and where to look. If it is bigger or runs long, the chat answers in one line and starts a background task for it. Then the chat is free for your next message.
+- You send a message. The chat answers in one line and starts a background task for it. Then the chat is free for your next message.
 - If your message is about a task that's already running, the chat sends it to that task.
-- The chat works in few steps: it finds every place a change touches first, makes the change in one go, and looks at a picture only when the code can't tell. No second helper checks the work, and Claude makes no picture after picture, unless you ask. Measured on 245 test chats over eight practice requests, each scored by a Claude that didn't know which way made it: this way scored 93.5% where plain Claude Code scored 90.5%, in 6.4 minutes against 8.5 and for $3.73 against $4.56; handing every request to a task with a second check scored 84% and took about five times as long.
-- A task gets your words as you said them, with nothing added, and runs on the model for most tasks (Opus) or, for heavy tasks, on Fable. The chat never hands a request to a copy of itself: measured on 108 requests, a copy cost several times as much as a fresh task and ran no faster.
-- In Config you can have every request go to a task instead (**Short requests**), and have a second helper check every change or all but small tested fixes (**Second check**).
+- If a few files can answer your question, the chat reads them and answers it itself. The chat changes no file. It runs only a single command that changes no file (a push of its branch, a fetch, a look with git or gh, opening a local page, a folder or a file to look at, a status check of a local server), in the background, and shows a local page in the browser pane itself. Tasks do the rest.
+- A request the chat can state exactly (a described change, a push and a look at the build, a merge, a look-up) goes to a fresh task on Sonnet with written instructions. A request that needs judgment goes to a fresh task on Opus, or on Fable when it is heavy. The chat never hands a request to a copy of itself: measured on 108 requests, a copy cost 1.4 to 5.9 times as much as the Sonnet task, which was fastest in 32 of 36 cases and within 9 seconds in the rest.
+- A task works in few steps: it finds every place a change touches first, makes the change in one go, and looks at a picture only when the code can't tell. No second helper checks the work unless you ask. In Config you can have one check every change, or all but small tested fixes (**Second check**).
 - For long searching and reading, Claude starts helpers: more agents that run alongside it. Claude keeps going while they run.
 
 ### The panel and its cards
@@ -112,8 +112,8 @@ The panel's header has these buttons (Results once there is a result):
 
 ### Rules and models
 
-- Three short texts guide the agents. The **principles** (ask less, build it once, show the result) go into every chat and every task. **The chat's rules** go into the chat, and **the task rules** go into tasks. Edit them in Config. Claudopus uses your copy, and updates never overwrite it.
-- The models Claudopus starts with: Opus for most tasks, Sonnet for long searching and reading (and for clearly stated jobs when every request goes to a task), Fable only for heavy tasks. You can change each in Config. A helper that checks a task's work runs on at least the model that did the work, and never below Opus. If an agent asks for an older model, it starts on the newest model of that family. If it asks for Haiku, it runs on Sonnet, unless you chose Haiku in Config. If the app moves a task to an older model after a safety flag, Claudopus ends that task, and the task above it continues with what is left.
+- Three short texts guide the agents. The **principles** (ask less, build it once, show the result) go into every chat and every task. **The chat's rules** go into the chat, and **the task rules** go into tasks. Edit them in Config. Claudopus uses your copy, and updates never overwrite it. A change to them, to the models or to the second check reaches new chats and new tasks. An open chat and a running task keep the rules they started with, through an update too.
+- The models Claudopus starts with: Opus for most tasks, Sonnet for requests the chat can state exactly and for long searching and reading, Fable only for heavy tasks. You can change each in Config. A helper that checks a task's work runs on at least the model that did the work, and never below Opus. If an agent asks for an older model, it starts on the newest model of that family. If it asks for Haiku, it runs on Sonnet, unless you chose Haiku in Config. If the app moves a task to an older model after a safety flag, Claudopus ends that task, and the task above it continues with what is left.
 
 ### Keys, passwords and admin commands
 
@@ -139,7 +139,7 @@ You set everything below in the panel's **Config** tab, except `macs`. Claudopus
 | `notifications` | `true` | `false` stops the notifications when a task is done, stopped or failed |
 | `admin` | `each` | When you are asked before an admin command runs: `each` time, once per task (`work`), or `never` |
 | `models` | `work` opus, `legwork` sonnet, `heavy` fable | The models for most tasks, clearly stated jobs with long searching and reading, and heavy tasks |
-| `lean` | `chat` itself, `fable` heavy, `second` asked | Who does a short request (`itself`: the chat, `tasks`: a task each), when Fable runs (`heavy`, `all` or `named`) and when a second helper checks (`asked`, `beyond`: all but small tested fixes, `every`) |
+| `lean` | `fable` heavy, `second` asked | When Fable runs (`heavy`, `all` or `named`) and when a second helper checks (`asked`, `beyond`: all but small tested fixes, `every`) |
 | `updates`, `updateEvery` | every hour | How often to look for a new version: every 1, 6, 24 or 168 hours, or only when you press **Check now** |
 | `macs` | none | Up to four other Macs over SSH whose chats the panel lists ([how](docs/guide.md#settings)) |
 

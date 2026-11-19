@@ -12,7 +12,6 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   const filled: string[] = []
   on('prompt.fill', (_, e) => (filled.push(e.text), { isFilled: true }))
   files.set('/private/tmp/s/scratchpad/revenue.png', 'PNG')
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'tasks' } }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'how is revenue doing', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Weekly revenue', prompt: 'how is revenue doing' } as never)

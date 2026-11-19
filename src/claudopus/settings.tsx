@@ -41,6 +41,13 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
   })()
   // A file that does not parse is someone's edit under way: it is left as it is
   if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error("Claudopus can't read config.json")
+  // A `chat` choice of 0.2.201 to 0.2.205, when the chat could do short requests itself, is read as nothing and goes at the next save
+  const old = config.lean
+  if (old && typeof old === 'object' && !Array.isArray(old) && 'chat' in old) {
+    const { chat: _gone, ...rest } = old as Record<string, unknown>
+    if (Object.keys(rest).length) config.lean = rest
+    else delete config.lean
+  }
   if ((key === 'models' || key === 'lean') && role) {
     const models = { ...((config[key] as Record<string, unknown>) ?? {}) }
     if (value === undefined) delete models[role]

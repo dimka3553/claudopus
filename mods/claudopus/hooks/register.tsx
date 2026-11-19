@@ -72,7 +72,7 @@ const FOLLOW_EVERY = 20_000
 const WORKING = ['pending', 'running', 'waiting']
 const NO_PAGES = /^(postgres|redis-server|mysqld|mongod)\b/
 
-const me = atom({ plugin: 'claudopus', key: 'me' } as const, { id: '', title: '', tokens: 0, isChat: false, needsContext: false, roleSent: '', isListOpened: false, window: 0 }, { shape: 'me-6' })
+const me = atom({ plugin: 'claudopus', key: 'me' } as const, { id: '', title: '', tokens: 0, isChat: false, needsContext: false, isListOpened: false, window: 0 }, { shape: 'me-6' })
 const todos = atom({ plugin: 'claudopus', key: 'todos' } as const, [], { shape: 'todos-3' })
 const view = atom({ plugin: 'claudopus', key: 'view' } as const, { openId: '' }, { shape: 'view-5' })
 const servers = atom({ plugin: 'claudopus', key: 'servers' } as const, [], { shape: 'servers-2' })
@@ -592,15 +592,12 @@ const recorderHooks = (on: On) => {
 }
 
 
-const BRIEF_ITSELF =
-  'A job of a few minutes: do it yourself, in this thread, in few steps. A bigger or longer one: one task, as your rules say. Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words.'
-const BRIEF_TASKS =
+const BRIEF =
   'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command: a push, a fetch or a look with git or gh, an open of a file or page, a local curl status check, a preview of a local page; a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
-const briefNow = () => (lean.chat === 'itself' ? BRIEF_ITSELF : BRIEF_TASKS)
 const REFUSED =
   'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow (a push, a fetch or a look with git or gh, `git -C <folder>` for a look into a topic\'s repo, an open of a file or page, a local curl status check, sent with `run_in_background: true`; a preview of a local page); it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
-  `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: ${lean.chat === 'itself' ? 'subagent_type "claudopus:task"' : 'subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest'}, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
+  `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
 const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus\/keyring\b/
 const NO_READ = 'A saved key or password is never read or printed. Use it as an environment variable through the secret runner the task rules name; it hides the value in anything the command prints.'
 const shellWords = (command: string) => {
@@ -646,39 +643,6 @@ const pushesMain = (command: string): boolean =>
     if (args.includes('--no-verify')) return true
     return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
   })
-const barePushes = (command: string, start: string): { folder: string; to?: string }[] => {
-  const found: { folder: string; to?: string }[] = []
-  const under = (base: string, path: string) => (path.startsWith('/') ? path : `${base}/${path}`)
-  let folder = start
-  let to: string | undefined
-  for (const words of shellWords(command)) {
-    let i = 0
-    while (i < words.length && /^\w+=/.test(words[i]!)) i++
-    const tool = (words[i] ?? '').split('/').pop()
-    if (tool === 'cd' && words[i + 1]) {
-      folder = under(folder, words[i + 1]!)
-      to = undefined
-      continue
-    }
-    if ((tool === 'bash' || tool === 'sh' || tool === 'zsh') && words[i + 1] === '-c') {
-      found.push(...barePushes(words[i + 2] ?? '', folder))
-      continue
-    }
-    if (tool !== 'git') continue
-    i++
-    let at = folder
-    while (i < words.length && words[i]!.startsWith('-')) {
-      if (words[i] === '-C' && words[i + 1]) at = under(at, words[i + 1]!)
-      i += /^-[Cc]$/.test(words[i]!) ? 2 : 1
-    }
-    const verb = words[i]
-    const named = words.slice(i + 1).filter(one => !one.startsWith('-'))
-    if ((verb === 'checkout' || verb === 'switch') && at === folder && named.length) to = named[0]
-    if (verb !== 'push' || words.slice(i + 1).some(one => /^--(?:tags|delete)$|^-d$/.test(one))) continue
-    if (named.length <= 1) found.push({ folder: at, ...(at === folder && to ? { to } : {}) })
-  }
-  return found
-}
 const CHANGING_GIT = ['checkout', 'switch', 'restore', 'reset', 'rebase', 'bisect', 'stash', 'merge', 'pull', 'cherry-pick', 'revert', 'am', 'apply', 'clean', 'commit', 'update-ref', 'branch', 'rm', 'mv', 'symbolic-ref']
 const changesOf = (command: string, start: string, home: string): string[] => {
   const at = (here: string, path: string) =>
@@ -856,11 +820,10 @@ const NO_BOXES =
 const NO_PUSH = 'Claude never pushes or merges to main itself, so two tasks never release at once: commit on your own branch and run the release runner the task rules name, from your worktree.'
 const SECRETS_MS = 60_000
 const workHead = () => `What follows is what Claudopus tells Claude in every task started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`
-const PASTED_TASKS = 'The middle of this message is in the file it names. Do not read that file into this chat: the agent that needs it reads it from that path.'
-const PASTED_ITSELF = 'The middle of this message is in the file it names. Read it from that path only when the job you do yourself needs it; a task that needs it reads it from that path.'
-const pastedNow = () => (lean.chat === 'itself' ? PASTED_ITSELF : PASTED_TASKS)
+const PASTED = 'The middle of this message is in the file it names. Do not read that file into this chat: the agent that needs it reads it from that path.'
 const KEEP =
   "Keep every request the user made and every decision, in the user's own words where short. Keep the state of each file and what is not committed. Drop tool output."
+const KEEP_RULES = 'Keep, word for word, the rules that came after your instructions, from "What follows is what Claudopus tells Claude in every task" to their end.'
 const KEEP_AGENTS = 'Keep the name or id of each background agent, with its topic and how far it has got.'
 const PANEL_RULE =
   '{Name} follows this task in a panel beside the chat, as a card with its to-dos. Keep the card up to date as you work: with the `todo` tool (mcp__claudopus__todo), list what you set out to do, mark the one you are on, tick what is done and drop what a change of direction left behind; with the `note` tool (mcp__claudopus__note), say in one short line how far you have got whenever that changes. A message from {name} changes the to-dos first. Write these for someone who does not read code: say what each step is for, speak to {name} as "you", and use no file names, commands or code. When a step needs {name}\'s own hands or go-ahead, say so right away with the `ask` tool (mcp__claudopus__ask). If a panel tool replies that no hook answered it, the panel did not get it: continue without it for notes and to-dos, but for a question, end your turn right away with a report whose first line is the question.'
@@ -1013,6 +976,12 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
     }
   })()
   if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error("Claudopus can't read config.json")
+  const old = config.lean
+  if (old && typeof old === 'object' && !Array.isArray(old) && 'chat' in old) {
+    const { chat: _gone, ...rest } = old as Record<string, unknown>
+    if (Object.keys(rest).length) config.lean = rest
+    else delete config.lean
+  }
   if ((key === 'models' || key === 'lean') && role) {
     const models = { ...((config[key] as Record<string, unknown>) ?? {}) }
     if (value === undefined) delete models[role]
@@ -9052,6 +9021,48 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   return done
 }
 const turnEnding = new Set<string>()
+
+type KeptRules = { role?: string; each?: string; principles?: { path: string; content: string } }
+const RULES_KEPT_FOR = 30 * 24 * 3_600_000
+const RULES_CHAT = /^[A-Za-z0-9_-]{1,80}$/
+const rulesDir = () => `${dir}/live/rules`
+let rulesKept: { id: string; kept: KeptRules } | undefined
+let rulesKeeping: Promise<unknown> = Promise.resolve()
+const keptRule = <K extends keyof KeptRules>($: EngineInterface, key: K, make: () => Promise<NonNullable<KeptRules[K]>>): Promise<NonNullable<KeptRules[K]>> => {
+  const run = rulesKeeping.then(async () => {
+    const id = await $.session.id()
+    if (!dir || !RULES_CHAT.test(id)) return make()
+    if (rulesKept?.id !== id) {
+      const text = await readOr($, `${rulesDir()}/${id}.json`)
+      let kept: KeptRules = {}
+      try {
+        const value = JSON.parse(text || '{}') as unknown
+        if (value && typeof value === 'object' && !Array.isArray(value)) kept = value as KeptRules
+      } catch {
+      }
+      rulesKept = { id, kept }
+    }
+    const held = rulesKept.kept[key]
+    if (held !== undefined) return held as NonNullable<KeptRules[K]>
+    const made = await make()
+    rulesKept = { id, kept: { ...rulesKept.kept, [key]: made } }
+    await $.fs.write(`${rulesDir()}/${id}.json`, JSON.stringify(rulesKept.kept))
+    return made
+  })
+  rulesKeeping = run.catch(() => undefined)
+  return run
+}
+const tidyKeptRules = async ($: EngineInterface, id: string) => {
+  if (!dir) return
+  const now = await $.clock.now()
+  for (const entry of await $.fs.list(rulesDir()).catch(() => [])) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    const path = `${rulesDir()}/${entry.name}`
+    if (entry.name === `${id}.json`) await $.fs.write(path, await readOr($, path))
+    else if (entry.mtimeMs && now - entry.mtimeMs > RULES_KEPT_FOR) await $.process.run(['rm', '-f', path]).catch(() => undefined)
+  }
+}
+
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
     await knowSystem($).catch(() => undefined)
@@ -9088,7 +9099,8 @@ const chatHooks = (on: On) => {
     const id = await $.session.id()
     heldChat = id
     const title = await appTitle($)
-    await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id ? m.needsContext : true }))
+    await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id === id ? m.needsContext : true }))
+    await tidyKeptRules($, id).catch(err => log($, `kept rules not tidied: ${String(err)}`))
     await noteCut($, id).catch(err => log($, `cut-off work not looked for: ${String(err)}`))
     during('load: read the other chats')
     await readOthers($).catch(() => undefined)
@@ -9379,9 +9391,8 @@ const chatHooks = (on: On) => {
     const m = await read($, me)
 
     if (!isOff) {
-      const role = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/chat.md')).text, models, lean))
-      const roleSent = mark(role)
-      if (!m.isChat || m.needsContext || roleSent !== m.roleSent) {
+      const role = await keptRule($, 'role', async () => named(fillModels((await inForce($, $.plugin.root, dir, 'roles/chat.md')).text, models, lean)))
+      if (!m.isChat || m.needsContext) {
         const subjects = (await readIndex($)).map(s => `- ${[s.name, s.repo, s.session, s.state, s.summary, `streams/${slug(s.name)}.md`].join(' | ')}`).join('\n')
         context.push(`${role}\nThis chat's saved words: ${dir}/words/${m.id}.md\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${subjects || '(none yet)'}`)
       }
@@ -9390,15 +9401,15 @@ const chatHooks = (on: On) => {
         .slice(-8)
         .map(one => `${one.title || 'task'} (${one.id}) ${one.isFork && m.window ? `${Math.round((one.tokens / m.window) * 100)}%` : thousands(one.tokens)}`)
       const told = reportsTold(await read($, reports), await $.clock.now())
-      context.push(`${briefNow()}${sizes.length ? `\nHow full each task's context is: ${sizes.join('; ')}.` : ''}${told ? `\n${told}` : ''}`)
-      await update($, me, one => ({ ...one, isChat: true, needsContext: false, roleSent }))
+      context.push(`${await keptRule($, 'each', async () => BRIEF)}${sizes.length ? `\nHow full each task's context is: ${sizes.join('; ')}.` : ''}${told ? `\n${told}` : ''}`)
+      await update($, me, one => ({ ...one, isChat: true, needsContext: false }))
 
       if (text.length > PASTE_CHARS) {
         const stamp = new Date().toISOString().replaceAll(':', '-')
         const path = `${dir}/pastes/${stamp}.md`
         await $.fs.write(`${dir}/pastes/${stamp}.md`, hideKeys(text))
         text = `${text.slice(0, 600)}\n\n[${text.length - 1200} characters pasted here were saved to ${path} and left out of this chat]\n\n${text.slice(-600)}`
-        context.push(pastedNow())
+        context.push(PASTED)
       }
     }
 
@@ -9446,10 +9457,8 @@ const chatHooks = (on: On) => {
 
   on('session.compact', async ($, e, next) => {
     const isChat = (await read($, me)).isChat && !isOff
-    const r = await next({ ...e, instructions: [e.instructions, KEEP, isChat ? KEEP_AGENTS : ''].filter(Boolean).join('\n') })
+    const r = await next({ ...e, instructions: [e.instructions, KEEP, e.agentId !== undefined && dir && !isOff ? KEEP_RULES : '', isChat ? KEEP_AGENTS : ''].filter(Boolean).join('\n') })
     if (e.agentId === undefined && e.trigger !== 'precompute') await update($, me, m => ({ ...m, needsContext: true }))
-    const agent = e.agentId
-    if (agent !== undefined && e.trigger !== 'precompute' && dir) await changeTodos($, list => (list.some(one => one.id === agent && !one.parentId) ? list.map(one => (one.id === agent ? { ...one, rulesDue: true } : one)) : list))
 
     return r
   })
@@ -9457,7 +9466,10 @@ const chatHooks = (on: On) => {
   on('prompt.context', async ($, e, next) => {
     const r = await next(e)
     const files = r.instructionFiles ?? e.instructionFiles
-    const { path, text: content } = await inForce($, $.plugin.root, dir, 'rules/CLAUDE.md')
+    const { path, content } = await keptRule($, 'principles', async () => {
+      const now = await inForce($, $.plugin.root, dir, 'rules/CLAUDE.md')
+      return { path: now.path, content: now.text }
+    })
     if (!files || !content.trim()) return r
     const others = files.filter(one => !one.content.trim().startsWith(content.trim()))
     const at = others.findIndex(one => one.kind !== 'managed')
@@ -10957,8 +10969,7 @@ const stepHooks = (on: On) => {
     const calls = e.tool_calls.map(call => ({ tool: call.tool_name, input: call.tool_input, tookMs: now - (callStarts.get(call.tool_use_id) ?? now) }))
     for (const call of e.tool_calls) callStarts.delete(call.tool_use_id)
     const card = (await read($, todos)).find(one => one.id === agent)
-    const again = await rulesAgain($, agent).catch(err => (void log($, `rules not handed again: ${String(err)}`), ''))
-    const lines = [...stepLines(agent, calls, !card?.parentId), ...(again ? [again] : [])]
+    const lines = stepLines(agent, calls, !card?.parentId)
     if (!lines.length) return r
     await log($, `work ${agent} told of its step: ${lines.map(line => line.slice(0, 40)).join(' / ')}`)
     return { ...r, additionalContext: [...(r.additionalContext ?? []), ...lines] }
@@ -11964,7 +11975,6 @@ const NO_FOLLOW =
   'Not run: this only follows a log and would never end, so read the log once when you need it (tail -n 20); you are woken the moment your command ends.'
 const SEND_BACKGROUND = (name: string) =>
   `Not run: this command may run for minutes, and held open it keeps ${name}'s replies from you until it ends. Send the same call again with \`run_in_background: true\` and nothing else changed: Claudopus tells you when it ends, and ${name}'s replies reach you while it runs. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
-const CHAT_HELD_LONG = 'Not run: this command may run for minutes, and held open it keeps this chat from answering until it ends. Send the same call again with `run_in_background: true` and nothing else changed: you are told when it ends.'
 const CHAT_SEND_BACKGROUND = 'Not run: the chat runs its own command only in the background. Send the same call again with `run_in_background: true` and nothing else changed.'
 
 const scriptsRun = async ($: EngineInterface, command: string) => {
@@ -12025,16 +12035,6 @@ const workRules = async ($: EngineInterface) => {
   const words = `- The chat's saved words, ${who()}'s messages word for word: ${dir}/words/${(await read($, me)).id}.md`
   return `${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}`
 }
-const rulesAgain = async ($: EngineInterface, agent: string) => {
-  const card = (await read($, todos)).find(one => one.id === agent)
-  if (!card || card.parentId || !(await read($, me)).isChat) return ''
-  const rules = await workRules($)
-  if (!card.rulesDue && card.rulesSent === hashOf(rules)) return ''
-  await changeTodos($, list => list.map(one => (one.id === agent ? { ...one, rulesSent: hashOf(rules), rulesDue: undefined } : one)))
-  await log($, `work ${agent} handed its rules again${card.rulesDue ? ' after a compaction' : ' as they changed'}`)
-  return `${card.rulesDue ? 'Your context was compacted, and the rules you were handed at the start are no longer in it.' : 'The rules every task follows have changed since you started.'} These are the rules now; they replace any earlier copy.\n\n${rules}${card.scratch ? `\n${SCRATCH_LINE(card.scratch)}` : ''}`
-}
-
 const ownCheckoutChanged = async ($: EngineInterface, texts: string[], start: string) => {
   const home = (await $.env.get('HOME')) ?? ''
   const folders = texts.flatMap(text => changesOf(text, start, home))
@@ -12135,26 +12135,15 @@ const workHooks = (on: On) => {
         return { deny: silent === 'wait' ? NO_PROGRESS_WAIT : NO_PROGRESS_SCRIPT }
       }
     }
-    const itselfHere = e.agentId === undefined && !isOff && Boolean(dir) && lean.chat === 'itself' && (await read($, me)).isChat
-    const pushed = itselfHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
-    let onMain = false
-    for (const push of pushed ? [pushed, ...(await scriptsRun($, pushed))].flatMap(text => barePushes(text, cwd || '.')) : []) {
-      const branch = push.to ?? (await $.process.run(['git', '-C', push.folder, 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => ''))
-      if (/^(?:main|master)$/.test(branch)) onMain = true
-    }
-    if (onMain) {
-      await log($, "refused the chat's push from main")
-      return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
-    }
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }
-    if (dir && !isOff && (e.agentId !== undefined || itselfHere) && e.tool === 'Bash') {
+    if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash') {
       const command = String((e as { command?: unknown }).command ?? '')
       const changed = /\bgit\b/.test(command) ? await ownCheckoutChanged($, [command], cwd || '.') : ''
       if (changed) {
-        await log($, `refused ${e.agentId === undefined ? "the chat's" : `work ${e.agentId}'s`} command that changes Claudopus's own checkout`)
+        await log($, `refused work ${e.agentId}'s command that changes Claudopus's own checkout`)
         return { deny: NO_SWITCH(changed) }
       }
     }
@@ -12167,8 +12156,7 @@ const workHooks = (on: On) => {
       return { deny: NO_RUNNER_MOVED }
     }
     const isChatHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat
-    const isItself = isChatHere && lean.chat === 'itself'
-    const chatCommand = isChatHere && !isItself && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
+    const chatCommand = isChatHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
     if (chatCommand && !isOneCommand(chatCommand) && !RUNNER_NAMED.test(chatCommand)) {
       await log($, "refused a chat's own command that is more than one command")
       return { deny: NOT_ONE_COMMAND }
@@ -12176,10 +12164,10 @@ const workHooks = (on: On) => {
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const places = /^\s*git\s+-C\s/.test(chatCommand) ? [cwd, ...(await readIndex($).catch(() => [])).map(s => s.repo).filter(repo => repo.startsWith('/'))] : []
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom, places) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-    const isRefusedHere = isChatHere && !isItself && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
-    if (dir && !isOff && (e.agentId !== undefined || isItself) && isLongHeld(e as never)) {
-      await log($, `refused ${e.agentId === undefined ? "the chat's" : `work ${e.agentId}'s`} long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
-      return { deny: e.agentId === undefined ? CHAT_HELD_LONG : SEND_BACKGROUND(who()) }
+    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
+    if (dir && !isOff && e.agentId !== undefined && isLongHeld(e as never)) {
+      await log($, `refused work ${e.agentId}'s long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
+      return { deny: SEND_BACKGROUND(who()) }
     }
     if (isChatCommand && !(e as { run_in_background?: unknown }).run_in_background) {
       await log($, "refused the chat's own command held open")
@@ -12405,7 +12393,6 @@ const workHooks = (on: On) => {
     const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
     const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
     if (READS.includes(e.tool) && !isPaste) return next(e)
-    if (isItself) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
     if (grants.length) await dropGrants($, grants).catch(() => undefined)
     const kind = e.tool === 'Bash' ? (shellWords(chatCommand)[0]?.[0] ?? '') : (/__(preview_start)$/.exec(e.tool)?.[1] ?? '')
@@ -12554,7 +12541,7 @@ const workHooks = (on: On) => {
     await changeTodos($, list => {
       const old = list.find(one => one.id === id)
       const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}), kind: e.fork ? 'fork' : (e.subagentType ?? '') }
-      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(rules ? { rulesSent: hashOf(rules) } : {}), ...(old?.scratch || scratch ? { scratch: old?.scratch || scratch } : {}) }])
+      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(old?.scratch || scratch ? { scratch: old?.scratch || scratch } : {}) }])
     })
     if (isOwn) await openList($)
     await sync($).catch(() => undefined)

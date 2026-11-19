@@ -205,7 +205,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     const text = e.tool === 'get_session' ? JSON.stringify({ sessionId: 'local_1', title: 'Old title' }) : '[]'
     return { value: { content: [{ type: 'text', text }], isError: false } }
   })
-  on('session.id', () => ({ value: 'engine-id' }))
+  // (another chat, where the test lays session:id)
+  on('session.id', () => ({ value: files.get('session:id') ?? 'engine-id' }))
   // The mod's pause in a long step (breathe): answered after the test's own timers have had their turn, as the engine answers from
   // outside the helper
   on('session.turns', async () => (await new Promise(done => setTimeout(() => done(undefined), 0)), { value: 1 }))
@@ -490,8 +491,6 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(files.has('git:top') ? `${files.get('git:top')}\n` : '', files.has('git:top') ? 0 : 128)
     // and where the repo a worktree belongs to keeps its git folder, as git:common lays it
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--git-common-dir')) return ok(files.has('git:common') ? `${files.get('git:common')}\n` : '', files.has('git:common') ? 0 : 128)
-    // (a folder's own branch, where the test lays git:branch:<folder>)
-    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref') && files.has(`git:branch:${rest[rest.indexOf('-C') + 1]}`)) return ok(`${files.get(`git:branch:${rest[rest.indexOf('-C') + 1]}`)}\n`)
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref')) return ok(files.has('git:branch') ? `${files.get('git:branch')}\n` : '', files.has('git:branch') ? 0 : 128)
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
@@ -1201,26 +1200,27 @@ test('a helper quiet for five minutes is named to its work once, and its card ne
   expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1)
 })
 
-test('work whose context was compacted is handed its rules again at its next step, once; work started before the rules changed is handed the new ones', async ($, on) => {
-  const { files } = world(on)
+test('a task keeps the rules it was started with: a compaction is told to keep them, and neither it nor rules changed since tell the task anything at its next step; the next task starts with the new rules', async ($, on) => {
+  const { files, compacts } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'draw the eyes', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, prompt: 'draw them' } as never)
-  // Started with the rules: nothing more at its steps
-  expect(await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))).not.toContain('These are the rules now')
+  expect(prompts[0]).toContain('WORK ROLE')
+  const reads = [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]
+  expect(await toldOf(batch($, 'a1', reads))).toBe('')
   await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: [{ role: 'user', text: 'one', toolUses: [] }] } as never)
-  const told = await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))
-  expect(told).toContain('Your context was compacted')
-  expect(told).toContain('What follows is what Claudopus tells Claude in every task')
-  expect(told).toContain('Keep the card up to date as you work')
-  expect(await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))).not.toContain('These are the rules now')
-  // The rules change under it, saved in Config: the new text reaches it
+  expect(compacts[0]).toContain('Keep, word for word, the rules that came after your instructions')
+  expect(await toldOf(batch($, 'a1', reads))).toBe('')
+  // The rules change under it, saved in Config: the running task is told nothing
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   await pressed(config, 'config-text-work-edit')
   await config.input({ key: 'config-text-work-input', text: '- Every run says how far it is.' })
   expect(files.get(`${MEMORY}/roles/work.md`)).toBe('- Every run says how far it is.\n')
   await config.unmount()
-  const changed = await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))
-  expect(changed).toContain('have changed since you started')
-  expect(changed).toContain('Every run says how far it is.')
+  expect(await toldOf(batch($, 'a1', reads))).toBe('')
+  expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain('handed its rules again')
+  // and a task started now gets them
+  await $.agent.spawn({ ...spawn, prompt: 'draw the nose' } as never)
+  expect(prompts.at(-1)).toContain('Every run says how far it is.')
+  expect(prompts.at(-1)).not.toContain('WORK ROLE')
 })

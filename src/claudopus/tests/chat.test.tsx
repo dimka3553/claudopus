@@ -2,7 +2,6 @@
 
 test('a chat gets its role once, is told to start a fresh agent from a brief for every message, and every message is saved', async ($, on) => {
   const { files } = world(on)
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'tasks' } }))
   await $.session.start(start)
 
   const first = await $.prompt.submit({ text: 'fix the upload page', wait: false, origin: composer })
@@ -40,64 +39,10 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   expect(kept.slice(long.length)).toContain('and the chin')
 })
 
-test('as shipped the chat does a short request itself: it is told so with each message, its edits and joined commands run held open, it reads a paste it needs, an admin command still waits for the person, and a copy of itself is still refused', async ($, on) => {
-  const { files } = world(on)
-  await $.session.start(start)
-  const told = (await $.prompt.submit({ text: 'make the button orange', wait: false, origin: composer })).context?.join('\n') ?? ''
-  expect(told).toContain('A job of a few minutes: do it yourself, in this thread, in few steps.')
-  expect(told).toContain('Only a message that changes what a listed task is already doing')
-  expect(told).not.toContain('start a fresh agent')
-  for (const [i, call] of [
-    { tool: 'Edit', file_path: '/repo/css/app.css', old_string: 'blue', new_string: 'orange' },
-    { tool: 'Write', file_path: '/repo/notes.txt', content: 'done' },
-    { tool: 'Bash', command: "grep -rn 1d4ed8 . | head -40 && sed -i '' 's/1d4ed8/f28c28/g' css/app.css" },
-    { tool: 'Bash', command: 'npm test' },
-    { tool: 'Bash', command: 'git status' },
-  ].entries())
-    expect([call, (await $.tool.call({ ...call, tool_use_id: `own${i}` } as never)).deny]).toEqual([call, undefined])
-  const paste = `start ${'x'.repeat(20_000)} end`
-  await $.prompt.submit({ text: paste, wait: false, origin: composer })
-  const saved = [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/pastes/`))
-  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'own-p', file_path: saved?.[0] } as never)).deny).toBeUndefined()
-  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'own-f', prompt: 'push it', subagent_type: 'fork' } as never)).deny).toContain('never starts a task as a copy')
-  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'own-t', prompt: 'build the page', subagent_type: 'claudopus:task', model: 'opus' } as never)).deny).toBeUndefined()
-  const copy = (await $.tool.call({ tool: 'Agent', tool_use_id: 'own-f2', prompt: 'push it', subagent_type: 'fork' } as never)).deny ?? ''
-  expect(copy).not.toContain('claudopus:quick')
-  // What holds a task's commands holds the chat's: main is never pushed, by name or by a bare push from main; Claudopus's own
-  // checkout is never changed; a command that may take minutes is not held open
-  for (const [i, command] of ['git push origin main', 'git commit -qam x && git push origin HEAD:main', 'gh pr merge 12 --squash'].entries())
-    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-m${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never pushes or merges to main itself')])
-  // (Claudopus's own checkout is /code, laid before any command that changes a checkout is looked at)
-  files.set('git:top', '/code')
-  files.set('checkout:/code', 'main')
-  files.set('git:branch', 'main')
-  files.set('git:branch:/wt', 'fix-nose')
-  files.set('git:branch:/My Repo', 'main')
-  for (const [i, command] of ['git push', 'git add -A && git commit -qm x && git push -q', 'git -C "/My Repo" push -u origin', "sh -c 'git push'", 'git checkout -q main && git push'].entries())
-    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-b${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never pushes or merges to main itself')])
-  // With main checked out, what pushes no main runs: the word push in a message, a stash or a search, a named branch, tags, a
-  // branch made in the same command, and a push from a worktree on its own branch
-  for (const [i, command] of ['git commit -qm "fix the push button"', 'git stash push', 'git log --grep=push', 'git push origin fix-nose', 'git push --tags', 'git checkout -qb fix && git commit -qam x && git push -u origin fix', 'git checkout -qb fix && git push -u origin', 'cd /wt && git push -u origin', 'git -C /wt push'].entries())
-    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-n${i}`, command } as never)).deny]).toEqual([command, undefined])
-  // and from a folder on a branch, a push in a checkout of main is still main's
-  files.set('git:branch', 'fix-nose')
-  files.set('git:branch:/repo', 'main')
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-b8', command: 'cd /repo && git push' } as never)).deny).toContain('never pushes or merges to main itself')
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-b9', command: 'git push -u origin fix-nose' } as never)).deny).toBeUndefined()
-  for (const key of ['git:branch', 'git:branch:/wt', 'git:branch:/My Repo', 'git:branch:/repo']) files.delete(key)
-  for (const [i, command] of ['git -C /code checkout feature', 'cd /code; git reset --hard v0.2.191', 'cd /code && git commit -qam x'].entries())
-    expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-c${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never changes what is checked out there')])
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l1', command: 'npm run build', description: 'Run the build (about 5 min)' } as never)).deny).toContain('keeps this chat from answering')
-  // A server left in the background stays up: nothing of Claudopus's stops it
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l2', command: 'npm run dev', description: 'Serve the site', run_in_background: true } as never)).deny).toBeUndefined()
-  expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain("the chat's own command started in the background")
-  expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain("in a chat's own thread")
-})
-
 test('work starts as a fresh agent from written instructions, never as a copy of the chat: a clearly stated job on Sonnet, the rest as a task, a fork or an agent with no model refused whatever an old config.json chose, and a brief gets the rules for the work', async ($, on) => {
   const { files } = world(on, { tokens: 400_000, chatRole: 'CHAT ROLE {lanes}' })
   // A choice of 0.2.152's that sent small jobs to a copy of the chat counts for nothing now
-  ownSet(files, 'config.json', JSON.stringify({ lean: { chat: 'tasks', small: 'copy', quick: 'work' } }))
+  ownSet(files, 'config.json', JSON.stringify({ lean: { small: 'copy', quick: 'work' } }))
   await $.session.start(start)
   const told = (await $.prompt.submit({ text: 'push it', wait: false, origin: composer })).context?.join('\n') ?? ''
   expect(told).toContain('`subagent_type: "claudopus:quick"` and `model: "sonnet"`')
@@ -573,7 +518,6 @@ test('a long build a task runs in the background that fails on another running t
 
 test('a large paste is saved to a file and left out of the chat', async ($, on) => {
   const { files } = world(on)
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'tasks' } }))
   await $.session.start(start)
   const paste = `start ${'x'.repeat(20_000)} end`
 
@@ -590,7 +534,6 @@ test('a large paste is saved to a file and left out of the chat', async ($, on) 
 
 test("a chat's own thread may only read, run a single command in the background, start agents and talk to them; an agent may do the work", async ($, on) => {
   const { files, stepped, clock } = world(on)
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'tasks' } }))
   await $.session.start(start)
   const told = await $.prompt.submit({ text: 'what does this function do', wait: false, origin: composer })
   expect(told.context?.join('\n')).toContain('Answer a question that a few reads settle here')
@@ -842,7 +785,7 @@ test("a chat's own thread may only read, run a single command in the background,
   for (const [i, call] of [{ tool: 'Edit', file_path: '/repo/src/nose.ts', old_string: 'a', new_string: 'b' }, { tool: 'Write', file_path: '/repo/x', content: 'x' }, { tool: 'Grep', pattern: 'nose' }, { tool: 'Bash', command: 'npm test' }].entries())
     for (const agentId of ['w1', 'helper-1']) expect((await $.tool.call({ ...call, tool_use_id: `w${i}${agentId}`, agentId } as never)).deny).toBeUndefined()
   // An old config.json's everything-as-a-full-task no longer stops the chat running its own single command
-  ownSet(files, 'config.json', JSON.stringify({ lean: { chat: 'tasks', small: 'full' } }))
+  ownSet(files, 'config.json', JSON.stringify({ lean: { small: 'full' } }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'push it', wait: false, origin: composer })
   files.set('git:branch', 'fix-nose')
@@ -917,8 +860,8 @@ test('rarely used tools wait behind tool search', async ($, on) => {
   expect((await $.tool.describe({ tool: 'Read', description: 'd', provider })).isDeferred).toBeUndefined()
 })
 
-test('a compaction is told what to keep, and the chat gets its role again after it', async ($, on) => {
-  const { compacts } = world(on)
+test('a compaction is told what to keep, and the chat gets its role again after it, as it first got it: rules changed since reach a new chat only, and kept rules of a chat not opened for a month go', async ($, on) => {
+  const { compacts, files, clock } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'one', wait: false, origin: composer })
 
@@ -928,6 +871,35 @@ test('a compaction is told what to keep, and the chat gets its role again after 
 
   const after = await $.prompt.submit({ text: 'two', wait: false, origin: composer })
   expect(after.context?.join('\n')).toContain('CHAT ROLE')
+
+  // The person writes their own copy of the chat's rules: the open chat is told nothing of it, at its next message or after a compaction
+  ownSet(files, 'roles/chat.md', 'MY OWN ROLE\n')
+  const next = await $.prompt.submit({ text: 'three', wait: false, origin: composer })
+  expect(next.context?.length).toBe(1)
+  expect(next.context?.join('\n')).not.toContain('ROLE')
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'one', toolUses: [] }] as never })
+  const again = (await $.prompt.submit({ text: 'four', wait: false, origin: composer })).context?.join('\n') ?? ''
+  expect(again).toContain('CHAT ROLE')
+  expect(again).not.toContain('MY OWN ROLE')
+  // also once Claudopus has loaded again, as after an update
+  await $.session.start(start)
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'one', toolUses: [] }] as never })
+  expect((await $.prompt.submit({ text: 'five', wait: false, origin: composer })).context?.join('\n')).toContain('CHAT ROLE')
+  // A new chat gets the rules as they are now, with its first message
+  files.set('session:id', 'chat-2')
+  await $.session.start(start)
+  const fresh = (await $.prompt.submit({ text: 'one', wait: false, origin: composer })).context?.join('\n') ?? ''
+  expect(fresh).toContain('MY OWN ROLE')
+  expect(fresh).not.toContain('CHAT ROLE')
+  // What the first chat was told is kept while it may be opened again, and goes once it has not been for a month
+  expect(JSON.parse(files.get(`${MEMORY}/live/rules/engine-id.json`) ?? '{}').role).toBe('CHAT ROLE')
+  files.set(`mtime:${MEMORY}/live/rules/engine-id.json`, String(clock.now() - 20 * 24 * 3_600_000))
+  await $.session.start(start)
+  expect(files.has(`${MEMORY}/live/rules/engine-id.json`)).toBe(true)
+  files.set(`mtime:${MEMORY}/live/rules/engine-id.json`, String(clock.now() - 31 * 24 * 3_600_000))
+  await $.session.start(start)
+  expect(files.has(`${MEMORY}/live/rules/engine-id.json`)).toBe(false)
+  expect(files.has(`${MEMORY}/live/rules/chat-2.json`)).toBe(true)
 })
 
 test('after a reply the answer is saved, the asks and what was done are logged, and the chat is renamed when its work changed', async ($, on) => {
@@ -947,8 +919,8 @@ test('after a reply the answer is saved, the asks and what was done are logged, 
   expect(titles).toEqual(['Upload page fix'])
 })
 
-test('every conversation carries the principles the mod ships, word for word and once, even where the same text was loaded from elsewhere', async ($, on) => {
-  world(on)
+test('every conversation carries the principles the mod ships, word for word and once, even where the same text was loaded from elsewhere, and a chat keeps the ones it started with', async ($, on) => {
+  const { files } = world(on)
   // The engine beneath answers what it was handed
   on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }))
   await $.session.start(start)
@@ -962,6 +934,12 @@ test('every conversation carries the principles the mod ships, word for word and
   const fresh = await $.prompt.context({ blocks: [], instructionFiles: [] })
   expect(fresh.instructionFiles?.map(one => [one.kind, one.content])).toEqual([['user', PRINCIPLES]])
   expect(told.instructionFiles?.some(one => one.content.includes('device code'))).toBe(false)
+  // The person's own copy written since reaches a new chat: this one, and each task it starts, carries what it started with
+  ownSet(files, 'rules/CLAUDE.md', 'MY PRINCIPLES\n')
+  expect((await $.prompt.context({ blocks: [], instructionFiles: [] })).instructionFiles?.map(one => one.content)).toEqual([PRINCIPLES])
+  files.set('session:id', 'chat-2')
+  await $.session.start(start)
+  expect((await $.prompt.context({ blocks: [], instructionFiles: [] })).instructionFiles?.map(one => one.content)).toEqual(['MY PRINCIPLES\n'])
 })
 
 test('a chat the app runs on another Mac over ssh tells every conversation that what needs the person is done from their own device', async ($, on) => {

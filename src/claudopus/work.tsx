@@ -111,8 +111,6 @@ const NO_FOLLOW =
 const SEND_BACKGROUND = (name: string) =>
   `Not run: this command may run for minutes, and held open it keeps ${name}'s replies from you until it ends. Send the same call again with \`run_in_background: true\` and nothing else changed: Claudopus tells you when it ends, and ${name}'s replies reach you while it runs. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
 // The chat's own command, which runs only in the background
-// A long command of a chat that does short requests itself
-const CHAT_HELD_LONG = 'Not run: this command may run for minutes, and held open it keeps this chat from answering until it ends. Send the same call again with `run_in_background: true` and nothing else changed: you are told when it ends.'
 const CHAT_SEND_BACKGROUND = 'Not run: the chat runs its own command only in the background. Send the same call again with `run_in_background: true` and nothing else changed.'
 
 // The files a command runs, as filesRun finds them, each read (the first megabyte): the mod's own runners (bin/admin, bin/secret,
@@ -181,26 +179,13 @@ const touchesKeyring = (e: { tool: string }) => {
   })
 }
 
-// The rules every piece of work a chat starts is handed after its brief, as they stand now: where the chat's words are, the work's
-// own rules, and its panel's
+// The rules every piece of work a chat starts is handed after its brief, as they stand when it starts: where the chat's words are, the
+// work's own rules, and its panel's. They are its rules for as long as it runs: a change made since reaches the next task
 const workRules = async ($: EngineInterface) => {
   const work = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).replace(/\{pane-file\}/g, `${$.plugin.root}/bin/pane-file`).trim()
   const words = `- The chat's saved words, ${who()}'s messages word for word: ${dir}/words/${(await read($, me)).id}.md`
   return `${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}`
 }
-// Work its rules no longer reach is handed them again at its next step: work started before they changed, and work whose context
-// was compacted, which keeps only a summary of its brief (on 15 Nov work compacted after two hours kept "long ones detached with
-// nohup" and lost the rest, then started 8 drawings at once on this Mac that its card never showed)
-const rulesAgain = async ($: EngineInterface, agent: string) => {
-  const card = (await read($, todos)).find(one => one.id === agent)
-  if (!card || card.parentId || !(await read($, me)).isChat) return ''
-  const rules = await workRules($)
-  if (!card.rulesDue && card.rulesSent === hashOf(rules)) return ''
-  await changeTodos($, list => list.map(one => (one.id === agent ? { ...one, rulesSent: hashOf(rules), rulesDue: undefined } : one)))
-  await log($, `work ${agent} handed its rules again${card.rulesDue ? ' after a compaction' : ' as they changed'}`)
-  return `${card.rulesDue ? 'Your context was compacted, and the rules you were handed at the start are no longer in it.' : 'The rules every task follows have changed since you started.'} These are the rules now; they replace any earlier copy.\n\n${rules}${card.scratch ? `\n${SCRATCH_LINE(card.scratch)}` : ''}`
-}
-
 // Claudopus's own checkout, when a command would change what is checked out there (changesOf), or nothing. Its own checkout is the
 // main checkout of the repo this chat's copy is made from or run from (knowSource, as this load first learnt it): every other repo,
 // a worktree of this one, and what a script it runs does are left to run
@@ -321,31 +306,18 @@ const workHooks = (on: On) => {
         return { deny: silent === 'wait' ? NO_PROGRESS_WAIT : NO_PROGRESS_SCRIPT }
       }
     }
-    // A chat that does short requests itself meets the guards a task's commands meet
-    const itselfHere = e.agentId === undefined && !isOff && Boolean(dir) && lean.chat === 'itself' && (await read($, me)).isChat
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
-    // (the chat works where it is, which may be main: a push there that names no branch would push main)
-    const pushed = itselfHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
-    let onMain = false
-    for (const push of pushed ? [pushed, ...(await scriptsRun($, pushed))].flatMap(text => barePushes(text, cwd || '.')) : []) {
-      const branch = push.to ?? (await $.process.run(['git', '-C', push.folder, 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => ''))
-      if (/^(?:main|master)$/.test(branch)) onMain = true
-    }
-    if (onMain) {
-      await log($, "refused the chat's push from main")
-      return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
-    }
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }
     // The Claudopus code chats run stays as it is: work reads other versions with git show and changes code in worktrees of its own.
     // Claudopus refuses it before Claude Code sees it, so no card offers it to be run on a press either
-    if (dir && !isOff && (e.agentId !== undefined || itselfHere) && e.tool === 'Bash') {
+    if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash') {
       const command = String((e as { command?: unknown }).command ?? '')
       const changed = /\bgit\b/.test(command) ? await ownCheckoutChanged($, [command], cwd || '.') : ''
       if (changed) {
-        await log($, `refused ${e.agentId === undefined ? "the chat's" : `work ${e.agentId}'s`} command that changes Claudopus's own checkout`)
+        await log($, `refused work ${e.agentId}'s command that changes Claudopus's own checkout`)
         return { deny: NO_SWITCH(changed) }
       }
     }
@@ -363,9 +335,7 @@ const workHooks = (on: On) => {
     // or granted for a call that does not run
     const isChatHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat
     // A single command the chat runs itself: one command and nothing joined to it
-    // (a chat that does jobs itself runs its commands as Claude Code does: joined, held open, and behind the same gates as a task's)
-    const isItself = isChatHere && lean.chat === 'itself'
-    const chatCommand = isChatHere && !isItself && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
+    const chatCommand = isChatHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
     if (chatCommand && !isOneCommand(chatCommand) && !RUNNER_NAMED.test(chatCommand)) {
       await log($, "refused a chat's own command that is more than one command")
       return { deny: NOT_ONE_COMMAND }
@@ -374,12 +344,12 @@ const workHooks = (on: On) => {
     const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
     const places = /^\s*git\s+-C\s/.test(chatCommand) ? [cwd, ...(await readIndex($).catch(() => [])).map(s => s.repo).filter(repo => repo.startsWith('/'))] : []
     const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom, places) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-    const isRefusedHere = isChatHere && !isItself && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
+    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool) && !isPaneShow(e)
     // A call is never changed on its way: auto mode reviews it as written and refuses one a hook has changed since, so one that must
     // run in the background is refused with the same call to send that way, and the call sent again is reviewed as it runs
-    if (dir && !isOff && (e.agentId !== undefined || isItself) && isLongHeld(e as never)) {
-      await log($, `refused ${e.agentId === undefined ? "the chat's" : `work ${e.agentId}'s`} long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
-      return { deny: e.agentId === undefined ? CHAT_HELD_LONG : SEND_BACKGROUND(who()) }
+    if (dir && !isOff && e.agentId !== undefined && isLongHeld(e as never)) {
+      await log($, `refused work ${e.agentId}'s long command held open: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
+      return { deny: SEND_BACKGROUND(who()) }
     }
     if (isChatCommand && !(e as { run_in_background?: unknown }).run_in_background) {
       await log($, "refused the chat's own command held open")
@@ -657,8 +627,6 @@ const workHooks = (on: On) => {
     const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
     const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
     if (READS.includes(e.tool) && !isPaste) return next(e)
-    // (what it leaves in the background runs on as in Claude Code, which tells the chat when it ends: a server {name} asked for stays up)
-    if (isItself) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
     if (grants.length) await dropGrants($, grants).catch(() => undefined)
     // An open, a curl or a preview not in the shape the chat runs is told that shape, so it can be run that way or go to a task
@@ -856,7 +824,7 @@ const workHooks = (on: On) => {
       const old = list.find(one => one.id === id)
       // Its title is the few words the task was given; under it, the person's message as they wrote it
       const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}), kind: e.fork ? 'fork' : (e.subagentType ?? '') }
-      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(rules ? { rulesSent: hashOf(rules) } : {}), ...(old?.scratch || scratch ? { scratch: old?.scratch || scratch } : {}) }])
+      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(old?.scratch || scratch ? { scratch: old?.scratch || scratch } : {}) }])
     })
     if (isOwn) await openList($)
     await sync($).catch(() => undefined)

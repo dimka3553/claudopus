@@ -8,8 +8,6 @@ export type Me = {
   isChat: boolean
   // The role text goes out with the next message: at the start and after a compaction
   needsContext: boolean
-  // Which version of the role text this chat last received
-  roleSent: string
   // The to-do panel has opened by itself once: closed, it stays closed until asked for
   isListOpened: boolean
   // The size of this chat's context window, in tokens; `tokens` is how much of it is used
@@ -153,9 +151,6 @@ export type Todo = {
   // A run a command left going however it was started (a launcher's children, a job sent off with &, a pool), found by the
   // process group its command's shell led: `isLeft`, with its log only where its output goes to a file, and `from` the background
   // command that left it, when one did
-  // The rules it was last handed after its brief, by their text's hash, and whether a compaction has taken them from its context
-  rulesSent?: string
-  rulesDue?: boolean
   // Its own folder in the chat's scratchpad, by name, which its rules name
   scratch?: string
   detached?: { id: string; what: string; at: number; cmd: string; log: string; pid?: string; isLeft?: boolean; from?: string }[]

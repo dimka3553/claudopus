@@ -170,6 +170,55 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
 }
 // The tasks and helpers whose turn's end is being taken up now: the list's look leaves them to it
 const turnEnding = new Set<string>()
+// ---- A chat keeps the rules it started with ----
+
+// What a chat is told (its role, the line with each message, the principles) is made once, at its first request, and kept by its id
+// in live/rules, a folder only Claudopus writes: a changed setting, an edited copy or an update reaches new chats only, and an open
+// one is told the same after a reload. A chat from before this was kept keeps what its first request under this version makes
+type KeptRules = { role?: string; each?: string; principles?: { path: string; content: string } }
+const RULES_KEPT_FOR = 30 * 24 * 3_600_000
+const RULES_CHAT = /^[A-Za-z0-9_-]{1,80}$/
+const rulesDir = () => `${dir}/live/rules`
+let rulesKept: { id: string; kept: KeptRules } | undefined
+let rulesKeeping: Promise<unknown> = Promise.resolve()
+const keptRule = <K extends keyof KeptRules>($: EngineInterface, key: K, make: () => Promise<NonNullable<KeptRules[K]>>): Promise<NonNullable<KeptRules[K]>> => {
+  // One at a time, so two requests of a chat never keep two texts
+  const run = rulesKeeping.then(async () => {
+    const id = await $.session.id()
+    if (!dir || !RULES_CHAT.test(id)) return make()
+    if (rulesKept?.id !== id) {
+      const text = await readOr($, `${rulesDir()}/${id}.json`)
+      let kept: KeptRules = {}
+      try {
+        const value = JSON.parse(text || '{}') as unknown
+        if (value && typeof value === 'object' && !Array.isArray(value)) kept = value as KeptRules
+      } catch {
+        // A file that does not parse keeps nothing: the texts are made again, once
+      }
+      rulesKept = { id, kept }
+    }
+    const held = rulesKept.kept[key]
+    if (held !== undefined) return held as NonNullable<KeptRules[K]>
+    const made = await make()
+    rulesKept = { id, kept: { ...rulesKept.kept, [key]: made } }
+    await $.fs.write(`${rulesDir()}/${id}.json`, JSON.stringify(rulesKept.kept))
+    return made
+  })
+  rulesKeeping = run.catch(() => undefined)
+  return run
+}
+// As a chat loads: its own kept rules count as used now, and those of chats not opened for a month go
+const tidyKeptRules = async ($: EngineInterface, id: string) => {
+  if (!dir) return
+  const now = await $.clock.now()
+  for (const entry of await $.fs.list(rulesDir()).catch(() => [])) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    const path = `${rulesDir()}/${entry.name}`
+    if (entry.name === `${id}.json`) await $.fs.write(path, await readOr($, path))
+    else if (entry.mtimeMs && now - entry.mtimeMs > RULES_KEPT_FOR) await $.process.run(['rm', '-f', path]).catch(() => undefined)
+  }
+}
+
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
     await knowSystem($).catch(() => undefined)
@@ -223,7 +272,8 @@ const chatHooks = (on: On) => {
     heldChat = id
     const title = await appTitle($)
     // The first load of a session sends the role text; a reload keeps what stands
-    await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id ? m.needsContext : true }))
+    await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id === id ? m.needsContext : true }))
+    await tidyKeptRules($, id).catch(err => log($, `kept rules not tidied: ${String(err)}`))
     // What was at work when this chat's process last ended is read before this load writes its own: work no longer at work was cut off
     await noteCut($, id).catch(err => log($, `cut-off work not looked for: ${String(err)}`))
     // The other chats, on this Mac and the others, are read before the panel is drawn: a chat that starts, or comes back, showed
@@ -571,10 +621,9 @@ const chatHooks = (on: On) => {
     const m = await read($, me)
 
     if (!isOff) {
-      // The role goes out with the person's first message, after a compaction, and again when its text has changed
-      const role = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/chat.md')).text, models, lean))
-      const roleSent = mark(role)
-      if (!m.isChat || m.needsContext || roleSent !== m.roleSent) {
+      // The role goes out with the person's first message and after a compaction, each time as this chat first got it (keptRule)
+      const role = await keptRule($, 'role', async () => named(fillModels((await inForce($, $.plugin.root, dir, 'roles/chat.md')).text, models, lean)))
+      if (!m.isChat || m.needsContext) {
         // Each subject with the path of its brief, so a brief for work on it can name that path without a search
         const subjects = (await readIndex($)).map(s => `- ${[s.name, s.repo, s.session, s.state, s.summary, `streams/${slug(s.name)}.md`].join(' | ')}`).join('\n')
         context.push(`${role}\nThis chat's saved words: ${dir}/words/${m.id}.md\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${subjects || '(none yet)'}`)
@@ -585,15 +634,15 @@ const chatHooks = (on: On) => {
         .slice(-8)
         .map(one => `${one.title || 'task'} (${one.id}) ${one.isFork && m.window ? `${Math.round((one.tokens / m.window) * 100)}%` : thousands(one.tokens)}`)
       const told = reportsTold(await read($, reports), await $.clock.now())
-      context.push(`${briefNow()}${sizes.length ? `\nHow full each task's context is: ${sizes.join('; ')}.` : ''}${told ? `\n${told}` : ''}`)
-      await update($, me, one => ({ ...one, isChat: true, needsContext: false, roleSent }))
+      context.push(`${await keptRule($, 'each', async () => BRIEF)}${sizes.length ? `\nHow full each task's context is: ${sizes.join('; ')}.` : ''}${told ? `\n${told}` : ''}`)
+      await update($, me, one => ({ ...one, isChat: true, needsContext: false }))
 
       if (text.length > PASTE_CHARS) {
         const stamp = new Date().toISOString().replaceAll(':', '-')
         const path = `${dir}/pastes/${stamp}.md`
         await $.fs.write(`${dir}/pastes/${stamp}.md`, hideKeys(text))
         text = `${text.slice(0, 600)}\n\n[${text.length - 1200} characters pasted here were saved to ${path} and left out of this chat]\n\n${text.slice(-600)}`
-        context.push(pastedNow())
+        context.push(PASTED)
       }
     }
 
@@ -654,23 +703,24 @@ const chatHooks = (on: On) => {
   // A compaction keeps what the person asked for, and the role text goes out again after it
   on('session.compact', async ($, e, next) => {
     const isChat = (await read($, me)).isChat && !isOff
-    const r = await next({ ...e, instructions: [e.instructions, KEEP, isChat ? KEEP_AGENTS : ''].filter(Boolean).join('\n') })
+    const r = await next({ ...e, instructions: [e.instructions, KEEP, e.agentId !== undefined && dir && !isOff ? KEEP_RULES : '', isChat ? KEEP_AGENTS : ''].filter(Boolean).join('\n') })
     if (e.agentId === undefined && e.trigger !== 'precompute') await update($, me, m => ({ ...m, needsContext: true }))
-    // A piece of work compacted loses the rules it was handed after its brief: it is handed them again at its next step
-    const agent = e.agentId
-    if (agent !== undefined && e.trigger !== 'precompute' && dir) await changeTodos($, list => (list.some(one => one.id === agent && !one.parentId) ? list.map(one => (one.id === agent ? { ...one, rulesDue: true } : one)) : list))
 
     return r
   })
 
   // The person's principles and working rules ship with the mod: every conversation, a chat's and each piece of work's, carries them
   // word for word as an instruction file of the person's own, and the same text loaded from elsewhere is not sent twice. In a chat
-  // the app runs on another Mac over ssh they end with the rule for what needs the person's hands there
+  // the app runs on another Mac over ssh they end with the rule for what needs the person's hands there. They are the ones the chat
+  // started with (keptRule), for the chat and its tasks alike: this event does not say whose conversation it is
   on('prompt.context', async ($, e, next) => {
     const r = await next(e)
     const files = r.instructionFiles ?? e.instructionFiles
     // The person's own copy in the memory folder when there is one, the shipped principles otherwise
-    const { path, text: content } = await inForce($, $.plugin.root, dir, 'rules/CLAUDE.md')
+    const { path, content } = await keptRule($, 'principles', async () => {
+      const now = await inForce($, $.plugin.root, dir, 'rules/CLAUDE.md')
+      return { path: now.path, content: now.text }
+    })
     if (!files || !content.trim()) return r
     // Another copy of the mod loaded beside this one sends the same principles, with the rule for afar after them or not
     const others = files.filter(one => !one.content.trim().startsWith(content.trim()))
