@@ -1801,9 +1801,8 @@ const panelHooks = (on: On) => {
     const finishFrom = (one: Todo) => (one.chat ? (endSeen.get(`${one.id}:${one.endedAt}`) ?? one.endedAt) : pauseFrom(one))
     // Done with a server left for the person: after its moment it stays up, under what waits, its row and Stop under it
     const isLeftUp = (one: Todo) => !one.chat && hasResult(stage(one)) && Boolean(one.bg?.length) && !isWaits(one) && !isFinishing(one)
-    // A command you ran on a press, while it runs or its output waits for its ended task: up with what it is and its press (a card
-    // still at work stays among the working, its command on it)
-    const isUp = (one: Todo) => isWaits(one) || isFinishing(one) || isLeftUp(one) || (!one.chat && stage(one) !== 'working' && runningOn(one.id).length > 0)
+    // A command you ran on a press, while it runs or its output waits for its ended task: up with what it is and its press
+    const isUp = (one: Todo) => isWaits(one) || isFinishing(one) || isLeftUp(one) || (!one.chat && runningOn(one.id).length > 0)
     const upSince = (one: Todo) => Math.max(...(one.chat ? [] : runningOn(one.id).map(run => run.startedAt ?? 0)), 0)
     const askingHere = shownWork.filter(isUp)
     const askingThere = listedChats.flatMap(c => shownOf(c).filter(isUp))
