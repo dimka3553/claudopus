@@ -1149,7 +1149,7 @@ test("a chat of this Mac with work opens by the app's own id when it has no Remo
   await list.unmount()
 })
 
-test("Details of another chat's work on this Mac is as deep as this chat's own: every to-do, its helpers with the step each is on, its commands' last lines, and its chat read from that chat's own file", async ($, on) => {
+test("Details of another chat's work on this Mac is as deep as this chat's own: every to-do, its helpers with the step each is on, how each of its commands stands, and its chat read from that chat's own file", async ($, on) => {
   const { files, clock, opened } = world(on)
   await $.session.start(start)
   const at = NOW
@@ -1183,8 +1183,8 @@ test("Details of another chat's work on this Mac is as deep as this chat's own: 
   expect((await tab.findAll({ type: 'Button' })).some(b => String(b.props.label).startsWith("Check the M4's plugin"))).toBe(true)
   expect(texts).toContain('To-do 1 of 2 · List the caches')
   expect(texts).toContain('Listing the caches.')
-  // Its command's last lines, as that chat read them
-  expect(texts).toContain('Updating marketplace claudopus')
+  // How its command stands, as that chat read it: its row's own line, and no last lines under it (they are in its log)
+  expect(texts).not.toContain('Updating marketplace claudopus')
   expect(texts).toContain('Fetching the mod')
   // The chat's name, and no line in place of its chat
   expect(texts.some(t => t?.startsWith('From the chat "M4 setup"'))).toBe(true)
