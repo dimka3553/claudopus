@@ -1,0 +1,1 @@
+- Results opens again with many results: Earlier and Archived now unfold 50 at a time, with Show 50 more under them, instead of every result at once, which was more than the app could draw.

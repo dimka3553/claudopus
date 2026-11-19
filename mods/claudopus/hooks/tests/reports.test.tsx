@@ -820,6 +820,32 @@ const otherChat = (at: number, chat = 'chat-b', title = 'Billing page') =>
       { id: 'b2', parentId: '', isFork: false, tokens: 0, title: 'Check the totals', words: 'check', items: [], entries: [{ at, kind: 'note', text: 'Adding up March.' }], answer: '', startedAt: at - 30_000, endedAt: 0, status: 'working' },
     ],
   })
+// A drawing past what the app draws (2000 parts, 32 deep, 262144 characters) is thrown away whole by the app, with no word to the
+// mod, and the tab says "Nothing to show yet" for good (19 Nov: Details of a task with 22 helpers and 206 ended commands). The
+// app's own check, as it runs before it draws a tab
+const appDraws = (tree: unknown) => {
+  let parts = 0
+  let deepest = 0
+  const plain = (n: unknown): unknown => {
+    if (n === null || n === undefined || typeof n === 'boolean') return null
+    if (typeof n === 'string' || typeof n === 'number') return String(n)
+    if (Array.isArray(n)) return n.map(plain).filter(one => one !== null)
+    const el = n as { type?: string; key?: string; props?: Record<string, unknown>; children?: unknown[] }
+    const props: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(el.props ?? {})) if (typeof v !== 'function' && k !== 'children' && v !== undefined) props[k] = v
+    return { type: el.type, props: { ...props, key: el.key }, children: (el.children ?? []).map(plain).filter(one => one !== null) }
+  }
+  const walk = (n: unknown, depth: number) => {
+    if (typeof n === 'string') return void (parts += 1)
+    const el = n as { children?: unknown[] }
+    parts += 1
+    deepest = Math.max(deepest, depth + 1)
+    for (const child of el.children ?? []) walk(child, depth + 1)
+  }
+  const sent = plain(tree)
+  walk(sent, 0)
+  return { parts, deepest, chars: JSON.stringify(sent).length, isDrawn: parts <= 2000 && deepest <= 32 && JSON.stringify(sent).length <= 262_144 }
+}
 
 // Results: kept, listed, opened, changed, put away and brought back, and rounds of one work
 
@@ -1309,6 +1335,44 @@ test('the results list is one line a row, newest first with no group of what wai
   expect(['v1', 'v2', 'v3'].map(id => Boolean(JSON.parse(files.get(`${MEMORY}/reports/${id}/meta.json`) ?? '{}').archived))).toEqual([true, true, true])
   expect(await until(async () => keyed(list, 'archived-fold'))).toBeDefined()
   expect((await keyed(list, 'archived-fold'))?.props.label).toBe('▸ Archived 1')
+})
+
+// 20 Nov: with about a thousand results, Earlier unfolded every one of them, past what the app draws: the tab said only that it
+// couldn't be shown, and Earlier seemed to do nothing
+test('Earlier and Archived unfold a page of results at a time, with a row that shows more, so the tab is always drawn', async ($, on) => {
+  const { files } = world(on)
+  const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [], gist: 'Done.' }
+  for (let n = 0; n < 700; n++) {
+    const r = { ...base, id: `2026111${n % 10}-${String(1000 + n)}-result-${n}`, title: `Result number ${n} with a title of a usual length`, at: 1_700_000_000_000 - n * 60_000, agent: `w${n}`, ...(n >= 600 ? { archived: true } : {}) }
+    files.set(`${MEMORY}/reports/${r.id}/meta.json`, JSON.stringify(r))
+    files.set(`${MEMORY}/reports/${r.id}/report.md`, 'Done.\n')
+  }
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Results', bodyColumns: 80 }, surface: 'desktop' } as never)
+  const titles = async () => (await list.findAll({ type: 'Button' })).filter(one => /^report-/.test(one.key ?? '')).length
+  expect(await until(async () => keyed(list, 'earlier-fold'))).toBeDefined()
+  expect((await keyed(list, 'earlier-fold'))?.props.label).toBe('▸ Earlier 595')
+  await pressed(list, 'earlier-fold')
+  expect(await until(async () => ((await titles()) === 55 ? true : undefined))).toBe(true)
+  expect(appDraws(await list.drawn()).isDrawn).toBe(true)
+  expect((await keyed(list, 'earlier-more'))?.props.label).toBe('Show 50 more')
+  await pressed(list, 'earlier-more')
+  expect(await until(async () => ((await titles()) === 105 ? true : undefined))).toBe(true)
+  // Shown past what the app draws, it takes pages back until it fits, never the tab's message alone
+  for (let n = 0; n < 12; n++) await pressed(list, 'earlier-more')
+  expect(await until(async () => ((await titles()) > 105 ? true : undefined))).toBe(true)
+  expect(appDraws(await list.drawn()).isDrawn).toBe(true)
+  expect(await list.find({ type: 'Text', text: "Claudopus couldn't show this tab" })).toBeUndefined()
+  // Folded and unfolded again, it starts at one page
+  await pressed(list, 'earlier-fold')
+  await pressed(list, 'earlier-fold')
+  expect(await until(async () => ((await titles()) === 55 ? true : undefined))).toBe(true)
+  // Archived the same way
+  await pressed(list, 'archived-fold')
+  expect(await until(async () => ((await titles()) === 105 ? true : undefined))).toBe(true)
+  expect((await keyed(list, 'archived-more'))?.props.label).toBe('Show 50 more')
+  expect(appDraws(await list.drawn()).isDrawn).toBe(true)
+  await list.unmount()
 })
 
 test('work whose brief names one result on what it is about is a round of that work; one naming several, or one on something else, is not', async ($, on) => {
