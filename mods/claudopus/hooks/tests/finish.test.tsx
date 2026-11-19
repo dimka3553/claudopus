@@ -808,7 +808,7 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   const moment = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
     (await view.findAll({ type: 'Svg' })).map(one => /^<svg data-moment="([\w-]+)"/.exec(String(one.props.source))?.[1]).filter(Boolean)[0]
   // The cards in their finish moment: outlined green at the top
-  const outlined = async (view: { findAll: (q: { type: 'Box' }) => Promise<{ props: Record<string, unknown> }[]> }) => (await view.findAll({ type: 'Box' })).filter(b => b.key === 'outline-top' && b.props.backgroundColor === '#4C9AFF').length
+  const outlined = async (view: { findAll: (q: { type: 'Box' }) => Promise<{ key?: string; props: Record<string, unknown> }[]> }) => (await view.findAll({ type: 'Box' })).filter(b => b.key === 'outline-top' && b.props.backgroundColor === '#4C9AFF').length
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   expect(await drawn(pane)).toEqual(['working'])
