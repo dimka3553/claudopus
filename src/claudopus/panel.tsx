@@ -771,7 +771,10 @@ const panelHooks = (on: On) => {
       const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
       // Its own plain words for what it does now; a watch's are its last event
       // (none beside a full count: what a script said as it counted its last thing, "command finished", read against "still running")
-      const words = isFull ? '' : plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, job.label)
+      // (the script's own fresh words first, then what the small model said it does now, then its last line made plain)
+      const isOwnNow = job.isOwn && !job.isEarlier
+      const nowSaid = job.now ? (/^[A-Z][a-z]/.test(job.now) ? job.now.charAt(0).toLowerCase() + job.now.slice(1) : job.now) : ''
+      const words = isFull ? '' : (isOwnNow ? plainOf(job.words, job.label) : '') || nowSaid || (isOwnNow ? '' : plainOf(job.latest, job.label))
       const hasSaid = Boolean(words || full.length || pct.length)
       // Silent, whether its programs still use the processor: still busy, or idle (stuck, or waiting on something far away)
       const live = job.live === 'busy' ? ' · still busy' : job.live === 'idle' ? ' · idle' : ''
@@ -807,7 +810,7 @@ const panelHooks = (on: On) => {
         const kindLead = job.kind === 'server' ? 'Serving' : job.kind === 'watch' ? 'Watching' : ''
         const shownLead = kindLead ? `${kindLead} · ${said ? 'last: ' : ''}` : lead && (nums.length || said) ? lead : ''
         const line = `${shownLead}${text}`
-        return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : (job.kind === 'script' && job.isNamed ? nowWord(job.label) : '') || JOB_NOW[job.kind], isWarn }
+        return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : (job.kind === 'script' && (job.title || job.isNamed) ? nowWord(job.title ?? job.label) : '') || JOB_NOW[job.kind], isWarn }
       }
       return { text: short, isWarn }
     }
@@ -833,7 +836,7 @@ const panelHooks = (on: On) => {
             {isMore(job) && owner ? (
               <Button key={`more-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openWork($, owner)} />
             ) : canOpenJob(job) ? (
-              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openLog($, job.id, job.label)} />
+              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openLog($, job.id, job.title ?? job.label)} />
             ) : (
               <Text wrap="truncate-end">{name}</Text>
             )}
@@ -915,7 +918,7 @@ const panelHooks = (on: On) => {
       // they ended, and its mark that it went well; one that did not says how it ended too. When is in its log's tab)
       const side = run.how === 'finished' ? took(run.endedAt - run.at) : endedLine(run, took(run.endedAt - run.at))
       const name = cut(runLabel(run), Math.max(12, perRow - 4 - t.depth * 2 - side.length - 1))
-      return (
+      const head = (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
           {endedLines(t, `twig-lines-${key}`, run)}
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -924,6 +927,15 @@ const panelHooks = (on: On) => {
           <Box flexShrink={0}>
             <Text dimColor={run.how !== 'failed'} color={run.how === 'failed' ? 'error' : undefined}>{side}</Text>
           </Box>
+        </Box>
+      )
+      // One that failed says why under its name, in plain words, where the small model said
+      const why = run.how === 'failed' ? run.named?.why : undefined
+      if (!why) return head
+      return (
+        <Box key={`ended-box-${key}`} flexDirection="column" flexShrink={0}>
+          {head}
+          {twigUnder(t, `why-${key}`, <Text color="error" wrap="truncate-end">{why}</Text>)}
         </Box>
       )
     }

@@ -10,7 +10,8 @@ import * as M7 from '../../mods/claudopus/hooks/update'
 import * as M8 from '../../mods/claudopus/hooks/changelog'
 import * as M9 from '../../mods/claudopus/hooks/tabmoves'
 import * as M10 from '../../mods/claudopus/hooks/jobs'
-import * as M11 from '../../mods/claudopus/hooks/usage'
+import * as M11 from '../../mods/claudopus/hooks/naming'
+import * as M12 from '../../mods/claudopus/hooks/usage'
 
 declare global {
   export import atom = M0.atom
@@ -261,26 +262,35 @@ declare global {
   export import Job = M10.Job
   export import JobKind = M10.JobKind
   export import TabMove = M9.TabMove
-  export import batteryShown = M11.batteryShown
-  export import batterySvg = M11.batterySvg
-  export import FOOTPRINT_EVERY = M11.FOOTPRINT_EVERY
-  export import gbText = M11.gbText
-  export import isBatteryLow = M11.isBatteryLow
-  export import isMemoryHigh = M11.isMemoryHigh
-  export import keptOf = M11.keptOf
-  export import leftText = M11.leftText
-  export import meterOf = M11.meterOf
-  export import nextKept = M11.nextKept
-  export import pctText = M11.pctText
-  export import rateText = M11.rateText
-  export import USAGE_AMBER = M11.USAGE_AMBER
-  export import USAGE_EVERY = M11.USAGE_EVERY
-  export import USAGE_LINUX = M11.USAGE_LINUX
-  export import USAGE_PURPLE = M11.USAGE_PURPLE
-  export import usageMac = M11.usageMac
-  export import usageSvg = M11.usageSvg
-  export import UsageTop = M11.UsageTop
-  export import UsageBattery = M11.UsageBattery
-  export import UsageFigures = M11.UsageFigures
-  export import UsageKept = M11.UsageKept
+  export import LOG_SENT = M11.LOG_SENT
+  export import NAMING_MODEL = M11.NAMING_MODEL
+  export import NAMING_SYSTEM = M11.NAMING_SYSTEM
+  export import namedHead = M11.namedHead
+  export import namingKey = M11.namingKey
+  export import namingOf = M11.namingOf
+  export import namingPrompt = M11.namingPrompt
+  export import Naming = M11.Naming
+  export import NamingAsk = M11.NamingAsk
+  export import batteryShown = M12.batteryShown
+  export import batterySvg = M12.batterySvg
+  export import FOOTPRINT_EVERY = M12.FOOTPRINT_EVERY
+  export import gbText = M12.gbText
+  export import isBatteryLow = M12.isBatteryLow
+  export import isMemoryHigh = M12.isMemoryHigh
+  export import keptOf = M12.keptOf
+  export import leftText = M12.leftText
+  export import meterOf = M12.meterOf
+  export import nextKept = M12.nextKept
+  export import pctText = M12.pctText
+  export import rateText = M12.rateText
+  export import USAGE_AMBER = M12.USAGE_AMBER
+  export import USAGE_EVERY = M12.USAGE_EVERY
+  export import USAGE_LINUX = M12.USAGE_LINUX
+  export import USAGE_PURPLE = M12.USAGE_PURPLE
+  export import usageMac = M12.usageMac
+  export import usageSvg = M12.usageSvg
+  export import UsageTop = M12.UsageTop
+  export import UsageBattery = M12.UsageBattery
+  export import UsageFigures = M12.UsageFigures
+  export import UsageKept = M12.UsageKept
 }

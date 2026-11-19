@@ -1792,6 +1792,109 @@ test('every run under a card says how it stands: a command that printed nothing 
   await list.unmount()
 })
 
+test('a command is named in plain words by a small model, asked in the background: its kind and title lead its row, what it does now is its second line, and why it failed is under its row in Details and in its log; the same command run again is named with no call, and no key in its log is sent; 19 Nov rows read "Run: score" and "Running"', SLOW, async ($, on) => {
+  let now = 1_700_000_000_000
+  const born = now
+  const TASKS = '/tmp/claude-501/x/s1/tasks'
+  const MIN = 60_000
+  const outputs: Record<string, () => string> = {
+    [`${TASKS}/bg-c1.output`]: () => (now - born >= 2 * MIN ? 'job v13-films3 submitted with key sk-ant-api03-abcdefghijklmnop\nwaiting for the machine\n' : ''),
+    [`${TASKS}/bg-c2.output`]: () => '',
+    [`${TASKS}/bg-s1.output`]: () => (now - born >= 3 * MIN ? 'loading 47 films\nTraceback (most recent call last):\nRuntimeError: CUDA out of memory\n\n[exited with code 1]\n' : 'loading 47 films\n'),
+  }
+  const NAMES = 'You name commands'
+  const { clock, completed } = world(on, {
+    jobs: { output: file => outputs[file]?.() ?? '', wroteAt: () => now - 2_000 },
+    complete: e => {
+      if (!e.system?.includes(NAMES)) return undefined
+      if (e.prompt.includes('score.py')) return JSON.stringify({ title: 'Score smoothed heads against the 47 test films', kind: 'test', now: '', why: e.prompt.includes('State: failed') ? 'Ran out of graphics memory while loading the films' : '' })
+      if (e.prompt.includes('v13-films3')) return JSON.stringify({ title: 'Smooth the last quarter of the films', kind: 'cloud job', now: e.prompt.includes('waiting for the machine') ? 'Waiting for the cloud machine to start' : '' })
+      return undefined
+    },
+  })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'smooth the heads', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Smooth the skin of the 3D heads', prompt: 'go' } as never)
+  const bg = (id: string, command: string, description: string) => $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command, description, run_in_background: true } as never)
+  const CLOUD = 'cd /repo/video-free && ../azure-jobs/run --name v13-films3 -- "bash batch.sh v13_3.txt v13" 2>&1 | grep --line-buffered run'
+  await bg('c1', CLOUD, 'Run: films, last quarter, with the finished lump step')
+  await bg('s1', 'python3 score.py --films 47', 'Run: score')
+  const texts = async (requestId = 'claudopus') => {
+    const pane = await $.ui.mount({ ...LIST, requestId, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
+    const all = [...(await pane.findAll({ type: 'Text' })).map(one => one.text), ...(await pane.findAll({ type: 'Button' })).map(one => String(one.props.label))]
+    await pane.unmount()
+    return all
+  }
+  // Each row leads with its kind in words and its title, as the model said them, in place of the task's own label
+  await advance(20_000)
+  const shown = (await until(async () => {
+    const all = await texts()
+    return all.includes('Cloud job · Smooth the last quarter of the films') && all.includes('Test · Score smoothed heads against the 47 test films') ? all : undefined
+  })) ?? []
+  expect(shown.some(text => /^Run: (score|films)/.test(text))).toBe(false)
+  // Asked of the small model, never waited for by the panel
+  const naming = () => completed.filter(e => e.system?.includes(NAMES))
+  expect(naming().length).toBeGreaterThan(0)
+  expect(naming().every(e => e.model === 'claude-haiku-5-5')).toBe(true)
+  // As its log moves, its second line says what it does now in the model's words
+  for (let n = 0; n < 6; n++) await advance(20_000)
+  expect(await until(async () => (await texts()).find(text => text === 'Waiting for the cloud machine to start'))).toBeDefined()
+  // and the key its log named was never sent
+  expect(naming().some(e => e.prompt.includes('sk-ant-api03'))).toBe(false)
+  expect(naming().some(e => e.prompt.includes('waiting for the machine'))).toBe(true)
+  // It fails: Details names it by its title, and says why under its row; its log says it too
+  for (let n = 0; n < 4; n++) await advance(20_000)
+  const details = (await until(async () => {
+    const all = await texts('work-a1')
+    return all.includes('Ran out of graphics memory while loading the films') ? all : undefined
+  })) ?? []
+  expect(details).toContain('Score smoothed heads against the 47 test films')
+  expect(details.some(text => /^Failed after \dm \d\ds$/.test(text))).toBe(true)
+  const log = await $.ui.mount({ ...LIST, requestId: 'log-bg-s1', props: { ...LIST.props, bodyColumns: 100 }, surface: 'desktop' } as never)
+  const logTexts = (await log.findAll({ type: 'Text' })).map(one => one.text)
+  await log.unmount()
+  expect(logTexts).toContain('Score smoothed heads against the 47 test films')
+  expect(logTexts.some(text => /^Failed after \dm \d\ds · \d+s ago · Ran out of graphics memory while loading the films$/.test(text))).toBe(true)
+  // The same command run again has its title with no call of its own
+  const asked = naming().length
+  await bg('c2', CLOUD, 'Run: films, last quarter, with the finished lump step')
+  for (let n = 0; n < 3; n++) await advance(20_000)
+  // (the two alike are one row, which says so)
+  expect(await until(async () => (await texts()).find(text => text === 'Cloud job · Smooth the last quarter of the films ×2'))).toBeDefined()
+  expect(naming().length).toBe(asked)
+})
+
+test('where the small model gives no answer, a command keeps the name its task gave it, and the model is not asked again for a while', SLOW, async ($, on) => {
+  let now = 1_700_000_000_000
+  const { clock, completed } = world(on, { jobs: { output: () => '', wroteAt: () => now - 2_000 }, complete: e => (e.system?.includes('You name commands') ? null : undefined) })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'redraw', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Redraw', prompt: 'go' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'r1', agentId: 'a1', command: 'bash /s/round3b_figs.sh', description: 'Redraw all pictures', run_in_background: true } as never)
+  const texts = async () => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
+    const all = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
+    await list.unmount()
+    return all
+  }
+  const naming = () => completed.filter(e => e.system?.includes('You name commands'))
+  await advance(20_000)
+  expect(await until(async () => (naming().length ? true : undefined))).toBe(true)
+  expect(await until(async () => (await texts()).find(text => text === 'Command · Redraw all pictures'))).toBeDefined()
+  // A second command within minutes of the model's error is not asked about
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'r2', agentId: 'a1', command: 'bash /s/fetch.sh', description: 'Download the scans', run_in_background: true } as never)
+  for (let n = 0; n < 6; n++) await advance(20_000)
+  expect(naming()).toHaveLength(1)
+  expect((await texts()).some(text => /^Download the scans$/.test(text))).toBe(true)
+  // Five minutes on, it is asked again
+  for (let n = 0; n < 12; n++) await advance(20_000)
+  expect(await until(async () => (naming().length > 1 ? true : undefined))).toBe(true)
+})
+
 test('only runs really running are listed: a watch the engine killed at its time limit, a command that failed and one that finished leave at once, counted on the closing row and told apart in Details; 15 Nov three "[killed]" watches stayed with their clocks running', SLOW, async ($, on) => {
   let now = 1_700_000_000_000
   const born = now

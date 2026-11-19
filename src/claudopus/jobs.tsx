@@ -19,21 +19,27 @@ let tasksMissedAt = 0
 const jobFiles = new Map<string, string>()
 
 // A job as its row shows it, from its command and words: a watch is what waits for something far away and ends when it is there
-const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false, theirs?: Seen): Job => {
+// (with its title and kind in plain words where the small model gave them, and what it does now)
+const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false, theirs?: Seen & { now?: string }, named?: { title?: string; kind?: string }): Job => {
   const seen = jobLog.get(id) ?? theirs
   const said = describedOf(what)
-  const kind: JobKind = isWatch ? 'watch' : jobKindOf(cmd, what)
+  // (one the small model says is a cloud job runs on another computer, whatever its line looks like)
+  const told: JobKind = isWatch ? 'watch' : jobKindOf(cmd, what)
+  const kind: JobKind = told === 'script' && named?.kind === 'cloud job' ? 'remote' : told
   const label = labelOf(said.text || cmd, cmd)
-  return { id, label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd, kind, at, ...(seen ?? {}), port: portOf(cmd) ?? seen?.port }
+  const now = namedNow.get(id) ?? theirs?.now
+  return { id, label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd, kind, at, ...(seen ?? {}), port: portOf(cmd) ?? seen?.port, ...(named?.title ? { title: named.title, ...(named.kind ? { namedKind: named.kind } : {}) } : {}), ...(now ? { now } : {}) }
 }
 // The rows a card has: what it sent to the background and Claude Code still tracks, and nothing else; jobs alike are one
-const jobsOf = (one: Todo): Job[] => foldJobs((one.bg ?? []).map(b => jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id])))
+const jobsOf = (one: Todo): Job[] => foldJobs((one.bg ?? []).map(b => jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id], b.named)))
 
 // A job's name on its row: what kind, a server's port, and its own words
 // Its kind leads in words, so it is never taken for a helper, then how many alike it stands for
 const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
   const many = job.count && job.count > 1 ? ` ×${job.count}` : ''
+  // Named by the small model: its kind in its words, then its title
+  if (job.title) return `${namedHead({ title: job.title, kind: job.namedKind as Naming['kind'] })}${job.kind === 'server' && job.port && !job.title.includes(job.port) ? ` :${job.port}` : ''}${many}`
   const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${many}`
   // Its own words alone when they say its kind already (Download the CT scans, Watch the cloud jobs)
   // (only when they say the kind it is: a watch named Check that… still leads with Watch)
@@ -77,6 +83,8 @@ const lookJobs = async ($: EngineInterface) => {
   const ended: string[] = []
   // How each ended, where its output says: finished, failed with its code, or killed
   const endedAs: Record<string, EndAs> = {}
+  // What each wrote, as read, for the small model that names them
+  const texts: Record<string, string> = {}
   // A watch well past the time limit the engine set it has ended, whether or not its last line was read
   for (const one of list) for (const b of one.bg ?? []) if (b.isWatch && b.expiresAt && now - b.expiresAt >= WATCH_GRACE) (ended.push(b.id), (endedAs[b.id] = 'timed out'))
   let isChanged = false
@@ -93,6 +101,7 @@ const lookJobs = async ($: EngineInterface) => {
       const job = asked[(n - 1) / 2]
       const id = job?.id ?? ''
       const text = parts[n + 1] ?? ''
+      texts[id] = text
       const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
       // One that ended, by the engine's last line on its output, and when: as that output last changed
       const end = runEndOf(text)
@@ -143,6 +152,8 @@ const lookJobs = async ($: EngineInterface) => {
       if (o && seen && seen.live !== live) (jobLog.set(o.id, { ...seen, live }), (isChanged = true))
     }
   }
+  // Each command that needs it is named afresh in plain words, in the background: never waited for here
+  void nameJobs($, list, texts, endedAs).catch(err => log($, `commands not named: ${String(err)}`))
   // A background command that has ended, by the engine's last line on its output, leaves its card
   if (ended.length) {
     await dropBackground($, ended, endedAs)
@@ -313,7 +324,7 @@ const openLog = ($: EngineInterface, id: string, label: string) => {
 const logOf = async ($: EngineInterface, paneId: string) => {
   for (const one of await read($, todos)) {
     const b = one.bg?.find(b => logPaneOf(b.id) === paneId)
-    if (b) return { one, job: jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id]), run: undefined, file: jobFiles.get(b.id) || (tasksDir ? `${tasksDir}/${b.id}.output` : '') }
+    if (b) return { one, job: jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id], b.named), run: undefined, file: jobFiles.get(b.id) || (tasksDir ? `${tasksDir}/${b.id}.output` : '') }
     const run = one.endedRuns?.find(r => logPaneOf(r.id) === paneId)
     // (one kept before its file was: where this chat's commands write, by its id)
     if (run) {
@@ -329,7 +340,9 @@ const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
   if (!found) return <Text dimColor>This log is no longer available.</Text>
   const { one, job, run, file } = found
   const now = await $.clock.now()
-  const label = job ? job.label : run ? runLabel(run) : 'A command'
+  const label = job ? (job.title ?? job.label) : run ? runLabel(run) : 'A command'
+  // (why it failed, in plain words, where the small model said)
+  const why = run?.how === 'failed' ? run.named?.why : undefined
   const kind: JobKind = job?.kind ?? run?.kind ?? 'script'
   const state = job ? `${JOB_NOW[kind]} · ${took(now - job.at)}` : run ? `${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(now - run.endedAt)} ago` : ''
   const r = file && canOpenFile(file) ? await $.process.run(['sh', '-c', 'tail -n "$2" "$1" 2>/dev/null # the log tab', 'sh', file, String(LOG_LINES + 1)], { timeoutMs: 5000 }).catch(() => undefined) : undefined
@@ -347,7 +360,7 @@ const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
             <Text bold wrap="wrap">{label}</Text>
           </Box>
         </Box>
-        {isFailed ? <Text color="error" wrap="wrap">{state}</Text> : null}
+        {isFailed ? <Text color="error" wrap="wrap">{why ? `${state} · ${why}` : state}</Text> : null}
         <Text dimColor wrap="wrap">{[isFailed ? '' : state, `of the task “${cut(titleOf(one), 40)}”`].filter(Boolean).join(' · ')}</Text>
         <Box flexDirection="row" gap={2} flexShrink={0}>
           {job && canStopJob(job) ? <Button key={`log-stop-${presses}`} label={stoppingJobs.has(job.id) ? 'Stopping' : 'Stop'} plain onPress={() => void stopJob($, one.id, job).catch(err => log($, `run not stopped: ${String(err)}`))} /> : null}

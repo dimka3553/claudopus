@@ -28,6 +28,10 @@ export type Job = {
   count?: number
   // While it writes nothing: whether the programs that hold its log open use the processor
   live?: 'busy' | 'idle'
+  // Its title and kind in plain words, and what it does now, as the small model said them (naming.tsx)
+  title?: string
+  namedKind?: string
+  now?: string
 }
 
 // How often the jobs' output is read, and how often a job that wrote something new counts as news for its card

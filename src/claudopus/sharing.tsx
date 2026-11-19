@@ -52,7 +52,7 @@ const shareMine = async ($: EngineInterface) => {
     const seen = Object.fromEntries(
       (one.bg ?? []).flatMap(job => {
         const s = jobLog.get(job.id)
-        return s ? [[job.id, { latest: s.latest, ...(s.pct ? { pct: s.pct } : {}), ...(s.done ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}), ...(s.wroteAt ? { wroteAt: s.wroteAt } : {}), ...(s.tail?.length ? { tail: s.tail } : {}), ...(s.words ? { words: s.words } : {}), ...(s.isOwn ? { isOwn: true } : {}), ...(s.isEarlier ? { isEarlier: true } : {}), ...(s.isEmpty ? { isEmpty: true } : {}) }]] : []
+        return s ? [[job.id, { latest: s.latest, ...(s.pct ? { pct: s.pct } : {}), ...(s.done ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}), ...(s.wroteAt ? { wroteAt: s.wroteAt } : {}), ...(s.tail?.length ? { tail: s.tail } : {}), ...(s.words ? { words: s.words } : {}), ...(s.isOwn ? { isOwn: true } : {}), ...(s.isEarlier ? { isEarlier: true } : {}), ...(s.isEmpty ? { isEmpty: true } : {}), ...(namedNow.get(job.id) ? { now: namedNow.get(job.id) } : {}) }]] : []
       }),
     )
     return Object.keys(seen).length ? { ...one, seenJobs: seen } : one

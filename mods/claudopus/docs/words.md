@@ -36,7 +36,7 @@ Every word Claudopus shows you (panel, cards, the bar, questions, notices, resul
 
 ## Every running thing has a progress line
 A running command or helper is two lines:
-1. **What it does**, in the task's words, with how long it has run: `Render the song stills · 4m 10s`
+1. **What it does**, with how long it has run: its kind, then a plain title a small model writes from the command, the task's words and its log, `Test · Score smoothed heads against the 47 test films · 4m 10s`, or the title alone where it starts with its kind, `Render the song stills`. Where the model gives none, the task's own words.
 2. **Now**: how far in things · how fast · what it is doing now: `2 of 6 · 33% · rendering still 3`. It counts things, never time; a time left shows only when the command itself prints one.
 
 - After three minutes with nothing new, line 2 keeps the last thing it said and adds how long: `Last: 2 of 6 stills rendered · nothing new for 29m`. With nothing ever said: `No output yet · started 29m ago`. Never "nothing new" alone. A narrow row keeps the time: `No output yet · 29m`, `No progress for 29m`.
@@ -45,6 +45,7 @@ A running command or helper is two lines:
 - A helper's line 2 is what it is doing now, in plain words: `Reading files`, `Rendering the song stills · 4m`, `Searching the web`, `Waiting for its commands`, or its own last note. Quiet for three minutes, it is `Last: Reading files · nothing new for 29m`.
 - A task's card says only its stage, the to-do marked doing (`To-do 5 of 7 · Mend the nose`), and its own last note as its line, plus in amber what needs you. A paused task is Working, and its card says nothing of the pause; a command that ended never takes the place of the task's own line.
 - Ended: `Done in 2m 05s`, `Failed after 2m 05s`, `Stopped after 1m`, `Ran out of time after 30m`.
+- Line 2's plain words are the command's own `progress:` words, else what the model says it does now, `Waiting for the cloud machine to start`. A failed command says why, in the model's plain words, under its row in Details and in its log: `Ran out of memory while loading the films`.
 - A count that is full while the command still runs never says 100%, and nothing after it: `7 of 7 heads · still running`.
 - In Details the commands of a task or helper that ended are a group, last under it, headed by a row as its card's closing row: `3 commands ended · 1 failed`. A press on that row folds them away (`3 commands ended · show`). Each is a row under it: its name as it had it running, never its shell line, then how long it ran, `2m 41s`, or how it ended where it did not finish, `Failed after 20s`. A press opens its log, which says when it ended.
 - A card's closing row counts what ended and what did not finish, and names none: `13 commands ended · 1 failed, 2 ran out of time`, `2 helpers ended · 1 helper failed`. A failed command has no row of its own on the card: which one, how and why is in Details and its log.

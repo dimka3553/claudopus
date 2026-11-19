@@ -114,14 +114,15 @@ export type Todo = {
   stuckTold?: number
   // What it started in the background itself, as Claude Code tracks it (a command, a watch, a server): the engine's task id, what
   // it is in its own words, and since when, with the command itself. Dropped as it ends or is stopped; a server stays under a done card
-  bg?: { id: string; what: string; at: number; isWatch?: boolean; cmd?: string; expiresAt?: number }[]
+  // `named`: its title and kind in plain words, as the small model said them (naming.tsx)
+  bg?: { id: string; what: string; at: number; isWatch?: boolean; cmd?: string; expiresAt?: number; named?: { title?: string; kind?: string } }[]
   // What it ran in the background that has ended, newest last: its words, when it began and ended, and how it ended
   // (finished, failed with its exit code, killed, timed out at the engine's limit, stopped by the work, or ended as far as the mod
   // can tell). Its card sums these up in a row, and Details lists them
-  endedRuns?: { id: string; what: string; at: number; endedAt: number; how: 'finished' | 'failed' | 'killed' | 'timed out' | 'stopped' | 'ended'; code?: string; count?: number; kind?: 'server' | 'download' | 'upload' | 'script' | 'remote' | 'watch'; why?: string; file?: string; cmd?: string }[]
+  endedRuns?: { id: string; what: string; at: number; endedAt: number; how: 'finished' | 'failed' | 'killed' | 'timed out' | 'stopped' | 'ended'; code?: string; count?: number; kind?: 'server' | 'download' | 'upload' | 'script' | 'remote' | 'watch'; why?: string; file?: string; cmd?: string; named?: { title?: string; kind?: string; why?: string } }[]
   // In another chat's file only: how each of its jobs stands as that chat last read it (its latest line, how far, its last lines),
   // by the job's id, so its Details shows them as that chat's own does
-  seenJobs?: Record<string, { latest: string; pct?: string; done?: string; total?: string; wroteAt?: number; tail?: string[]; words?: string; isOwn?: boolean; isEarlier?: boolean; isEmpty?: boolean; target?: string }>
+  seenJobs?: Record<string, { latest: string; pct?: string; done?: string; total?: string; wroteAt?: number; tail?: string[]; words?: string; isOwn?: boolean; isEarlier?: boolean; isEmpty?: boolean; target?: string; now?: string }>
   // Its own folder in the chat's scratchpad, by name, which its rules name
   scratch?: string
   // How many reminders Claudopus sent of what waits on the person on it (its question, or the Allow its commands wait for), waiting since `at`
