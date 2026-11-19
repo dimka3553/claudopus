@@ -1017,7 +1017,7 @@ test("a task that ends its step while its helpers work stays at work, and nothin
   agents.a1 = 'running'
   const late = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb1', agentId: 'a1', message: 'The nose is fixed.' } as never)) as { deny?: string; result?: { message?: string } }
   expect([late.deny, late.result?.message]).toEqual([undefined, expect.stringContaining('Report delivered to your caller')])
-  expect(await until(async () => list.find({ type: 'Text', text: '✓ Done' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: '◐ Delivered' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: '1 working' })).toBeUndefined()
   await list.unmount()
   // Stopped by the chat, a task's helpers at work are stopped with it

@@ -99,7 +99,7 @@ test('a task that leaves a preview server going for the person is done only once
   await $.prompt.submit({ text: 'build and deploy the site', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Build and deploy the site', prompt: 'build it' } as never)
   const call = async (tool: string, id: string, input: Record<string, unknown> = {}) => (await $.tool.call({ tool, tool_use_id: id, agentId: 'a1', ...input } as never)) as { deny?: string }
-  const isDone = async () => (await leftTexts($)).some(text => text === '✓ Done' || /^Done · /.test(text))
+  const isDone = async () => (await leftTexts($)).some(text => text === '◐ Delivered' || /^Done · /.test(text))
   await call('mcp__claudopus__todo', 't1', { item: 'Build the full page', state: 'done' })
   await call('mcp__claudopus__todo', 't2', { item: 'Put it live', state: 'doing' })
   // The server it leaves going is sent to the background as itself, and has its row

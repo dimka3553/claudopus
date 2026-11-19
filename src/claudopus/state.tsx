@@ -1,24 +1,29 @@
 // ---- One stage for a task's card ----
 
-// A card stands in one of five stages, and its colour, its line, its place in the panel, the header's counts, the octopus, the
+// A card stands in one of six stages, and its colour, its line, its place in the panel, the header's counts, the octopus, the
 // sound, the notifications and what other chats see all read it here; nothing else decides
 // - working (purple): from its start until its result, whether it takes steps or has ended a step with commands or helpers of its
 //   own running
 // - waiting (amber): only while something of its own waits for the person: a question, a permission, a key or password box
-// - done (green): only by handing in its result, with every to-do ticked or dropped and nothing of its own running; a server it
-//   left for the person keeps its row under the card
+// - delivered (blue): only by handing in its result, with every to-do ticked or dropped and nothing of its own running; a server
+//   it left for the person keeps its row under the card. The result is the person's to look at: a reply puts it back to work
+// - done (green): only by the person's Mark as done on a delivered card, which puts it under Finished (19 Nov, the person:
+//   "distinguish between something that's completely done, which is something that you can mark as done as a person, and
+//   something that's in the intermediate state"). A card that finished before cards stayed up is done, as it was
 // - stopped (grey): only by the person's Stop, or the chat's on their word
 // - failed (red): it could not go on, and its card says why
-type Stage = 'working' | 'waiting' | 'done' | 'stopped' | 'failed'
-type Staged = Pick<Todo, 'status'> & Parameters<typeof needsPerson>[0]
+type Stage = 'working' | 'waiting' | 'delivered' | 'done' | 'stopped' | 'failed'
+type Staged = Pick<Todo, 'status' | 'up' | 'closedAt'> & Parameters<typeof needsPerson>[0]
 const stageOf = (_list: readonly Staged[], card: Staged): Stage => {
   if (card.status === 'failed' || card.status === 'stopped') return card.status
   if (needsPerson(card)) return 'waiting'
-  return card.status === 'done' ? 'done' : 'working'
+  return card.status === 'done' ? (card.up && !card.closedAt ? 'delivered' : 'done') : 'working'
 }
+// Whether it handed in its result: delivered, or marked done by the person
+const hasResult = (stage: Stage) => stage === 'delivered' || stage === 'done'
 // Each stage in the words a card says it with, and its colour
-const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
-const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, done: DONE, stopped: undefined, failed: 'error' })[stage]
+const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', delivered: 'Delivered', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
+const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, delivered: DELIVERED, done: DONE, stopped: undefined, failed: 'error' })[stage]
 // Why a card failed, where it says so
 const WHY_NO_RESULT = 'Ended without its result'
 const WHY_APP_CLOSED = 'The app closed while it worked'

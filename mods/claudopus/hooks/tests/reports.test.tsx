@@ -838,7 +838,7 @@ test('finished work leaves a result for good that asks nothing: its pictures cop
   expect(await pane.find({ type: 'Text', text: /^●$/ })).toBeUndefined()
   // Its task is done, in green, and waits for nobody: no question from its result on the card, nothing to press for one, and the
   // header counts nothing as waiting
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /^Result ready|Shall I send it to the team/ })).toBeUndefined()
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === '#E5A50A').length).toBe(0)
@@ -959,9 +959,9 @@ test('finished work leaves a result for good that asks nothing: its pictures cop
   expect(await cards.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
   await $.agent.spawn({ ...spawn, description: 'Save another rule', prompt: 'save it' } as never)
   await $.turn.complete({ agentId: 'a5', answer: 'The rule is saved.', durationMs: 1, isAborted: false, turnId: 't6', reason: 'answer' })
-  expect(await until(async () => (await cards.find({ type: 'Text', text: '✓ Done' })) ?? undefined)).toBeDefined()
+  expect(await until(async () => (await cards.find({ type: 'Text', text: '◐ Delivered' })) ?? undefined)).toBeDefined()
   await pressed(cards, 'dismiss-a5')
-  expect(await until(async () => ((await cards.find({ type: 'Text', text: '✓ Done' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await cards.find({ type: 'Text', text: '◐ Delivered' })) ? undefined : true))).toBe(true)
   expect(await until(async () => ((await finishedCount()) === before + 2 ? true : undefined))).toBe(true)
   // And while the person uses the panel scrolled down, where the drawing on screen is kept while they move: the card dismissed is
   // under Finished in the drawing right after the press, not once they have left the panel alone (18 Nov, the person: "when I

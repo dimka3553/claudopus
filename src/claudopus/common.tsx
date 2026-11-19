@@ -61,6 +61,9 @@ const FILL = '#80808024'
 const EDGE_PARTS = 14
 // How long a line of the log may be
 const NOTE_CHARS = 200
+// What a delivered card lists of what its result leaves open: so many questions, each so long
+const QUESTIONS_KEPT = 6
+const QUESTION_CHARS = 200
 // How much of an answer the panel keeps
 const ANSWER_CHARS = 30_000
 // While the servers panel is open it looks again this often

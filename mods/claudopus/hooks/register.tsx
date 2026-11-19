@@ -6,7 +6,7 @@ import type { Round } from './flows'
 import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, svgFits, view as statsShown } from './stats'
 import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
 import { broughtBackBy, isResultId, marksOf, merged, markThere, parsedMeta, PLACE, PULL, pullThere, PUSH, PUSH_THERE, rehome, RESULTS_A_TRIP, RESULTS_EVERY, RESULTS_LOOK, resultsOf } from './results'
-import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, helpersOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, shareableHelpers, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
+import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, helpersOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, deliveredSaid, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, shareableHelpers, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
 import type { Answer, Off } from './shared'
 import { clearModel, configView, editing, fillModels, heavyModeOf, leanOf, modelsIn, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, HeavyMode, Lean, LeanKey, Models, Role } from './config'
@@ -57,6 +57,8 @@ const STEP_CHARS = 160
 const FILL = '#80808024'
 const EDGE_PARTS = 14
 const NOTE_CHARS = 200
+const QUESTIONS_KEPT = 6
+const QUESTION_CHARS = 200
 const ANSWER_CHARS = 30_000
 const TICK = 3000
 const LINGER = 2000
@@ -1184,7 +1186,7 @@ const ended = (one: Todo, status: Todo['status'], at: number): Todo => {
   const servers = status === 'done' ? (one.bg ?? []).filter(b => isServerRun(b.cmd, b.what)) : []
   return { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, up: true, why: undefined, bg: servers.length ? servers : undefined }
 }
-const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, questions: undefined, newAt: at })
 const stoppedAs = (one: Todo): Todo['status'] => (hasReport(one) ? 'done' : 'stopped')
 const handedBack = new Map<string, string>()
 const stoppedHere = new Set<string>()
@@ -1648,15 +1650,16 @@ const withLinks = (Link: ElementTable['Link'], text: string, key: string, whole 
 }
 
 
-type Stage = 'working' | 'waiting' | 'done' | 'stopped' | 'failed'
-type Staged = Pick<Todo, 'status'> & Parameters<typeof needsPerson>[0]
+type Stage = 'working' | 'waiting' | 'delivered' | 'done' | 'stopped' | 'failed'
+type Staged = Pick<Todo, 'status' | 'up' | 'closedAt'> & Parameters<typeof needsPerson>[0]
 const stageOf = (_list: readonly Staged[], card: Staged): Stage => {
   if (card.status === 'failed' || card.status === 'stopped') return card.status
   if (needsPerson(card)) return 'waiting'
-  return card.status === 'done' ? 'done' : 'working'
+  return card.status === 'done' ? (card.up && !card.closedAt ? 'delivered' : 'done') : 'working'
 }
-const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
-const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, done: DONE, stopped: undefined, failed: 'error' })[stage]
+const hasResult = (stage: Stage) => stage === 'delivered' || stage === 'done'
+const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', delivered: 'Delivered', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
+const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, delivered: DELIVERED, done: DONE, stopped: undefined, failed: 'error' })[stage]
 const WHY_NO_RESULT = 'Ended without its result'
 const WHY_APP_CLOSED = 'The app closed while it worked'
 const WHY_ERROR = 'Ended with an error'
@@ -2990,10 +2993,11 @@ const LIVE = '#8A63F0'
 const NEEDS = '#E5A50A'
 const LIVE_DOTS = dots(LIVE, LINE)
 const DONE = 'success'
+const DELIVERED = '#4C9AFF'
 const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: '', wave: '', asking: '', updated: '' }
 const ART_FILES: Record<Exclude<keyof typeof ART, 'asking' | 'updated'>, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg', wave: 'wave.svg' }
 const isHappy = (cards: (Staged & { id: string; parentId?: string; endedAt: number })[], at: number) =>
-  cards.some(one => !one.parentId && stageOf(cards, one) === 'done' && isLingering(one, at))
+  cards.some(one => !one.parentId && hasResult(stageOf(cards, one)) && isLingering(one, at))
 const HEAD_MARK = 48
 const BAND_MARK = 16
 const moments = new Map<string, { art: keyof typeof ART; mark: string; at: number }>()
@@ -4245,7 +4249,7 @@ const lookEnds = async ($: EngineInterface) => {
   const cards = list.filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
-  const all: { id: string; status: string; endedAt: number }[] = [...cards.map(one => ({ id: one.id, status: stageOf(list, one), endedAt: one.endedAt })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt }))]
+  const all: { id: string; status: string; endedAt: number }[] = [...cards.map(one => ({ id: one.id, status: hasResult(stageOf(list, one)) ? 'done' : stageOf(list, one), endedAt: one.endedAt })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt }))]
   const was = lastSeen
   lastSeen = new Map(all.map(one => [one.id, standing(one.status, one.endedAt)]))
   if (!was) return
@@ -8719,6 +8723,7 @@ const chatHooks = (on: On) => {
         type: 'object',
         properties: {
           text: { type: 'string' },
+          questions: { type: 'array', items: { type: 'string' }, description: named('Only with your last note before you hand in, and only when your result leaves something open that {name} may want to decide on seeing it: each as one short plain question. Your delivered card lists them, and {name} answers them all in one reply, which starts you again. Never what holds you up: that is a question you ask before you finish') },
           task: { type: 'string', description: named('Only after a message from {name} that is a new task of its own, which you do not do: that request in one line. The chat starts it as a task of its own') },
         },
         required: ['text'],
@@ -10928,12 +10933,13 @@ const toolHooks = (on: On) => {
   })
 
   on('tool.call', { tool: 'mcp__claudopus__note' }, async ($, e) => {
-    const input = e as unknown as { text?: string; decision?: boolean; task?: string }
+    const input = e as unknown as { text?: string; decision?: boolean; task?: string; questions?: unknown }
+    const asked = Array.isArray(input.questions) ? input.questions.map(one => oneLine(typeof one === 'string' ? one : '').slice(0, QUESTION_CHARS)).filter(Boolean).slice(0, QUESTIONS_KEPT) : undefined
     const text = oneLine(input.text ?? '').slice(0, NOTE_CHARS)
     if (!text) return { result: 'A note needs its text.' }
     if (e.agentId === undefined) return { result: "Only a background task keeps a log in the panel; the chat has none." }
     const kind: Entry['kind'] = input.decision ? 'decision' : 'note'
-    await change($, e.agentId, (one, at) => ({ ...one, entries: [...one.entries, { at, kind, text }].slice(-ENTRIES_KEPT) }))
+    await change($, e.agentId, (one, at) => ({ ...one, entries: [...one.entries, { at, kind, text }].slice(-ENTRIES_KEPT), ...(asked && one.id === e.agentId ? { questions: asked.length ? asked : undefined } : {}) }))
     const task = oneLine(input.task ?? '').slice(0, 400)
     if (!task) return { result: 'Noted.' }
     const list = await read($, todos)
@@ -11239,7 +11245,7 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
   }
   if (open.kind === 'change') {
     const one = changeTarget(cards)
-    return one && { head: `↳ Message to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) }
+    return one && { head: `↳ ${stageOf(cards, one) === 'delivered' && one.questions?.length ? 'Reply' : 'Message'} to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) }
   }
   if (open.kind === 'continue') {
     const r = kept.find(one => one.id === open.id)
@@ -11635,7 +11641,7 @@ const panelHooks = (on: On) => {
     const ours = modelName(await $.session.model().catch(() => ''))
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
     const isAbovePrompt = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
-    const isFinishMoment = (one: Todo) => stage(one) === 'done' && lingers(one, at)
+    const isFinishMoment = (one: Todo) => hasResult(stage(one)) && lingers(one, at)
     const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
     const stood: Record<Flow['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
     const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `It was moved to ${one.moved}` : rightModel(one.model ?? '') ? "Tasks don't run on this model" : '')
@@ -11772,6 +11778,21 @@ const panelHooks = (on: On) => {
       )
     }
     const canDismiss = (one: Todo) => !one.chat && !one.parentId && one.status !== 'working' && shownWork.some(up => up.id === one.id) && !isActingOnReply(one) && !one.admins?.length && !needsFor(one).some(need => need.kind !== 'question')
+    const questionLines = (one: Todo, key: string, left: number | 'xs') => {
+      const asked = one.questions ?? []
+      if (!asked.length) return null
+      return (
+        <Box key={key} flexDirection="column" paddingLeft={left}>
+          <Text dimColor>{asked.length === 1 ? 'It asks' : `It asks ${asked.length} things`}</Text>
+          {asked.map((text, n) => (
+            <Box key={`${key}-${n}`} flexDirection="row" gap={1} alignItems="flex-start">
+              {asked.length > 1 ? <Box flexShrink={0}><Text dimColor>{`${n + 1}.`}</Text></Box> : null}
+              <Box flexGrow={1} flexShrink={1} minWidth={0}><Text wrap="wrap">{text}</Text></Box>
+            </Box>
+          ))}
+        </Box>
+      )
+    }
     const small = (one: Todo) => {
       const isMomentNow = isFinishMoment(one) && !keptUpNow.has(one.id) && !isDismissed(one)
       if (!isMomentNow) cardNo += 1
@@ -11782,7 +11803,7 @@ const panelHooks = (on: On) => {
       const scope = `card-${one.id}`
       const isMoment = isMomentNow && !isAbovePrompt
       return (
-        <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isMoment ? { borderStyle: 'round' as const, borderColor: DONE } : {})}>
+        <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isMoment ? { borderStyle: 'round' as const, borderColor: stageColor(stage(one)) ?? DONE } : {})}>
           {edge(one, kept.length, done, kept.some(item => item.state === 'doing'))}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
             <Box flexDirection="column">
@@ -11800,7 +11821,7 @@ const panelHooks = (on: On) => {
                 ) : null}
                 {/* Done, at the top or under Finished: a press opens the box above the chat for what to change, where that bar
                     takes a box; the same task then carries on with what is typed */}
-                {canChange(one) && 'Input' in table && repliesInBar(e.surface) ? (
+                {canChange(one) && stage(one) !== 'delivered' && 'Input' in table && repliesInBar(e.surface) ? (
                   <Box flexShrink={0}>
                     <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : 'Message'} plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
                   </Box>
@@ -11811,8 +11832,9 @@ const panelHooks = (on: On) => {
                     <Button key={`again-small-${one.id}-${presses}`} label="Start again" plain dimColor hover={{ scope: `again-${one.id}`, underline: true }} onPress={() => ((presses += 1), void startAgain($, one.id))} />
                   </Box>
                 ) : null}
-                {/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again */}
-                {canDismiss(one) ? (
+                {/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again. A
+                    delivered card has its two presses at its bottom instead, and none up here */}
+                {canDismiss(one) && stage(one) !== 'delivered' ? (
                   <Box flexShrink={0}>
                     <Button key={`dismiss-${one.id}-${presses}`} label="Dismiss" plain dimColor hover={{ scope: `dismiss-${one.id}`, underline: true }} onPress={() => void ((presses += 1), dismiss($, one.id).catch(err => log($, `card not dismissed: ${String(err)}`)))} />
                   </Box>
@@ -11855,19 +11877,20 @@ const panelHooks = (on: On) => {
                 ) : null}
               </Box>
             ) : null}
-            {/* A card that waits says so with its block alone: no line of what the task last did under it */}
+            {/* A card that waits says so with its block alone: no line of what the task last did under it. A delivered card's line is
+                one row: what it asks and its presses come right under it */}
             {needsPerson(one) ? null : (
-            <Box flexDirection="row" alignItems="flex-start" gap={1} height={2} overflow="hidden" paddingLeft={lead}>
+            <Box flexDirection="row" alignItems="flex-start" gap={1} height={stage(one) === 'delivered' ? 1 : 2} overflow="hidden" paddingLeft={lead}>
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* Ended, the line begins with its stage, in its colour: green done, grey stopped, red failed with why; then what
                     it last said */}
-                {stage(one) === 'done' || stage(one) === 'stopped' || stage(one) === 'failed' ? (
+                {hasResult(stage(one)) || stage(one) === 'stopped' || stage(one) === 'failed' ? (
                   <Box flexDirection="row" minWidth={0}>
                     {/* (the stage's own word is never the part cut short: on a narrow panel a long note beside it left "✓ …") */}
                     <Box flexShrink={stage(one) === 'failed' ? 1 : 0} minWidth={0}>
                       <Text wrap="truncate-end" color={stageColor(stage(one))} dimColor={stage(one) === 'stopped'}>
-                        {stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? `✕ Failed${one.why ? ` · ${one.why}` : ''}` : 'Stopped'}
+                        {stage(one) === 'delivered' ? '◐ Delivered' : stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? `✕ Failed${one.why ? ` · ${one.why}` : ''}` : 'Stopped'}
                       </Text>
                     </Box>
                     {noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}
@@ -11880,6 +11903,19 @@ const panelHooks = (on: On) => {
             )}
             {/* Its helpers, inside the card: its coloured edge runs down beside them */}
             {tree.length ? <Box key={`tree-${one.id}`} flexDirection="column" paddingLeft={lead}>{tree}</Box> : null}
+            {/* Delivered: what its result leaves open, numbered, with no press of their own, and at the card's bottom its only two
+                presses (19 Nov, the person: "buttons at the bottom to mark as done, provide feedback", "it makes the most sense
+                to just send one message for both the questions"). The reply is typed in the box above the chat, as every
+                message is, and puts the task back to work; Mark as done puts the card under Finished */}
+            {stage(one) === 'delivered' ? questionLines(one, `asks-${one.id}`, lead) : null}
+            {stage(one) === 'delivered' && (canDismiss(one) || (canChange(one) && 'Input' in table && repliesInBar(e.surface))) ? (
+              <Box key={`delivered-${one.id}`} flexDirection="row" flexWrap="wrap" gap={1} paddingLeft={lead}>
+                {canChange(one) && 'Input' in table && repliesInBar(e.surface) ? (
+                  <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : one.questions?.length ? 'Reply' : 'Give feedback'} variant={isBarOpen('change', one.id) ? undefined : 'primary'} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
+                ) : null}
+                {canDismiss(one) ? <Button key={`dismiss-${one.id}-${presses}`} label="Mark as done" onPress={() => void ((presses += 1), dismiss($, one.id).catch(err => log($, `card not marked done: ${String(err)}`)))} /> : null}
+              </Box>
+            ) : null}
           </Box>
         </Box>
       )
@@ -12653,6 +12689,7 @@ const panelHooks = (on: On) => {
             </Box>
           ) : null}
           {resultPart(one)}
+          {stage(one) === 'delivered' && one.questions?.length ? part('part-questions', 'Questions', '', questionLines(one, 'asks-whole', 0) ?? <Box />) : null}
           {one.words ? askPart(one) : null}
           {todoPart(one)}
           {helpersPart(one)}
@@ -12866,7 +12903,7 @@ const panelHooks = (on: On) => {
     const placeOf = (one: Todo) => topPlaces.get(placeKey(one)) ?? (Number.isFinite(cameAt(one)) ? cameAt(one) : answeredPlace(one) || at)
     const isFinishing = (one: Todo) => !isWaits(one) && isFinishMoment(one)
     const finishFrom = (one: Todo) => (one.chat ? (endSeen.get(`${one.id}:${one.endedAt}`) ?? one.endedAt) : pauseFrom(one))
-    const isLeftUp = (one: Todo) => !one.chat && stage(one) === 'done' && Boolean(one.bg?.length) && !isWaits(one) && !isFinishing(one)
+    const isLeftUp = (one: Todo) => !one.chat && hasResult(stage(one)) && Boolean(one.bg?.length) && !isWaits(one) && !isFinishing(one)
     const isUp = (one: Todo) => isWaits(one) || isFinishing(one) || isLeftUp(one) || (!one.chat && runningOn(one.id).length > 0)
     const upSince = (one: Todo) => Math.max(...(one.chat ? [] : runningOn(one.id).map(run => run.startedAt ?? 0)), 0)
     const askingHere = shownWork.filter(isUp)
@@ -12900,10 +12937,11 @@ const panelHooks = (on: On) => {
     const runningThere = elsewhere.filter(one => stageOf(elsewhere, one) === 'working')
     const head = {
       here: own.filter(one => stage(one) === 'working').length + runningFlows.length,
+      delivered: shownWork.filter(one => stage(one) === 'delivered').length,
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
       asks: waitsCount,
-      isDone: isHappy(own, at) || elsewhere.some(one => stageOf(elsewhere, one) === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
+      isDone: isHappy(own, at) || elsewhere.some(one => hasResult(stageOf(elsewhere, one)) && lingers(one, at)) || flowList.some(isFlowMoment),
     }
     const mood = headMood(head)
     const isKeyed = e.surface === 'terminal' && !boxes.length
@@ -12947,7 +12985,15 @@ const panelHooks = (on: On) => {
                     ) : null}
                   </Box>
                 )}
-                <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head)}</Text>
+                {/* (what waits is amber, what was delivered is its own blue, on the one line) */}
+                <Box flexDirection="row" minWidth={0}>
+                  {headLine(head).length > deliveredSaid(head).length ? (
+                    <Box flexShrink={1} minWidth={0}>
+                      <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head).slice(0, headLine(head).length - deliveredSaid(head).length)}</Text>
+                    </Box>
+                  ) : null}
+                  {head.delivered ? <Box flexShrink={0}><Text color={DELIVERED} dimColor={false}>{deliveredSaid(head)}</Text></Box> : null}
+                </Box>
                 {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 && chat.window ? `This chat is ${fill(chat.tokens, chat.window)}` : chat.tokens > 0 ? 'This chat has started' : 'This chat has just begun'}</Text>}
               </Box>
             </Box>

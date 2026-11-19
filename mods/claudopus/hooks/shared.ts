@@ -337,15 +337,23 @@ export const openUrl = (c: { host: string; link?: Link }, held = '') => {
 // The panel's header: one line for everything the panel shows, every chat's, so it never says less than the cards under it.
 // What waits for the person comes first; then what works, here, in other chats, or both; then what just finished; else that
 // nothing waits. Each count is of cards by their stage
-export type Head = { here: number; there: number; chats: number; asks: number; isDone: boolean }
-export const headLine = ({ here, there, chats, asks, isDone }: Head) => {
+export type Head = { here: number; there: number; chats: number; asks: number; isDone: boolean; delivered?: number }
+// (what was delivered and is not yet marked done comes last, and alone when nothing waits or works)
+export const deliveredSaid = ({ here, there, asks, delivered = 0 }: Head) => (delivered ? `${asks || here || there ? ' · ' : ''}${delivered} delivered` : '')
+export const headLine = (head: Head) => {
+  const { here, there, chats, asks, isDone } = head
   const running = here + there
-  if (asks) return `${asks} waiting for you${running ? ` · ${running} working` : ''}`
   const others = chats === 1 ? '1 other chat' : `${chats} other chats`
-  if (here && there) return `${running} working, here and in ${others}`
-  if (there) return `${there} working in ${chats === 1 ? 'another chat' : others}`
-  if (here) return `${here} working`
-  return isDone ? 'Just finished' : 'Nothing waits for you'
+  const first = asks
+    ? `${asks} waiting for you${running ? ` · ${running} working` : ''}`
+    : here && there
+      ? `${running} working, here and in ${others}`
+      : there
+        ? `${there} working in ${chats === 1 ? 'another chat' : others}`
+        : here
+          ? `${here} working`
+          : ''
+  return first || head.delivered ? `${first}${deliveredSaid(head)}` : isDone ? 'Just finished' : 'Nothing waits for you'
 }
 // The octopus beside it: happy for the moment work finishes, whatever else goes on, so no finish passes unseen; else amber while
 // anything needs the person, at work while anything runs, resting only when nothing goes on anywhere

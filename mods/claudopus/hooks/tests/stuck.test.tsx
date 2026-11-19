@@ -991,7 +991,7 @@ test("a task may not stop with to-dos open, nothing of its own running and nothi
   expect(files.get(reports()[0] ?? '')?.startsWith(REPORT)).toBe(true)
   expect(files.get(reports()[0] ?? '')).not.toContain('Not done')
   const done = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => (await done.find({ type: 'Text', text: '✓ Done' })) ?? undefined)).toBeDefined()
+  expect(await until(async () => (await done.find({ type: 'Text', text: '◐ Delivered' })) ?? undefined)).toBeDefined()
   expect((await done.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(text => /^Not done/.test(text))).toEqual([])
   await done.unmount()
   expect(appended.filter(line => /to-dos? not done/.test(line))).toEqual([])
