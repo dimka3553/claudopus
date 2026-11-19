@@ -1,60 +1,4 @@
-var __assign = (this && this.__assign) || function () {
-    __assign = Object.assign || function(t) {
-        for (var s, i = 1, n = arguments.length; i < n; i++) {
-            s = arguments[i];
-            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
-                t[p] = s[p];
-        }
-        return t;
-    };
-    return __assign.apply(this, arguments);
-};
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-var __generator = (this && this.__generator) || function (thisArg, body) {
-    var _ = { label: 0, sent: function() { if (t[0] & 1) throw t[1]; return t[1]; }, trys: [], ops: [] }, f, y, t, g = Object.create((typeof Iterator === "function" ? Iterator : Object).prototype);
-    return g.next = verb(0), g["throw"] = verb(1), g["return"] = verb(2), typeof Symbol === "function" && (g[Symbol.iterator] = function() { return this; }), g;
-    function verb(n) { return function (v) { return step([n, v]); }; }
-    function step(op) {
-        if (f) throw new TypeError("Generator is already executing.");
-        while (g && (g = 0, op[0] && (_ = 0)), _) try {
-            if (f = 1, y && (t = op[0] & 2 ? y["return"] : op[0] ? y["throw"] || ((t = y["return"]) && t.call(y), 0) : y.next) && !(t = t.call(y, op[1])).done) return t;
-            if (y = 0, t) op = [op[0] & 2, t.value];
-            switch (op[0]) {
-                case 0: case 1: t = op; break;
-                case 4: _.label++; return { value: op[1], done: false };
-                case 5: _.label++; y = op[1]; op = [0]; continue;
-                case 7: op = _.ops.pop(); _.trys.pop(); continue;
-                default:
-                    if (!(t = _.trys, t = t.length > 0 && t[t.length - 1]) && (op[0] === 6 || op[0] === 2)) { _ = 0; continue; }
-                    if (op[0] === 3 && (!t || (op[1] > t[0] && op[1] < t[3]))) { _.label = op[1]; break; }
-                    if (op[0] === 6 && _.label < t[1]) { _.label = t[1]; t = op; break; }
-                    if (t && _.label < t[2]) { _.label = t[2]; _.ops.push(op); break; }
-                    if (t[2]) _.ops.pop();
-                    _.trys.pop(); continue;
-            }
-            op = body.call(thisArg, _);
-        } catch (e) { op = [6, e]; y = 0; } finally { f = t = 0; }
-        if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
-    }
-};
-var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
-    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
-        if (ar || !(i in from)) {
-            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
-            ar[i] = from[i];
-        }
-    }
-    return to.concat(ar || Array.prototype.slice.call(from));
-};
-var _this = this;
+"use strict";
 // ---- A command Claude Code blocked a task from running, run on the person's own Allow ----
 // Claude Code's auto mode refuses some of a background task's commands outright (an unpack of an app, a Claude Code session driven
 // for a test, a look at a site's name servers: three on 17 Nov), and the person then pasted the command into their own terminal
@@ -65,464 +9,276 @@ var _this = this;
 // What may be run is kept in the mod's own state by the hook that saw Claude Code's refusal, never taken from the card: Allow
 // runs only that command, on the question it was put up with, and goes with the press
 // A command longer than this is not offered: it could not be read on the card before pressing
-var RUN_TEXT_MOST = 4000;
+const RUN_TEXT_MOST = 4000;
 // Nor one holding a character that is drawn otherwise than the shell reads it, or not at all: a control character but a line break
 // or tab, a direction mark or override, a zero-width or invisible one, a tag character
-var RUN_UNSEEN = new RegExp('[\\u0000-\\u0008\\u000B-\\u001F\\u007F-\\u009F\\u00AD\\u034F\\u115F\\u1160\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u206F\\u2800\\u3164\\uFEFF\\uFFA0\\uFFF9-\\uFFFB\\u{1D173}-\\u{1D17A}\\u{E0000}-\\u{E007F}]', 'u');
+const RUN_UNSEEN = new RegExp('[\\u0000-\\u0008\\u000B-\\u001F\\u007F-\\u009F\\u00AD\\u034F\\u115F\\u1160\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u206F\\u2800\\u3164\\uFEFF\\uFFA0\\uFFF9-\\uFFFB\\u{1D173}-\\u{1D17A}\\u{E0000}-\\u{E007F}]', 'u');
 // The longest a command runs once pressed: one Claude would have held open, at most its own timeout or ten minutes; one it would
 // have sent to the background, an hour. Then Claudopus stops it, and the task gets what it printed by then
-var RUN_LIMIT = 10 * 60000;
-var RUN_LIMIT_BACKGROUND = 60 * 60000;
+const RUN_LIMIT = 10 * 60000;
+const RUN_LIMIT_BACKGROUND = 60 * 60000;
 // How often a running one is looked at, and how much of its output the task is sent in the message (the whole is in its file)
-var RUN_LOOK = 5000;
-var RUN_TAIL_LINES = 30;
-var RUN_TAIL_CHARS = 4000;
+const RUN_LOOK = 5000;
+const RUN_TAIL_LINES = 30;
+const RUN_TAIL_CHARS = 4000;
 // Offers never pressed, ended runs, and their output files are let go after a day; a run under way is always kept
-var RUN_KEPT = 24 * 60 * 60000;
-var RUNS_KEPT = 40;
-var RUN_END = /claudopus-exit (\d+)( stopped)?\s*$/;
+const RUN_KEPT = 24 * 60 * 60000;
+const RUNS_KEPT = 40;
+const RUN_END = /claudopus-exit (\d+)( stopped)?\s*$/;
 // Every offer and run, kept across reloads in the mod's state; drawn from `runList`, its copy as last written or read
-var runs = atom({ plugin: 'claudopus', key: 'runs' }, [], { shape: 'runs-1' });
-var runList = [];
-var saveRuns = function ($, fn) { return __awaiter(_this, void 0, void 0, function () {
-    var now;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0: return [4 /*yield*/, $.clock.now()];
-            case 1:
-                now = _a.sent();
-                return [4 /*yield*/, update($, runs, function (list) {
-                        var next = fn(list);
-                        var live = function (one) { return Boolean(one.startedAt && !one.endedAt); };
-                        var kept = next.filter(function (one) { var _a, _b; return !live(one) && now - ((_b = (_a = one.endedAt) !== null && _a !== void 0 ? _a : one.startedAt) !== null && _b !== void 0 ? _b : one.askAt) < RUN_KEPT; }).slice(-RUNS_KEPT);
-                        return next.filter(function (one) { return live(one) || kept.includes(one); });
-                    })];
-            case 2:
-                runList = _a.sent();
-                redraw($);
-                return [2 /*return*/, runList];
-        }
+const runs = atom({ plugin: 'claudopus', key: 'runs' }, [], { shape: 'runs-1' });
+let runList = [];
+const saveRuns = async ($, fn) => {
+    const now = await $.clock.now();
+    runList = await update($, runs, list => {
+        const next = fn(list);
+        const live = (one) => Boolean(one.startedAt && !one.endedAt);
+        const kept = next.filter(one => !live(one) && now - (one.endedAt ?? one.startedAt ?? one.askAt) < RUN_KEPT).slice(-RUNS_KEPT);
+        return next.filter(one => live(one) || kept.includes(one));
     });
-}); };
-var isSameRun = function (one, other) { return one.card === other.card && one.askAt === other.askAt; };
+    redraw($);
+    return runList;
+};
+const isSameRun = (one, other) => one.card === other.card && one.askAt === other.askAt;
 // The command its card's notice offers, not yet pressed: only the one Claudopus kept as Claude Code refused it, on that same notice
-var offeredRun = function (one) {
-    var ask = one.ask;
-    if (!(ask === null || ask === void 0 ? void 0 : ask.refused) || one.chat || !ask.copy)
+const offeredRun = (one) => {
+    const ask = one.ask;
+    if (!ask?.refused || one.chat || !ask.copy)
         return undefined;
-    return runList.find(function (run) { return isSameRun(run, { card: one.id, askAt: ask.at }) && run.command === ask.copy && !run.startedAt; });
+    return runList.find(run => isSameRun(run, { card: one.id, askAt: ask.at }) && run.command === ask.copy && !run.startedAt);
 };
 // The runs on a card under way, and those ended whose output is kept for their task's next step
-var runningOn = function (card) { return runList.filter(function (run) { return run.card === card && run.startedAt && (!run.endedAt || Boolean(run.waiting)); }); };
+const runningOn = (card) => runList.filter(run => run.card === card && run.startedAt && (!run.endedAt || Boolean(run.waiting)));
 // How long a run's end stays one grey line where it ran, unless its task writes a line of its own first: after that its end is
 // the ended row under the card and in Details
-var RUN_END_SHOWN = 60000;
+const RUN_END_SHOWN = 60000;
 // The runs said on a card: those running or kept, and one that ended just now
-var runsShownOn = function (one, at) { return __spreadArray(__spreadArray([], runningOn(one.id), true), runList.filter(function (run) { var _a, _b; return run.card === one.id && run.startedAt && run.endedAt && !run.waiting && at - run.endedAt < RUN_END_SHOWN && ((_b = (_a = ownNote(one)) === null || _a === void 0 ? void 0 : _a.at) !== null && _b !== void 0 ? _b : 0) <= run.endedAt; }), true); };
+const runsShownOn = (one, at) => [...runningOn(one.id), ...runList.filter(run => run.card === one.id && run.startedAt && run.endedAt && !run.waiting && at - run.endedAt < RUN_END_SHOWN && (ownNote(one)?.at ?? 0) <= run.endedAt)];
 // How a run the person allowed ended, in the card's own words: its grey line for a while, never the task's line (19 Nov)
-var endedSaid = function (run, what) {
-    var _a, _b, _c, _d;
-    if (what === void 0) { what = 'your command'; }
-    var ran = took(((_a = run.endedAt) !== null && _a !== void 0 ? _a : 0) - ((_c = (_b = run.startedAt) !== null && _b !== void 0 ? _b : run.endedAt) !== null && _c !== void 0 ? _c : 0));
-    var What = what.charAt(0).toUpperCase() + what.slice(1);
+const endedSaid = (run, what = 'your command') => {
+    const ran = took((run.endedAt ?? 0) - (run.startedAt ?? run.endedAt ?? 0));
+    const What = what.charAt(0).toUpperCase() + what.slice(1);
     if (!run.log)
-        return "".concat(What, " didn't start");
-    return { exited: run.exit === 0 ? "".concat(What, " ended after ").concat(ran) : "".concat(What, " failed after ").concat(ran), limit: "".concat(What, " was stopped at its limit of ").concat(limitText(run.limitMs)), stopped: "You stopped ".concat(what, " after ").concat(ran), lost: "".concat(What, " stopped after ").concat(ran) }[(_d = run.end) !== null && _d !== void 0 ? _d : 'lost'];
+        return `${What} didn't start`;
+    return { exited: run.exit === 0 ? `${What} ended after ${ran}` : `${What} failed after ${ran}`, limit: `${What} was stopped at its limit of ${limitText(run.limitMs)}`, stopped: `You stopped ${what} after ${ran}`, lost: `${What} stopped after ${ran}` }[run.end ?? 'lost'];
 };
 // An allowed run that ended is a row of the card's ended commands, as one of the task's own is: its words, how it ended, its log
-var keepRunEnded = function ($, run, why) { return __awaiter(_this, void 0, void 0, function () {
-    var kept, how, ended;
-    var _a, _b, _c;
-    return __generator(this, function (_d) {
-        switch (_d.label) {
-            case 0:
-                kept = (_a = runList.find(function (one) { return isSameRun(one, run); })) !== null && _a !== void 0 ? _a : run;
-                if (!kept.endedAt)
-                    return [2 /*return*/];
-                how = { exited: kept.exit === 0 ? 'finished' : 'failed', limit: 'timed out', stopped: 'stopped', lost: why ? 'failed' : 'ended' }[(_b = kept.end) !== null && _b !== void 0 ? _b : 'lost'];
-                ended = __assign(__assign(__assign({ id: "press-".concat(kept.askAt), what: kept.description || 'Your command', at: (_c = kept.startedAt) !== null && _c !== void 0 ? _c : kept.endedAt, endedAt: kept.endedAt, how: how, cmd: kept.command }, (kept.exit !== undefined && kept.exit !== 0 ? { code: String(kept.exit) } : {})), (why ? { why: why } : {})), (kept.log ? { file: kept.log } : {}));
-                return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (card) { return (card.id === kept.card ? __assign(__assign({}, card), keepEnded(card, [ended])) : card); }); })];
-            case 1:
-                _d.sent();
-                redraw($);
-                return [2 /*return*/];
-        }
-    });
-}); };
+const keepRunEnded = async ($, run, why) => {
+    const kept = runList.find(one => isSameRun(one, run)) ?? run;
+    if (!kept.endedAt)
+        return;
+    const how = { exited: kept.exit === 0 ? 'finished' : 'failed', limit: 'timed out', stopped: 'stopped', lost: why ? 'failed' : 'ended' }[kept.end ?? 'lost'];
+    const ended = { id: `press-${kept.askAt}`, what: kept.description || 'Your command', at: kept.startedAt ?? kept.endedAt, endedAt: kept.endedAt, how, cmd: kept.command, ...(kept.exit !== undefined && kept.exit !== 0 ? { code: String(kept.exit) } : {}), ...(why ? { why } : {}), ...(kept.log ? { file: kept.log } : {}) };
+    await changeTodos($, list => list.map(card => (card.id === kept.card ? { ...card, ...keepEnded(card, [ended]) } : card)));
+    redraw($);
+};
 // The ones the person stopped, for this load (the stop is also written in its output)
-var runStopped = new Set();
-var runKey = function (run) { return "".concat(run.card, ":").concat(run.askAt); };
+const runStopped = new Set();
+const runKey = (run) => `${run.card}:${run.askAt}`;
 // The presses this load took, so two at once run it once, and the ask a press cleared that starts its run (answerCleared)
-var runPressed = new Set();
-var runAsked = new Map();
+const runPressed = new Set();
+const runAsked = new Map();
 // What an ended run printed, kept for a task that was not at a step when it ended: it is told as its next step begins (replyRead,
 // from that step's own hook), and its card says so meanwhile in one grey line. Nothing starts the task for it
-var runsAtStep = function ($, agent) { return __awaiter(_this, void 0, void 0, function () {
-    var due, _loop_1, _i, due_1, run;
-    var _a, _b;
-    return __generator(this, function (_c) {
-        switch (_c.label) {
-            case 0:
-                due = runList.filter(function (run) { var _a; return ((_a = run.waiting) === null || _a === void 0 ? void 0 : _a.target) === agent; });
-                _loop_1 = function (run) {
-                    var told;
-                    return __generator(this, function (_d) {
-                        switch (_d.label) {
-                            case 0: return [4 /*yield*/, tell($, agent, (_b = (_a = run.waiting) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : '').catch(function () { return undefined; })];
-                            case 1:
-                                told = _d.sent();
-                                if (!told || told.deny)
-                                    return [2 /*return*/, "continue"];
-                                return [4 /*yield*/, saveRuns($, function (list) { return list.map(function (one) { return (isSameRun(one, run) ? __assign(__assign({}, one), { waiting: undefined }) : one); }); })];
-                            case 2:
-                                _d.sent();
-                                return [2 /*return*/];
-                        }
-                    });
-                };
-                _i = 0, due_1 = due;
-                _c.label = 1;
-            case 1:
-                if (!(_i < due_1.length)) return [3 /*break*/, 4];
-                run = due_1[_i];
-                return [5 /*yield**/, _loop_1(run)];
-            case 2:
-                _c.sent();
-                _c.label = 3;
-            case 3:
-                _i++;
-                return [3 /*break*/, 1];
-            case 4: return [2 /*return*/];
-        }
-    });
-}); };
-var limitText = function (ms) { return (ms >= 60 * 60000 ? "".concat(Math.round(ms / 3600000), " hour").concat(ms >= 2 * 3600000 ? 's' : '') : "".concat(Math.max(1, Math.round(ms / 60000)), " min")); };
+const runsAtStep = async ($, agent) => {
+    const due = runList.filter(run => run.waiting?.target === agent);
+    for (const run of due) {
+        const told = await tell($, agent, run.waiting?.text ?? '').catch(() => undefined);
+        if (!told || told.deny)
+            continue;
+        await saveRuns($, list => list.map(one => (isSameRun(one, run) ? { ...one, waiting: undefined } : one)));
+    }
+};
+const limitText = (ms) => (ms >= 60 * 60000 ? `${Math.round(ms / 3600000)} hour${ms >= 2 * 3600000 ? 's' : ''}` : `${Math.max(1, Math.round(ms / 60000))} min`);
 // What a refused call may be offered as: a command of the Bash tool, short enough to read and drawn as it runs, with the folder it
 // runs in (the chat's, where a task's commands start) and its limit
-var runnableOf = function (tool, call) {
-    var command = typeof call.command === 'string' ? call.command.trim() : '';
+const runnableOf = (tool, call) => {
+    const command = typeof call.command === 'string' ? call.command.trim() : '';
     if (tool !== 'Bash' || !command || command.length > RUN_TEXT_MOST || RUN_UNSEEN.test(command))
         return undefined;
-    var asked = typeof call.timeout === 'number' && call.timeout > 0 ? Math.min(call.timeout, RUN_LIMIT) : RUN_LIMIT;
-    var limitMs = call.run_in_background === true ? RUN_LIMIT_BACKGROUND : asked;
-    return { command: command, cwd: cwd || dir.replace(/\/\.claude\/claudopus$/, ''), limitMs: limitMs, description: typeof call.description === 'string' ? oneLine(call.description) : '' };
+    const asked = typeof call.timeout === 'number' && call.timeout > 0 ? Math.min(call.timeout, RUN_LIMIT) : RUN_LIMIT;
+    const limitMs = call.run_in_background === true ? RUN_LIMIT_BACKGROUND : asked;
+    return { command, cwd: cwd || dir.replace(/\/\.claude\/claudopus$/, ''), limitMs, description: typeof call.description === 'string' ? oneLine(call.description) : '' };
 };
 // Kept as its notice goes up on the card, by the hook that saw Claude Code refuse it; output files over a day old go meanwhile
-var offerRun = function ($, card, from, askAt, runnable) { return __awaiter(_this, void 0, void 0, function () {
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0: return [4 /*yield*/, saveRuns($, function (list) { return __spreadArray(__spreadArray([], list.filter(function (one) { return !isSameRun(one, { card: card, askAt: askAt }); }), true), [__assign({ card: card, from: from, askAt: askAt }, runnable)], false); })];
-            case 1:
-                _a.sent();
-                if (dir)
-                    void $.process.run(['find', "".concat(dir, "/runs"), '-type', 'f', '-name', '*.log', '-mtime', '+1', '-delete'], { timeoutMs: 15000 }).catch(function () { return undefined; });
-                return [2 /*return*/];
-        }
-    });
-}); };
-// What the card and the chat say of it before the press (where and for how long are said under the command: runWhere)
-var runDetails = function (run, reason) {
-    if (reason === void 0) { reason = ''; }
-    return "Runs once in ".concat(shortPath(run.cwd, 60), ", for at most ").concat(limitText(run.limitMs)).concat(reason ? " \u00B7 blocked as \u201C".concat(reason, "\u201D") : '', ".");
+const offerRun = async ($, card, from, askAt, runnable) => {
+    await saveRuns($, list => [...list.filter(one => !isSameRun(one, { card, askAt })), { card, from, askAt, ...runnable }]);
+    if (dir)
+        void $.process.run(['find', `${dir}/runs`, '-type', 'f', '-name', '*.log', '-mtime', '+1', '-delete'], { timeoutMs: 15000 }).catch(() => undefined);
 };
+// What the card and the chat say of it before the press (where and for how long are said under the command: runWhere)
+const runDetails = (run, reason = '') => `Runs once in ${shortPath(run.cwd, 60)}, for at most ${limitText(run.limitMs)}${reason ? ` · blocked as “${reason}”` : ''}.`;
 // Allow on the card in this chat's own panel: the one way a run starts. The question is answered first, as any press answers
 // it; only once it has been cleared does the command start (answerCleared calls startRun). A press whose answer could not be
 // written leaves the block to be pressed again
-var runIt = function ($, one) { return __awaiter(_this, void 0, void 0, function () {
-    var run;
-    var _a;
-    return __generator(this, function (_b) {
-        switch (_b.label) {
-            case 0:
-                presses += 1;
-                run = offeredRun(one);
-                if (!run || runPressed.has(runKey(run)))
-                    return [2 /*return*/];
-                runPressed.add(runKey(run));
-                runAsked.set(one.id, run);
-                _b.label = 1;
-            case 1:
-                _b.trys.push([1, , 3, 4]);
-                return [4 /*yield*/, answerAsk($, one, ALLOW)];
-            case 2:
-                _b.sent();
-                return [3 /*break*/, 4];
-            case 3:
-                runAsked.delete(one.id);
-                if (!((_a = runList.find(function (other) { return isSameRun(other, run); })) === null || _a === void 0 ? void 0 : _a.startedAt))
-                    runPressed.delete(runKey(run));
-                return [7 /*endfinally*/];
-            case 4: return [2 /*return*/];
-        }
-    });
-}); };
+const runIt = async ($, one) => {
+    presses += 1;
+    const run = offeredRun(one);
+    if (!run || runPressed.has(runKey(run)))
+        return;
+    runPressed.add(runKey(run));
+    runAsked.set(one.id, run);
+    try {
+        await answerAsk($, one, ALLOW);
+    }
+    finally {
+        runAsked.delete(one.id);
+        if (!runList.find(other => isSameRun(other, run))?.startedAt)
+            runPressed.delete(runKey(run));
+    }
+};
 // Started once its question is cleared, on that press; whatever goes wrong is said on the card. Answers what the task is told
-var startRun = function ($, one, run) { return __awaiter(_this, void 0, void 0, function () {
-    var at, logFile, isLogged, r, _a, pid, why, stops;
-    var _b;
-    return __generator(this, function (_c) {
-        switch (_c.label) {
-            case 0: return [4 /*yield*/, $.clock.now()];
-            case 1:
-                at = _c.sent();
-                logFile = "".concat(dir, "/runs/").concat(slug(one.id) || 'work', "-").concat(at, ".log");
-                return [4 /*yield*/, $.fs.write(logFile, '').then(function () { return true; }).catch(function () { return false; })];
-            case 2:
-                isLogged = _c.sent();
-                if (!isLogged) return [3 /*break*/, 4];
-                return [4 /*yield*/, $.process.run(["".concat($.plugin.root, "/bin/run-it"), 'start', run.command, logFile, run.cwd], { cwd: run.cwd, timeoutMs: 15000 }).catch(function (err) { return ({ exitCode: 1, stdout: '', stderr: String(err) }); })];
-            case 3:
-                _a = _c.sent();
-                return [3 /*break*/, 5];
-            case 4:
-                _a = { exitCode: 1, stdout: '', stderr: 'its output file could not be made' };
-                _c.label = 5;
-            case 5:
-                r = _a;
-                pid = r.exitCode === 0 ? (_b = /^(\d+)\s*$/.exec(r.stdout.trim())) === null || _b === void 0 ? void 0 : _b[1] : undefined;
-                if (!!pid) return [3 /*break*/, 9];
-                why = cut(oneLine(r.stderr), 100) || 'no reason given';
-                return [4 /*yield*/, log($, "run of the refused command for ".concat(one.id, " not started: ").concat(why))];
-            case 6:
-                _c.sent();
-                return [4 /*yield*/, saveRuns($, function (list) { return list.map(function (other) { return (isSameRun(other, run) ? __assign(__assign({}, other), { startedAt: at, endedAt: at, end: 'lost' }) : other); }); })];
-            case 7:
-                _c.sent();
-                return [4 /*yield*/, keepRunEnded($, run, why)];
-            case 8:
-                _c.sent();
-                return [2 /*return*/, named("{Name} pressed \"".concat(ALLOW, "\" on your card for the command Claude Code refused, but it could not be started (").concat(why, "), so it did not run. What Claude Code refused stays refused: do not do it yourself. Carry on without it, and say in your report what was left out."))];
-            case 9: return [4 /*yield*/, saveRuns($, function (list) { return list.map(function (other) { return (isSameRun(other, run) ? __assign(__assign({}, other), { startedAt: at, log: logFile, pid: pid }) : other); }); })];
-            case 10:
-                _c.sent();
-                return [4 /*yield*/, log($, "refused command for ".concat(one.id, " run on ").concat(who(), "'s press, in ").concat(run.cwd))];
-            case 11:
-                _c.sent();
-                stops = run.limitMs >= RUN_LIMIT_BACKGROUND ? "It is stopped after ".concat(limitText(run.limitMs), " if it is still running then.") : "It is stopped after ".concat(limitText(run.limitMs), " at most.");
-                followRun($, __assign(__assign({}, run), { startedAt: at, log: logFile, pid: pid }));
-                return [2 /*return*/, named("{Name} pressed \"".concat(ALLOW, "\" on your card for the command Claude Code refused, and it is running for them now, exactly as shown, as their own, in ").concat(run.cwd, ". What it prints goes to ").concat(logFile, ", which you can read as it runs; when it ends, its last lines come to you as a message at your next step. ").concat(stops, " Do not run it yourself; carry on with what does not need it."))];
-        }
-    });
-}); };
+const startRun = async ($, one, run) => {
+    const at = await $.clock.now();
+    const logFile = `${dir}/runs/${slug(one.id) || 'work'}-${at}.log`;
+    const isLogged = await $.fs.write(logFile, '').then(() => true).catch(() => false);
+    const r = isLogged
+        ? await $.process.run([`${$.plugin.root}/bin/run-it`, 'start', run.command, logFile, run.cwd], { cwd: run.cwd, timeoutMs: 15000 }).catch(err => ({ exitCode: 1, stdout: '', stderr: String(err) }))
+        : { exitCode: 1, stdout: '', stderr: 'its output file could not be made' };
+    const pid = r.exitCode === 0 ? /^(\d+)\s*$/.exec(r.stdout.trim())?.[1] : undefined;
+    if (!pid) {
+        const why = cut(oneLine(r.stderr), 100) || 'no reason given';
+        await log($, `run of the refused command for ${one.id} not started: ${why}`);
+        await saveRuns($, list => list.map(other => (isSameRun(other, run) ? { ...other, startedAt: at, endedAt: at, end: 'lost' } : other)));
+        await keepRunEnded($, run, why);
+        return named(`{Name} pressed "${ALLOW}" on your card for the command Claude Code refused, but it could not be started (${why}), so it did not run. What Claude Code refused stays refused: do not do it yourself. Carry on without it, and say in your report what was left out.`);
+    }
+    await saveRuns($, list => list.map(other => (isSameRun(other, run) ? { ...other, startedAt: at, log: logFile, pid } : other)));
+    await log($, `refused command for ${one.id} run on ${who()}'s press, in ${run.cwd}`);
+    const stops = run.limitMs >= RUN_LIMIT_BACKGROUND ? `It is stopped after ${limitText(run.limitMs)} if it is still running then.` : `It is stopped after ${limitText(run.limitMs)} at most.`;
+    followRun($, { ...run, startedAt: at, log: logFile, pid });
+    return named(`{Name} pressed "${ALLOW}" on your card for the command Claude Code refused, and it is running for them now, exactly as shown, as their own, in ${run.cwd}. What it prints goes to ${logFile}, which you can read as it runs; when it ends, its last lines come to you as a message at your next step. ${stops} Do not run it yourself; carry on with what does not need it.`);
+};
 // Each run under way is looked at every RUN_LOOK by this load, a reload's own load taking over the ones it finds (followRuns)
-var followed = new Set();
-var followRuns = function ($) { return __awaiter(_this, void 0, void 0, function () {
-    var _i, runList_1, run;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0: return [4 /*yield*/, read($, runs)];
-            case 1:
-                runList = _a.sent();
-                for (_i = 0, runList_1 = runList; _i < runList_1.length; _i++) {
-                    run = runList_1[_i];
-                    if (run.startedAt && !run.endedAt && run.log && run.pid)
-                        followRun($, run);
-                }
-                return [2 /*return*/];
-        }
-    });
-}); };
-var followRun = function ($, run) {
-    var key = runKey(run);
+const followed = new Set();
+const followRuns = async ($) => {
+    runList = await read($, runs);
+    for (const run of runList)
+        if (run.startedAt && !run.endedAt && run.log && run.pid)
+            followRun($, run);
+};
+const followRun = ($, run) => {
+    const key = runKey(run);
     if (followed.has(key))
         return;
     followed.add(key);
-    var isLooking = false;
-    var timer = everyLoad($, RUN_LOOK, function () {
+    let isLooking = false;
+    const timer = everyLoad($, RUN_LOOK, () => {
         if (isLooking)
             return;
         isLooking = true;
         void lookRun($, run)
-            .then(function (isEnded) { return isEnded && (timer.cancel(), followed.delete(key)); })
-            .catch(function (err) { return log($, "run of ".concat(run.card, " not followed: ").concat(String(err))); })
-            .finally(function () { return (isLooking = false); });
+            .then(isEnded => isEnded && (timer.cancel(), followed.delete(key)))
+            .catch(err => log($, `run of ${run.card} not followed: ${String(err)}`))
+            .finally(() => (isLooking = false));
     });
 };
 // Its output's end: what it printed, and how it ended once it has (stopped, when the stop wrote so)
-var runOutputOf = function (text) {
-    var end = RUN_END.exec(text);
-    var lines = text.replace(RUN_END, '').replace(/\s+$/, '').split('\n');
-    return { exit: end ? Number(end[1]) : undefined, isStopped: Boolean(end === null || end === void 0 ? void 0 : end[2]), lines: lines };
+const runOutputOf = (text) => {
+    const end = RUN_END.exec(text);
+    const lines = text.replace(RUN_END, '').replace(/\s+$/, '').split('\n');
+    return { exit: end ? Number(end[1]) : undefined, isStopped: Boolean(end?.[2]), lines };
 };
-var lookRun = function ($, run) { return __awaiter(_this, void 0, void 0, function () {
-    var now, out, _a, at, stopped, _b, _c, _d, alive, late, _e;
-    var _f;
-    return __generator(this, function (_g) {
-        switch (_g.label) {
-            case 0:
-                now = (_f = runList.find(function (one) { return isSameRun(one, run); })) !== null && _f !== void 0 ? _f : run;
-                if (now.endedAt || !run.log || !run.pid || !run.startedAt)
-                    return [2 /*return*/, true];
-                during('look at a command run on a press');
-                _a = runOutputOf;
-                return [4 /*yield*/, fileEnd($, run.log, 64000)];
-            case 1:
-                out = _a.apply(void 0, [_g.sent()]);
-                return [4 /*yield*/, $.clock.now()];
-            case 2:
-                at = _g.sent();
-                stopped = function (isStopped) { return (isStopped || runStopped.has(runKey(run)) ? 'stopped' : 'exited'); };
-                if (!(out.exit !== undefined)) return [3 /*break*/, 4];
-                return [4 /*yield*/, endRun($, run, stopped(out.isStopped), out.exit, out.lines)];
-            case 3: return [2 /*return*/, (void (_g.sent()), true)];
-            case 4:
-                if (!(at - run.startedAt > run.limitMs)) return [3 /*break*/, 8];
-                return [4 /*yield*/, stopProcess($, run)];
-            case 5:
-                _g.sent();
-                _b = endRun;
-                _c = [$, run, 'limit', undefined];
-                _d = runOutputOf;
-                return [4 /*yield*/, fileEnd($, run.log, 64000)];
-            case 6: return [4 /*yield*/, _b.apply(void 0, _c.concat([_d.apply(void 0, [_g.sent()]).lines]))];
-            case 7: return [2 /*return*/, (void (_g.sent()), true)];
-            case 8: return [4 /*yield*/, $.process.run(["".concat($.plugin.root, "/bin/run-it"), 'alive', run.pid, run.log], { timeoutMs: 10000 }).catch(function () { return undefined; })];
-            case 9:
-                alive = _g.sent();
-                if (!(alive && alive.exitCode !== 0)) return [3 /*break*/, 12];
-                _e = runOutputOf;
-                return [4 /*yield*/, fileEnd($, run.log, 64000)];
-            case 10:
-                late = _e.apply(void 0, [_g.sent()]);
-                return [4 /*yield*/, endRun($, run, late.exit !== undefined ? stopped(late.isStopped) : runStopped.has(runKey(run)) ? 'stopped' : 'lost', late.exit, late.lines)];
-            case 11: return [2 /*return*/, (void (_g.sent()), true)];
-            case 12: return [2 /*return*/, false];
-        }
-    });
-}); };
-var stopProcess = function ($, run) {
-    return run.pid && run.log ? $.process.run(["".concat($.plugin.root, "/bin/run-it"), 'stop', run.pid, run.log], { timeoutMs: 15000 }).catch(function (err) { return log($, "run of ".concat(run.card, " not stopped: ").concat(String(err))); }) : Promise.resolve();
+const lookRun = async ($, run) => {
+    const now = runList.find(one => isSameRun(one, run)) ?? run;
+    if (now.endedAt || !run.log || !run.pid || !run.startedAt)
+        return true;
+    during('look at a command run on a press');
+    const out = runOutputOf(await fileEnd($, run.log, 64000));
+    // Nothing is drawn again for a look: the card shows only that it runs, and its time moves with the panel's calm drawings (calmLook).
+    // A drawing at each look, every 5 s and through the person's use of the panel, rebuilt the whole panel in the app, which flashed
+    // (17 Nov, Dima's screenshot); its end is drawn at once (saveRuns)
+    const at = await $.clock.now();
+    const stopped = (isStopped) => (isStopped || runStopped.has(runKey(run)) ? 'stopped' : 'exited');
+    if (out.exit !== undefined)
+        return void (await endRun($, run, stopped(out.isStopped), out.exit, out.lines)), true;
+    if (at - run.startedAt > run.limitMs) {
+        await stopProcess($, run);
+        return void (await endRun($, run, 'limit', undefined, runOutputOf(await fileEnd($, run.log, 64000)).lines)), true;
+    }
+    // Gone without writing its end (stopped from outside, or the Mac restarted): said so, with what it printed
+    const alive = await $.process.run([`${$.plugin.root}/bin/run-it`, 'alive', run.pid, run.log], { timeoutMs: 10000 }).catch(() => undefined);
+    if (alive && alive.exitCode !== 0) {
+        const late = runOutputOf(await fileEnd($, run.log, 64000));
+        return void (await endRun($, run, late.exit !== undefined ? stopped(late.isStopped) : runStopped.has(runKey(run)) ? 'stopped' : 'lost', late.exit, late.lines)), true;
+    }
+    return false;
 };
+const stopProcess = ($, run) => run.pid && run.log ? $.process.run([`${$.plugin.root}/bin/run-it`, 'stop', run.pid, run.log], { timeoutMs: 15000 }).catch(err => log($, `run of ${run.card} not stopped: ${String(err)}`)) : Promise.resolve();
 // The person's Stop on its row
-var stopRun = function ($, run) { return __awaiter(_this, void 0, void 0, function () {
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0:
-                presses += 1;
-                if (runStopped.has(runKey(run)))
-                    return [2 /*return*/];
-                runStopped.add(runKey(run));
-                redraw($);
-                return [4 /*yield*/, stopProcess($, run)];
-            case 1:
-                _a.sent();
-                return [2 /*return*/];
-        }
-    });
-}); };
+const stopRun = async ($, run) => {
+    presses += 1;
+    if (runStopped.has(runKey(run)))
+        return;
+    runStopped.add(runKey(run));
+    redraw($);
+    await stopProcess($, run);
+};
 // What the task is sent of a run's end, which no press of the person's starts: written in while the task is at a step; else kept
 // with the run for the task's next step (runsAtStep), never sent from a timer. Says whether it was sent, is kept, or is not sent
 // (a task the person stopped)
-var deliverRun = function ($, cardId, target, run, text) { return __awaiter(_this, void 0, void 0, function () {
-    var card, isWorking, told, _a;
-    var _b;
-    return __generator(this, function (_c) {
-        switch (_c.label) {
-            case 0: return [4 /*yield*/, read($, todos)];
-            case 1:
-                card = (_c.sent()).find(function (one) { return one.id === cardId; });
-                if (!card)
-                    return [2 /*return*/, 'held'];
-                return [4 /*yield*/, read($, todos)];
-            case 2:
-                isWorking = ((_b = (_c.sent()).find(function (one) { return one.id === target; })) === null || _b === void 0 ? void 0 : _b.status) === 'working';
-                if (!isWorking) return [3 /*break*/, 4];
-                return [4 /*yield*/, tell($, target, text)];
-            case 3:
-                _a = _c.sent();
-                return [3 /*break*/, 5];
-            case 4:
-                _a = undefined;
-                _c.label = 5;
-            case 5:
-                told = _a;
-                if (told && !told.deny)
-                    return [2 /*return*/, 'sent'
-                        // A task the person stopped gets nothing more: what it printed stays in its file
-                    ];
-                // A task the person stopped gets nothing more: what it printed stays in its file
-                if (isHeld(card))
-                    return [2 /*return*/, 'held'];
-                return [4 /*yield*/, saveRuns($, function (list) { return list.map(function (one) { return (isSameRun(one, run) ? __assign(__assign({}, one), { waiting: { target: target, text: text } }) : one); }); })];
-            case 6:
-                _c.sent();
-                return [2 /*return*/, 'waits'];
-        }
-    });
-}); };
+const deliverRun = async ($, cardId, target, run, text) => {
+    const card = (await read($, todos)).find(one => one.id === cardId);
+    if (!card)
+        return 'held';
+    const isWorking = (await read($, todos)).find(one => one.id === target)?.status === 'working';
+    const told = isWorking ? await tell($, target, text) : undefined;
+    if (told && !told.deny)
+        return 'sent';
+    // A task the person stopped gets nothing more: what it printed stays in its file
+    if (isHeld(card))
+        return 'held';
+    await saveRuns($, list => list.map(one => (isSameRun(one, run) ? { ...one, waiting: { target, text } } : one)));
+    return 'waits';
+};
 // Its end: kept, sent to the task, and said on the card
-var endRun = function ($, run, end, exit, lines) { return __awaiter(_this, void 0, void 0, function () {
-    var at, isFirst, last, ran, how, tail, text;
-    var _a, _b;
-    return __generator(this, function (_c) {
-        switch (_c.label) {
-            case 0: return [4 /*yield*/, $.clock.now()];
-            case 1:
-                at = _c.sent();
-                isFirst = false;
-                last = oneLine((_a = lines.filter(function (line) { return line.trim(); }).at(-1)) !== null && _a !== void 0 ? _a : '').slice(0, 300);
-                return [4 /*yield*/, saveRuns($, function (list) { return ((isFirst = false), list).map(function (one) { return (isSameRun(one, run) && !one.endedAt ? ((isFirst = true), __assign(__assign(__assign(__assign({}, one), { endedAt: at, end: end }), (exit === undefined ? {} : { exit: exit })), (last ? { last: last } : {}))) : one); }); })];
-            case 2:
-                _c.sent();
-                if (!isFirst)
-                    return [2 /*return*/];
-                runStopped.delete(runKey(run));
-                ran = took(at - ((_b = run.startedAt) !== null && _b !== void 0 ? _b : at));
-                how = {
-                    exited: exit === 0 ? "ended well after ".concat(ran) : "ended with exit ".concat(exit, " after ").concat(ran),
-                    limit: "was stopped at its limit of ".concat(limitText(run.limitMs)),
-                    stopped: "was stopped by {name} after ".concat(ran),
-                    lost: "stopped after ".concat(ran, " without saying how it ended"),
-                }[end];
-                tail = cut(lines.slice(-RUN_TAIL_LINES).join('\n'), RUN_TAIL_CHARS);
-                return [4 /*yield*/, log($, "refused command for ".concat(run.card, " run on ").concat(who(), "'s press ").concat(named(how)))];
-            case 3:
-                _c.sent();
-                text = named("{Name} pressed \"".concat(ALLOW, "\" on your card for the command Claude Code refused, and it ran for them, exactly as shown, once, as their own, in ").concat(run.cwd, ":\n").concat(run.command, "\nIt ").concat(how, ". Its whole output is in ").concat(run.log, "; ").concat(tail ? "its last lines:\n".concat(tail) : 'it printed nothing.', "\nThat ran on {name}'s own press, as theirs: it is no permission. Claude Code still decides each call of yours, so do not run it, or another way to the same end, yourself. Use what it printed; if you need it run again, ask {name} with the command."));
-                return [4 /*yield*/, deliverRun($, run.card, run.from || run.card, run, text)
-                    // Said to the person where commands are: a row of the card's ended ones, with its log, and a grey line for a while where it ran
-                    // (runBlock), never on the line that says what the task does now (19 Nov). An output kept for the task's next step is said by
-                    // the card's grey line for it
-                ];
-            case 4:
-                _c.sent();
-                // Said to the person where commands are: a row of the card's ended ones, with its log, and a grey line for a while where it ran
-                // (runBlock), never on the line that says what the task does now (19 Nov). An output kept for the task's next step is said by
-                // the card's grey line for it
-                return [4 /*yield*/, keepRunEnded($, run)];
-            case 5:
-                // Said to the person where commands are: a row of the card's ended ones, with its log, and a grey line for a while where it ran
-                // (runBlock), never on the line that says what the task does now (19 Nov). An output kept for the task's next step is said by
-                // the card's grey line for it
-                _c.sent();
-                return [2 /*return*/];
-        }
-    });
-}); };
+const endRun = async ($, run, end, exit, lines) => {
+    const at = await $.clock.now();
+    let isFirst = false;
+    const last = oneLine(lines.filter(line => line.trim()).at(-1) ?? '').slice(0, 300);
+    await saveRuns($, list => ((isFirst = false), list).map(one => (isSameRun(one, run) && !one.endedAt ? ((isFirst = true), { ...one, endedAt: at, end, ...(exit === undefined ? {} : { exit }), ...(last ? { last } : {}) }) : one)));
+    if (!isFirst)
+        return;
+    runStopped.delete(runKey(run));
+    const ran = took(at - (run.startedAt ?? at));
+    const how = {
+        exited: exit === 0 ? `ended well after ${ran}` : `ended with exit ${exit} after ${ran}`,
+        limit: `was stopped at its limit of ${limitText(run.limitMs)}`,
+        stopped: `was stopped by {name} after ${ran}`,
+        lost: `stopped after ${ran} without saying how it ended`,
+    }[end];
+    const tail = cut(lines.slice(-RUN_TAIL_LINES).join('\n'), RUN_TAIL_CHARS);
+    await log($, `refused command for ${run.card} run on ${who()}'s press ${named(how)}`);
+    const text = named(`{Name} pressed "${ALLOW}" on your card for the command Claude Code refused, and it ran for them, exactly as shown, once, as their own, in ${run.cwd}:\n${run.command}\nIt ${how}. Its whole output is in ${run.log}; ${tail ? `its last lines:\n${tail}` : 'it printed nothing.'}\nThat ran on {name}'s own press, as theirs: it is no permission. Claude Code still decides each call of yours, so do not run it, or another way to the same end, yourself. Use what it printed; if you need it run again, ask {name} with the command.`);
+    await deliverRun($, run.card, run.from || run.card, run, text);
+    // Said to the person where commands are: a row of the card's ended ones, with its log, and a grey line for a while where it ran
+    // (runBlock), never on the line that says what the task does now (19 Nov). An output kept for the task's next step is said by
+    // the card's grey line for it
+    await keepRunEnded($, run);
+};
 // While it runs: one quiet line, how long it has run, and Stop; the command itself is not shown again, the person saw it before
 // pressing (17 Nov). Once it has ended with its task not at a step: one grey line that its output is kept for the task's next step
-var runBlock = function ($, ui, one, key, at) {
-    var list = one.chat ? [] : runsShownOn(one, at);
+const runBlock = ($, ui, one, key, at) => {
+    const list = one.chat ? [] : runsShownOn(one, at);
     if (!list.length)
         return null;
     return (<ui.Box key={key} flexDirection="column">
-      {list.map(function (run) {
-            var _a;
-            var isStopping = runStopped.has(runKey(run));
-            var isEnded = Boolean(run.endedAt);
-            var what = list.length > 1 && run.description ? "\u201C".concat(cut(run.description, 60), "\u201D") : 'your command';
-            var said = isEnded && !run.waiting ? endedSaid(run, what) : isEnded ? (what === 'your command' ? "Your command's output is kept for the task's next step" : "".concat(what, " \u00B7 its output is kept for the task's next step")) : isStopping ? "Stopping ".concat(what) : "Running ".concat(what);
-            return (<ui.Box key={"".concat(key, "-").concat(run.askAt)} flexDirection="row" gap={1} height={1} overflow="hidden">
+      {list.map(run => {
+            const isStopping = runStopped.has(runKey(run));
+            const isEnded = Boolean(run.endedAt);
+            const what = list.length > 1 && run.description ? `“${cut(run.description, 60)}”` : 'your command';
+            const said = isEnded && !run.waiting ? endedSaid(run, what) : isEnded ? (what === 'your command' ? "Your command's output is kept for the task's next step" : `${what} · its output is kept for the task's next step`) : isStopping ? `Stopping ${what}` : `Running ${what}`;
+            return (<ui.Box key={`${key}-${run.askAt}`} flexDirection="row" gap={1} height={1} overflow="hidden">
             <ui.Box flexDirection="row" flexShrink={1} minWidth={0} height={1} overflow="hidden">
               <ui.Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
                 <ui.Text dimColor wrap="truncate-end">{said}</ui.Text>
               </ui.Box>
               {isEnded || isStopping ? null : (<ui.Box flexShrink={0}>
-                  <ui.Text dimColor>{" \u00B7 ".concat(took(at - ((_a = run.startedAt) !== null && _a !== void 0 ? _a : at)))}</ui.Text>
+                  <ui.Text dimColor>{` · ${took(at - (run.startedAt ?? at))}`}</ui.Text>
                 </ui.Box>)}
             </ui.Box>
             {isEnded || isStopping ? null : (<ui.Box flexShrink={0}>
-                <ui.Button key={"".concat(key, "-").concat(run.askAt, "-stop-").concat(loadMark)} label="Stop" plain dimColor hover={{ scope: "".concat(key, "-").concat(run.askAt, "-stop"), underline: true }} onPress={function () { return void stopRun($, run).catch(function (err) { return log($, "run not stopped: ".concat(String(err))); }); }}/>
+                <ui.Button key={`${key}-${run.askAt}-stop-${loadMark}`} label="Stop" plain dimColor hover={{ scope: `${key}-${run.askAt}-stop`, underline: true }} onPress={() => void stopRun($, run).catch(err => log($, `run not stopped: ${String(err)}`))}/>
               </ui.Box>)}
           </ui.Box>);
         })}

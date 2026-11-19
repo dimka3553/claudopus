@@ -1,0 +1,3 @@
+- Cards stand by colour: what waits for you (yellow) on top, then what was delivered (blue), then what works (purple). A card you just answered goes at once to its place among the working, under every blue card, instead of staying up with what waits.
+- A workflow that finishes stays where it was, green, for its two seconds, instead of jumping to the top.
+- A card still at work that runs a command you started stays among the working cards.
