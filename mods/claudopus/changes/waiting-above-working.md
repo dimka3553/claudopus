@@ -1,0 +1,1 @@
+- A card that waits for you is always above every card that only works. A card you just answered goes under all that still waits, instead of keeping its old place above them.
