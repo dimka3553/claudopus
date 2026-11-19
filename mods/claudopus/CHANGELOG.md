@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.209 · 19 November 2026
+- Delivered cards now stand at the top of the panel, the newest first, above the tasks still working and under anything that waits for you.
+- Mark as done turns the card green where it stands, outlined, with the happy octopus, for two seconds; then it goes under Finished.
+
 ## 0.2.208 · 19 November 2026
 - A task that hands in its result is now Delivered, in blue, instead of Done: the result is yours to look at, and you may still give feedback. Only your press on Mark as done turns its card green and puts it under Finished.
 - A delivered card has its two presses at its bottom, Reply (Give feedback when it asks nothing) and Mark as done, and none at its top right. Reply opens the box above the chat, and what you send puts the same task back to work.

@@ -316,11 +316,14 @@ const isDismissed = (one: Todo) => one.status !== 'working' && Boolean(one.close
 // The cards pressed Dismiss on whose write has not landed: drawn dismissed from the press itself (asPressed), so a drawing the app
 // asks for between the press and the write, which the panel then keeps while the person uses it, never shows it at the top (18 Nov,
 // the person: "when I click this, the message should go below the finished")
-const dismissedNow = new Set<string>()
+const dismissedNow = new Map<string, number>()
 const dismiss = async ($: EngineInterface, id: string) => {
-  dismissedNow.add(id)
-  redraw($)
+  // (marked from the press's own time, so the card's green moment is drawn from the press itself, in the place it stood)
   const at = await $.clock.now()
+  dismissedNow.set(id, at)
+  redraw($)
+  // Its moment over, it is drawn again, under Finished
+  $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
   // (dismissed, it is done with: a question of its own on the card goes with it, and it is drawn at once, before it is kept)
   await changeTodos($, list => list.map(one => (one.id === id && one.status !== 'working' && !one.closedAt ? { ...one, closedAt: at, ask: undefined } : one))).finally(() => dismissedNow.delete(id))
   redraw($)

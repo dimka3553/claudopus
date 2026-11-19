@@ -125,7 +125,7 @@ const draftDrawn = (key: string) => {
 // tab's own to-dos
 const paneShape = async ($: EngineInterface, paneId: string) => {
   const at = await $.clock.now()
-  const card = (one: Todo) => [one.id, one.status, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, one.parentId ?? '', lingers(one, at), (one.admins ?? []).map(gate => gate.id), one.stuckAt ?? 0, one.running?.at ?? 0, jobsOf(one).length]
+  const card = (one: Todo) => [one.id, one.status, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => gate.id), one.stuckAt ?? 0, one.running?.at ?? 0, jobsOf(one).length]
   const own = await read($, todos)
   const chats = await read($, others)
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
@@ -204,7 +204,9 @@ const personSign = async ($: EngineInterface) => {
   // (and what the person's own presses change once their write lands: a card dismissed, a result's question answered or set aside,
   // a task their answer starts again. Without them, a drawing made between the press and its write was kept while they used the
   // panel, and the card stayed at the top with its buttons for 15 seconds after each move)
-  const own = [cards.filter(one => one.closedAt).map(one => one.id), [...dismissedNow]]
+  // (a card marked done is green in its place for its two seconds, then under Finished: both are drawn in the kept drawing too)
+  const momentAt = await $.clock.now()
+  const own = [cards.filter(one => one.closedAt).map(one => one.id), [...dismissedNow.keys()], cards.filter(one => isDoneMoment(one, momentAt)).map(one => one.id)]
   return JSON.stringify([
     presses, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
     [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
@@ -392,7 +394,7 @@ const askPressed = new Map<string, string>()
 // A card as the panel draws it: an ask or a gate already pressed is not drawn as still waiting. A card the person dismissed is
 // drawn asking nothing
 const asPressed = (given: Todo): Todo => {
-  const closed = given.status !== 'working' && !given.closedAt && dismissedNow.has(given.id) ? { ...given, closedAt: given.endedAt || 1 } : given
+  const closed = given.status !== 'working' && !given.closedAt && dismissedNow.has(given.id) ? { ...given, closedAt: dismissedNow.get(given.id) ?? (given.endedAt || 1) } : given
   const one: Todo = closed.closedAt && closed.ask ? { ...closed, ask: undefined } : closed
   const isAnswered = Boolean(one.ask && askPressed.get(one.id) === `${one.ask.at}:${one.ask.text}`)
   const admins = one.admins?.filter(gate => !gatePressed.has(gate.id))
