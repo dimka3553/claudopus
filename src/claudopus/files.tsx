@@ -271,8 +271,10 @@ const LINK_ICON = '<rect x="2.5" y="4.5" width="23" height="23" rx="5" fill="#3b
 const CODE_ICON = '<circle cx="9" cy="8" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="9" cy="24" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="19" cy="12" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><path d="M9 10.6v10.8M19 14.6c0 4-10 3-10 6.8" fill="none" stroke="#9a9890" stroke-width="1.5"/>'
 // A file of no kind of its own shows its ending on its page, such as JSON
 const endingOf = (path = '') => (/\.([a-z0-9]{1,4})$/i.exec(path)?.[1] ?? '').toUpperCase()
+// A file of code shows its ending in its language's colour
+const ENDING_COLORS: Record<string, string> = { TS: '#3178C6', TSX: '#3178C6', JS: '#B8A11E', JSX: '#B8A11E', MJS: '#B8A11E', PY: '#3572A5', SH: '#4E9A2A', JSON: '#8A7A2E', CSS: '#663399', HTML: '#D24E2B', MD: '#6B6A65', SWIFT: '#E0583A', GO: '#00879A', RS: '#B7410E', RB: '#B22222', C: '#555BA8', H: '#555BA8', CPP: '#555BA8' }
 const iconOf = (kind: MadeKind | 'code', path?: string) =>
-  kind === 'code' ? CODE_ICON : kind === 'link' ? LINK_ICON : pageIcon(kind === 'file' ? endingOf(path) : madeKindOf(kind).badge, madeKindOf(kind).color)
+  kind === 'code' ? CODE_ICON : kind === 'link' ? LINK_ICON : pageIcon(kind === 'file' ? endingOf(path) : madeKindOf(kind).badge, kind === 'file' ? (ENDING_COLORS[endingOf(path)] ?? madeKindOf(kind).color) : madeKindOf(kind).color)
 const svgOfIcon = (kind: MadeKind | 'code', width: number, height: number, path?: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 28 32">${iconOf(kind, path)}</svg>`
 const tileSvg = (inner: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="${TILE_W}" height="${TILE_H}" viewBox="0 0 ${TILE_W} ${TILE_H}">${inner}</svg>`
 // A small copy cut to its place from its top, with rounded corners; each tile's cut has a name of its own, should the app draw them
@@ -299,6 +301,8 @@ const pileTile = (first: Made, face: Face | undefined) =>
 const BAR_W = 64
 const BAR_H = 8
 const BAR_CELLS = 6
+// The bar's column in the panel's cells
+const BAR_COLUMNS = 7
 const ADDED = '#57AB5A'
 const REMOVED = '#E5534B'
 const barShare = (one: CodeFile, most: number) => (most > 0 ? Math.sqrt((one.plus + one.minus) / most) : 0)
@@ -347,6 +351,16 @@ const CODE_KINDS = [
 ]
 // The most files listed before "Show all"
 const CHANGED_MOST = 8
+// Files by the folder they are in inside the repo, the folder of the most changed first, as they stand in the list; one at the
+// repo's top is under the repo's own name
+const foldersOf = (list: CodeFile[]) => {
+  const by = new Map<string, CodeFile[]>()
+  for (const one of list) {
+    const folder = one.inRepo.includes('/') ? one.inRepo.slice(0, one.inRepo.lastIndexOf('/')) : fileName(one.path.slice(0, one.path.length - one.inRepo.length - 1))
+    by.set(folder, [...(by.get(folder) ?? []), one])
+  }
+  return [...by.entries()]
+}
 // Opens what was pressed where the person is: a picture as the chat's pictures open, any other file or a link as the system opens it
 const openMade = async ($: EngineInterface, one: Made, pane: string, row: string, surface?: RenderSurface) => {
   if (one.kind === 'picture') return showPicture($, one.path, pane, row, surface)
@@ -441,19 +455,35 @@ const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, k
     </Box>
   )
 }
-// Under the tiles, the files the task changed in a repo, by kind: a row each with its bar, its name, the folder it is in inside the
-// repo and its counts. A press on a file opens what changed in it in a tab of the panel. A task counted before files were kept has
-// only its counts
+// Under the tiles, the files the task changed in a repo, by kind, as a table whose columns line up: each kind's heading with its
+// counts, then under each folder inside the repo a row a file: its icon, its name, then its counts and its bar at the right in
+// columns of their own, which line up down the list. A press on a name shows the file in the app's Files pane. A task counted before files were kept
+// has only its counts
 const changedList = ($: EngineInterface, ui: Ui, code: CodeMade, pane: string, key: string, canDraw: boolean, owner: string, gen: string) => {
   const { Box, Button, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   const list = code.files ?? []
   const isAll = openPiles.has(`${pane}:code`)
   const most = Math.max(0, ...list.map(one => one.plus + one.minus))
-  const counts = (one: { plus: number; minus: number }, at: string) => [
-    <Text key={`${at}-plus`} color="success">{`+${one.plus.toLocaleString('en-US')}`}</Text>,
-    <Text key={`${at}-minus`} color="error" dimColor={!one.minus}>{`−${one.minus.toLocaleString('en-US')}`}</Text>,
-  ]
+  const plusOf = (one: { plus: number }) => `+${one.plus.toLocaleString('en-US')}`
+  const minusOf = (one: { minus: number }) => `−${one.minus.toLocaleString('en-US')}`
+  const groups = CODE_KINDS.map(group => {
+    const all = list.filter(group.test)
+    return { ...group, all, sum: { plus: all.reduce((n, one) => n + one.plus, 0), minus: all.reduce((n, one) => n + one.minus, 0) } }
+  }).filter(group => group.all.length)
+  // Each count's column as wide as its widest, the sums' too
+  const plusW = Math.max(...[...list, ...groups.map(group => group.sum)].map(one => plusOf(one).length), 2)
+  const minusW = Math.max(...[...list, ...groups.map(group => group.sum)].map(one => minusOf(one).length), 2)
+  const counts = (one: { plus: number; minus: number }, at: string, isDim = false) => (
+    <Box key={`${at}-counts`} flexDirection="row" gap={1} flexShrink={0}>
+      <Box width={plusW} justifyContent="flex-end">
+        <Text color="success" dimColor={isDim}>{plusOf(one)}</Text>
+      </Box>
+      <Box width={minusW} justifyContent="flex-end">
+        <Text color="error" dimColor={isDim || !one.minus}>{minusOf(one)}</Text>
+      </Box>
+    </Box>
+  )
   if (!list.length)
     return (
       <Box key={`${key}-code`} flexDirection="row" gap={1}>
@@ -461,51 +491,67 @@ const changedList = ($: EngineInterface, ui: Ui, code: CodeMade, pane: string, k
         {counts(code, `${key}-code`)}
       </Box>
     )
+  // The bar's column, the same width in every row and under each heading
+  const barColumn = (one: CodeFile | undefined, at: string) => {
+    if (!canDraw || !table.Svg) {
+      const bar = one ? barCells(one, most) : undefined
+      return (
+        <Box key={`${at}-bar`} flexDirection="row" width={BAR_CELLS} flexShrink={0}>
+          {bar ? <Text color="success">{bar.green}</Text> : null}
+          {bar ? <Text color="error">{bar.red}</Text> : null}
+          {bar ? <Text dimColor>{bar.rest}</Text> : null}
+        </Box>
+      )
+    }
+    return (
+      <Box key={`${at}-bar`} width={BAR_COLUMNS} flexShrink={0} alignItems="center" justifyContent="flex-end">
+        {one ? <table.Svg key={`${at}-bar-svg`} source={barSvg(one, most)} alt={linesWord(one)} width={BAR_W} height={BAR_H} /> : null}
+      </Box>
+    )
+  }
   let left = isAll ? Infinity : CHANGED_MOST
   return (
     <Box key={`${key}-code`} flexDirection="column" gap={1}>
-      {CODE_KINDS.map(group => {
-        const all = list.filter(group.test)
-        const rows = all.slice(0, Math.max(0, left))
+      {groups.map(group => {
+        const rows = group.all.slice(0, Math.max(0, left))
         left -= rows.length
-        if (!all.length) return null
-        const sum = { plus: all.reduce((n, one) => n + one.plus, 0), minus: all.reduce((n, one) => n + one.minus, 0) }
         return (
           <Box key={`${key}-${group.kind}`} flexDirection="column">
-            <Box flexDirection="row" gap={1}>
-              <Text dimColor>{`${group.title} · ${all.length} ${all.length === 1 ? 'file' : 'files'}`}</Text>
-              {counts(sum, `${key}-${group.kind}-sum`)}
+            <Box flexDirection="row" alignItems="center" gap={1}>
+              <Box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
+                <Text bold>{group.title}</Text>
+                <Text dimColor>{`${group.all.length} ${group.all.length === 1 ? 'file' : 'files'}`}</Text>
+              </Box>
+              {counts(group.sum, `${key}-${group.kind}-sum`, true)}
+              {barColumn(undefined, `${key}-${group.kind}-sum`)}
             </Box>
-            {rows.map(one => {
-              const row = `${key}-${group.kind}-${mark(one.path).replace(':', '-')}`
-              const folder = one.inRepo.includes('/') ? one.inRepo.slice(0, one.inRepo.lastIndexOf('/')) : ''
-              const bar = barCells(one, most)
-              return (
-                <Box key={row} flexDirection="row" alignItems="center" gap={1} minWidth={0}>
-                  {canDraw && table.Svg ? (
-                    <Box flexShrink={0}>
-                      <table.Svg key={`${row}-bar`} source={barSvg(one, most)} alt={linesWord(one)} width={BAR_W} height={BAR_H} />
-                    </Box>
-                  ) : (
-                    <Box flexDirection="row" flexShrink={0}>
-                      <Text color="success">{bar.green}</Text>
-                      <Text color="error">{bar.red}</Text>
-                      <Text dimColor>{bar.rest}</Text>
-                    </Box>
-                  )}
-                  <Box flexDirection="row" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
-                    <Box flexShrink={0}>
-                      <Button key={`${row}-open-${presses}${gen}`} label={fileName(one.path)} plain hover={{ underline: true }} onPress={() => openDiff($, one, code.since ?? 0, owner)} />
-                    </Box>
-                    {folder ? <Text dimColor wrap="truncate-end">{middleCut(folder, 40)}</Text> : null}
-                  </Box>
-                  <Box flexDirection="row" gap={1} flexShrink={0}>
-                    {one.isNew ? <Text dimColor>new</Text> : null}
-                    {counts(one, row)}
-                  </Box>
+            {foldersOf(rows).map(([folder, inFolder]) => (
+              <Box key={`${key}-${group.kind}-in-${mark(folder).replace(':', '-')}`} flexDirection="column">
+                <Box paddingLeft={canDraw ? 3 : 0} minWidth={0}>
+                  <Text dimColor wrap="truncate-end">{folder}</Text>
                 </Box>
-              )
-            })}
+                {inFolder.map(one => {
+                  const row = `${key}-${group.kind}-${mark(one.path).replace(':', '-')}`
+                  return (
+                    <Box key={row} flexDirection="row" alignItems="center" gap={1} minWidth={0}>
+                      {canDraw && table.Svg ? (
+                        <Box flexShrink={0}>
+                          <table.Svg key={`${row}-icon`} source={svgOfIcon('file', 16, 18, one.path)} alt={`${endingOf(one.path) || 'Text'} file`} width={16} height={18} />
+                        </Box>
+                      ) : null}
+                      <Box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+                        <Box flexShrink={1} minWidth={0}>
+                          <Button key={`${row}-open-${presses}${gen}`} label={fileName(one.path)} plain hover={{ underline: true }} onPress={press => void showFile($, one, code.since ?? 0, owner, press.surface)} />
+                        </Box>
+                        {one.isNew ? <Text dimColor>new</Text> : null}
+                      </Box>
+                      {counts(one, row)}
+                      {barColumn(one, row)}
+                    </Box>
+                  )
+                })}
+              </Box>
+            ))}
           </Box>
         )
       })}
@@ -523,6 +569,19 @@ const changedList = ($: EngineInterface, ui: Ui, code: CodeMade, pane: string, k
     </Box>
   )
 }
+// A press on a changed file shows it in the desktop app's own Files pane, beside the chat, through the app's view tool. Where the
+// app has no Files pane (the terminal, an app without the tool) or will not show it (a file outside the chat's folders), what changed
+// in it opens in a tab of the panel instead
+const showFile = async ($: EngineInterface, file: CodeFile, since: number, owner: string, surface?: RenderSurface) => {
+  presses += 1
+  if (surface !== 'terminal') {
+    const shown = await $.mcp.call('ccd_view', 'show_pane', { pane: 'file', path: file.path }).catch(err => ({ isError: true, content: [{ type: 'text', text: String(err) }] }))
+    const said = shown.content.map(one => ('text' in one ? String(one.text) : '')).join(' ')
+    if (!shown.isError) return
+    await log($, `${file.path} not shown in the Files pane, its changes open in a tab: ${cut(said, 160)}`)
+  }
+  openDiff($, file, since, owner)
+}
 
 // ---- What changed in one file, in a tab of the panel ----
 
@@ -538,7 +597,6 @@ const diffs = new Map<string, DiffOf>()
 // The tabs showing their whole file rather than what changed
 const diffWhole = new Set<string>()
 const openDiff = ($: EngineInterface, file: CodeFile, since: number, owner: string) => {
-  presses += 1
   const id = diffPaneOf(file.path)
   if (diffs.size > 100) diffs.delete(diffs.keys().next().value ?? '')
   diffs.set(id, { file, since, owner })

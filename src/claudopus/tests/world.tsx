@@ -76,6 +76,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const copied: string[] = []
   // The terminal tabs opened beside the chat, by what they were opened with
   const terminals: unknown[] = []
+  // What the app's view tool was asked to show beside the chat; it refuses where the test lays ccd_view:refused
+  const viewed: unknown[] = []
   // What was sent on to an agent, what the mod wrote into an agent's chat, and what it submitted to this one
   const sent: string[] = []
   const appended: string[] = []
@@ -194,6 +196,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   on('mcp.call', (_, e) => {
     if (e.server === 'terminal') terminals.push(e.args)
+    if (e.server === 'ccd_view') {
+      viewed.push(e.args)
+      if (files.has('ccd_view:refused')) return { value: { content: [{ type: 'text', text: files.get('ccd_view:refused') ?? '' }], isError: true } }
+    }
     if (e.tool === 'set_session_title') titles.push(String(e.args.title))
     const text = e.tool === 'get_session' ? JSON.stringify({ sessionId: 'local_1', title: 'Old title' }) : '[]'
     return { value: { content: [{ type: 'text', text }], isError: false } }
@@ -671,7 +677,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, pressRuns, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, pressRuns, titles, compacts, opened, tabs, viewed, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two

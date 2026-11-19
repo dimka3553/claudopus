@@ -50,9 +50,8 @@ A running command or helper is two lines:
 - A press on a command's name opens its log in a tab of the panel, running or ended: its name, how it stands, `Stop`, `Details`, `Open in Terminal`, then the end of what it wrote. Details repeats none of it under a command.
 
 ## Files a task changed
-- A card says `3 changed files` beside its other files, a press that opens Details. Under Files there, the files a task changed in a repo are listed by kind, `Code · 5 files`, then `Documents · 2 files`, the most changed first: a bar each (green for lines added, red for lines removed, as long as its change against the most changed), the file's name, its folder in the repo, `new` for a file it made, and `+259 −24`. Past eight, `Show all 12`.
-- A press on a file opens what changed in it in a tab of the panel, named after the file: its name, its folder and counts, `Details`, `Whole file` or `Changes`, then the changes as Claude Code draws a diff. A new file is drawn whole.
-- A command that has written nothing for a minute says whether its programs still use the processor: `No output yet · started 20m ago · still busy`, or in amber `nothing new for 20m · idle`.
+- A card says `3 changed files` beside its other files, a press that opens Details. Under Files there, the files a task changed in a repo are a table by kind, `Code 5 files`, then `Documents 2 files`, each heading with its counts, the most changed first, under a dim line for each folder in the repo: a row a file with its icon (its ending in its language's colour), its name, `new` for a file it made, then `+259 −24` and a bar (green for lines added, red for lines removed, as long as its change against the most changed) in columns that line up down the list. Past eight, `Show all 12`.
+- A press on a file's name shows it in the app's Files pane beside the chat. Where the app can't (the terminal, or a file outside the chat's folders), what changed in it opens in a tab of the panel, named after the file: its name, its folder and counts, `Details`, `Whole file` or `Changes`, then the changes as Claude Code draws a diff.
 
 ## Marks
 One mark for each kind of row, the same on a card and in Details; a ring moves around one that runs.

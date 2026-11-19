@@ -1,2 +1,2 @@
-- A task's changed files are now a list you can open: press "3 changed files" on its card, and its Details lists each file by kind (code, then documents), with a bar of the lines added and removed
-- A press on a file in that list opens what changed in it in a tab of the panel, drawn as a diff, with Whole file to see all of it
+- A task's changed files are now a list you can open: press "3 changed files" on its card, and its Details lists each file by kind (code, then documents) in lined-up columns, with an icon, its folder, its counts and a bar of the lines added and removed
+- A press on a file in that list shows it in the app's Files pane beside the chat; in the terminal, or for a file the app can't show, what changed in it opens in a tab of the panel

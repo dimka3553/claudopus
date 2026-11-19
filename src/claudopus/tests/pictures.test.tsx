@@ -215,8 +215,8 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   expect(logged.filter(line => !line.startsWith('"Pick a design" has a question for you'))).toEqual([])
 })
 
-test("what a task made is on its card under its title, side by side, and as tiles under the title in its Details: a file opens on a press, three of a kind are one stack that opens out, and the files it changed in a repo are a list by kind, a bar each, each opening what changed in it in a tab of the panel", async ($, on) => {
-  const { files, shown, logged, tabs } = world(on, {})
+test("what a task made is on its card under its title, side by side, and as tiles under the title in its Details: a file opens on a press, three of a kind are one stack that opens out, and the files it changed in a repo are a table by kind, an icon and a bar each, each shown in the app's Files pane on a press, or where it can't, what changed in it opens in a tab of the panel", async ($, on) => {
+  const { files, shown, logged, tabs, viewed } = world(on, {})
   const NEW = '9999999999999'
   const pdf = '/Users/me/out/vat-report.pdf'
   const shots = ['/Users/me/out/a.png', '/Users/me/out/b.png', '/Users/me/out/c.png']
@@ -265,17 +265,30 @@ test("what a task made is on its card under its title, side by side, and as tile
   // Under the tiles, the files it changed in its repo, by kind, the most changed first: a bar each, as long as its lines changed
   // against the most changed, with its name, its folder in the repo and its counts; never a folder outside the repo
   const texts = async (in_: typeof tab) => (await in_.findAll({ type: 'Text' })).map(one => String(one.text))
-  expect((await texts(tab)).filter(text => /^(Code|Documents) · /.test(text))).toEqual(['Code · 1 file', 'Documents · 1 file'])
+  expect((await texts(tab)).filter(text => /^(Code|Documents|\d+ files?)$/.test(text))).toEqual(['Code', '1 file', 'Documents', '1 file'])
   const bars = (await tab.findAll({ type: 'Svg' })).filter(svg => svg.props.width === 64)
   expect(bars.map(svg => String(svg.props.alt))).toEqual(['12 added, 3 removed', '40 added, 0 removed'])
+  // Each file has an icon with its ending, in its language's colour (19 Nov: "add icons to the files")
+  const fileIcons = (await tab.findAll({ type: 'Svg' })).filter(svg => svg.props.width === 16)
+  expect(fileIcons.map(svg => String(svg.props.alt))).toEqual(['TS file', 'MD file'])
+  expect(String(fileIcons[0]?.props.source)).toContain('#3178C6')
+  // The counts stand in columns as wide as the widest, so they line up down the list (19 Nov: "it all doesn't align")
+  expect((await tab.findAll({ type: 'Box' })).filter(box => box.props.width === 3 && box.props.justifyContent === 'flex-end').length).toBeGreaterThanOrEqual(4)
   expect(String(bars[1]?.props.source)).toContain('width="64" height="8" rx="2" fill="#57AB5A"')
   expect(String(bars[0]?.props.source)).toMatch(/width="(\d+)" height="8" rx="2" fill="#57AB5A".*fill="#E5534B"/)
   const rows = (await tab.findAll({ type: 'Button' })).filter(one => /^(app\.ts|README\.md)$/.test(String(one.props.label)))
   expect(rows.map(one => String(one.props.label))).toEqual(['app.ts', 'README.md'])
-  expect(await texts(tab)).toContain('src')
+  // under a line for the folder each is in, the repo's own name for one at its top
+  expect(await texts(tab)).toEqual(expect.arrayContaining(['src', 'repo', 'new']))
   expect((await texts(tab)).some(text => /\/Users\/me|\/repo\//.test(text))).toBe(false)
-  // A press on a file opens what changed in it in a tab of the panel named after it, drawn by Claude Code as a diff
+  // A press on a file shows it in the app's own Files pane beside the chat, and opens no tab of the panel (19 Nov: "it shouldn't open
+  // within the tab itself")
   await tab.press({ key: rows[0]?.key ?? '' })
+  expect(await until(async () => viewed[0])).toEqual({ pane: 'file', path: '/repo/src/app.ts' })
+  expect(tabs.some(one => one.startsWith('diff-'))).toBe(false)
+  // Where the app won't show it, what changed in it opens in a tab of the panel named after it, drawn by Claude Code as a diff
+  files.set('ccd_view:refused', 'The file is outside the folders this session can open.')
+  await tab.press({ key: (await tab.findAll({ type: 'Button' })).find(one => one.props.label === 'app.ts')?.key ?? '' })
   const diffTab = await until(async () => tabs.find(one => /^diff-.*: app\.ts$/.test(one)))
   const diff = await $.ui.mount({ ...LIST, requestId: String(diffTab).split(':')[0], props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
   const code = async () => (await diff.findAll({ type: 'Code' })).map(one => ({ source: String(one.props.source), format: one.props.format, startLine: one.props.startLine }))
