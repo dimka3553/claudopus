@@ -464,7 +464,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
       return files.has(path) ? ok(files.get(path)) : ok('', 1)
     }
     // The lines a task added to and took from its files, as the test lays git:numstat
-    if (tool === 'sh' && String(rest[1]).includes('git diff --numstat')) return ok(files.get('git:numstat') ?? '')
+    // (git:numstat:<repo> for a repo of its own)
+    if (tool === 'sh' && String(rest[1]).includes('git diff --numstat')) return ok(files.get(`git:numstat:${String(rest[3])}`) ?? files.get('git:numstat') ?? '')
     // What changed in one file, as the test lays git:diff:<the file in its repo>; a file it lays none for is new
     if (tool === 'sh' && String(rest[1]).includes('# the changes tab')) return ok(files.get(`git:diff:${String(rest.at(-1))}`) ?? 'NEW\n')
     if (tool === 'sh' || tool === 'bash') {
@@ -513,7 +514,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
       return ok(`${on === 'worktree' ? `${folder}/../.git/worktrees/x` : `${folder}/.git`}\n${folder}/.git\n${folder}\n`)
     }
     // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
-    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(files.has('git:top') ? `${files.get('git:top')}\n` : '', files.has('git:top') ? 0 : 128)
+    // (git:top:<folder> for a folder in a repo of its own)
+    const topLaid = files.get(`git:top:${String(rest[rest.indexOf('-C') + 1])}`) ?? files.get('git:top')
+    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(topLaid !== undefined ? `${topLaid}\n` : '', topLaid !== undefined ? 0 : 128)
     // and where the repo a worktree belongs to keeps its git folder, as git:common lays it
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--git-common-dir')) return ok(files.has('git:common') ? `${files.get('git:common')}\n` : '', files.has('git:common') ? 0 : 128)
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref')) return ok(files.has('git:branch') ? `${files.get('git:branch')}\n` : '', files.has('git:branch') ? 0 : 128)
@@ -632,6 +635,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     }
     if (e.tool === 'Bash' && command.startsWith('hold ')) return { result: { stdout: await new Promise<string>(done => held.set(command.slice(5), done)), stderr: '', interrupted: false } } as never
     if (e.tool === 'Bash' && command.includes('admin')) admins.push({ command, grants: [...files].filter(([path]) => path.startsWith(`${MEMORY}/admin-grants/`)).map(([, text]) => JSON.parse(text)) })
+    // A command prints what the test lays as stdout:<the command>
+    if (e.tool === 'Bash' && files.has(`stdout:${command}`)) return { result: { stdout: files.get(`stdout:${command}`), stderr: '', interrupted: false } } as never
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))
     if (e.tool === 'SendMessage') sent.push(String((e as { message?: string }).message))
     // A command that prints the key, as one could print it by mistake
