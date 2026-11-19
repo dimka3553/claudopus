@@ -210,14 +210,11 @@ const personSign = async ($: EngineInterface) => {
   return JSON.stringify([
     presses, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
     [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
-    [...pictureIn.keys()], isUpdating, loadMark, foldsHeld(momentAt),
+    [...pictureIn.keys()], isUpdating, loadMark,
     // and what their presses change that shows later: a Stop's card, a note a box left, the update's steps, a copy made
     [...(await read($, todos)), ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], loosePressed.length, [...sentReplies].map(([id, sent]) => [id, sent.to, sent.text]), updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
   ])
 }
-// The press that folded Finished: the drawing for it is not held at the bottom of the view (panel.tsx, heldRows). The person
-// shortened the list on purpose, so the view comes back to what is left; held, it showed only blank and the fold, its cards above
-let foldPress = -1
 // A click is the focus moving onto a button, then the press: a drawing between them is a new button under the pointer, and the
 // click did nothing (16 Nov, recorded: the update note's What's new took several clicks while other chats' writes drew the panel
 // twice a second). From the person's focus on one of the panel's buttons until its press, or PRESS_HOLD, the panel is drawn as it
@@ -1199,32 +1196,6 @@ const sentLine = (one: Todo, now: number, most = 60) => {
   if (sent.isPress) return `✓ You pressed “${cut(sent.text, most)}”`
   return `✓ You ${sent.ask === CHANGE_WHAT ? 'wrote' : 'answered'} “${cut(sent.text, most)}”${isHeld && !isActingOnReply(one) ? ' · the question is still open' : ''}`
 }
-// A block a press answered on a small card, by card: the card holds the rows it took (foldRows) under the grey line that takes its
-// place, for FOLD_HELD from the first drawing that shows it so, then closes up. `need`: the block's id and when it came, so the rows
-// stand where it stood among the card's other blocks. Its time is counted in the panel's own drawing, which also asks for the drawing
-// that closes it, and the end of each is part of what the person's own presses change (personSign), so a panel held while they use
-// it scrolled down closes it too (19 Nov: the space after Release it never closed while the person moved about the panel)
-const answerFolds = new Map<string, { need: string; came: number; rows: number; at: number; pressed: number }>()
-const FOLD_HELD = 3000
-// (one never drawn within FOLD_UNSEEN of its press is let go, so a card first shown later never opens a space)
-const FOLD_UNSEEN = 10_000
-const holdFold = (card: string, need: string, came: number, rows: number) => void answerFolds.set(card, { need, came, rows, at: Infinity, pressed: Date.now() })
-// The rows a card holds now for a block just answered, while that block is no longer drawn
-const foldOf = ($: EngineInterface, card: string, now: number, drawn: string[]) => {
-  const fold = answerFolds.get(card)
-  if (!fold || drawn.includes(fold.need)) return undefined
-  if (fold.at === Infinity) {
-    if (Date.now() - fold.pressed > FOLD_UNSEEN) return void answerFolds.delete(card)
-    answerFolds.set(card, { ...fold, at: now })
-    $.clock.after(FOLD_HELD + 50, () => drawAgain($))
-    return fold
-  }
-  if (now - fold.at < FOLD_HELD) return fold
-  answerFolds.delete(card)
-  return undefined
-}
-// The cards whose space is still held, as a drawing at `now` would show them
-const foldsHeld = (now: number) => [...answerFolds].filter(([, fold]) => now - fold.at < FOLD_HELD).map(([card]) => card)
 // What was pressed on a block, said in one grey line where the block was: on its task's card (sentLine), or at the top of the
 // panel for a block that belonged to no task (loosePressed). Drawn from the press itself, before anything is awaited
 let loosePressed: { text: string; at: number }[] = []

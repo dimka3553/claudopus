@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.231 · 19 November 2026
+- When you answer a question on a card, the card closes up at once under the grey line of your answer. No empty space is left under it or under the list, scrolled or not, by a button, Answer in words, Allow or Release it.
+
 ## 0.2.230 · 19 November 2026
 - Claudopus now cleans up what tasks leave behind, every ten minutes and when a task stops. That covers the copies Chrome makes of itself, browser profiles, leftover temporary folders, task scratch folders untouched for two days, and code copies whose work is merged. Pictures a result shows are moved into the result's folder first. Your CT data, photos, videos and Desktop are never touched.
 - When your disk has less than 20 GB left, the panel says so at its top and you get one notification. Free up space cleans up at once and also clears the download caches.

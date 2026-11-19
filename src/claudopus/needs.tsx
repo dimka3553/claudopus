@@ -215,35 +215,32 @@ const looseNeeds = ($: EngineInterface, surface: string, shown: (card: string | 
   ].sort((a, b) => a.at - b.at)
 }
 
-// How many rows a block takes on a small card of `room` letters, reckoned high: a press that answers it folds it to one grey line,
-// and the card holds that many rows under the line for FOLD_HELD (asking.tsx, answerFolds), so nothing below moves up under the pointer
-// that pressed (19 Nov: the person asked that an answered question go at once, and "the card doesn't jump"). Too many rows only
-// moves what is below further down, never under the pointer, which stays on the rows held
-const foldRows = (need: Need, room: number) => {
+// How many rows a block takes on a small card of `room` letters, reckoned high: what stands above a card's blocks is judged by it
+// (panel.tsx, blocksSign), so a block above that grows, shrinks or goes marks the cards under it as moved under the pointer
+const blockRowsOf = (need: Need, room: number) => {
   // (the letters of a row reckoned fewer than the card's own perRow, so a long line is never thought to take fewer rows than it does)
   const per = Math.max(20, Math.floor(room / 2.4))
   const lines = (text: string, each = per) => text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / each)), 0)
-  // In the desktop app's pixels, measured on its own renderer (19 Nov): a line of text FOLD_LINE, a gap between parts FOLD_GAP, a
-  // row of buttons FOLD_BUTTONS, the outline and its padding FOLD_EDGE; a held row of the card is FOLD_ROW
-  const details = need.details ? lines(need.details.length <= DETAILS_ON_CARD ? need.details : `${cut(need.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`) * FOLD_LINE : 0
-  const pictures = Math.ceil((need.card?.ask?.pictures?.length ?? 0) / 2) * (ASK_PIC_TALL + FOLD_LINE + 8)
-  const command = need.command ? lines(need.command) * FOLD_LINE + 16 : 0
-  const buttons = need.buttons.length ? Math.ceil(need.buttons.reduce((n, button) => n + button.label.length + 6, 0) / (per * 1.4)) * FOLD_BUTTONS : 0
-  const parts = [FOLD_LINE, lines(cut(need.text, Math.round(room * 1.6)), Math.floor(per * 0.9)) * FOLD_LINE, details, pictures, command, need.where ? lines(need.where) * FOLD_LINE : 0, need.said ? lines(need.said) * FOLD_LINE : 0, buttons, need.line ? FOLD_LINE : 0].filter(Boolean)
-  return Math.ceil((parts.reduce((n, part) => n + part, 0) + (parts.length - 1) * FOLD_GAP + FOLD_EDGE) / FOLD_ROW)
+  // In the desktop app's pixels, measured on its own renderer (19 Nov): a line of text BLOCK_LINE, a gap between parts BLOCK_GAP, a
+  // row of buttons BLOCK_BUTTONS, the outline and its padding BLOCK_EDGE; a row of the card is BLOCK_ROW
+  const details = need.details ? lines(need.details.length <= DETAILS_ON_CARD ? need.details : `${cut(need.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`) * BLOCK_LINE : 0
+  const pictures = Math.ceil((need.card?.ask?.pictures?.length ?? 0) / 2) * (ASK_PIC_TALL + BLOCK_LINE + 8)
+  const command = need.command ? lines(need.command) * BLOCK_LINE + 16 : 0
+  const buttons = need.buttons.length ? Math.ceil(need.buttons.reduce((n, button) => n + button.label.length + 6, 0) / (per * 1.4)) * BLOCK_BUTTONS : 0
+  const parts = [BLOCK_LINE, lines(cut(need.text, Math.round(room * 1.6)), Math.floor(per * 0.9)) * BLOCK_LINE, details, pictures, command, need.where ? lines(need.where) * BLOCK_LINE : 0, need.said ? lines(need.said) * BLOCK_LINE : 0, buttons, need.line ? BLOCK_LINE : 0].filter(Boolean)
+  return Math.ceil((parts.reduce((n, part) => n + part, 0) + (parts.length - 1) * BLOCK_GAP + BLOCK_EDGE) / BLOCK_ROW)
 }
-const FOLD_LINE = 24
-const FOLD_GAP = 12
-const FOLD_BUTTONS = 44
-const FOLD_EDGE = 26
-const FOLD_ROW = 24
+const BLOCK_LINE = 24
+const BLOCK_GAP = 12
+const BLOCK_BUTTONS = 44
+const BLOCK_EDGE = 26
+const BLOCK_ROW = 24
 
 // The one drawing: an outlined amber block; a small dim label of its kind; the question in amber; what it is about; the command
 // in a row of its own, whole; then its buttons. `isWhole`: in Details, where nothing is cut. `pictures`: the question's own
 // pictures, drawn by the pane (it keeps how much of them one drawing holds)
 const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boolean; isCompact?: boolean; room?: number; surface?: string; pictures?: JSX.Element | null; autoFocus?: boolean; isMoving?: boolean } = {}) => {
   const { isWhole = false, room = 80 } = opts
-  const isFolding = !isWhole && !opts.isCompact && opts.surface === 'desktop'
   const one = need.card
   const ask = one?.ask
   const Link = (ui as Ui & { Link: ElementTable['Link'] }).Link
@@ -306,19 +303,15 @@ const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boo
               label={button.label}
               {...(button.isPlain ? { plain: true } : n === 0 ? { variant: 'primary' as const } : {})}
               {...(button.hotkey ? { hotkey: button.hotkey } : {})}
-              // A press on the list's small card just after the card moved under the pointer does nothing, and says so (isMovedUnder).
-              // A press that answers a block there holds its rows for a moment
+              // A press on the list's small card just after the card moved under the pointer does nothing, and says so (isMovedUnder)
               onPress={
                 opts.isMoving && one
                   ? press => {
                       if (isMovedUnder(one.id)) return void (movedPresses.set(need.id, need.at), drawAgain($))
                       movedPresses.delete(need.id)
-                      if (isFolding && !button.isOpener) holdFold(one.id, need.id, need.at, foldRows(need, room))
                       button.onPress(press)
                     }
-                  : isFolding && !button.isOpener && one
-                    ? press => (holdFold(one.id, need.id, need.at, foldRows(need, room)), button.onPress(press))
-                    : button.onPress
+                  : button.onPress
               }
             />
           ))}
