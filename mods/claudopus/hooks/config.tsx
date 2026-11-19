@@ -179,7 +179,8 @@ export const LOOK_CHOICES = [
 export const lookSaid = (value: string) => (value === '0' ? 'only when you press Check now' : (LOOK_CHOICES.find(one => one.value === value)?.label ?? 'Every hour').replace(/^./, c => c.toLowerCase()))
 // Whether version a is newer than version b, by their numbers
 export const isNewer = (a: string, b: string) => {
-  const [x, y] = [a, b].map(v => v.split('.').map(n => Number.parseInt(n, 10) || 0))
+  const parts = (v: string) => v.split('.').map(n => Number.parseInt(n, 10) || 0)
+  const [x, y] = [parts(a), parts(b)]
   for (let n = 0; n < Math.max(x.length, y.length); n += 1) if ((x[n] ?? 0) !== (y[n] ?? 0)) return (x[n] ?? 0) > (y[n] ?? 0)
   return false
 }
