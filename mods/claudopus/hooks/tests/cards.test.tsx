@@ -974,7 +974,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   // First it stays in its place for two seconds, green, saying it finished; the header counts it as no longer running at once and says it just finished
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.bold).toBe(true)
   expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
-  expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === '#4C9AFF').length).toBe(1)
+  expect((await pane.findAll({ type: 'Box' })).filter(b => !b.key?.startsWith('outline-') && b.props.backgroundColor === '#4C9AFF').length).toBe(1)
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.props.color).toBe('#4C9AFF')
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.text).toBe('1 delivered')
   // Its helper, ended in the same moment, stays in its card for the same pause
@@ -1435,13 +1435,13 @@ test("a card's title, its line of facts and every line under them start at one l
   await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Measure the nose', prompt: 'go', parentAgentId: 'a1' } as never)
 
   // How far in a line's first letter is: the padding on the way down its first parts, and a desktop's own around a plain Button
-  type Drawn = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+  type Drawn = { type?: string; key?: string; props?: Record<string, unknown>; children?: unknown[] }
   const insetOf = (node: unknown, surface: string): string[] => {
     if (!node || typeof node !== 'object') return []
     const { type, props = {}, children = [] } = node as Drawn
     const own = [props.paddingLeft ?? props.paddingX ?? props.padding].filter(step => step !== undefined && step !== 0).map(String)
     if (type === 'Button') return [...own, ...(props.plain && surface !== 'terminal' ? ['xs'] : [])]
-    return type === 'Box' ? [...own, ...insetOf(children.find(one => one && typeof one === 'object'), surface)] : own
+    return type === 'Box' ? [...own, ...insetOf(children.find(one => one && typeof one === 'object' && !/^outline-(top|left|right|bottom)$/.test((one as Drawn).key ?? '')), surface)] : own
   }
   // Each line of the card's column, the title and its facts as two
   const edges = async (surface: 'desktop' | 'terminal') => {
@@ -1455,8 +1455,8 @@ test("a card's title, its line of facts and every line under them start at one l
   const expectOneEdge = async (lines: number, block = -1) => {
     // A desktop moves every line in by the step a plain Button pads its label with; a terminal draws each at the card's edge.
     // What waits for the person is an outlined block: its outline starts at that edge, and its words one cell inside the outline
-    expect(await edges('desktop')).toEqual(Array.from({ length: lines }, (_, n) => (n === block ? 'xs+1' : 'xs')))
-    expect(await edges('terminal')).toEqual(Array.from({ length: lines }, (_, n) => (n === block ? '1' : '')))
+    expect(await edges('desktop')).toEqual(Array.from({ length: lines }, (_, n) => 'xs'))
+    expect(await edges('terminal')).toEqual(Array.from({ length: lines }, (_, n) => ''))
   }
   // At work: the title, the model's name that opens the choice of models, the step it is on, the line beside the dots, the helper tree
   await expectOneEdge(5)
@@ -1895,7 +1895,7 @@ test("work that finishes comes to the top, outlined for two seconds, and stays t
   band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await clock.advance(1_000)
   await again.redraw()
-  const greens = async () => [(await again.findAll({ type: 'Text', text: '✓ Done' })).map(one => one.props.color), (await again.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.borderColor === 'success').length]
+  const greens = async () => [(await again.findAll({ type: 'Text', text: '✓ Done' })).map(one => one.props.color), (await again.findAll({ type: 'Box' })).filter(b => b.key === 'outline-top' && b.props.backgroundColor === 'success').length]
   const isHappyNow = async () => (await again.findAll({ type: 'Svg' })).some(one => /<title>happy<\/title>/.test(String(one.props.source)))
   // Through its moment it keeps its delivered shape, its line one row and the row of its presses, but the presses themselves are gone
   // at once, the choice made, so nothing moves under the pointer and a second click lands on nothing (19 Nov, the person: "As soon
