@@ -511,14 +511,15 @@ const madeChips = ($: EngineInterface, ui: Ui, one: Todo, key: string, onOpenWor
 // stack opens out into a tile for each of its files. Where no picture can be drawn, a row each
 // `gen`, where the pane has one, is the mark of what its drawing shows, which every key carries
 // `owner`: the task or the result the files are of, which a file's tab goes back to
-const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, key: string, owner: string, surface?: RenderSurface, gen = '') => {
+// (`isLean`: no small copies on the tiles, in a Details tab drawn with less in it: drawingFits)
+const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, key: string, owner: string, surface?: RenderSurface, gen = '', isLean = false) => {
   if (!files.made.length && !files.code) return null
   const { Box, Button, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   const canDraw = Boolean(table.Svg) && surface !== 'terminal' && !('isTerminal' in ui)
   const things = thingsOf(files, kind => openPiles.has(`${pane}:${kind}`))
   const shown = things.slice(0, TILES_MOST)
-  const made = canDraw ? facesNow($, shown.slice(0, FACES_MOST).flatMap(thing => thing.files.slice(0, 1))) : faces
+  const made = isLean ? new Map<string, Face>() : canDraw ? facesNow($, shown.slice(0, FACES_MOST).flatMap(thing => thing.files.slice(0, 1))) : faces
   let chars = 0
   const faceOf = (one: Made | undefined) => {
     const face = one ? made.get(faceKey(one)) : undefined

@@ -153,10 +153,17 @@ const withSteers = (lines: Line[], entries: Entry[]): Line[] => {
   })
   return all
 }
-// The newest lines of a chat that one drawing has room for
-const newest = (lines: Line[]) => {
-  let room = TALK_CHARS
-  const from = lines.findLastIndex((line, i) => i < lines.length - TALK_KEPT || (room -= line.text.length) < 0)
+// The newest lines of a chat that one drawing has room for; fewer in a Details tab drawn with less in it (`squeeze`, drawingFits)
+const TALK_SQUEEZED = [
+  [TALK_KEPT, TALK_CHARS],
+  [100, 16_000],
+  [30, 6_000],
+  [10, 2_000],
+] as const
+const newest = (lines: Line[], squeeze = 0) => {
+  const [kept, chars] = TALK_SQUEEZED[Math.min(squeeze, TALK_SQUEEZED.length - 1)] ?? TALK_SQUEEZED[0]
+  let room: number = chars
+  const from = lines.findLastIndex((line, i) => i < lines.length - kept || (room -= line.text.length) < 0)
   return lines.slice(from + 1)
 }
 

@@ -53,6 +53,36 @@ const DONE_FOLDED = 8
 const TALK_KEPT = 300
 const TALK_CHARS = 40_000
 const PICTURES_CHARS = 150_000
+const FIT_PARTS = 1800
+const FIT_DEEP = 30
+const FIT_CHARS = 230_000
+const fitsSeen = new WeakMap<object, boolean>()
+const drawingFits = (drawing: unknown) => {
+  if (!drawing || typeof drawing !== 'object') return true
+  const known = fitsSeen.get(drawing)
+  if (known !== undefined) return known
+  let parts = 0
+  let deepest = 0
+  let chars = 0
+  const walk = (node: unknown, depth: number) => {
+    if (parts > FIT_PARTS || chars > FIT_CHARS || deepest > FIT_DEEP) return
+    if (typeof node === 'string' || typeof node === 'number') return void ((parts += 1), (chars += String(node).length + 2))
+    if (!node || typeof node !== 'object') return
+    if (Array.isArray(node)) return void node.forEach(child => walk(child, depth))
+    const el = node as { type?: unknown; props?: Record<string, unknown>; children?: unknown }
+    if (!el.props && el.type === undefined) return
+    parts += 1
+    deepest = Math.max(deepest, depth + 1)
+    const props: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(el.props ?? {})) if (key !== 'children' && typeof value !== 'function' && value !== undefined) props[key] = value
+    chars += JSON.stringify({ type: typeof el.type === 'string' ? el.type : '', props }).length + 14
+    walk(el.children ?? el.props?.children, depth + 1)
+  }
+  walk(drawing, 0)
+  const fits = parts <= FIT_PARTS && chars <= FIT_CHARS && deepest <= FIT_DEEP
+  fitsSeen.set(drawing, fits)
+  return fits
+}
 const SAID_CHARS = 8000
 const TOLD_CHARS = 300
 const STEP_CHARS = 160
@@ -1896,9 +1926,16 @@ const withSteers = (lines: Line[], entries: Entry[]): Line[] => {
   })
   return all
 }
-const newest = (lines: Line[]) => {
-  let room = TALK_CHARS
-  const from = lines.findLastIndex((line, i) => i < lines.length - TALK_KEPT || (room -= line.text.length) < 0)
+const TALK_SQUEEZED = [
+  [TALK_KEPT, TALK_CHARS],
+  [100, 16_000],
+  [30, 6_000],
+  [10, 2_000],
+] as const
+const newest = (lines: Line[], squeeze = 0) => {
+  const [kept, chars] = TALK_SQUEEZED[Math.min(squeeze, TALK_SQUEEZED.length - 1)] ?? TALK_SQUEEZED[0]
+  let room: number = chars
+  const from = lines.findLastIndex((line, i) => i < lines.length - kept || (room -= line.text.length) < 0)
   return lines.slice(from + 1)
 }
 
@@ -4141,14 +4178,14 @@ const madeChips = ($: EngineInterface, ui: Ui, one: Todo, key: string, onOpenWor
     </Box>
   )
 }
-const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, key: string, owner: string, surface?: RenderSurface, gen = '') => {
+const madeTiles = ($: EngineInterface, ui: Ui, files: FilesMade, pane: string, key: string, owner: string, surface?: RenderSurface, gen = '', isLean = false) => {
   if (!files.made.length && !files.code) return null
   const { Box, Button, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   const canDraw = Boolean(table.Svg) && surface !== 'terminal' && !('isTerminal' in ui)
   const things = thingsOf(files, kind => openPiles.has(`${pane}:${kind}`))
   const shown = things.slice(0, TILES_MOST)
-  const made = canDraw ? facesNow($, shown.slice(0, FACES_MOST).flatMap(thing => thing.files.slice(0, 1))) : faces
+  const made = isLean ? new Map<string, Face>() : canDraw ? facesNow($, shown.slice(0, FACES_MOST).flatMap(thing => thing.files.slice(0, 1))) : faces
   let chars = 0
   const faceOf = (one: Made | undefined) => {
     const face = one ? made.get(faceKey(one)) : undefined
@@ -10193,6 +10230,7 @@ const openJobOutput = async ($: EngineInterface, job: Pick<Job, 'id' | 'label'>,
 }
 
 const endedFolded = new Set<string>()
+const endedOpened = new Set<string>()
 const LOG_PANE = 'log-'
 const LOG_LINES = 300
 const logPaneOf = (id: string) => `${LOG_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)
@@ -12605,10 +12643,31 @@ const newestFor = (line: string, key: string) => (paneNewest.get(line)?.key === 
 const withoutScroll = (key: string) => key.replace(/\|[01]$/, '')
 const heldTabs = new Set<string>()
 let usedUntil = 0
+const SQUEEZE_MOST = 3
+const paneSqueezed = new Map<string, number>()
+const tooBigLogged = new Map<string, number>()
+const givenIfDrawn = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0] & { requestId?: string }, drawing: unknown) => {
+  if (drawingFits(drawing)) return drawing
+  const id = e.requestId ?? ''
+  const now = await $.clock.now()
+  if (now - (tooBigLogged.get(id) ?? -Infinity) >= 60_000) (tooBigLogged.set(id, now), await log($, `tab ${id} not given: its drawing is past what the app draws`))
+  const { Box, Button, Text } = uiOf($, e)
+  return (
+    <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
+      <Text bold>Claudopus couldn't show this tab</Text>
+      <Text dimColor wrap="wrap">It holds more than the app can draw at once.</Text>
+      {id !== LIST ? (
+        <Box alignItems="flex-start">
+          <Button key={`too-big-back-${presses}`} label="Back to the list" plain onPress={() => ((presses += 1), void front($, LIST, LIST_TITLE).catch(err => log($, `list not shown: ${String(err)}`)))} />
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
 let listSurface = ''
 const panelHooks = (on: On) => {
 
-  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => (await givenIfDrawn($, e, await (async () => {
     const id = e.requestId ?? ''
     await noteTabAsked($, id)
     const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, LOG_PANE, DIFF_PANE, 'report-'].some(start => id.startsWith(start))
@@ -12650,7 +12709,7 @@ const panelHooks = (on: On) => {
         {body}
       </Box>
     )
-  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
+  })())) as Awaited<ReturnType<typeof next>>).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
@@ -12690,7 +12749,7 @@ const panelHooks = (on: On) => {
     if (paneId === LIST) drawnFiles.clear()
     during(paneId === LIST ? 'draw the panel' : 'draw a Details tab')
     if (paneId === LIST) await read($, tick)
-    const drawing = await (async () => {
+    const drawFor = async (squeeze: number) => {
     const { Box, Button, Markdown, Text } = uiOf($, e)
     const large = pictureIn.get(paneId)
     if (large) {
@@ -12818,7 +12877,7 @@ const panelHooks = (on: On) => {
       if (!paths.length) return null
       if (one.chat?.host) return <Text key={`${key}-pics`} dimColor wrap="wrap">{`${paths.length === 1 ? 'Its picture is' : `Its ${paths.length} pictures are`} on the Mac that chat runs on. Open that chat to see ${paths.length === 1 ? 'it' : 'them'}.`}</Text>
       const drawing = uiOf($, e)
-      const canDraw = e.surface !== 'terminal' && 'Svg' in drawing
+      const canDraw = e.surface !== 'terminal' && 'Svg' in drawing && squeeze < 3
       const made = canDraw ? askPicturesOf($, one) : paths.map(path => ({ name: fileName(path), path, thumb: null }) as Pic)
       const shownPics: string[] = made ? [] : ['wait']
       if (!isWhole) picsShown.set(one.id, shownPics)
@@ -13309,12 +13368,13 @@ const panelHooks = (on: On) => {
     }
     const endedBranches = (card: Todo): Branch[] => {
       const runs = [...(card.endedRuns ?? [])].sort((a, b) => b.endedAt - a.endedAt)
-      return runs.length ? [{ one: card, ended: runs, kids: endedFolded.has(card.id) ? [] : runs.map(run => ({ one: card, run, kids: [] })) }] : []
+      return runs.length ? [{ one: card, ended: runs, kids: isEndedFolded(card.id) ? [] : runs.map(run => ({ one: card, run, kids: [] })) }] : []
     }
+    const isEndedFolded = (id: string) => endedFolded.has(id) || squeeze >= 2 || (squeeze >= 1 && !endedOpened.has(id))
     const endedGroupRow = (t: Twig) => {
       const id = t.one?.id ?? ''
-      const text = `${endedSummary(0, t.ended ?? [])}${endedFolded.has(id) ? ' · show' : ''}`
-      return twigRowOf(t, `ended-group-${id}`, text, true, '', () => ((endedFolded.has(id) ? endedFolded.delete(id) : endedFolded.add(id)), (presses += 1), redraw($)))
+      const text = `${endedSummary(0, t.ended ?? [])}${isEndedFolded(id) ? ' · show' : ''}`
+      return twigRowOf(t, `ended-group-${id}`, text, true, '', () => ((isEndedFolded(id) ? (endedFolded.delete(id), endedOpened.add(id)) : (endedOpened.delete(id), endedFolded.add(id))), (presses += 1), redraw($)))
     }
     const withAll = (branches: Branch[]): Branch[] => branches.map(b => (b.job || b.run || b.ended ? b : { ...b, kids: [...jobBranches(b.one, true), ...withAll(b.kids), ...endedBranches(b.one)] }))
     const jobBranches = (card: Todo, isAll = false): Branch[] => {
@@ -13686,7 +13746,7 @@ const panelHooks = (on: On) => {
           <Box key={`pics-${at}`} flexDirection="column" alignItems="flex-start" gap={1} width="100%">
             {made.map((pic, n) => (
               <Box key={`pic-${at}-${n}`} flexDirection="column" alignItems="flex-start" width="100%">
-                {pic.thumb && e.surface !== 'terminal' && 'Svg' in drawing ? (
+                {pic.thumb && e.surface !== 'terminal' && 'Svg' in drawing && squeeze < 1 ? (
                   <drawing.Svg
                     key={`pic-svg-${at}-${n}`}
                     source={pic.thumb.source}
@@ -13711,7 +13771,7 @@ const panelHooks = (on: On) => {
         )
       }
       let uses = 0
-      const shown = newest((lines ?? []).map(line => ({ ...line, at: line.isUse ? (uses += 1) : uses })))
+      const shown = newest((lines ?? []).map(line => ({ ...line, at: line.isUse ? (uses += 1) : uses })), squeeze)
       const blocks = shown.reduce<Line[][]>((all, line) => {
         const last = all.at(-1)
         return line.kind === 'step' && last?.[0]?.kind === 'step' ? [...all.slice(0, -1), [...last, line]] : [...all, [line]]
@@ -13799,7 +13859,7 @@ const panelHooks = (on: On) => {
     }
 
     const big = (one: Todo, lines: Line[] | undefined) => {
-      const showing = lines ? newest(lines).length : 0
+      const showing = lines ? newest(lines, squeeze).length : 0
       const parent = one.parentId ? [...all, ...elsewhere, ...helpersThere].find(card => card.id === one.parentId) : undefined
       return (
         <Box key={`todo-${one.id}`} flexDirection="column" gap={1} flexGrow={1}>
@@ -13832,7 +13892,7 @@ const panelHooks = (on: On) => {
             </Box>
           </Box>
           {/* What it made, right under its title, while it works and once it is done */}
-          {madeNow($, one)?.made.length || madeNow($, one)?.code ? part('part-files', 'Files', '', madeTiles($, table, madeNow($, one) ?? { made: [] }, paneId, `files-${one.id}`, one.id, e.surface) ?? <Box />) : null}
+          {madeNow($, one)?.made.length || madeNow($, one)?.code ? part('part-files', 'Files', '', madeTiles($, table, madeNow($, one) ?? { made: [] }, paneId, `files-${one.id}`, one.id, e.surface, '', squeeze >= 2) ?? <Box />) : null}
           {needsFor(one).length ? (
             <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE} />
@@ -14226,7 +14286,11 @@ const panelHooks = (on: On) => {
         {!alone ? finishedPart(isFinishedOpen) : null}
       </Box>
     )
-    })()
+    }
+    let squeeze = Math.max(0, (paneSqueezed.get(paneId) ?? 0) - 1)
+    let drawing = await drawFor(squeeze)
+    while (paneId.startsWith(WORK_PANE) && !drawingFits(drawing) && squeeze < SQUEEZE_MOST) ((doneDrawn.length = 0), (drawing = await drawFor((squeeze += 1))))
+    if ((paneSqueezed.get(paneId) ?? 0) !== squeeze) (paneSqueezed.set(paneId, squeeze), void log($, `tab ${paneId} drawn with less in it (${squeeze} of ${SQUEEZE_MOST}) to fit what the app draws`))
     const newestMade = paneNewest.get(paneLine)
     if (newestMade?.key === place && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), newestMade.drawing as Awaited<ReturnType<typeof next>>)
     if ((shownKept.get(paneLine) ?? 0) > askedNo && newestMade) return newestMade.drawing as Awaited<ReturnType<typeof next>>
@@ -14413,12 +14477,17 @@ const tabFailed = async ($: EngineInterface, e: Parameters<EngineInterface['ui']
   await log($, `tab ${id} not drawn (${error?.kind ?? 'unknown'}): ${why}`)
   const isAgain = fails.length < 3
   if (isAgain) await watchTabs($, [id], 'its drawing failed')
-  const { Box, Text } = uiOf($, e)
+  const { Box, Button, Text } = uiOf($, e)
   return (
     <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
       <Text bold>Claudopus couldn't show this tab</Text>
       <Text dimColor wrap="wrap">{cut(why, 300)}</Text>
       <Text dimColor wrap="wrap">{isAgain ? 'Claudopus tries again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
+      {id !== LIST ? (
+        <Box alignItems="flex-start">
+          <Button key={`failed-back-${presses}`} label="Back to the list" plain onPress={() => ((presses += 1), void front($, LIST, LIST_TITLE).catch(err => log($, `list not shown: ${String(err)}`)))} />
+        </Box>
+      ) : null}
     </Box>
   )
 }
