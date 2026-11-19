@@ -2,6 +2,14 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.213 · 19 November 2026
+- A press on a command's name opens its log in a tab of the panel instead of the Terminal app: what the command is, how it stands, Stop, and the end of what it wrote, drawn again as it writes. It works for a command that has ended too, on its card and under Commands ended in Details.
+- A command that has written nothing for a minute says whether its programs still use the processor: `still busy`, or in amber `idle`. Tasks are told the same, and to write logs a person can follow: a line as each stage starts and what came out at the end.
+- A count that is full while the command still runs no longer shows 100%, which read as done: its row says `7 of 7 heads · still running`. Tasks are told to count what has finished, never what has started.
+- A command that failed keeps a row on its card, in red, with how long it ran and why (the last line it wrote that names a fault), until it is run again and finishes. The closing row names what else did not finish, and a helper that failed, instead of a bare count.
+- More kinds of command are told apart: an upload has an up arrow, a command that runs on another computer (ssh, a cloud job, a cluster) a hollow square, and a command named by its own verb says it while it has nothing else to say (Building, Testing, Rendering). The row for commands folded away is a grey square that opens Details.
+- Details no longer repeats a command's last lines under its row.
+
 ## 0.2.212 · 19 November 2026
 - Buttons in the panel, such as Close and Mark as done, answer on the first click again while your Mac is busy: after a scroll the panel no longer starts a new drawing for every change, up to dozens at once, but makes one at a time and keeps the one on screen meanwhile.
 

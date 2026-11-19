@@ -63,7 +63,7 @@ const prompts: string[] = []
 // the release
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; live?: (file: string) => number | undefined; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -300,6 +300,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // says, last written when it says, and every detached process it names still runs
     // (and, where the test gives them, the processes and the file each held-open command's shell writes to)
     // (as the mod asks now: every word after the script's name is an output, with no count before them, and nothing follows the last)
+    // (a log's end, as its tab reads it; and how much of the processor the programs that hold each silent log open use)
+    if (options.jobs && tool === 'sh' && String(rest[1]).includes('# the log tab')) return ok(options.jobs.output(String(rest[3])))
+    if (options.jobs && tool === 'sh' && String(rest[1]).includes('@@LIVE@@'))
+      return ok(rest.slice(3).flatMap(file => { const use = options.jobs?.live?.(String(file)); return use === undefined ? [] : [`@@LIVE@@ ${use} ${String(file)}`] }).join('\n'))
     if (options.jobs && tool === 'sh' && String(rest[1]).startsWith('for f; do ') && String(rest[1]).includes('@@JOB@@'))
       return ok(rest.slice(3).map(file => `\n@@JOB@@ ${Math.floor((options.jobs?.wroteAt(String(file)) ?? 0) / 1000)} ${String(file)}\n${options.jobs?.output(String(file)) ?? ''}`).join(''))
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('@@JOB@@')) {
@@ -2162,9 +2166,10 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   }
   expect((await rails('desktop')).map(svg => svg.match(/d="([^"]*)"/)?.[1])).toEqual(['M9 0V20M27 0V20'])
   expect(await rails('terminal')).toEqual(['│ │  '])
-  // and so in Details, past each line under it there, the last lines its command printed too
+  // and so in Details, past the line under it there (a command's last lines are in its log, never under its row: they said twice
+  // what its row says, 19 Nov)
   const inDetails = await rails('desktop', 'work-a1')
-  expect(inDetails.length).toBeGreaterThan(1)
+  expect(inDetails.length).toBe(1)
   expect(inDetails.map(svg => svg.match(/d="([^"]*)"/)?.[1])).toEqual(inDetails.map(() => 'M9 0V20M27 0V20'))
 
   // The work's Details lists every helper, ended or not, as the same tree
@@ -2293,6 +2298,13 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   const plain = await until(async () => (await texts()).find(text => /(^| · )waiting for the machine to start$/.test(text)))
   expect(plain).toBeDefined()
   expect((await texts()).some(text => /\[run|Running\)|\d MB ·/.test(text))).toBe(false)
+  // A count that is full while the command still runs never reads 100%, as done: it says it is still running, with its own words
+  // (19 Nov "7 of 7 heads · 100% · started, finishing", from a script that counted the heads it had started)
+  output = 'progress: 7/7 heads started, finishing\n'
+  wroteAt = now + 19_000
+  await advance(20_000)
+  expect(await until(async () => (await texts()).find(text => /^7 of 7 heads · still running · started, finishing$/.test(text)))).toBeDefined()
+  expect((await texts()).some(text => /100%/.test(text))).toBe(false)
   // A wait's count of tries is how far it is, its words that say its name again are left out, and when it last tried changes
   output = 'progress: 6 tries waiting for the CT scans\nprogress: 7 tries waiting for the CT scans\n'
   // (written a second before the end of the step, whenever in it the panel looks)
@@ -2463,12 +2475,13 @@ test('nothing a task or its helper starts may only wait held open, pass time or 
   expect((await line()).filter(text => /^Watch\b/.test(text))).toHaveLength(2)
 })
 
-test('every run under a card says how it stands: a command that printed nothing says so, a watch its last event, and a press on its name shows its output whole; 15 Nov rows said only "updated 9m ago"', SLOW, async ($, on) => {
+test('every run under a card says how it stands: a command that printed nothing says so, a watch its last event, silent, whether it is still busy or idle, and a press on its name opens its log in a tab of the panel; 15 Nov rows said only "updated 9m ago"', SLOW, async ($, on) => {
   let now = 1_700_000_000_000
   const TASKS = '/tmp/claude-501/x/s1/tasks'
   const outputs: Record<string, () => string> = { [`${TASKS}/bg-r1.output`]: () => '', [`${TASKS}/mon-m1.output`]: () => 'series arrived\nwrote vsd-02.png\n' }
   const wrote: Record<string, () => number> = { [`${TASKS}/bg-r1.output`]: () => 1_700_000_000_000, [`${TASKS}/mon-m1.output`]: () => now - 30_000 }
-  const { clock, shown: opened, files } = world(on, { jobs: { output: file => outputs[file]?.() ?? '', wroteAt: file => wrote[file]?.() ?? 0 } })
+  let use: number | undefined
+  const { clock, shown: opened, tabs } = world(on, { jobs: { output: file => outputs[file]?.() ?? '', wroteAt: file => wrote[file]?.() ?? 0, live: file => (file.endsWith('bg-r1.output') ? use : undefined) } })
   on('session.cwd', () => ({ value: '/repo' }) as never)
   const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
   await $.session.start(start)
@@ -2501,12 +2514,29 @@ test('every run under a card says how it stands: a command that printed nothing 
   expect(shown.some(text => /^Watching( · last: |$)/.test(text))).toBe(true)
   // its event's file name is never shown
   expect(shown.some(text => /vsd-02/.test(text))).toBe(false)
-  // A press on a run's name shows its output whole in a Terminal window, as it goes on
+  // Silent, its row says whether the programs that hold its log open still use the processor: still busy, quietly, or idle, in amber
+  use = 40
+  await advance(25_000)
+  expect(await until(async () => (await texts()).find(text => /^No output yet · started \d+m ago · still busy$/.test(text)))).toBeDefined()
+  use = 0
+  await advance(25_000)
+  expect(await until(async () => (await texts()).find(text => /^No output yet · started \d+m ago · idle$/.test(text)))).toBeDefined()
+  // A press on a run's name opens its log in a tab of the panel, named after it: what it is, how it stands, and the end of what
+  // it wrote as it wrote it, without colour codes (19 Nov: the log opened in the Terminal app, outside the panel)
+  outputs[`${TASKS}/bg-r1.output`] = () => 'stage: drawing figure 3\n\x1b[32mprogress: 3/9 figures drawing\x1b[0m\n'
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
   const before = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Command · Redraw all pictures')?.key ?? ''
   await list.press({ key: before })
-  const argv = await until(async () => opened.find(one => String(one[1]).endsWith('/output.command')))
-  expect(files.get(String(argv?.[1]))).toContain(`exec tail -n 1000 -F '${TASKS}/bg-r1.output'`)
+  expect(await until(async () => tabs.find(one => one === 'log-bg-r1: Redraw all pictures'))).toBeDefined()
+  expect(opened.some(one => String(one[1]).endsWith('/output.command'))).toBe(false)
+  const logTab = await $.ui.mount({ ...LIST, requestId: 'log-bg-r1', props: { ...LIST.props, bodyColumns: 100 }, surface: 'desktop' } as never)
+  const logTexts = (await logTab.findAll({ type: 'Text' })).map(one => one.text)
+  expect(logTexts).toContain('Redraw all pictures')
+  expect(logTexts.some(text => /^Running · \d+m \d\ds · of the task “Redraw and fetch”$/.test(text))).toBe(true)
+  expect(logTexts).toContain('stage: drawing figure 3')
+  expect(logTexts).toContain('progress: 3/9 figures drawing')
+  expect((await logTab.findAll({ type: 'Button' })).map(one => String(one.props.label))).toEqual(['Stop', 'Details', 'Open in Terminal'])
+  await logTab.unmount()
   // and moves the buttons' keys, so the panel is not pulled back to the row it pressed
   const after = await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Command · Redraw all pictures' && b.key !== before)?.key)
   expect(after).toBeDefined()
@@ -2560,11 +2590,17 @@ test('only runs really running are listed: a watch the engine killed at its time
   })) ?? []
   // The watches the engine killed at their limit, the failed and the finished command are gone from the tree, and no clock runs for them
   expect(shown.some(text => /\[killed\]/.test(text))).toBe(false)
-  expect(shown.some(text => /^(Wait for first screening pass ×2|Run the fetch of the list|Run the tidy up)\b(?!: (failed|done))/.test(text))).toBe(false)
+  expect(shown.some(text => /^(Wait for first screening pass ×2|Run the tidy up)$/.test(text))).toBe(false)
+  // The one that failed has a row of its own over the closing row: what it was, that it failed and after how long, and why,
+  // from the end of what it wrote (19 Nov "13 commands ended · 1 failed" said neither which nor why)
+  expect(shown).toContain('Run the fetch of the list')
+  expect(shown.some(text => /^Failed after \dm \d\ds$/.test(text))).toBe(true)
+  expect(shown).toContain('Traceback: boom')
   // (the card's own line never names the commands that ended: how each ended is in Details, 18 Nov)
   expect(shown.some(text => /^Run the (tidy up|fetch of the list): (done|failed)/.test(text))).toBe(false)
   // The closing row counts them and says, in words, how many did not finish well
-  expect(shown).toContain('4 commands ended · 1 failed, 2 ran out of time')
+  // (each kind of bad end names its newest and how many more; the failed one is named on its own row above)
+  expect(shown).toContain('4 commands ended · 1 failed · 2 ran out of time: Wait for first screening pass and 1 more')
   // The wait still running stays, and the two fits: each row with how long it has run and nothing of the time its description
   // gave, within it or long past it
   expect(shown).toContain('Wait for the details screening to finish')
@@ -2572,12 +2608,15 @@ test('only runs really running are listed: a watch the engine killed at its time
   expect(shown.some(text => /of about|\bover$|\(about|\d+ min\b/.test(text))).toBe(false)
   // Details names each ended run with how it ended
   const pane = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
-  const details = (await pane.findAll({ type: 'Text' })).map(one => one.text)
+  // (an ended command's name is a button where what it wrote is still there: a press opens it, as a running one's does)
+  const details = [...(await pane.findAll({ type: 'Text' })).map(one => one.text), ...(await pane.findAll({ type: 'Button' })).filter(one => String(one.key ?? '').startsWith('ended-open-')).map(one => String(one.props.label))]
   await pane.unmount()
   expect(details).toContain('Commands ended')
   expect(details.filter(text => text === 'Wait for first screening pass').length).toBe(2)
   expect(details.filter(text => /^Ran out of time after (29|30)m \d\ds · /.test(text)).length).toBe(2)
   expect(details.some(text => /^Failed after \dm \d\ds · /.test(text))).toBe(true)
+  // (why it failed is on its card's row and in its log, not said again here)
+  expect(details).not.toContain('Traceback: boom')
   expect(details.some(text => /^Done in \dm \d\ds · /.test(text))).toBe(true)
   // Later the wait is past the time its description gave too: its row still says only how long it has run
   for (let n = 0; n < 8; n++) await advance(MIN)

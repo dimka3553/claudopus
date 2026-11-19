@@ -210,20 +210,33 @@ const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => ({ finished: 'done', 
 const endedLine = (run: Pick<EndedRun, 'how' | 'code'>, ran: string) =>
   run.how === 'finished' ? `Done in ${ran}` : `${{ failed: 'Failed', killed: 'Stopped', stopped: 'Stopped', 'timed out': 'Ran out of time', ended: 'Ended' }[run.how] ?? 'Ended'} after ${ran}`
 // The closing row under a card: how many helpers and runs have ended, then how many of the runs did not finish well, in words
-const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
+// Those that did not finish well are named, the newest of each kind of end and how many more, so "1 failed" never stands without
+// which one (19 Nov "13 commands ended · 1 failed" named nothing); not one that has a row of its own above (`shown`, its id)
+const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how' | 'what' | 'id' | 'endedAt'>[], shown = '', lost: string[] = []) => {
   const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
   const head = helpers && runs.length ? `${n(helpers, 'helper')} and ${n(runs.length, 'command')} ended` : helpers ? `${n(helpers, 'helper')} ended` : `${n(runs.length, 'command')} ended`
   const bad = (['failed', 'killed', 'timed out'] as const).flatMap(how => {
-    const count = runs.filter(r => r.how === how).length
-    return count ? [`${count} ${endedWord({ how })}`] : []
+    const of = runs.filter(r => r.how === how)
+    if (!of.length) return []
+    const newest = of.reduce((a, b) => (b.endedAt >= a.endedAt ? b : a))
+    const name = of.some(r => r.id === shown) ? '' : runWords(String(newest.what ?? ''))
+    return [`${of.length} ${endedWord({ how })}${name ? `: ${name}${of.length > 1 ? ` and ${of.length - 1} more` : ''}` : ''}`]
   })
-  return bad.length ? `${head} · ${bad.join(', ')}` : head
+  // (a helper that failed is named as a helper, so its name is never taken for a command's)
+  const helpersBad = lost.length ? [`${n(lost.length, 'helper')} failed: ${lost.at(-1)}${lost.length > 1 ? ` and ${lost.length - 1} more` : ''}`] : []
+  return [head, ...helpersBad, ...bad].join(' · ')
+}
+// The command that failed last and was not run again since with the same words and finished well: it has a row of its own on
+// its card, with why, until it is
+const failureOf = (runs: EndedRun[]) => {
+  const failed = runs.filter(r => r.how === 'failed').reduce<EndedRun | undefined>((a, b) => (!a || b.endedAt >= a.endedAt ? b : a), undefined)
+  return failed && !runs.some(r => r.how === 'finished' && r.endedAt >= failed.endedAt && r.what === failed.what) ? failed : undefined
 }
 // The runs a card has had end, kept so its summary row and Details can say how each ended, the newest last
 const keepEnded = (one: Todo, runs: EndedRun[]) => (runs.length ? { endedRuns: [...(one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id)), ...runs].slice(-BG_KEPT) } : {})
 // Background work that has ended or was stopped leaves every card that kept it at once, and is kept as ended with how it ended
 // (by its id, or one word for them all), so the card's summary counts it
-type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string; at?: number }
+type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string; at?: number; why?: string }
 const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Record<string, EndAs> = 'ended') => {
   const now = await $.clock.now()
   const endOfId = (id: string) => {
@@ -243,7 +256,10 @@ const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Re
         // before it was killed
         const endedAt = end.at && end.at >= b.at && end.at <= now ? end.at : now
         const how = end.how === 'killed' && b.expiresAt && endedAt >= b.expiresAt - Math.min(60_000, (b.expiresAt - b.at) / 10) ? 'timed out' : end.how
-        return { id: b.id, what: b.what, at: b.at, endedAt, how, ...(end.code ? { code: end.code } : {}) } as EndedRun
+        // With its kind, for its mark, why it failed, and the file it wrote to, which a press on its name opens
+        const kind: JobKind = b.isWatch ? 'watch' : jobKindOf(b.cmd ?? b.what, b.what)
+        const file = jobFiles.get(b.id)
+        return { id: b.id, what: b.what, at: b.at, endedAt, how, kind, ...(end.code ? { code: end.code } : {}), ...(end.why ? { why: end.why } : {}), ...(file ? { file } : {}) } as EndedRun
       })
       return { ...one, bg: bg?.length ? bg : undefined, ...keepEnded(one, runs) }
     })

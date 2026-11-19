@@ -15,7 +15,7 @@ import { copyOf, download, FAILS, folderMarketplace, folderReady, install, insta
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, isKindSaid, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, portOf, SERVER_CMD } from './jobs'
+import { DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, isKindSaid, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_NOW, JOB_SHAPE, whyOf, logLines, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, portOf, SERVER_CMD } from './jobs'
 import { isOwnLongScript, plainOf, SILENT_AFTER, SILENT_WARN } from './jobs'
 import { heavyOf, waitingOf, watcherOf } from './jobs'
 import type { HeavyKind, WaitKind } from './jobs'
@@ -1253,7 +1253,7 @@ const TWIG_STEP = 18
 const TWIG_ENDED = '#4EBA65'
 const TWIG_FAILED = '#E5484D'
 const twigWidth = (t: Twig) => t.rails.length * TWIG_STEP + 36
-const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'circle' | 'square' | 'diamond' | 'down' | 'open' = 'circle') => {
+const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'circle' | 'square' | 'hollow' | 'diamond' | 'down' | 'up' | 'open' = 'circle') => {
   const mid = line / 2
   const x = (level: number) => level * TWIG_STEP + 9
   const own = x(t.rails.length)
@@ -1269,6 +1269,8 @@ const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'c
     square: `<rect x="${at - 3.5}" y="${mid - 3.5}" width="7" height="7" rx="1" fill="${dot}"/>`,
     diamond: `<path d="M${at} ${mid - 4.5}L${at + 4.5} ${mid}L${at} ${mid + 4.5}L${at - 4.5} ${mid}Z" fill="${dot}"/>`,
     down: `<path d="M${at - 4.5} ${mid - 3.5}H${at + 4.5}L${at} ${mid + 4}Z" fill="${dot}"/>`,
+    hollow: `<rect x="${at - 3.25}" y="${mid - 3.25}" width="6.5" height="6.5" rx="1" fill="none" stroke="${dot}" stroke-width="1.5"/>`,
+    up: `<path d="M${at - 4.5} ${mid + 3.5}H${at + 4.5}L${at} ${mid - 4}Z" fill="${dot}"/>`,
     open: `<path d="M${at} ${mid - 4}L${at + 4} ${mid}L${at} ${mid + 4}L${at - 4} ${mid}Z" fill="none" stroke="${dot}" stroke-width="1.5"/>`,
   }[shape]
   const mark = dot
@@ -9189,17 +9191,25 @@ type EndedRun = NonNullable<Todo['endedRuns']>[number]
 const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => ({ finished: 'done', failed: 'failed', killed: 'stopped', stopped: 'stopped', 'timed out': 'ran out of time', ended: 'ended' })[run.how] ?? run.how
 const endedLine = (run: Pick<EndedRun, 'how' | 'code'>, ran: string) =>
   run.how === 'finished' ? `Done in ${ran}` : `${{ failed: 'Failed', killed: 'Stopped', stopped: 'Stopped', 'timed out': 'Ran out of time', ended: 'Ended' }[run.how] ?? 'Ended'} after ${ran}`
-const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
+const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how' | 'what' | 'id' | 'endedAt'>[], shown = '', lost: string[] = []) => {
   const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
   const head = helpers && runs.length ? `${n(helpers, 'helper')} and ${n(runs.length, 'command')} ended` : helpers ? `${n(helpers, 'helper')} ended` : `${n(runs.length, 'command')} ended`
   const bad = (['failed', 'killed', 'timed out'] as const).flatMap(how => {
-    const count = runs.filter(r => r.how === how).length
-    return count ? [`${count} ${endedWord({ how })}`] : []
+    const of = runs.filter(r => r.how === how)
+    if (!of.length) return []
+    const newest = of.reduce((a, b) => (b.endedAt >= a.endedAt ? b : a))
+    const name = of.some(r => r.id === shown) ? '' : runWords(String(newest.what ?? ''))
+    return [`${of.length} ${endedWord({ how })}${name ? `: ${name}${of.length > 1 ? ` and ${of.length - 1} more` : ''}` : ''}`]
   })
-  return bad.length ? `${head} · ${bad.join(', ')}` : head
+  const helpersBad = lost.length ? [`${n(lost.length, 'helper')} failed: ${lost.at(-1)}${lost.length > 1 ? ` and ${lost.length - 1} more` : ''}`] : []
+  return [head, ...helpersBad, ...bad].join(' · ')
+}
+const failureOf = (runs: EndedRun[]) => {
+  const failed = runs.filter(r => r.how === 'failed').reduce<EndedRun | undefined>((a, b) => (!a || b.endedAt >= a.endedAt ? b : a), undefined)
+  return failed && !runs.some(r => r.how === 'finished' && r.endedAt >= failed.endedAt && r.what === failed.what) ? failed : undefined
 }
 const keepEnded = (one: Todo, runs: EndedRun[]) => (runs.length ? { endedRuns: [...(one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id)), ...runs].slice(-BG_KEPT) } : {})
-type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string; at?: number }
+type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string; at?: number; why?: string }
 const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Record<string, EndAs> = 'ended') => {
   const now = await $.clock.now()
   const endOfId = (id: string) => {
@@ -9216,7 +9226,9 @@ const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Re
         const end = endOfId(b.id)
         const endedAt = end.at && end.at >= b.at && end.at <= now ? end.at : now
         const how = end.how === 'killed' && b.expiresAt && endedAt >= b.expiresAt - Math.min(60_000, (b.expiresAt - b.at) / 10) ? 'timed out' : end.how
-        return { id: b.id, what: b.what, at: b.at, endedAt, how, ...(end.code ? { code: end.code } : {}) } as EndedRun
+        const kind: JobKind = b.isWatch ? 'watch' : jobKindOf(b.cmd ?? b.what, b.what)
+        const file = jobFiles.get(b.id)
+        return { id: b.id, what: b.what, at: b.at, endedAt, how, kind, ...(end.code ? { code: end.code } : {}), ...(end.why ? { why: end.why } : {}), ...(file ? { file } : {}) } as EndedRun
       })
       return { ...one, bg: bg?.length ? bg : undefined, ...keepEnded(one, runs) }
     })
@@ -9245,7 +9257,7 @@ const handbackRefused = (list: Todo[], id: string) => {
 
 
 
-type Seen = { latest: string; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; words?: string; isEmpty?: boolean; port?: string; wroteAt?: number }
+type Seen = { latest: string; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; words?: string; isEmpty?: boolean; live?: 'busy' | 'idle'; port?: string; wroteAt?: number }
 const jobLog = new Map<string, Seen>()
 const jobNews = new Map<string, number>()
 let jobsLookedAt = 0
@@ -9258,7 +9270,7 @@ const jobFiles = new Map<string, string>()
 const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false, theirs?: Seen): Job => {
   const seen = jobLog.get(id) ?? theirs
   const said = describedOf(what)
-  const kind: JobKind = isWatch ? 'watch' : (said.kind ?? jobKindOf(cmd, what))
+  const kind: JobKind = isWatch ? 'watch' : jobKindOf(cmd, what)
   const label = labelOf(said.text || cmd, cmd)
   return { id, label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd, kind, at, ...(seen ?? {}), port: portOf(cmd) ?? seen?.port }
 }
@@ -9317,7 +9329,8 @@ const lookJobs = async ($: EngineInterface) => {
       const text = parts[n + 1] ?? ''
       const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
       const end = runEndOf(text)
-      if (end) (ended.includes(id) || ended.push(id), (endedAs[id] = { ...end, ...(m ? { at: m } : {}) }))
+      const why = end?.how === 'failed' ? whyOf(text) : ''
+      if (end) (ended.includes(id) || ended.push(id), (endedAs[id] = { ...end, ...(m ? { at: m } : {}), ...(why ? { why } : {}) }))
       const failedCmd = end?.how === 'failed' && job?.owner ? (list.find(one => one.id === job.owner)?.bg?.find(b => b.id === id)?.cmd ?? '') : ''
       if (failedCmd && job?.owner) {
         const owner = job.owner
@@ -9337,6 +9350,24 @@ const lookJobs = async ($: EngineInterface) => {
       if (seen.latest && owner && was && was.latest !== seen.latest && now - (jobNews.get(owner) ?? 0) >= JOB_NEWS) moved.add(owner)
     }
   }
+  const quiet = asked.filter(o => {
+    if (ended.includes(o.id)) return false
+    const b = list.find(one => one.id === o.owner)?.bg?.find(b => b.id === o.id)
+    const seen = jobLog.get(o.id)
+    if (!b || b.isWatch || !seen) return false
+    return now - (seen.wroteAt && !seen.isEmpty ? seen.wroteAt : b.at) >= SILENT_WARN
+  })
+  for (const o of asked) if (!quiet.includes(o) && jobLog.get(o.id)?.live) (jobLog.set(o.id, { ...(jobLog.get(o.id) as Seen), live: undefined }), (isChanged = true))
+  if (quiet.length && now - liveLookedAt >= LIVE_LOOK) {
+    liveLookedAt = now
+    const r = await $.process.run(['sh', '-c', LIVE_SCRIPT, 'sh', ...quiet.map(o => `${tasksDir}/${o.id}.output`)], { timeoutMs: 8000 }).catch(() => undefined)
+    for (const m of (r?.stdout ?? '').matchAll(/^@@LIVE@@ (\d+) (.*)$/gm)) {
+      const o = quiet.find(o => `${tasksDir}/${o.id}.output` === m[2])
+      const seen = o ? jobLog.get(o.id) : undefined
+      const live = Number(m[1]) >= LIVE_BUSY ? 'busy' : 'idle'
+      if (o && seen && seen.live !== live) (jobLog.set(o.id, { ...seen, live }), (isChanged = true))
+    }
+  }
   if (ended.length) {
     await dropBackground($, ended, endedAs)
     for (const id of ended) jobLog.delete(id)
@@ -9350,6 +9381,10 @@ const lookJobs = async ($: EngineInterface) => {
   else if (isChanged) outputMoved = true
 }
 let outputMoved = false
+const LIVE_LOOK = 20_000
+const LIVE_BUSY = 3
+let liveLookedAt = 0
+const LIVE_SCRIPT = `command -v lsof >/dev/null 2>&1 || exit 0; for f; do p=$(lsof -t "$f" 2>/dev/null | tr '\\n' ',' | sed 's/,$//'); [ -n "$p" ] || continue; c=$(ps -o pcpu= -p "$p" 2>/dev/null | awk '{s+=$1} END{printf "%d", s+0.5}'); echo "@@LIVE@@ $c $f"; done`
 
 const shortAgo = (ms: number) => {
   const all = Math.max(0, Math.floor(ms / 1000))
@@ -9422,8 +9457,8 @@ const stopping = async ($: EngineInterface, owner: string, job: Job, said?: stri
 
 const RUN_SILENT_TOLD = 60_000
 const silentTold = new Set<string>()
-const RUN_SILENT = (what: string, silent: string) =>
-  `Your command "${what}" has printed nothing for ${silent}. Look at it now: if it is stuck, stop it with TaskStop and find out why; if it is still working, let it finish, and make what you run next print a plain \`progress:\` line as it goes.`
+const RUN_SILENT = (what: string, silent: string, live?: 'busy' | 'idle') =>
+  `Your command "${what}" has printed nothing for ${silent}${live === 'busy' ? ', and its programs are still using the processor, so it is likely still working' : live === 'idle' ? ', and its programs are not using the processor: it is stuck, or waits on something far away' : ''}. Look at it now: if it is stuck, stop it with TaskStop and find out why; if it is still working, let it finish, and make what you run next print a plain \`progress:\` line as it goes.`
 const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
   for (const one of list) {
     if (one.status !== 'working' || one.chat) continue
@@ -9433,7 +9468,7 @@ const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
       const silent = job.isEmpty ? now - job.at : now - job.wroteAt
       if (silent < RUN_SILENT_TOLD) continue
       silentTold.add(job.id)
-      void tell($, one.id, RUN_SILENT(job.label, shortAgo(silent)))
+      void tell($, one.id, RUN_SILENT(job.label, shortAgo(silent), job.live))
       await log($, `work ${one.id} told its run ${job.id} has been silent ${shortAgo(silent)}`)
     }
   }
@@ -9442,12 +9477,13 @@ const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
 const runWords = (what: string, cmd = '') => labelOf(describedOf(what).text, cmd)
 
 
-const canOpenJob = (job: Job) => Boolean(jobFiles.get(job.id)) && !isRunFromAfar && !isLinux
-const openJobOutput = async ($: EngineInterface, job: Job) => {
-  const file = jobFiles.get(job.id)
+const canOpenFile = (file: string | undefined) => Boolean(file) && !isRunFromAfar
+const canOpenJob = (job: Job) => canOpenFile(jobFiles.get(job.id))
+const openJobOutput = async ($: EngineInterface, job: Pick<Job, 'id' | 'label'>, written?: string) => {
+  const file = written ?? jobFiles.get(job.id)
   presses += 1
   drawAgain($)
-  if (!file || !canOpenJob(job)) return
+  if (!file || !canOpenFile(file) || isLinux) return
   const at = await $.clock.now()
   const base = `${dir}/terminal`
   const home = `${base}/output-${slug(job.id) || 'job'}-${at}`
@@ -9457,6 +9493,71 @@ const openJobOutput = async ($: EngineInterface, job: Job) => {
   const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
   if (r.exitCode !== 0) void log($, `output not opened: ${r.stderr.trim().slice(0, 160)}`)
+}
+
+const LOG_PANE = 'log-'
+const LOG_LINES = 300
+const logPaneOf = (id: string) => `${LOG_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)
+const openLog = ($: EngineInterface, id: string, label: string) => {
+  presses += 1
+  void comingTab((async () => {
+    await front($, logPaneOf(id), cut(label || 'Log', 30))
+    redraw($)
+  })()).catch(err => log($, `log of ${id} not opened: ${String(err)}`))
+}
+const logOf = async ($: EngineInterface, paneId: string) => {
+  for (const one of await read($, todos)) {
+    const b = one.bg?.find(b => logPaneOf(b.id) === paneId)
+    if (b) return { one, job: jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id]), run: undefined, file: jobFiles.get(b.id) || (tasksDir ? `${tasksDir}/${b.id}.output` : '') }
+    const run = one.endedRuns?.find(r => logPaneOf(r.id) === paneId)
+    if (run) return { one, job: undefined, run, file: run.file ?? '' }
+  }
+  return undefined
+}
+const logView = async ($: EngineInterface, ui: Ui, paneId: string) => {
+  const { Box, Button, Text } = ui
+  const found = await logOf($, paneId)
+  if (!found) return <Text dimColor>This log is no longer available.</Text>
+  const { one, job, run, file } = found
+  const now = await $.clock.now()
+  const label = job ? job.label : runWords(run?.what ?? '') || 'A command'
+  const kind: JobKind = job?.kind ?? run?.kind ?? 'script'
+  const state = job ? `${JOB_NOW[kind]} · ${took(now - job.at)}` : run ? `${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(now - run.endedAt)} ago` : ''
+  const r = file && canOpenFile(file) ? await $.process.run(['sh', '-c', 'tail -n "$2" "$1" 2>/dev/null # the log tab', 'sh', file, String(LOG_LINES + 1)], { timeoutMs: 5000 }).catch(() => undefined) : undefined
+  const all = logLines(r?.stdout ?? '')
+  const lines = all.slice(-LOG_LINES)
+  const isFailed = run?.how === 'failed'
+  return (
+    <Box key="log" flexDirection="column" gap={1} flexGrow={1}>
+      <Box key="log-head" flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+        <Box flexDirection="row" gap={1}>
+          <Box flexShrink={0}>
+            <Text color={isFailed ? 'error' : job ? JOB_COLOR[kind] : undefined} dimColor={!job && !isFailed}>{JOB_GLYPH[kind]}</Text>
+          </Box>
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+            <Text bold wrap="wrap">{label}</Text>
+          </Box>
+        </Box>
+        {isFailed ? <Text color="error" wrap="wrap">{state}</Text> : null}
+        <Text dimColor wrap="wrap">{[isFailed ? '' : state, `of the task “${cut(titleOf(one), 40)}”`].filter(Boolean).join(' · ')}</Text>
+        <Box flexDirection="row" gap={2} flexShrink={0}>
+          {job && canStopJob(job) ? <Button key={`log-stop-${presses}`} label={stoppingJobs.has(job.id) ? 'Stopping' : 'Stop'} plain onPress={() => void stopJob($, one.id, job).catch(err => log($, `run not stopped: ${String(err)}`))} /> : null}
+          <Button key={`log-details-${presses}`} label="Details" plain onPress={() => openWork($, one.id)} />
+          {file && canOpenFile(file) && !isLinux ? <Button key={`log-terminal-${presses}`} label="Open in Terminal" plain onPress={() => void openJobOutput($, { id: job?.id ?? run?.id ?? '', label }, file).catch(err => log($, `output not opened: ${String(err)}`))} /> : null}
+        </Box>
+      </Box>
+      <Box key="log-lines" flexDirection="column" backgroundColor={OUTPUT_FILL} paddingX={2} paddingY={1} flexShrink={0}>
+        {all.length > lines.length ? <Text dimColor>{`The last ${LOG_LINES} lines`}</Text> : null}
+        {lines.length ? (
+          lines.map((line, n) => (
+            <Text key={`log-line-${n}`} wrap="wrap">{line || ' '}</Text>
+          ))
+        ) : (
+          <Text dimColor wrap="wrap">{!file || !canOpenFile(file) ? "This log isn't on this Mac." : job ? 'No output yet. It shows here as soon as the command writes something.' : 'It wrote nothing.'}</Text>
+        )}
+      </Box>
+    </Box>
+  )
 }
 
 const HEAVY_RAMP = 20_000
@@ -11554,7 +11655,7 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const id = e.requestId ?? ''
     await noteTabAsked($, id)
-    const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, 'report-'].some(start => id.startsWith(start))
+    const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, LOG_PANE, 'report-'].some(start => id.startsWith(start))
     if (e.surface === 'desktop' && isTab && !id.startsWith(WORK_PANE) && !id.startsWith(FLOW_PANE)) {
       heldTabs.add(id)
       const key = `${id}|${e.surface}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.scroll.offset > 0 ? 1 : 0}`
@@ -12039,15 +12140,17 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
+    const isMore = (job: Job) => job.id.startsWith('more-')
+    const MORE_COLOR = '#9A9A9A'
     const jobLines = (t: Twig, key: string, job: Job) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !(job.isEmpty ? at - job.at >= JOB_QUIET : job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, isMore(job) ? MORE_COLOR : JOB_COLOR[job.kind], !isMore(job) && !(job.isEmpty ? at - job.at >= JOB_QUIET : job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={isMore(job) ? 'More commands running' : JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
         </Box>
       ) : (
         <Box key={key} flexDirection="row" flexShrink={0}>
           <Text dimColor>{twigText(t)}</Text>
-          <Text color={JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
+          <Text color={isMore(job) ? MORE_COLOR : JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
         </Box>
       )
     const twigRails = (t: Twig, key: string) =>
@@ -12068,8 +12171,13 @@ const panelHooks = (on: On) => {
         </Box>
       </Box>
     )
+    const nowWord = (label: string) => {
+      const first = doingOf(label).split(/\s+/)[0] ?? ''
+      return /ing$/.test(first) && first.toLowerCase() !== (label.trim().split(/\s+/)[0] ?? '').toLowerCase() ? first : ''
+    }
     const jobStand = (job: Job, width: number) => {
-      const pct = job.pct ? [job.pct] : []
+      const isFull = job.pct === '100%' || Boolean(job.done && job.total && job.done === job.total)
+      const pct = isFull ? ['still running'] : job.pct ? [job.pct] : []
       const quiet = job.wroteAt && !job.isEmpty ? at - job.wroteAt : undefined
       const ran = at - job.at
       const ago = (ms: number) => {
@@ -12086,13 +12194,14 @@ const panelHooks = (on: On) => {
       const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
       const words = plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, job.label)
       const hasSaid = Boolean(words || full.length || pct.length)
+      const live = job.live === 'busy' ? ' · still busy' : job.live === 'idle' ? ' · idle' : ''
       const [state, short]: [string, string] =
         job.kind === 'server' || job.kind === 'watch' ? ['', '']
         : !isSilent ? ['', '']
-        : hasSaid ? [`nothing new for ${ago(still)}`, `nothing new for ${shortAgo(still)}`]
-        : !job.wroteAt || job.isEmpty ? [`No output yet · started ${shortAgo(ran)} ago`, `No output yet · ${shortAgo(ran)}`]
-        : [`No progress shown · nothing new for ${ago(still)}`, `No progress for ${shortAgo(still)}`]
-      const isWarn = isSilent
+        : hasSaid ? [`nothing new for ${ago(still)}${live}`, `nothing new for ${shortAgo(still)}${live}`]
+        : !job.wroteAt || job.isEmpty ? [`No output yet · started ${shortAgo(ran)} ago${live}`, `No output yet · ${shortAgo(ran)}${live}`]
+        : [`No progress shown · nothing new for ${ago(still)}${live}`, `No progress for ${shortAgo(still)}${live}`]
+      const isWarn = isSilent && job.live !== 'busy'
       const lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving · ') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching · ') : isSilent && hasSaid ? 'Last: ' : ''
       const near = left
       const numbers = [[...full, ...pct, ...rate, ...left], [...full, ...pct, ...left], ...(near.length ? [[...full, ...near]] : []), [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...compact, ...near], [...bare, ...near]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]
@@ -12108,7 +12217,7 @@ const panelHooks = (on: On) => {
         const kindLead = job.kind === 'server' ? 'Serving' : job.kind === 'watch' ? 'Watching' : ''
         const shownLead = kindLead ? `${kindLead} · ${said ? 'last: ' : ''}` : lead && (nums.length || said) ? lead : ''
         const line = `${shownLead}${text}`
-        return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : kindLead || (job.kind === 'download' ? 'Downloading' : 'Working'), isWarn }
+        return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : (job.kind === 'script' && job.isNamed ? nowWord(job.label) : '') || JOB_NOW[job.kind], isWarn }
       }
       return { text: short, isWarn }
     }
@@ -12127,8 +12236,10 @@ const panelHooks = (on: On) => {
           {jobLines(t, `twig-lines-${key}`, job)}
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
             {/* A press shows its output whole in a Terminal window, where this Mac can open one */}
-            {canOpenJob(job) ? (
-              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => void openJobOutput($, job).catch(err => log($, `output not opened: ${String(err)}`))} />
+            {isMore(job) && owner ? (
+              <Button key={`more-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openWork($, owner)} />
+            ) : canOpenJob(job) ? (
+              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openLog($, job.id, job.label)} />
             ) : (
               <Text wrap="truncate-end">{name}</Text>
             )}
@@ -12145,7 +12256,7 @@ const panelHooks = (on: On) => {
         </Box>
       ) : null
       const { text: stand, isWarn } = jobStand(job, width - (isStoppable ? 10 : 0))
-      const pctAt = job.pct && !isWarn ? (stand.startsWith(`${job.pct} · `) || stand === job.pct ? 0 : stand.includes(` · ${job.pct}`) ? stand.indexOf(` · ${job.pct}`) + 3 : -1) : -1
+      const pctAt = job.pct && !isWarn && !/still running/i.test(stand) ? (stand.startsWith(`${job.pct} · `) || stand === job.pct ? 0 : stand.includes(` · ${job.pct}`) ? stand.indexOf(` · ${job.pct}`) + 3 : -1) : -1
       const detail = ''
       return (
         <Box key={`job-${key}`} flexDirection="column" flexShrink={0}>
@@ -12176,12 +12287,65 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
+    const endedMark = (run: EndedRun) => (
+      <Text color={run.how === 'failed' ? 'error' : run.how === 'finished' ? DONE : undefined} dimColor={run.how !== 'failed' && run.how !== 'finished'}>
+        {JOB_GLYPH[run.kind ?? 'script']}
+      </Text>
+    )
+    const endedLines = (t: Twig, key: string, run: EndedRun) =>
+      'Svg' in table && e.surface !== 'terminal' ? (
+        <Box key={key} flexShrink={0}>
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, run.how === 'failed' ? TWIG_FAILED : '#808080', false, JOB_SHAPE[run.kind ?? 'script'])} alt={endedWord(run)} width={twigWidth(t)} height={LINE} isInteractive />
+        </Box>
+      ) : (
+        <Box key={key} flexDirection="row" flexShrink={0}>
+          <Text dimColor>{twigText(t)}</Text>
+          {endedMark(run)}
+        </Box>
+      )
+    const openEnded = (run: EndedRun, owner: string) => (canOpenFile(run.file) ? openLog($, run.id, runWords(run.what) || 'A command') : openWork($, owner))
+    const failedRow = (t: Twig, run: EndedRun, owner: string) => {
+      const key = `failed-${owner}-${run.id}`
+      const width = perRow - 4 - t.depth * 2
+      const side = endedLine(run, took(run.endedAt - run.at))
+      const name = cut(runWords(run.what) || 'A command', Math.max(12, width))
+      return (
+        <Box key={`job-${key}`} flexDirection="column" flexShrink={0}>
+          <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+            {endedLines(t, `twig-lines-${key}`, run)}
+            <Box flexGrow={1} flexShrink={1} minWidth={0}>
+              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openEnded(run, owner)} />
+            </Box>
+          </Box>
+          {/* (that it failed and after how long, in red, then why, as a running row's second line says how it stands) */}
+          {twigUnder(
+            t,
+            `why-${key}`,
+            <Box flexDirection="row" flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+              <Box flexShrink={0}>
+                <Text color="error">{side}</Text>
+              </Box>
+              {run.why ? (
+                <Box flexShrink={0}>
+                  <Text dimColor>{' · '}</Text>
+                </Box>
+              ) : null}
+              {run.why ? (
+                <Box flexShrink={1} minWidth={0}>
+                  <Text dimColor wrap="truncate-end">{run.why}</Text>
+                </Box>
+              ) : null}
+            </Box>,
+          )}
+        </Box>
+      )
+    }
     const jobBranches = (card: Todo, isAll = false): Branch[] => {
       const jobs = jobsOf(card)
       if (isAll || jobs.length <= JOBS_SHOWN) return jobs.map(job => ({ one: card, job, kids: [] }))
       const more = jobs.length - JOBS_SHOWN + 1
       const shown = jobs.slice(-(JOBS_SHOWN - 1))
-      const rest: Job = { id: `more-${card.id}`, label: `${jobs.slice(0, more).reduce((n, job) => n + (job.count ?? 1), 0)} more commands`, cmd: '', kind: 'watch', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
+      const rest: Job = { id: `more-${card.id}`, label: `${jobs.slice(0, more).reduce((n, job) => n + (job.count ?? 1), 0)} more commands`, cmd: '', kind: 'script', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
       return [...shown, rest].map(job => ({ one: card, job, kids: [] }))
     }
     const withJobs = (branches: Branch[], isAll = false): Branch[] =>
@@ -12198,7 +12362,10 @@ const panelHooks = (on: On) => {
       const rest = under.length - twigs.filter(t => !t.job).length
       if (!rest && !runs.length) return twigsOf(branches).map(rowOf)
       const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
-      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs), true, '', () => openWork($, one.id))]
+      const failed = failureOf(runs)
+      const onTree = new Set(twigs.flatMap(t => (!t.job && t.one ? [t.one.id] : [])))
+      const lost = under.filter(kid => kid.status === 'failed' && !onTree.has(kid.id)).map(kid => titleOf(kid))
+      return [...twigs.map(rowOf), ...(failed ? [failedRow({ ...closing, isLast: false }, failed, one.id)] : []), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs, failed?.id, lost), true, '', () => openWork($, one.id))]
     }
 
     const flowMine = await sessionName($)
@@ -12474,7 +12641,7 @@ const panelHooks = (on: On) => {
     }
     const underTwig = (t: Twig) => {
       if (t.job) {
-        const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).slice(-OUTPUT_LINES)
+        const tail: string[] = []
         if (!tail.length) return null
         const inset = canOpenJob(t.job) ? lead : 0
         return (
@@ -12534,22 +12701,26 @@ const panelHooks = (on: On) => {
       const runs = endedRunsOf(one, one.chat ? helpersThere : all).reverse()
       if (!runs.length) return null
       const isBad = (run: (typeof runs)[number]) => run.how === 'failed' || run.how === 'killed' || run.how === 'timed out'
-      const bad = runs.filter(isBad).length
       return part(
         'part-ended-runs',
         'Commands ended',
-        endedSummary(0, runs),
+        endedSummary(0, runs.map(run => ({ ...run, what: '' }))),
         <Box flexDirection="column">
-          {runs.map(run => (
+          {runs.flatMap(run => [
             <Box key={`ended-${run.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+              <Box flexShrink={0}>{endedMark(run)}</Box>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                <Text wrap="truncate-end">{describedOf(run.what).text || run.what || 'A command'}</Text>
+                {canOpenFile(run.file) ? (
+                  <Button key={`ended-open-${run.id}-${presses}`} label={describedOf(run.what).text || run.what || 'A command'} plain hover={{ scope: `ended-${run.id}`, underline: true }} onPress={() => openEnded(run, one.id)} />
+                ) : (
+                  <Text wrap="truncate-end">{describedOf(run.what).text || run.what || 'A command'}</Text>
+                )}
               </Box>
               <Box flexShrink={0}>
-                <Text dimColor={!isBad(run)} color={isBad(run) ? NEEDS : undefined}>{`${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(at - run.endedAt)} ago`}</Text>
+                <Text dimColor={!isBad(run)} color={run.how === 'failed' ? 'error' : undefined}>{`${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(at - run.endedAt)} ago`}</Text>
               </Box>
-            </Box>
-          ))}
+            </Box>,
+          ])}
         </Box>,
       )
     }
@@ -13198,6 +13369,11 @@ const tabHooks = (on: On) => {
         {await pictureView($, e)}
       </Box>
     )
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
+
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    if (!e.requestId?.startsWith(LOG_PANE)) return next(e)
+    return logView($, uiOf($, e), e.requestId)
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {

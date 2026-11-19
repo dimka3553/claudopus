@@ -226,7 +226,10 @@ declare global {
   export import JOB_COLOR = M10.JOB_COLOR
   export import JOB_GLYPH = M10.JOB_GLYPH
   export import JOB_HEAD = M10.JOB_HEAD
+  export import JOB_NOW = M10.JOB_NOW
   export import JOB_SHAPE = M10.JOB_SHAPE
+  export import whyOf = M10.whyOf
+  export import logLines = M10.logLines
   export import JOB_LOOK = M10.JOB_LOOK
   export import JOB_NEWS = M10.JOB_NEWS
   export import JOB_QUIET = M10.JOB_QUIET
