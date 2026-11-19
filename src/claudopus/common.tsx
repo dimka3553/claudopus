@@ -60,7 +60,7 @@ const FILL = '#80808024'
 // A card's outline. The app rounds the corners of every border it draws, and a card's edge of to-dos is square and stuck out past
 // them, so the outline is four thin filled strips round the card instead, whose corners are square. It takes no room of the card's
 // own beyond the strips; with no colour the card is drawn as it is
-const OUTLINE = 0.15
+const OUTLINE = 0.1
 const squareOutline = (Box: Ui['Box'], color: string | undefined, key: string, card: JSX.Element) =>
   color ? (
     <Box key={`outline-${key}`} flexDirection="column" flexShrink={0}>

@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.223 · 19 November 2026
+- The square outline on a card is thinner now, and the question block has room inside it above and below its words.
+
 ## 0.2.222 · 19 November 2026
 - The line beside a working task's three dots now only says what the task itself is doing. When a command you allowed on its card ends, that line keeps the task's own words: the command's end is a grey line where it ran for a minute, and a row under the card's ended commands.
 - Before a task writes its first note, that line says what it is doing right now, such as Reading files, instead of Starting or Working.
