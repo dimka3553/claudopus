@@ -57,7 +57,7 @@ const commandHooks = (on: On) => {
     const r = await next(e)
     // The list closed, by anyone: nothing of where it stood is kept, so the line above the prompt no longer points into it
     // and where what waited stood at its top: opened again, it is put together afresh
-    if (e.id === LIST) (listOffsets.clear(), topPlaces.clear(), topClosed.clear(), drawAgain($))
+    if (e.id === LIST) (listOffsets.clear(), topPlaces.clear(), drawAgain($))
     if (e.id === LIST && e.origin.kind === 'person' && dir) await choosePanel($, false)
     return r
   })

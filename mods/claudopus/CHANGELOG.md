@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.226 · 19 November 2026
+- Cards stand by colour: what waits for you (yellow) on top, then what was delivered (blue), then what works (purple). A card you just answered goes at once to its place among the working, under every blue card, instead of staying up with what waits.
+- A workflow that finishes stays where it was, green, for its two seconds, instead of jumping to the top.
+
 ## 0.2.225 · 19 November 2026
 - The empty space under your answer on a card now closes after three seconds, also while you keep using a panel that is scrolled down. Before, it could stay until you left the panel alone.
 - That space is never taller than the panel's visible height.
