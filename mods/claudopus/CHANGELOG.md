@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.217 · 19 November 2026
+- A task's changed files are now a list you can open: press "3 changed files" on its card, and its Details lists each file by kind (code, then documents) in lined-up columns, with an icon, its folder, its counts and a bar of the lines added and removed
+- A press on a file in that list shows it in the app's Files pane beside the chat; in the terminal, or for a file the app can't show, what changed in it opens in a tab of the panel
+
 ## 0.2.216 · 19 November 2026
 - In Details, the commands a task or helper ran that have ended are a group under the one that started them, headed by a row that says how many ended and how many failed, instead of a flat list under Commands ended. A press on that row folds them away.
 - An ended command is named as it was while it ran, never by its shell line.

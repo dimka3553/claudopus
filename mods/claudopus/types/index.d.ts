@@ -25,10 +25,12 @@ export type Entry = { at: number; kind: 'note' | 'decision' | 'steer'; text: str
 export type Item = { text: string; state: 'open' | 'doing' | 'done' | 'dropped' }
 
 // What a task made: a file or link of its own, by its kind (with the file's time when it was listed), and its code as a count of
-// files and lines
+// files and lines, with each file it changed in a repo (its path, the part of it inside the repo, the lines added and removed, and
+// whether it is new since the task began) and the time it is counted from, in seconds
 export type MadeKind = 'picture' | 'video' | 'pdf' | 'sheet' | 'doc' | 'file' | 'link'
 export type Made = { path: string; name: string; kind: MadeKind; at?: number }
-export type CodeMade = { count: number; plus: number; minus: number }
+export type CodeFile = { path: string; inRepo: string; plus: number; minus: number; isNew?: boolean }
+export type CodeMade = { count: number; plus: number; minus: number; files?: CodeFile[]; since?: number }
 export type FilesMade = { made: Made[]; code?: CodeMade }
 
 // One thing the person asked for: a card in the panel, and the one piece of background work that does it

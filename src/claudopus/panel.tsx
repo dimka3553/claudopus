@@ -64,7 +64,7 @@ const panelHooks = (on: On) => {
     const id = e.requestId ?? ''
     // Every ask for a tab's drawing passes here first, and is noted (watchTabs)
     await noteTabAsked($, id)
-    const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, LOG_PANE, 'report-'].some(start => id.startsWith(start))
+    const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, LOG_PANE, DIFF_PANE, 'report-'].some(start => id.startsWith(start))
     // A tab of the mod's on the desktop, Settings, About, Results and the rest, but for a work's or a workflow's Details, which are
     // drawn with the panel below: every drawing of the panel draws it again too, so under load its buttons went as the panel's did
     // (16 Nov: Settings' Reset pressed, never reached the mod). Held the same way: given again through a click, and while its
@@ -1536,7 +1536,7 @@ const panelHooks = (on: On) => {
             </Box>
           </Box>
           {/* What it made, right under its title, while it works and once it is done */}
-          {madeNow($, one)?.made.length || madeNow($, one)?.code ? part('part-files', 'Files', '', madeTiles($, table, madeNow($, one) ?? { made: [] }, paneId, `files-${one.id}`, e.surface) ?? <Box />) : null}
+          {madeNow($, one)?.made.length || madeNow($, one)?.code ? part('part-files', 'Files', '', madeTiles($, table, madeNow($, one) ?? { made: [] }, paneId, `files-${one.id}`, one.id, e.surface) ?? <Box />) : null}
           {needsFor(one).length ? (
             <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE} />

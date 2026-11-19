@@ -28,6 +28,7 @@ declare global {
   export import ToolCallResult = M0.ToolCallResult
   export import SessionMessage = M0.SessionMessage
   export import ToolUseSummary = M0.ToolUseSummary
+  export import CodeFile = M1.CodeFile
   export import CodeMade = M1.CodeMade
   export import Entry = M1.Entry
   export import FilesMade = M1.FilesMade
