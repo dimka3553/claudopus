@@ -267,23 +267,23 @@ var WAITS_KINDS = new Set(['claudopus:task', 'claudopus:quick', 'general-purpose
 var saveReport = function ($, card, text) { return __awaiter(_this, void 0, void 0, function () {
     var one, isKept, kept, marked, at, title, stamp, base, ids, id, into, chat, files, report, _a;
     var _b;
-    var _c, _d, _e, _f, _g, _h, _j;
-    return __generator(this, function (_k) {
-        switch (_k.label) {
+    var _c, _d, _e, _f, _g;
+    return __generator(this, function (_h) {
+        switch (_h.label) {
             case 0: return [4 /*yield*/, read($, todos)];
             case 1:
-                one = (_c = (_k.sent()).find(function (todo) { return todo.id === card.id; })) !== null && _c !== void 0 ? _c : card;
+                one = (_c = (_h.sent()).find(function (todo) { return todo.id === card.id; })) !== null && _c !== void 0 ? _c : card;
                 isKept = text.trim().length >= REPORT_LEAST || namedPaths(text).some(function (path) { return PICTURE.test(path); });
                 return [4 /*yield*/, loadReports($)];
             case 2:
-                kept = _k.sent();
+                kept = _h.sent();
                 marked = mark(text);
                 // The same report again is no newer result
                 if (!isKept || kept.some(function (r) { return r.agent === one.id && r.mark === marked; }))
                     return [2 /*return*/];
                 return [4 /*yield*/, $.clock.now()];
             case 3:
-                at = _k.sent();
+                at = _h.sent();
                 title = cut(one.title || quoted(one.words, 60) || 'Report', 70);
                 stamp = new Date(at).toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
                 base = "".concat(stamp, "-").concat(slug(title).slice(0, 40) || 'report');
@@ -292,33 +292,33 @@ var saveReport = function ($, card, text) { return __awaiter(_this, void 0, void
                 into = "".concat(reportsDir(), "/").concat(id);
                 return [4 /*yield*/, read($, me)];
             case 4:
-                chat = _k.sent();
+                chat = _h.sent();
                 return [4 /*yield*/, $.fs.write("".concat(dir, "/reports/").concat(id, "/report.md"), "".concat(text.trim(), "\n"))];
             case 5:
-                _k.sent();
+                _h.sent();
                 return [4 /*yield*/, copyNamed($, text, into).catch(function (err) { return (void log($, "pictures of report ".concat(id, " not copied: ").concat(String(err))), []); })];
             case 6:
-                files = _k.sent();
+                files = _h.sent();
                 return [4 /*yield*/, makeThumbs($, { id: id, files: files }).catch(function (err) { return log($, "small copies of report ".concat(id, " not made: ").concat(String(err))); })];
             case 7:
-                _k.sent();
+                _h.sent();
                 _b = { id: id, title: title, subject: oneLine(one.subject || title), at: at, chat: chat.title, chatId: chat.id };
                 return [4 /*yield*/, readIndex($)];
             case 8:
                 _a = [(
                     // The folder of the subject the work recorded, which need not be the chat's own
-                    _b.folder = (_g = [(_f = (_e = (_k.sent()).find(function (s) { return one.subject && slug(s.name) === slug(one.subject); })) === null || _e === void 0 ? void 0 : _e.repo) !== null && _f !== void 0 ? _f : ''].find(function (repo) { return repo.startsWith('/'); })) !== null && _g !== void 0 ? _g : cwd, _b.gist = gistOf(text, title), _b.files = files, _b)];
-                return [4 /*yield*/, madeBy($, (_h = one.wrote) !== null && _h !== void 0 ? _h : [], text, (_j = one.begunAt) !== null && _j !== void 0 ? _j : one.startedAt)
+                    _b.folder = (_g = [(_f = (_e = (_h.sent()).find(function (s) { return one.subject && slug(s.name) === slug(one.subject); })) === null || _e === void 0 ? void 0 : _e.repo) !== null && _f !== void 0 ? _f : ''].find(function (repo) { return repo.startsWith('/'); })) !== null && _g !== void 0 ? _g : cwd, _b.gist = gistOf(text, title), _b.files = files, _b)];
+                return [4 /*yield*/, listMade($, one, text)
                         .then(function (made) { return ({ made: made }); })
                         .catch(function (err) { return (void log($, "files of report ".concat(id, " not listed: ").concat(String(err))), {}); })];
             case 9:
-                report = __assign.apply(void 0, [__assign.apply(void 0, [__assign.apply(void 0, _a.concat([(_k.sent())])), { agent: one.id, mark: marked }]), (one.from ? { from: one.from } : {})]);
+                report = __assign.apply(void 0, [__assign.apply(void 0, [__assign.apply(void 0, _a.concat([(_h.sent())])), { agent: one.id, mark: marked }]), (one.from ? { from: one.from } : {})]);
                 return [4 /*yield*/, $.fs.write("".concat(dir, "/reports/").concat(id, "/meta.json"), "".concat(JSON.stringify(report, null, 2), "\n"))];
             case 10:
-                _k.sent();
+                _h.sent();
                 return [4 /*yield*/, loadReports($)];
             case 11:
-                _k.sent();
+                _h.sent();
                 return [2 /*return*/];
         }
     });

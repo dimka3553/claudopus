@@ -153,8 +153,8 @@ let finishedAtTop: string[] = []
 const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
   const now = await read($, todos)
   const before = JSON.stringify(now)
-  // (a task's card ends done only with its result: holdDone)
-  const hold = (list: Todo[]) => holdDone(list, fn(list))
+  // (a task's card ends done only with its result: holdDone; and keeps what each of its results named: saidKept)
+  const hold = (list: Todo[]) => saidKept(list, holdDone(list, fn(list)))
   const next = hold(now)
   if (JSON.stringify(next) === before) return now
   return update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))

@@ -427,7 +427,7 @@ var ownCheckoutChanged = function ($, texts, start) { return __awaiter(_this, vo
 var workHooks = function (on) {
     // A chat's own thread reads, starts agents and talks to them; the work runs in the agents, which carry an agent id
     on('tool.call', function ($, e, raw) { return __awaiter(_this, void 0, void 0, function () {
-        var run, grants, _a, keyKept, ownFiles, crossed, _b, _c, command, card, waits, _d, _e, isWatch, command, _f, _g, command, changed, _h, _j, _k, _l, _m, isChatHere, _o, chatCommand, pushFrom, _p, places, _q, _r, isChatCommand, _s, isRefusedHere, gated, released, _t, _u, _v, fileSaid, woken, next, nextHere, call, resume, held_1, _w, steered, from, answered, answer, message, woke, words, isWhole, to_1, theirs, now_1, list, target_1, given, isRepeat, asking, asked_1, isSteer_1, sender, title, id_1, now_2, isKeeping_1, nudge_1, sent, line, agent_1, refused, _x, report_1, taken_1, now_3, card_1, above, _y, now_4, text_1, parent_1, written_1, r, _z, call, r, stopId_1, now_5, r, readPath, isPaste, kind, shape;
+        var run, grants, _a, keyKept, ownFiles, crossed, _b, _c, command, card, waits, _d, _e, isWatch, command, _f, _g, command, changed, _h, _j, _k, _l, _m, isChatHere, _o, chatCommand, pushFrom, _p, places, _q, _r, isChatCommand, _s, isRefusedHere, gated, released, _t, _u, _v, fileSaid, woken, next, nextHere, call, resume, held_1, _w, steered, from, answered, answer, message, woke, words, isWhole, to_1, theirs, now_1, list, target_1, given, isRepeat, asking, asked_1, isSteer_1, sender, title, id_1, now_2, isKeeping_1, nudge_1, sent, line, agent_1, refused, _x, report_1, taken_1, now_3, card_1, above, _y, now_4, text_1, parent_1, written_1, r, r, _z, call, r, stopId_1, now_5, r, readPath, isPaste, kind, shape;
         var _this = this;
         var _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, _33, _34;
         return __generator(this, function (_35) {
@@ -1093,82 +1093,93 @@ var workHooks = function (on) {
                         handedBack.set(agent_1, report_1);
                     return [2 /*return*/, r];
                 case 112:
-                    if (e.agentId !== undefined)
-                        return [2 /*return*/, next(e)];
-                    _z = isOff;
-                    if (_z) return [3 /*break*/, 114];
-                    return [4 /*yield*/, read($, me)];
+                    if (!(e.agentId !== undefined)) return [3 /*break*/, 116];
+                    return [4 /*yield*/, next(e)
+                        // (the pull request, release or page a command of its put up is what it made: linksPutUp)
+                    ];
                 case 113:
-                    _z = !(_35.sent()).isChat;
-                    _35.label = 114;
+                    r = _35.sent();
+                    if (!(dir && !isOff)) return [3 /*break*/, 115];
+                    return [4 /*yield*/, keepPutUp($, e.agentId, linksPutUp(e, r)).catch(function (err) { return log($, "links a command put up not kept: ".concat(String(err))); })];
                 case 114:
+                    _35.sent();
+                    _35.label = 115;
+                case 115: return [2 /*return*/, r];
+                case 116:
+                    _z = isOff;
+                    if (_z) return [3 /*break*/, 118];
+                    return [4 /*yield*/, read($, me)];
+                case 117:
+                    _z = !(_35.sent()).isChat;
+                    _35.label = 118;
+                case 118:
                     if (_z)
                         return [2 /*return*/, next(e)
                             // Work the chat starts is a fresh agent on a model it names: a copy of the chat, or an agent left to the chat's own model, is refused
                         ];
-                    if (!(e.tool === 'Agent')) return [3 /*break*/, 116];
+                    if (!(e.tool === 'Agent')) return [3 /*break*/, 120];
                     call = e;
-                    if (!(call.subagent_type === 'fork' || !String((_27 = call.model) !== null && _27 !== void 0 ? _27 : '').trim())) return [3 /*break*/, 116];
+                    if (!(call.subagent_type === 'fork' || !String((_27 = call.model) !== null && _27 !== void 0 ? _27 : '').trim())) return [3 /*break*/, 120];
                     return [4 /*yield*/, log($, "refused an Agent call ".concat(call.subagent_type === 'fork' ? 'that copies the chat' : 'with no model'))];
-                case 115:
-                    _35.sent();
-                    return [2 /*return*/, { deny: NO_COPY() }];
-                case 116:
-                    if (!(e.tool === 'TaskStop' && dir)) return [3 /*break*/, 124];
-                    return [4 /*yield*/, next(e)];
-                case 117:
-                    r = _35.sent();
-                    stopId_1 = String((_28 = e.task_id) !== null && _28 !== void 0 ? _28 : '');
-                    if (!(!r.deny && stopId_1)) return [3 /*break*/, 123];
-                    stoppedHere.add(stopId_1);
-                    return [4 /*yield*/, stopHelpers($, stopId_1)];
-                case 118:
-                    _35.sent();
-                    return [4 /*yield*/, dropBackground($, [stopId_1], 'stopped')];
                 case 119:
                     _35.sent();
-                    return [4 /*yield*/, $.clock.now()];
+                    return [2 /*return*/, { deny: NO_COPY() }];
                 case 120:
-                    now_5 = _35.sent();
-                    return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (one) { return (one.id === stopId_1 && !one.parentId && one.status === 'working' && !interrupting.has(stopId_1) ? ended(one, stoppedAs(one), now_5) : one); }); })];
+                    if (!(e.tool === 'TaskStop' && dir)) return [3 /*break*/, 128];
+                    return [4 /*yield*/, next(e)];
                 case 121:
-                    _35.sent();
-                    return [4 /*yield*/, lookEnds($)];
+                    r = _35.sent();
+                    stopId_1 = String((_28 = e.task_id) !== null && _28 !== void 0 ? _28 : '');
+                    if (!(!r.deny && stopId_1)) return [3 /*break*/, 127];
+                    stoppedHere.add(stopId_1);
+                    return [4 /*yield*/, stopHelpers($, stopId_1)];
                 case 122:
                     _35.sent();
-                    _35.label = 123;
-                case 123: return [2 /*return*/, r];
+                    return [4 /*yield*/, dropBackground($, [stopId_1], 'stopped')];
+                case 123:
+                    _35.sent();
+                    return [4 /*yield*/, $.clock.now()];
                 case 124:
-                    if (OWN.includes(e.tool) || OWN_SERVERS.some(function (prefix) { return e.tool.startsWith(prefix); }) || isPaneShow(e))
-                        return [2 /*return*/, next(e)
-                            // The chat's single command always runs in the background, so no command holds the chat; Claudopus stops it at its limit
-                        ];
-                    if (!isChatCommand) return [3 /*break*/, 128];
-                    return [4 /*yield*/, next(e)];
+                    now_5 = _35.sent();
+                    return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (one) { return (one.id === stopId_1 && !one.parentId && one.status === 'working' && !interrupting.has(stopId_1) ? ended(one, stoppedAs(one), now_5) : one); }); })];
                 case 125:
-                    r = _35.sent();
-                    if (!(!r.deny && !r.isError)) return [3 /*break*/, 127];
-                    return [4 /*yield*/, chatCommandStarted($, e, r.result).catch(function (err) { return log($, "the chat's command not followed: ".concat(String(err))); })];
+                    _35.sent();
+                    return [4 /*yield*/, lookEnds($)];
                 case 126:
                     _35.sent();
                     _35.label = 127;
                 case 127: return [2 /*return*/, r];
                 case 128:
+                    if (OWN.includes(e.tool) || OWN_SERVERS.some(function (prefix) { return e.tool.startsWith(prefix); }) || isPaneShow(e))
+                        return [2 /*return*/, next(e)
+                            // The chat's single command always runs in the background, so no command holds the chat; Claudopus stops it at its limit
+                        ];
+                    if (!isChatCommand) return [3 /*break*/, 132];
+                    return [4 /*yield*/, next(e)];
+                case 129:
+                    r = _35.sent();
+                    if (!(!r.deny && !r.isError)) return [3 /*break*/, 131];
+                    return [4 /*yield*/, chatCommandStarted($, e, r.result).catch(function (err) { return log($, "the chat's command not followed: ".concat(String(err))); })];
+                case 130:
+                    _35.sent();
+                    _35.label = 131;
+                case 131: return [2 /*return*/, r];
+                case 132:
                     readPath = String((_30 = (_29 = e.file_path) !== null && _29 !== void 0 ? _29 : e.path) !== null && _30 !== void 0 ? _30 : '');
                     isPaste = Boolean(dir) && (readPath === "".concat(dir, "/pastes") || readPath.startsWith("".concat(dir, "/pastes/")));
                     if (READS.includes(e.tool) && !isPaste)
                         return [2 /*return*/, next(e)];
                     return [4 /*yield*/, log($, "refused ".concat(e.tool, " in a chat's own thread"))];
-                case 129:
+                case 133:
                     _35.sent();
-                    if (!grants.length) return [3 /*break*/, 131];
+                    if (!grants.length) return [3 /*break*/, 135];
                     return [4 /*yield*/, dropGrants($, grants).catch(function () { return undefined; })
                         // An open, a curl or a preview not in the shape the chat runs is told that shape, so it can be run that way or go to a task
                     ];
-                case 130:
+                case 134:
                     _35.sent();
-                    _35.label = 131;
-                case 131:
+                    _35.label = 135;
+                case 135:
                     kind = e.tool === 'Bash' ? ((_32 = (_31 = shellWords(chatCommand)[0]) === null || _31 === void 0 ? void 0 : _31[0]) !== null && _32 !== void 0 ? _32 : '') : ((_34 = (_33 = /__(preview_start)$/.exec(e.tool)) === null || _33 === void 0 ? void 0 : _33[1]) !== null && _34 !== void 0 ? _34 : '');
                     shape = Object.hasOwn(CHAT_SHAPES, kind) ? CHAT_SHAPES[kind] : '';
                     return [2 /*return*/, { deny: shape ? "".concat(REFUSED, " ").concat(shape) : REFUSED }];

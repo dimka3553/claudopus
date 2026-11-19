@@ -391,7 +391,8 @@ var endedLine = function (run, ran) { var _a; return run.how === 'finished' ? "D
 // which one (19 Nov "13 commands ended · 1 failed" named nothing); not one that has a row of its own above (`shown`, its id)
 // An ended command's name, as its row had it while it ran: its own words, or else what it ran in a few words, never its shell
 // line (19 Nov: "cd /Users/…; S=/private/tmp/…" and "until [ -f /private/…" stood as names under Commands ended)
-var runLabel = function (run) { var _a; return endedName(String((_a = run.what) !== null && _a !== void 0 ? _a : ''), run.cmd); };
+// (its title in plain words first, where the small model gave one)
+var runLabel = function (run) { var _a, _b; return ((_a = run.named) === null || _a === void 0 ? void 0 : _a.title) || endedName(String((_b = run.what) !== null && _b !== void 0 ? _b : ''), run.cmd); };
 // (counts only, never which: a name on the row was more than it needs, and which one is a press away in Details, 19 Nov;
 // `lost`: how many helpers failed, said as helpers so their count is never taken for the commands')
 var endedSummary = function (helpers, runs, lost) {
@@ -434,7 +435,7 @@ var dropBackground = function ($_1, ids_1) {
                                 if ((bg === null || bg === void 0 ? void 0 : bg.length) === ((_b = one.bg) === null || _b === void 0 ? void 0 : _b.length))
                                     return one;
                                 var runs = ((_c = one.bg) !== null && _c !== void 0 ? _c : []).filter(function (b) { return isGone(b.id); }).map(function (b) {
-                                    var _a;
+                                    var _a, _b;
                                     var end = endOfId(b.id);
                                     // It ended when its output last changed, where that is known, else as it was seen gone. A watch the engine killed at the
                                     // time limit it set ran out of time (within a tenth of its limit, at most a minute, as its limit is counted from when the mod saw it start); one killed
@@ -442,9 +443,10 @@ var dropBackground = function ($_1, ids_1) {
                                     var endedAt = end.at && end.at >= b.at && end.at <= now ? end.at : now;
                                     var how = end.how === 'killed' && b.expiresAt && endedAt >= b.expiresAt - Math.min(60000, (b.expiresAt - b.at) / 10) ? 'timed out' : end.how;
                                     // With its kind, for its mark, why it failed, and the file it wrote to, which a press on its name opens
-                                    var kind = b.isWatch ? 'watch' : jobKindOf((_a = b.cmd) !== null && _a !== void 0 ? _a : b.what, b.what);
+                                    var told = b.isWatch ? 'watch' : jobKindOf((_a = b.cmd) !== null && _a !== void 0 ? _a : b.what, b.what);
+                                    var kind = told === 'script' && ((_b = b.named) === null || _b === void 0 ? void 0 : _b.kind) === 'cloud job' ? 'remote' : told;
                                     var file = jobFiles.get(b.id);
-                                    return __assign(__assign(__assign(__assign(__assign({ id: b.id, what: b.what }, (b.cmd ? { cmd: b.cmd.slice(0, 400) } : {})), { at: b.at, endedAt: endedAt, how: how, kind: kind }), (end.code ? { code: end.code } : {})), (end.why ? { why: end.why } : {})), (file ? { file: file } : {}));
+                                    return __assign(__assign(__assign(__assign(__assign(__assign({ id: b.id, what: b.what }, (b.cmd ? { cmd: b.cmd.slice(0, 400) } : {})), { at: b.at, endedAt: endedAt, how: how, kind: kind }), (end.code ? { code: end.code } : {})), (end.why ? { why: end.why } : {})), (file ? { file: file } : {})), (b.named ? { named: b.named } : {}));
                                 });
                                 return __assign(__assign(__assign({}, one), { bg: (bg === null || bg === void 0 ? void 0 : bg.length) ? bg : undefined }), keepEnded(one, runs));
                             });

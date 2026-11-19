@@ -1,4 +1,5 @@
-// Work that goes on when the chat's process ends: what the keeper reads, the keeper started, cut-off work marked and started again
+// The chat's process: what is at work is recorded beside it, a card found at work after the process was replaced says the app
+// closed while it worked, and the watcher that brings Claudopus back
 var __assign = (this && this.__assign) || function () {
     __assign = Object.assign || function(t) {
         for (var s, i = 1, n = arguments.length; i < n; i++) {
@@ -46,261 +47,61 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
         if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
     }
 };
+var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
+    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
+        if (ar || !(i in from)) {
+            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
+            ar[i] = from[i];
+        }
+    }
+    return to.concat(ar || Array.prototype.slice.call(from));
+};
 var _this = this;
 var KEEP_AT = "".concat(MEMORY, "/keep/engine-id");
 var KEEP_NOW = 1700000000000;
-// What the last process of this chat left: the work it had at work, and when the keeper saw it end
-var leftAtWork = function (files, ids, cutAt, pid) {
-    if (cutAt === void 0) { cutAt = KEEP_NOW - 60000; }
-    if (pid === void 0) { pid = '4242'; }
-    files.set("".concat(KEEP_AT, ".json"), JSON.stringify({ count: ids.length, ids: ids, title: 'Contest', pid: pid, at: cutAt - 5000 }));
-    files.set("".concat(KEEP_AT, ".state"), JSON.stringify({ cutAt: cutAt, count: ids.length }));
-};
-var cardText = function ($, pattern) { return __awaiter(_this, void 0, void 0, function () {
-    var pane, found;
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0: return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { surface: 'desktop' }))];
-            case 1:
-                pane = _a.sent();
-                return [4 /*yield*/, pane.findAll({ type: 'Text', text: pattern })];
-            case 2:
-                found = (_a.sent()).map(function (one) { return ({ text: one.text, color: one.props.color }); });
-                return [4 /*yield*/, pane.unmount()];
-            case 3:
-                _a.sent();
-                return [2 /*return*/, found];
-        }
-    });
-}); };
-test('what is at work is kept for the keeper, with the process that runs it, and a chat run from another Mac starts one', SLOW, function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, files, clock;
-    var _b, _c;
-    return __generator(this, function (_d) {
-        switch (_d.label) {
+test("what is at work is recorded with the chat's process that runs it, each task by its title, and is taken out as it ends; no keeper is started, whatever runs the chat", SLOW, function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, files, clock, kept, _b, _c;
+    var _this = this;
+    var _d;
+    return __generator(this, function (_e) {
+        switch (_e.label) {
             case 0:
                 _a = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } }), files = _a.files, clock = _a.clock;
                 return [4 /*yield*/, $.session.start(start)];
             case 1:
-                _d.sent();
-                expect(files.get("".concat(MEMORY, "/log.md"))).toContain('keeper started for engine-id');
+                _e.sent();
                 return [4 /*yield*/, $.prompt.submit({ text: 'solve the cameras', wait: false, origin: composer })];
             case 2:
-                _d.sent();
+                _e.sent();
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Solve the cameras', prompt: 'solve' }))];
             case 3:
-                _d.sent();
-                return [4 /*yield*/, clock.advance(21000)];
-            case 4:
-                _d.sent();
-                expect(JSON.parse((_b = files.get("".concat(KEEP_AT, ".json"))) !== null && _b !== void 0 ? _b : '{}')).toMatchObject({ count: 1, ids: ['a1'] });
-                return [4 /*yield*/, $.turn.complete({ answer: 'Solved: all 158 frames placed, and the report is written with every number.'.repeat(4), durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' })];
-            case 5:
-                _d.sent();
-                return [4 /*yield*/, clock.advance(21000)];
-            case 6:
-                _d.sent();
-                expect(JSON.parse((_c = files.get("".concat(KEEP_AT, ".json"))) !== null && _c !== void 0 ? _c : '{}')).toMatchObject({ count: 0, ids: [] });
-                return [2 /*return*/];
-        }
-    });
-}); });
-test('a chat this Mac runs itself, and the copy the keeper started, start no keeper', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var files;
-    var _a;
-    return __generator(this, function (_b) {
-        switch (_b.label) {
-            case 0:
-                files = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1', CLAUDE_CODE_SESSION_KIND: 'bg' } }).files;
-                return [4 /*yield*/, $.session.start(start)];
-            case 1:
-                _b.sent();
-                expect((_a = files.get("".concat(MEMORY, "/log.md"))) !== null && _a !== void 0 ? _a : '').not.toContain('keeper started');
-                return [2 /*return*/];
-        }
-    });
-}); });
-test('work cut off as the process ended is started again with a message, its card says nothing of it, and the person is told', SLOW, function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, files, clock, resumed, logged, _b;
-    var _c;
-    return __generator(this, function (_d) {
-        switch (_d.label) {
-            case 0:
-                _a = world(on), files = _a.files, clock = _a.clock, resumed = _a.resumed, logged = _a.logged;
-                leftAtWork(files, ['a7', 'a8']);
-                return [4 /*yield*/, $.session.start(start)
-                    // Nothing until Claude Code has had its moment to start what it starts itself
-                ];
-            case 1:
-                _d.sent();
-                // Nothing until Claude Code has had its moment to start what it starts itself
-                expect(resumed).toEqual([]);
-                return [4 /*yield*/, clock.advance(31000)];
-            case 2:
-                _d.sent();
-                expect(resumed.map(function (one) { return one.split(':')[0]; })).toEqual(['a7', 'a8']);
-                expect(resumed[0]).toContain("this chat's process was ended at");
-                expect(resumed[0]).toContain('not by');
-                // Started again, the cards go on as they were: no line of when the chat stopped or since when they run again (18 Nov)
+                _e.sent();
+                kept = function () { var _a; return JSON.parse((_a = files.get("".concat(KEEP_AT, ".json"))) !== null && _a !== void 0 ? _a : '{}'); };
                 _b = expect;
-                return [4 /*yield*/, cardText($, /Interrupted|running again/)];
-            case 3:
-                // Started again, the cards go on as they were: no line of when the chat stopped or since when they run again (18 Nov)
-                _b.apply(void 0, [_d.sent()]).toEqual([]);
-                // Nothing in the chat either
-                expect(logged.some(function (line) { return line.includes('after the chat stopped at'); })).toBe(false);
-                expect(files.get("".concat(MEMORY, "/log.md"))).toContain('cut-off notice pushed');
-                // The keeper's file says both are at work again
-                expect(JSON.parse((_c = files.get("".concat(KEEP_AT, ".json"))) !== null && _c !== void 0 ? _c : '{}')).toMatchObject({ count: 2 });
-                return [2 /*return*/];
-        }
-    });
-}); });
-test('in the copy kept on this Mac, work Claude Code started again itself is only marked; one it could not is said in amber', SLOW, function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, files, clock, resumed, logged, lines, said;
-    var _b;
-    return __generator(this, function (_c) {
-        switch (_c.label) {
-            case 0:
-                _a = world(on, { env: { CLAUDE_CODE_SESSION_KIND: 'bg' }, agents: { a7: 'running' }, kinds: { a7: 'general-purpose' }, unresumable: new Set(['a8']) }), files = _a.files, clock = _a.clock, resumed = _a.resumed, logged = _a.logged;
-                leftAtWork(files, ['a7', 'a8']);
-                return [4 /*yield*/, $.session.start(start)];
-            case 1:
-                _c.sent();
-                return [4 /*yield*/, clock.advance(31000)];
-            case 2:
-                _c.sent();
-                expect(resumed).toEqual([]);
-                return [4 /*yield*/, cardText($, /^Interrupted at /)];
-            case 3:
-                lines = _c.sent();
-                said = function (end) { return lines.find(function (one) { var _a; return (_a = one.text) === null || _a === void 0 ? void 0 : _a.endsWith(end); }); };
-                expect(lines.map(function (one) { var _a; return (_a = one.text) === null || _a === void 0 ? void 0 : _a.replace(/\d\d:\d\d/g, 'hh:mm'); }).sort()).toEqual(["Interrupted at hh:mm when the chat stopped · Claudopus couldn't start it again"]);
-                expect((_b = said("couldn't start it again")) === null || _b === void 0 ? void 0 : _b.color).toBe('#E5A50A');
-                expect(logged.some(function (line) { return line.includes("couldn't start"); })).toBe(true);
-                return [2 /*return*/];
-        }
-    });
-}); });
-test('a chat with no keeper starts nothing again, and a cut is taken up once, through a reload of the mod before it was done', SLOW, function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, files, clock, resumed;
-    return __generator(this, function (_b) {
-        switch (_b.label) {
-            case 0:
-                _a = world(on), files = _a.files, clock = _a.clock, resumed = _a.resumed;
-                // Work left at work with no keeper to see its process end, as a chat quit on purpose days ago
-                files.set("".concat(KEEP_AT, ".json"), JSON.stringify({ count: 1, ids: ['a6'], title: 'Contest', pid: '4242', at: KEEP_NOW - 5000 }));
-                return [4 /*yield*/, $.session.start(start)];
-            case 1:
-                _b.sent();
-                return [4 /*yield*/, clock.advance(31000)];
-            case 2:
-                _b.sent();
-                expect(resumed).toEqual([]);
-                // A cut the keeper saw, and a reload 10 s into the new process: each piece is sent one message, not two
-                leftAtWork(files, ['a7'], KEEP_NOW + 31000 - 60000);
-                return [4 /*yield*/, $.session.start(start)];
-            case 3:
-                _b.sent();
-                return [4 /*yield*/, clock.advance(10000)];
-            case 4:
-                _b.sent();
-                return [4 /*yield*/, $.session.start(start)];
-            case 5:
-                _b.sent();
-                return [4 /*yield*/, clock.advance(31000)];
-            case 6:
-                _b.sent();
-                expect(resumed.map(function (one) { return one.split(':')[0]; })).toEqual(['a7']);
-                // Loaded again once it was done: nothing more
-                return [4 /*yield*/, $.session.start(start)];
-            case 7:
-                // Loaded again once it was done: nothing more
-                _b.sent();
-                return [4 /*yield*/, clock.advance(31000)];
-            case 8:
-                _b.sent();
-                expect(resumed).toHaveLength(1);
-                // A day and more ago
-                leftAtWork(files, ['a9'], KEEP_NOW - 25 * 3600000);
-                return [4 /*yield*/, $.session.start(start)];
-            case 9:
-                _b.sent();
-                return [4 /*yield*/, clock.advance(31000)];
-            case 10:
-                _b.sent();
-                expect(resumed).toHaveLength(1);
-                return [2 /*return*/];
-        }
-    });
-}); });
-test('the notice names each piece by its own title', SLOW, function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, files, clock, logged, card, said;
-    var _this = this;
-    var _b;
-    return __generator(this, function (_c) {
-        switch (_c.label) {
-            case 0:
-                _a = world(on, { unresumable: new Set(['a8']) }), files = _a.files, clock = _a.clock, logged = _a.logged;
-                card = function (id, title) { return ({ id: id, parentId: '', isFork: false, tokens: 0, title: title, words: '', items: [], entries: [], answer: '', startedAt: KEEP_NOW - 600000, endedAt: KEEP_NOW - 60000, status: 'stopped' }); };
-                // Kept in the order the other way round from the keeper's file
-                files.set("".concat(MEMORY, "/finished/engine-id.json"), JSON.stringify([card('a8', 'Train the splats'), card('a7', 'Solve the cameras')]));
-                leftAtWork(files, ['a7', 'a8']);
-                return [4 /*yield*/, $.session.start(start)];
-            case 1:
-                _c.sent();
-                return [4 /*yield*/, clock.advance(31000)
-                    // (each is sent from a hook, a moment after the look)
-                ];
-            case 2:
-                _c.sent();
-                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        return [2 /*return*/, logged.find(function (line) { return line.includes('after the chat stopped at'); })];
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { var _a; return __generator(this, function (_b) {
+                        return [2 /*return*/, (((_a = kept().ids) === null || _a === void 0 ? void 0 : _a.length) ? kept() : undefined)];
                     }); }); })];
-            case 3:
-                said = (_b = (_c.sent())) !== null && _b !== void 0 ? _b : '';
-                // Only the task that could not be started again is said in the chat
-                expect(said).toMatch(/^Claudopus couldn't start "Train the splats" again after the chat stopped at \d\d:\d\d\.$/);
-                return [2 /*return*/];
-        }
-    });
-}); });
-test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper, its work counted as at work', SLOW, function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var files, lapse;
-    var _a;
-    return __generator(this, function (_b) {
-        switch (_b.label) {
-            case 0:
-                files = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } }).files;
-                return [4 /*yield*/, $.session.start(start)];
-            case 1:
-                _b.sent();
-                return [4 /*yield*/, $.prompt.submit({ text: 'train the splats', wait: false, origin: composer })];
-            case 2:
-                _b.sent();
-                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Train the splats', prompt: 'train' }))
-                    // Another error is not a lapsed sign-in
-                ];
-            case 3:
-                _b.sent();
-                // Another error is not a lapsed sign-in
-                return [4 /*yield*/, $.turn.complete({ answer: 'API Error: 529 overloaded', durationMs: 1, isAborted: false, turnId: 't0', reason: 'error', agentId: 'a1' })];
             case 4:
-                // Another error is not a lapsed sign-in
-                _b.sent();
-                expect(files.has("".concat(KEEP_AT, ".handover"))).toBe(false);
-                lapse = function (turnId) { return $.turn.complete({ answer: 'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}', durationMs: 1, isAborted: false, turnId: turnId, reason: 'error', agentId: 'a1' }); };
-                // Once is no lapse; twice within minutes is
-                return [4 /*yield*/, lapse('t1')];
+                _b.apply(void 0, [_e.sent()]).toMatchObject({ ids: ['a1'], titles: { a1: 'Solve the cameras' }, pid: '4242' });
+                // It hands in its result: nothing is at work
+                return [4 /*yield*/, $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'Solved: all 158 frames placed, and the report is written with every number.' })];
             case 5:
-                // Once is no lapse; twice within minutes is
-                _b.sent();
-                expect(files.has("".concat(KEEP_AT, ".handover"))).toBe(false);
-                return [4 /*yield*/, lapse('t2')];
+                // It hands in its result: nothing is at work
+                _e.sent();
+                return [4 /*yield*/, $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' })];
             case 6:
-                _b.sent();
-                expect(files.has("".concat(KEEP_AT, ".handover"))).toBe(true);
-                expect(JSON.parse((_a = files.get("".concat(KEEP_AT, ".json"))) !== null && _a !== void 0 ? _a : '{}')).toMatchObject({ ids: ['a1'] });
+                _e.sent();
+                return [4 /*yield*/, clock.advance(21000)];
+            case 7:
+                _e.sent();
+                _c = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { var _a; return __generator(this, function (_b) {
+                        return [2 /*return*/, (((_a = kept().ids) === null || _a === void 0 ? void 0 : _a.length) === 0 ? kept() : undefined)];
+                    }); }); })];
+            case 8:
+                _c.apply(void 0, [_e.sent()]).toMatchObject({ ids: [], pid: '4242' });
+                expect((_d = files.get("".concat(MEMORY, "/log.md"))) !== null && _d !== void 0 ? _d : '').not.toContain('keeper');
+                expect(__spreadArray([], files.keys(), true).filter(function (path) { return /\/keep\/engine-id\.(state|handover)$/.test(path); })).toEqual([]);
                 return [2 /*return*/];
         }
     });
@@ -332,61 +133,95 @@ test('each chat beats for the watcher that brings Claudopus back, naming its pro
         }
     });
 }); });
-test('a chat this Mac runs whose process ended with tasks at work, as when the app quits or drops it, has them and their helpers started again, each helper under its own task, and the chat is told not to start them itself; a task you stopped is left, and a reload in the same process starts nothing', SLOW, function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, files, clock, resumed, appended, card, pane, cut, _b;
-    return __generator(this, function (_c) {
-        switch (_c.label) {
+test('a card that was at work when the chat\'s process was replaced, as when the app quits or drops the chat, is failed with "The app closed while it worked" and offers Start again, a task this process has no card for under the title the last process kept; nothing is started again, what Claude Code itself runs again stays at work, and a reload in the same process fails nothing', SLOW, function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, files, clock, resumed, appended, submitted, lastProcess, shown, _b, now, _c;
+    var _this = this;
+    return __generator(this, function (_d) {
+        switch (_d.label) {
             case 0:
-                _a = world(on, { unresumable: new Set(['a4']) }), files = _a.files, clock = _a.clock, resumed = _a.resumed, appended = _a.appended;
-                // The last process wrote the file and beat until the moment it ended; no keeper saw it end. a3 had handed back its result a moment
-                // before; a4 cannot be started again, so its helper a2 is left too; a1 is a helper of a9's
-                files.set("".concat(KEEP_AT, ".json"), JSON.stringify({ count: 5, ids: ['a7', 'a8', 'a6', 'a3', 'a4'], helpers: { a9: 'a7', a1: 'a9', a5: 'a6', a2: 'a4' }, titles: { a9: 'Lay out the frames' }, title: 'Contest', pid: '3131', at: KEEP_NOW - 600000 }));
-                files.set("".concat(KEEP_AT, ".beat"), '3131\tclaudopus@x\t/s/settings.json\n');
-                files.set("mtime:".concat(KEEP_AT, ".beat"), String(KEEP_NOW - 60000));
-                card = function (id, title, more) {
-                    if (more === void 0) { more = {}; }
-                    return (__assign({ id: id, parentId: '', isFork: false, tokens: 0, title: title, words: '', items: [], entries: [], answer: '', startedAt: KEEP_NOW - 900000, endedAt: KEEP_NOW - 60000, status: 'stopped' }, more));
-                };
-                files.set("".concat(MEMORY, "/finished/engine-id.json"), JSON.stringify([card('a7', 'Solve the cameras'), card('a8', 'Train the splats'), card('a6', 'Sort the frames', { byYou: { at: KEEP_NOW - 60000 } }), card('a3', 'Write it up', { status: 'done', handedBackAt: KEEP_NOW - 70000 }), card('a4', 'Fit the lens')]));
+                _a = world(on, { agents: { a8: 'running' } }), files = _a.files, clock = _a.clock, resumed = _a.resumed, appended = _a.appended, submitted = _a.submitted;
+                lastProcess = function (pid) { return files.set("".concat(KEEP_AT, ".json"), JSON.stringify({ ids: ['a7', 'a8', 'a9'], titles: { a7: 'Solve the cameras', a8: 'Train the splats' }, pid: pid, at: KEEP_NOW - 600000 })); };
+                shown = function () { return __awaiter(_this, void 0, void 0, function () {
+                    var pane, texts, buttons;
+                    return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0: return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { surface: 'desktop' }))];
+                            case 1:
+                                pane = _a.sent();
+                                return [4 /*yield*/, pane.findAll({ type: 'Text' })];
+                            case 2:
+                                texts = (_a.sent()).map(function (one) { var _a; return ({ text: String((_a = one.text) !== null && _a !== void 0 ? _a : ''), color: one.props.color }); });
+                                return [4 /*yield*/, pane.findAll({ type: 'Button' })];
+                            case 3:
+                                buttons = (_a.sent()).map(function (one) { var _a; return String((_a = one.props.label) !== null && _a !== void 0 ? _a : ''); });
+                                return [4 /*yield*/, pane.unmount()];
+                            case 4:
+                                _a.sent();
+                                return [2 /*return*/, { failed: texts.filter(function (one) { return one.text.startsWith('✕ Failed'); }), titles: texts.filter(function (one) { return /^(Solve the cameras|Train the splats)$/.test(one.text); }).map(function (one) { return one.text; }), again: buttons.filter(function (label) { return label === 'Start again'; }).length }];
+                        }
+                    });
+                }); };
+                // The same process wrote it: a reload of the mod, which ends nothing
+                lastProcess('4242');
                 return [4 /*yield*/, $.session.start(start)];
             case 1:
-                _c.sent();
-                expect(resumed).toEqual([]);
+                _d.sent();
                 return [4 /*yield*/, clock.advance(31000)];
             case 2:
-                _c.sent();
-                expect(resumed.map(function (one) { return one.split(':')[0]; }).sort()).toEqual(['a1', 'a7', 'a8', 'a9']);
-                expect(resumed.every(function (one) { return one.includes("this chat's process was ended at") && one.includes('Continue from where you were'); })).toBe(true);
-                // The task whose helper is started again is told not to start it a second time
-                expect(resumed.find(function (one) { return one.startsWith('a7: '); })).toContain('do not start them a second time');
-                expect(resumed.find(function (one) { return one.startsWith('a8: '); })).not.toContain('helpers');
-                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { surface: 'desktop' }))];
-            case 3:
-                pane = _c.sent();
-                return [4 /*yield*/, pane.findAll({ type: 'Text', text: /^Interrupted at / })];
-            case 4:
-                cut = (_c.sent()).map(function (one) { var _a; return (_a = one.text) === null || _a === void 0 ? void 0 : _a.replace(/\d\d:\d\d/g, 'hh:mm'); });
-                // The helper, which this process had no card for, is back under its task by the title the last process kept
+                _d.sent();
                 _b = expect;
-                return [4 /*yield*/, pane.findAll({ type: 'Button' })];
-            case 5:
-                // The helper, which this process had no card for, is back under its task by the title the last process kept
-                _b.apply(void 0, [(_c.sent()).map(function (one) { return one.props.label; })]).toContain('Lay out the frames');
-                return [4 /*yield*/, pane.unmount()];
-            case 6:
-                _c.sent();
-                expect(cut.filter(function (line) { return line === null || line === void 0 ? void 0 : line.includes('running again'); })).toHaveLength(0);
-                expect(cut.filter(function (line) { return line === null || line === void 0 ? void 0 : line.endsWith("Claudopus couldn't start it again"); })).toHaveLength(1);
-                expect(appended.filter(function (line) { return line.includes('Claudopus has started "Solve the cameras", "Train the splats" again, with 2 helpers cut off under them') && line.includes('Do not start them again'); })).toHaveLength(1);
-                // Loaded again in this process: nothing more
+                return [4 /*yield*/, shown()];
+            case 3:
+                _b.apply(void 0, [_d.sent()]).toEqual({ failed: [], titles: [], again: 0 });
+                // Another process wrote it and is gone: its work ended with it
+                lastProcess('3131');
                 return [4 /*yield*/, $.session.start(start)];
-            case 7:
-                // Loaded again in this process: nothing more
-                _c.sent();
+            case 4:
+                _d.sent();
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { var _a; return __generator(this, function (_b) {
+                        switch (_b.label) {
+                            case 0: return [4 /*yield*/, shown()];
+                            case 1:
+                                if (!(_b.sent()).failed.length) return [3 /*break*/, 3];
+                                return [4 /*yield*/, shown()];
+                            case 2:
+                                _a = _b.sent();
+                                return [3 /*break*/, 4];
+                            case 3:
+                                _a = undefined;
+                                _b.label = 4;
+                            case 4: return [2 /*return*/, (_a)];
+                        }
+                    }); }); })];
+            case 5:
+                now = _d.sent();
+                expect(now === null || now === void 0 ? void 0 : now.failed.map(function (one) { return one.text; })).toEqual(['✕ Failed · The app closed while it worked']);
+                expect(now === null || now === void 0 ? void 0 : now.titles).toEqual(['Solve the cameras']);
+                expect(now === null || now === void 0 ? void 0 : now.again).toBe(1);
+                expect(files.get("".concat(MEMORY, "/log.md"))).toContain("the chat's process was replaced (3131 to 4242) while work was at work: a7 ended with it");
+                // Nothing starts it again by itself, at the moment the old keeper took or later, and the chat is told to start nothing
                 return [4 /*yield*/, clock.advance(31000)];
+            case 6:
+                // Nothing starts it again by itself, at the moment the old keeper took or later, and the chat is told to start nothing
+                _d.sent();
+                return [4 /*yield*/, clock.advance(60000)];
+            case 7:
+                _d.sent();
+                expect(resumed).toEqual([]);
+                expect(__spreadArray(__spreadArray([], appended, true), submitted, true).filter(function (line) { return /again|cut off|process was ended/.test(line); })).toEqual([]);
+                // Loaded again in this process, the card is as it was: failed once, never a second card
+                return [4 /*yield*/, $.session.start(start)];
             case 8:
-                _c.sent();
-                expect(resumed).toHaveLength(4);
+                // Loaded again in this process, the card is as it was: failed once, never a second card
+                _d.sent();
+                return [4 /*yield*/, clock.advance(31000)];
+            case 9:
+                _d.sent();
+                _c = expect;
+                return [4 /*yield*/, shown()];
+            case 10:
+                _c.apply(void 0, [(_d.sent()).failed.map(function (one) { return one.text; })]).toEqual(['✕ Failed · The app closed while it worked']);
+                expect(resumed).toEqual([]);
                 return [2 /*return*/];
         }
     });

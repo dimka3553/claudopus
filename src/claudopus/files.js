@@ -75,7 +75,7 @@ var TEXT_DOC = /\.(md|txt|html?|csv)$/i;
 var WROTE_KEPT = 300;
 var MADE_LOOKED = 300;
 // The most things a card's row names before "and N more", and the most tiles a Files part draws before the same
-var CHIPS_MOST = 6;
+var CHIPS_MOST = 8;
 var TILES_MOST = 24;
 // The most small copies one Files part has made: the first tiles only, the rest keep their icon
 var FACES_MOST = 12;
@@ -180,36 +180,95 @@ var codeOf = function ($, byTop, since) { return __awaiter(_this, void 0, void 0
         }
     });
 }); };
-// Links a result names on a line that says it made or put them up, the first few: a page it put online, a report it added. A page
-// it only cites is no thing it made
+// Links a result names on a line that says it made or put them up, and those whose shape says something was put up (a pull request,
+// an issue, a release, a published page) wherever they stand. A page it only cites is no thing it made
 var MADE_LINK_LINE = /\b(made|added|created|published|deployed|live|online|posted|uploaded|opened|pushed|report|pull request|PR|release[sd]?)\b/i;
-var linksIn = function (text) {
-    return __spreadArray([], new Set(text.split('\n').filter(function (line) { return MADE_LINK_LINE.test(line); }).flatMap(function (line) { var _a; return ((_a = line.match(/https?:\/\/[^\s`'"()<>[\]{}|,;*]+/g)) !== null && _a !== void 0 ? _a : []).map(function (link) { return link.replace(/[.:!?]+$/, ''); }); })), true).slice(0, 3);
-};
+var MADE_LINK = /^https?:\/\/(www\.)?(github\.com\/[^/\s]+\/[^/\s]+\/(pull|issues|releases)\/|gitlab\.com\/\S+\/-\/(merge_requests|issues)\/|claude\.ai\/(public\/)?artifacts?\/)/i;
+var LINK = /https?:\/\/[^\s`'"()<>[\]{}|,;*\\]+/g;
+var LINKS_MOST = 30;
+var linksOf = function (text) { var _a; return ((_a = text.match(LINK)) !== null && _a !== void 0 ? _a : []).map(function (link) { return link.replace(/[.:!?]+$/, ''); }); };
+var linksIn = function (text) { return __spreadArray([], new Set(text.split('\n').flatMap(function (line) { return linksOf(line).filter(function (link) { return MADE_LINK_LINE.test(line) || MADE_LINK.test(link); }); })), true).slice(0, LINKS_MOST); };
+var isLink = function (said) { return /^https?:\/\//.test(said); };
 var linkName = function (link) {
-    var _a, _b;
-    var _c = link.replace(/^https?:\/\//, '').replace(/\/$/, '').split('/'), _d = _c[0], host = _d === void 0 ? '' : _d, rest = _c.slice(1);
-    var last = (_a = rest.at(-1)) !== null && _a !== void 0 ? _a : '';
+    var _a, _b, _c, _d, _e;
+    var _f = link.replace(/^https?:\/\//, '').replace(/[?#].*$/, '').replace(/\/$/, '').split('/'), _g = _f[0], host = _g === void 0 ? '' : _g, rest = _f.slice(1);
+    // A pull request or an issue by its repo and number, "clipify #70", as it is spoken of; a published page as one
+    if (/^(www\.)?(github|gitlab)\.com$/.test(host) && /^(pull|issues|merge_requests)$/.test((_a = rest.at(-2)) !== null && _a !== void 0 ? _a : '') && /^\d+$/.test((_b = rest.at(-1)) !== null && _b !== void 0 ? _b : ''))
+        return "".concat(rest.at(-3) === '-' ? rest.at(-4) : rest[1], " #").concat(rest.at(-1));
+    if (/^claude\.ai$/.test(host) && /^artifacts?$/.test((_c = rest.at(-2)) !== null && _c !== void 0 ? _c : ''))
+        return 'claude.ai page';
+    var last = (_d = rest.at(-1)) !== null && _d !== void 0 ? _d : '';
     // "os.example.com/reports/362" is "os report 362": the site's first word, the kind of page in the singular, and the page
-    var kind = rest.length > 1 ? ((_b = rest.at(-2)) !== null && _b !== void 0 ? _b : '').replace(/(?<=\w{3})s$/, '') : '';
+    var kind = rest.length > 1 ? ((_e = rest.at(-2)) !== null && _e !== void 0 ? _e : '').replace(/(?<=\w{3})s$/, '') : '';
     return last ? "".concat(host.replace(/^www\./, '').split('.')[0], " ").concat(kind ? "".concat(kind, " ") : '').concat(last).slice(0, 40) : host.replace(/^www\./, '');
 };
-// What a task made: the files its steps wrote or its commands named, and the files and links its result names, that are there and
-// were made since it began. A picture, video, PDF, spreadsheet or document is a thing of its own, as is any file the result names;
-// the other files it wrote inside a repo are its code, counted and never listed
+// What a task's words name as made: a result's files and links, and of the words a step ends with only its links
+var saidIn = function (text, isResult) { return __spreadArray(__spreadArray([], (isResult ? namedPaths(text) : []), true), linksIn(text), true); };
+var SAID_KEPT = 300;
+var withSaid = function (one, found) {
+    var _a, _b;
+    var said = __spreadArray([], new Set(__spreadArray(__spreadArray([], ((_a = one.said) !== null && _a !== void 0 ? _a : []), true), found, true)), true).slice(-SAID_KEPT);
+    return said.length === ((_b = one.said) !== null && _b !== void 0 ? _b : []).length && said.every(function (item, n) { var _a; return item === ((_a = one.said) === null || _a === void 0 ? void 0 : _a[n]); }) ? one : __assign(__assign({}, one), { said: said });
+};
+// Every change to the cards keeps what each new answer of a task's names, on its card and its task's (a helper's result is what its
+// task made too): the answer is replaced at each step's end and each result, so what an earlier one named is never lost
+var saidKept = function (before, next) {
+    var _a, _b;
+    var was = new Map(before.map(function (one) { return [one.id, one]; }));
+    var found = new Map();
+    for (var _i = 0, next_1 = next; _i < next_1.length; _i++) {
+        var one = next_1[_i];
+        if (one.chat || !one.answer.trim() || one.answer === ((_a = was.get(one.id)) === null || _a === void 0 ? void 0 : _a.answer))
+            continue;
+        var named_1 = saidIn(one.answer, one.status !== 'working');
+        if (named_1.length)
+            for (var _c = 0, _d = new Set([one.id, topOf(next, one.id)]); _c < _d.length; _c++) {
+                var id = _d[_c];
+                found.set(id, __spreadArray(__spreadArray([], ((_b = found.get(id)) !== null && _b !== void 0 ? _b : []), true), named_1, true));
+            }
+    }
+    return found.size ? next.map(function (one) { var _a; return (found.has(one.id) ? withSaid(one, (_a = found.get(one.id)) !== null && _a !== void 0 ? _a : []) : one); }) : next;
+};
+// A command that opens a pull request, a release or a page prints where it is: kept as what its task made, which a result that names
+// it only by its number ("pull request #284") would leave out
+var PUTS_UP = /\b(gh\s+(pr|release|gist)\s+create|glab\s+mr\s+create)\b/;
+var linksPutUp = function (e, r) {
+    var _a, _b;
+    if (r.deny || r.isError)
+        return [];
+    var isPutting = (e.tool === 'Bash' && PUTS_UP.test(String((_a = e.command) !== null && _a !== void 0 ? _a : ''))) || /artifact/i.test(e.tool);
+    return isPutting ? __spreadArray([], new Set(linksOf(JSON.stringify((_b = r.result) !== null && _b !== void 0 ? _b : '')).filter(function (link) { return MADE_LINK.test(link); })), true) : [];
+};
+var keepPutUp = function ($, id, links) { return __awaiter(_this, void 0, void 0, function () {
+    return __generator(this, function (_a) {
+        switch (_a.label) {
+            case 0:
+                if (!links.length) return [3 /*break*/, 2];
+                return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (one) { return (one.id === id || one.id === topOf(list, id) ? withSaid(one, links) : one); }); })];
+            case 1:
+                _a.sent();
+                _a.label = 2;
+            case 2: return [2 /*return*/];
+        }
+    });
+}); };
+// What a task made: the files its steps wrote or its commands named, and the files and links its results name (`said`, from every
+// one it gave, and `answer`), that are there and were made since it began. A picture, video, PDF, spreadsheet or document is a
+// thing of its own, as is any file a result names; the other files it wrote inside a repo are its code, counted and never listed
 var madeBy = function ($_1, wrote_1, answer_1, since_1) {
     var args_1 = [];
     for (var _i = 4; _i < arguments.length; _i++) {
         args_1[_i - 4] = arguments[_i];
     }
-    return __awaiter(_this, __spreadArray([$_1, wrote_1, answer_1, since_1], args_1, true), void 0, function ($, wrote, answer, since, isDated) {
+    return __awaiter(_this, __spreadArray([$_1, wrote_1, answer_1, since_1], args_1, true), void 0, function ($, wrote, answer, since, isDated, said) {
         var named, made, byTop, seen, isThing, newest, _a, _b, given, path, isNamed, stat, kind, top_2, _c, order, _d, _e, _f, n, given, _g, _h, link, code, _j;
         var _k;
         if (isDated === void 0) { isDated = true; }
+        if (said === void 0) { said = []; }
         return __generator(this, function (_l) {
             switch (_l.label) {
                 case 0:
-                    named = namedPaths(answer);
+                    named = __spreadArray([], new Set(__spreadArray(__spreadArray([], said.filter(function (one) { return !isLink(one); }), true), namedPaths(answer), true)), true);
                     made = [];
                     byTop = new Map();
                     seen = new Set();
@@ -263,7 +322,7 @@ var madeBy = function ($_1, wrote_1, answer_1, since_1) {
                             order.set(given.replace(/^\/private(?=\/(tmp|var)\/)/, ''), n);
                     }
                     made.sort(function (a, b) { var _a, _b; return ((_a = order.get(a.path)) !== null && _a !== void 0 ? _a : 0) - ((_b = order.get(b.path)) !== null && _b !== void 0 ? _b : 0); });
-                    for (_g = 0, _h = linksIn(answer); _g < _h.length; _g++) {
+                    for (_g = 0, _h = __spreadArray([], new Set(__spreadArray(__spreadArray([], said.filter(isLink), true), linksIn(answer), true)), true); _g < _h.length; _g++) {
                         link = _h[_g];
                         made.push({ path: link, name: linkName(link), kind: 'link' });
                     }
@@ -282,9 +341,56 @@ var madeBy = function ($_1, wrote_1, answer_1, since_1) {
         });
     });
 };
+// What a task made in its whole life: listed now, with what it was listed with before (kept on its card and with each result it
+// gave) that the listing no longer finds. A thing of its own or a link stays; a changed file stays only once it is gone (its
+// worktree taken away once merged), with the lines it was counted with, as one still there that is no longer changed is not
+var listMade = function ($, one, answer) { return __awaiter(_this, void 0, void 0, function () {
+    var now, earlier, _a, paths, kept, counted, gone, _i, _b, file, files, since, code, all;
+    var _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+    return __generator(this, function (_p) {
+        switch (_p.label) {
+            case 0: return [4 /*yield*/, madeBy($, (_c = one.wrote) !== null && _c !== void 0 ? _c : [], answer, (_d = one.begunAt) !== null && _d !== void 0 ? _d : one.startedAt, true, (_e = one.said) !== null && _e !== void 0 ? _e : [])];
+            case 1:
+                now = _p.sent();
+                _a = [[one.made]];
+                return [4 /*yield*/, read($, reports)];
+            case 2:
+                earlier = __spreadArray.apply(void 0, _a.concat([(_p.sent()).filter(function (r) { return r.agent === one.id && r.made; }).map(function (r) { return r.made; }), true])).filter(function (files) { return Boolean(files); });
+                if (!earlier.length)
+                    return [2 /*return*/, now];
+                paths = new Set(now.made.map(function (made) { return made.path; }));
+                kept = earlier.flatMap(function (files) { return files.made; }).filter(function (made) { return !paths.has(made.path) && (paths.add(made.path), true); });
+                counted = new Set(((_g = (_f = now.code) === null || _f === void 0 ? void 0 : _f.files) !== null && _g !== void 0 ? _g : []).map(function (file) { return file.path; }));
+                gone = [];
+                _i = 0, _b = earlier.flatMap(function (files) { var _a, _b; return (_b = (_a = files.code) === null || _a === void 0 ? void 0 : _a.files) !== null && _b !== void 0 ? _b : []; });
+                _p.label = 3;
+            case 3:
+                if (!(_i < _b.length)) return [3 /*break*/, 6];
+                file = _b[_i];
+                if (counted.has(file.path))
+                    return [3 /*break*/, 5];
+                counted.add(file.path);
+                return [4 /*yield*/, $.fs.exists(file.path).catch(function () { return true; })];
+            case 4:
+                if (!(_p.sent()))
+                    gone.push(file);
+                _p.label = 5;
+            case 5:
+                _i++;
+                return [3 /*break*/, 3];
+            case 6:
+                files = __spreadArray(__spreadArray([], ((_j = (_h = now.code) === null || _h === void 0 ? void 0 : _h.files) !== null && _j !== void 0 ? _j : []), true), gone, true).sort(function (a, b) { return b.plus + b.minus - (a.plus + a.minus); });
+                since = (_l = (_k = now.code) === null || _k === void 0 ? void 0 : _k.since) !== null && _l !== void 0 ? _l : (_o = (_m = earlier.find(function (files) { var _a; return (_a = files.code) === null || _a === void 0 ? void 0 : _a.since; })) === null || _m === void 0 ? void 0 : _m.code) === null || _o === void 0 ? void 0 : _o.since;
+                code = files.length ? __assign({ count: files.length, plus: files.reduce(function (sum, file) { return sum + file.plus; }, 0), minus: files.reduce(function (sum, file) { return sum + file.minus; }, 0), files: files }, (since ? { since: since } : {})) : now.code;
+                all = __spreadArray(__spreadArray([], now.made, true), kept, true);
+                return [2 /*return*/, __assign({ made: __spreadArray(__spreadArray([], all.filter(function (made) { return made.kind !== 'link'; }), true), all.filter(function (made) { return made.kind === 'link'; }), true) }, (code ? { code: code } : {}))];
+        }
+    });
+}); };
 // What a card draws: its task's files as last listed, and listed again, out of the drawing, once it has made a step since (a file a
 // step writes is there only after the step), at most every MADE_AGAIN while it works, and once it ends. The listings take turns, so a
-// panel opened on many cards lists them one after another
+// panel opened on many cards lists them one after another. What a listing found is kept on the card, so it is drawn at once after a
+// reload and nothing it once listed is lost
 var MADE_AGAIN = 20000;
 var MADE_HOLD = 15000;
 // What a listing shows: nothing at all is the same as not listed yet
@@ -293,32 +399,44 @@ var madeOf = new Map();
 var madeLoading = new Set();
 var madeTurn = Promise.resolve();
 var madeNow = function ($, one) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e, _f;
     if (one.chat)
         return undefined;
     // While it works a helper's edits change no count of the task's own, so time is part of what is listed
-    var key = "".concat((_a = one.steps) !== null && _a !== void 0 ? _a : 0, ":").concat(((_b = one.wrote) !== null && _b !== void 0 ? _b : []).length, ":").concat(one.answer.length, ":").concat(one.status, ":").concat(one.status === 'working' ? Math.floor(Date.now() / MADE_AGAIN) : '');
+    var key = "".concat((_a = one.steps) !== null && _a !== void 0 ? _a : 0, ":").concat(((_b = one.wrote) !== null && _b !== void 0 ? _b : []).length, ":").concat(((_c = one.said) !== null && _c !== void 0 ? _c : []).length, ":").concat(one.answer.length, ":").concat(one.status, ":").concat(one.status === 'working' ? Math.floor(Date.now() / MADE_AGAIN) : '');
     var was = madeOf.get(one.id);
     var isDue = !was || (was.key !== key && (one.status !== 'working' || Date.now() - was.at >= MADE_AGAIN));
-    if (isDue && !madeLoading.has(one.id) && (((_c = one.wrote) !== null && _c !== void 0 ? _c : []).length || one.answer)) {
+    if (isDue && !madeLoading.has(one.id) && (((_d = one.wrote) !== null && _d !== void 0 ? _d : []).length || ((_e = one.said) !== null && _e !== void 0 ? _e : []).length || one.made || one.answer)) {
         madeLoading.add(one.id);
-        var run = madeTurn.then(function () { var _a, _b; return madeBy($, (_a = one.wrote) !== null && _a !== void 0 ? _a : [], one.status === 'working' ? '' : one.answer, (_b = one.begunAt) !== null && _b !== void 0 ? _b : one.startedAt); });
+        // (the words a step ends with name no file as made: only a result does, and each one's is in `said`)
+        var run = madeTurn.then(function () { return listMade($, one, one.status === 'working' ? '' : one.answer); });
         // A listing that never ends (a file on a volume that does not answer) holds the others up no longer than MADE_HOLD
         madeTurn = Promise.race([run.catch(function () { return undefined; }), $.clock.sleep(MADE_HOLD)]);
         var isNew_1 = false;
         void run
-            .then(function (files) {
-            var _a, _b;
-            if (madeOf.size > 200)
-                madeOf.delete((_a = madeOf.keys().next().value) !== null && _a !== void 0 ? _a : '');
-            isNew_1 = shownOf(files) !== shownOf((_b = madeOf.get(one.id)) === null || _b === void 0 ? void 0 : _b.files);
-            madeOf.set(one.id, { key: key, at: Date.now(), files: files });
-        })
+            .then(function (files) { return __awaiter(_this, void 0, void 0, function () {
+            var _a, _b, _c;
+            return __generator(this, function (_d) {
+                switch (_d.label) {
+                    case 0:
+                        if (madeOf.size > 200)
+                            madeOf.delete((_a = madeOf.keys().next().value) !== null && _a !== void 0 ? _a : '');
+                        isNew_1 = shownOf(files) !== shownOf((_c = (_b = madeOf.get(one.id)) === null || _b === void 0 ? void 0 : _b.files) !== null && _c !== void 0 ? _c : one.made);
+                        madeOf.set(one.id, { key: key, at: Date.now(), files: files });
+                        if (!(shownOf(files) && shownOf(files) !== shownOf(one.made))) return [3 /*break*/, 2];
+                        return [4 /*yield*/, changeTodos($, function (list) { return list.map(function (card) { return (card.id === one.id ? __assign(__assign({}, card), { made: files }) : card); }); })];
+                    case 1:
+                        _d.sent();
+                        _d.label = 2;
+                    case 2: return [2 /*return*/];
+                }
+            });
+        }); })
             .catch(function (err) { return log($, "files of ".concat(one.id, " not listed: ").concat(String(err))); })
             // The panel is drawn again only when what it shows changed
             .finally(function () { return (madeLoading.delete(one.id), isNew_1 ? redraw($) : undefined); });
     }
-    return was === null || was === void 0 ? void 0 : was.files;
+    return (_f = was === null || was === void 0 ? void 0 : was.files) !== null && _f !== void 0 ? _f : one.made;
 };
 // What a result's pane draws: what its task made, kept with the result when it was saved. One saved before that is listed once, out
 // of the drawing (which writes nothing), from its task's card while that is kept and else from the paths its text names. A picture
@@ -331,17 +449,17 @@ var madeOfReport = function ($, r, text) {
         madeLoading.add(r.id);
         void (function () { return __awaiter(_this, void 0, void 0, function () {
             var one, listed;
-            var _a, _b, _c;
-            return __generator(this, function (_d) {
-                switch (_d.label) {
+            var _a, _b, _c, _d;
+            return __generator(this, function (_e) {
+                switch (_e.label) {
                     case 0: return [4 /*yield*/, read($, todos)];
                     case 1:
-                        one = (_d.sent()).find(function (card) { return card.id === r.agent; });
-                        return [4 /*yield*/, madeBy($, (_a = one === null || one === void 0 ? void 0 : one.wrote) !== null && _a !== void 0 ? _a : [], text, one ? ((_b = one.begunAt) !== null && _b !== void 0 ? _b : one.startedAt) : 0, Boolean(one)).catch(function () { return ({ made: [] }); })];
+                        one = (_e.sent()).find(function (card) { return card.id === r.agent; });
+                        return [4 /*yield*/, madeBy($, (_a = one === null || one === void 0 ? void 0 : one.wrote) !== null && _a !== void 0 ? _a : [], text, one ? ((_b = one.begunAt) !== null && _b !== void 0 ? _b : one.startedAt) : 0, Boolean(one), (_c = one === null || one === void 0 ? void 0 : one.said) !== null && _c !== void 0 ? _c : []).catch(function () { return ({ made: [] }); })];
                     case 2:
-                        listed = _d.sent();
+                        listed = _e.sent();
                         if (madeOfOld.size > 200)
-                            madeOfOld.delete((_c = madeOfOld.keys().next().value) !== null && _c !== void 0 ? _c : '');
+                            madeOfOld.delete((_d = madeOfOld.keys().next().value) !== null && _d !== void 0 ? _d : '');
                         madeOfOld.set(r.id, listed);
                         return [2 /*return*/];
                 }
@@ -636,7 +754,8 @@ var madeChips = function ($, ui, one, key, onOpenWork) {
           <Button key={"".concat(key, "-").concat(thing.key, "-open-").concat(presses)} label={"".concat(middleCut(thing.label, 18)).concat(thing.kind === 'link' ? ' ↗' : '')} plain onPress={function (press) { return void ((presses += 1), thing.files.length > 1 ? onOpenWork() : thing.files[0] ? openMade($, thing.files[0], '', '', press.surface) : undefined); }}/>
         </Box>);
         })}
-      {things.length > shown.length ? <Text key={"".concat(key, "-more")} dimColor>{"".concat(things.length - shown.length, " more")}</Text> : null}
+      {/* (the rest are in its Details, which the press opens) */}
+      {things.length > shown.length ? <Button key={"".concat(key, "-more-").concat(presses)} label={"".concat(things.length - shown.length, " more")} plain dimColor hover={{ underline: true }} onPress={function () { return void ((presses += 1), onOpenWork()); }}/> : null}
       {files.code ? (<Box key={"".concat(key, "-code")} flexDirection="row" alignItems="center" gap={1} flexShrink={0} height={1} overflow="hidden">
           {icon('code', "".concat(key, "-code"))}
           <Button key={"".concat(key, "-code-open-").concat(presses)} label={countWord(files.code)} plain hover={{ underline: true }} onPress={function () { return void ((presses += 1), onOpenWork()); }}/>

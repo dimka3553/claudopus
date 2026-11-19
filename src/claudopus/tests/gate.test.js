@@ -56,6 +56,48 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     return to.concat(ar || Array.prototype.slice.call(from));
 };
 var _this = this;
+// The waits the engine was asked to run for a held call (`/bin/sleep`, which the world ends only on wake()): a press must end the
+// hold with no more than the one that was in flight, and with no wake()
+var countingSleeps = function (on) {
+    var seen = { sleeps: 0 };
+    var counted = new Proxy(on, {
+        apply: function (to, self, args) {
+            var _a = args, name = _a[0], handle = _a[1];
+            var run = name !== 'process.run' ? handle : function (c, e) { var _a; return (((_a = e.argv) === null || _a === void 0 ? void 0 : _a[0]) === '/bin/sleep' && (seen.sleeps += 1), handle(c, e)); };
+            return Reflect.apply(to, self, [name, run]);
+        },
+    });
+    return { on: counted, seen: seen };
+};
+// Everything drawn in the colour of what is done: no press leaves a green box or line
+var gateGreens = function (pane) { return __awaiter(_this, void 0, void 0, function () { var _a, _b; return __generator(this, function (_c) {
+    switch (_c.label) {
+        case 0:
+            _a = [[]];
+            return [4 /*yield*/, pane.findAll({ type: 'Box' })];
+        case 1:
+            _b = [__spreadArray.apply(void 0, _a.concat([(_c.sent()), true]))];
+            return [4 /*yield*/, pane.findAll({ type: 'Text' })];
+        case 2: return [2 /*return*/, __spreadArray.apply(void 0, _b.concat([(_c.sent()), true])).filter(function (one) { var _a; return (!((_a = one.key) !== null && _a !== void 0 ? _a : '').startsWith('outline-') || one.key === 'outline-top') && ['color', 'borderColor', 'backgroundColor'].some(function (prop) { return one.props[prop] === 'success'; }); }).length];
+    }
+}); }); };
+var gateTexts = function (pane) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+    switch (_a.label) {
+        case 0: return [4 /*yield*/, pane.findAll({ type: 'Text' })];
+        case 1: return [2 /*return*/, (_a.sent()).map(function (one) { var _a; return String((_a = one.text) !== null && _a !== void 0 ? _a : ''); })
+            // The labels of one gate's own buttons, in the order drawn
+        ];
+    }
+}); }); };
+// The labels of one gate's own buttons, in the order drawn
+var gateButtons = function (pane, id) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+    switch (_a.label) {
+        case 0: return [4 /*yield*/, pane.findAll({ type: 'Button' })];
+        case 1: return [2 /*return*/, (_a.sent()).filter(function (one) { var _a; return ((_a = one.key) !== null && _a !== void 0 ? _a : '').startsWith("gate-".concat(id, "-")); }).map(function (one) { var _a; return String((_a = one.props.label) !== null && _a !== void 0 ? _a : ''); })];
+    }
+}); }); };
+var ALLOWED_LINE = '✓ You pressed “Allow”';
+var REFUSED_LINE = "✓ You pressed “Don't allow”";
 test('an admin command is held however the runner is reached, and nothing else is taken for one', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
     var _a, press, bash, held, admins, list, n, _i, _b, command, id, call, _c, _d, _e, quoted, _f, _g, slashed, _h, _j, _k, _l, command, _m;
     return __generator(this, function (_o) {
@@ -163,153 +205,229 @@ test('an admin command is held however the runner is reached, and nothing else i
         }
     });
 }); });
-test('asked each time: the call is held, its card shows the exact command and the Mac with three buttons, and Allow once lets that one command run', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, press, list, bash, labels, held, grants, admins, logged, appended, notified, files, done, call, _b, _c, _d, _e, _f, details, _g, _h, grant, _j, _k, _l;
+test("asked each time: the call is held and its card has one block (Permission, the question in amber, the command whole, Allow, Don't allow and Always allow this command); Allow lets that one command run at once, and one grey line says what was pressed", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var counted, _a, list, bash, labels, held, grants, admins, logged, appended, notified, files, clock, wake, done, call, _b, boxes, drawn, _c, question, _d, _e, _f, _g, _h, details, _j, _k, _l, grant, _m, _o, _p, _q, _r, _s, again, _t, _u;
     var _this = this;
-    var _m, _o, _p, _q, _r, _s;
-    return __generator(this, function (_t) {
-        switch (_t.label) {
-            case 0: return [4 /*yield*/, gated($, on)];
+    var _v, _w, _x, _y, _z, _0, _1;
+    return __generator(this, function (_2) {
+        switch (_2.label) {
+            case 0:
+                counted = countingSleeps(on);
+                return [4 /*yield*/, gated($, counted.on)];
             case 1:
-                _a = _t.sent(), press = _a.press, list = _a.list, bash = _a.bash, labels = _a.labels, held = _a.held, grants = _a.grants, admins = _a.admins, logged = _a.logged, appended = _a.appended, notified = _a.notified, files = _a.files;
+                _a = _2.sent(), list = _a.list, bash = _a.bash, labels = _a.labels, held = _a.held, grants = _a.grants, admins = _a.admins, logged = _a.logged, appended = _a.appended, notified = _a.notified, files = _a.files, clock = _a.clock, wake = _a.wake;
                 done = false;
                 call = bash('b1', "".concat(ADMIN, " here 'chmod 644 /etc/hosts'")).then(function (r) { return ((done = true), r); });
                 _b = expect;
                 return [4 /*yield*/, held('b1')];
             case 2:
-                _b.apply(void 0, [_t.sent()]).toBeDefined();
+                _b.apply(void 0, [_2.sent()]).toBeDefined();
                 // Held: nothing ran, and nothing is granted
                 expect(done).toBe(false);
                 expect(admins).toEqual([]);
                 expect(grants()).toEqual([]);
-                _c = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: 'Run an admin command on this Mac?' })];
+                return [4 /*yield*/, list.findAll({ type: 'Box' })];
             case 3:
-                _c.apply(void 0, [(_m = (_t.sent())) === null || _m === void 0 ? void 0 : _m.props.color]).toBe('#E5A50A');
+                boxes = (_2.sent());
+                expect(boxes.filter(function (one) { return one.key === 'outline-top' && one.props.backgroundColor === '#E5A50A'; }).length).toBe(1);
+                return [4 /*yield*/, gateTexts(list)];
+            case 4:
+                drawn = _2.sent();
+                expect(drawn.slice(drawn.indexOf('Permission'), drawn.indexOf('Permission') + 3)).toEqual(['Permission', 'Run this as admin on this Mac?', 'chmod 644 /etc/hosts']);
+                _c = expect;
+                return [4 /*yield*/, list.find({ type: 'Text', text: 'Permission' })];
+            case 5:
+                _c.apply(void 0, [(_v = (_2.sent())) === null || _v === void 0 ? void 0 : _v.props.dimColor]).toBe(true);
+                return [4 /*yield*/, list.find({ type: 'Text', text: 'Run this as admin on this Mac?' })];
+            case 6:
+                question = _2.sent();
+                expect([question === null || question === void 0 ? void 0 : question.props.color, question === null || question === void 0 ? void 0 : question.props.bold]).toEqual(['#E5A50A', true]);
                 _d = expect;
                 return [4 /*yield*/, list.find({ type: 'Text', text: 'chmod 644 /etc/hosts' })];
-            case 4:
-                _d.apply(void 0, [(_o = (_t.sent())) === null || _o === void 0 ? void 0 : _o.props.mono]).toBe(true);
+            case 7:
+                _d.apply(void 0, [(_w = (_2.sent())) === null || _w === void 0 ? void 0 : _w.props.mono]).toBe(true);
                 _e = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: "Allow once: it runs as admin. Deny: it doesn't run, and Claudopus tells Claude." })];
-            case 5:
-                _e.apply(void 0, [_t.sent()]).toBeDefined();
+                return [4 /*yield*/, gateButtons(list, 'b1-0')];
+            case 8:
+                _e.apply(void 0, [_2.sent()]).toEqual(['Allow', "Don't allow", 'Always allow this command']);
+                // Nothing under the question when there is nothing more to say, and none of the words the block had before
                 _f = expect;
+                return [4 /*yield*/, list.findAll({ type: 'Markdown' })];
+            case 9:
+                // Nothing under the question when there is nothing more to say, and none of the words the block had before
+                _f.apply(void 0, [(_2.sent()).map(function (one) { var _a; return String((_a = one.props.text) !== null && _a !== void 0 ? _a : ''); }).filter(function (text) { return /Allow|admin/.test(text); })]).toEqual([]);
+                _g = expect;
                 return [4 /*yield*/, labels()];
-            case 6:
-                _f.apply(void 0, [(_t.sent()).filter(function (one) { return ['Allow once', 'Always allow this command', 'Deny'].includes(one); })]).toEqual(['Allow once', 'Always allow this command', 'Deny']);
+            case 10:
+                _g.apply(void 0, [(_2.sent()).filter(function (one) { return ['Allow once', 'Allow for this task', 'Deny'].includes(one); })]).toEqual([]);
+                // Its card is amber and counted once as what waits
+                expect(boxes.some(function (one) { return one.props.width === 1 && one.props.backgroundColor === '#E5A50A'; })).toBe(true);
+                _h = expect;
+                return [4 /*yield*/, list.findAll({ type: 'Text' })];
+            case 11:
+                _h.apply(void 0, [(_2.sent()).filter(function (one) { var _a; return /waiting for you/.test(String((_a = one.text) !== null && _a !== void 0 ? _a : '')); }).map(function (one) { return [one.text, one.props.color]; })]).toEqual([['1 waiting for you', '#E5A50A']]);
                 // Said as a notification, and to the chat's model alone: the chat shows nothing of it (18 Nov: "garbage I don't need to read");
-                // its Details tab has it at the top
+                // its Details tab has the same block
                 expect(logged.some(function (line) { return line.includes('chmod 644 /etc/hosts'); })).toBe(false);
                 expect(appended.some(function (line) { return line.startsWith('undefined: From Claudopus: the task "Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts.'); })).toBe(true);
                 expect(notified).toContain('Fix the hosts file has a question for you | Run an admin command on this Mac: chmod 644 /etc/hosts');
                 return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { requestId: 'work-a1', surface: 'desktop' }))];
-            case 7:
-                details = _t.sent();
-                _g = expect;
-                return [4 /*yield*/, details.find({ type: 'Text', text: 'Waiting for you' })];
-            case 8:
-                _g.apply(void 0, [_t.sent()]).toBeDefined();
-                return [4 /*yield*/, press('gate-b1-0-once')];
-            case 9:
-                _t.sent();
-                _h = expect;
+            case 12:
+                details = _2.sent();
+                _j = expect;
+                return [4 /*yield*/, details.find({ type: 'Text', text: 'Run this as admin on this Mac?' })];
+            case 13:
+                _j.apply(void 0, [_2.sent()]).toBeDefined();
+                _k = expect;
+                return [4 /*yield*/, gateButtons(details, 'b1-0')];
+            case 14:
+                _k.apply(void 0, [_2.sent()]).toEqual(['Allow', "Don't allow", 'Always allow this command']);
+                return [4 /*yield*/, details.unmount()
+                    // The press itself ends the hold: the call returns with no second let pass (no wake, no move of the clock), and no wait was
+                    // started but the one in flight
+                ];
+            case 15:
+                _2.sent();
+                // The press itself ends the hold: the call returns with no second let pass (no wake, no move of the clock), and no wait was
+                // started but the one in flight
+                return [4 /*yield*/, pressed(list, 'gate-b1-0-once')];
+            case 16:
+                // The press itself ends the hold: the call returns with no second let pass (no wake, no move of the clock), and no wait was
+                // started but the one in flight
+                _2.sent();
+                _l = expect;
                 return [4 /*yield*/, call];
-            case 10:
-                _h.apply(void 0, [(_t.sent()).result]).toBe('ran');
+            case 17:
+                _l.apply(void 0, [(_2.sent()).result]).toBe('ran');
+                expect(counted.seen.sleeps).toBe(1);
                 // It ran with one grant, for this Mac and this exact command, sealed with the keychain's key; the grant goes with the call
                 expect(admins.length).toBe(1);
-                grant = ((_q = (_p = admins[0]) === null || _p === void 0 ? void 0 : _p.grants) !== null && _q !== void 0 ? _q : [])[0];
-                expect((_r = admins[0]) === null || _r === void 0 ? void 0 : _r.grants.length).toBe(1);
+                grant = ((_y = (_x = admins[0]) === null || _x === void 0 ? void 0 : _x.grants) !== null && _y !== void 0 ? _y : [])[0];
+                expect((_z = admins[0]) === null || _z === void 0 ? void 0 : _z.grants.length).toBe(1);
                 expect({ host: grant === null || grant === void 0 ? void 0 : grant.host, command: grant === null || grant === void 0 ? void 0 : grant.command }).toEqual({ host: 'here', command: 'chmod 644 /etc/hosts' });
-                expect(grant === null || grant === void 0 ? void 0 : grant.seal).toBe(fakeSeal((_s = files.get('keychain:gate')) !== null && _s !== void 0 ? _s : '', "grant\n".concat(grant === null || grant === void 0 ? void 0 : grant.id, "\n").concat(grant === null || grant === void 0 ? void 0 : grant.at, "\nhere\nchmod 644 /etc/hosts")));
+                expect(grant === null || grant === void 0 ? void 0 : grant.seal).toBe(fakeSeal((_0 = files.get('keychain:gate')) !== null && _0 !== void 0 ? _0 : '', "grant\n".concat(grant === null || grant === void 0 ? void 0 : grant.id, "\n").concat(grant === null || grant === void 0 ? void 0 : grant.at, "\nhere\nchmod 644 /etc/hosts")));
                 expect(grants()).toEqual([]);
-                _j = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: 'Run an admin command on this Mac?' })];
-            case 11:
-                _j.apply(void 0, [_t.sent()]).toBeUndefined();
-                // In its place for a minute: what the person pressed and what happens now
-                _k = expect;
-                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        return [2 /*return*/, list.find({ type: 'Text', text: 'You allowed it. It runs now.' })];
-                    }); }); })];
-            case 12:
-                // In its place for a minute: what the person pressed and what happens now
-                _k.apply(void 0, [_t.sent()]).toBeDefined();
                 expect(files.has(ALLOWED)).toBe(false);
-                // Once is once: the same command again is held again
-                void bash('b2', "".concat(ADMIN, " here 'chmod 644 /etc/hosts'"));
-                _l = expect;
+                // In the block's place: one grey line of what was pressed, and nothing green
+                _m = expect;
+                return [4 /*yield*/, list.find({ type: 'Text', text: 'Run this as admin on this Mac?' })];
+            case 18:
+                // In the block's place: one grey line of what was pressed, and nothing green
+                _m.apply(void 0, [_2.sent()]).toBeUndefined();
+                _o = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        return [2 /*return*/, list.find({ type: 'Text', text: ALLOWED_LINE })];
+                    }); }); })];
+            case 19:
+                _o.apply(void 0, [(_1 = (_2.sent())) === null || _1 === void 0 ? void 0 : _1.props.dimColor]).toBe(true);
+                _p = expect;
+                return [4 /*yield*/, gateTexts(list)];
+            case 20:
+                _p.apply(void 0, [(_2.sent()).filter(function (one) { return one.startsWith('✓ '); })]).toEqual([ALLOWED_LINE]);
+                _q = expect;
+                return [4 /*yield*/, gateGreens(list)];
+            case 21:
+                _q.apply(void 0, [_2.sent()]).toBe(0);
+                _r = expect;
+                return [4 /*yield*/, gateButtons(list, 'b1-0')];
+            case 22:
+                _r.apply(void 0, [_2.sent()]).toEqual([]);
+                // The line goes by itself a minute on
+                return [4 /*yield*/, clock.advance(61000)];
+            case 23:
+                // The line goes by itself a minute on
+                _2.sent();
+                _s = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0: return [4 /*yield*/, list.find({ type: 'Text', text: ALLOWED_LINE })];
+                            case 1: return [2 /*return*/, ((_a.sent()) ? undefined : true)];
+                        }
+                    }); }); })];
+            case 24:
+                _s.apply(void 0, [_2.sent()]).toBe(true);
+                again = bash('b2', "".concat(ADMIN, " here 'chmod 644 /etc/hosts'"));
+                _t = expect;
                 return [4 /*yield*/, held('b2')];
-            case 13:
-                _l.apply(void 0, [_t.sent()]).toBeDefined();
+            case 25:
+                _t.apply(void 0, [_2.sent()]).toBeDefined();
                 expect(admins.length).toBe(1);
+                return [4 /*yield*/, pressed(list, 'gate-b2-0-deny')];
+            case 26:
+                _2.sent();
+                _u = expect;
+                return [4 /*yield*/, again];
+            case 27:
+                _u.apply(void 0, [(_2.sent()).deny]).toContain('Refused by Sam');
+                wake();
                 return [2 /*return*/];
         }
     });
 }); });
-test('Deny refuses the call with a line that says the person refused it, and nothing runs or is granted', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, press, list, bash, held, grants, admins, call, _b, _c, r, _d, _e, _f;
+test("Don't allow refuses the call with a line that says the person refused it, and nothing runs or is granted", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, list, bash, held, grants, admins, wake, call, _b, _c, r, _d, _e, _f;
     var _this = this;
-    return __generator(this, function (_g) {
-        switch (_g.label) {
+    var _g;
+    return __generator(this, function (_h) {
+        switch (_h.label) {
             case 0: return [4 /*yield*/, gated($, on)];
             case 1:
-                _a = _g.sent(), press = _a.press, list = _a.list, bash = _a.bash, held = _a.held, grants = _a.grants, admins = _a.admins;
+                _a = _h.sent(), list = _a.list, bash = _a.bash, held = _a.held, grants = _a.grants, admins = _a.admins, wake = _a.wake;
                 call = bash('b1', "".concat(ADMIN, " m4 'rm -rf /Library/Caches/x'"));
                 _b = expect;
                 return [4 /*yield*/, held('b1')];
             case 2:
-                _b.apply(void 0, [_g.sent()]).toBeDefined();
+                _b.apply(void 0, [_h.sent()]).toBeDefined();
                 _c = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: 'Run an admin command on m4?' })];
+                return [4 /*yield*/, list.find({ type: 'Text', text: 'Run this as admin on m4?' })];
             case 3:
-                _c.apply(void 0, [_g.sent()]).toBeDefined();
-                return [4 /*yield*/, press('gate-b1-0-deny')];
+                _c.apply(void 0, [_h.sent()]).toBeDefined();
+                return [4 /*yield*/, pressed(list, 'gate-b1-0-deny')];
             case 4:
-                _g.sent();
+                _h.sent();
                 return [4 /*yield*/, call];
             case 5:
-                r = _g.sent();
-                expect(r.deny).toBe("Refused by Sam: Sam pressed Deny on this admin command, so it didn't run. Don't try to run it another way. Continue without it, or say what it is needed for and ask again.");
+                r = _h.sent();
+                expect(r.deny).toBe("Refused by Sam: Sam pressed Don't allow on this admin command, so it didn't run. Don't try to run it another way. Continue without it, or say what it is needed for and ask again.");
                 expect(admins).toEqual([]);
                 expect(grants()).toEqual([]);
                 _d = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: 'Run an admin command on m4?' })];
+                return [4 /*yield*/, list.find({ type: 'Text', text: 'Run this as admin on m4?' })];
             case 6:
-                _d.apply(void 0, [_g.sent()]).toBeUndefined();
+                _d.apply(void 0, [_h.sent()]).toBeUndefined();
                 _e = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        return [2 /*return*/, list.find({ type: 'Text', text: "You denied it. It didn't run, and Claudopus told Claude." })];
+                        return [2 /*return*/, list.find({ type: 'Text', text: REFUSED_LINE })];
                     }); }); })];
             case 7:
-                _e.apply(void 0, [_g.sent()]).toBeDefined();
+                _e.apply(void 0, [(_g = (_h.sent())) === null || _g === void 0 ? void 0 : _g.props.dimColor]).toBe(true);
                 _f = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: 'Admin command on m4' })];
+                return [4 /*yield*/, gateGreens(list)];
             case 8:
-                _f.apply(void 0, [_g.sent()]).toBeDefined();
+                _f.apply(void 0, [_h.sent()]).toBe(0);
+                wake();
                 return [2 /*return*/];
         }
     });
 }); });
-test('no way to the runner gets past the press: another spelling, a shell, a helper, and two commands in one call each wait', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, press, list, bash, held, admins, labels, n, _i, _b, command, id, call, _c, _d, both, _e, _f, _g, _h, _j, waiting, _k, _l;
+test('no way to the runner gets past the press: another spelling, a shell, a helper, and two things to allow in one call each wait', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, press, list, bash, held, admins, labels, grants, files, n, _i, _b, command, id, call, _c, _d, _loop_2, _e, _f, _g, id, command, second, shown, waiting, _h, _j;
     var _this = this;
-    return __generator(this, function (_m) {
-        switch (_m.label) {
+    return __generator(this, function (_k) {
+        switch (_k.label) {
             case 0: return [4 /*yield*/, gated($, on)
                 // A helper's call shows on the card of the work it helps
             ];
             case 1:
-                _a = _m.sent(), press = _a.press, list = _a.list, bash = _a.bash, held = _a.held, admins = _a.admins, labels = _a.labels;
+                _a = _k.sent(), press = _a.press, list = _a.list, bash = _a.bash, held = _a.held, admins = _a.admins, labels = _a.labels, grants = _a.grants, files = _a.files;
                 // A helper's call shows on the card of the work it helps
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Look at the file', prompt: 'look', parentAgentId: 'a1' }))];
             case 2:
                 // A helper's call shows on the card of the work it helps
-                _m.sent();
+                _k.sent();
                 n = 0;
                 _i = 0, _b = ["cd /plug/claudopus/bin && ./admin here 'id -u'", "bash -c \"/plug/claudopus/bin/../bin/admin here 'id -u'\"", "X=1 env ".concat(ADMIN, " here 'id -u'"), "eval \"".concat(ADMIN, " here 'id -u'\"")];
-                _m.label = 3;
+                _k.label = 3;
             case 3:
                 if (!(_i < _b.length)) return [3 /*break*/, 8];
                 command = _b[_i];
@@ -318,110 +436,150 @@ test('no way to the runner gets past the press: another spelling, a shell, a hel
                 _c = expect;
                 return [4 /*yield*/, held(id)];
             case 4:
-                _c.apply(void 0, [_m.sent()]).toBeDefined();
+                _c.apply(void 0, [_k.sent()]).toBeDefined();
                 expect(admins.length).toBe(0);
                 return [4 /*yield*/, press("gate-".concat(id, "-0-deny"))];
             case 5:
-                _m.sent();
+                _k.sent();
                 _d = expect;
                 return [4 /*yield*/, call];
             case 6:
-                _d.apply(void 0, [(_m.sent()).deny]).toContain('Refused by Sam');
-                _m.label = 7;
+                _d.apply(void 0, [(_k.sent()).deny]).toContain('Refused by Sam');
+                _k.label = 7;
             case 7:
                 _i++;
                 return [3 /*break*/, 3];
             case 8:
-                both = bash('t1', "".concat(ADMIN, " here 'id -u' && ").concat(ADMIN, " here 'whoami'"));
-                _e = expect;
-                return [4 /*yield*/, held('t1')];
+                // Two in one call, an admin command and then another or a release: the first allowed, the second asked in its turn; refused,
+                // neither runs, the first grant is taken back, and the card says the refusal, never that anything was allowed
+                files.set('git:top', '/repo/wt');
+                files.set('git:branch', 'fix-it');
+                _loop_2 = function (id, command, second, shown) {
+                    var both, _l, _m, _o, _p, _q, _r, _s;
+                    return __generator(this, function (_t) {
+                        switch (_t.label) {
+                            case 0:
+                                both = bash(id, command);
+                                _l = expect;
+                                return [4 /*yield*/, held(id)];
+                            case 1:
+                                _l.apply(void 0, [_t.sent()]).toBeDefined();
+                                return [4 /*yield*/, press("gate-".concat(id, "-0-once"))];
+                            case 2:
+                                _t.sent();
+                                _m = expect;
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, keyed(list, second)];
+                                    }); }); })];
+                            case 3:
+                                _m.apply(void 0, [_t.sent()]).toBeDefined();
+                                _o = expect;
+                                return [4 /*yield*/, list.find({ type: 'Text', text: shown })];
+                            case 4:
+                                _o.apply(void 0, [_t.sent()]).toBeDefined();
+                                return [4 /*yield*/, press(second)];
+                            case 5:
+                                _t.sent();
+                                _p = expect;
+                                return [4 /*yield*/, both];
+                            case 6:
+                                _p.apply(void 0, [(_t.sent()).deny]).toContain('Refused by Sam');
+                                expect(admins.length).toBe(0);
+                                expect(grants()).toEqual([]);
+                                _q = expect;
+                                return [4 /*yield*/, labels()];
+                            case 7:
+                                _q.apply(void 0, [_t.sent()]).not.toContain("Don't allow");
+                                _r = expect;
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, list.find({ type: 'Text', text: REFUSED_LINE })];
+                                    }); }); })];
+                            case 8:
+                                _r.apply(void 0, [_t.sent()]).toBeDefined();
+                                _s = expect;
+                                return [4 /*yield*/, list.find({ type: 'Text', text: ALLOWED_LINE })];
+                            case 9:
+                                _s.apply(void 0, [_t.sent()]).toBeUndefined();
+                                return [2 /*return*/];
+                        }
+                    });
+                };
+                _e = 0, _f = [
+                    ['t1', "".concat(ADMIN, " here 'id -u' && ").concat(ADMIN, " here 'whoami'"), 'gate-t1-1-deny', 'whoami'],
+                    ['t2', "".concat(ADMIN, " here 'id -u'; /plug/claudopus/bin/release"), 'gate-t2-r0-deny', 'Release fix-it to main?'],
+                ];
+                _k.label = 9;
             case 9:
-                _e.apply(void 0, [_m.sent()]).toBeDefined();
-                return [4 /*yield*/, press('gate-t1-0-once')];
+                if (!(_e < _f.length)) return [3 /*break*/, 12];
+                _g = _f[_e], id = _g[0], command = _g[1], second = _g[2], shown = _g[3];
+                return [5 /*yield**/, _loop_2(id, command, second, shown)];
             case 10:
-                _m.sent();
-                _f = expect;
-                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        return [2 /*return*/, keyed(list, 'gate-t1-1-deny')];
-                    }); }); })];
+                _k.sent();
+                _k.label = 11;
             case 11:
-                _f.apply(void 0, [_m.sent()]).toBeDefined();
-                _g = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: 'whoami' })];
+                _e++;
+                return [3 /*break*/, 9];
             case 12:
-                _g.apply(void 0, [_m.sent()]).toBeDefined();
-                return [4 /*yield*/, press('gate-t1-1-deny')];
-            case 13:
-                _m.sent();
-                _h = expect;
-                return [4 /*yield*/, both];
-            case 14:
-                _h.apply(void 0, [(_m.sent()).deny]).toContain('Refused by Sam');
-                expect(admins.length).toBe(0);
-                _j = expect;
-                return [4 /*yield*/, labels()];
-            case 15:
-                _j.apply(void 0, [_m.sent()]).not.toContain('Deny');
                 waiting = bash('w1', "".concat(ADMIN, " here 'id -u'"));
-                _k = expect;
+                _h = expect;
                 return [4 /*yield*/, held('w1')];
-            case 16:
-                _k.apply(void 0, [_m.sent()]).toBeDefined();
-                return [4 /*yield*/, $.prompt.submit({ text: 'Allow once', wait: false, origin: composer })];
-            case 17:
-                _m.sent();
-                return [4 /*yield*/, $.tool.call({ tool: 'SendMessage', tool_use_id: 'm1', to: 'a1', message: 'Allow once' })];
-            case 18:
-                _m.sent();
-                _l = expect;
+            case 13:
+                _h.apply(void 0, [_k.sent()]).toBeDefined();
+                return [4 /*yield*/, $.prompt.submit({ text: 'Allow', wait: false, origin: composer })];
+            case 14:
+                _k.sent();
+                return [4 /*yield*/, $.tool.call({ tool: 'SendMessage', tool_use_id: 'm1', to: 'a1', message: 'Allow' })];
+            case 15:
+                _k.sent();
+                _j = expect;
                 return [4 /*yield*/, keyed(list, 'gate-w1-0-once')];
-            case 19:
-                _l.apply(void 0, [_m.sent()]).toBeDefined();
+            case 16:
+                _j.apply(void 0, [_k.sent()]).toBeDefined();
                 expect(admins.length).toBe(0);
                 return [4 /*yield*/, press('gate-w1-0-deny')];
-            case 20:
-                _m.sent();
+            case 17:
+                _k.sent();
                 return [4 /*yield*/, waiting];
-            case 21:
-                _m.sent();
+            case 18:
+                _k.sent();
                 return [2 /*return*/];
         }
     });
 }); });
 test('Always allow this command keeps the exact command for its Mac, sealed; Config lists it with Remove, and a list work wrote itself allows nothing', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, press, list, bash, held, admins, files, tabs, first, _b, _c, kept, _d, _i, _e, _f, id, command, call, _g, forged, _h, _j, _k, id, command, call, _l, _m, _o, config, _p, _q, _r, _s, before, stale, _t, _u, again, _v;
+    var _a, press, list, bash, held, admins, files, tabs, first, _b, _c, kept, _d, _i, _e, _f, id, command, call, _g, forged, _h, _j, _k, id, command, call, _l, _m, _o, config, _p, _q, _r, _s, _t, before, stale, _u, _v, again, _w;
     var _this = this;
-    var _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6;
-    return __generator(this, function (_7) {
-        switch (_7.label) {
+    var _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7;
+    return __generator(this, function (_8) {
+        switch (_8.label) {
             case 0: return [4 /*yield*/, gated($, on)];
             case 1:
-                _a = _7.sent(), press = _a.press, list = _a.list, bash = _a.bash, held = _a.held, admins = _a.admins, files = _a.files, tabs = _a.tabs;
+                _a = _8.sent(), press = _a.press, list = _a.list, bash = _a.bash, held = _a.held, admins = _a.admins, files = _a.files, tabs = _a.tabs;
                 first = bash('b1', "".concat(ADMIN, " here 'softwareupdate -l'"));
                 _b = expect;
                 return [4 /*yield*/, held('b1')];
             case 2:
-                _b.apply(void 0, [_7.sent()]).toBeDefined();
+                _b.apply(void 0, [_8.sent()]).toBeDefined();
                 return [4 /*yield*/, press('gate-b1-0-always')];
             case 3:
-                _7.sent();
+                _8.sent();
                 _c = expect;
                 return [4 /*yield*/, first];
             case 4:
-                _c.apply(void 0, [(_7.sent()).result]).toBe('ran');
-                kept = JSON.parse((_w = files.get(ALLOWED)) !== null && _w !== void 0 ? _w : '{}');
-                expect((_x = kept.here) === null || _x === void 0 ? void 0 : _x.map(function (one) { return one.command; })).toEqual(['softwareupdate -l']);
-                expect((_z = (_y = kept.here) === null || _y === void 0 ? void 0 : _y[0]) === null || _z === void 0 ? void 0 : _z.seal).toBe(fakeSeal((_0 = files.get('keychain:gate')) !== null && _0 !== void 0 ? _0 : '', 'allow\nhere\nsoftwareupdate -l'));
+                _c.apply(void 0, [(_8.sent()).result]).toBe('ran');
+                kept = JSON.parse((_x = files.get(ALLOWED)) !== null && _x !== void 0 ? _x : '{}');
+                expect((_y = kept.here) === null || _y === void 0 ? void 0 : _y.map(function (one) { return one.command; })).toEqual(['softwareupdate -l']);
+                expect((_0 = (_z = kept.here) === null || _z === void 0 ? void 0 : _z[0]) === null || _0 === void 0 ? void 0 : _0.seal).toBe(fakeSeal((_1 = files.get('keychain:gate')) !== null && _1 !== void 0 ? _1 : '', 'allow\nhere\nsoftwareupdate -l'));
                 // The same command on the same Mac now runs without a press, with its own grant
                 _d = expect;
                 return [4 /*yield*/, bash('b2', "".concat(ADMIN, " here 'softwareupdate -l'"))];
             case 5:
                 // The same command on the same Mac now runs without a press, with its own grant
-                _d.apply(void 0, [(_7.sent()).result]).toBe('ran');
+                _d.apply(void 0, [(_8.sent()).result]).toBe('ran');
                 expect(admins.length).toBe(2);
-                expect((_1 = admins[1]) === null || _1 === void 0 ? void 0 : _1.grants.map(function (one) { return one.command; })).toEqual(['softwareupdate -l']);
+                expect((_2 = admins[1]) === null || _2 === void 0 ? void 0 : _2.grants.map(function (one) { return one.command; })).toEqual(['softwareupdate -l']);
                 _i = 0, _e = [['b3', "".concat(ADMIN, " here 'softwareupdate -l -a'")], ['b4', "".concat(ADMIN, " m4 'softwareupdate -l'")]];
-                _7.label = 6;
+                _8.label = 6;
             case 6:
                 if (!(_i < _e.length)) return [3 /*break*/, 11];
                 _f = _e[_i], id = _f[0], command = _f[1];
@@ -429,23 +587,23 @@ test('Always allow this command keeps the exact command for its Mac, sealed; Con
                 _g = expect;
                 return [4 /*yield*/, held(id)];
             case 7:
-                _g.apply(void 0, [_7.sent()]).toBeDefined();
+                _g.apply(void 0, [_8.sent()]).toBeDefined();
                 return [4 /*yield*/, press("gate-".concat(id, "-0-deny"))];
             case 8:
-                _7.sent();
+                _8.sent();
                 return [4 /*yield*/, call];
             case 9:
-                _7.sent();
-                _7.label = 10;
+                _8.sent();
+                _8.label = 10;
             case 10:
                 _i++;
                 return [3 /*break*/, 6];
             case 11:
-                forged = { here: __spreadArray(__spreadArray([], ((_2 = kept.here) !== null && _2 !== void 0 ? _2 : []), true), [{ command: 'rm -rf /', seal: (_5 = (_4 = (_3 = kept.here) === null || _3 === void 0 ? void 0 : _3[0]) === null || _4 === void 0 ? void 0 : _4.seal) !== null && _5 !== void 0 ? _5 : '', at: 1 }, { command: 'reboot', seal: '', at: 1 }], false) };
+                forged = { here: __spreadArray(__spreadArray([], ((_3 = kept.here) !== null && _3 !== void 0 ? _3 : []), true), [{ command: 'rm -rf /', seal: (_6 = (_5 = (_4 = kept.here) === null || _4 === void 0 ? void 0 : _4[0]) === null || _5 === void 0 ? void 0 : _5.seal) !== null && _6 !== void 0 ? _6 : '', at: 1 }, { command: 'reboot', seal: '', at: 1 }], false) };
                 // As if it got past the guards with the kept copy (a key F-007's way): the seals still allow nothing
                 ownSet(files, 'admin-allowed.json', JSON.stringify(forged));
                 _h = 0, _j = [['f1', "".concat(ADMIN, " here 'rm -rf /'")], ['f2', "".concat(ADMIN, " here 'reboot'")]];
-                _7.label = 12;
+                _8.label = 12;
             case 12:
                 if (!(_h < _j.length)) return [3 /*break*/, 17];
                 _k = _j[_h], id = _k[0], command = _k[1];
@@ -453,15 +611,15 @@ test('Always allow this command keeps the exact command for its Mac, sealed; Con
                 _l = expect;
                 return [4 /*yield*/, held(id)];
             case 13:
-                _l.apply(void 0, [_7.sent()]).toBeDefined();
+                _l.apply(void 0, [_8.sent()]).toBeDefined();
                 return [4 /*yield*/, press("gate-".concat(id, "-0-deny"))];
             case 14:
-                _7.sent();
+                _8.sent();
                 _m = expect;
                 return [4 /*yield*/, call];
             case 15:
-                _m.apply(void 0, [(_7.sent()).deny]).toContain('Refused by Sam');
-                _7.label = 16;
+                _m.apply(void 0, [(_8.sent()).deny]).toContain('Refused by Sam');
+                _8.label = 16;
             case 16:
                 _h++;
                 return [3 /*break*/, 12];
@@ -470,61 +628,65 @@ test('Always allow this command keeps the exact command for its Mac, sealed; Con
             return [4 /*yield*/, pressed(list, 'config-open')];
             case 18:
                 // Config lists what the person allowed, says how many entries are not theirs, and Remove takes one out
-                _7.sent();
+                _8.sent();
                 _o = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         return [2 /*return*/, tabs.find(function (tab) { return tab === 'config: Config'; })];
                     }); }); })];
             case 19:
-                _o.apply(void 0, [_7.sent()]).toBeDefined();
+                _o.apply(void 0, [_8.sent()]).toBeDefined();
                 return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { requestId: 'config', props: __assign(__assign({}, LIST.props), { title: 'Config', bodyColumns: 70 }), surface: 'desktop' }))];
             case 20:
-                config = _7.sent();
+                config = _8.sent();
                 _p = expect;
-                return [4 /*yield*/, config.find({ type: 'Text', text: 'Always allowed' })];
+                return [4 /*yield*/, moreShown(config)];
             case 21:
-                _p.apply(void 0, [_7.sent()]).toBeDefined();
+                _p.apply(void 0, [_8.sent()]).toBe(true);
                 _q = expect;
-                return [4 /*yield*/, config.find({ type: 'Text', text: 'softwareupdate -l' })];
+                return [4 /*yield*/, config.find({ type: 'Text', text: /These run without asking, exactly as written and only on their Mac\./ })];
             case 22:
-                _q.apply(void 0, [(_6 = (_7.sent())) === null || _6 === void 0 ? void 0 : _6.props.mono]).toBe(true);
+                _q.apply(void 0, [_8.sent()]).toBeDefined();
                 _r = expect;
-                return [4 /*yield*/, config.find({ type: 'Text', text: 'rm -rf /' })];
+                return [4 /*yield*/, config.find({ type: 'Text', text: 'softwareupdate -l' })];
             case 23:
-                _r.apply(void 0, [_7.sent()]).toBeUndefined();
+                _r.apply(void 0, [(_7 = (_8.sent())) === null || _7 === void 0 ? void 0 : _7.props.mono]).toBe(true);
                 _s = expect;
-                return [4 /*yield*/, config.find({ type: 'Text', text: /2 more in the file weren't added here, so they allow nothing/ })];
+                return [4 /*yield*/, config.find({ type: 'Text', text: 'rm -rf /' })];
             case 24:
-                _s.apply(void 0, [_7.sent()]).toBeDefined();
+                _s.apply(void 0, [_8.sent()]).toBeUndefined();
+                _t = expect;
+                return [4 /*yield*/, config.find({ type: 'Text', text: /2 more in the file weren't added here, so they allow nothing/ })];
+            case 25:
+                _t.apply(void 0, [_8.sent()]).toBeDefined();
                 before = files.get('keychain:gate');
                 stale = JSON.stringify(kept);
                 return [4 /*yield*/, pressed(config, 'config-admin-remove-0')];
-            case 25:
-                _7.sent();
-                _t = expect;
+            case 26:
+                _8.sent();
+                _u = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { var _a; return __generator(this, function (_b) {
                         return [2 /*return*/, (JSON.parse((_a = files.get(ALLOWED)) !== null && _a !== void 0 ? _a : '{"here":[1]}').here === undefined ? true : undefined)];
                     }); }); })];
-            case 26:
-                _t.apply(void 0, [_7.sent()]).toBe(true);
-                _u = expect;
-                return [4 /*yield*/, config.find({ type: 'Text', text: /^None yet/ })];
             case 27:
-                _u.apply(void 0, [_7.sent()]).toBeDefined();
+                _u.apply(void 0, [_8.sent()]).toBe(true);
+                _v = expect;
+                return [4 /*yield*/, until(function () { return config.find({ type: 'Text', text: /None is always allowed yet\./ }); })];
+            case 28:
+                _v.apply(void 0, [_8.sent()]).toBeDefined();
                 // Removing made a new key: the old entry put back, seal and all, allows nothing
                 expect(files.get('keychain:gate')).not.toBe(before);
                 files.set(ALLOWED, stale);
                 again = bash('b5', "".concat(ADMIN, " here 'softwareupdate -l'"));
-                _v = expect;
+                _w = expect;
                 return [4 /*yield*/, held('b5')];
-            case 28:
-                _v.apply(void 0, [_7.sent()]).toBeDefined();
-                return [4 /*yield*/, press('gate-b5-0-deny')];
             case 29:
-                _7.sent();
-                return [4 /*yield*/, again];
+                _w.apply(void 0, [_8.sent()]).toBeDefined();
+                return [4 /*yield*/, press('gate-b5-0-deny')];
             case 30:
-                _7.sent();
+                _8.sent();
+                return [4 /*yield*/, again];
+            case 31:
+                _8.sent();
                 return [2 /*return*/];
         }
     });
@@ -590,112 +752,118 @@ test('work never reads or writes the allowed list, the grants or the key that se
     });
 }); });
 test('asked once per piece of work: one Allow covers that work and its helpers until it ends, and no other work', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, press, list, bash, held, admins, files, labels, tabs, _b, config, _c, sealedAs, first, _d, _e, _f, _g, _h, _j, other, _k, _l, back, _m;
+    var _a, press, list, bash, held, admins, files, tabs, _b, config, _c, _d, sealedAs, first, _e, _f, _g, _h, _j, _k, other, _l, _m, back, _o;
     var _this = this;
-    var _o, _p;
-    return __generator(this, function (_q) {
-        switch (_q.label) {
+    var _p, _q;
+    return __generator(this, function (_r) {
+        switch (_r.label) {
             case 0: return [4 /*yield*/, gated($, on)
                 // The setting is chosen in Config, which seals it
             ];
             case 1:
-                _a = _q.sent(), press = _a.press, list = _a.list, bash = _a.bash, held = _a.held, admins = _a.admins, files = _a.files, labels = _a.labels, tabs = _a.tabs;
+                _a = _r.sent(), press = _a.press, list = _a.list, bash = _a.bash, held = _a.held, admins = _a.admins, files = _a.files, tabs = _a.tabs;
                 // The setting is chosen in Config, which seals it
                 return [4 /*yield*/, pressed(list, 'config-open')];
             case 2:
                 // The setting is chosen in Config, which seals it
-                _q.sent();
+                _r.sent();
                 _b = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         return [2 /*return*/, tabs.find(function (tab) { return tab === 'config: Config'; })];
                     }); }); })];
             case 3:
-                _b.apply(void 0, [_q.sent()]).toBeDefined();
+                _b.apply(void 0, [_r.sent()]).toBeDefined();
                 return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { requestId: 'config', props: __assign(__assign({}, LIST.props), { title: 'Config', bodyColumns: 70 }), surface: 'desktop' }))];
             case 4:
-                config = _q.sent();
+                config = _r.sent();
                 _c = expect;
-                return [4 /*yield*/, config.find({ type: 'Text', text: 'Admin commands' })];
+                return [4 /*yield*/, moreShown(config)];
             case 5:
-                _c.apply(void 0, [_q.sent()]).toBeDefined();
-                return [4 /*yield*/, config.select({ key: 'config-admin-mode-pick', value: 'work' })];
+                _c.apply(void 0, [_r.sent()]).toBe(true);
+                _d = expect;
+                return [4 /*yield*/, config.find({ type: 'Text', text: 'Admin commands' })];
             case 6:
-                _q.sent();
+                _d.apply(void 0, [_r.sent()]).toBeDefined();
+                return [4 /*yield*/, config.select({ key: 'config-admin-mode-pick', value: 'work' })];
+            case 7:
+                _r.sent();
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { var _a; return __generator(this, function (_b) {
                         return [2 /*return*/, JSON.parse((_a = files.get("".concat(MEMORY, "/config.json"))) !== null && _a !== void 0 ? _a : '{}').adminSealed];
                     }); }); })];
-            case 7:
-                sealedAs = _q.sent();
-                expect(JSON.parse((_o = files.get("".concat(MEMORY, "/config.json"))) !== null && _o !== void 0 ? _o : '{}')).toEqual({ name: 'Sam', admin: 'work', adminSealed: fakeSeal((_p = files.get('keychain:gate')) !== null && _p !== void 0 ? _p : '', 'mode\nwork') });
+            case 8:
+                sealedAs = _r.sent();
+                expect(JSON.parse((_p = files.get("".concat(MEMORY, "/config.json"))) !== null && _p !== void 0 ? _p : '{}')).toEqual({ name: 'Sam', admin: 'work', adminSealed: fakeSeal((_q = files.get('keychain:gate')) !== null && _q !== void 0 ? _q : '', 'mode\nwork') });
                 expect(sealedAs).toBeDefined();
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Look at the file', prompt: 'look', parentAgentId: 'a1' }))];
-            case 8:
-                _q.sent();
-                return [4 /*yield*/, $.prompt.submit({ text: 'update the other Mac', wait: false, origin: composer })];
             case 9:
-                _q.sent();
-                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Update the other Mac', prompt: 'update the other Mac' }))];
+                _r.sent();
+                return [4 /*yield*/, $.prompt.submit({ text: 'update the other Mac', wait: false, origin: composer })];
             case 10:
-                _q.sent();
-                first = bash('b1', "".concat(ADMIN, " here 'id -u'"));
-                _d = expect;
-                return [4 /*yield*/, held('b1')];
+                _r.sent();
+                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Update the other Mac', prompt: 'update the other Mac' }))];
             case 11:
-                _d.apply(void 0, [_q.sent()]).toBeDefined();
+                _r.sent();
+                first = bash('b1', "".concat(ADMIN, " here 'id -u'"));
                 _e = expect;
-                return [4 /*yield*/, labels()];
+                return [4 /*yield*/, held('b1')];
             case 12:
-                _e.apply(void 0, [_q.sent()]).toContain('Allow for this task');
+                _e.apply(void 0, [_r.sent()]).toBeDefined();
+                // The same three buttons, and under the question what this Allow covers
                 _f = expect;
-                return [4 /*yield*/, labels()];
+                return [4 /*yield*/, gateButtons(list, 'b1-0')];
             case 13:
-                _f.apply(void 0, [_q.sent()]).not.toContain('Allow once');
-                return [4 /*yield*/, press('gate-b1-0-once')];
-            case 14:
-                _q.sent();
+                // The same three buttons, and under the question what this Allow covers
+                _f.apply(void 0, [_r.sent()]).toEqual(['Allow', "Don't allow", 'Always allow this command']);
                 _g = expect;
-                return [4 /*yield*/, first];
+                return [4 /*yield*/, list.findAll({ type: 'Markdown' })];
+            case 14:
+                _g.apply(void 0, [(_r.sent()).map(function (one) { return one.props.text; })]).toContain("Allow also covers this task's next admin commands.");
+                return [4 /*yield*/, press('gate-b1-0-once')];
             case 15:
-                _g.apply(void 0, [(_q.sent()).result]).toBe('ran');
-                // Its later commands, and its helper's, run without another press, each with its own grant
+                _r.sent();
                 _h = expect;
-                return [4 /*yield*/, bash('b2', "".concat(ADMIN, " here 'chmod 644 /etc/hosts'"))];
+                return [4 /*yield*/, first];
             case 16:
+                _h.apply(void 0, [(_r.sent()).result]).toBe('ran');
                 // Its later commands, and its helper's, run without another press, each with its own grant
-                _h.apply(void 0, [(_q.sent()).result]).toBe('ran');
                 _j = expect;
-                return [4 /*yield*/, bash('b3', "".concat(ADMIN, " m4 'whoami'"), 'a2')];
+                return [4 /*yield*/, bash('b2', "".concat(ADMIN, " here 'chmod 644 /etc/hosts'"))];
             case 17:
-                _j.apply(void 0, [(_q.sent()).result]).toBe('ran');
+                // Its later commands, and its helper's, run without another press, each with its own grant
+                _j.apply(void 0, [(_r.sent()).result]).toBe('ran');
+                _k = expect;
+                return [4 /*yield*/, bash('b3', "".concat(ADMIN, " m4 'whoami'"), 'a2')];
+            case 18:
+                _k.apply(void 0, [(_r.sent()).result]).toBe('ran');
                 expect(admins.map(function (one) { return one.grants.map(function (grant) { return grant.command; }); })).toEqual([['id -u'], ['chmod 644 /etc/hosts'], ['whoami']]);
                 other = bash('b4', "".concat(ADMIN, " here 'id -u'"), 'a3');
-                _k = expect;
-                return [4 /*yield*/, held('b4')];
-            case 18:
-                _k.apply(void 0, [_q.sent()]).toBeDefined();
-                return [4 /*yield*/, press('gate-b4-0-deny')];
-            case 19:
-                _q.sent();
                 _l = expect;
-                return [4 /*yield*/, other];
+                return [4 /*yield*/, held('b4')];
+            case 19:
+                _l.apply(void 0, [_r.sent()]).toBeDefined();
+                return [4 /*yield*/, press('gate-b4-0-deny')];
             case 20:
-                _l.apply(void 0, [(_q.sent()).deny]).toContain('Refused by Sam');
+                _r.sent();
+                _m = expect;
+                return [4 /*yield*/, other];
+            case 21:
+                _m.apply(void 0, [(_r.sent()).deny]).toContain('Refused by Sam');
                 // Ended and started again, it asks again
                 return [4 /*yield*/, $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' })];
-            case 21:
-                // Ended and started again, it asks again
-                _q.sent();
-                back = bash('b5', "".concat(ADMIN, " here 'id -u'"));
-                _m = expect;
-                return [4 /*yield*/, held('b5')];
             case 22:
-                _m.apply(void 0, [_q.sent()]).toBeDefined();
-                return [4 /*yield*/, press('gate-b5-0-deny')];
+                // Ended and started again, it asks again
+                _r.sent();
+                back = bash('b5', "".concat(ADMIN, " here 'id -u'"));
+                _o = expect;
+                return [4 /*yield*/, held('b5')];
             case 23:
-                _q.sent();
-                return [4 /*yield*/, back];
+                _o.apply(void 0, [_r.sent()]).toBeDefined();
+                return [4 /*yield*/, press('gate-b5-0-deny')];
             case 24:
-                _q.sent();
+                _r.sent();
+                return [4 /*yield*/, back];
+            case 25:
+                _r.sent();
                 expect(admins.length).toBe(3);
                 return [2 /*return*/];
         }
@@ -703,32 +871,36 @@ test('asked once per piece of work: one Allow covers that work and its helpers u
 }); });
 var _loop_1 = function (admin) {
     test("\"".concat(admin, "\" written into config.json by anything but Config counts for nothing: every command still asks"), function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-        var _a, press, bash, held, admins, files, call, _b, config, _c;
-        return __generator(this, function (_d) {
-            switch (_d.label) {
+        var _a, press, bash, held, admins, files, call, _b, config, _c, _d;
+        return __generator(this, function (_e) {
+            switch (_e.label) {
                 case 0: return [4 /*yield*/, gated($, on, { admin: admin, adminSealed: fakeSeal('kept-key', "mode\n".concat(admin)).replace(/^./, 'z') })];
                 case 1:
-                    _a = _d.sent(), press = _a.press, bash = _a.bash, held = _a.held, admins = _a.admins, files = _a.files;
+                    _a = _e.sent(), press = _a.press, bash = _a.bash, held = _a.held, admins = _a.admins, files = _a.files;
                     files.set('keychain:gate', 'kept-key');
                     call = bash('b1', "".concat(ADMIN, " here 'id -u'"));
                     _b = expect;
                     return [4 /*yield*/, held('b1')];
                 case 2:
-                    _b.apply(void 0, [_d.sent()]).toBeDefined();
+                    _b.apply(void 0, [_e.sent()]).toBeDefined();
                     expect(admins.length).toBe(0);
                     return [4 /*yield*/, press('gate-b1-0-deny')];
                 case 3:
-                    _d.sent();
+                    _e.sent();
                     return [4 /*yield*/, call];
                 case 4:
-                    _d.sent();
+                    _e.sent();
                     return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { requestId: 'config', props: __assign(__assign({}, LIST.props), { title: 'Config', bodyColumns: 70 }), surface: 'desktop' }))];
                 case 5:
-                    config = _d.sent();
+                    config = _e.sent();
                     _c = expect;
-                    return [4 /*yield*/, config.find({ type: 'Text', text: new RegExp("Your settings file says \"".concat(admin, "\", but you didn't choose it here, so every command asks")) })];
+                    return [4 /*yield*/, moreShown(config)];
                 case 6:
-                    _c.apply(void 0, [_d.sent()]).toBeDefined();
+                    _c.apply(void 0, [_e.sent()]).toBe(true);
+                    _d = expect;
+                    return [4 /*yield*/, config.find({ type: 'Text', text: new RegExp("Your settings file says \"".concat(admin, "\", but you didn't choose it here, so every command asks")) })];
+                case 7:
+                    _d.apply(void 0, [_e.sent()]).toBeDefined();
                     return [2 /*return*/];
             }
         });
@@ -739,19 +911,19 @@ for (var _i = 0, _a = ['never', 'work']; _i < _a.length; _i++) {
     _loop_1(admin);
 }
 test('never asked, as Config sealed it: the call goes through as it was made, with no hold, no grant and nothing on the card', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, press, list, bash, admins, files, grants, logged, notified, before, r, _b, config, _c;
+    var _a, press, list, bash, admins, files, grants, logged, notified, before, r, _b, _c, config, _d;
     var _this = this;
-    var _d;
-    return __generator(this, function (_e) {
-        switch (_e.label) {
+    var _e;
+    return __generator(this, function (_f) {
+        switch (_f.label) {
             case 0: return [4 /*yield*/, gated($, on, { admin: 'never', adminSealed: fakeSeal('kept-key', 'mode\nnever') }, { env: {} })];
             case 1:
-                _a = _e.sent(), press = _a.press, list = _a.list, bash = _a.bash, admins = _a.admins, files = _a.files, grants = _a.grants, logged = _a.logged, notified = _a.notified;
+                _a = _f.sent(), press = _a.press, list = _a.list, bash = _a.bash, admins = _a.admins, files = _a.files, grants = _a.grants, logged = _a.logged, notified = _a.notified;
                 files.set('keychain:gate', 'kept-key');
                 before = __spreadArray([], files.keys(), true).filter(function (path) { return !path.endsWith('log.md'); }).sort();
                 return [4 /*yield*/, bash('b1', "".concat(ADMIN, " here 'chmod 644 /etc/hosts'"))];
             case 2:
-                r = _e.sent();
+                r = _f.sent();
                 expect(r.result).toBe('ran');
                 expect(r.deny).toBeUndefined();
                 expect(admins).toEqual([{ command: "".concat(ADMIN, " here 'chmod 644 /etc/hosts'"), grants: [] }]);
@@ -761,22 +933,29 @@ test('never asked, as Config sealed it: the call goes through as it was made, wi
                 expect(logged.some(function (line) { return line.includes('admin command'); })).toBe(false);
                 expect(notified.some(function (line) { return line.includes('admin command'); })).toBe(false);
                 _b = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: 'Run an admin command on this Mac?' })];
+                return [4 /*yield*/, list.find({ type: 'Text', text: 'Permission' })];
             case 3:
-                _b.apply(void 0, [_e.sent()]).toBeUndefined();
-                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { requestId: 'config', props: __assign(__assign({}, LIST.props), { title: 'Config', bodyColumns: 70 }), surface: 'desktop' }))];
-            case 4:
-                config = _e.sent();
-                return [4 /*yield*/, pressed(config, 'config-admin-mode-back')];
-            case 5:
-                _e.sent();
+                _b.apply(void 0, [_f.sent()]).toBeUndefined();
                 _c = expect;
+                return [4 /*yield*/, list.find({ type: 'Text', text: 'Run this as admin on this Mac?' })];
+            case 4:
+                _c.apply(void 0, [_f.sent()]).toBeUndefined();
+                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { requestId: 'config', props: __assign(__assign({}, LIST.props), { title: 'Config', bodyColumns: 70 }), surface: 'desktop' }))];
+            case 5:
+                config = _f.sent();
+                return [4 /*yield*/, moreShown(config)];
+            case 6:
+                _f.sent();
+                return [4 /*yield*/, pressed(config, 'config-admin-mode-back')];
+            case 7:
+                _f.sent();
+                _d = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { var _a; return __generator(this, function (_b) {
                         return [2 /*return*/, (JSON.parse((_a = files.get("".concat(MEMORY, "/config.json"))) !== null && _a !== void 0 ? _a : '{}').admin === undefined ? true : undefined)];
                     }); }); })];
-            case 6:
-                _c.apply(void 0, [_e.sent()]).toBe(true);
-                expect(JSON.parse((_d = files.get("".concat(MEMORY, "/config.json"))) !== null && _d !== void 0 ? _d : '{}')).toEqual({ name: 'Sam' });
+            case 8:
+                _d.apply(void 0, [_f.sent()]).toBe(true);
+                expect(JSON.parse((_e = files.get("".concat(MEMORY, "/config.json"))) !== null && _e !== void 0 ? _e : '{}')).toEqual({ name: 'Sam' });
                 expect(files.get('keychain:gate')).not.toBe('kept-key');
                 return [2 /*return*/];
         }
@@ -799,317 +978,453 @@ test('with no panel to ask on, an admin command is refused, never run unasked', 
     });
 }); });
 test('F-008 F-009 · no admin password is kept: Config has no setting to keep one, every one an earlier version kept is forgotten as the mod loads, and admin commands on another Mac still ask on their card', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, press, bash, held, admins, files, _b, _c, config, _d, _e, call, _f, _g;
+    var _a, press, bash, held, admins, files, _b, _c, config, _d, _e, _f, call, _g, _h;
     var _this = this;
-    return __generator(this, function (_h) {
-        switch (_h.label) {
+    return __generator(this, function (_j) {
+        switch (_j.label) {
             case 0: return [4 /*yield*/, gated($, on, { adminPassword: 'keep' })];
             case 1:
-                _a = _h.sent(), press = _a.press, bash = _a.bash, held = _a.held, admins = _a.admins, files = _a.files;
+                _a = _j.sent(), press = _a.press, bash = _a.bash, held = _a.held, admins = _a.admins, files = _a.files;
                 _b = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         return [2 /*return*/, files.get('keychain:admin-forgotten')];
                     }); }); })];
             case 2:
-                _b.apply(void 0, [_h.sent()]).toBe('yes');
+                _b.apply(void 0, [_j.sent()]).toBe('yes');
                 _c = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { var _a; return __generator(this, function (_b) {
                         return [2 /*return*/, (JSON.parse((_a = files.get("".concat(MEMORY, "/config.json"))) !== null && _a !== void 0 ? _a : '{}').adminPassword === undefined ? true : undefined)];
                     }); }); })];
             case 3:
-                _c.apply(void 0, [_h.sent()]).toBe(true);
+                _c.apply(void 0, [_j.sent()]).toBe(true);
                 return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { requestId: 'config', props: __assign(__assign({}, LIST.props), { title: 'Config', bodyColumns: 70 }), surface: 'desktop' }))];
             case 4:
-                config = _h.sent();
+                config = _j.sent();
                 _d = expect;
-                return [4 /*yield*/, config.find({ type: 'Text', text: 'Admin password' })];
+                return [4 /*yield*/, moreShown(config)];
             case 5:
-                _d.apply(void 0, [_h.sent()]).toBeUndefined();
+                _d.apply(void 0, [_j.sent()]).toBe(true);
                 _e = expect;
-                return [4 /*yield*/, config.find({ type: 'Text', text: /Each one still asks for the admin password, which Claudopus never saves/ })];
+                return [4 /*yield*/, config.find({ type: 'Text', text: 'Admin password' })];
             case 6:
-                _e.apply(void 0, [_h.sent()]).toBeDefined();
-                call = bash('b2', "".concat(ADMIN, " m4 'id -u'"));
+                _e.apply(void 0, [_j.sent()]).toBeUndefined();
                 _f = expect;
-                return [4 /*yield*/, held('b2')];
+                return [4 /*yield*/, config.find({ type: 'Text', text: /each asks for your Mac password, which Claudopus never saves/ })];
             case 7:
-                _f.apply(void 0, [_h.sent()]).toBeDefined();
-                return [4 /*yield*/, press('gate-b2-0-once')];
-            case 8:
-                _h.sent();
+                _f.apply(void 0, [_j.sent()]).toBeDefined();
+                call = bash('b2', "".concat(ADMIN, " m4 'id -u'"));
                 _g = expect;
-                return [4 /*yield*/, call];
+                return [4 /*yield*/, held('b2')];
+            case 8:
+                _g.apply(void 0, [_j.sent()]).toBeDefined();
+                return [4 /*yield*/, press('gate-b2-0-once')];
             case 9:
-                _g.apply(void 0, [(_h.sent()).result]).toBe('ran');
+                _j.sent();
+                _h = expect;
+                return [4 /*yield*/, call];
+            case 10:
+                _h.apply(void 0, [(_j.sent()).result]).toBe('ran');
                 expect(admins.length).toBe(1);
                 return [2 /*return*/];
         }
     });
 }); });
-test("the chat's own thread, doing its own work, is asked at the top of the panel, each time even under once per piece of work", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var w, list, _loop_2, _i, _a, id;
+test("the chat's own thread, doing its own work, is asked at the top of the panel, each time even under once per piece of work, and its press is said there in one grey line", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var w, list, _loop_3, _i, _a, id;
     var _this = this;
-    return __generator(this, function (_b) {
-        switch (_b.label) {
+    var _b, _c;
+    return __generator(this, function (_d) {
+        switch (_d.label) {
             case 0:
                 w = world(on);
                 w.files.set('keychain:gate', 'kept-key');
                 w.files.set("".concat(MEMORY, "/config.json"), JSON.stringify({ name: 'Sam', agents: false, admin: 'work', adminSealed: fakeSeal('kept-key', 'mode\nwork') }));
                 return [4 /*yield*/, $.session.start(start)];
             case 1:
-                _b.sent();
+                _d.sent();
                 return [4 /*yield*/, $.prompt.submit({ text: 'fix the hosts file', wait: false, origin: composer })];
             case 2:
-                _b.sent();
+                _d.sent();
                 return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { props: __assign(__assign({}, LIST.props), { bodyColumns: 80 }), surface: 'desktop' }))];
             case 3:
-                list = _b.sent();
-                _loop_2 = function (id) {
-                    var call, _c, _d, _e, _f, _g;
-                    return __generator(this, function (_h) {
-                        switch (_h.label) {
+                list = _d.sent();
+                _loop_3 = function (id) {
+                    var call, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+                    return __generator(this, function (_p) {
+                        switch (_p.label) {
                             case 0:
                                 call = $.tool.call({ tool: 'Bash', tool_use_id: id, command: "".concat(ADMIN, " here 'id -u'") });
-                                _c = expect;
+                                _e = expect;
                                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                                         return [2 /*return*/, keyed(list, "gate-".concat(id, "-0-deny"))];
                                     }); }); })];
                             case 1:
-                                _c.apply(void 0, [_h.sent()]).toBeDefined();
-                                _d = expect;
-                                return [4 /*yield*/, list.find({ type: 'Text', text: 'Run an admin command on this Mac?' })];
-                            case 2:
-                                _d.apply(void 0, [_h.sent()]).toBeDefined();
-                                // No piece of work to allow it for: the chat's thread never ends, so it is asked each time
-                                _e = expect;
-                                return [4 /*yield*/, list.findAll({ type: 'Button' })];
-                            case 3:
-                                // No piece of work to allow it for: the chat's thread never ends, so it is asked each time
-                                _e.apply(void 0, [(_h.sent()).map(function (one) { return one.props.label; })]).toContain('Allow once');
+                                _e.apply(void 0, [_p.sent()]).toBeDefined();
+                                // Whose it is stands beside its kind, as it is on no task's card
                                 _f = expect;
-                                return [4 /*yield*/, list.findAll({ type: 'Button' })];
-                            case 4:
-                                _f.apply(void 0, [(_h.sent()).map(function (one) { return one.props.label; })]).not.toContain('Allow for this task');
-                                return [4 /*yield*/, pressed(list, "gate-".concat(id, "-0-once"))];
-                            case 5:
-                                _h.sent();
-                                w.wake();
+                                return [4 /*yield*/, list.find({ type: 'Text', text: 'Permission · This chat' })];
+                            case 2:
+                                // Whose it is stands beside its kind, as it is on no task's card
+                                _f.apply(void 0, [(_b = (_p.sent())) === null || _b === void 0 ? void 0 : _b.props.dimColor]).toBe(true);
                                 _g = expect;
-                                return [4 /*yield*/, call];
+                                return [4 /*yield*/, list.find({ type: 'Text', text: 'Run this as admin on this Mac?' })];
+                            case 3:
+                                _g.apply(void 0, [_p.sent()]).toBeDefined();
+                                // No piece of work to allow it for: the chat's thread never ends, so it is asked each time, and Allow covers this one alone
+                                _h = expect;
+                                return [4 /*yield*/, gateButtons(list, "".concat(id, "-0"))];
+                            case 4:
+                                // No piece of work to allow it for: the chat's thread never ends, so it is asked each time, and Allow covers this one alone
+                                _h.apply(void 0, [_p.sent()]).toEqual(['Allow', "Don't allow", 'Always allow this command']);
+                                _j = expect;
+                                return [4 /*yield*/, list.findAll({ type: 'Markdown' })];
+                            case 5:
+                                _j.apply(void 0, [(_p.sent()).map(function (one) { var _a; return String((_a = one.props.text) !== null && _a !== void 0 ? _a : ''); }).filter(function (text) { return text.includes('also covers'); })]).toEqual([]);
+                                // The press ends the hold by itself
+                                return [4 /*yield*/, pressed(list, "gate-".concat(id, "-0-once"))];
                             case 6:
-                                _g.apply(void 0, [(_h.sent()).result]).toBe('ran');
+                                // The press ends the hold by itself
+                                _p.sent();
+                                _k = expect;
+                                return [4 /*yield*/, call];
+                            case 7:
+                                _k.apply(void 0, [(_p.sent()).result]).toBe('ran');
+                                _l = expect;
+                                return [4 /*yield*/, list.find({ type: 'Text', text: 'Permission · This chat' })];
+                            case 8:
+                                _l.apply(void 0, [_p.sent()]).toBeUndefined();
+                                _m = expect;
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, list.find({ type: 'Text', text: ALLOWED_LINE })];
+                                    }); }); })];
+                            case 9:
+                                _m.apply(void 0, [(_c = (_p.sent())) === null || _c === void 0 ? void 0 : _c.props.dimColor]).toBe(true);
+                                _o = expect;
+                                return [4 /*yield*/, gateGreens(list)];
+                            case 10:
+                                _o.apply(void 0, [_p.sent()]).toBe(0);
                                 return [2 /*return*/];
                         }
                     });
                 };
                 _i = 0, _a = ['c1', 'c2'];
-                _b.label = 4;
+                _d.label = 4;
             case 4:
                 if (!(_i < _a.length)) return [3 /*break*/, 7];
                 id = _a[_i];
-                return [5 /*yield**/, _loop_2(id)];
+                return [5 /*yield**/, _loop_3(id)];
             case 5:
-                _b.sent();
-                _b.label = 6;
+                _d.sent();
+                _d.label = 6;
             case 6:
                 _i++;
                 return [3 /*break*/, 4];
             case 7:
                 expect(w.admins.length).toBe(2);
+                w.wake();
                 return [2 /*return*/];
         }
     });
 }); });
 test("another chat's panel shows an admin command that waits, with no button: only the chat that holds the call allows it", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, files, clock, at, list, _b, _c, _d, _e;
+    var _a, files, clock, at, list, _b, _c, _d, _e, _f;
     var _this = this;
-    return __generator(this, function (_f) {
-        switch (_f.label) {
+    var _g;
+    return __generator(this, function (_h) {
+        switch (_h.label) {
             case 0:
                 _a = world(on), files = _a.files, clock = _a.clock;
                 return [4 /*yield*/, $.session.start(start)];
             case 1:
-                _f.sent();
+                _h.sent();
                 at = 1700000000000;
                 files.set("".concat(MEMORY, "/live/chat-b.json"), JSON.stringify({ chat: 'chat-b', title: 'Billing page', folder: '/repo/billing', host: '', at: at, cards: [{ id: 'b1', parentId: '', isFork: false, tokens: 0, title: 'Update the server', words: 'update it', items: [], entries: [], answer: '', admins: [{ id: 'x-0', host: 'here', command: 'softwareupdate -i -a', at: at }], startedAt: at - 60000, endedAt: 0, status: 'working' }] }));
                 return [4 /*yield*/, clock.advance(5000)];
             case 2:
-                _f.sent();
+                _h.sent();
                 return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { surface: 'desktop' }))];
             case 3:
-                list = _f.sent();
+                list = _h.sent();
                 _b = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         return [2 /*return*/, list.find({ type: 'Text', text: 'softwareupdate -i -a' })];
                     }); }); })];
             case 4:
-                _b.apply(void 0, [_f.sent()]).toBeDefined();
+                _b.apply(void 0, [_h.sent()]).toBeDefined();
                 _c = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: 'Run an admin command on this Mac?' })];
+                return [4 /*yield*/, list.find({ type: 'Text', text: 'Permission' })];
             case 5:
-                _c.apply(void 0, [_f.sent()]).toBeDefined();
+                _c.apply(void 0, [_h.sent()]).toBeDefined();
                 _d = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: 'Allow or deny it on its card in its own chat.' })];
+                return [4 /*yield*/, list.find({ type: 'Text', text: 'Run this as admin on this Mac?' })];
             case 6:
-                _d.apply(void 0, [_f.sent()]).toBeDefined();
+                _d.apply(void 0, [_h.sent()]).toBeDefined();
                 _e = expect;
-                return [4 /*yield*/, list.findAll({ type: 'Button' })];
+                return [4 /*yield*/, list.find({ type: 'Text', text: 'Allow it on its card in its own chat.' })];
             case 7:
-                _e.apply(void 0, [(_f.sent()).some(function (one) { return ['Allow once', 'Always allow this command', 'Deny'].includes(String(one.props.label)); })]).toBe(false);
+                _e.apply(void 0, [(_g = (_h.sent())) === null || _g === void 0 ? void 0 : _g.props.dimColor]).toBe(true);
+                _f = expect;
+                return [4 /*yield*/, list.findAll({ type: 'Button' })];
+            case 8:
+                _f.apply(void 0, [(_h.sent()).some(function (one) { var _a; return ['Allow', 'Always allow this command', "Don't allow"].includes(String(one.props.label)) || ((_a = one.key) !== null && _a !== void 0 ? _a : '').startsWith('gate-'); })]).toBe(false);
                 return [2 /*return*/];
         }
     });
 }); });
-test('a release whose output goes to a log asks once, for its own branch: the 15 Nov run-progress-rows release asked twice, first for a branch called ">"', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, list, press, files, grants, holding, _loop_3, _i, _b, _c, id, tail;
+test('a release nobody pressed for is asked, once, for its own branch, with Allow and Don\'t allow alone: the 15 Nov run-progress-rows release, its output sent to a log, asked twice, first for a branch called ">"', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, list, files, grants, holding, wake, _loop_4, _i, _b, _c, id, tail;
     var _this = this;
-    var _d;
-    return __generator(this, function (_e) {
-        switch (_e.label) {
+    var _d, _e;
+    return __generator(this, function (_f) {
+        switch (_f.label) {
             case 0: return [4 /*yield*/, gated($, on)];
             case 1:
-                _a = _e.sent(), list = _a.list, press = _a.press, files = _a.files, grants = _a.grants, holding = _a.holding;
+                _a = _f.sent(), list = _a.list, files = _a.files, grants = _a.grants, holding = _a.holding, wake = _a.wake;
                 files.set('git:top', '/repo/wt');
                 files.set('git:branch', 'fix-it');
-                _loop_3 = function (id, tail) {
-                    var call, _f, _g, _h, granted, _j;
-                    return __generator(this, function (_k) {
-                        switch (_k.label) {
+                _loop_4 = function (id, tail) {
+                    var call, _g, drawn, _h, under, _j, granted, _k, _l;
+                    return __generator(this, function (_m) {
+                        switch (_m.label) {
                             case 0:
                                 call = $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command: "hold x".concat(id, "; /plug/claudopus/bin/release").concat(tail) });
-                                _f = expect;
+                                _g = expect;
                                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                                         return [2 /*return*/, keyed(list, "gate-".concat(id, "-r0-once"))];
                                     }); }); })];
                             case 1:
-                                _f.apply(void 0, [_k.sent()]).toBeDefined();
-                                // Said in plain words: what is released, its branch, and where from in one line
-                                _g = expect;
-                                return [4 /*yield*/, list.find({ type: 'Text', text: 'Branch fix-it' })];
+                                _g.apply(void 0, [_m.sent()]).toBeDefined();
+                                return [4 /*yield*/, gateTexts(list)];
                             case 2:
-                                // Said in plain words: what is released, its branch, and where from in one line
-                                _g.apply(void 0, [_k.sent()]).toBeDefined();
+                                drawn = _m.sent();
+                                expect(drawn.slice(drawn.indexOf('Permission'), drawn.indexOf('Permission') + 2)).toEqual(['Permission', 'Release fix-it to main?']);
                                 _h = expect;
-                                return [4 /*yield*/, list.findAll({ type: 'Text' })];
+                                return [4 /*yield*/, list.find({ type: 'Text', text: 'Release fix-it to main?' })];
                             case 3:
-                                _h.apply(void 0, [(_k.sent()).some(function (one) { var _a; return /^>|> from/.test(String((_a = one.text) !== null && _a !== void 0 ? _a : '')); })]).toBe(false);
-                                return [4 /*yield*/, press("gate-".concat(id, "-r0-once"))];
+                                _h.apply(void 0, [(_d = (_m.sent())) === null || _d === void 0 ? void 0 : _d.props.color]).toBe('#E5A50A');
+                                return [4 /*yield*/, list.findAll({ type: 'Markdown' })];
                             case 4:
-                                _k.sent();
+                                under = (_m.sent()).map(function (one) { var _a; return String((_a = one.props.text) !== null && _a !== void 0 ? _a : ''); });
+                                expect(under).toContain('Branch fix-it · from /repo/wt');
+                                expect(__spreadArray(__spreadArray([], drawn, true), under, true).some(function (one) { return /^>|> from/.test(one); })).toBe(false);
+                                expect(drawn.some(function (one) { return one === 'fix-it from /repo/wt'; })).toBe(false);
+                                // A release is asked each time: nothing to always allow
+                                _j = expect;
+                                return [4 /*yield*/, gateButtons(list, "".concat(id, "-r0"))];
+                            case 5:
+                                // A release is asked each time: nothing to always allow
+                                _j.apply(void 0, [_m.sent()]).toEqual(['Allow', "Don't allow"]);
+                                return [4 /*yield*/, pressed(list, "gate-".concat(id, "-r0-once"))];
+                            case 6:
+                                _m.sent();
                                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                                         return [2 /*return*/, (grants().length ? grants() : undefined)];
                                     }); }); })];
-                            case 5:
-                                granted = _k.sent();
+                            case 7:
+                                granted = _m.sent();
                                 expect(granted === null || granted === void 0 ? void 0 : granted.map(function (path) { var _a; return (function (_a) {
                                     var host = _a.host, command = _a.command;
                                     return [host, command];
                                 })(JSON.parse((_a = files.get(path)) !== null && _a !== void 0 ? _a : '{}')); })).toEqual([['release', '/repo/wt\nfix-it']]);
-                                (_d = holding.get("x".concat(id, "; /plug/claudopus/bin/release").concat(tail))) === null || _d === void 0 ? void 0 : _d('released');
-                                _j = expect;
+                                _k = expect;
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, list.find({ type: 'Text', text: ALLOWED_LINE })];
+                                    }); }); })];
+                            case 8:
+                                _k.apply(void 0, [_m.sent()]).toBeDefined();
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, holding.get("x".concat(id, "; /plug/claudopus/bin/release").concat(tail))];
+                                    }); }); })];
+                            case 9:
+                                (_e = (_m.sent())) === null || _e === void 0 ? void 0 : _e('released');
+                                _l = expect;
                                 return [4 /*yield*/, call];
-                            case 6:
-                                _j.apply(void 0, [(_k.sent()).deny]).toBeUndefined();
+                            case 10:
+                                _l.apply(void 0, [(_m.sent()).deny]).toBeUndefined();
                                 return [2 /*return*/];
                         }
                     });
                 };
                 _i = 0, _b = [['rl1', ' > /tmp/release.log 2>&1'], ['rl2', ' 2>/tmp/release.log'], ['rl3', '>/tmp/release.log']];
-                _e.label = 2;
+                _f.label = 2;
             case 2:
                 if (!(_i < _b.length)) return [3 /*break*/, 5];
                 _c = _b[_i], id = _c[0], tail = _c[1];
-                return [5 /*yield**/, _loop_3(id, tail)];
+                return [5 /*yield**/, _loop_4(id, tail)];
             case 3:
-                _e.sent();
-                _e.label = 4;
+                _f.sent();
+                _f.label = 4;
             case 4:
                 _i++;
                 return [3 /*break*/, 2];
-            case 5: return [2 /*return*/];
+            case 5:
+                wake();
+                return [2 /*return*/];
         }
     });
 }); });
-test('a press is answered by a line, not a card: an ask is an outlined box, what was done a line with no fill or edge that goes once its call ends', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, press, bash, held, list, clock, call, _b, boxes, _c, _d, _e, edges, withNote, _f, _g;
+test("the press on a task's go-ahead for a release lets that task's next release of that folder through with no block, once: a second run, another folder and another task are asked", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, list, files, grants, holding, appended, resumed, wake, press, asks, goAhead, release, through, asked;
     var _this = this;
-    return __generator(this, function (_h) {
-        switch (_h.label) {
+    return __generator(this, function (_b) {
+        switch (_b.label) {
             case 0: return [4 /*yield*/, gated($, on)];
             case 1:
-                _a = _h.sent(), press = _a.press, bash = _a.bash, held = _a.held, list = _a.list, clock = _a.clock;
-                call = bash('b1', "".concat(ADMIN, " here 'chmod 644 /etc/hosts'"));
-                _b = expect;
-                return [4 /*yield*/, held('b1')];
+                _a = _b.sent(), list = _a.list, files = _a.files, grants = _a.grants, holding = _a.holding, appended = _a.appended, resumed = _a.resumed, wake = _a.wake, press = _a.press;
+                files.set('git:top', '/repo/wt');
+                files.set('git:branch', 'fix-it');
+                files.set('/repo/wt/.release', 'main\n');
+                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Tidy the logs', prompt: 'tidy the logs' }))];
             case 2:
-                _b.apply(void 0, [_h.sent()]).toBeDefined();
-                boxes = function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                    switch (_a.label) {
-                        case 0: return [4 /*yield*/, list.findAll({ type: 'Box' })];
-                        case 1: return [2 /*return*/, (_a.sent())
-                            // The ask: an outlined box in the colour of what needs the person, the kind of ask at its top
-                        ];
-                    }
-                }); }); };
-                // The ask: an outlined box in the colour of what needs the person, the kind of ask at its top
-                _c = expect;
-                return [4 /*yield*/, boxes()];
-            case 3:
-                // The ask: an outlined box in the colour of what needs the person, the kind of ask at its top
-                _c.apply(void 0, [(_h.sent()).some(function (one) { return one.props.borderStyle === 'round' && one.props.borderColor === '#E5A50A'; })]).toBe(true);
-                _d = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: 'Admin command · waiting for you' })];
-            case 4:
-                _d.apply(void 0, [_h.sent()]).toBeDefined();
-                return [4 /*yield*/, press('gate-b1-0-once')];
-            case 5:
-                _h.sent();
-                return [4 /*yield*/, call];
-            case 6:
-                _h.sent();
-                _e = expect;
-                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        return [2 /*return*/, list.find({ type: 'Text', text: 'You allowed it. It runs now.' })];
-                    }); }); })];
-            case 7:
-                _e.apply(void 0, [_h.sent()]).toBeDefined();
-                edges = function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                    switch (_a.label) {
-                        case 0: return [4 /*yield*/, boxes()];
-                        case 1: return [2 /*return*/, (_a.sent()).filter(function (one) { return one.props.backgroundColor === '#8A63F0' || one.props.backgroundColor === '#80808024'; }).length];
-                    }
-                }); }); };
-                return [4 /*yield*/, edges()
-                    // Its call has ended: once it could be read, it goes, well before a minute
-                ];
-            case 8:
-                withNote = _h.sent();
-                // Its call has ended: once it could be read, it goes, well before a minute
-                return [4 /*yield*/, clock.advance(16000)];
-            case 9:
-                // Its call has ended: once it could be read, it goes, well before a minute
-                _h.sent();
-                _f = expect;
-                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        switch (_a.label) {
-                            case 0: return [4 /*yield*/, list.find({ type: 'Text', text: 'You allowed it. It runs now.' })];
-                            case 1: return [2 /*return*/, ((_a.sent()) ? undefined : true)];
+                _b.sent();
+                asks = 0;
+                goAhead = function () { return __awaiter(_this, void 0, void 0, function () {
+                    var text, button, _a;
+                    var _this = this;
+                    var _b;
+                    return __generator(this, function (_c) {
+                        switch (_c.label) {
+                            case 0:
+                                text = "Release the hosts fix, round ".concat((asks += 1), "?");
+                                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: "k".concat(asks), agentId: 'a1', text: text, details: 'It changes one line.', choices: ['Release it'], release: '/repo/wt' })];
+                            case 1:
+                                _c.sent();
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        switch (_a.label) {
+                                            case 0: return [4 /*yield*/, list.findAll({ type: 'Button' })];
+                                            case 1: return [2 /*return*/, (_a.sent()).find(function (one) { return one.props.label === 'Release it'; })];
+                                        }
+                                    }); }); })];
+                            case 2:
+                                button = _c.sent();
+                                return [4 /*yield*/, list.press({ key: (_b = button === null || button === void 0 ? void 0 : button.key) !== null && _b !== void 0 ? _b : '' })];
+                            case 3:
+                                _c.sent();
+                                _a = expect;
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, __spreadArray(__spreadArray([], appended, true), resumed, true).find(function (line) { return line.includes('pressed "Release it"') && line.includes(text); })];
+                                    }); }); })];
+                            case 4:
+                                _a.apply(void 0, [_c.sent()]).toBeDefined();
+                                return [2 /*return*/];
                         }
-                    }); }); })];
+                    });
+                }); };
+                release = function (id, agentId) { return $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: agentId, command: "hold x".concat(id, "; /plug/claudopus/bin/release") }); };
+                through = function (id) { return __awaiter(_this, void 0, void 0, function () {
+                    var call, run, _a, _b, _c;
+                    var _this = this;
+                    return __generator(this, function (_d) {
+                        switch (_d.label) {
+                            case 0:
+                                call = release(id, 'a1');
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, holding.get("x".concat(id, "; /plug/claudopus/bin/release"))];
+                                    }); }); })];
+                            case 1:
+                                run = _d.sent();
+                                expect(run).toBeDefined();
+                                expect(grants().map(function (path) { var _a; return (function (_a) {
+                                    var host = _a.host, command = _a.command;
+                                    return [host, command];
+                                })(JSON.parse((_a = files.get(path)) !== null && _a !== void 0 ? _a : '{}')); })).toEqual([['release', '/repo/wt\nfix-it']]);
+                                _a = expect;
+                                return [4 /*yield*/, keyed(list, "gate-".concat(id, "-r0-once"))];
+                            case 2:
+                                _a.apply(void 0, [_d.sent()]).toBeUndefined();
+                                _b = expect;
+                                return [4 /*yield*/, list.find({ type: 'Text', text: 'Release fix-it to main?' })];
+                            case 3:
+                                _b.apply(void 0, [_d.sent()]).toBeUndefined();
+                                run === null || run === void 0 ? void 0 : run('released');
+                                _c = expect;
+                                return [4 /*yield*/, call];
+                            case 4:
+                                _c.apply(void 0, [(_d.sent()).deny]).toBeUndefined();
+                                return [2 /*return*/];
+                        }
+                    });
+                }); };
+                asked = function (id_1) {
+                    var args_1 = [];
+                    for (var _i = 1; _i < arguments.length; _i++) {
+                        args_1[_i - 1] = arguments[_i];
+                    }
+                    return __awaiter(_this, __spreadArray([id_1], args_1, true), void 0, function (id, agentId) {
+                        var call, _a, _b, _c;
+                        var _this = this;
+                        if (agentId === void 0) { agentId = 'a1'; }
+                        return __generator(this, function (_d) {
+                            switch (_d.label) {
+                                case 0:
+                                    call = release(id, agentId);
+                                    _a = expect;
+                                    return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                            return [2 /*return*/, keyed(list, "gate-".concat(id, "-r0-deny"))];
+                                        }); }); })];
+                                case 1:
+                                    _a.apply(void 0, [_d.sent()]).toBeDefined();
+                                    _b = expect;
+                                    return [4 /*yield*/, gateButtons(list, "".concat(id, "-r0"))];
+                                case 2:
+                                    _b.apply(void 0, [_d.sent()]).toEqual(['Allow', "Don't allow"]);
+                                    expect(grants()).toEqual([]);
+                                    return [4 /*yield*/, press("gate-".concat(id, "-r0-deny"))];
+                                case 3:
+                                    _d.sent();
+                                    _c = expect;
+                                    return [4 /*yield*/, call];
+                                case 4:
+                                    _c.apply(void 0, [(_d.sent()).deny]).toBe("Refused by Sam: Sam pressed Don't allow on this release, so nothing was released. Don't try to release it another way. Continue without it, or say what it is needed for and ask again.");
+                                    return [2 /*return*/];
+                            }
+                        });
+                    });
+                };
+                return [4 /*yield*/, goAhead()];
+            case 3:
+                _b.sent();
+                return [4 /*yield*/, through('r1')
+                    // Once: the press allowed one run
+                ];
+            case 4:
+                _b.sent();
+                // Once: the press allowed one run
+                return [4 /*yield*/, asked('r2')
+                    // A new press, and still only that folder's release by that task: another worktree's and another task's are asked, and neither
+                    // uses the press up
+                ];
+            case 5:
+                // Once: the press allowed one run
+                _b.sent();
+                // A new press, and still only that folder's release by that task: another worktree's and another task's are asked, and neither
+                // uses the press up
+                return [4 /*yield*/, goAhead()];
+            case 6:
+                // A new press, and still only that folder's release by that task: another worktree's and another task's are asked, and neither
+                // uses the press up
+                _b.sent();
+                files.set('git:top', '/repo/other');
+                return [4 /*yield*/, asked('r3')];
+            case 7:
+                _b.sent();
+                files.set('git:top', '/repo/wt');
+                return [4 /*yield*/, asked('r4', 'a2')];
+            case 8:
+                _b.sent();
+                return [4 /*yield*/, through('r5')];
+            case 9:
+                _b.sent();
+                return [4 /*yield*/, asked('r6')];
             case 10:
-                _f.apply(void 0, [_h.sent()]).toBe(true);
-                // It had no fill or purple edge of its own, as a piece of work has
-                _g = expect;
-                return [4 /*yield*/, edges()];
-            case 11:
-                // It had no fill or purple edge of its own, as a piece of work has
-                _g.apply(void 0, [_h.sent()]).toBe(withNote);
+                _b.sent();
+                wake();
                 return [2 /*return*/];
         }
     });
 }); });
 // A long list of another chat's running work, two of whose cards wait on a gate and one on an ask: what the 15 Nov panel drew below
-// the fold, where the person had to scroll to find Allow once
+// the fold, where the person had to scroll to find its Allow
 var longList = function (at, gates, asks) {
     if (asks === void 0) { asks = {}; }
     return JSON.stringify({
@@ -1124,7 +1439,7 @@ var textOrder = function (pane) { return __awaiter(_this, void 0, void 0, functi
         case 1: return [2 /*return*/, (_a.sent()).map(function (one) { var _a; return String((_a = one.text) !== null && _a !== void 0 ? _a : ''); })];
     }
 }); }); };
-test('a work that waits for a press comes to the top whole, its amber box in it, the oldest first with the cards that asked; answered, it keeps its place while anything else waits, and goes back once nothing does', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+test('a work that waits for a press comes to the top whole, its amber block in it, the oldest first with the cards that asked; answered, it goes under all that still waits, and back once nothing does', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
     var _a, files, clock, at, list, _b, texts, first, rest, _c, after, _d, _e;
     var _this = this;
     return __generator(this, function (_f) {
@@ -1164,7 +1479,8 @@ test('a work that waits for a press comes to the top whole, its amber box in it,
                 expect(first('run step six')).toBeLessThan(first('Card one'));
                 rest = function (all) { return all.filter(function (one) { return /^Card (one|two|three)$/.test(one); }); };
                 expect(rest(texts)).toEqual(['Card one', 'Card two', 'Card three']);
-                // The older gate is answered (in its own chat) while the others still wait: its card stays where it was, and nothing moves
+                // The older gate is answered (in its own chat) while the others still wait: its card goes under them, never above what waits,
+                // and stays up there over the rest
                 files.set("".concat(MEMORY, "/live/chat-b.json"), longList(at + 6000, { w6: at - 1000 }, { w4: at - 1500 }));
                 return [4 /*yield*/, clock.advance(5000)];
             case 6:
@@ -1181,10 +1497,10 @@ test('a work that waits for a press comes to the top whole, its amber box in it,
                 return [4 /*yield*/, textOrder(list)];
             case 8:
                 after = _f.sent();
-                expect(after.indexOf('Card five')).toBeLessThan(after.indexOf('Card four'));
                 expect(after.indexOf('Card four')).toBeLessThan(after.indexOf('Card six'));
+                expect(after.indexOf('Card six')).toBeLessThan(after.indexOf('Card five'));
                 expect(after.filter(function (one) { return /^Card (one|two|three)$/.test(one); })).toEqual(['Card one', 'Card two', 'Card three']);
-                expect(after.indexOf('Card six')).toBeLessThan(after.indexOf('Card one'));
+                expect(after.indexOf('Card five')).toBeLessThan(after.indexOf('Card one'));
                 // Once nothing waits, the cards go back to where they began
                 files.set("".concat(MEMORY, "/live/chat-b.json"), longList(at + 12000, {}, {}));
                 return [4 /*yield*/, clock.advance(5000)];
@@ -1212,64 +1528,71 @@ test('a work that waits for a press comes to the top whole, its amber box in it,
         }
     });
 }); });
-test('a gate answered on its card says what was allowed in that same card, outlined green, while the card stays at the top', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, press, bash, held, list, call, _b, green, texts, call2, _c, now;
+test('a gate answered on its card says what was pressed in that same card, in one grey line with no box of its own, while the card stays at the top', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, press, bash, held, list, call, _b, _c, _d, drawn, call2, _e, now;
     var _this = this;
-    return __generator(this, function (_d) {
-        switch (_d.label) {
+    return __generator(this, function (_f) {
+        switch (_f.label) {
             case 0: return [4 /*yield*/, gated($, on)];
             case 1:
-                _a = _d.sent(), press = _a.press, bash = _a.bash, held = _a.held, list = _a.list;
+                _a = _f.sent(), press = _a.press, bash = _a.bash, held = _a.held, list = _a.list;
                 call = bash('b1', "".concat(ADMIN, " here 'chmod 644 /etc/hosts'"));
                 _b = expect;
                 return [4 /*yield*/, held('b1')];
             case 2:
-                _b.apply(void 0, [_d.sent()]).toBeDefined();
+                _b.apply(void 0, [_f.sent()]).toBeDefined();
                 return [4 /*yield*/, press('gate-b1-0-once')];
             case 3:
-                _d.sent();
+                _f.sent();
                 return [4 /*yield*/, call];
             case 4:
-                _d.sent();
+                _f.sent();
+                _c = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        switch (_a.label) {
-                            case 0: return [4 /*yield*/, list.findAll({ type: 'Box' })];
-                            case 1: return [2 /*return*/, (_a.sent()).find(function (one) { return one.props.borderStyle === 'round' && one.props.borderColor === 'success'; })];
-                        }
+                        return [2 /*return*/, list.find({ type: 'Text', text: ALLOWED_LINE })];
                     }); }); })];
             case 5:
-                green = _d.sent();
-                expect(green === null || green === void 0 ? void 0 : green.key).toBe('done-gate-b1-0');
+                _c.apply(void 0, [_f.sent()]).toBeDefined();
+                _d = expect;
+                return [4 /*yield*/, list.findAll({ type: 'Box' })];
+            case 6:
+                _d.apply(void 0, [(_f.sent()).filter(function (one) { var _a; return one.key === 'outline-top' || ((_a = one.key) !== null && _a !== void 0 ? _a : '').startsWith('done-gate-'); })]).toEqual([]);
                 return [4 /*yield*/, textOrder(list)
                     // In its card, under the work's title, not a line of its own at the top
                 ];
-            case 6:
-                texts = _d.sent();
-                // In its card, under the work's title, not a line of its own at the top
-                expect(texts.indexOf('Fix the hosts file')).toBeLessThan(texts.indexOf('You allowed it. It runs now.'));
-                expect(texts.filter(function (one) { return one === 'You allowed it. It runs now.'; }).length).toBe(1);
-                // Another work's gate comes in: its card is drawn under the answered one, which keeps its place while anything waits
-                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Tidy the logs', prompt: 'tidy the logs' }))];
             case 7:
-                // Another work's gate comes in: its card is drawn under the answered one, which keeps its place while anything waits
-                _d.sent();
-                call2 = bash('b2', "".concat(ADMIN, " here 'id -u'"), 'a2');
-                _c = expect;
-                return [4 /*yield*/, held('b2')];
+                drawn = _f.sent();
+                // In its card, under the work's title, not a line of its own at the top
+                expect(drawn.indexOf('Fix the hosts file')).toBeLessThan(drawn.indexOf(ALLOWED_LINE));
+                expect(drawn.filter(function (one) { return one === ALLOWED_LINE; }).length).toBe(1);
+                // Another work's gate comes in while the grey line is still said: its card, which waits, is drawn above the answered one
+                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Tidy the logs', prompt: 'tidy the logs' }))];
             case 8:
-                _c.apply(void 0, [_d.sent()]).toBeDefined();
-                return [4 /*yield*/, textOrder(list)];
+                // Another work's gate comes in while the grey line is still said: its card, which waits, is drawn above the answered one
+                _f.sent();
+                call2 = bash('b2', "".concat(ADMIN, " here 'id -u'"), 'a2');
+                _e = expect;
+                return [4 /*yield*/, held('b2')];
             case 9:
-                now = _d.sent();
+                _e.apply(void 0, [_f.sent()]).toBeDefined();
+                return [4 /*yield*/, textOrder(list)];
+            case 10:
+                now = _f.sent();
                 expect(now.indexOf('Tidy the logs')).toBeGreaterThan(-1);
-                expect(now.indexOf('Fix the hosts file')).toBeLessThan(now.indexOf('Tidy the logs'));
-                void call2.catch(function () { return undefined; });
+                expect(now.indexOf('Tidy the logs')).toBeLessThan(now.indexOf('Fix the hosts file'));
+                expect(now.indexOf(ALLOWED_LINE)).toBeGreaterThan(now.indexOf('Tidy the logs'));
+                return [4 /*yield*/, press('gate-b2-0-deny')];
+            case 11:
+                _f.sent();
+                return [4 /*yield*/, call2];
+            case 12:
+                _f.sent();
                 return [2 /*return*/];
         }
     });
 }); });
 test('on the desktop the line above the prompt says how many wait and what the first asks, scrolled or not, and Show takes a scrolled list to the top; in the terminal it comes only once scrolled', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, files, clock, at, MARK, show, _loop_4, _i, _b, surface;
+    var _a, files, clock, at, MARK, show, _loop_5, _i, _b, surface;
     var _this = this;
     return __generator(this, function (_c) {
         switch (_c.label) {
@@ -1285,14 +1608,14 @@ test('on the desktop the line above the prompt says how many wait and what the f
                 ];
             case 2:
                 _c.sent();
-                MARK = /^● 2 questions waiting for you · first: /;
+                MARK = /^● 2 waiting for you · /;
                 show = function (band) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                     switch (_a.label) {
                         case 0: return [4 /*yield*/, band.findAll({ type: 'Button' })];
                         case 1: return [2 /*return*/, (_a.sent()).some(function (one) { return one.props.label === 'Show'; })];
                     }
                 }); }); };
-                _loop_4 = function (surface) {
+                _loop_5 = function (surface) {
                     var down, _d, band, mark, _e, top_1, _f, still, _g, _h, _j;
                     return __generator(this, function (_k) {
                         switch (_k.label) {
@@ -1370,7 +1693,7 @@ test('on the desktop the line above the prompt says how many wait and what the f
             case 3:
                 if (!(_i < _b.length)) return [3 /*break*/, 6];
                 surface = _b[_i];
-                return [5 /*yield**/, _loop_4(surface)];
+                return [5 /*yield**/, _loop_5(surface)];
             case 4:
                 _c.sent();
                 _c.label = 5;
@@ -1400,7 +1723,7 @@ test("in the terminal, an ask that comes in while one is typed in never takes th
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Check the ears', prompt: 'check the ears' }))];
             case 4:
                 _d.sent();
-                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] })];
+                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve'] })];
             case 5:
                 _d.sent();
                 return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { surface: 'terminal' }))];
@@ -1500,7 +1823,7 @@ test('in the terminal, a password box that comes while a reply is being typed le
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Hide the repo', prompt: 'make the repo private' }))];
             case 3:
                 _d.sent();
-                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] })];
+                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve'] })];
             case 4:
                 _d.sent();
                 return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { surface: 'terminal' }))];
@@ -1592,7 +1915,7 @@ test('in the terminal, an ask that comes while a password is being typed leaves 
                 return [4 /*yield*/, list.input({ key: (_c = box === null || box === void 0 ? void 0 : box.key) !== null && _c !== void 0 ? _c : '', text: 'hunt', kind: 'change' })];
             case 7:
                 _d.sent();
-                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] })];
+                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve'] })];
             case 8:
                 _d.sent();
                 _a = expect;
@@ -1651,16 +1974,24 @@ var askingFourth = function ($_1, on_1, choices_1) {
                 case 6: return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { surface: 'desktop' }))];
                 case 7:
                     list = _d.sent();
-                    return [4 /*yield*/, $.tool.call(__assign({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a4', text: 'Release piece four?' }, (choices ? { choices: choices } : {})))];
+                    return [4 /*yield*/, $.tool.call(__assign({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a4', text: 'Release piece four?' }, (choices ? { choices: choices } : {})))
+                        // (ended: it hands in its result with the question still open, which is what ends a task)
+                    ];
                 case 8:
                     _d.sent();
                     if (!ended) return [3 /*break*/, 10];
-                    return [4 /*yield*/, $.turn.complete({ answer: 'Waits for your Release it.', durationMs: 1, isAborted: false, turnId: 'turn-a4', reason: 'answer', agentId: 'a4' })];
+                    return [4 /*yield*/, $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h-a4', agentId: 'a4', message: 'Waits for your Release it.' })];
                 case 9:
                     _d.sent();
                     _d.label = 10;
-                case 10: return [4 /*yield*/, w.clock.advance(5000)];
+                case 10:
+                    if (!ended) return [3 /*break*/, 12];
+                    return [4 /*yield*/, $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'turn-a4', reason: 'answer', agentId: 'a4' })];
                 case 11:
+                    _d.sent();
+                    _d.label = 12;
+                case 12: return [4 /*yield*/, w.clock.advance(5000)];
+                case 13:
                     _d.sent();
                     order = function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         switch (_a.label) {
@@ -1675,7 +2006,7 @@ var askingFourth = function ($_1, on_1, choices_1) {
                                 case 1: return [2 /*return*/, ((_a.sent())[0] === 'Piece 4' ? true : undefined)];
                             }
                         }); }); })];
-                case 12:
+                case 14:
                     _c.apply(void 0, [_d.sent()]).toBe(true);
                     return [2 /*return*/, __assign(__assign({}, w), { list: list, order: order })];
             }
@@ -1688,7 +2019,7 @@ test('Release it on an ended ask leaves its card where it was, saying the answer
     var _g;
     return __generator(this, function (_h) {
         switch (_h.label) {
-            case 0: return [4 /*yield*/, askingFourth($, on, ['Release it', 'Not now'], true)];
+            case 0: return [4 /*yield*/, askingFourth($, on, ['Release it'], true)];
             case 1:
                 _a = _h.sent(), list = _a.list, order = _a.order, clock = _a.clock, resumed = _a.resumed;
                 return [4 /*yield*/, list.findAll({ type: 'Button' })];
@@ -1737,53 +2068,53 @@ test('Release it on an ended ask leaves its card where it was, saying the answer
 }); });
 var answeredStays = function ($, on, how) { return __awaiter(_this, void 0, void 0, function () {
     var _a, list, order, clock, _b, _c, _d, _e, _f, _g, _h, _j, _k;
-    var _l;
+    var _l, _m;
     var _this = this;
-    var _m, _o, _p, _q;
-    return __generator(this, function (_r) {
-        switch (_r.label) {
-            case 0: return [4 /*yield*/, askingFourth($, on)];
+    var _o, _p, _q, _r;
+    return __generator(this, function (_s) {
+        switch (_s.label) {
+            case 0: return [4 /*yield*/, askingFourth($, on, ['Go on'])];
             case 1:
-                _a = _r.sent(), list = _a.list, order = _a.order, clock = _a.clock;
+                _a = _s.sent(), list = _a.list, order = _a.order, clock = _a.clock;
                 if (!(how === 'press')) return [3 /*break*/, 4];
-                _b = pressed;
-                _c = [list];
+                _c = (_b = list).press;
+                _l = {};
                 return [4 /*yield*/, list.findAll({ type: 'Button' })];
-            case 2: return [4 /*yield*/, _b.apply(void 0, _c.concat([(_o = (_m = (_r.sent()).find(function (one) { return one.props.label === 'Done'; })) === null || _m === void 0 ? void 0 : _m.key) !== null && _o !== void 0 ? _o : '']))];
+            case 2: return [4 /*yield*/, _c.apply(_b, [(_l.key = (_p = (_o = (_s.sent()).find(function (one) { return one.props.label === 'Go on'; })) === null || _o === void 0 ? void 0 : _o.key) !== null && _p !== void 0 ? _p : '', _l)])];
             case 3:
-                _r.sent();
+                _s.sent();
                 return [3 /*break*/, 7];
             case 4:
                 _e = (_d = list).input;
-                _l = {};
+                _m = {};
                 return [4 /*yield*/, list.findAll({ type: 'Input' })];
-            case 5: return [4 /*yield*/, _e.apply(_d, [(_l.key = (_q = (_p = (_r.sent()).find(function (one) { var _a; return /-reply-/.test((_a = one.key) !== null && _a !== void 0 ? _a : ''); })) === null || _p === void 0 ? void 0 : _p.key) !== null && _q !== void 0 ? _q : '', _l.text = 'It is pasted', _l)])];
+            case 5: return [4 /*yield*/, _e.apply(_d, [(_m.key = (_r = (_q = (_s.sent()).find(function (one) { var _a; return /-reply-/.test((_a = one.key) !== null && _a !== void 0 ? _a : ''); })) === null || _q === void 0 ? void 0 : _q.key) !== null && _r !== void 0 ? _r : '', _m.text = 'It is pasted', _m)])];
             case 6:
-                _r.sent();
-                _r.label = 7;
+                _s.sent();
+                _s.label = 7;
             case 7:
                 _f = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         return [2 /*return*/, list.find({ type: 'Text', text: /You answered/ })];
                     }); }); })];
             case 8:
-                _f.apply(void 0, [_r.sent()]).toBeDefined();
+                _f.apply(void 0, [_s.sent()]).toBeDefined();
                 _g = expect;
                 return [4 /*yield*/, order()];
             case 9:
-                _g.apply(void 0, [_r.sent()]).toEqual(['Piece 4', 'Piece 1', 'Piece 2', 'Piece 3', 'Piece 5']);
+                _g.apply(void 0, [_s.sent()]).toEqual(['Piece 4', 'Piece 1', 'Piece 2', 'Piece 3', 'Piece 5']);
                 return [4 /*yield*/, clock.advance(30000)];
             case 10:
-                _r.sent();
+                _s.sent();
                 _h = expect;
                 return [4 /*yield*/, order()];
             case 11:
-                _h.apply(void 0, [(_r.sent())[0]]).toBe('Piece 4');
+                _h.apply(void 0, [(_s.sent())[0]]).toBe('Piece 4');
                 // A minute on, it takes its own place among the others
                 return [4 /*yield*/, clock.advance(35000)];
             case 12:
                 // A minute on, it takes its own place among the others
-                _r.sent();
+                _s.sent();
                 _j = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         switch (_a.label) {
@@ -1792,38 +2123,39 @@ var answeredStays = function ($, on, how) { return __awaiter(_this, void 0, void
                         }
                     }); }); })];
             case 13:
-                _j.apply(void 0, [_r.sent()]).toBe(true);
+                _j.apply(void 0, [_s.sent()]).toBe(true);
                 _k = expect;
                 return [4 /*yield*/, order()];
             case 14:
-                _k.apply(void 0, [_r.sent()]).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5']);
+                _k.apply(void 0, [_s.sent()]).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5']);
                 return [2 /*return*/];
         }
     });
 }); };
-test('Done on an ask leaves the card at the top saying the answer for a minute, then in its own place', function ($, on) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+test("a press on an ask's own button leaves the card at the top saying the answer for a minute, then in its own place", function ($, on) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
     return [2 /*return*/, answeredStays($, on, 'press')];
 }); }); });
 test('an answer sent from an ask\'s box leaves the card at the top saying the answer for a minute, then in its own place', function ($, on) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
     return [2 /*return*/, answeredStays($, on, 'reply')];
 }); }); });
-test('answering one of two asks at the top leaves both cards where they were, the oldest first, for as long as the other still waits; once nothing waits they go back to their places', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, list, order, clock, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, labelled, _m, _o, _p, _q, _r, _s;
+test('answering one of two asks at the top puts the one still waiting first and the answered one under it, for as long as the other still waits; once nothing waits they go back to their places', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, list, order, clock, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, labelled, _o, _p, _q, _r, _s, _t;
+    var _u, _v, _w;
     var _this = this;
-    var _t, _u;
-    return __generator(this, function (_v) {
-        switch (_v.label) {
-            case 0: return [4 /*yield*/, askingFourth($, on)];
+    var _x, _y;
+    return __generator(this, function (_z) {
+        switch (_z.label) {
+            case 0: return [4 /*yield*/, askingFourth($, on, ['Go on'])];
             case 1:
-                _a = _v.sent(), list = _a.list, order = _a.order, clock = _a.clock;
-                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Release piece two?', choices: ['Release it', 'Not now'] })];
+                _a = _z.sent(), list = _a.list, order = _a.order, clock = _a.clock;
+                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Release piece two?', choices: ['Release it'] })];
             case 2:
-                _v.sent();
+                _z.sent();
                 return [4 /*yield*/, clock.advance(5000)
                     // The newer ask goes under the older one, never above it
                 ];
             case 3:
-                _v.sent();
+                _z.sent();
                 // The newer ask goes under the older one, never above it
                 _b = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
@@ -1834,339 +2166,342 @@ test('answering one of two asks at the top leaves both cards where they were, th
                     }); }); })];
             case 4:
                 // The newer ask goes under the older one, never above it
-                _b.apply(void 0, [_v.sent()]).toBe(true);
+                _b.apply(void 0, [_z.sent()]).toBe(true);
                 _c = expect;
                 return [4 /*yield*/, order()];
             case 5:
-                _c.apply(void 0, [_v.sent()]).toEqual(['Piece 4', 'Piece 2', 'Piece 1', 'Piece 3', 'Piece 5']);
-                _d = pressed;
-                _e = [list];
+                _c.apply(void 0, [_z.sent()]).toEqual(['Piece 4', 'Piece 2', 'Piece 1', 'Piece 3', 'Piece 5']);
+                _e = (_d = list).press;
+                _u = {};
                 return [4 /*yield*/, list.findAll({ type: 'Button' })];
             case 6: 
-            // The older ask, first at the top, is answered: it stays first, and it still says the answer under the line its work then writes
-            return [4 /*yield*/, _d.apply(void 0, _e.concat([(_u = (_t = (_v.sent()).find(function (one) { return one.props.label === 'Done'; })) === null || _t === void 0 ? void 0 : _t.key) !== null && _u !== void 0 ? _u : '']))];
+            // The older ask, first at the top, is answered: the one still waiting goes above it at once, while the answered card still says
+            // the answer and holds the space its question took, and stays so under the line its work then writes
+            return [4 /*yield*/, _e.apply(_d, [(_u.key = (_y = (_x = (_z.sent()).find(function (one) { return one.props.label === 'Go on'; })) === null || _x === void 0 ? void 0 : _x.key) !== null && _y !== void 0 ? _y : '', _u)])];
             case 7:
-                // The older ask, first at the top, is answered: it stays first, and it still says the answer under the line its work then writes
-                _v.sent();
+                // The older ask, first at the top, is answered: the one still waiting goes above it at once, while the answered card still says
+                // the answer and holds the space its question took, and stays so under the line its work then writes
+                _z.sent();
                 _f = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        return [2 /*return*/, list.find({ type: 'Text', text: /You answered “Done”/ })];
+                        return [2 /*return*/, list.find({ type: 'Text', text: /You answered “Go on”/ })];
                     }); }); })];
             case 8:
-                _f.apply(void 0, [_v.sent()]).toBeDefined();
-                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n4', agentId: 'a4', text: 'Now doing the next part' })];
-            case 9:
-                _v.sent();
-                return [4 /*yield*/, clock.advance(5000)];
-            case 10:
-                _v.sent();
+                _f.apply(void 0, [_z.sent()]).toBeDefined();
                 _g = expect;
                 return [4 /*yield*/, order()];
+            case 9:
+                _g.apply(void 0, [_z.sent()]).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5']);
+                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n4', agentId: 'a4', text: 'Now doing the next part' })];
+            case 10:
+                _z.sent();
+                return [4 /*yield*/, clock.advance(5000)];
             case 11:
-                _g.apply(void 0, [_v.sent()]).toEqual(['Piece 4', 'Piece 2', 'Piece 1', 'Piece 3', 'Piece 5']);
+                _z.sent();
                 _h = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: /You answered “Done”/ })];
-            case 12:
-                _h.apply(void 0, [_v.sent()]).toBeDefined();
-                // Past its minute, with the other ask still waiting, it keeps its place: nothing moves by itself
-                return [4 /*yield*/, clock.advance(65000)];
-            case 13:
-                // Past its minute, with the other ask still waiting, it keeps its place: nothing moves by itself
-                _v.sent();
-                _j = expect;
                 return [4 /*yield*/, order()];
+            case 12:
+                _h.apply(void 0, [_z.sent()]).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5']);
+                _j = expect;
+                return [4 /*yield*/, list.find({ type: 'Text', text: /You answered “Go on”/ })];
+            case 13:
+                _j.apply(void 0, [_z.sent()]).toBeDefined();
+                // Past its minute, with the other ask still waiting, it stays up under it: nothing moves by itself
+                return [4 /*yield*/, clock.advance(65000)];
             case 14:
-                _j.apply(void 0, [_v.sent()]).toEqual(['Piece 4', 'Piece 2', 'Piece 1', 'Piece 3', 'Piece 5']);
+                // Past its minute, with the other ask still waiting, it stays up under it: nothing moves by itself
+                _z.sent();
+                _k = expect;
+                return [4 /*yield*/, order()];
+            case 15:
+                _k.apply(void 0, [_z.sent()]).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5']);
                 // It asks again: new, it goes under what already waits
                 return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4b', agentId: 'a4', text: 'And the next part?', choices: ['Yes', 'No'] })];
-            case 15:
-                // It asks again: new, it goes under what already waits
-                _v.sent();
-                return [4 /*yield*/, clock.advance(1000)];
             case 16:
-                _v.sent();
-                _k = expect;
+                // It asks again: new, it goes under what already waits
+                _z.sent();
+                return [4 /*yield*/, clock.advance(1000)];
+            case 17:
+                _z.sent();
+                _l = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         switch (_a.label) {
                             case 0: return [4 /*yield*/, order()];
                             case 1: return [2 /*return*/, ((_a.sent())[0] === 'Piece 2' ? true : undefined)];
                         }
                     }); }); })];
-            case 17:
-                _k.apply(void 0, [_v.sent()]).toBe(true);
-                _l = expect;
-                return [4 /*yield*/, order()];
             case 18:
-                _l.apply(void 0, [_v.sent()]).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5']);
+                _l.apply(void 0, [_z.sent()]).toBe(true);
+                _m = expect;
+                return [4 /*yield*/, order()];
+            case 19:
+                _m.apply(void 0, [_z.sent()]).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5']);
                 labelled = function (label) { return __awaiter(_this, void 0, void 0, function () { var _a, _b; return __generator(this, function (_c) {
                     switch (_c.label) {
                         case 0: return [4 /*yield*/, list.findAll({ type: 'Button' })];
                         case 1: return [2 /*return*/, (_b = (_a = (_c.sent()).find(function (one) { return one.props.label === label; })) === null || _a === void 0 ? void 0 : _a.key) !== null && _b !== void 0 ? _b : ''];
                     }
                 }); }); };
-                _m = pressed;
-                _o = [list];
-                return [4 /*yield*/, labelled('Not now')];
-            case 19: return [4 /*yield*/, _m.apply(void 0, _o.concat([_v.sent()]))];
-            case 20:
-                _v.sent();
-                _p = pressed;
-                _q = [list];
+                _p = (_o = list).press;
+                _v = {};
+                return [4 /*yield*/, labelled('Release it')];
+            case 20: return [4 /*yield*/, _p.apply(_o, [(_v.key = _z.sent(), _v)])];
+            case 21:
+                _z.sent();
+                _r = (_q = list).press;
+                _w = {};
                 return [4 /*yield*/, labelled('Yes')];
-            case 21: return [4 /*yield*/, _p.apply(void 0, _q.concat([_v.sent()]))];
-            case 22:
-                _v.sent();
-                return [4 /*yield*/, clock.advance(65000)];
+            case 22: return [4 /*yield*/, _r.apply(_q, [(_w.key = _z.sent(), _w)])];
             case 23:
-                _v.sent();
-                _r = expect;
+                _z.sent();
+                return [4 /*yield*/, clock.advance(65000)];
+            case 24:
+                _z.sent();
+                _s = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         switch (_a.label) {
                             case 0: return [4 /*yield*/, order()];
                             case 1: return [2 /*return*/, ((_a.sent())[0] === 'Piece 1' ? true : undefined)];
                         }
                     }); }); })];
-            case 24:
-                _r.apply(void 0, [_v.sent()]).toBe(true);
-                _s = expect;
-                return [4 /*yield*/, order()];
             case 25:
-                _s.apply(void 0, [_v.sent()]).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5']);
+                _s.apply(void 0, [_z.sent()]).toBe(true);
+                _t = expect;
+                return [4 /*yield*/, order()];
+            case 26:
+                _t.apply(void 0, [_z.sent()]).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5']);
                 return [2 /*return*/];
         }
     });
 }); });
-// 15 Nov: Allow once was pressed and the amber box with its buttons stayed up to a second, until the gate's wait (a one-second
-// sleep the engine runs) read the press; only then did the green box come
-var pressedFirst = function ($_1, on_1, button_1, said_1) {
-    var args_1 = [];
-    for (var _i = 4; _i < arguments.length; _i++) {
-        args_1[_i - 4] = arguments[_i];
-    }
-    return __awaiter(_this, __spreadArray([$_1, on_1, button_1, said_1], args_1, true), void 0, function ($, on, button, said, isRelease) {
-        var w, call, base, _a, _b, _c, _d;
-        var _this = this;
-        var _e;
-        if (isRelease === void 0) { isRelease = false; }
-        return __generator(this, function (_f) {
-            switch (_f.label) {
-                case 0: return [4 /*yield*/, gated($, on)];
-                case 1:
-                    w = _f.sent();
-                    if (isRelease)
-                        (w.files.set('git:top', '/repo/wt'), w.files.set('git:branch', 'fix-it'));
-                    call = w.bash('p1', isRelease ? 'hold xp1; /plug/claudopus/bin/release' : "".concat(ADMIN, " here 'chmod 644 /etc/hosts'"));
-                    base = "gate-p1-".concat(isRelease ? 'r' : '', "0-").concat(button);
-                    _a = expect;
-                    return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                            return [2 /*return*/, keyed(w.list, base)];
-                        }); }); })];
-                case 2:
-                    _a.apply(void 0, [_f.sent()]).toBeDefined();
-                    // Pressed, and the wait not yet let go: the drawing that follows the press shows the answer, with nothing left to press
-                    return [4 /*yield*/, pressed(w.list, base)];
-                case 3:
-                    // Pressed, and the wait not yet let go: the drawing that follows the press shows the answer, with nothing left to press
-                    _f.sent();
-                    _b = expect;
-                    return [4 /*yield*/, w.list.find({ type: 'Text', text: said })];
-                case 4:
-                    _b.apply(void 0, [_f.sent()]).toBeDefined();
-                    _c = expect;
-                    return [4 /*yield*/, w.list.findAll({ type: 'Button' })];
-                case 5:
-                    _c.apply(void 0, [(_f.sent()).some(function (b) { var _a; return ((_a = b.key) !== null && _a !== void 0 ? _a : '').startsWith('gate-p1-'); })]).toBe(false);
-                    _d = expect;
-                    return [4 /*yield*/, w.list.find({ type: 'Text', text: /· waiting for you$/ })];
-                case 6:
-                    _d.apply(void 0, [_f.sent()]).toBeUndefined();
-                    w.wake();
-                    if (!isRelease) return [3 /*break*/, 8];
-                    return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                            return [2 /*return*/, w.holding.get('xp1; /plug/claudopus/bin/release')];
-                        }); }); })];
-                case 7:
-                    (_e = (_f.sent())) === null || _e === void 0 ? void 0 : _e('released');
-                    _f.label = 8;
-                case 8: return [4 /*yield*/, call];
-                case 9:
-                    _f.sent();
-                    return [2 /*return*/];
-            }
-        });
-    });
-};
-test("Allow once on a gate draws it answered in the press's own drawing, before the wait reads it: green, with no buttons left", function ($, on) { return pressedFirst($, on, 'once', 'You allowed it. It runs now.'); });
-test("Always allow on a gate draws it answered in the press's own drawing", function ($, on) { return pressedFirst($, on, 'always', "You always allow this command. It runs now, and Claudopus won't ask again."); });
-test("Deny on a gate draws it answered in the press's own drawing", function ($, on) { return pressedFirst($, on, 'deny', "You denied it. It didn't run, and Claudopus told Claude."); });
-test("Allow once on a release draws it answered in the press's own drawing", function ($, on) { return pressedFirst($, on, 'once', 'You allowed it. Claude is releasing it now.', true); });
-test('two presses on a gate before its wait reads them send one answer: the first, as drawn', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, list, bash, held, wake, call, _b, once, deny, _c, _d, r, _e, _f, _g;
-    var _h, _j, _k, _l;
-    return __generator(this, function (_m) {
-        switch (_m.label) {
-            case 0: return [4 /*yield*/, gated($, on)];
-            case 1:
-                _a = _m.sent(), list = _a.list, bash = _a.bash, held = _a.held, wake = _a.wake;
-                call = bash('d1', "".concat(ADMIN, " here 'chmod 644 /etc/hosts'"));
-                _b = expect;
-                return [4 /*yield*/, held('d1')];
-            case 2:
-                _b.apply(void 0, [_m.sent()]).toBeDefined();
-                return [4 /*yield*/, keyed(list, 'gate-d1-0-once')];
-            case 3:
-                once = (_j = (_h = (_m.sent())) === null || _h === void 0 ? void 0 : _h.key) !== null && _j !== void 0 ? _j : '';
-                return [4 /*yield*/, keyed(list, 'gate-d1-0-deny')];
-            case 4:
-                deny = (_l = (_k = (_m.sent())) === null || _k === void 0 ? void 0 : _k.key) !== null && _l !== void 0 ? _l : '';
-                return [4 /*yield*/, list.press({ key: once })];
-            case 5:
-                _m.sent();
-                _c = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: 'You allowed it. It runs now.' })];
-            case 6:
-                _c.apply(void 0, [_m.sent()]).toBeDefined();
-                return [4 /*yield*/, list.press({ key: deny }).catch(function () { return undefined; })
-                    // The second press changed nothing: the card still says what the first one did
-                ];
-            case 7:
-                _m.sent();
-                // The second press changed nothing: the card still says what the first one did
-                _d = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: 'You allowed it. It runs now.' })];
-            case 8:
-                // The second press changed nothing: the card still says what the first one did
-                _d.apply(void 0, [_m.sent()]).toBeDefined();
-                return [4 /*yield*/, list.press({ key: once }).catch(function () { return undefined; })];
-            case 9:
-                _m.sent();
-                wake();
-                return [4 /*yield*/, call];
-            case 10:
-                r = (_m.sent());
-                expect(r.deny).toBeUndefined();
-                _e = expect;
-                return [4 /*yield*/, list.findAll({ type: 'Text' })];
-            case 11:
-                _e.apply(void 0, [(_m.sent()).filter(function (t) { var _a; return /^You (allowed|denied|always)/.test(String((_a = t.text) !== null && _a !== void 0 ? _a : '')); }).length]).toBe(1);
-                _f = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: 'You allowed it. It runs now.' })];
-            case 12:
-                _f.apply(void 0, [_m.sent()]).toBeDefined();
-                _g = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: /^You denied it/ })];
-            case 13:
-                _g.apply(void 0, [_m.sent()]).toBeUndefined();
-                return [2 /*return*/];
-        }
-    });
-}); });
-test('a gate allowed but not let through says so where its green box was, never a false "allowed"', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var w, call, _a, r, _b, _c, _d;
+// 15 Nov: Allow was pressed and the amber block with its buttons stayed up to a second, until the gate's wait (a one-second
+// sleep the engine ran) read the press. Now the block goes in the press's own drawing, and the press itself ends the wait
+test("a press on a gate takes its block away in the press's own drawing and leaves one grey line of what was pressed, with no buttons left and nothing green; the held call then ends with no second let pass", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var counted, w, _loop_6, _i, _a, _b, id, command, button, question, said, ends;
     var _this = this;
+    var _c, _d;
     return __generator(this, function (_e) {
         switch (_e.label) {
-            case 0: return [4 /*yield*/, gated($, on)];
+            case 0:
+                counted = countingSleeps(on);
+                return [4 /*yield*/, gated($, counted.on)];
             case 1:
                 w = _e.sent();
-                call = w.bash('f1', "".concat(ADMIN, " here 'chmod 644 /etc/hosts'"));
-                _a = expect;
-                return [4 /*yield*/, w.held('f1')];
-            case 2:
-                _a.apply(void 0, [_e.sent()]).toBeDefined();
-                // The seal for the grant cannot be made, as a keychain that refuses: the command does not run
-                w.files.set('keychain:refused', '1');
-                return [4 /*yield*/, w.press('gate-f1-0-once')];
-            case 3:
-                _e.sent();
-                return [4 /*yield*/, call];
-            case 4:
-                r = (_e.sent());
-                expect(r.deny).toBeDefined();
-                expect(w.grants()).toEqual([]);
-                _b = expect;
-                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        return [2 /*return*/, w.list.find({ type: 'Text', text: "Claudopus couldn't use its keychain key. It didn't run, and Claudopus told Claude." })];
-                    }); }); })];
-            case 5:
-                _b.apply(void 0, [_e.sent()]).toBeDefined();
-                _c = expect;
-                return [4 /*yield*/, w.list.find({ type: 'Text', text: 'You allowed it. It runs now.' })];
-            case 6:
-                _c.apply(void 0, [_e.sent()]).toBeUndefined();
-                _d = expect;
-                return [4 /*yield*/, w.list.find({ type: 'Text', text: /^You allowed it/ })];
-            case 7:
-                _d.apply(void 0, [_e.sent()]).toBeUndefined();
-                return [2 /*return*/];
-        }
-    });
-}); });
-// Found on a second look: one Bash call with two commands to allow, the first allowed and the second refused, ran nothing yet left
-// "You allowed it once" green for the first
-test('a call refused after one of its commands was allowed says in grey that nothing in it ran, never green', SLOW, function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var w, _loop_5, _i, _a, _b, id, command, second;
-    var _this = this;
-    return __generator(this, function (_c) {
-        switch (_c.label) {
-            case 0: return [4 /*yield*/, gated($, on)];
-            case 1:
-                w = _c.sent();
                 w.files.set('git:top', '/repo/wt');
                 w.files.set('git:branch', 'fix-it');
-                _loop_5 = function (id, command, second) {
-                    var call, _d, _e, _f, _g, _h;
-                    return __generator(this, function (_j) {
-                        switch (_j.label) {
+                _loop_6 = function (id, command, button, question, said, ends) {
+                    var before, call, base, _f, _g, _h, _j, _k, _l, _m, r, _o;
+                    return __generator(this, function (_p) {
+                        switch (_p.label) {
                             case 0:
+                                before = counted.seen.sleeps;
                                 call = w.bash(id, command);
-                                _d = expect;
-                                return [4 /*yield*/, w.held(id)];
-                            case 1:
-                                _d.apply(void 0, [_j.sent()]).toBeDefined();
-                                return [4 /*yield*/, w.press("gate-".concat(id, "-0-once"))];
-                            case 2:
-                                _j.sent();
-                                _e = expect;
-                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                                        return [2 /*return*/, keyed(w.list, second)];
-                                    }); }); })];
-                            case 3:
-                                _e.apply(void 0, [_j.sent()]).toBeDefined();
-                                return [4 /*yield*/, w.press(second)];
-                            case 4:
-                                _j.sent();
+                                base = "gate-".concat(id, "-").concat(button);
                                 _f = expect;
-                                return [4 /*yield*/, call];
-                            case 5:
-                                _f.apply(void 0, [(_j.sent()).deny]).toBeDefined();
-                                expect(w.admins).toEqual([]);
-                                _g = expect;
                                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                                        return [2 /*return*/, w.list.find({ type: 'Text', text: "It didn't run: another part of the same command was denied, so none of it ran." })];
+                                        return [2 /*return*/, keyed(w.list, base)];
                                     }); }); })];
-                            case 6:
-                                _g.apply(void 0, [_j.sent()]).toBeDefined();
+                            case 1:
+                                _f.apply(void 0, [_p.sent()]).toBeDefined();
+                                _g = expect;
+                                return [4 /*yield*/, w.list.find({ type: 'Text', text: question })];
+                            case 2:
+                                _g.apply(void 0, [_p.sent()]).toBeDefined();
+                                // Pressed: the very next look at the panel has the line, with nothing left to press and nothing that still asks
+                                return [4 /*yield*/, pressed(w.list, base)];
+                            case 3:
+                                // Pressed: the very next look at the panel has the line, with nothing left to press and nothing that still asks
+                                _p.sent();
                                 _h = expect;
-                                return [4 /*yield*/, w.list.find({ type: 'Text', text: 'You allowed it. It runs now.' })];
+                                return [4 /*yield*/, w.list.find({ type: 'Text', text: said })];
+                            case 4:
+                                _h.apply(void 0, [(_c = (_p.sent())) === null || _c === void 0 ? void 0 : _c.props.dimColor]).toBe(true);
+                                _j = expect;
+                                return [4 /*yield*/, w.list.findAll({ type: 'Button' })];
+                            case 5:
+                                _j.apply(void 0, [(_p.sent()).some(function (b) { var _a; return ((_a = b.key) !== null && _a !== void 0 ? _a : '').startsWith("gate-".concat(id, "-")); })]).toBe(false);
+                                _k = expect;
+                                return [4 /*yield*/, w.list.find({ type: 'Text', text: question })];
+                            case 6:
+                                _k.apply(void 0, [_p.sent()]).toBeUndefined();
+                                _l = expect;
+                                return [4 /*yield*/, w.list.find({ type: 'Text', text: 'Permission' })];
                             case 7:
-                                _h.apply(void 0, [_j.sent()]).toBeUndefined();
+                                _l.apply(void 0, [_p.sent()]).toBeUndefined();
+                                _m = expect;
+                                return [4 /*yield*/, gateGreens(w.list)];
+                            case 8:
+                                _m.apply(void 0, [_p.sent()]).toBe(0);
+                                if (!(ends === 'held')) return [3 /*break*/, 10];
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, w.holding.get("x".concat(id, "; /plug/claudopus/bin/release"))];
+                                    }); }); })];
+                            case 9:
+                                (_d = (_p.sent())) === null || _d === void 0 ? void 0 : _d('released');
+                                _p.label = 10;
+                            case 10: return [4 /*yield*/, call];
+                            case 11:
+                                r = (_p.sent());
+                                if (ends === 'refused')
+                                    expect(r.deny).toContain('Refused by Sam');
+                                else
+                                    expect(r.deny).toBeUndefined();
+                                // One wait was in flight while it was held, and the press started no other
+                                expect(counted.seen.sleeps - before).toBe(1);
+                                // The one line of the card is of the last press alone
+                                _o = expect;
+                                return [4 /*yield*/, gateTexts(w.list)];
+                            case 12:
+                                // The one line of the card is of the last press alone
+                                _o.apply(void 0, [(_p.sent()).filter(function (one) { return one.startsWith('✓ '); })]).toEqual([said]);
                                 return [2 /*return*/];
                         }
                     });
                 };
                 _i = 0, _a = [
-                    ['m1', "".concat(ADMIN, " here 'id -u'; ").concat(ADMIN, " here 'id -g'"), 'gate-m1-1-deny'],
-                    ['m2', "".concat(ADMIN, " here 'id -u'; /plug/claudopus/bin/release"), 'gate-m2-r0-deny'],
+                    ['p1', "".concat(ADMIN, " here 'chmod 644 /etc/hosts'"), '0-once', 'Run this as admin on this Mac?', ALLOWED_LINE, 'ran'],
+                    ['p2', "".concat(ADMIN, " here 'chmod 600 /etc/hosts'"), '0-always', 'Run this as admin on this Mac?', '✓ You pressed “Always allow this command”', 'ran'],
+                    ['p3', "".concat(ADMIN, " here 'chmod 755 /etc/hosts'"), '0-deny', 'Run this as admin on this Mac?', REFUSED_LINE, 'refused'],
+                    ['p4', 'hold xp4; /plug/claudopus/bin/release', 'r0-once', 'Release fix-it to main?', ALLOWED_LINE, 'held'],
+                    ['p5', 'hold xp5; /plug/claudopus/bin/release', 'r0-deny', 'Release fix-it to main?', REFUSED_LINE, 'refused'],
                 ];
-                _c.label = 2;
+                _e.label = 2;
             case 2:
                 if (!(_i < _a.length)) return [3 /*break*/, 5];
-                _b = _a[_i], id = _b[0], command = _b[1], second = _b[2];
-                return [5 /*yield**/, _loop_5(id, command, second)];
+                _b = _a[_i], id = _b[0], command = _b[1], button = _b[2], question = _b[3], said = _b[4], ends = _b[5];
+                return [5 /*yield**/, _loop_6(id, command, button, question, said, ends)];
             case 3:
-                _c.sent();
-                _c.label = 4;
+                _e.sent();
+                _e.label = 4;
+            case 4:
+                _i++;
+                return [3 /*break*/, 2];
+            case 5:
+                w.wake();
+                return [2 /*return*/];
+        }
+    });
+}); });
+test('two presses on a gate send one answer: the first, as drawn', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, list, bash, held, wake, admins, call, _b, once, deny, _c, _d, r, _e;
+    var _f, _g, _h, _j;
+    return __generator(this, function (_k) {
+        switch (_k.label) {
+            case 0: return [4 /*yield*/, gated($, on)];
+            case 1:
+                _a = _k.sent(), list = _a.list, bash = _a.bash, held = _a.held, wake = _a.wake, admins = _a.admins;
+                call = bash('d1', "".concat(ADMIN, " here 'chmod 644 /etc/hosts'"));
+                _b = expect;
+                return [4 /*yield*/, held('d1')];
+            case 2:
+                _b.apply(void 0, [_k.sent()]).toBeDefined();
+                return [4 /*yield*/, keyed(list, 'gate-d1-0-once')];
+            case 3:
+                once = (_g = (_f = (_k.sent())) === null || _f === void 0 ? void 0 : _f.key) !== null && _g !== void 0 ? _g : '';
+                return [4 /*yield*/, keyed(list, 'gate-d1-0-deny')];
+            case 4:
+                deny = (_j = (_h = (_k.sent())) === null || _h === void 0 ? void 0 : _h.key) !== null && _j !== void 0 ? _j : '';
+                return [4 /*yield*/, list.press({ key: once })];
+            case 5:
+                _k.sent();
+                _c = expect;
+                return [4 /*yield*/, list.find({ type: 'Text', text: ALLOWED_LINE })];
+            case 6:
+                _c.apply(void 0, [_k.sent()]).toBeDefined();
+                return [4 /*yield*/, list.press({ key: deny }).catch(function () { return undefined; })
+                    // The second press changed nothing: the card still says what the first one did
+                ];
+            case 7:
+                _k.sent();
+                // The second press changed nothing: the card still says what the first one did
+                _d = expect;
+                return [4 /*yield*/, list.find({ type: 'Text', text: ALLOWED_LINE })];
+            case 8:
+                // The second press changed nothing: the card still says what the first one did
+                _d.apply(void 0, [_k.sent()]).toBeDefined();
+                return [4 /*yield*/, list.press({ key: once }).catch(function () { return undefined; })];
+            case 9:
+                _k.sent();
+                return [4 /*yield*/, call];
+            case 10:
+                r = (_k.sent());
+                expect(r.deny).toBeUndefined();
+                expect(admins.length).toBe(1);
+                _e = expect;
+                return [4 /*yield*/, gateTexts(list)];
+            case 11:
+                _e.apply(void 0, [(_k.sent()).filter(function (one) { return one.startsWith('✓ '); })]).toEqual([ALLOWED_LINE]);
+                wake();
+                return [2 /*return*/];
+        }
+    });
+}); });
+test('a gate allowed but not let through says so in its grey line, never a bare "Allow"', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var w, _loop_7, _i, _a, _b, id, command, button, said;
+    var _this = this;
+    var _c;
+    return __generator(this, function (_d) {
+        switch (_d.label) {
+            case 0: return [4 /*yield*/, gated($, on)];
+            case 1:
+                w = _d.sent();
+                w.files.set('git:top', '/repo/wt');
+                w.files.set('git:branch', 'fix-it');
+                _loop_7 = function (id, command, button, said) {
+                    var call, _e, r, _f, _g, _h;
+                    return __generator(this, function (_j) {
+                        switch (_j.label) {
+                            case 0:
+                                w.files.delete('keychain:refused');
+                                call = w.bash(id, command);
+                                _e = expect;
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, keyed(w.list, button)];
+                                    }); }); })];
+                            case 1:
+                                _e.apply(void 0, [_j.sent()]).toBeDefined();
+                                w.files.set('keychain:refused', '1');
+                                return [4 /*yield*/, w.press(button)];
+                            case 2:
+                                _j.sent();
+                                return [4 /*yield*/, call];
+                            case 3:
+                                r = (_j.sent());
+                                expect(r.deny).toContain('could not secure what was allowed');
+                                expect(w.grants()).toEqual([]);
+                                expect(w.admins).toEqual([]);
+                                _f = expect;
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, w.list.find({ type: 'Text', text: said })];
+                                    }); }); })];
+                            case 4:
+                                _f.apply(void 0, [(_c = (_j.sent())) === null || _c === void 0 ? void 0 : _c.props.dimColor]).toBe(true);
+                                // (the line whole: nothing on the card says only that it was allowed)
+                                _g = expect;
+                                return [4 /*yield*/, gateTexts(w.list)];
+                            case 5:
+                                // (the line whole: nothing on the card says only that it was allowed)
+                                _g.apply(void 0, [(_j.sent()).filter(function (one) { return one.startsWith('✓ '); })]).toEqual([said]);
+                                _h = expect;
+                                return [4 /*yield*/, gateGreens(w.list)];
+                            case 6:
+                                _h.apply(void 0, [_j.sent()]).toBe(0);
+                                return [2 /*return*/];
+                        }
+                    });
+                };
+                _i = 0, _a = [
+                    ['f1', "".concat(ADMIN, " here 'chmod 644 /etc/hosts'"), 'gate-f1-0-once', "✓ You pressed “Allow” · the keychain key couldn't be used, so it didn't run"],
+                    ['f2', '/plug/claudopus/bin/release', 'gate-f2-r0-once', "✓ You pressed “Allow” · the keychain key couldn't be used, so nothing was released"],
+                ];
+                _d.label = 2;
+            case 2:
+                if (!(_i < _a.length)) return [3 /*break*/, 5];
+                _b = _a[_i], id = _b[0], command = _b[1], button = _b[2], said = _b[3];
+                return [5 /*yield**/, _loop_7(id, command, button, said)];
+            case 3:
+                _d.sent();
+                _d.label = 4;
             case 4:
                 _i++;
                 return [3 /*break*/, 2];

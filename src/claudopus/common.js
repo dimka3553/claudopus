@@ -127,7 +127,7 @@ var FILL = '#80808024';
 // A card's outline. The app rounds the corners of every border it draws, and a card's edge of to-dos is square and stuck out past
 // them, so the outline is four thin filled strips round the card instead, whose corners are square. It takes no room of the card's
 // own beyond the strips; with no colour the card is drawn as it is
-var OUTLINE = 0.15;
+var OUTLINE = 0.1;
 var squareOutline = function (Box, color, key, card) {
     return color ? (<Box key={"outline-".concat(key)} flexDirection="column" flexShrink={0}>
       <Box key="outline-top" height={OUTLINE} flexShrink={0} backgroundColor={color}/>
@@ -219,7 +219,7 @@ var changeTodos = function ($, fn) { return __awaiter(_this, void 0, void 0, fun
             case 1:
                 now = _a.sent();
                 before = JSON.stringify(now);
-                hold = function (list) { return holdDone(list, fn(list)); };
+                hold = function (list) { return saidKept(list, holdDone(list, fn(list))); };
                 next = hold(now);
                 if (JSON.stringify(next) === before)
                     return [2 /*return*/, now];
