@@ -29,6 +29,8 @@ const gateWaits = new Map<string, (said: GateSaid | 'gone' | 'words') => void>()
 const gateParked = new Map<string, string>()
 // What the person last typed on each gate, for the task's answer to the call it held
 const gateWords = new Map<string, string>()
+// and the files that went with them, said to the task after its answer
+const gateNotes = new Map<string, string>()
 // What a press on a parked gate allows: that card's next run of the very same admin command or change to a file, once, within
 // RELEASE_ALLOWED of the press (a release goes through releaseAllowed). Taken out as the card ends (state.tsx)
 const gateOnce = new Map<string, { kind: 'admin' | 'file'; host: string; command: string; at: number }[]>()
@@ -54,10 +56,10 @@ const GATE_DENIED = (gate?: Pick<Gate, 'kind'>) =>
   named(`Refused by {name}: {name} pressed Don't allow on this ${gate?.kind === 'release' ? "release, so nothing was released. Don't try to release it another way" : gate?.kind === 'file' ? "change, so the file was not changed. Don't try to change it another way" : "admin command, so it didn't run. Don't try to run it another way"}. Continue without it, or say what it is needed for and ask again.`)
 const gateNoun = (gate?: Pick<Gate, 'kind'>) => (gate?.kind === 'release' ? 'release' : gate?.kind === 'file' ? 'change to their file' : 'admin command')
 // The held call's answer when the person wrote instead of pressing, and the words they write after: the permission stays on the card
-const GATE_WORDS = (gate: Pick<Gate, 'kind'>, words: string) =>
-  named(
+const GATE_WORDS = (gate: Pick<Gate, 'kind'>, words: string, note = '') =>
+  `${named(
     `This ${gateNoun(gate)} did not run yet: {name} neither allowed nor refused it, and wrote to you about it instead, in their own words: “${words}”\nAnswer them with the \`ask\` tool: your answer in \`text\` (one plain line) and \`details\` (what it does and why, in everyday words), with no \`choices\`. Claudopus shows it inside the permission on your card, under their words, where Allow and Don't allow stay until {name} presses one. Typed words never allow anything. Don't run it again until then: when {name} presses Allow, Claudopus tells you, and your next run of exactly the same ${gate.kind === 'file' ? 'change' : 'command'} goes through once, with nothing more asked. With nothing else to do, end your step.`,
-  )
+  )}${note}`
 const GATE_WORDS_AGAIN = (gate: Gate, words: string) =>
   named(`{name} wrote to you again about the ${gateNoun(gate)} that waits on your card (${gateWhat(gate)}), in their own words: “${words}”\nAnswer them with the \`ask\` tool as before, with no \`choices\`: Claudopus shows it inside that permission, which stays until {name} presses Allow or Don't allow.`)
 const GATE_ALLOWED_LATER = (gate: Gate) =>
@@ -374,7 +376,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') =
 
 // Words typed on a gate of a task's card (Answer in words): kept on its block, and to the task. A call still held ends with them,
 // so the task can answer; one already ended that way hears them as a message. Never a press: the block keeps Allow and Don't allow
-const wordsOnGate = ($: EngineInterface, card: string, id: string, value: string) => {
+const wordsOnGate = ($: EngineInterface, card: string, id: string, value: string, note = '') => {
   const run = (async () => {
     const words = value.trim()
     const one = (await read($, todos)).find(other => other.id === card)
@@ -383,10 +385,11 @@ const wordsOnGate = ($: EngineInterface, card: string, id: string, value: string
     presses += 1
     await setGates($, card, list => list.map(other => (other.id === id ? { ...other, talk: [...(other.talk ?? []), { by: 'you' as const, text: cut(words, ASK_DETAILS) }].slice(-PERMIT_TALK_KEPT) } : other)))
     gateWords.set(id, words)
+    gateNotes.set(id, note)
     pressedLine($, card, '', '', `You answered “${cut(oneLine(words), 80)}”`)
     const end = gateWaits.get(id)
     if (gateHeld.has(id) && end) return end('words')
-    if (gateParked.has(id)) await toTask($, card, gate.from ?? card, GATE_WORDS_AGAIN(gate, words), words, gateWhat(gate))
+    if (gateParked.has(id)) await toTask($, card, gate.from ?? card, `${GATE_WORDS_AGAIN(gate, words)}${note}`, words, gateWhat(gate))
   })()
   answersOnWay.add(run)
   void run.finally(() => answersOnWay.delete(run)).catch(err => log($, `words on a permission not sent: ${String(err)}`))
@@ -419,6 +422,7 @@ const answerParked = ($: EngineInterface, gate: Gate, said: GateSaid, card: stri
     }
     gateParked.delete(id)
     gateWords.delete(id)
+    gateNotes.delete(id)
     await setGates($, card, list => list.filter(one => one.id !== id))
     await log($, `${gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on'} ${gate.host}: ${said === 'deny' ? 'not allowed' : 'allowed once'} after words`)
     await toTask($, card, gate.from ?? card, said === 'deny' ? GATE_DENIED(gate) : GATE_ALLOWED_LATER(gate), gateLabel(said), gateWhat(gate))
@@ -449,7 +453,7 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
       const said = await holdGate($, next, { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}), ...(isWork ? { isWork: true } : {}) }, card ? top : '')
       if (said !== 'once' && said !== 'always') {
         await dropGrants($, grants)
-        return { deny: said === 'deny' ? GATE_DENIED() : said === 'words' ? GATE_WORDS({}, gateWords.get(`${e.tool_use_id}-${n}`) ?? '') : said === 'late' ? GATE_LATE() : said === 'blind' ? GATE_BLIND() : GATE_GONE(), grants: [] }
+        return { deny: said === 'deny' ? GATE_DENIED() : said === 'words' ? GATE_WORDS({}, gateWords.get(`${e.tool_use_id}-${n}`) ?? '', gateNotes.get(`${e.tool_use_id}-${n}`)) : said === 'late' ? GATE_LATE() : said === 'blind' ? GATE_BLIND() : GATE_GONE(), grants: [] }
       }
       if (said === 'always')
         await allowAlways($, call).catch(async err => {
@@ -579,7 +583,7 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
     if (said !== 'once') {
       await dropGrants($, grants)
       const gate = { kind: 'release' as const }
-      return { deny: said === 'deny' ? GATE_DENIED(gate) : said === 'words' ? GATE_WORDS(gate, gateWords.get(id) ?? '') : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate), grants: [] }
+      return { deny: said === 'deny' ? GATE_DENIED(gate) : said === 'words' ? GATE_WORDS(gate, gateWords.get(id) ?? '', gateNotes.get(id)) : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate), grants: [] }
     }
     const grant = await issueGrant($, id, { host: 'release', command: `${repo}\n${branch}` }, 'release-grant')
     if (!grant) {
@@ -627,7 +631,7 @@ const gateOwnFile = async ($: EngineInterface, e: ToolCallInput, next: { signal?
   if (card && (await takeOnce($, top, 'file', file, cut(change, 2000)))) return ''
   const said = await holdGate($, next, { id: `${e.tool_use_id}-f`, call: e.tool_use_id, kind: 'file', host: file, command: cut(change, 2000), at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
   const gate = { kind: 'file' as const }
-  return said === 'once' ? '' : said === 'deny' ? GATE_DENIED(gate) : said === 'words' ? GATE_WORDS(gate, gateWords.get(`${e.tool_use_id}-f`) ?? '') : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate)
+  return said === 'once' ? '' : said === 'deny' ? GATE_DENIED(gate) : said === 'words' ? GATE_WORDS(gate, gateWords.get(`${e.tool_use_id}-f`) ?? '', gateNotes.get(`${e.tool_use_id}-f`)) : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate)
 }
 
 // What a command did to them: a command can write the person's own settings and texts, and the commands always allowed, in ways no

@@ -48,7 +48,7 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
 // barKeyTyped while the box is open, for its Send button. `said`: what went wrong with what was last sent from it
 // `message`: the task a message goes to, whose box has the message's own row under it (messageFoot): its files, Attach, Send now
 // and Send, as at the bottom of its Details
-type BarBox = { head: string; placeholder: string; draft?: string; secret?: string; said?: string; extra?: JSX.Element | null; message?: Todo; send: (value: string) => void }
+type BarBox = { head: string; placeholder: string; draft?: string; secret?: string; said?: string; extra?: JSX.Element | null; message?: Todo; attachTo?: string; send: (value: string) => void }
 // The card the box was opened on by Message, while it works or has finished and asks nothing: asking, its box goes
 const changeTarget = (cards: Todo[]) => (barOpen?.kind === 'change' ? cards.find(one => one.id === barOpen?.id && canChange(asPressed(one))) : undefined)
 // What the open box is for, as it stands now; none once that is answered, gone or no longer open to it, and the box goes with it
@@ -62,7 +62,7 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
   }
   if (open.kind === 'answer') {
     const one = barTarget(cards)
-    return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), send: value => void (sent(one.id), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`))) }
+    return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), attachTo: one.id, send: value => void (sent(one.id), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`))) }
   }
   if (open.kind === 'change') {
     const one = changeTarget(cards)
@@ -71,11 +71,20 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
   // Words on a permission of a task's card: they go to that task, and the block keeps Allow and Don't allow (gate.tsx, wordsOnGate)
   if (open.kind === 'permission') {
     const one = gatePressed.has(open.id) || !(gateHeld.has(open.id) || gateParked.has(open.id)) ? undefined : cards.find(card => !card.chat && card.admins?.some(gate => gate.id === open.id))
-    return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), send: value => void (value.trim() && ((barBoxAt = 0), drafts.delete(barDraft()), keepDraft($, barDraft(), undefined), replies.set(open.id, (replies.get(open.id) ?? 0) + 1), (barOpen = undefined), freeTimes($), redraw($), wordsOnGate($, one.id, open.id, value))) }
+    // (its files go with the words, as from the box that answers a question)
+    const sendWords = (value: string) => {
+      if (!one) return
+      const files = takeAttached(open.id)
+      const shown = [value.trim(), ...files.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join(' ')
+      if (!shown) return
+      ;((barBoxAt = 0), drafts.delete(barDraft()), keepDraft($, barDraft(), undefined), replies.set(open.id, (replies.get(open.id) ?? 0) + 1), (barOpen = undefined), freeTimes($), redraw($))
+      void wordsOnGate($, one.id, open.id, shown, filesNote(files))
+    }
+    return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), attachTo: open.id, send: sendWords }
   }
   if (open.kind === 'continue') {
     const r = kept.find(one => one.id === open.id)
-    return r && { head: `↳ Message to “${cut(r.title, 50)}”`, placeholder: 'Type your message', draft: barDraft(), send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))) }
+    return r && { head: `↳ Message to “${cut(r.title, 50)}”`, placeholder: 'Type your message', draft: barDraft(), attachTo: r.id, send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value, takeAttached(r.id)).catch(err => log($, `message from a result not sent: ${String(err)}`))) }
   }
   const box = boxes.find(one => one.id === open.id)
   if (!box) return undefined
@@ -100,7 +109,8 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
 }
 const barBox = ($: EngineInterface, ui: Ui, box: BarBox) => {
   const typed = () => (box.draft ? (drafts.get(box.draft) ?? '') : box.secret ? (barKeyTyped.get(box.secret) ?? '') : '')
-  const send = (value: string) => void (value.trim() && box.send(value))
+  // (pictures or files attached are an answer by themselves, with no words)
+  const send = (value: string) => void ((value.trim() || (box.attachTo && attached.get(box.attachTo)?.length)) && box.send(value))
   return (
     <ui.Box key="band-box" flexDirection="column" flexShrink={0} width="100%">
       <ui.Box flexDirection="row" height={1} overflow="hidden">
@@ -132,7 +142,9 @@ const barBox = ($: EngineInterface, ui: Ui, box: BarBox) => {
           {messageFoot($, ui, box.message, 'band-box', <ui.Button key={`band-box-close-${presses}-${boxPresses}`} label="Close" plain dimColor onPress={press => openBar($, undefined, press.surface)} />)}
         </ui.Box>
       ) : null}
+      {box.attachTo && !box.message ? <ui.Box key="band-box-attached" flexShrink={0} marginTop={1} width="100%">{attachedRow($, ui, box.attachTo, 'band-box')}</ui.Box> : null}
       {box.message ? null : <ui.Box key="band-box-foot" flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
+        {box.attachTo ? <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>{attachButtons($, ui, box.attachTo, 'band-box')}</ui.Box> : null}
         <ui.Box flexGrow={1} flexShrink={1} minWidth={0} />
         <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
           <ui.Button key={`band-box-send-${presses}-${boxPresses}`} label="Send" variant="primary" onPress={() => send(typed())} />
@@ -153,7 +165,7 @@ const barBox = ($: EngineInterface, ui: Ui, box: BarBox) => {
 // written. The cards are looked at once a second instead (lookBar), and the bar is drawn again when what it shows of them moved
 const barHeld = new Map<string, { shape: string; mark: string; drawing: unknown }>()
 // What a bar with a box open is drawn for, from the mod's own memory alone: which box, and what is said beside it
-const barShape = () => (barOpen ? `${barOpen.kind}|${barBoxKey()}|${JSON.stringify(attached.get(barOpen.id) ?? [])}|${isBoxKind(barOpen.kind) ? `${boxSaid.get(barOpen.id) ?? ''}|${boxHeldReply.has(barOpen.id)}` : barCardsDrawn}` : '')
+const barShape = () => (barOpen ? `${barOpen.kind}|${barBoxKey()}|${attachShape(barOpen.id)}|${isBoxKind(barOpen.kind) ? `${boxSaid.get(barOpen.id) ?? ''}|${boxHeldReply.has(barOpen.id)}` : barCardsDrawn}` : '')
 // What the cards say of the box open in the bar as last looked at: its card, still asking or still done, under its title. Part
 // of the held shape, so a card that stops asking (answered elsewhere, its question withdrawn, the task stopped) takes its box
 // away within a second

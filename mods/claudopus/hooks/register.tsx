@@ -2292,18 +2292,18 @@ const welcomeCard = ($: EngineInterface, ui: Ui) => (
 
 
 const CONTINUE_FROM = (r: Report, now: number, words: string) => `Continue from the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: ${words}`
-const continueFrom = ($: EngineInterface, id: string, words: string) => {
-  const run = continueNow($, id, words)
+const continueFrom = ($: EngineInterface, id: string, words: string, files: string[] = []) => {
+  const run = continueNow($, id, words, files)
   answersOnWay.add(run)
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
   return run
 }
-const continueNow = async ($: EngineInterface, id: string, words: string): Promise<void> => {
+const continueNow = async ($: EngineInterface, id: string, words: string, files: string[] = []): Promise<void> => {
   const r = (await read($, reports)).find(one => one.id === id)
-  if (!r || !words.trim()) return
+  if (!r || (!words.trim() && !files.length)) return
   const card = r.agent ? (await read($, todos)).find(one => one.id === r.agent && canChange(one)) : undefined
-  if (card) return changeTask($, card.id, words.trim())
-  await sendForPerson($, CONTINUE_FROM(r, await $.clock.now(), words.trim()))
+  if (card) return changeTask($, card.id, words.trim(), files)
+  await sendForPerson($, `${CONTINUE_FROM(r, await $.clock.now(), words.trim() || '(no words, only the files below)')}${filesNote(files)}`)
 }
 
 const REPORTS_PANE = 'reports'
@@ -3729,8 +3729,8 @@ const askPicturesOf = ($: EngineInterface, one: Todo): Pic[] | undefined => {
 
 
 const MADE_KINDS: { kind: MadeKind; test: RegExp; one: string; many: string; badge: string; color: string }[] = [
-  { kind: 'picture', test: /\.(png|jpe?g|gif|webp|svg|heic)$/i, one: 'picture', many: 'pictures', badge: 'IMG', color: '#3A78C9' },
-  { kind: 'video', test: /\.(mp4|mov|webm|m4v)$/i, one: 'video', many: 'videos', badge: 'VID', color: '#8B5CF6' },
+  { kind: 'picture', test: /\.(png|jpe?g|gif|webp|svg|heic|heif|tiff?|bmp)$/i, one: 'picture', many: 'pictures', badge: 'IMG', color: '#3A78C9' },
+  { kind: 'video', test: /\.(mp4|mov|webm|m4v|mkv|avi)$/i, one: 'video', many: 'videos', badge: 'VID', color: '#8B5CF6' },
   { kind: 'pdf', test: /\.pdf$/i, one: 'PDF', many: 'PDFs', badge: 'PDF', color: '#D0473E' },
   { kind: 'sheet', test: /\.(xlsx?|csv|numbers)$/i, one: 'spreadsheet', many: 'spreadsheets', badge: 'XLS', color: '#23955A' },
   { kind: 'doc', test: /\.(docx?|pages|pptx?|key|md|txt|html?)$/i, one: 'document', many: 'documents', badge: 'DOC', color: '#6B6A65' },
@@ -3997,7 +3997,7 @@ const pageIcon = (badge: string, color: string) =>
 const LINK_ICON = '<rect x="2.5" y="4.5" width="23" height="23" rx="5" fill="#3b3b39" stroke="#9a9890" stroke-width="1.2"/><path d="M11 13.5h-1.5a3.5 3.5 0 0 0 0 7H11M17 13.5h1.5a3.5 3.5 0 0 1 0 7H17M11.5 17h5" fill="none" stroke="#C9A7FF" stroke-width="1.6" stroke-linecap="round"/>'
 const CODE_ICON = '<circle cx="9" cy="8" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="9" cy="24" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><circle cx="19" cy="12" r="2.6" fill="none" stroke="#9a9890" stroke-width="1.5"/><path d="M9 10.6v10.8M19 14.6c0 4-10 3-10 6.8" fill="none" stroke="#9a9890" stroke-width="1.5"/>'
 const endingOf = (path = '') => (/\.([a-z0-9]{1,4})$/i.exec(path)?.[1] ?? '').toUpperCase()
-const ENDING_COLORS: Record<string, string> = { TS: '#3178C6', TSX: '#3178C6', JS: '#B8A11E', JSX: '#B8A11E', MJS: '#B8A11E', PY: '#3572A5', SH: '#4E9A2A', JSON: '#8A7A2E', CSS: '#663399', HTML: '#D24E2B', MD: '#6B6A65', SWIFT: '#E0583A', GO: '#00879A', RS: '#B7410E', RB: '#B22222', C: '#555BA8', H: '#555BA8', CPP: '#555BA8' }
+const ENDING_COLORS: Record<string, string> = { TS: '#3178C6', TSX: '#3178C6', JS: '#B8A11E', JSX: '#B8A11E', MJS: '#B8A11E', PY: '#3572A5', SH: '#4E9A2A', JSON: '#8A7A2E', CSS: '#663399', HTML: '#D24E2B', MD: '#6B6A65', SWIFT: '#E0583A', GO: '#00879A', RS: '#B7410E', RB: '#B22222', C: '#555BA8', H: '#555BA8', CPP: '#555BA8', ZIP: '#8A6D3B', MP3: '#C2416B', WAV: '#C2416B', M4A: '#C2416B' }
 const iconOf = (kind: MadeKind | 'code', path?: string) =>
   kind === 'code' ? CODE_ICON : kind === 'link' ? LINK_ICON : pageIcon(kind === 'file' ? endingOf(path) : madeKindOf(kind).badge, kind === 'file' ? (ENDING_COLORS[endingOf(path)] ?? madeKindOf(kind).color) : madeKindOf(kind).color)
 const svgOfIcon = (kind: MadeKind | 'code', width: number, height: number, path?: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 28 32">${iconOf(kind, path)}</svg>`
@@ -5660,7 +5660,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], barOpen?.kind ?? '', barOpen?.id ?? '', barOpen?.mark ?? '', [...attached], [...replies]])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], barOpen?.kind ?? '', barOpen?.id ?? '', barOpen?.mark ?? '', [...attached], [...attachSaid], [...replies]])
 }
 const calmCard = (one: Todo) => {
   const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, ...rest } = one as Todo & Record<string, unknown>
@@ -5815,8 +5815,8 @@ const actingOn = new Map<string, string>()
 const answeredAsks = new Set<string>()
 const answeredAt = new Map<string, number>()
 const answersOnWay = new Set<Promise<unknown>>()
-const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
-  const run = answerNow($, one, choice, isReply)
+const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = false, picked: string[] = [], files: string[] = picked) => {
+  const run = answerNow($, one, choice, isReply, picked, files)
   if (one.chat) return run
   answersOnWay.add(run)
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
@@ -5895,9 +5895,11 @@ const openBar = ($: EngineInterface, to: { kind: BarKind; id: string; one?: Todo
     .catch(err => recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }))
 }
 const sendFromBar = ($: EngineInterface, id: string, value: string) => {
+  const picked = takeAttached(id)
   const run = (async () => {
     const one = (await read($, todos)).find(card => card.id === id)
-    if (one?.ask && value.trim()) await answerAsk($, one, value, true)
+    const files = [...new Set([...picked, ...(await pathsIn($, value))])]
+    if (one?.ask && (value.trim() || files.length)) await answerAsk($, one, value, true, picked, files)
   })()
   answersOnWay.add(run)
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
@@ -5905,8 +5907,7 @@ const sendFromBar = ($: EngineInterface, id: string, value: string) => {
 }
 const canChange = (one: Todo) => !one.chat && !one.parentId && (one.status === 'working' || one.status === 'done' || one.status === 'failed') && !isHeld(one) && !needsPerson(one)
 const sendChange = ($: EngineInterface, id: string, value: string, isNow = false) => {
-  const files = attached.get(id) ?? []
-  attached.delete(id)
+  const files = takeAttached(id)
   const run = changeTask($, id, value.trim(), files, isNow)
   answersOnWay.add(run)
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
@@ -5914,6 +5915,60 @@ const sendChange = ($: EngineInterface, id: string, value: string, isNow = false
 }
 const attached = new Map<string, string[]>()
 const ATTACH_MOST = 20
+const takeAttached = (id: string) => {
+  const files = attached.get(id) ?? []
+  attached.delete(id)
+  attachSaid.delete(id)
+  return files
+}
+const attachSaid = new Map<string, string>()
+const NOTHING_TO_PASTE = "There's nothing to paste. Copy a picture or a file first, then press Paste."
+const attachedDir = () => `${dir}/attached`
+const attachedMade = (path: string): Made => ({ path, name: fileName(path), kind: madeKind(path).kind })
+const attachedFace = (path: string) => faces.get(faceKey(attachedMade(path))) ?? undefined
+const attachShape = (id: string) => JSON.stringify([attached.get(id) ?? [], (attached.get(id) ?? []).map(path => Boolean(attachedFace(path))), attachSaid.get(id) ?? ''])
+const addAttached = async ($: EngineInterface, id: string, picked: string[]) => {
+  attached.set(id, [...new Set([...(attached.get(id) ?? []), ...picked])].slice(0, ATTACH_MOST))
+  attachSaid.delete(id)
+  ;((presses += 1), (boxPresses += 1), drawAgain($, true))
+  const missing = picked.map(attachedMade).filter(one => !faces.has(faceKey(one)) && !facesLoading.has(faceKey(one)))
+  if (!missing.length) return
+  for (const one of missing) {
+    facesLoading.add(faceKey(one))
+    const face = await makeFace($, one).catch(err => (log($, `small copy of an attached file not made: ${String(err)}`), null))
+    faces.set(faceKey(one), face)
+    facesMade += 1
+    facesLoading.delete(faceKey(one))
+  }
+  ;((presses += 1), (boxPresses += 1), drawAgain($, true))
+}
+const PASTE_MAC = `ObjC.import('AppKit')
+function run(argv) {
+  const pb = $.NSPasteboard.generalPasteboard
+  const out = []
+  const urls = pb.readObjectsForClassesOptions($([$.NSURL]), $({ NSPasteboardURLReadingFileURLsOnlyKey: true }))
+  if (!urls.isNil()) for (let i = 0; i < urls.count; i++) out.push(urls.objectAtIndex(i).path.js)
+  if (out.length) return out.join('\\n')
+  let data = pb.dataForType($.NSPasteboardTypePNG)
+  if (data.isNil()) {
+    const tiff = pb.dataForType($.NSPasteboardTypeTIFF)
+    if (!tiff.isNil()) data = $.NSBitmapImageRep.imageRepWithData(tiff).representationUsingTypeProperties(4, $({}))
+  }
+  if (data.isNil()) return ''
+  return data.writeToFileAtomically(argv[0], true) ? argv[0] : ''
+}`
+const PASTE_LINUX = 'xclip -selection clipboard -t image/png -o > "$1" 2>/dev/null && [ -s "$1" ] && echo "$1"'
+const pastePicture = async ($: EngineInterface, id: string) => {
+  if (!canAttach()) return
+  await $.process.run(['mkdir', '-p', attachedDir()])
+  const at = new Date(await $.clock.now())
+  const to = `${attachedDir()}/pasted-${at.getDate()}-${MONTHS[at.getMonth()]}-${[at.getHours(), at.getMinutes(), at.getSeconds()].map(n => String(n).padStart(2, '0')).join('.')}.png`
+  const r = await $.process.run(isLinux ? ['sh', '-c', PASTE_LINUX, 'sh', to] : ['osascript', '-l', 'JavaScript', '-e', PASTE_MAC, to], { timeoutMs: 15_000 }).catch(err => (log($, `clipboard not read: ${String(err)}`), undefined))
+  const got = (r?.exitCode === 0 ? r.stdout : '').split('\n').map(line => line.trim()).filter(line => line.startsWith('/'))
+  if (got.length) return addAttached($, id, got)
+  attachSaid.set(id, NOTHING_TO_PASTE)
+  ;((presses += 1), (boxPresses += 1), drawAgain($, true))
+}
 const canAttach = () => !isRunFromAfar
 const PICK_MAC = ['osascript', '-e', 'activate', '-e', 'set picked to choose file with prompt "Attach files" with multiple selections allowed', '-e', 'set out to ""', '-e', 'repeat with f in picked', '-e', 'set out to out & POSIX path of f & linefeed', '-e', 'end repeat', '-e', 'return out']
 const PICK_LINUX = ['zenity', '--file-selection', '--multiple', '--separator=\n', '--title=Attach files']
@@ -5923,8 +5978,7 @@ const pickFiles = async ($: EngineInterface, id: string) => {
   if (!r || r.exitCode !== 0) return
   const picked = r.stdout.split('\n').map(line => line.trim()).filter(line => line.startsWith('/'))
   if (!picked.length) return
-  attached.set(id, [...new Set([...(attached.get(id) ?? []), ...picked])].slice(0, ATTACH_MOST))
-  ;((presses += 1), (boxPresses += 1), drawAgain($, true))
+  await addAttached($, id, picked)
 }
 const unattach = ($: EngineInterface, id: string, path: string) => {
   const left = (attached.get(id) ?? []).filter(one => one !== path)
@@ -5945,22 +5999,61 @@ const sendMessageFrom = ($: EngineInterface, id: string, value: string, isNow: b
   redraw($)
   void sendChange($, id, value, isNow).catch(err => log($, `message not sent: ${String(err)}`))
 }
+const ATTACH_COLUMNS = 14
+const attachedRow = ($: EngineInterface, ui: Ui, id: string, key: string) => {
+  const files = attached.get(id) ?? []
+  const said = attachSaid.get(id)
+  if (!files.length && !said) return null
+  const canDraw = 'Svg' in ui && !('isTerminal' in ui)
+  let chars = 0
+  const faceOf = (path: string) => {
+    const face = attachedFace(path)
+    if (!face || chars + face.base64.length > TILE_CHARS) return undefined
+    chars += face.base64.length
+    return face
+  }
+  return (
+    <ui.Box key={`${key}-files`} flexDirection="column" gap={1} width="100%">
+      {files.length ? (
+        <ui.Box flexDirection="row" flexWrap="wrap" columnGap={1} rowGap={1}>
+          {files.map((path, n) => {
+            const one = attachedMade(path)
+            const remove = () => unattach($, id, path)
+            if (!canDraw || !('Svg' in ui)) return <ui.Button key={`${key}-file-${n}-remove-${presses}`} label={`📎 ${cut(one.name, 40)} ✕`} plain dimColor onPress={remove} />
+            const row = `${key}-file-${n}`
+            return (
+              <ui.Box key={row} flexDirection="column" alignItems="flex-start" width={ATTACH_COLUMNS} flexShrink={0}>
+                <ui.Svg key={`${row}-svg`} source={oneTile(one, faceOf(path))} alt={`${madeKindOf(one.kind).one.replace(/^\w/, c => c.toUpperCase())}: ${one.name}`} width={TILE_SHOWN_W} height={TILE_SHOWN_H} />
+                <ui.Box flexDirection="row" alignItems="center" width="100%">
+                  <ui.Button key={`${row}-open-${presses}`} label={middleCut(one.name, ATTACH_COLUMNS - 2)} plain onPress={press => void ((presses += 1), openMade($, one, '', row, press.surface).catch(err => log($, `attached file not opened: ${String(err)}`)))} />
+                  <ui.Button key={`${row}-remove-${presses}`} label="✕" plain dimColor onPress={remove} />
+                </ui.Box>
+              </ui.Box>
+            )
+          })}
+        </ui.Box>
+      ) : null}
+      {said ? <ui.Text key={`${key}-files-said`} color={NEEDS} wrap="wrap">{said}</ui.Text> : null}
+    </ui.Box>
+  )
+}
+const attachButtons = ($: EngineInterface, ui: Ui, id: string, key: string) =>
+  canAttach()
+    ? [
+        <ui.Button key={`${key}-attach-${presses}-${boxPresses}`} label="Attach" plain onPress={() => void pickFiles($, id).catch(err => log($, `files not picked: ${String(err)}`))} />,
+        <ui.Button key={`${key}-paste-${presses}-${boxPresses}`} label={PASTE} plain onPress={() => void pastePicture($, id).catch(err => log($, `nothing pasted: ${String(err)}`))} />,
+      ]
+    : null
+const PASTE = 'Paste'
 const SEND_NOW = 'Stop and send'
 const messageFoot = ($: EngineInterface, ui: Ui, one: Todo, key: string, close: JSX.Element | null = null) => {
-  const files = attached.get(one.id) ?? []
   const typed = () => drafts.get(messageDraft(one.id)) ?? ''
   const isMidStep = one.status === 'working'
   return (
     <ui.Box key={`${key}-foot`} flexDirection="column" flexShrink={0} gap={1} width="100%">
-      {files.length ? (
-        <ui.Box key={`${key}-files`} flexDirection="row" flexWrap="wrap" columnGap={2}>
-          {files.map((path, n) => (
-            <ui.Button key={`${key}-file-${n}-${presses}`} label={`📎 ${cut(path.split('/').pop() ?? path, 40)} ✕`} plain dimColor onPress={() => unattach($, one.id, path)} />
-          ))}
-        </ui.Box>
-      ) : null}
+      {attachedRow($, ui, one.id, key)}
       <ui.Box flexDirection="row" alignItems="center" flexWrap="wrap" gap={1}>
-        {canAttach() ? <ui.Button key={`${key}-attach-${presses}-${boxPresses}`} label="Attach" plain onPress={() => void pickFiles($, one.id).catch(err => log($, `files not picked: ${String(err)}`))} /> : null}
+        {attachButtons($, ui, one.id, key)}
         {/* The sends keep together at the right, on the next line when the pane is narrow */}
         <ui.Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} justifyContent="flex-end">
           {isMidStep ? <ui.Button key={`${key}-now-${presses}-${boxPresses}`} label={SEND_NOW} onPress={() => sendMessageFrom($, one.id, typed(), true)} /> : null}
@@ -5977,7 +6070,7 @@ const isPaneBox = (element: string | undefined) => /^details-.*-reply-/.test(ele
 const paneBoxKey = (id: string) => `details-${id}-reply-change-${replies.get(id) ?? 0}`
 const isPaneBoxHeld = (paneId: string, at: number) => paneBoxIn === paneId && paneBoxAt > 0 && at - paneBoxAt < BAR_BOX_HELD
 const paneBoxHeld = new Map<string, { id: string; shape: string; drawing: unknown }>()
-const paneBoxShape = (id: string) => JSON.stringify([paneBoxKey(id), attached.get(id) ?? [], presses, boxPresses])
+const paneBoxShape = (id: string) => JSON.stringify([paneBoxKey(id), attachShape(id), presses, boxPresses])
 const messageBox = ($: EngineInterface, ui: Ui, one: Todo, paneId: string) => (
   <ui.Box key={`message-${one.id}`} flexDirection="column" gap={1} flexShrink={0}>
     {'Input' in ui ? (
@@ -6073,13 +6166,15 @@ const changeTask = async ($: EngineInterface, id: string, said: string, picked: 
   else await toEnded($, card, id, text, sent)
   await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(shown, 120)}”`)))
 }
-const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
+const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false, picked: string[] = [], files: string[] = picked) => {
   if (one.chat) return
   const ask = one.ask
-  const said = choice.trim()
+  const words = choice.trim()
+  const said = [words, ...picked.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join(' ')
+  const note = isReply ? filesNote(files) : ''
   if (!ask || !said) return
   const target = ask.from ?? one.id
-  if (!settles(ask, said, isReply)) return holdAsk($, one, ask, said, target)
+  if (!settles(ask, words, isReply)) return holdAsk($, one, ask, said, target, note)
   const asked = `${one.id}:${ask.at}:${ask.text}`
   if (answeredAsks.has(asked)) return
   answeredAsks.add(asked)
@@ -6100,7 +6195,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
     )
     if (askPressed.get(one.id) === mark) askPressed.delete(one.id)
     if (!isCleared) return void (sentReplies.get(one.id)?.to === 'sending' && sentReplies.delete(one.id), redraw($))
-    await answerCleared($, one, ask, said, isReply, target, at, line)
+    await answerCleared($, one, ask, said, isReply, target, at, line, note)
   } catch (err) {
     if (askPressed.get(one.id) === mark) askPressed.delete(one.id)
     answeredAsks.delete(asked)
@@ -6113,7 +6208,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
     throw err
   }
 }
-const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, isReply: boolean, target: string, at: number, line: string) => {
+const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, isReply: boolean, target: string, at: number, line: string, note = '') => {
   answeredAt.set(one.id, ask.at)
   dropDrafts($, one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
@@ -6128,9 +6223,9 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   const to = ask.refused
     ? isRun && run
       ? await startRun($, one, run)
-      : REFUSAL_ANSWERED(ask.copy ?? ask.text, said, isReply)
+      : `${REFUSAL_ANSWERED(ask.copy ?? ask.text, said, isReply)}${note}`
     : isReply
-      ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}`
+      ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}`
       : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
   const told = working ? await tell($, target, to) : undefined
@@ -6192,7 +6287,7 @@ const takeBackNow = async ($: EngineInterface, one: Todo, shownAt: number) => {
 }
 const TAKEN_BACK = (said: string, asked: string) =>
   `${who(true)} took back their answer "${said}" to your question ("${asked}"): it was pressed by mistake. Do not act on it, and undo what you already did on it if you can. The question is on your card again, and their answer comes to you as a message.`
-const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, target: string) => {
+const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, target: string, note = '') => {
   const key = `${one.id}:${ask.at}:${ask.text}:reply:${ask.replied?.at ?? ''}:${said}`
   if (answeredAsks.has(key)) return
   answeredAsks.add(key)
@@ -6213,7 +6308,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   if (inChat.has(one.id)) (inChat.delete(one.id), void tellChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`))))
   const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
-  const to = ask.refused ? REFUSAL_WORDS(ask.copy ?? ask.text, said) : `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
+  const to = ask.refused ? `${REFUSAL_WORDS(ask.copy ?? ask.text, said)}${note}` : `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}\n${named(REPLY_HOLDS)}`
   const told = working ? await tell($, target, to) : undefined
   if (told && !told.deny) return void (writtenIn($, target, one.id), redraw($))
   await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at })
@@ -7272,6 +7367,7 @@ const gateHeld = new Set<string>()
 const gateWaits = new Map<string, (said: GateSaid | 'gone' | 'words') => void>()
 const gateParked = new Map<string, string>()
 const gateWords = new Map<string, string>()
+const gateNotes = new Map<string, string>()
 const gateOnce = new Map<string, { kind: 'admin' | 'file'; host: string; command: string; at: number }[]>()
 const takeOnce = async ($: EngineInterface, card: string, kind: 'admin' | 'file', host: string, command: string) => {
   const now = await $.clock.now()
@@ -7289,10 +7385,10 @@ const workAllowed = new Set<string>()
 const GATE_DENIED = (gate?: Pick<Gate, 'kind'>) =>
   named(`Refused by {name}: {name} pressed Don't allow on this ${gate?.kind === 'release' ? "release, so nothing was released. Don't try to release it another way" : gate?.kind === 'file' ? "change, so the file was not changed. Don't try to change it another way" : "admin command, so it didn't run. Don't try to run it another way"}. Continue without it, or say what it is needed for and ask again.`)
 const gateNoun = (gate?: Pick<Gate, 'kind'>) => (gate?.kind === 'release' ? 'release' : gate?.kind === 'file' ? 'change to their file' : 'admin command')
-const GATE_WORDS = (gate: Pick<Gate, 'kind'>, words: string) =>
-  named(
+const GATE_WORDS = (gate: Pick<Gate, 'kind'>, words: string, note = '') =>
+  `${named(
     `This ${gateNoun(gate)} did not run yet: {name} neither allowed nor refused it, and wrote to you about it instead, in their own words: “${words}”\nAnswer them with the \`ask\` tool: your answer in \`text\` (one plain line) and \`details\` (what it does and why, in everyday words), with no \`choices\`. Claudopus shows it inside the permission on your card, under their words, where Allow and Don't allow stay until {name} presses one. Typed words never allow anything. Don't run it again until then: when {name} presses Allow, Claudopus tells you, and your next run of exactly the same ${gate.kind === 'file' ? 'change' : 'command'} goes through once, with nothing more asked. With nothing else to do, end your step.`,
-  )
+  )}${note}`
 const GATE_WORDS_AGAIN = (gate: Gate, words: string) =>
   named(`{name} wrote to you again about the ${gateNoun(gate)} that waits on your card (${gateWhat(gate)}), in their own words: “${words}”\nAnswer them with the \`ask\` tool as before, with no \`choices\`: Claudopus shows it inside that permission, which stays until {name} presses Allow or Don't allow.`)
 const GATE_ALLOWED_LATER = (gate: Gate) =>
@@ -7564,7 +7660,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') =
   redraw($)
 }
 
-const wordsOnGate = ($: EngineInterface, card: string, id: string, value: string) => {
+const wordsOnGate = ($: EngineInterface, card: string, id: string, value: string, note = '') => {
   const run = (async () => {
     const words = value.trim()
     const one = (await read($, todos)).find(other => other.id === card)
@@ -7573,10 +7669,11 @@ const wordsOnGate = ($: EngineInterface, card: string, id: string, value: string
     presses += 1
     await setGates($, card, list => list.map(other => (other.id === id ? { ...other, talk: [...(other.talk ?? []), { by: 'you' as const, text: cut(words, ASK_DETAILS) }].slice(-PERMIT_TALK_KEPT) } : other)))
     gateWords.set(id, words)
+    gateNotes.set(id, note)
     pressedLine($, card, '', '', `You answered “${cut(oneLine(words), 80)}”`)
     const end = gateWaits.get(id)
     if (gateHeld.has(id) && end) return end('words')
-    if (gateParked.has(id)) await toTask($, card, gate.from ?? card, GATE_WORDS_AGAIN(gate, words), words, gateWhat(gate))
+    if (gateParked.has(id)) await toTask($, card, gate.from ?? card, `${GATE_WORDS_AGAIN(gate, words)}${note}`, words, gateWhat(gate))
   })()
   answersOnWay.add(run)
   void run.finally(() => answersOnWay.delete(run)).catch(err => log($, `words on a permission not sent: ${String(err)}`))
@@ -7605,6 +7702,7 @@ const answerParked = ($: EngineInterface, gate: Gate, said: GateSaid, card: stri
     }
     gateParked.delete(id)
     gateWords.delete(id)
+    gateNotes.delete(id)
     await setGates($, card, list => list.filter(one => one.id !== id))
     await log($, `${gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on'} ${gate.host}: ${said === 'deny' ? 'not allowed' : 'allowed once'} after words`)
     await toTask($, card, gate.from ?? card, said === 'deny' ? GATE_DENIED(gate) : GATE_ALLOWED_LATER(gate), gateLabel(said), gateWhat(gate))
@@ -7631,7 +7729,7 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
       const said = await holdGate($, next, { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}), ...(isWork ? { isWork: true } : {}) }, card ? top : '')
       if (said !== 'once' && said !== 'always') {
         await dropGrants($, grants)
-        return { deny: said === 'deny' ? GATE_DENIED() : said === 'words' ? GATE_WORDS({}, gateWords.get(`${e.tool_use_id}-${n}`) ?? '') : said === 'late' ? GATE_LATE() : said === 'blind' ? GATE_BLIND() : GATE_GONE(), grants: [] }
+        return { deny: said === 'deny' ? GATE_DENIED() : said === 'words' ? GATE_WORDS({}, gateWords.get(`${e.tool_use_id}-${n}`) ?? '', gateNotes.get(`${e.tool_use_id}-${n}`)) : said === 'late' ? GATE_LATE() : said === 'blind' ? GATE_BLIND() : GATE_GONE(), grants: [] }
       }
       if (said === 'always')
         await allowAlways($, call).catch(async err => {
@@ -7742,7 +7840,7 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
     if (said !== 'once') {
       await dropGrants($, grants)
       const gate = { kind: 'release' as const }
-      return { deny: said === 'deny' ? GATE_DENIED(gate) : said === 'words' ? GATE_WORDS(gate, gateWords.get(id) ?? '') : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate), grants: [] }
+      return { deny: said === 'deny' ? GATE_DENIED(gate) : said === 'words' ? GATE_WORDS(gate, gateWords.get(id) ?? '', gateNotes.get(id)) : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate), grants: [] }
     }
     const grant = await issueGrant($, id, { host: 'release', command: `${repo}\n${branch}` }, 'release-grant')
     if (!grant) {
@@ -7786,7 +7884,7 @@ const gateOwnFile = async ($: EngineInterface, e: ToolCallInput, next: { signal?
   if (card && (await takeOnce($, top, 'file', file, cut(change, 2000)))) return ''
   const said = await holdGate($, next, { id: `${e.tool_use_id}-f`, call: e.tool_use_id, kind: 'file', host: file, command: cut(change, 2000), at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
   const gate = { kind: 'file' as const }
-  return said === 'once' ? '' : said === 'deny' ? GATE_DENIED(gate) : said === 'words' ? GATE_WORDS(gate, gateWords.get(`${e.tool_use_id}-f`) ?? '') : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate)
+  return said === 'once' ? '' : said === 'deny' ? GATE_DENIED(gate) : said === 'words' ? GATE_WORDS(gate, gateWords.get(`${e.tool_use_id}-f`) ?? '', gateNotes.get(`${e.tool_use_id}-f`)) : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate)
 }
 
 const PERSON_FILES = ['config.json', 'rules/CLAUDE.md', 'roles/chat.md', 'roles/work.md', 'admin-allowed.json']
@@ -11751,7 +11849,7 @@ const toolHooks = (on: On) => {
     if (own && text && !choices.length && (parked || refused)) {
       const answer = { by: 'task' as const, text: cut([asked, given1].filter(Boolean).join('\n\n'), ASK_DETAILS) }
       if (parked) await setGates($, own.id, list => list.map(gate => (gate.id === parked.id ? { ...gate, talk: [...(gate.talk ?? []), answer].slice(-PERMIT_TALK_KEPT) } : gate)))
-      else await changeTodos($, list => list.map(one => (one.id === own.id && one.ask?.at === refused?.at ? { ...one, ask: { ...one.ask, talk: [...(one.ask.talk ?? []), answer].slice(-PERMIT_TALK_KEPT), replied: undefined } } : one)))
+      else await changeTodos($, list => list.map(one => (one.id === own.id && one.ask && one.ask.at === refused?.at ? { ...one, ask: { ...one.ask, talk: [...(one.ask.talk ?? []), answer].slice(-PERMIT_TALK_KEPT), replied: undefined } } : one)))
       await askAloud($, own, text).catch(err => log($, `answer not told: ${String(err)}`))
       return { result: `Shown inside the permission on your card, under ${who()}'s words. It keeps Allow and Don't allow until ${who()} presses one, and that press comes back to you as a message. Don't run it again before then. With nothing else to do, end your step.` }
     }
@@ -12077,7 +12175,7 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
       ) : null}
     </ui.Box>
   ) : null
-type BarBox = { head: string; placeholder: string; draft?: string; secret?: string; said?: string; extra?: JSX.Element | null; message?: Todo; send: (value: string) => void }
+type BarBox = { head: string; placeholder: string; draft?: string; secret?: string; said?: string; extra?: JSX.Element | null; message?: Todo; attachTo?: string; send: (value: string) => void }
 const changeTarget = (cards: Todo[]) => (barOpen?.kind === 'change' ? cards.find(one => one.id === barOpen?.id && canChange(asPressed(one))) : undefined)
 const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): BarBox | undefined => {
   const open = barOpen
@@ -12089,7 +12187,7 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
   }
   if (open.kind === 'answer') {
     const one = barTarget(cards)
-    return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), send: value => void (sent(one.id), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`))) }
+    return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), attachTo: one.id, send: value => void (sent(one.id), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`))) }
   }
   if (open.kind === 'change') {
     const one = changeTarget(cards)
@@ -12097,11 +12195,19 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
   }
   if (open.kind === 'permission') {
     const one = gatePressed.has(open.id) || !(gateHeld.has(open.id) || gateParked.has(open.id)) ? undefined : cards.find(card => !card.chat && card.admins?.some(gate => gate.id === open.id))
-    return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), send: value => void (value.trim() && ((barBoxAt = 0), drafts.delete(barDraft()), keepDraft($, barDraft(), undefined), replies.set(open.id, (replies.get(open.id) ?? 0) + 1), (barOpen = undefined), freeTimes($), redraw($), wordsOnGate($, one.id, open.id, value))) }
+    const sendWords = (value: string) => {
+      if (!one) return
+      const files = takeAttached(open.id)
+      const shown = [value.trim(), ...files.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join(' ')
+      if (!shown) return
+      ;((barBoxAt = 0), drafts.delete(barDraft()), keepDraft($, barDraft(), undefined), replies.set(open.id, (replies.get(open.id) ?? 0) + 1), (barOpen = undefined), freeTimes($), redraw($))
+      void wordsOnGate($, one.id, open.id, shown, filesNote(files))
+    }
+    return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), attachTo: open.id, send: sendWords }
   }
   if (open.kind === 'continue') {
     const r = kept.find(one => one.id === open.id)
-    return r && { head: `↳ Message to “${cut(r.title, 50)}”`, placeholder: 'Type your message', draft: barDraft(), send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))) }
+    return r && { head: `↳ Message to “${cut(r.title, 50)}”`, placeholder: 'Type your message', draft: barDraft(), attachTo: r.id, send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value, takeAttached(r.id)).catch(err => log($, `message from a result not sent: ${String(err)}`))) }
   }
   const box = boxes.find(one => one.id === open.id)
   if (!box) return undefined
@@ -12125,7 +12231,7 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
 }
 const barBox = ($: EngineInterface, ui: Ui, box: BarBox) => {
   const typed = () => (box.draft ? (drafts.get(box.draft) ?? '') : box.secret ? (barKeyTyped.get(box.secret) ?? '') : '')
-  const send = (value: string) => void (value.trim() && box.send(value))
+  const send = (value: string) => void ((value.trim() || (box.attachTo && attached.get(box.attachTo)?.length)) && box.send(value))
   return (
     <ui.Box key="band-box" flexDirection="column" flexShrink={0} width="100%">
       <ui.Box flexDirection="row" height={1} overflow="hidden">
@@ -12157,7 +12263,9 @@ const barBox = ($: EngineInterface, ui: Ui, box: BarBox) => {
           {messageFoot($, ui, box.message, 'band-box', <ui.Button key={`band-box-close-${presses}-${boxPresses}`} label="Close" plain dimColor onPress={press => openBar($, undefined, press.surface)} />)}
         </ui.Box>
       ) : null}
+      {box.attachTo && !box.message ? <ui.Box key="band-box-attached" flexShrink={0} marginTop={1} width="100%">{attachedRow($, ui, box.attachTo, 'band-box')}</ui.Box> : null}
       {box.message ? null : <ui.Box key="band-box-foot" flexDirection="row" alignItems="center" gap={2} flexShrink={0} marginTop={1}>
+        {box.attachTo ? <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>{attachButtons($, ui, box.attachTo, 'band-box')}</ui.Box> : null}
         <ui.Box flexGrow={1} flexShrink={1} minWidth={0} />
         <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
           <ui.Button key={`band-box-send-${presses}-${boxPresses}`} label="Send" variant="primary" onPress={() => send(typed())} />
@@ -12168,7 +12276,7 @@ const barBox = ($: EngineInterface, ui: Ui, box: BarBox) => {
   )
 }
 const barHeld = new Map<string, { shape: string; mark: string; drawing: unknown }>()
-const barShape = () => (barOpen ? `${barOpen.kind}|${barBoxKey()}|${JSON.stringify(attached.get(barOpen.id) ?? [])}|${isBoxKind(barOpen.kind) ? `${boxSaid.get(barOpen.id) ?? ''}|${boxHeldReply.has(barOpen.id)}` : barCardsDrawn}` : '')
+const barShape = () => (barOpen ? `${barOpen.kind}|${barBoxKey()}|${attachShape(barOpen.id)}|${isBoxKind(barOpen.kind) ? `${boxSaid.get(barOpen.id) ?? ''}|${boxHeldReply.has(barOpen.id)}` : barCardsDrawn}` : '')
 let barCardsDrawn = ''
 const barCardsSign = (cards: Todo[]) => {
   const one = changeTarget(cards) ?? barTarget(cards)
