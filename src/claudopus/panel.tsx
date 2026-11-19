@@ -43,8 +43,14 @@ const shownAts = new Map<string, number>()
 // pictures of 317, 264 and 301 parts in turn within 200 ms; 19 Nov, the person after Release it: "it first went big, then it went
 // small, then it went big again"). An ask the newest picture was not made for is drawn afresh, so a card only ever moves on. It is also what a press under way keeps on screen
 // (isPressHeld), and the tabs and the bar above the prompt keep theirs the same way
+// (the newest picture serves the view at the top and scrolled down alike: kept for one of them only, every ask for the other was drawn
+// afresh, and none of the holds below gave it, through a press or while a drawing was under way. On 19 Nov, a scroll to the top on a
+// loaded Mac started a fresh drawing at each ask for 8 s, up to nine at once, each taking 7-12 s, and Mark as done and Close
+// pressed meanwhile showed nothing for as long; recorded)
 const paneNewest = new Map<string, { key: string; drawing: unknown }>()
 const newestFor = (line: string, key: string) => (paneNewest.get(line)?.key === key ? paneNewest.get(line)?.drawing : undefined)
+// A pane's size and place, the key without its last part, whether the view is scrolled
+const withoutScroll = (key: string) => key.replace(/\|[01]$/, '')
 // The mod's tabs drawn on the desktop, whose buttons a click holds the drawing for (holdForPress)
 const heldTabs = new Set<string>()
 let usedUntil = 0
@@ -68,11 +74,12 @@ const panelHooks = (on: On) => {
       const key = `${id}|${e.surface}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.scroll.offset > 0 ? 1 : 0}`
       const at = await $.clock.now()
       const line = `${id}|${e.surface}`
-      const recent = newestFor(line, key)
+      const place = withoutScroll(key)
+      const recent = newestFor(line, place)
       if (recent && isPressHeld(at)) return ((isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
       // (a tab is often quick to draw on its own: slow or not, it is given again while the panel's drawings are slow, as the bar is)
-      if (recent && !isTyping && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent as Awaited<ReturnType<typeof next>>
-      freshBegins(key)
+      if (recent && !isTyping && isFreshTooSoon($, place, at, isPanelSlow(at))) return recent as Awaited<ReturnType<typeof next>>
+      freshBegins(place, at)
       const askedNo = (shownAsked.get(line) ?? 0) + 1
       shownAsked.set(line, askedNo)
       const madeFrom = Date.now()
@@ -81,11 +88,11 @@ const panelHooks = (on: On) => {
         const drawing = await next(e)
         if ((shownKept.get(line) ?? 0) > askedNo && paneNewest.has(line)) return paneNewest.get(line)?.drawing as typeof drawing
         shownKept.set(line, askedNo)
-        paneNewest.set(line, { key, drawing })
+        paneNewest.set(line, { key: place, drawing })
         made = { at, ms: Date.now() - madeFrom, fresh: freshness }
         return drawing
       } finally {
-        freshEnds($, key, made)
+        freshEnds($, place, made)
       }
     }
     if (e.surface !== 'terminal' || !isTab) return next(e)
@@ -126,7 +133,8 @@ const panelHooks = (on: On) => {
     // person types, whose box keeps its own drawing below
     const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
     const paneLine = `${paneId}|${e.surface}`
-    const recent = newestFor(paneLine, shownKey)
+    const place = withoutScroll(shownKey)
+    const recent = newestFor(paneLine, place)
     // A press under way: the drawing on screen, the one last made for this pane on this surface, focused or not
     // (of this size and place: a pane resized or scrolled meanwhile is drawn afresh). Given before anything is read, so it is
     // answered at once: given after the pane's reads, it came too late under load and a newer ask dropped it
@@ -139,9 +147,9 @@ const panelHooks = (on: On) => {
       if (usedUntil !== until) ((usedUntil = until), $.clock.after(until - heldAt + 20, () => void (usedUntil === until && drawFresh($))))
       return ((listHeldAt = heldAt), recent as Awaited<ReturnType<typeof next>>)
     }
-    if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt, false, false)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
+    if (recent && !isTyping && isFreshTooSoon($, place, heldAt, false, false)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
     // (counted from the drawing's end: a call for a drawing it made itself, as its own count of what waits at the top, is in it)
-    freshBegins(shownKey)
+    freshBegins(place, heldAt)
     // (counted by pane, whatever the ask's size or scroll: a drawing begun earlier never takes the place of one begun later)
     const askedNo = (shownAsked.get(paneLine) ?? 0) + 1
     shownAsked.set(paneLine, askedNo)
@@ -1878,7 +1886,7 @@ const panelHooks = (on: On) => {
     // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
     // ones the engine holds, and this one is made again once the click is over (holdForPress)
     const newestMade = paneNewest.get(paneLine)
-    if (newestMade?.key === shownKey && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), newestMade.drawing as Awaited<ReturnType<typeof next>>)
+    if (newestMade?.key === place && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), newestMade.drawing as Awaited<ReturnType<typeof next>>)
     // Overtaken by a newer drawing that is already made: not kept, and the newer one is given in its place
     if ((shownKept.get(paneLine) ?? 0) > askedNo && newestMade) return newestMade.drawing as Awaited<ReturnType<typeof next>>
     shownKept.set(paneLine, askedNo)
@@ -1890,7 +1898,7 @@ const panelHooks = (on: On) => {
       if (id) paneBoxHeld.set(`${paneId}|${e.surface}`, { id, shape: paneBoxShape(id), drawing })
       else paneBoxHeld.delete(`${paneId}|${e.surface}`)
     }
-    paneNewest.set(paneLine, { key: shownKey, drawing })
+    paneNewest.set(paneLine, { key: place, drawing })
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     isMade = true
     // (from when it is made, not begun: a drawing that took seconds, as right after an update, would otherwise show a moment half over)
@@ -1901,7 +1909,7 @@ const panelHooks = (on: On) => {
     return drawing
     } finally {
       // (a drawing given again from heldDrawings, or one that threw, counts as none made)
-      freshEnds($, shownKey, isMade ? { at: heldAt, ms: Date.now() - madeFrom, fresh: freshness } : undefined)
+      freshEnds($, place, isMade ? { at: heldAt, ms: Date.now() - madeFrom, fresh: freshness } : undefined)
     }
     } finally {
       if (paneId === LIST) listDrawing -= 1

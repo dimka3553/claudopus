@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.212 · 19 November 2026
+- Buttons in the panel, such as Close and Mark as done, answer on the first click again while your Mac is busy: after a scroll the panel no longer starts a new drawing for every change, up to dozens at once, but makes one at a time and keeps the one on screen meanwhile.
+
 ## 0.2.211 · 19 November 2026
 - Mark as done always shows its green moment, with the happy octopus and the chime, even when the panel is slow to draw, as it is right after an update: its two seconds now start when you first see the card turn green, not at the press.
 - Through that moment the card keeps its shape and its presses, which do nothing then, so a second click can't land on another button or link; a second press on Mark as done changes nothing.

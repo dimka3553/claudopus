@@ -5347,11 +5347,12 @@ const FRESH_GAP = 1000
 const SLOW_DRAW = 250
 const freshDrawn = new Map<string, { at: number; ms: number; fresh: number }>()
 const freshDue = new Set<string>()
-const freshUnderWay = new Map<string, { fresh: number; isOvertaken: boolean }>()
+const freshUnderWay = new Map<string, { fresh: number; isOvertaken: boolean; since: number }>()
+const UNDER_WAY_MOST = 15_000
 let pressedAt = 0
 const isFreshTooSoon = ($: EngineInterface, key: string, at: number, isLoaded = false, canGiveMade = true) => {
   const going = freshUnderWay.get(key)
-  if (going && going.fresh === freshness) return (going.isOvertaken = true)
+  if (going && at - going.since < UNDER_WAY_MOST) return (going.isOvertaken = true)
   const last = freshDrawn.get(key)
   const again = madeAgain.get(key)
   madeAgain.delete(key)
@@ -5364,13 +5365,16 @@ const isFreshTooSoon = ($: EngineInterface, key: string, at: number, isLoaded = 
   return true
 }
 const isPanelSlow = (at: number) => [...freshDrawn].some(([key, last]) => key.startsWith(`${LIST}|`) && last.ms >= SLOW_DRAW && at - last.at < 10_000)
-const freshBegins = (key: string) => (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false }), freshness)
+const freshBegins = (key: string, at: number) => (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false, since: at }), freshness)
 const madeAgain = new Map<string, { fresh: number; at: number }>()
 const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: number; fresh: number }) => {
-  const isOvertaken = freshUnderWay.get(key)?.isOvertaken
+  const going = freshUnderWay.get(key)
   freshUnderWay.delete(key)
-  if (made) freshDrawn.set(key, made)
-  if (isOvertaken && made) (madeAgain.set(key, { fresh: made.fresh, at: made.at }), void drawFresh($))
+  const fresh = going?.fresh ?? made?.fresh ?? freshness
+  if (made) freshDrawn.set(key, { ...made, fresh })
+  if (!going?.isOvertaken) return
+  if (fresh !== freshness) return void drawFresh($)
+  if (made) (madeAgain.set(key, { fresh, at: made.at }), void drawFresh($))
 }
 let calmAt = 0
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
@@ -11379,7 +11383,7 @@ const bandHooks = (on: On) => {
     const isBarHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
     if (recent && !isBarHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
     if (recent && !isBarHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
-    freshBegins(key)
+    freshBegins(key, at)
     const madeFrom = Date.now()
     let made: { at: number; ms: number; fresh: number } | undefined
     try {
@@ -11541,6 +11545,7 @@ const shownSigns = new Map<string, string>()
 const shownAts = new Map<string, number>()
 const paneNewest = new Map<string, { key: string; drawing: unknown }>()
 const newestFor = (line: string, key: string) => (paneNewest.get(line)?.key === key ? paneNewest.get(line)?.drawing : undefined)
+const withoutScroll = (key: string) => key.replace(/\|[01]$/, '')
 const heldTabs = new Set<string>()
 let usedUntil = 0
 let listSurface = ''
@@ -11555,10 +11560,11 @@ const panelHooks = (on: On) => {
       const key = `${id}|${e.surface}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.scroll.offset > 0 ? 1 : 0}`
       const at = await $.clock.now()
       const line = `${id}|${e.surface}`
-      const recent = newestFor(line, key)
+      const place = withoutScroll(key)
+      const recent = newestFor(line, place)
       if (recent && isPressHeld(at)) return ((isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
-      if (recent && !isTyping && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent as Awaited<ReturnType<typeof next>>
-      freshBegins(key)
+      if (recent && !isTyping && isFreshTooSoon($, place, at, isPanelSlow(at))) return recent as Awaited<ReturnType<typeof next>>
+      freshBegins(place, at)
       const askedNo = (shownAsked.get(line) ?? 0) + 1
       shownAsked.set(line, askedNo)
       const madeFrom = Date.now()
@@ -11567,11 +11573,11 @@ const panelHooks = (on: On) => {
         const drawing = await next(e)
         if ((shownKept.get(line) ?? 0) > askedNo && paneNewest.has(line)) return paneNewest.get(line)?.drawing as typeof drawing
         shownKept.set(line, askedNo)
-        paneNewest.set(line, { key, drawing })
+        paneNewest.set(line, { key: place, drawing })
         made = { at, ms: Date.now() - madeFrom, fresh: freshness }
         return drawing
       } finally {
-        freshEnds($, key, made)
+        freshEnds($, place, made)
       }
     }
     if (e.surface !== 'terminal' || !isTab) return next(e)
@@ -11603,7 +11609,8 @@ const panelHooks = (on: On) => {
     if (boxHeld && isPaneBoxHeld(paneId, heldAt) && boxHeld.shape === paneBoxShape(boxHeld.id)) return boxHeld.drawing as Awaited<ReturnType<typeof next>>
     const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
     const paneLine = `${paneId}|${e.surface}`
-    const recent = newestFor(paneLine, shownKey)
+    const place = withoutScroll(shownKey)
+    const recent = newestFor(paneLine, place)
     if (recent && paneId === LIST && isPressHeld(heldAt)) return ((listHeldAt = heldAt), (isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
     const sign = paneId === LIST && e.surface === 'desktop' ? await personSign($) : ''
     if (recent && sign && !isTyping && isInUse(heldAt, e.props.scroll.offset) && shownSigns.get(shownKey) === sign && heldAt - (shownAts.get(shownKey) ?? 0) < ENGAGED) {
@@ -11611,8 +11618,8 @@ const panelHooks = (on: On) => {
       if (usedUntil !== until) ((usedUntil = until), $.clock.after(until - heldAt + 20, () => void (usedUntil === until && drawFresh($))))
       return ((listHeldAt = heldAt), recent as Awaited<ReturnType<typeof next>>)
     }
-    if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt, false, false)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
-    freshBegins(shownKey)
+    if (recent && !isTyping && isFreshTooSoon($, place, heldAt, false, false)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
+    freshBegins(place, heldAt)
     const askedNo = (shownAsked.get(paneLine) ?? 0) + 1
     shownAsked.set(paneLine, askedNo)
     const madeFrom = Date.now()
@@ -13079,7 +13086,7 @@ const panelHooks = (on: On) => {
     )
     })()
     const newestMade = paneNewest.get(paneLine)
-    if (newestMade?.key === shownKey && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), newestMade.drawing as Awaited<ReturnType<typeof next>>)
+    if (newestMade?.key === place && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), newestMade.drawing as Awaited<ReturnType<typeof next>>)
     if ((shownKept.get(paneLine) ?? 0) > askedNo && newestMade) return newestMade.drawing as Awaited<ReturnType<typeof next>>
     shownKept.set(paneLine, askedNo)
     shownSigns.set(shownKey, sign)
@@ -13090,7 +13097,7 @@ const panelHooks = (on: On) => {
       if (id) paneBoxHeld.set(`${paneId}|${e.surface}`, { id, shape: paneBoxShape(id), drawing })
       else paneBoxHeld.delete(`${paneId}|${e.surface}`)
     }
-    paneNewest.set(paneLine, { key: shownKey, drawing })
+    paneNewest.set(paneLine, { key: place, drawing })
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     isMade = true
     if (doneDrawn.length) {
@@ -13099,7 +13106,7 @@ const panelHooks = (on: On) => {
     }
     return drawing
     } finally {
-      freshEnds($, shownKey, isMade ? { at: heldAt, ms: Date.now() - madeFrom, fresh: freshness } : undefined)
+      freshEnds($, place, isMade ? { at: heldAt, ms: Date.now() - madeFrom, fresh: freshness } : undefined)
     }
     } finally {
       if (paneId === LIST) listDrawing -= 1
