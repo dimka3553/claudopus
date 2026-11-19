@@ -109,9 +109,14 @@ const startCatchUp = async ($: EngineInterface) => {
 
 const memoryHooks = (on: On) => {
 
-  // A reply that names a memory file: its links to memory open the mod's tab, since the app's file pane refuses ~/.claude. The
+  // A reply as the chat shows it. One that names a memory file: its links to memory open the mod's tab, since the app's file pane refuses ~/.claude. The
   // terminal opens such a path itself, so it keeps its own drawing
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
+    // The line that ends a turn the chat had nothing to say in (a paused task's notice, NO_ANSWER) is drawn as nothing
+    if (!isOff && !e.props.isSummary && e.props.text.trim() === NO_ANSWER) {
+      const { Box } = uiOf($, e)
+      return <Box key={`quiet-${mark(e.requestId)}`} />
+    }
     if (e.surface === 'terminal' || !dir || e.props.isSummary || !memoryPathIn().test(e.props.text)) return next(e)
     const { text, hrefs } = memoryLinked(e.props.text)
     if (!hrefs.length) return next(e)

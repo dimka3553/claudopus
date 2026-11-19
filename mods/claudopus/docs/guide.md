@@ -100,7 +100,7 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 ### When a task is done
 
 - When a task finishes, its card turns green with the happy octopus for a moment. Then the chat passes on its result, and the panel lists it under Finished.
-- If Claude gave its report while something it started in the background was still running, the task counts as finished when you stop it afterwards. A task you stopped, or one that failed, before that does not turn green.
+- A task can't finish while a command it started still runs, except a server it leaves for you: that keeps its row under the Done card, with Stop.
 - If a task ends while Claudopus reloads, it gets its green moment once the panel draws again.
 - What a task left for you to read is listed under Results.
 - A finish plays a short quiet chime. A notification, with the purple octopus, names the task and the first words of its result, so you hear and see it when you're elsewhere. It comes from Claudopus with its octopus icon. Click it to open that chat in the Claude app (in a terminal, it brings the terminal forward). The first one makes macOS ask you once to allow Claudopus notifications.
@@ -169,19 +169,10 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 
 ### A chat run on another Mac over SSH
 
-- When your Mac's Claude app runs a chat on another Mac over SSH, the chat keeps working when your Mac goes away. The app owns that chat's process there and its sign-in. It may end the process (it did when a closed laptop came back for a moment overnight), and with the app away, the sign-in it lends lapses.
-- So in such a chat, Claudopus starts a small keeper on that Mac, which outlives the process.
-- If the process ends while a task is working and the app doesn't start the chat again within a minute, the keeper starts the same chat again there. It runs as one of Claude Code's own background sessions, under that Mac's own sign-in, with the same model, effort, permission mode and plugins, and with Remote Control on.
-- If the process still runs but the sign-in the app lent it has lapsed (two turns within ten minutes end with the API's own 401 for it), Claudopus has the keeper end that process. The chat then goes on there right away, without the minute's wait.
-- Claude Code starts the interrupted task again itself. If the keeper's copy can't start something, Claudopus sends Claude a message that does.
-- Each such card says "Cut off at 00:14 as the chat's process ended; going again since 00:15", or, in amber, that it couldn't be started again. One notice says the same in the chat ("… has been going on this Mac by itself since 00:15"). It also goes to that Mac and, where Claude Code's push is on (`agentPushNotifEnabled`) and Remote Control is connected, to your phone.
-- While the copy runs, you can watch it from the Claude app's Remote Control or from a terminal: `ssh <that Mac> -t claude attach <its id>`. (`claude agents` lists it, named after the chat with "(kept on this Mac)".)
-- Once its tasks are done and it has been idle two minutes, the keeper stops the copy, and the chat opens in the app as before, with everything that ran meanwhile in it and on its cards.
-- If you open the chat in the app while the copy is still working, the keeper stops the copy right away so the app can have the chat. The app's first try may say the chat is running in the background. If so, send your message again, and Claudopus starts the interrupted task again in the app's chat.
-- A task started with a command held open loses that command when a process ends. So Claude starts anything longer than a few minutes detached and follows its log. That goes on through every change.
-- The keeper's record of each chat is in `keep/`.
-- The app ends the process the same way when you archive the chat or quit the app, so tasks still working then go on too. Stop them first if you don't want that.
-- A chat this Mac's own terminal runs, as in tmux, is never ended by the app and needs no keeper.
+- When your Mac's Claude app runs a chat on another Mac over SSH, the app owns that chat's process there. A task and its commands last only while that process does.
+- If the app ends the process (you quit the app or archive the chat, or a closed laptop comes back for a moment), a task that was working ends with it. Its card says `Failed · The app closed while it worked` and has **Start again**. Nothing starts it again by itself.
+- So work that must outlive the app runs in the cloud, and the task watches for its end.
+- `keep/` records which tasks were working, so the card can say why.
 
 ### In a terminal
 
@@ -301,7 +292,7 @@ Everything Claudopus saves is in `~/.claude/claudopus`, as plain files:
 | `live/` | Each open chat's running tasks and its Remote Control and app ids, rewritten at least every 20 seconds, for the other chats' panels and the panels of other Macs. With `macs`, it also holds what was last fetched from each of those Macs. On a Mac named by another, it holds the chats that Mac handed over (`live/pushed/`) and requests to open a chat waiting for it (`live/outbox/`). A chat removes its own file when it closes |
 | `rules/CLAUDE.md`, `roles/chat.md`, `roles/work.md` | Your own copies of the three texts, written only when you edit or save one in the Config tab. Reset moves your copy aside as `.old` |
 | `update-seen.json`, `update-steps.json`, `update-later.json`, `reloads/` | The version the last check saw on claudopus.ai (a number only), where Download and Install stand (a version, a stage, a commit and a fingerprint, never a text to show), a version put off with Not now, and marks that tell a reloaded chat what it moved from and keep a chat run over SSH from being reloaded by an older copy |
-| `keep/` | For a chat the app runs from another Mac: what's working (`<chat>.json`), and the keeper's times and log (`<chat>.state`, `<chat>.log`) |
+| `keep/` | Which tasks were working in each chat (`<chat>.json`), so a card can say the app closed while it worked; and the beat `bin/revive` reads |
 | `log.md` | Claudopus's own log |
 
 Delete the folder to start over. Claudopus writes nowhere else: no build, start-up or settings file of Claude Code or your projects.

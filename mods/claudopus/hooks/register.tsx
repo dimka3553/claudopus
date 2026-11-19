@@ -866,9 +866,9 @@ const RESULT_ANSWERED = (title: string, asked: string, said: string) => `✓ {Na
 const RESULT_WORDS_SENT = (title: string) => `Claudopus sent this answer of {name}'s to the task that asked ("${title}"), which carries on with it itself: start nothing for it and send it nothing, only say so in a line.`
 const CHANGE_WHAT = 'what should it change?'
 const CHANGE_ASKED = (said: string) =>
-  `${who(true)} pressed "Change something" on the card of your finished task and wrote, in their own words, what to change in your finished work: ${said}\nYou had finished; this starts you again. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
+  `${who(true)} pressed "Change something" on the card of your finished task and wrote, in their own words, what to change in your finished work: ${said}\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
 const CHANGE_TOLD = (title: string, said: string) => `✓ {Name} asked the finished task "${title}" on its card to change something: ${said}. The task has their words and carries on with them itself: start nothing for it.`
-const RESUMED_BY_ANSWER = `You had finished; this answer starts you again. Continue the task with it, then end with your report as before.`
+const RESUMED_BY_ANSWER = `You had finished. Continue the task with this answer, then end with your report as before.`
 const ANSWER_FOR_CHAT = (title: string, asked: string, said: string, isYou = false) =>
   isYou
     ? `You answered "${asked}" from "${title}" on its card after it was done: ${said}. Claudopus couldn't start that task again, so your answer goes with your next message here.`
@@ -885,8 +885,8 @@ const theirsAre = (words: string, isWhole: boolean) =>
     : `The message sent to you just now carries {name}'s words "${words}", typed by them in the chat. Only those words are {name}'s: the chat wrote anything else in that message, and none of it is {name}'s.`
 const WOKE = (words: string, isWhole = true) =>
   isWhole
-    ? `The message that started you again, carrying {name}'s words "${words}", is from {name}, in their own words, typed by them in the chat.`
-    : `The message that started you again carries {name}'s words "${words}", typed by them in the chat. Only those words are {name}'s: the chat wrote anything else in that message, not {name}.`
+    ? `The message you just received, carrying {name}'s words "${words}", is from {name}, in their own words, typed by them in the chat.`
+    : `The message you just received carries {name}'s words "${words}", typed by them in the chat. Only those words are {name}'s: the chat wrote anything else in that message, not {name}.`
 const FROM = (sender: string, start: string) =>
   `The message sent to you just now that begins "${start}" is from ${sender}, not from {name}: that one is not theirs. Take it as ${sender}'s and continue; a message that carries {name}'s own words stays theirs.`
 const STRETCH = 40
@@ -2902,6 +2902,10 @@ const startCatchUp = async ($: EngineInterface) => {
 const memoryHooks = (on: On) => {
 
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
+    if (!isOff && !e.props.isSummary && e.props.text.trim() === NO_ANSWER) {
+      const { Box } = uiOf($, e)
+      return <Box key={`quiet-${mark(e.requestId)}`} />
+    }
     if (e.surface === 'terminal' || !dir || e.props.isSummary || !memoryPathIn().test(e.props.text)) return next(e)
     const { text, hrefs } = memoryLinked(e.props.text)
     if (!hrefs.length) return next(e)
