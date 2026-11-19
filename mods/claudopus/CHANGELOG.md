@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.208 · 19 November 2026
+- A task that hands in its result is now Delivered, in blue, instead of Done: the result is yours to look at, and you may still give feedback. Only your press on Mark as done turns its card green and puts it under Finished.
+- A delivered card has its two presses at its bottom, Reply (Give feedback when it asks nothing) and Mark as done, and none at its top right. Reply opens the box above the chat, and what you send puts the same task back to work.
+- What a task's result leaves open is listed on its delivered card as numbered lines, and one reply answers them all.
+- The panel's top line counts what is delivered, in blue.
+
 ## 0.2.207 · 19 November 2026
 - A task's Details has a box at its bottom to write to that task, whether it works or has finished: the same message as the box Message opens above the chat.
 - Under both boxes: Send, which the task reads at its next step, and, while it works, Stop and send, which stops what it is doing, with its commands and helpers, and starts it again with your message.

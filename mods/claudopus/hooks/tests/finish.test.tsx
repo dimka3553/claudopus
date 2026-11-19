@@ -791,7 +791,7 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   const moment = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
     (await view.findAll({ type: 'Svg' })).map(one => /^<svg data-moment="([\w-]+)"/.exec(String(one.props.source))?.[1]).filter(Boolean)[0]
   // The cards in their finish moment: outlined green at the top
-  const outlined = async (view: { findAll: (q: { type: 'Box' }) => Promise<{ props: Record<string, unknown> }[]> }) => (await view.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.borderColor === 'success').length
+  const outlined = async (view: { findAll: (q: { type: 'Box' }) => Promise<{ props: Record<string, unknown> }[]> }) => (await view.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.borderColor === '#4C9AFF').length
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   expect(await drawn(pane)).toEqual(['working'])
@@ -869,7 +869,7 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   expect(await drawn(again)).toEqual(['mark'])
   // (its card is still among the cards, done and green, with no second moment at the top)
   expect(await outlined(again)).toBe(0)
-  expect((await again.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect((await again.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   // Work that ended long before a load is not
   await clock.advance(30_000)
   await $.session.start(start)
@@ -883,7 +883,7 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   await $.session.start(start)
   await clock.advance(5_000)
   const after = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect((await after.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect((await after.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect(await outlined(after)).toBe(1)
   await clock.advance(2_100)
   expect(await outlined(after)).toBe(0)
@@ -928,7 +928,7 @@ test('work that ended its step in words while a watch of its own runs has not fi
   expect(await drawn(pane)).toEqual(['working'])
   const kept = () => [...files.keys()].filter(key => /\/reports\/[^/]+-remove-the-hover\/report\.md$/.test(key))
   await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' } as never)
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   expect(await stoppedCards()).toBe(1)
   expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(20)
@@ -943,7 +943,7 @@ test('work that ended its step in words while a watch of its own runs has not fi
   // (second by second through one look at the engine's list)
   for (let second = 0; second < 20 && (await stoppedCards()) < 2; second += 1) await clock.advance(1000)
   expect(await stoppedCards()).toBe(2)
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   await clock.advance(2_100)
 
   // Its step ended after only a short line ("started it in the background") while Claude Code lists its run as going on, it has
@@ -965,7 +965,7 @@ test('work that ended its step in words while a watch of its own runs has not fi
   // Claudopus answers the hand-back itself, so Claude Code shows the chat no box of it (18 Nov: "Look, why is it doubled?")
   const handed = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a4', message: 'Named it Otto.' } as never)) as { deny?: string; result?: { success?: boolean; message?: string } }
   expect([handed.deny, handed.result?.success, handed.result?.message?.includes('Claudopus gives it to the chat')]).toEqual([undefined, true, true])
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect(await drawn(pane)).toEqual(['happy'])
   // Its step after the hand-back, and Claude Code's presses for a report it did not see delivered, end it with no model
   const HANDED = { role: 'assistant', content: [{ type: 'tool_use', id: 'hb', name: 'SubagentHandback', input: { message: 'Named it Otto.' } }] }
@@ -980,7 +980,7 @@ test('work that ended its step in words while a watch of its own runs has not fi
   talk.splice(0, talk.length)
   // Its turn may end with no text of its own: what it handed in stays its answer, and it stays done
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't4s', reason: 'answer', agentId: 'a4' } as never)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect(await drawn(pane)).toEqual(['happy'])
   // Claude Code's notice that it ended without delivering a report brings the chat's model the report, to give as its own reply;
   // a later notice of the same end brings nothing again
@@ -995,7 +995,7 @@ test('work that ended its step in words while a watch of its own runs has not fi
   await clock.advance(20_000)
   expect(await drawn(pane)).toEqual(['mark'])
   expect((await pane.findAll({ type: 'Button' })).some(b => b.key === 'stop-a4')).toBe(false)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect(await stoppedCards()).toBe(3)
   expect((await pane.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label)))).toBeUndefined()
   // A turn of words alone after it leaves it as it ended: not announced again, its report kept once
@@ -1011,7 +1011,7 @@ test('work that ended its step in words while a watch of its own runs has not fi
   expect(await drawn(pane)).toEqual(['working'])
   await $.tool.call({ tool: 'TaskStop', tool_use_id: 's4', task_id: 'a4' } as never)
   expect(await stoppedCards()).toBe(4)
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   await clock.advance(2_100)
 
   // Sent a message after its words, it is still at work: stopped before it took a step, it is stopped
@@ -1028,7 +1028,7 @@ test('work that ended its step in words while a watch of its own runs has not fi
   await answer('a6', 't2')
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 't2b', reason: 'answer', agentId: 'a6' } as never)
   expect(await stoppedCards()).toBe(6)
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(2_100)
 
@@ -1037,7 +1037,7 @@ test('work that ended its step in words while a watch of its own runs has not fi
   await answer('a7', 't3')
   await pane.press({ key: 'stop-a7' })
   expect(await stoppedCards()).toBe(7)
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(2_100)
 
@@ -1047,7 +1047,7 @@ test('work that ended its step in words while a watch of its own runs has not fi
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b4', agentId: 'a8', command: 'ls' } as never)
   await pane.press({ key: 'stop-a8' })
   expect(await stoppedCards()).toBe(8)
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(2_100)
 
@@ -1058,12 +1058,12 @@ test('work that ended its step in words while a watch of its own runs has not fi
   await clock.advance(20_000)
   expect(await drawn(pane)).toEqual(['mark'])
   expect(await stoppedCards()).toBe(9)
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   await clock.advance(2_100)
   await $.agent.spawn({ ...spawn, description: 'Draw the chin', prompt: 'draw the chin' } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't6', reason: 'error', agentId: 'a10' } as never)
   expect(await drawn(pane)).toEqual(['mark'])
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   await pane.unmount()
 })
 
@@ -1115,7 +1115,7 @@ test('work that hands in an answer while a copy of its own still runs, with that
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w2', reason: 'answer', agentId: 'a1' } as never)
   // Still at work: not green, not under Finished, and its answer is no result
   expect(await drawn(pane)).toEqual(['working'])
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   expect(await job()).toBeDefined()
   await clock.advance(20_000)
   expect(await drawn(pane)).toEqual(['working'])
@@ -1135,7 +1135,7 @@ test('work that hands in an answer while a copy of its own still runs, with that
   await call('SubagentHandback', 'h2', { message: report })
   agents.a1 = 'completed'
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w3', reason: 'answer', agentId: 'a1' } as never)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect(await drawn(pane)).toEqual(['happy'])
   await clock.advance(10)
   expect(await until(async () => kept()[0])).toBeDefined()
@@ -1165,12 +1165,12 @@ test('work that hands in its result with everything it set out to do done, leavi
   expect(((await call('SubagentHandback', 'h1', { message: 'The site runs at http://localhost:3000.' })) as { deny?: string }).deny).toBeUndefined()
   agents.a1 = 'waiting'
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
-  expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success')).toHaveLength(1)
+  expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
+  expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === '#4C9AFF')).toHaveLength(1)
   // After its moment the card stays up, done, never under Finished: the server's row is under it with the row's own Stop, and the
   // task itself has none
   await clock.advance(20_000)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect((await rows()).filter(text => /Serve the site/.test(text))).toHaveLength(1)
   expect(await rowStop()).toBeDefined()
   expect(await pane.find({ type: 'Button', key: 'stop-a1' })).toBeUndefined()
@@ -1184,12 +1184,12 @@ test('work that hands in its result with everything it set out to do done, leavi
   expect(await until(async () => ((await rows()).some(text => /Serve the site/.test(text)) ? undefined : true))).toBe(true)
   expect(appended.filter(line => line.startsWith('a1: '))).toEqual([])
   await clock.advance(60 * 60_000)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect(await fold()).toBeUndefined()
   // Only the person's Dismiss puts it under Finished
   await pressed(pane, 'dismiss-a1')
   expect(await until(async () => fold())).toBe('▸ Finished 1')
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   // One that hands in while a command of its own that ends by itself still runs is refused: it stays at work with its Stop, never
   // Done in between (18 Nov, the person: "Why does it turn from purple to green to purple to green to purple?"), and is done
   // only once the command has ended and it hands in again
@@ -1201,13 +1201,13 @@ test('work that hands in its result with everything it set out to do done, leavi
   expect(((await train('SubagentHandback', 'h2', { message: 'The training is started and takes two hours.' })) as { deny?: string }).deny).toMatch(/^Not handed in: a command of yours still runs: /)
   agents.a2 = 'waiting'
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w2', reason: 'answer', agentId: 'a2' } as never)
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   await clock.advance(20_000)
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   expect(await pane.find({ type: 'Button', key: 'stop-a2' })).toBeDefined()
   await train('TaskStop', 'k2', { task_id: 'bg-b2' })
   expect(((await train('SubagentHandback', 'h3', { message: 'The model is trained.' })) as { deny?: string }).deny).toBeUndefined()
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   await pane.unmount()
 })
 
@@ -1247,7 +1247,7 @@ test('work that hands in its result with nothing of its own running finishes, th
   expect((await pane.findAll({ type: 'Button' })).some(b => String(b.key ?? '').startsWith('stop-list-job-'))).toBe(false)
   const asking = await line()
   expect(asking).not.toMatch(/Done|Waiting/)
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   await clock.advance(10 * 60_000)
   expect(await line()).toBe(asking)
 
@@ -1265,13 +1265,13 @@ test('work that hands in its result with nothing of its own running finishes, th
   // It has finished: not at work, its clock stopped
   expect(await drawn(pane)).toEqual(['happy'])
   expect((await pane.findAll({ type: 'Button' })).some(b => b.key === 'stop-a1')).toBe(false)
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeDefined()
   const endedLine = await line()
   expect(endedLine).not.toMatch(/Done|Waiting/)
   // and once its moment is over its card stays up, done, its clock where it stopped, never counting on
   await clock.advance(60_000)
   expect(await line()).toBe(endedLine)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
 
   // The chat, told of the press, passes the same answer on: it is not sent, so the ended work is not started a third time
   const sends = resumed.length
@@ -1324,7 +1324,7 @@ const dozen = async ($: Parameters<TestBody>[0], on: On, asking = false) => {
   if (asking) await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a3', text: 'May I delete the old repo?', choices: ['Approve', 'Refuse'] } as never)
   await w.clock.advance(5000)
   const order = async () => (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(one => /^Piece \d+$/.test(one)).filter((one, n, all) => all.indexOf(one) === n)
-  const green = async () => (await list.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.borderColor === 'success').length
+  const green = async () => (await list.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.borderColor === '#4C9AFF').length
   const fold = async () => (await list.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label)))?.props.label
   // Its run over, as Claude Code lists it: with its last words taken as its result it is done, and ended by an error it failed
   const end = (agentId: string, reason = 'answer') => ((agents[agentId] = reason === 'answer' ? 'completed' : 'failed'), (kinds[agentId] = 'general-purpose'), $.turn.complete({ answer: reason === 'answer' ? 'Done.' : '', durationMs: 1, isAborted: false, turnId: `t-${agentId}`, reason, agentId } as never))
@@ -1332,14 +1332,14 @@ const dozen = async ($: Parameters<TestBody>[0], on: On, asking = false) => {
 }
 const others = (but: number[]) => Array.from({ length: 12 }, (_, n) => n + 1).filter(n => !but.includes(n)).map(n => `Piece ${n}`)
 
-test('a finished card in the middle of a dozen comes to the top at once, outlined green, for two seconds on time, then is back in its place among the cards, still green and never under Finished, after an hour and after another task finishes; only Dismiss puts it under Finished; done, it has only Message and Dismiss to press, failed those two as well, and Dismiss tells its task nothing', SLOW, async ($, on) => {
+test('a finished card in the middle of a dozen comes to the top at once, outlined green, for two seconds on time, then is back in its place among the cards, still green and never under Finished, after an hour and after another task finishes; only Mark as done puts it under Finished; delivered, it has only Give feedback and Mark as done to press, at its bottom, failed Message and Dismiss at its top right, and neither press tells its task anything', SLOW, async ($, on) => {
   const { list, order, green, fold, end, clock, appended, resumed, sent, submitted } = await dozen($, on)
-  const doneLines = async () => (await list.findAll({ type: 'Text' })).filter(one => one.text === '✓ Done' && one.props.color === 'success').length
+  const doneLines = async () => (await list.findAll({ type: 'Text' })).filter(one => one.text === '◐ Delivered' && one.props.color === '#4C9AFF').length
   expect(await order()).toEqual(others([]))
   await end('a7')
   expect(await order()).toEqual(['Piece 7', ...others([7])])
   expect(await green()).toBe(1)
-  expect((await list.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect((await list.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   await clock.advance(1_900)
   expect(await order()).toEqual(['Piece 7', ...others([7])])
   expect(await green()).toBe(1)
@@ -1369,9 +1369,9 @@ test('a finished card in the middle of a dozen comes to the top at once, outline
   expect(await order()).toEqual(others([7]))
   expect(await doneLines()).toBe(1)
 
-  // A finished card, done or failed, has two quiet buttons at its top right and nothing else to press but its title: Change
-  // something, where the bar above the chat takes its box, and Dismiss, which puts it under Finished at once and sends its task
-  // nothing
+  // A delivered card has two buttons at its bottom and nothing else to press but its title: Give feedback, filled, where the bar
+  // above the chat takes its box, and Mark as done; a failed one has Message and Dismiss, quiet, at its top right. Either way the
+  // second puts it under Finished at once and sends its task nothing
   const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   const onCard = async (id: string) => {
     type Drawn = { type?: string; key?: string; props?: Record<string, unknown>; children?: unknown[] }
@@ -1384,12 +1384,12 @@ test('a finished card in the middle of a dozen comes to the top at once, outline
     walk(await list.find({ type: 'Box', key: `todo-${id}` }))
     return found
   }
-  for (const [id, reason, said] of [['a8', 'answer', /^✓ Done/], ['a10', 'error', /^✕ Failed/]] as const) {
+  for (const [id, reason, said, presses] of [['a8', 'answer', /^◐ Delivered/, [['Give feedback', undefined, undefined], ['Mark as done', undefined, undefined]]], ['a10', 'error', /^✕ Failed/, [['Message', true, true], ['Dismiss', true, true]]]] as const) {
     await end(id, reason)
-    expect(await until(async () => ((await onCard(id)).some(one => one[0] === 'Dismiss') ? true : undefined))).toBe(true)
+    expect(await until(async () => ((await onCard(id)).some(one => one[0] === presses[1][0]) ? true : undefined))).toBe(true)
     expect(await list.find({ type: 'Text', text: said })).toBeDefined()
     // (a failed card also has its Start again)
-    expect([id, (await onCard(id)).filter(one => one[0] !== 'Start again')]).toEqual([id, [[`Piece ${id.slice(1)}`, true, undefined], ['Message', true, true], ['Dismiss', true, true]]])
+    expect([id, (await onCard(id)).filter(one => one[0] !== 'Start again')]).toEqual([id, [[`Piece ${id.slice(1)}`, true, undefined], ...presses]])
     if (reason === 'answer') expect((await onCard(id)).length).toBe(3)
     const told = [appended.length, resumed.length, sent.length, submitted.length]
     const folded = Number(/\d+/.exec(String(await fold()))?.[0])
@@ -1523,7 +1523,7 @@ test('a finished card that left a server running stays at the top after its mome
   expect(await order()).toEqual(['Piece 3', 'Piece 1', 'Piece 2', 'Piece 4'])
   await clock.advance(60 * 60_000)
   expect((await list.findAll({ type: 'Button' })).filter(b => b.props.label === 'Stop' && String(b.key ?? '').startsWith('stop-list-job-'))).toHaveLength(1)
-  expect((await list.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect((await list.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect(await order()).toEqual(['Piece 3', 'Piece 1', 'Piece 2', 'Piece 4'])
 })
 

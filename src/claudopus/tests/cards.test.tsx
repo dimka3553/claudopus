@@ -163,7 +163,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   kinds.a1 = kinds.a2 = 'general-purpose'
   await $.turn.complete({ answer: 'Waiting.', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'answer', agentId: 'a1' } as never)
   expect((await pane.find({ type: 'Text', text: /^2m/ }))?.text).toBe('2m 00s')
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   expect(await pane.find({ type: 'Button', key: 'stop-a1' })).toBeDefined()
   expect((await pane.findAll({ type: 'Box' })).some(b => String(b.props.backgroundColor).startsWith('#8A63F0'))).toBe(true)
   agents.a1 = 'running'
@@ -177,26 +177,27 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   for (const item of ['Compare the head with your scan', 'Check the left ear', 'Later step 1', 'Later step 2', 'Later step 3', 'Later step 4']) await call('todo', { item, state: 'done' })
   agents.a1 = 'completed'
   await $.turn.complete({ answer: 'The nostril is **closed**.', durationMs: 1, isAborted: false, turnId: 'turn-4', reason: 'answer', agentId: 'a1' } as never)
-  expect((await tab.find({ type: 'Text', text: /^Done · \d+m/ }))?.text).toBe('Done · 2m 00s')
+  expect((await tab.find({ type: 'Text', text: /^Delivered · \d+m/ }))?.text).toBe('Delivered · 2m 00s')
   expect(await tab.find({ type: 'Button', key: 'stop-a1' })).toBeUndefined()
   await tab.unmount()
   // First it stays in its place for two seconds, green, saying it finished; the header counts it as no longer running at once and says it just finished
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.bold).toBe(true)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
-  expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
-  expect((await pane.find({ type: 'Text', text: /^Just finished$/ }))?.text).toBe('Just finished')
+  expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
+  expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === '#4C9AFF').length).toBe(1)
+  expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.props.color).toBe('#4C9AFF')
+  expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.text).toBe('1 delivered')
   // Its helper, ended in the same moment, stays in its card for the same pause
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', 'Dismiss', 'Search the docs'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', 'Search the docs', 'Mark as done'])
   await clock.advance(1_000)
-  expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeDefined()
   await clock.advance(1_100)
   // After them it is still among the cards, green, its line the last written into it (its helper's), and nothing is under Finished:
   // only Dismiss puts it there
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.bold).toBe(true)
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect((await pane.find({ type: 'Text', text: /^ · I am reading/ }))?.text).toBe(' · I am reading how the other model draws outlines.')
-  expect((await pane.find({ type: 'Text', text: /^Nothing/ }))?.text).toBe('Nothing waits for you')
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', 'Dismiss', '1 helper ended'])
+  expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.text).toBe('1 delivered')
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', '1 helper ended', 'Mark as done'])
   await pressed(pane, 'dismiss-a1')
   // Dismissed, it is one folded row, "Finished", under the running cards; unfolded, a card as running work has, with Details and no Stop
   const buttons = (await until(async () => ((await pane.findAll({ type: 'Button' })).some(b => b.props.label === '▸ Finished 1') ? pane.findAll({ type: 'Button' }) : undefined))) ?? []
@@ -494,15 +495,15 @@ test('work that ends in an error is kept as failed, saying why; a run that is ov
   // How its Details says it stands, once ended
   const stands = async (id: string) => {
     const details = await $.ui.mount({ ...LIST, requestId: `work-${id}`, surface: 'desktop' } as never)
-    const text = (await details.find({ type: 'Text', text: /^(Done|Failed|Stopped) · / }))?.text
+    const text = (await details.find({ type: 'Text', text: /^(Delivered|Done|Failed|Stopped) · / }))?.text
     await details.unmount()
     return text?.replace(/ · [^·]*$/, '')
   }
   for (const [title, isPressed, hasCommand, ends] of [
     ['Pressed for a hand-back', true, false, 'Failed · Ended without its result'],
-    ['Never pressed', false, false, 'Done'],
+    ['Never pressed', false, false, 'Delivered'],
     ['Pressed, its command running', true, true, 'Failed · Ended without its result'],
-    ['Never pressed, its command running', false, true, 'Done'],
+    ['Never pressed, its command running', false, true, 'Delivered'],
   ] as const) {
     const { agentId: id = '' } = await $.agent.spawn({ ...spawn, description: title, prompt: 'go' } as never)
     kinds[id] = 'general-purpose'
@@ -675,7 +676,7 @@ test("a card's title, its line of facts and every line under them start at one l
   await $.turn.complete({ answer: 'Measured.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
   await $.turn.complete({ answer: 'Fixed.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(500)
-  await expectOneEdge(4)
+  await expectOneEdge(5)
 })
 
 test('work a safety flag would move to an older model is ended with a report that says so, never run there; an agent whose own kind starts it on an older model or Haiku runs on the newest', async ($, on) => {
@@ -821,7 +822,7 @@ test('the model a running work is on is pressed and another chosen: its next ste
   agents.a1 = 'completed'
   await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'answer', agentId: 'a1' } as never)
   expect(await keyed(tab, 'model-a1')).toBeUndefined()
-  expect((await tab.find({ type: 'Text', text: /^Done/ }))?.text).toMatch(/^Done · Fable 5\.2 · /)
+  expect((await tab.find({ type: 'Text', text: /^Delivered/ }))?.text).toMatch(/^Delivered · Fable 5\.2 · /)
   expect(logged).toEqual([])
   await tab.unmount()
   await pane.unmount()
@@ -908,13 +909,13 @@ test('a result is handed in only with every to-do ticked or dropped, no helper o
   for (const [refusal, then] of steps) {
     // Refused every time it is tried, in the same words, and its card stays at work, with nothing kept as its result
     for (const _ of [1, 2]) expect((await hand()).deny).toBe(refusal)
-    expect([refusal.slice(0, 40), await pane.find({ type: 'Text', text: '✓ Done' }), Boolean(await pane.find({ type: 'Button', key: 'stop-a1' }))]).toEqual([refusal.slice(0, 40), undefined, true])
+    expect([refusal.slice(0, 40), await pane.find({ type: 'Text', text: '◐ Delivered' }), Boolean(await pane.find({ type: 'Button', key: 'stop-a1' }))]).toEqual([refusal.slice(0, 40), undefined, true])
     await then()
   }
   // With only the server left it goes through: the card is done at once, green, with what it handed in as its result
   const through = await hand()
   expect([through.deny, through.result?.success]).toEqual([undefined, true])
-  expect((await pane.find({ type: 'Text', text: '✓ Done' }))?.props.color).toBe('success')
+  expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect(await pane.find({ type: 'Button', key: 'stop-a1' })).toBeUndefined()
   await clock.advance(10)
   const kept = await until(async () => [...files.keys()].find(key => /\/reports\/[^/]+\/report\.md$/.test(key)))
@@ -922,7 +923,7 @@ test('a result is handed in only with every to-do ticked or dropped, no helper o
   await pane.unmount()
 })
 
-test("a card's edge and the line it ends with say its stage: purple at work, through a turn's end while a command or a helper of its own runs; amber only while something of its own waits for the person; green and ✓ Done with its result; no colour and Stopped; red and ✕ Failed with why; ended, it stays so among the cards, stopped and failed with Start again and Dismiss, until it is dismissed", async ($, on) => {
+test("a card's edge and the line it ends with say its stage: purple at work, through a turn's end while a command or a helper of its own runs; amber only while something of its own waits for the person; green and ◐ Delivered with its result; no colour and Stopped; red and ✕ Failed with why; ended, it stays so among the cards, stopped and failed with Start again and Dismiss, until it is dismissed", async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}
   const { clock } = world(on, { agents, kinds })
@@ -940,7 +941,7 @@ test("a card's edge and the line it ends with say its stage: purple at work, thr
   const card = async (id: string) => {
     const nodes = under(await pane.find({ type: 'Box', key: `todo-${id}` }))
     const edge = nodes.find(one => one.type === 'Box' && one.props?.width === 1)
-    const line = nodes.find(one => one.type === 'Text' && /^(✓ Done|✕ Failed|Stopped)/.test(textOf(one)))
+    const line = nodes.find(one => one.type === 'Text' && /^(◐ Delivered|✕ Failed|Stopped)/.test(textOf(one)))
     const isAmber = nodes.some(one => [one.props?.color, one.props?.backgroundColor, one.props?.borderColor].includes(AMBER))
     return [edge?.props?.backgroundColor, line ? textOf(line) : undefined, line?.props?.color, isAmber]
   }
@@ -967,7 +968,7 @@ test("a card's edge and the line it ends with say its stage: purple at work, thr
   expect(await card('a3')).toEqual(AT_WORK)
   // Done, by handing in its result: green
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h3', agentId: 'a3', message: 'Both eyes are drawn.' } as never)
-  expect(await card('a3')).toEqual(['success', '✓ Done', 'success', false])
+  expect(await card('a3')).toEqual(['#4C9AFF', '◐ Delivered', '#4C9AFF', false])
   // Stopped by the person: no colour on its edge, its line dim
   await pane.press({ key: 'stop-a2' })
   expect(await card('a2')).toEqual([undefined, 'Stopped', undefined, false])
@@ -981,7 +982,7 @@ test("a card's edge and the line it ends with say its stage: purple at work, thr
   const fold = async () => (await pane.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label)))?.props.label
   for (const ms of [2_100, 3_600_000]) {
     await clock.advance(ms)
-    expect([ms, await card('a3'), await card('a2'), await card('a4'), await fold()]).toEqual([ms, ['success', '✓ Done', 'success', false], [undefined, 'Stopped', undefined, false], ['error', '✕ Failed · Ended with an error', 'error', false], undefined])
+    expect([ms, await card('a3'), await card('a2'), await card('a4'), await fold()]).toEqual([ms, ['#4C9AFF', '◐ Delivered', '#4C9AFF', false], [undefined, 'Stopped', undefined, false], ['error', '✕ Failed · Ended with an error', 'error', false], undefined])
     expect([ms, await offered('a2'), await offered('a4')]).toEqual([ms, ['Start again', 'Dismiss'], ['Start again', 'Dismiss']])
   }
   // Dismissed, each is under Finished and stays there, and the one not dismissed stays up
@@ -989,7 +990,7 @@ test("a card's edge and the line it ends with say its stage: purple at work, thr
   await pressed(pane, 'dismiss-a2')
   expect(await until(async () => ((await fold()) === '▸ Finished 2' ? true : undefined))).toBe(true)
   await clock.advance(3_600_000)
-  expect([await fold(), (await card('a2'))[1], (await card('a4'))[1], await card('a3')]).toEqual(['▸ Finished 2', undefined, undefined, ['success', '✓ Done', 'success', false]])
+  expect([await fold(), (await card('a2'))[1], (await card('a4'))[1], await card('a3')]).toEqual(['▸ Finished 2', undefined, undefined, ['#4C9AFF', '◐ Delivered', '#4C9AFF', false]])
   await pane.unmount()
 })
 
@@ -1026,7 +1027,7 @@ test('the stop button of a to-do stops its work, and its card stays among the ca
   await pane.unmount()
 })
 
-test("work that finishes comes to the top for two seconds, then stays among the cards, green, until it is dismissed: two at once, through an hour and another task's end, one ended while the panel was closed; done, it offers only Message and Dismiss; dismissed, it stays under Finished; a message to it makes the same card work again, and done again when it hands in", async ($, on) => {
+test("work that finishes comes to the top for two seconds, then stays among the cards, blue and Delivered, until the person marks it done: two at once, through an hour and another task's end, one ended while the panel was closed; delivered, its only presses are at its bottom, Give feedback and Mark as done; marked done, it is green under Finished; a message to it makes the same card work again, and delivered again when it hands in, what its last note left open listed on it with Reply", async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}
   const { clock } = world(on, { agents, kinds })
@@ -1043,10 +1044,10 @@ test("work that finishes comes to the top for two seconds, then stays among the 
   const titles = async (of: Pane) => (await of.findAll({ type: 'Text' })).filter(one => one.props.bold && /nose|ears|eyes/.test(one.text)).map(one => one.text)
   const fold = async (of: Pane) => (await of.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label)))?.props.label
   // The cards drawn done: each line's colour, and each green edge
-  const dones = async (of: Pane) => [(await of.findAll({ type: 'Text', text: '✓ Done' })).map(one => one.props.color), (await of.findAll({ type: 'Box' })).filter(b => b.props.width === 1 && b.props.backgroundColor === 'success').length]
+  const dones = async (of: Pane) => [(await of.findAll({ type: 'Text', text: '◐ Delivered' })).map(one => one.props.color), (await of.findAll({ type: 'Box' })).filter(b => b.props.width === 1 && b.props.backgroundColor === '#4C9AFF').length]
   // What a card offers beside its title
   const offered = async (of: Pane, id: string) => (await of.findAll({ type: 'Button' })).filter(b => new RegExp(`^(stop|change|again-small|dismiss)-${id}(-\\d+)?$`).test(String(b.key))).map(b => b.props.label)
-  const head = async (of: Pane) => (await of.find({ type: 'Text', text: /working|waiting for you|^Nothing|^Just/ }))?.text
+  const head = async (of: Pane) => (await of.findAll({ type: 'Text' })).filter(one => /working|waiting for you|^Nothing|^Just|delivered$/.test(one.text)).map(one => one.text).join('')
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
 
   // Two that end together both go to the top, green, the newer first, over the one still working; neither is under Finished
@@ -1055,14 +1056,14 @@ test("work that finishes comes to the top for two seconds, then stays among the 
   await clock.advance(100)
   await end('a3', 't3')
   expect(await titles(pane)).toEqual(['Draw the eyes', 'Fix the nose', 'Check the ears'])
-  expect(await dones(pane)).toEqual([['success', 'success'], 2])
-  expect(await head(pane)).toBe('1 working')
+  expect(await dones(pane)).toEqual([['#4C9AFF', '#4C9AFF'], 2])
+  expect(await head(pane)).toBe('1 working · 2 delivered')
   expect(await fold(pane)).toBeUndefined()
   // After their two seconds both are still among the cards, each in the place it began in, green, and so an hour later: no time
   // moves a card under Finished
   for (const ms of [2_100, 3_600_000]) {
     await clock.advance(ms)
-    expect([ms, await titles(pane), await dones(pane), await fold(pane)]).toEqual([ms, ['Fix the nose', 'Check the ears', 'Draw the eyes'], [['success', 'success'], 2], undefined])
+    expect([ms, await titles(pane), await dones(pane), await fold(pane)]).toEqual([ms, ['Fix the nose', 'Check the ears', 'Draw the eyes'], [['#4C9AFF', '#4C9AFF'], 2], undefined])
   }
 
   // Nor does another task's end, and work that ends while the panel is closed is up among the cards, green, when it opens
@@ -1070,34 +1071,49 @@ test("work that finishes comes to the top for two seconds, then stays among the 
   await end('a2', 't2')
   await clock.advance(2_500)
   const again = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect([await titles(again), await dones(again), await fold(again)]).toEqual([['Fix the nose', 'Check the ears', 'Draw the eyes'], [['success', 'success', 'success'], 3], undefined])
-  expect(await head(again)).toBe('Nothing waits for you')
-  // A done card's line is the last it wrote; it offers Message and Dismiss and nothing else: no Stop, no Start again,
-  // and no question about its result
+  expect([await titles(again), await dones(again), await fold(again)]).toEqual([['Fix the nose', 'Check the ears', 'Draw the eyes'], [['#4C9AFF', '#4C9AFF', '#4C9AFF'], 3], undefined])
+  expect(await head(again)).toBe('3 delivered')
+  // A delivered card's line is the last it wrote; its presses are Give feedback and Mark as done, at its bottom, and nothing
+  // else: no Stop, no Start again, no Message or Dismiss beside its title
   expect((await again.find({ type: 'Text', text: /^ · The nostril/ }))?.text).toBe(' · The nostril is closed on both sides.')
-  for (const id of ['a1', 'a2', 'a3']) expect([id, await offered(again, id)]).toEqual([id, ['Message', 'Dismiss']])
+  for (const id of ['a1', 'a2', 'a3']) expect([id, await offered(again, id)]).toEqual([id, ['Give feedback', 'Mark as done']])
+  expect((await again.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => label === 'Message' || label === 'Dismiss')).toEqual([])
   expect(await again.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
 
   // Dismiss puts it under Finished, and it stays there: an hour on, and as other work goes on and ends
   await pressed(again, 'dismiss-a1')
   expect(await until(() => fold(again))).toBe('▸ Finished 1')
   expect(await titles(again)).toEqual(['Check the ears', 'Draw the eyes'])
+  // (marked done, it is green there, with Message, and the header no longer counts it)
+  expect(await head(again)).toBe('2 delivered')
+  await pressed(again, 'finished-fold')
+  expect((await again.findAll({ type: 'Text', text: '✓ Done' })).map(one => one.props.color)).toEqual(['success'])
+  expect(await offered(again, 'a1')).toEqual(['Message'])
+  await pressed(again, 'finished-fold')
   await clock.advance(3_600_000)
-  expect([await fold(again), await titles(again), await dones(again)]).toEqual(['▸ Finished 1', ['Check the ears', 'Draw the eyes'], [['success', 'success'], 2]])
+  expect([await fold(again), await titles(again), await dones(again)]).toEqual(['▸ Finished 1', ['Check the ears', 'Draw the eyes'], [['#4C9AFF', '#4C9AFF'], 2]])
 
   // A message to a done task makes the same card work again, purple with its Stop and Message, and no second card; started again by
   // Claude Code under its id, it is still that one card
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a3', message: 'Shade the eyes too.' } as never)
   agents.a3 = 'running'
   await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'Shade the eyes too.', resume: { agentId: 'a3' } } as never)
-  expect([await titles(again), await offered(again, 'a3'), await dones(again), await head(again), await fold(again)]).toEqual([['Check the ears', 'Draw the eyes'], ['Stop', 'Message'], [['success'], 1], '1 working', '▸ Finished 1'])
+  expect([await titles(again), await offered(again, 'a3'), await dones(again), await head(again), await fold(again)]).toEqual([['Check the ears', 'Draw the eyes'], ['Stop', 'Message'], [['#4C9AFF'], 1], '1 working · 1 delivered', '▸ Finished 1'])
   // When it hands in it is done again: at the top for its two seconds, then among the cards as before, the dismissed one still
   // under Finished
+  // (its last note lists what the result leaves open: numbered on the card with no press of their own, and the first press reads Reply)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n3', agentId: 'a3', text: 'The eyes are shaded.', questions: ['Should the lashes be longer?', 'Which eye colour?'] } as never)
+  expect(await again.find({ type: 'Text', text: 'It asks 2 things' })).toBeUndefined()
   agents.a3 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h3', agentId: 'a3', message: 'The eyes are shaded.' } as never)
-  expect([await titles(again), await offered(again, 'a3'), await dones(again), await fold(again)]).toEqual([['Draw the eyes', 'Check the ears'], ['Message', 'Dismiss'], [['success', 'success'], 2], '▸ Finished 1'])
+  expect([await titles(again), await offered(again, 'a3'), await dones(again), await fold(again)]).toEqual([['Draw the eyes', 'Check the ears'], ['Reply', 'Mark as done'], [['#4C9AFF', '#4C9AFF'], 2], '▸ Finished 1'])
+  expect((await again.findAll({ type: 'Text' })).map(one => one.text).filter(text => /^It asks|^\d\.$|\?$/.test(text))).toEqual(['It asks 2 things', '1.', 'Should the lashes be longer?', '2.', 'Which eye colour?'])
+  // Reply opens the box above the chat, headed as a reply; a message sent puts it back to work with nothing left listed
+  await pressed(again, 'change-a3')
+  expect((await until(() => band.find({ type: 'Text', text: /^↳ / })))?.text).toBe('↳ Reply to “Draw the eyes”')
+  await pressed(again, 'change-a3')
   await clock.advance(2_100)
-  expect([await titles(again), await dones(again), await fold(again)]).toEqual([['Check the ears', 'Draw the eyes'], [['success', 'success'], 2], '▸ Finished 1'])
+  expect([await titles(again), await dones(again), await fold(again)]).toEqual([['Check the ears', 'Draw the eyes'], [['#4C9AFF', '#4C9AFF'], 2], '▸ Finished 1'])
   await again.unmount()
   await band.unmount()
 })
@@ -1112,8 +1128,8 @@ test('a message to a done task whose run is gone starts nothing and adds no card
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await clock.advance(2_100)
   // How the list stands: its cards, the done ones, and whether the task has a Stop
-  const stands = async () => [(await pane.findAll({ type: 'Text' })).filter(one => one.props.bold && /nose/.test(one.text)).map(one => one.text), (await pane.findAll({ type: 'Text', text: '✓ Done' })).map(one => one.props.color), Boolean(await pane.find({ type: 'Button', key: 'stop-a1' }))]
-  expect(await stands()).toEqual([['Fix the nose'], ['success'], false])
+  const stands = async () => [(await pane.findAll({ type: 'Text' })).filter(one => one.props.bold && /nose/.test(one.text)).map(one => one.text), (await pane.findAll({ type: 'Text', text: '◐ Delivered' })).map(one => one.props.color), Boolean(await pane.find({ type: 'Button', key: 'stop-a1' }))]
+  expect(await stands()).toEqual([['Fix the nose'], ['#4C9AFF'], false])
   await $.prompt.submit({ text: 'Also close the left nostril.', wait: false, origin: composer })
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Sam: “Also close the left nostril.”' } as never)
   // At once, and once the list of what runs has been looked at again
@@ -1121,7 +1137,7 @@ test('a message to a done task whose run is gone starts nothing and adds no card
   // ten minutes on, it is Done as before)
   for (const ms of [90_000, 600_000]) {
     await clock.advance(ms)
-    expect([ms, ...(await stands())]).toEqual([ms, ['Fix the nose'], ['success'], false])
+    expect([ms, ...(await stands())]).toEqual([ms, ['Fix the nose'], ['#4C9AFF'], false])
   }
   expect(resumed).toEqual([])
   await pane.unmount()
@@ -1202,7 +1218,7 @@ test('a helper and tasks that ended while the mod was out are ended on their car
   const failed = await until(() => pane.find({ type: 'Text', text: /^✕ Failed/ }))
   expect([failed?.text, failed?.props.color]).toEqual(['✕ Failed · Ended without its result', 'error'])
   expect((await pane.findAll({ type: 'Button' })).filter(b => b.props.label === 'Start again').map(b => String(b.key).replace(/-\d+$/, ''))).toEqual(['again-small-a4'])
-  expect((await pane.find({ type: 'Text', text: /^Nothing/ }))?.text).toBe('Nothing waits for you')
+  expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.text).toBe('2 delivered')
   expect(await pane.find({ type: 'Text', text: /No progress|quiet|Nothing new/ })).toBeUndefined()
   await pane.unmount()
 })

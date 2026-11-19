@@ -128,6 +128,8 @@ export type Todo = {
   /** Ended, and kept up among the cards until the person dismisses it: nothing else moves it under Finished */
   up?: true
   closedAt?: number
+  // What its result leaves open for the person, a line each, from its last note: listed on its delivered card, answered in one reply
+  questions?: string[]
   // The kind of agent it was started as (claudopus:task, general-purpose, fork…), when the chat started it
   kind?: string
   // Stopped by the person's own press on Stop, on its card or a helper's: when. Until `isLifted`, set by their next message, the chat

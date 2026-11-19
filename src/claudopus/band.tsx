@@ -66,7 +66,7 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
   }
   if (open.kind === 'change') {
     const one = changeTarget(cards)
-    return one && { head: `↳ Message to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) }
+    return one && { head: `↳ ${stageOf(cards, one) === 'delivered' && one.questions?.length ? 'Reply' : 'Message'} to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) }
   }
   if (open.kind === 'continue') {
     const r = kept.find(one => one.id === open.id)

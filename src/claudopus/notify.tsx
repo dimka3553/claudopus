@@ -30,7 +30,7 @@ const lookEnds = async ($: EngineInterface) => {
   const cards = list.filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
-  const all: { id: string; status: string; endedAt: number }[] = [...cards.map(one => ({ id: one.id, status: stageOf(list, one), endedAt: one.endedAt })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt }))]
+  const all: { id: string; status: string; endedAt: number }[] = [...cards.map(one => ({ id: one.id, status: hasResult(stageOf(list, one)) ? 'done' : stageOf(list, one), endedAt: one.endedAt })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt }))]
   const was = lastSeen
   lastSeen = new Map(all.map(one => [one.id, standing(one.status, one.endedAt)]))
   if (!was) return

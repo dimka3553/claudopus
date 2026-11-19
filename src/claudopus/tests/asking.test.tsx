@@ -585,7 +585,7 @@ test('Release it on a go-ahead asked with its worktree reaches the task as its a
   await bash('bgr', 'hold release-in-the-background', 'a1', { description: 'Release fix-nose', run_in_background: true })
   const early = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h-early', agentId: 'a1', message: 'Released.' } as never)) as { deny?: string }
   expect(early.deny).toContain('Not handed in: a command of yours still runs')
-  expect(await list.find({ type: 'Text', text: /^✓ Done/ })).toBeUndefined()
+  expect(await list.find({ type: 'Text', text: /^◐ Delivered/ })).toBeUndefined()
   await $.tool.call({ tool: 'TaskStop', tool_use_id: 'bgr-s', agentId: 'a1', task_id: 'bg-bgr' } as never)
   // Once: the same card's next release run is asked as any release nobody pressed for
   await clock.advance(1000)
@@ -659,7 +659,7 @@ test('a reply in words that does not settle an ask keeps it, and the card active
   await $.turn.complete({ answer: 'Released as 0.2.77.', durationMs: 1, isAborted: false, turnId: 'turn-4', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(60_000)
   // Done, it stays among the cards, saying so, until the person dismisses it: only then is it under Finished
-  expect(await until(async () => list.find({ type: 'Text', text: /^✓ Done/ }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: /^◐ Delivered/ }))).toBeDefined()
   expect(await isFinished()).toBe(false)
   await pressed(list, 'dismiss-a1')
   expect(await until(async () => ((await isFinished()) ? true : undefined))).toBe(true)
@@ -2045,7 +2045,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   expect(await key('change-a3')).toBeUndefined()
   await shut.unmount()
   const top = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
-  expect((await until(async () => (await key('change-a3')) ?? undefined))?.props.label).toBe('Message')
+  expect((await until(async () => (await key('change-a3')) ?? undefined))?.props.label).toBe('Give feedback')
   expect((await list.findAll({ type: 'Button' })).map(b => String(b.key)).filter(one => /^(change|dismiss)-a3-/.test(one)).map(one => one.split('-')[0])).toEqual(['change', 'dismiss'])
   // Pressed, it opens the box in the bar for that card, with no question: one line that asks what to change, Send and Close
   const changeBox = async () => (await top.findAll({ type: 'Input' } as never)).find(one => /-reply-change-/.test(one.key ?? ''))

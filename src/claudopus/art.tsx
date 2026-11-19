@@ -17,6 +17,8 @@ const NEEDS = '#E5A50A'
 const LIVE_DOTS = dots(LIVE, LINE)
 // The mark of work that finished
 const DONE = 'success'
+// A result handed in and not yet marked done by the person
+const DELIVERED = '#4C9AFF'
 // The octopus: resting, working at its computers (drawn from 32 px up), and lifting its arms (for 16 to 24 px). Each is an SVG
 // file of the mod's, art/<name>.svg, read when the session starts: a drawing is swapped by replacing its file. Happy is the
 // octopus in the finished green, bouncing with its arms up once over the two seconds finished work pauses, then still
@@ -27,7 +29,7 @@ const ART_FILES: Record<Exclude<keyof typeof ART, 'asking' | 'updated'>, string>
 // Whether the octopus is happy at a time: work of this chat's that finished, not stopped or failed, is in its pause. A new drawing
 // starts its animation, so it plays from the first finish and holds its last picture through any finish that follows in the pause
 const isHappy = (cards: (Staged & { id: string; parentId?: string; endedAt: number })[], at: number) =>
-  cards.some(one => !one.parentId && stageOf(cards, one) === 'done' && isLingering(one, at))
+  cards.some(one => !one.parentId && hasResult(stageOf(cards, one)) && isLingering(one, at))
 // How big the octopus is drawn in the panel's header and in the line above the prompt, in the app's pixels
 const HEAD_MARK = 48
 const BAND_MARK = 16

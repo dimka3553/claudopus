@@ -249,6 +249,7 @@ const chatHooks = (on: On) => {
         type: 'object',
         properties: {
           text: { type: 'string' },
+          questions: { type: 'array', items: { type: 'string' }, description: named('Only with your last note before you hand in, and only when your result leaves something open that {name} may want to decide on seeing it: each as one short plain question. Your delivered card lists them, and {name} answers them all in one reply, which starts you again. Never what holds you up: that is a question you ask before you finish') },
           task: { type: 'string', description: named('Only after a message from {name} that is a new task of its own, which you do not do: that request in one line. The chat starts it as a task of its own') },
         },
         required: ['text'],

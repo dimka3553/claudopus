@@ -221,7 +221,7 @@ const panelHooks = (on: On) => {
     // then it goes under Finished. Work stopped or stopped by an error is not: it pauses in its place, in its own look
     // In the few rows above the prompt a narrow terminal gives the panel, the outline would take two of them
     const isAbovePrompt = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
-    const isFinishMoment = (one: Todo) => stage(one) === 'done' && lingers(one, at)
+    const isFinishMoment = (one: Todo) => hasResult(stage(one)) && lingers(one, at)
     const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
     // How a workflow's card says it ended; one under way says nothing of its state: the moving dots do
     const stood: Record<Flow['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
@@ -402,6 +402,22 @@ const panelHooks = (on: On) => {
     // A card of this chat's that has ended and is not under Finished can be dismissed there; one at work has Stop, and one a
     // command waits on for the person's Allow stays
     const canDismiss = (one: Todo) => !one.chat && !one.parentId && one.status !== 'working' && shownWork.some(up => up.id === one.id) && !isActingOnReply(one) && !one.admins?.length && !needsFor(one).some(need => need.kind !== 'question')
+    // What a delivered task's result leaves open, as its last note listed it: numbered lines, all answered by one reply
+    const questionLines = (one: Todo, key: string, left: number | 'xs') => {
+      const asked = one.questions ?? []
+      if (!asked.length) return null
+      return (
+        <Box key={key} flexDirection="column" paddingLeft={left}>
+          <Text dimColor>{asked.length === 1 ? 'It asks' : `It asks ${asked.length} things`}</Text>
+          {asked.map((text, n) => (
+            <Box key={`${key}-${n}`} flexDirection="row" gap={1} alignItems="flex-start">
+              {asked.length > 1 ? <Box flexShrink={0}><Text dimColor>{`${n + 1}.`}</Text></Box> : null}
+              <Box flexGrow={1} flexShrink={1} minWidth={0}><Text wrap="wrap">{text}</Text></Box>
+            </Box>
+          ))}
+        </Box>
+      )
+    }
     const small = (one: Todo) => {
       // In the terminal, while the letters are keys, the first nine cards are numbered and the number opens the card's Details
       // A card in its moment at the top is not numbered, so the others keep their numbers through it
@@ -415,7 +431,7 @@ const panelHooks = (on: On) => {
       // Just finished, in its moment at the top: outlined in the green of what is done, as an allowed notice is
       const isMoment = isMomentNow && !isAbovePrompt
       return (
-        <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isMoment ? { borderStyle: 'round' as const, borderColor: DONE } : {})}>
+        <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isMoment ? { borderStyle: 'round' as const, borderColor: stageColor(stage(one)) ?? DONE } : {})}>
           {edge(one, kept.length, done, kept.some(item => item.state === 'doing'))}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
             <Box flexDirection="column">
@@ -433,7 +449,7 @@ const panelHooks = (on: On) => {
                 ) : null}
                 {/* Done, at the top or under Finished: a press opens the box above the chat for what to change, where that bar
                     takes a box; the same task then carries on with what is typed */}
-                {canChange(one) && 'Input' in table && repliesInBar(e.surface) ? (
+                {canChange(one) && stage(one) !== 'delivered' && 'Input' in table && repliesInBar(e.surface) ? (
                   <Box flexShrink={0}>
                     <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : 'Message'} plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
                   </Box>
@@ -444,8 +460,9 @@ const panelHooks = (on: On) => {
                     <Button key={`again-small-${one.id}-${presses}`} label="Start again" plain dimColor hover={{ scope: `again-${one.id}`, underline: true }} onPress={() => ((presses += 1), void startAgain($, one.id))} />
                   </Box>
                 ) : null}
-                {/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again */}
-                {canDismiss(one) ? (
+                {/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again. A
+                    delivered card has its two presses at its bottom instead, and none up here */}
+                {canDismiss(one) && stage(one) !== 'delivered' ? (
                   <Box flexShrink={0}>
                     <Button key={`dismiss-${one.id}-${presses}`} label="Dismiss" plain dimColor hover={{ scope: `dismiss-${one.id}`, underline: true }} onPress={() => void ((presses += 1), dismiss($, one.id).catch(err => log($, `card not dismissed: ${String(err)}`)))} />
                   </Box>
@@ -488,19 +505,20 @@ const panelHooks = (on: On) => {
                 ) : null}
               </Box>
             ) : null}
-            {/* A card that waits says so with its block alone: no line of what the task last did under it */}
+            {/* A card that waits says so with its block alone: no line of what the task last did under it. A delivered card's line is
+                one row: what it asks and its presses come right under it */}
             {needsPerson(one) ? null : (
-            <Box flexDirection="row" alignItems="flex-start" gap={1} height={2} overflow="hidden" paddingLeft={lead}>
+            <Box flexDirection="row" alignItems="flex-start" gap={1} height={stage(one) === 'delivered' ? 1 : 2} overflow="hidden" paddingLeft={lead}>
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* Ended, the line begins with its stage, in its colour: green done, grey stopped, red failed with why; then what
                     it last said */}
-                {stage(one) === 'done' || stage(one) === 'stopped' || stage(one) === 'failed' ? (
+                {hasResult(stage(one)) || stage(one) === 'stopped' || stage(one) === 'failed' ? (
                   <Box flexDirection="row" minWidth={0}>
                     {/* (the stage's own word is never the part cut short: on a narrow panel a long note beside it left "✓ …") */}
                     <Box flexShrink={stage(one) === 'failed' ? 1 : 0} minWidth={0}>
                       <Text wrap="truncate-end" color={stageColor(stage(one))} dimColor={stage(one) === 'stopped'}>
-                        {stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? `✕ Failed${one.why ? ` · ${one.why}` : ''}` : 'Stopped'}
+                        {stage(one) === 'delivered' ? '◐ Delivered' : stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? `✕ Failed${one.why ? ` · ${one.why}` : ''}` : 'Stopped'}
                       </Text>
                     </Box>
                     {noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}
@@ -513,6 +531,19 @@ const panelHooks = (on: On) => {
             )}
             {/* Its helpers, inside the card: its coloured edge runs down beside them */}
             {tree.length ? <Box key={`tree-${one.id}`} flexDirection="column" paddingLeft={lead}>{tree}</Box> : null}
+            {/* Delivered: what its result leaves open, numbered, with no press of their own, and at the card's bottom its only two
+                presses (19 Nov, the person: "buttons at the bottom to mark as done, provide feedback", "it makes the most sense
+                to just send one message for both the questions"). The reply is typed in the box above the chat, as every
+                message is, and puts the task back to work; Mark as done puts the card under Finished */}
+            {stage(one) === 'delivered' ? questionLines(one, `asks-${one.id}`, lead) : null}
+            {stage(one) === 'delivered' && (canDismiss(one) || (canChange(one) && 'Input' in table && repliesInBar(e.surface))) ? (
+              <Box key={`delivered-${one.id}`} flexDirection="row" flexWrap="wrap" gap={1} paddingLeft={lead}>
+                {canChange(one) && 'Input' in table && repliesInBar(e.surface) ? (
+                  <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : one.questions?.length ? 'Reply' : 'Give feedback'} variant={isBarOpen('change', one.id) ? undefined : 'primary'} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
+                ) : null}
+                {canDismiss(one) ? <Button key={`dismiss-${one.id}-${presses}`} label="Mark as done" onPress={() => void ((presses += 1), dismiss($, one.id).catch(err => log($, `card not marked done: ${String(err)}`)))} /> : null}
+              </Box>
+            ) : null}
           </Box>
         </Box>
       )
@@ -1402,6 +1433,7 @@ const panelHooks = (on: On) => {
             </Box>
           ) : null}
           {resultPart(one)}
+          {stage(one) === 'delivered' && one.questions?.length ? part('part-questions', 'Questions', '', questionLines(one, 'asks-whole', 0) ?? <Box />) : null}
           {one.words ? askPart(one) : null}
           {todoPart(one)}
           {helpersPart(one)}
@@ -1653,7 +1685,7 @@ const panelHooks = (on: On) => {
     const isFinishing = (one: Todo) => !isWaits(one) && isFinishMoment(one)
     const finishFrom = (one: Todo) => (one.chat ? (endSeen.get(`${one.id}:${one.endedAt}`) ?? one.endedAt) : pauseFrom(one))
     // Done with a server left for the person: after its moment it stays up, under what waits, its row and Stop under it
-    const isLeftUp = (one: Todo) => !one.chat && stage(one) === 'done' && Boolean(one.bg?.length) && !isWaits(one) && !isFinishing(one)
+    const isLeftUp = (one: Todo) => !one.chat && hasResult(stage(one)) && Boolean(one.bg?.length) && !isWaits(one) && !isFinishing(one)
     // A command you ran on a press, while it runs or its output waits for its ended task: up with what it is and its press
     const isUp = (one: Todo) => isWaits(one) || isFinishing(one) || isLeftUp(one) || (!one.chat && runningOn(one.id).length > 0)
     const upSince = (one: Todo) => Math.max(...(one.chat ? [] : runningOn(one.id).map(run => run.startedAt ?? 0)), 0)
@@ -1696,11 +1728,13 @@ const panelHooks = (on: On) => {
     const runningThere = elsewhere.filter(one => stageOf(elsewhere, one) === 'working')
     const head = {
       here: own.filter(one => stage(one) === 'working').length + runningFlows.length,
+      // (what was handed in and waits for the person's look, counted after what works)
+      delivered: shownWork.filter(one => stage(one) === 'delivered').length,
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
       // Each thing at the top counts once, as the line above the prompt counts them
       asks: waitsCount,
-      isDone: isHappy(own, at) || elsewhere.some(one => stageOf(elsewhere, one) === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
+      isDone: isHappy(own, at) || elsewhere.some(one => hasResult(stageOf(elsewhere, one)) && lingers(one, at)) || flowList.some(isFlowMoment),
     }
     const mood = headMood(head)
     // A letter for each header button, in the terminal alone, and only while the panel has no password box to type in: there the
@@ -1757,7 +1791,15 @@ const panelHooks = (on: On) => {
                     ) : null}
                   </Box>
                 )}
-                <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head)}</Text>
+                {/* (what waits is amber, what was delivered is its own blue, on the one line) */}
+                <Box flexDirection="row" minWidth={0}>
+                  {headLine(head).length > deliveredSaid(head).length ? (
+                    <Box flexShrink={1} minWidth={0}>
+                      <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head).slice(0, headLine(head).length - deliveredSaid(head).length)}</Text>
+                    </Box>
+                  ) : null}
+                  {head.delivered ? <Box flexShrink={0}><Text color={DELIVERED} dimColor={false}>{deliveredSaid(head)}</Text></Box> : null}
+                </Box>
                 {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 && chat.window ? `This chat is ${fill(chat.tokens, chat.window)}` : chat.tokens > 0 ? 'This chat has started' : 'This chat has just begun'}</Text>}
               </Box>
             </Box>
