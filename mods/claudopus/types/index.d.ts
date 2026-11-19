@@ -23,6 +23,7 @@ export type Stream = { name: string; repo: string; session: string; state: strin
 export type Entry = { at: number; kind: 'note' | 'decision' | 'steer' | 'event'; text: string; step?: number }
 
 // One thing the work set out to do under its to-do; `doing` is the one it is on now, at most one at a time
+export type Talk = { by: 'you' | 'task'; text: string }
 export type Item = { text: string; state: 'open' | 'doing' | 'done' | 'dropped' }
 
 // What a task made: a file or link of its own, by its kind (with the file's time when it was listed), and its code as a count of
@@ -85,12 +86,13 @@ export type Todo = {
   // stands out with the ask in view until the work clears it or ends
   // `replied`: the person's reply in their own words that did not settle it; the ask stays while the work acts on it, with nothing to press or type, until the work clears it or asks again, or ends with it open, when every answer is back. `isWaking`: the work had ended and is being started again with the reply
   // `isCommand`: `copy` is a command the person types in a terminal opened in `cwd`. `choices` are buttons the person answers with, sent back to `from`, the agent that asked (a helper's ask shows on its work's card). `pictures` are the picture files the ask is about, shown with it in the chat. `details` is what the ask is about, in full, shown with it on the card and in the chat. `release`: the worktree folder a press on its first choice allows one release run for. `refused`: Claudopus's notice of a call Claude Code refused, whose answer tells the work to carry on without it and never starts ended work again
-  ask?: { text: string; details?: string; release?: string; copy?: string; isCommand?: boolean; cwd?: string; choices?: string[]; pictures?: string[]; from?: string; at: number; refused?: boolean; replied?: { text: string; at: number; isWaking?: boolean } }
+  ask?: { text: string; details?: string; release?: string; copy?: string; isCommand?: boolean; cwd?: string; choices?: string[]; pictures?: string[]; from?: string; at: number; refused?: boolean; replied?: { text: string; at: number; isWaking?: boolean }; talk?: Talk[] }
   // Admin commands it, or a helper of it, wants to run, each held until the person presses Allow or Deny on this card: the Mac
   // (`here` or an ssh host), the exact command, the agent that runs it, and whether Allow covers the whole piece of work
   // What waits for the person's press: an admin command, a release to main ('release'), or a change to a file of theirs ('file')
   // `isUndone`: a file of theirs a command changed, put back as it was (`isOutside`: found changed between commands, by an editor or a program left running); Allow makes the change again
-  admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean; kind?: 'release' | 'file'; isUndone?: boolean; isOutside?: boolean; call?: string; folder?: string; branch?: string }[]
+  // `talk`: what the person wrote on it with Answer in words, and the task's answers, the oldest first. A release's `reason` is the task's one line for it (bin/release -m), `commits` the subjects of its branch's commits main lacks, newest first, `more` how many more there are, `files` how many files it changes
+  admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean; kind?: 'release' | 'file'; isUndone?: boolean; isOutside?: boolean; call?: string; folder?: string; branch?: string; talk?: Talk[]; reason?: string; commits?: string[]; more?: number; files?: number }[]
   startedAt: number
   // When it first began, kept when it is started again (whose startedAt moves on so its time runs on): the cards keep their places by it
   begunAt?: number

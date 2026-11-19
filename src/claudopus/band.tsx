@@ -68,6 +68,11 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
     const one = changeTarget(cards)
     return one && { head: `↳ ${stageOf(cards, one) === 'delivered' && one.questions?.length ? 'Reply' : 'Message'} to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) }
   }
+  // Words on a permission of a task's card: they go to that task, and the block keeps Allow and Don't allow (gate.tsx, wordsOnGate)
+  if (open.kind === 'permission') {
+    const one = gatePressed.has(open.id) || !(gateHeld.has(open.id) || gateParked.has(open.id)) ? undefined : cards.find(card => !card.chat && card.admins?.some(gate => gate.id === open.id))
+    return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), send: value => void (value.trim() && ((barBoxAt = 0), drafts.delete(barDraft()), keepDraft($, barDraft(), undefined), replies.set(open.id, (replies.get(open.id) ?? 0) + 1), (barOpen = undefined), freeTimes($), redraw($), wordsOnGate($, one.id, open.id, value))) }
+  }
   if (open.kind === 'continue') {
     const r = kept.find(one => one.id === open.id)
     return r && { head: `↳ Message to “${cut(r.title, 50)}”`, placeholder: 'Type your message', draft: barDraft(), send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value).catch(err => log($, `message from a result not sent: ${String(err)}`))) }

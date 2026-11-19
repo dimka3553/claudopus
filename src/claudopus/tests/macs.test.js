@@ -455,7 +455,7 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
             case 4:
                 _b.apply(void 0, [_o.sent()]).toBeDefined();
                 _c = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: '1 task working in another chat' })];
+                return [4 /*yield*/, list.find({ type: 'Text', text: '1 working in another chat' })];
             case 5:
                 _c.apply(void 0, [_o.sent()]).toBeDefined();
                 quiet = JSON.stringify({ chat: 'chat-old', title: 'Remote connector', folder: '/repo/billing', host: '', at: NOW + 11000, cards: [] });
@@ -503,7 +503,7 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
             case 15:
                 _g.apply(void 0, [_o.sent()]).toBe(true);
                 _h = expect;
-                return [4 /*yield*/, list.find({ type: 'Text', text: 'Nothing running' })];
+                return [4 /*yield*/, list.find({ type: 'Text', text: 'Nothing waits for you' })];
             case 16:
                 _h.apply(void 0, [_o.sent()]).toBeDefined();
                 _j = expect;

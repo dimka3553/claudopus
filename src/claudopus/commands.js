@@ -1,80 +1,198 @@
-"use strict";
 // The /claudopus and /servers commands, and the panel's focus and close
-const commandHooks = (on) => {
-    on('command.run', { command: 'claudopus' }, async ($) => {
-        await update($, me, one => ({ ...one, isListOpened: true }));
-        await update($, paneShown, () => true);
-        const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS });
-        // Asked for where it can be drawn, it is open in every chat from now on
-        if (opened.isPlaced)
-            await choosePanel($, true);
-        return { text: opened.isPlaced ? 'Claudopus opened its panel.' : nowhere('Claudopus') };
+var __assign = (this && this.__assign) || function () {
+    __assign = Object.assign || function(t) {
+        for (var s, i = 1, n = arguments.length; i < n; i++) {
+            s = arguments[i];
+            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
+                t[p] = s[p];
+        }
+        return t;
+    };
+    return __assign.apply(this, arguments);
+};
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
+};
+var __generator = (this && this.__generator) || function (thisArg, body) {
+    var _ = { label: 0, sent: function() { if (t[0] & 1) throw t[1]; return t[1]; }, trys: [], ops: [] }, f, y, t, g = Object.create((typeof Iterator === "function" ? Iterator : Object).prototype);
+    return g.next = verb(0), g["throw"] = verb(1), g["return"] = verb(2), typeof Symbol === "function" && (g[Symbol.iterator] = function() { return this; }), g;
+    function verb(n) { return function (v) { return step([n, v]); }; }
+    function step(op) {
+        if (f) throw new TypeError("Generator is already executing.");
+        while (g && (g = 0, op[0] && (_ = 0)), _) try {
+            if (f = 1, y && (t = op[0] & 2 ? y["return"] : op[0] ? y["throw"] || ((t = y["return"]) && t.call(y), 0) : y.next) && !(t = t.call(y, op[1])).done) return t;
+            if (y = 0, t) op = [op[0] & 2, t.value];
+            switch (op[0]) {
+                case 0: case 1: t = op; break;
+                case 4: _.label++; return { value: op[1], done: false };
+                case 5: _.label++; y = op[1]; op = [0]; continue;
+                case 7: op = _.ops.pop(); _.trys.pop(); continue;
+                default:
+                    if (!(t = _.trys, t = t.length > 0 && t[t.length - 1]) && (op[0] === 6 || op[0] === 2)) { _ = 0; continue; }
+                    if (op[0] === 3 && (!t || (op[1] > t[0] && op[1] < t[3]))) { _.label = op[1]; break; }
+                    if (op[0] === 6 && _.label < t[1]) { _.label = t[1]; t = op; break; }
+                    if (t && _.label < t[2]) { _.label = t[2]; _.ops.push(op); break; }
+                    if (t[2]) _.ops.pop();
+                    _.trys.pop(); continue;
+            }
+            op = body.call(thisArg, _);
+        } catch (e) { op = [6, e]; y = 0; } finally { f = t = 0; }
+        if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
+    }
+};
+var _this = this;
+var commandHooks = function (on) {
+    on('command.run', { command: 'claudopus' }, function ($) { return __awaiter(_this, void 0, void 0, function () {
+        var opened;
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0: return [4 /*yield*/, update($, me, function (one) { return (__assign(__assign({}, one), { isListOpened: true })); })];
+                case 1:
+                    _a.sent();
+                    return [4 /*yield*/, update($, paneShown, function () { return true; })];
+                case 2:
+                    _a.sent();
+                    return [4 /*yield*/, $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS })
+                        // Asked for where it can be drawn, it is open in every chat from now on
+                    ];
+                case 3:
+                    opened = _a.sent();
+                    if (!opened.isPlaced) return [3 /*break*/, 5];
+                    return [4 /*yield*/, choosePanel($, true)];
+                case 4:
+                    _a.sent();
+                    _a.label = 5;
+                case 5: return [2 /*return*/, { text: opened.isPlaced ? 'Claudopus opened its panel.' : nowhere('Claudopus') }];
+            }
+        });
+    }); });
     // A box the person moves the focus into holds the panel's drawing, so nothing is drawn under them as they start typing; the focus
     // moved by them anywhere else, or out of the pane, lets it go
-    on('ui.focus', async ($, e, next) => {
-        // The bar holds its drawing for as long as its reply box has the cursor (band.tsx), however the cursor came there first: by the
-        // person's click in the box, as the box takes it when they click into the bar (autoFocus), or by the mod's own call. After that
-        // only the person's own focus renews it (and each letter): the app may give the box the cursor again each time it builds it
-        // anew, and each redraw would renew the hold that puts redraws off (asking.tsx, isBoxHeld)
-        const isInBarBox = e.plugin === 'claudopus' && isBarBox(e.element);
-        if (isInBarBox && (e.origin.kind === 'person' || barBoxAt === 0))
-            barBoxAt = await $.clock.now();
-        // and a Details tab its message box (messageBox), the same way
-        const isInPaneBox = e.plugin === 'claudopus' && isPaneBox(e.element);
-        if (isInPaneBox && (e.origin.kind === 'person' || paneBoxAt === 0))
-            ((paneBoxAt = await $.clock.now()), (paneBoxIn = e.requestId ?? ''));
-        if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
-            // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
-            if (e.plugin === 'claudopus')
-                await engage($);
-            // A button the person put the focus on holds the panel's drawing until it is pressed (PRESS_HOLD)
-            if (e.plugin === 'claudopus' && isTypedBox(e.element))
-                holdTimes($);
-            else
-                freeTimes($);
-            // after the let-go above, whose own drawing would end the hold
-            // and so does a button of the bar above the prompt on the desktop, which is redrawn as often (band.tsx)
-            const isBarButton = e.plugin === 'claudopus' && e.component === 'AbovePrompt' && barIds.get('desktop') === e.requestId && !isBarBox(e.element);
-            // and a button of a tab of the mod's on the desktop, such as Settings' Reset, which every drawing of the panel draws again too
-            const isTabButton = e.plugin === 'claudopus' && heldTabs.has(e.requestId ?? '') && !isTypedBox(e.element);
-            if ((e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element)) || isBarButton || isTabButton)
-                await holdForPress($);
-            else
-                pressFrom = 0;
-            if (!isInBarBox)
-                barBoxAt = 0;
-            if (!isInPaneBox)
-                paneBoxAt = 0;
-        }
-        return next(e);
-    });
+    on('ui.focus', function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
+        var isInBarBox, isInPaneBox, isBarButton, isTabButton;
+        var _a, _b;
+        return __generator(this, function (_c) {
+            switch (_c.label) {
+                case 0:
+                    isInBarBox = e.plugin === 'claudopus' && isBarBox(e.element);
+                    if (!(isInBarBox && (e.origin.kind === 'person' || barBoxAt === 0))) return [3 /*break*/, 2];
+                    return [4 /*yield*/, $.clock.now()
+                        // and a Details tab its message box (messageBox), the same way
+                    ];
+                case 1:
+                    barBoxAt = _c.sent();
+                    _c.label = 2;
+                case 2:
+                    isInPaneBox = e.plugin === 'claudopus' && isPaneBox(e.element);
+                    if (!(isInPaneBox && (e.origin.kind === 'person' || paneBoxAt === 0))) return [3 /*break*/, 4];
+                    return [4 /*yield*/, $.clock.now()];
+                case 3:
+                    ((paneBoxAt = _c.sent()), (paneBoxIn = (_a = e.requestId) !== null && _a !== void 0 ? _a : ''));
+                    _c.label = 4;
+                case 4:
+                    if (!(e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined))) return [3 /*break*/, 10];
+                    if (!(e.plugin === 'claudopus')) return [3 /*break*/, 6];
+                    return [4 /*yield*/, engage($)
+                        // A button the person put the focus on holds the panel's drawing until it is pressed (PRESS_HOLD)
+                    ];
+                case 5:
+                    _c.sent();
+                    _c.label = 6;
+                case 6:
+                    // A button the person put the focus on holds the panel's drawing until it is pressed (PRESS_HOLD)
+                    if (e.plugin === 'claudopus' && isTypedBox(e.element))
+                        holdTimes($);
+                    else
+                        freeTimes($);
+                    isBarButton = e.plugin === 'claudopus' && e.component === 'AbovePrompt' && barIds.get('desktop') === e.requestId && !isBarBox(e.element);
+                    isTabButton = e.plugin === 'claudopus' && heldTabs.has((_b = e.requestId) !== null && _b !== void 0 ? _b : '') && !isTypedBox(e.element);
+                    if (!((e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element)) || isBarButton || isTabButton)) return [3 /*break*/, 8];
+                    return [4 /*yield*/, holdForPress($)];
+                case 7:
+                    _c.sent();
+                    return [3 /*break*/, 9];
+                case 8:
+                    pressFrom = 0;
+                    _c.label = 9;
+                case 9:
+                    if (!isInBarBox)
+                        barBoxAt = 0;
+                    if (!isInPaneBox)
+                        paneBoxAt = 0;
+                    _c.label = 10;
+                case 10: return [2 /*return*/, next(e)];
+            }
+        });
+    }); });
     // The person scrolling the panel or a Details tab is using it: what moves on its own waits (engage)
-    on('ui.scroll', async ($, e, next) => {
-        if (e.origin.kind === 'person' && (e.requestId === LIST || e.requestId.startsWith(WORK_PANE) || e.requestId.startsWith(FLOW_PANE)))
-            await engage($);
-        // Every move is let through as it comes. The app's own moves back to a box that holds the cursor in a pane arrive here as the
-        // person's, already drawn: refusing them only undid each one a moment later, a bounce worse than the pull (0.2.135, taken out).
-        // The reply box is drawn in the bar above the prompt instead, where there is nothing to pull (asking.tsx, repliesInBar)
-        return next(e);
-    }).catch(($, e, next) => next(e));
+    on('ui.scroll', function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0:
+                    if (!(e.origin.kind === 'person' && (e.requestId === LIST || e.requestId.startsWith(WORK_PANE) || e.requestId.startsWith(FLOW_PANE)))) return [3 /*break*/, 2];
+                    return [4 /*yield*/, engage($)
+                        // Every move is let through as it comes. The app's own moves back to a box that holds the cursor in a pane arrive here as the
+                        // person's, already drawn: refusing them only undid each one a moment later, a bounce worse than the pull (0.2.135, taken out).
+                        // The reply box is drawn in the bar above the prompt instead, where there is nothing to pull (asking.tsx, repliesInBar)
+                    ];
+                case 1:
+                    _a.sent();
+                    _a.label = 2;
+                case 2: 
+                // Every move is let through as it comes. The app's own moves back to a box that holds the cursor in a pane arrive here as the
+                // person's, already drawn: refusing them only undid each one a moment later, a bounce worse than the pull (0.2.135, taken out).
+                // The reply box is drawn in the bar above the prompt instead, where there is nothing to pull (asking.tsx, repliesInBar)
+                return [2 /*return*/, next(e)];
+            }
+        });
+    }); }).catch(function ($, e, next) { return next(e); });
     // A pick of the person's in the mod's panes is their own move, as a press is (tabHooks): the drawing is let go before it acts
-    on('ui.select', { plugin: 'claudopus' }, async ($, e, next) => (freeTimes($), next(e)));
+    on('ui.select', { plugin: 'claudopus' }, function ($, e, next) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+        return [2 /*return*/, (freeTimes($), next(e))];
+    }); }); });
     // Closed by the person's own hand, it closes in every chat and stays closed until asked for; a close of the mod's own is no choice
-    on('ui.close', async ($, e, next) => {
-        const r = await next(e);
-        // The list closed, by anyone: nothing of where it stood is kept, so the line above the prompt no longer points into it
-        // and where what waited stood at its top: opened again, it is put together afresh
-        if (e.id === LIST)
-            (listOffsets.clear(), topPlaces.clear(), drawAgain($));
-        if (e.id === LIST && e.origin.kind === 'person' && dir)
-            await choosePanel($, false);
-        return r;
-    });
-    on('command.run', { command: 'servers' }, async ($) => {
-        await scanServers($).catch(err => log($, `servers not read: ${String(err)}`));
-        const opened = await $.ui.open({ id: PANE, title: PANE_TITLE });
-        return { text: opened.isPlaced ? 'Claudopus opened the Servers panel.'
-                : nowhere('Servers') };
-    });
+    on('ui.close', function ($, e, next) { return __awaiter(_this, void 0, void 0, function () {
+        var r;
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0: return [4 /*yield*/, next(e)
+                    // The list closed, by anyone: nothing of where it stood is kept, so the line above the prompt no longer points into it
+                    // and where what waited stood at its top: opened again, it is put together afresh
+                ];
+                case 1:
+                    r = _a.sent();
+                    // The list closed, by anyone: nothing of where it stood is kept, so the line above the prompt no longer points into it
+                    // and where what waited stood at its top: opened again, it is put together afresh
+                    if (e.id === LIST)
+                        (listOffsets.clear(), topPlaces.clear(), drawAgain($));
+                    if (!(e.id === LIST && e.origin.kind === 'person' && dir)) return [3 /*break*/, 3];
+                    return [4 /*yield*/, choosePanel($, false)];
+                case 2:
+                    _a.sent();
+                    _a.label = 3;
+                case 3: return [2 /*return*/, r];
+            }
+        });
+    }); });
+    on('command.run', { command: 'servers' }, function ($) { return __awaiter(_this, void 0, void 0, function () {
+        var opened;
+        return __generator(this, function (_a) {
+            switch (_a.label) {
+                case 0: return [4 /*yield*/, scanServers($).catch(function (err) { return log($, "servers not read: ".concat(String(err))); })];
+                case 1:
+                    _a.sent();
+                    return [4 /*yield*/, $.ui.open({ id: PANE, title: PANE_TITLE })];
+                case 2:
+                    opened = _a.sent();
+                    return [2 /*return*/, { text: opened.isPlaced ? 'Claudopus opened the Servers panel.'
+                                : nowhere('Servers') }];
+            }
+        });
+    }); });
 };

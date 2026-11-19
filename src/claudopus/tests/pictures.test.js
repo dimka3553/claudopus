@@ -531,47 +531,53 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
         }
     });
 }); });
-test("what a task made is on its card under its title, side by side, and as tiles under the title in its Details: a file opens on a press, three of a kind are one stack that opens out, its code is a count of files and lines, and no folder or path is shown", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, files, shown, logged, NEW, pdf, shots, _i, _b, path, pane, chips, icons, _c, _d, tab, bold, tiles, _e, _f, _g, _h, _j;
+test("what a task made is on its card under its title, side by side, and as tiles under the title in its Details: a file opens on a press, three of a kind are one stack that opens out, and the files it changed in a repo are a table by kind, an icon and a bar each, each shown in the app's Files pane on a press, or where it can't, what changed in it opens in a tab of the panel", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, files, shown, logged, tabs, viewed, NEW, pdf, shots, _i, _b, path, pane, chips, icons, _c, _d, _e, tab, bold, tiles, _f, _g, texts, drawn, _h, sources, _j, rowCounts, fileIcons, rows, _k, _l, _m, _o, _p, _q, diffTab, diff, code, _r, _s, _t, _u, _v, _w, _x, _y, newTab, fresh, _z, _0, _1, term, _2, madeShown, _3, _4, _5;
+    var _6, _7, _8;
     var _this = this;
-    return __generator(this, function (_k) {
-        switch (_k.label) {
+    var _9, _10, _11, _12, _13, _14, _15, _16, _17;
+    return __generator(this, function (_18) {
+        switch (_18.label) {
             case 0:
-                _a = world(on, {}), files = _a.files, shown = _a.shown, logged = _a.logged;
+                _a = world(on, {}), files = _a.files, shown = _a.shown, logged = _a.logged, tabs = _a.tabs, viewed = _a.viewed;
                 NEW = '9999999999999';
                 pdf = '/Users/me/out/vat-report.pdf';
                 shots = ['/Users/me/out/a.png', '/Users/me/out/b.png', '/Users/me/out/c.png'];
-                for (_i = 0, _b = __spreadArray(__spreadArray([pdf], shots, true), ['/repo/src/app.ts', '/tmp/work/scratch.png'], false); _i < _b.length; _i++) {
+                for (_i = 0, _b = __spreadArray(__spreadArray([pdf], shots, true), ['/repo/src/app.ts', '/repo/README.md', '/tmp/work/scratch.png'], false); _i < _b.length; _i++) {
                     path = _b[_i];
                     (files.set(path, 'x'), files.set("mtime:".concat(path), NEW));
                 }
                 // One that was there before the task began is not of its making
                 files.set('/Users/me/out/old.pdf', 'x');
                 files.set('git:top', '/repo');
-                files.set('git:numstat', '12\t3\tsrc/app.ts\n');
+                files.set('git:numstat', '12\t3\tsrc/app.ts\n40\t0\tREADME.md\tnew\n');
+                files.set('git:diff:src/app.ts', 'diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1,2 +1,2 @@\n-const a = 1\n+const a = 2\n same()\n');
                 return [4 /*yield*/, $.session.start(start)];
             case 1:
-                _k.sent();
+                _18.sent();
                 return [4 /*yield*/, $.prompt.submit({ text: 'make the report', wait: false, origin: composer })];
             case 2:
-                _k.sent();
+                _18.sent();
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { prompt: 'Make the report.' }))];
             case 3:
-                _k.sent();
+                _18.sent();
                 return [4 /*yield*/, $.tool.call({ tool: 'Write', tool_use_id: 'w1', agentId: 'a1', file_path: '/repo/src/app.ts', content: 'x' })];
             case 4:
-                _k.sent();
+                _18.sent();
                 return [4 /*yield*/, $.tool.call({ tool: 'Write', tool_use_id: 'w2', agentId: 'a1', file_path: '/tmp/work/scratch.png', content: 'x' })];
             case 5:
-                _k.sent();
-                return [4 /*yield*/, $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1', command: "render ".concat(__spreadArray(__spreadArray([pdf], shots, true), ['/Users/me/out/old.pdf'], false).join(' ')), description: 'Run the render of the report' })];
+                _18.sent();
+                return [4 /*yield*/, $.tool.call({ tool: 'Write', tool_use_id: 'w3', agentId: 'a1', file_path: '/repo/README.md', content: 'x' })];
             case 6:
-                _k.sent();
+                _18.sent();
+                return [4 /*yield*/, $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1', command: "render ".concat(__spreadArray(__spreadArray([pdf], shots, true), ['/Users/me/out/old.pdf'], false).join(' ')), description: 'Run the render of the report' })];
+            case 7:
+                _18.sent();
                 return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { props: __assign(__assign({}, LIST.props), { bodyColumns: 80 }), surface: 'desktop' }))
                     // While it still works: its files right under its title, each an icon and a word or two
                 ];
-            case 7:
-                pane = _k.sent();
+            case 8:
+                pane = _18.sent();
                 // While it still works: its files right under its title, each an icon and a word or two
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         switch (_a.label) {
@@ -579,45 +585,58 @@ test("what a task made is on its card under its title, side by side, and as tile
                             case 1: return [2 /*return*/, (_a.sent()) || undefined];
                         }
                     }); }); })];
-            case 8:
-                // While it still works: its files right under its title, each an icon and a word or two
-                _k.sent();
-                return [4 /*yield*/, pane.findAll({ type: 'Button' })];
             case 9:
-                chips = (_k.sent()).filter(function (one) { return String(one.key).startsWith('made-a1-'); }).map(function (one) { return String(one.props.label); });
-                expect(chips).toEqual(['3 pictures', 'vat-report']);
-                return [4 /*yield*/, pane.findAll({ type: 'Svg' })];
+                // While it still works: its files right under its title, each an icon and a word or two
+                _18.sent();
+                return [4 /*yield*/, pane.findAll({ type: 'Button' })];
             case 10:
-                icons = (_k.sent()).filter(function (svg) { return svg.props.width === 18; });
-                expect(icons.map(function (svg) { return String(svg.props.alt).trim(); })).toEqual(['Picture', 'PDF', 'Code']);
-                _c = expect;
-                return [4 /*yield*/, pane.findAll({ type: 'Text' })];
+                chips = (_18.sent()).filter(function (one) { return String(one.key).startsWith('made-a1-'); }).map(function (one) { return String(one.props.label); });
+                expect(chips).toEqual(['3 pictures', 'vat-report', '2 changed files']);
+                return [4 /*yield*/, pane.findAll({ type: 'Svg' })];
             case 11:
-                _c.apply(void 0, [(_k.sent()).map(function (one) { return one.text; }).filter(function (text) { return /code file|^[+−]\d/.test(String(text)); })]).toEqual(['1 code file', '+12', '−3']);
+                icons = (_18.sent()).filter(function (svg) { return svg.props.width === 18; });
+                expect(icons.map(function (svg) { return String(svg.props.alt).trim(); })).toEqual(['Picture', 'PDF', 'Code']);
+                // its changed files' counts drawn at the size of the button beside them
+                _c = expect;
+                return [4 /*yield*/, pane.findAll({ type: 'Svg' })];
+            case 12:
+                // its changed files' counts drawn at the size of the button beside them
+                _c.apply(void 0, [(_18.sent()).map(function (one) { return String(one.props.alt); }).filter(function (alt) { return alt.includes('added'); })]).toEqual(['52 added, 3 removed']);
                 _d = expect;
                 return [4 /*yield*/, pane.findAll({ type: 'Text' })];
-            case 12:
-                _d.apply(void 0, [(_k.sent()).some(function (one) { return /\/Users\/me|\/repo\/src|scratch|old/.test(String(one.text)); })]).toBe(false);
+            case 13:
+                _d.apply(void 0, [(_18.sent()).some(function (one) { return /\/Users\/me|\/repo\/src|scratch|old/.test(String(one.text)); })]).toBe(false);
+                // Its changed files are a count that opens its Details (19 Nov: "1 code file" could not be pressed)
+                return [4 /*yield*/, pressed(pane, 'made-a1-code-open')];
+            case 14:
+                // Its changed files are a count that opens its Details (19 Nov: "1 code file" could not be pressed)
+                _18.sent();
+                _e = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        return [2 /*return*/, tabs.find(function (one) { return one.startsWith('work-a1'); })];
+                    }); }); })];
+            case 15:
+                _e.apply(void 0, [_18.sent()]).toBeDefined();
                 // A file opens on a press, as the system opens it
                 return [4 /*yield*/, pressed(pane, 'made-a1-pdf-0-open')];
-            case 13:
+            case 16:
                 // A file opens on a press, as the system opens it
-                _k.sent();
+                _18.sent();
                 expect(shown).toEqual([['open', pdf]]);
                 return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { requestId: 'work-a1', props: __assign(__assign({}, LIST.props), { bodyColumns: 80 }), surface: 'desktop' }))];
-            case 14:
-                tab = _k.sent();
+            case 17:
+                tab = _18.sent();
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         switch (_a.label) {
                             case 0: return [4 /*yield*/, keyed(tab, 'files-a1-pile-picture-open')];
                             case 1: return [2 /*return*/, (_a.sent()) || undefined];
                         }
                     }); }); })];
-            case 15:
-                _k.sent();
+            case 18:
+                _18.sent();
                 return [4 /*yield*/, tab.findAll({ type: 'Text' })];
-            case 16:
-                bold = (_k.sent()).filter(function (text) { return text.props.bold; }).map(function (text) { return text.text; });
+            case 19:
+                bold = (_18.sent()).filter(function (text) { return text.props.bold; }).map(function (text) { return text.text; });
                 expect(bold[1]).toBe('Files');
                 tiles = function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                     switch (_a.label) {
@@ -625,74 +644,320 @@ test("what a task made is on its card under its title, side by side, and as tile
                         case 1: return [2 /*return*/, (_a.sent()).filter(function (svg) { return svg.props.width === 96; }).map(function (svg) { return String(svg.props.alt); })];
                     }
                 }); }); };
-                _e = expect;
+                _f = expect;
                 return [4 /*yield*/, tiles()];
-            case 17:
-                _e.apply(void 0, [_k.sent()]).toEqual(['3 pictures', 'vat-report', '1 code file']);
+            case 20:
+                _f.apply(void 0, [_18.sent()]).toEqual(['3 pictures', 'vat-report']);
                 // A stack opens out into a tile for each of its files, and folds again
                 return [4 /*yield*/, pressed(tab, 'files-a1-pile-picture-open')];
-            case 18:
+            case 21:
                 // A stack opens out into a tile for each of its files, and folds again
-                _k.sent();
+                _18.sent();
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         switch (_a.label) {
                             case 0: return [4 /*yield*/, tiles()];
                             case 1: return [2 /*return*/, ((_a.sent()).includes('a') ? true : undefined)];
                         }
                     }); }); })];
-            case 19:
-                _k.sent();
-                _f = expect;
+            case 22:
+                _18.sent();
+                _g = expect;
                 return [4 /*yield*/, tiles()];
-            case 20:
-                _f.apply(void 0, [_k.sent()]).toEqual(['a', 'b', 'c', 'vat-report', '1 code file']);
+            case 23:
+                _g.apply(void 0, [_18.sent()]).toEqual(['a', 'b', 'c', 'vat-report']);
                 return [4 /*yield*/, pressed(tab, 'files-a1-fewer')];
-            case 21:
-                _k.sent();
+            case 24:
+                _18.sent();
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         switch (_a.label) {
                             case 0: return [4 /*yield*/, tiles()];
                             case 1: return [2 /*return*/, ((_a.sent()).includes('3 pictures') ? true : undefined)];
                         }
+                    }); }); })
+                    // Under the tiles, the files it changed in its repo, by kind, the most changed first, under a line for the folder each is in (the
+                    // repo's own name for one at its top): an icon, its name, and its counts and bar, as long as its lines changed against the most
+                    // changed; never a folder outside the repo
+                ];
+            case 25:
+                _18.sent();
+                texts = function (in_) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                    switch (_a.label) {
+                        case 0: return [4 /*yield*/, in_.findAll({ type: 'Text' })];
+                        case 1: return [2 /*return*/, (_a.sent()).map(function (one) { return String(one.text); })];
+                    }
+                }); }); };
+                drawn = function (in_) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                    switch (_a.label) {
+                        case 0: return [4 /*yield*/, in_.findAll({ type: 'Svg' })];
+                        case 1: return [2 /*return*/, (_a.sent()).filter(function (svg) { return svg.props.width !== 96; }).map(function (svg) { return String(svg.props.alt); })];
+                    }
+                }); }); };
+                _h = expect;
+                return [4 /*yield*/, drawn(tab)];
+            case 26:
+                _h.apply(void 0, [_18.sent()]).toEqual(['Code · 1 file', '12 added, 3 removed', 'src', 'TS file', '12 added, 3 removed', 'Documents · 1 file', '40 added, 0 removed', 'repo', 'MD file', 'new, 40 added, 0 removed']);
+                return [4 /*yield*/, tab.findAll({ type: 'Svg' })];
+            case 27:
+                sources = (_18.sent()).filter(function (svg) { return /^(Code|Documents) · |^src$|^repo$|added/.test(String(svg.props.alt)); }).map(function (svg) { return String(svg.props.source); });
+                expect(sources.every(function (source) { return source.includes('font-size="14"'); })).toBe(true);
+                _j = expect;
+                return [4 /*yield*/, texts(tab)];
+            case 28:
+                _j.apply(void 0, [(_18.sent()).filter(function (text) { return /^(Code|Documents|src|repo|new)$|^[+−]\d/.test(text); })]).toEqual([]);
+                rowCounts = sources.filter(function (source) { return source.includes('<g transform'); });
+                expect(rowCounts.map(function (source) { var _a; return (_a = /<text x="(\d+)"[^>]*fill="#57AB5A"/.exec(source)) === null || _a === void 0 ? void 0 : _a[1]; })).toEqual(['70', '70']);
+                expect(rowCounts[1]).toContain('width="64" height="8" rx="2" fill="#57AB5A"');
+                expect(rowCounts[0]).toMatch(/width="(\d+)" height="8" rx="2" fill="#57AB5A".*fill="#E5534B"/);
+                return [4 /*yield*/, tab.findAll({ type: 'Svg' })];
+            case 29:
+                fileIcons = (_18.sent()).filter(function (svg) { return svg.props.width === 16; });
+                expect(String((_9 = fileIcons[0]) === null || _9 === void 0 ? void 0 : _9.props.source)).toContain('#3178C6');
+                return [4 /*yield*/, tab.findAll({ type: 'Button' })];
+            case 30:
+                rows = (_18.sent()).filter(function (one) { return /^(app\.ts|README\.md)$/.test(String(one.props.label)); });
+                expect(rows.map(function (one) { return String(one.props.label); })).toEqual(['app.ts', 'README.md']);
+                _k = expect;
+                _l = [[]];
+                return [4 /*yield*/, texts(tab)];
+            case 31:
+                _m = [__spreadArray.apply(void 0, _l.concat([(_18.sent()), true]))];
+                return [4 /*yield*/, drawn(tab)];
+            case 32:
+                _k.apply(void 0, [__spreadArray.apply(void 0, _m.concat([(_18.sent()), true])).some(function (text) { return /\/Users\/me|\/repo\//.test(text); })]).toBe(false);
+                // A press on a file shows it in the app's own Files pane beside the chat, and opens no tab of the panel (19 Nov: "it shouldn't open
+                // within the tab itself")
+                return [4 /*yield*/, tab.press({ key: (_11 = (_10 = rows[0]) === null || _10 === void 0 ? void 0 : _10.key) !== null && _11 !== void 0 ? _11 : '' })];
+            case 33:
+                // A press on a file shows it in the app's own Files pane beside the chat, and opens no tab of the panel (19 Nov: "it shouldn't open
+                // within the tab itself")
+                _18.sent();
+                _o = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        return [2 /*return*/, viewed[0]];
                     }); }); })];
-            case 22:
-                _k.sent();
-                _g = expect;
-                return [4 /*yield*/, tab.findAll({ type: 'Text' })];
-            case 23:
-                _g.apply(void 0, [(_k.sent()).some(function (one) { return /\/Users\/me|\/repo\/src/.test(String(one.text)); })]).toBe(false);
+            case 34:
+                _o.apply(void 0, [_18.sent()]).toEqual({ pane: 'file', path: '/repo/src/app.ts' });
+                expect(tabs.some(function (one) { return one.startsWith('diff-'); })).toBe(false);
+                // Where the app won't show it, what changed in it opens in a tab of the panel named after it, drawn by Claude Code as a diff
+                files.set('ccd_view:refused', 'The file is outside the folders this session can open.');
+                _q = (_p = tab).press;
+                _6 = {};
+                return [4 /*yield*/, tab.findAll({ type: 'Button' })];
+            case 35: return [4 /*yield*/, _q.apply(_p, [(_6.key = (_13 = (_12 = (_18.sent()).find(function (one) { return one.props.label === 'app.ts'; })) === null || _12 === void 0 ? void 0 : _12.key) !== null && _13 !== void 0 ? _13 : '', _6)])];
+            case 36:
+                _18.sent();
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        return [2 /*return*/, tabs.find(function (one) { return /^diff-.*: app\.ts$/.test(one); })];
+                    }); }); })];
+            case 37:
+                diffTab = _18.sent();
+                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { requestId: String(diffTab).split(':')[0], props: __assign(__assign({}, LIST.props), { bodyColumns: 80 }), surface: 'desktop' }))];
+            case 38:
+                diff = _18.sent();
+                code = function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                    switch (_a.label) {
+                        case 0: return [4 /*yield*/, diff.findAll({ type: 'Code' })];
+                        case 1: return [2 /*return*/, (_a.sent()).map(function (one) { return ({ source: String(one.props.source), format: one.props.format, startLine: one.props.startLine }); })];
+                    }
+                }); }); };
+                _r = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0: return [4 /*yield*/, code()];
+                            case 1: return [2 /*return*/, (_a.sent())[0]];
+                        }
+                    }); }); })];
+            case 39:
+                _r.apply(void 0, [_18.sent()]).toEqual({ source: '@@ -1,2 +1,2 @@\n-const a = 1\n+const a = 2\n same()', format: 'diff', startLine: undefined });
+                _s = expect;
+                return [4 /*yield*/, texts(diff)];
+            case 40:
+                _s.apply(void 0, [_18.sent()]).toEqual(expect.arrayContaining(['app.ts', 'src ·', '+12', '−3', 'of the task “Fix the nose”']));
+                _t = expect;
+                return [4 /*yield*/, diff.findAll({ type: 'Button' })];
+            case 41:
+                _t.apply(void 0, [(_18.sent()).map(function (one) { return String(one.props.label); })]).toEqual(['Details', 'Whole file']);
+                _v = (_u = diff).press;
+                _7 = {};
+                return [4 /*yield*/, diff.findAll({ type: 'Button' })];
+            case 42: 
+            // Whole file draws the file itself, numbered, and Changes goes back
+            return [4 /*yield*/, _v.apply(_u, [(_7.key = (_15 = (_14 = (_18.sent()).find(function (one) { return one.props.label === 'Whole file'; })) === null || _14 === void 0 ? void 0 : _14.key) !== null && _15 !== void 0 ? _15 : '', _7)])];
+            case 43:
+                // Whole file draws the file itself, numbered, and Changes goes back
+                _18.sent();
+                _w = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0: return [4 /*yield*/, code()];
+                            case 1: return [2 /*return*/, (_a.sent()).find(function (one) { return one.startLine === 1; })];
+                        }
+                    }); }); })];
+            case 44:
+                _w.apply(void 0, [_18.sent()]).toEqual({ source: 'x', format: undefined, startLine: 1 });
+                return [4 /*yield*/, diff.unmount()
+                    // A file new since the task began is drawn whole, with nothing to switch
+                ];
+            case 45:
+                _18.sent();
+                _y = (_x = tab).press;
+                _8 = {};
+                return [4 /*yield*/, tab.findAll({ type: 'Button' })];
+            case 46: 
+            // A file new since the task began is drawn whole, with nothing to switch
+            return [4 /*yield*/, _y.apply(_x, [(_8.key = (_17 = (_16 = (_18.sent()).find(function (one) { return one.props.label === 'README.md'; })) === null || _16 === void 0 ? void 0 : _16.key) !== null && _17 !== void 0 ? _17 : '', _8)])];
+            case 47:
+                // A file new since the task began is drawn whole, with nothing to switch
+                _18.sent();
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        return [2 /*return*/, tabs.find(function (one) { return /^diff-.*: README\.md$/.test(one); })];
+                    }); }); })];
+            case 48:
+                newTab = _18.sent();
+                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { requestId: String(newTab).split(':')[0], props: __assign(__assign({}, LIST.props), { bodyColumns: 80 }), surface: 'desktop' }))];
+            case 49:
+                fresh = _18.sent();
+                _z = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { var _a; return __generator(this, function (_b) {
+                        switch (_b.label) {
+                            case 0: return [4 /*yield*/, fresh.findAll({ type: 'Code' })];
+                            case 1: return [2 /*return*/, (_a = (_b.sent())[0]) === null || _a === void 0 ? void 0 : _a.props.startLine];
+                        }
+                    }); }); })];
+            case 50:
+                _z.apply(void 0, [_18.sent()]).toBe(1);
+                _0 = expect;
+                return [4 /*yield*/, texts(fresh)];
+            case 51:
+                _0.apply(void 0, [_18.sent()]).toContain('new ·');
+                _1 = expect;
+                return [4 /*yield*/, fresh.findAll({ type: 'Button' })];
+            case 52:
+                _1.apply(void 0, [(_18.sent()).map(function (one) { return String(one.props.label); })]).toEqual(['Details']);
+                return [4 /*yield*/, fresh.unmount()];
+            case 53:
+                _18.sent();
                 return [4 /*yield*/, tab.unmount()
+                    // A terminal draws each bar in cells: added, removed, then the track
+                ];
+            case 54:
+                _18.sent();
+                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { requestId: 'work-a1', props: __assign(__assign({}, LIST.props), { bodyColumns: 80 }), surface: 'terminal' }))];
+            case 55:
+                term = _18.sent();
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0: return [4 /*yield*/, texts(term)];
+                            case 1: return [2 /*return*/, ((_a.sent()).includes('■■■■■■') ? true : undefined)];
+                        }
+                    }); }); })];
+            case 56:
+                _18.sent();
+                _2 = expect;
+                return [4 /*yield*/, texts(term)];
+            case 57:
+                _2.apply(void 0, [(_18.sent()).filter(function (text) { return /^[■·]+$/.test(text); })]).toEqual(['■■■', '■', '··', '■■■■■■']);
+                return [4 /*yield*/, term.unmount()
                     // Done: what its result names joins in, but a code file it names stays in the count, and only a link it says it made is a thing
                 ];
-            case 24:
-                _k.sent();
+            case 58:
+                _18.sent();
                 // Done: what its result names joins in, but a code file it names stays in the count, and only a link it says it made is a thing
                 return [4 /*yield*/, $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: "The report is made: ".concat(pdf, ". The fix is in /repo/src/app.ts.\n\nReport added: https://os.example.com/reports/9\nSee the guide at https://docs.example.com/guide") })];
-            case 25:
+            case 59:
                 // Done: what its result names joins in, but a code file it names stays in the count, and only a link it says it made is a thing
-                _k.sent();
+                _18.sent();
                 return [4 /*yield*/, $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a1' })];
-            case 26:
-                _k.sent();
+            case 60:
+                _18.sent();
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         switch (_a.label) {
                             case 0: return [4 /*yield*/, keyed(pane, 'made-a1-link-0-open')];
                             case 1: return [2 /*return*/, (_a.sent()) || undefined];
                         }
                     }); }); })];
-            case 27:
-                _k.sent();
-                _h = expect;
-                return [4 /*yield*/, pane.findAll({ type: 'Button' })];
-            case 28:
-                _h.apply(void 0, [(_k.sent()).filter(function (one) { return String(one.key).startsWith('made-a1-'); }).map(function (one) { return String(one.props.label); })]).toEqual(['3 pictures', 'vat-report', 'os report 9 ↗']);
-                _j = expect;
-                return [4 /*yield*/, pane.findAll({ type: 'Text' })];
-            case 29:
-                _j.apply(void 0, [(_k.sent()).map(function (one) { return one.text; }).filter(function (text) { return /code file/.test(String(text)); })]).toEqual(['1 code file']);
+            case 61:
+                _18.sent();
+                madeShown = function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                    switch (_a.label) {
+                        case 0: return [4 /*yield*/, pane.findAll({ type: 'Button' })];
+                        case 1: return [2 /*return*/, (_a.sent()).filter(function (one) { return String(one.key).startsWith('made-a1-'); }).map(function (one) { return String(one.props.label); })];
+                    }
+                }); }); };
+                _3 = expect;
+                return [4 /*yield*/, madeShown()];
+            case 62:
+                _3.apply(void 0, [_18.sent()]).toEqual(['3 pictures', 'vat-report', 'os report 9 ↗', '2 changed files']);
+                // Started again, it changes a file in a worktree of its own and opens a pull request, and its next result names that only by its
+                // number: what its first result named stays, and the pull request is there from what the command printed (19 Nov: a card started
+                // again showed only "3 changed files" of seven pull requests, a published page and a document)
+                files.set('git:top:/wt/s6/src', '/wt/s6');
+                files.set('/wt/s6/src/drop.ts', 'x');
+                files.set('mtime:/wt/s6/src/drop.ts', NEW);
+                files.set('git:numstat:/wt/s6', '7\t0\tsrc/drop.ts\tnew\n');
+                return [4 /*yield*/, $.tool.call({ tool: 'Write', tool_use_id: 'w4', agentId: 'a1', file_path: '/wt/s6/src/drop.ts', content: 'x' })];
+            case 63:
+                _18.sent();
+                files.set('stdout:gh pr create --fill', 'Creating pull request for s6 into main in acme/web\n\nhttps://github.com/acme/web/pull/284\n');
+                return [4 /*yield*/, $.tool.call({ tool: 'Bash', tool_use_id: 'b2', agentId: 'a1', command: 'gh pr create --fill', description: 'Open the pull request' })];
+            case 64:
+                _18.sent();
+                return [4 /*yield*/, $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'a1', message: 'The fix is in pull request #284.' })];
+            case 65:
+                _18.sent();
+                return [4 /*yield*/, $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't3', reason: 'answer', agentId: 'a1' })];
+            case 66:
+                _18.sent();
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0: return [4 /*yield*/, madeShown()];
+                            case 1: return [2 /*return*/, ((_a.sent()).includes('web #284 ↗') ? true : undefined)];
+                        }
+                    }); }); })];
+            case 67:
+                _18.sent();
+                _4 = expect;
+                return [4 /*yield*/, madeShown()];
+            case 68:
+                _4.apply(void 0, [_18.sent()]).toEqual(['3 pictures', 'vat-report', 'os report 9 ↗', 'web #284 ↗', '3 changed files']);
+                // Started a third time: its worktree is taken away once merged, a step ends with words of its own, and its result lists pull
+                // requests in a table and a published page with no word saying it made them. The file it changed there stays with its count, and
+                // a page it only cites is still no thing it made
+                files.delete('/wt/s6/src/drop.ts');
+                files.delete('git:numstat:/wt/s6');
+                return [4 /*yield*/, $.tool.call({ tool: 'Bash', tool_use_id: 'b3', agentId: 'a1', command: 'npm test', description: 'Test the upgrades' })];
+            case 69:
+                _18.sent();
+                return [4 /*yield*/, $.turn.complete({ answer: 'Watching https://github.com/acme/web/pull/285 build.', durationMs: 1, isAborted: false, turnId: 't4', reason: 'answer', agentId: 'a1' })];
+            case 70:
+                _18.sent();
+                return [4 /*yield*/, $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a1', message: 'Two upgrades are open.\n\n| App | Pull request |\n|---|---|\n| Main app | https://github.com/acme/web/pull/285 |\n| Clipify | https://github.com/acme/clipify/pull/70 |\n\nTracker page: https://claude.ai/artifact/NP6UV\nSee https://docs.example.com/guide' })];
+            case 71:
+                _18.sent();
+                return [4 /*yield*/, $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't5', reason: 'answer', agentId: 'a1' })];
+            case 72:
+                _18.sent();
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0: return [4 /*yield*/, madeShown()];
+                            case 1: return [2 /*return*/, ((_a.sent()).includes('clipify #70 ↗') ? true : undefined)];
+                        }
+                    }); }); })];
+            case 73:
+                _18.sent();
+                _5 = expect;
+                return [4 /*yield*/, madeShown()];
+            case 74:
+                _5.apply(void 0, [_18.sent()]).toEqual(['3 pictures', 'vat-report', 'os report 9 ↗', 'web #284 ↗', 'web #285 ↗', 'clipify #70 ↗', 'claude.ai page ↗', '3 changed files']);
+                // Each opens on a press, as the system opens a link
+                return [4 /*yield*/, pressed(pane, 'made-a1-link-4-open')];
+            case 75:
+                // Each opens on a press, as the system opens a link
+                _18.sent();
+                expect(shown.at(-1)).toEqual(['open', 'https://claude.ai/artifact/NP6UV']);
                 return [4 /*yield*/, pane.unmount()];
-            case 30:
-                _k.sent();
+            case 76:
+                _18.sent();
                 expect(logged).toEqual([]);
                 return [2 /*return*/];
         }

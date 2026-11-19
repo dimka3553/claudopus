@@ -520,6 +520,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     // and where the repo a worktree belongs to keeps its git folder, as git:common lays it
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--git-common-dir')) return ok(files.has('git:common') ? `${files.get('git:common')}\n` : '', files.has('git:common') ? 0 : 128)
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref')) return ok(files.has('git:branch') ? `${files.get('git:branch')}\n` : '', files.has('git:branch') ? 0 : 128)
+    // and what a branch adds to main: its commits' subjects as git:log lays them, the files it changes as git:diff does
+    if (tool === 'git' && rest.includes('log') && rest.includes('--format=%s')) return ok(files.get('git:log') ?? '')
+    if (tool === 'git' && rest.includes('diff') && rest.includes('--name-only')) return ok(files.get('git:diff') ?? '')
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
     if (tool?.endsWith('bin/secret')) {
@@ -1180,6 +1183,14 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
   await clock.advance(1000)
   expect(['asked for the command', Boolean(await until(async () => list.find({ type: 'Text', text: BLOCKED })))]).toEqual(['asked for the command', true])
   expect(logLines('put to the person on its card')).toHaveLength(1)
+  // Words on it go to the task, which answers inside the same block; it stays, waiting for the press, and runs nothing
+  const field = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith('ask-a1-words-field-')))
+  await list.input({ key: field?.key ?? '', text: 'Why count them?' } as never)
+  expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('about the command Claude Code refused you (wc -l notes.md)')))).toContain('“Why count them?”')
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'To size the notes before I split them.' } as never)
+  expect(await until(async () => (await list.findAll({ type: 'Markdown' } as never)).map(one => String(one.props.text ?? '')).find(one => one.includes('**The answer:**')))).toContain('**You asked:** Why count them?\n\n**The answer:** To size the notes before I split them.')
+  expect(await list.find({ type: 'Text', text: BLOCKED })).toBeDefined()
+  expect(pressRuns).toEqual([])
   await deny()
   const told = await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('do not do it, nor reach its result by other means')))
   expect(told).toContain(`pressed "Don't allow" when asked whether to run the command Claude Code refused you (wc -l notes.md)`)
@@ -1236,9 +1247,9 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   // Don't allow runs nothing, and tells the task to carry on without it
   await refuse('b00', { command: 'dig +short NS example.net', description: 'Look up the name servers' })
   expect(await until(async () => list.find({ type: 'Text', text: BLOCKED }))).toBeDefined()
-  // (nothing is typed on it: only its two buttons answer it)
+  // (only its two buttons answer it: words typed on it go to the task and run nothing)
   expect(await buttons()).toEqual(['Allow', "Don't allow"])
-  expect((await list.findAll({ type: 'Input' } as never)).length).toBe(0)
+  expect((await list.findAll({ type: 'Input' } as never)).map(one => one.props.placeholder)).toEqual(['Answer in words'])
   await pressOn('-deny-')
   expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('do not do it, nor reach its result by other means')))).toBeDefined()
   expect(pressRuns).toEqual([])

@@ -409,19 +409,27 @@ test("another chat's panel shows an admin command that waits, with no button: on
   expect((await list.findAll({ type: 'Button' })).some(one => ['Allow', 'Always allow this command', "Don't allow"].includes(String(one.props.label)) || (one.key ?? '').startsWith('gate-'))).toBe(false)
 })
 
-test('a release nobody pressed for is asked, once, for its own branch, with Allow and Don\'t allow alone: the 15 Nov run-progress-rows release, its output sent to a log, asked twice, first for a branch called ">"', async ($, on) => {
+test('a release nobody pressed for is asked, once, for its own branch, with Allow and Don\'t allow alone, saying what it puts on main: the 15 Nov run-progress-rows release, its output sent to a log, asked twice, first for a branch called ">"; and the 19 Nov release that said only its branch and folder', async ($, on) => {
   const { list, files, grants, holding, wake } = await gated($, on)
   files.set('git:top', '/repo/wt')
   files.set('git:branch', 'fix-it')
-  for (const [id, tail] of [['rl1', ' > /tmp/release.log 2>&1'], ['rl2', ' 2>/tmp/release.log'], ['rl3', '>/tmp/release.log']] as const) {
+  // What it says under the question: the task's own line (-m), else that it gave none, then the commits main lacks, then the counts
+  const commits = '- Fix the hosts file\n- Test the hosts file'
+  for (const [id, tail, log, about] of [
+    ['rl1', ' -m "Make the server start again after a reboot" > /tmp/release.log 2>&1', 'Fix the hosts file\nTest the hosts file\n', `Make the server start again after a reboot\n\n${commits}\n\n2 commits · 3 changed files · branch fix-it · from /repo/wt`],
+    ['rl2', ' 2>/tmp/release.log', 'Fix the hosts file\nTest the hosts file\n', `Claude gave no reason for it. Its commits say:\n\n${commits}\n\n2 commits · 3 changed files · branch fix-it · from /repo/wt`],
+    ['rl3', '>/tmp/release.log', '', 'Branch fix-it · from /repo/wt'],
+  ] as const) {
+    files.set('git:log', log)
+    files.set('git:diff', log ? 'etc/hosts\ntest/hosts.test.ts\nREADME.md\n' : '')
     const call = $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command: `hold x${id}; /plug/claudopus/bin/release${tail}` } as never) as Promise<{ deny?: string; result?: unknown }>
     expect(await until(async () => keyed(list, `gate-${id}-r0-once`))).toBeDefined()
-    // Said in plain words: what is released in the question, its branch and where from in one line under it, and no command row
+    // Said in plain words: what is released in the question, what it puts on main under it, and no command row
     const drawn = await gateTexts(list)
     expect(drawn.slice(drawn.indexOf('Permission'), drawn.indexOf('Permission') + 2)).toEqual(['Permission', 'Release fix-it to main?'])
     expect((await list.find({ type: 'Text', text: 'Release fix-it to main?' }))?.props.color).toBe('#E5A50A')
     const under = (await list.findAll({ type: 'Markdown' })).map(one => String(one.props.text ?? ''))
-    expect(under).toContain('Branch fix-it · from /repo/wt')
+    expect(under).toContain(about)
     expect([...drawn, ...under].some(one => /^>|> from/.test(one))).toBe(false)
     expect(drawn.some(one => one === 'fix-it from /repo/wt')).toBe(false)
     // A release is asked each time: nothing to always allow
@@ -485,6 +493,61 @@ test("the press on a task's go-ahead for a release lets that task's next release
   await through('r5')
   await asked('r6')
   wake()
+})
+
+test("a permission on a task's card is answered in words before any press: the held call ends with the words for the task, the block stays with its buttons, shows the words and the task's answer in place of a question of its own, and only Allow lets the very same command through, once; Don't allow after words refuses it", async ($, on) => {
+  const { list, bash, held, grants, press, appended, resumed, files, holding, wake } = await gated($, on)
+  const told = (words: string) => until(async () => [...appended, ...resumed].find(line => line.startsWith('a1: ') && line.includes(words)))
+  const words = async (id: string, text: string) => {
+    const field = await until(async () => (await list.findAll({ type: 'Input' })).find(one => (one.key ?? '').startsWith(`gate-${id}-words-field-`)))
+    await list.input({ key: field?.key ?? '', text })
+    wake()
+  }
+  const call = bash('w1', `${ADMIN} here 'id -u'`) as Promise<{ deny?: string }>
+  await held('w1')
+  await words('w1-0', 'What is this for?')
+  const said = (await call).deny ?? ''
+  expect(said).toContain('neither allowed nor refused it, and wrote to you about it instead, in their own words: “What is this for?”')
+  expect(said).toContain("Don't run it again until then")
+  expect(grants()).toEqual([])
+  // Still waiting for the press, with every button
+  expect(await gateButtons(list, 'w1-0')).toEqual(['Allow', "Don't allow", 'Always allow this command'])
+  // The task's answer, given with no buttons, goes inside the permission under the words, never as a question of its own
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'It checks which user the server runs as.', details: 'It changes nothing.' } as never)
+  expect(await until(async () => (await list.findAll({ type: 'Markdown' })).map(one => String(one.props.text ?? '')).find(one => one.includes('**The answer:**')))).toBe('**You asked:** What is this for?\n\n**The answer:** It checks which user the server runs as.\n\nIt changes nothing.')
+  expect(await list.find({ type: 'Text', text: 'Question' })).toBeUndefined()
+  // More words go to the task as a message, and the block keeps waiting
+  await words('w1-0', 'And why now?')
+  expect(await told('wrote to you again about the admin command that waits on your card')).toContain('“And why now?”')
+  expect(await gateButtons(list, 'w1-0')).toEqual(['Allow', "Don't allow", 'Always allow this command'])
+  // Allow: the task is told to run it again, and that very command goes through with nothing asked, once
+  await press('gate-w1-0-once')
+  expect(await told('pressed Allow on the admin command that waited on your card')).toBeDefined()
+  expect(await until(async () => ((await keyed(list, 'gate-w1-0-once')) ? undefined : true))).toBe(true)
+  const second = bash('w2', `hold xw2; ${ADMIN} here 'id -u'`) as Promise<{ deny?: string }>
+  const run = await until(async () => holding.get(`xw2; ${ADMIN} here 'id -u'`))
+  expect(grants()).toHaveLength(1)
+  expect(await keyed(list, 'gate-w2-0-once')).toBeUndefined()
+  run?.('ran')
+  expect((await second).deny).toBeUndefined()
+  const third = bash('w3', `${ADMIN} here 'id -u'`) as Promise<{ deny?: string }>
+  await held('w3')
+  await press('gate-w3-0-deny')
+  expect((await third).deny).toContain("pressed Don't allow")
+  // A release answered in words, then refused: the task hears the refusal, and its next run is asked again
+  files.set('git:top', '/repo/wt')
+  files.set('git:branch', 'fix-it')
+  const release = $.tool.call({ tool: 'Bash', tool_use_id: 'w4', agentId: 'a1', command: 'hold xw4; /plug/claudopus/bin/release' } as never) as Promise<{ deny?: string }>
+  expect(await until(async () => keyed(list, 'gate-w4-r0-once'))).toBeDefined()
+  await words('w4-r0', 'What does it fix?')
+  expect((await release).deny).toContain('This release did not run yet')
+  await press('gate-w4-r0-deny')
+  expect(await told("pressed Don't allow on this release")).toBeDefined()
+  expect(await until(async () => ((await keyed(list, 'gate-w4-r0-deny')) ? undefined : true))).toBe(true)
+  const asked = $.tool.call({ tool: 'Bash', tool_use_id: 'w5', agentId: 'a1', command: 'hold xw5; /plug/claudopus/bin/release' } as never) as Promise<{ deny?: string }>
+  expect(await until(async () => keyed(list, 'gate-w5-r0-once'))).toBeDefined()
+  await press('gate-w5-r0-deny')
+  expect((await asked).deny).toContain("pressed Don't allow")
 })
 
 // A long list of another chat's running work, two of whose cards wait on a gate and one on an ask: what the 15 Nov panel drew below

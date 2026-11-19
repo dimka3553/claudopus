@@ -1757,7 +1757,7 @@ const holdDone = (before: Todo[], next: Todo[]) => {
   return next.map(one => {
     const old = was.get(one.id)
     const isHeld = !one.parentId && !one.chat && one.status === 'done' && !hasReport(one) && old?.status === 'working'
-    if (old?.status === 'working' && one.status !== 'working' && !isHeld) (workAllowed.delete(one.id), releaseAllowed.delete(one.id))
+    if (old?.status === 'working' && one.status !== 'working' && !isHeld) (workAllowed.delete(one.id), releaseAllowed.delete(one.id), gateOnce.delete(one.id))
     return isHeld && old ? { ...old, answer: one.answer || old.answer } : one
   })
 }
@@ -5824,7 +5824,7 @@ const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = fals
 }
 const plainWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) =>
-  !isReply || Boolean(ask.refused) || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))
+  !isReply || (!ask.refused && (!ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))))
 const askPressed = new Map<string, string>()
 const asPressed = (given: Todo): Todo => {
   const closed = given.status !== 'working' && !given.closedAt && dismissedNow.has(given.id) ? { ...given, closedAt: dismissedNow.get(given.id) ?? (given.endedAt || 1) } : given
@@ -5839,7 +5839,7 @@ const repliesInBar = (surface: string) => barBoxes.has(surface)
 let barBoxAt = 0
 const BAR_BOX_HELD = 300_000
 const isBarBox = (element: string | undefined) => /^band-.*-reply-/.test(element ?? '')
-type BarKind = 'answer' | 'change' | 'key' | 'words' | 'password' | 'continue'
+type BarKind = 'answer' | 'change' | 'key' | 'words' | 'password' | 'continue' | 'permission'
 let barOpen: { kind: BarKind; id: string; mark: string } | undefined
 const isBarOpen = (kind: BarKind, id: string) => barOpen?.kind === kind && barOpen.id === id
 const isReplyOpen = (one: Todo) => Boolean(one.ask) && isBarOpen('answer', one.id)
@@ -6190,7 +6190,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   const listed = await read($, todos)
   const isWaking = listed.find(card => card.id === one.id)?.status !== 'working' && listed.find(card => card.id === target)?.status !== 'working'
   await changeTodos($, list =>
-    ((isHeld = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
+    ((isHeld = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) }, ...(card.ask.refused ? { talk: [...(card.ask.talk ?? []), { by: 'you' as const, text: cut(said, ASK_DETAILS) }].slice(-PERMIT_TALK_KEPT) } : {}) }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isHeld) return
   dropDrafts($, one.id)
@@ -6202,7 +6202,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   if (inChat.has(one.id)) (inChat.delete(one.id), void tellChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`))))
   const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
-  const to = `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
+  const to = ask.refused ? REFUSAL_WORDS(ask.copy ?? ask.text, said) : `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
   const told = working ? await tell($, target, to) : undefined
   if (told && !told.deny) return void (writtenIn($, target, one.id), redraw($))
   await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at })
@@ -7258,13 +7258,36 @@ type GateSaid = 'once' | 'always' | 'deny'
 type AdminCall = { host: string; command: string }
 const GATE_SERVICE = 'claudopus-admin-gate'
 const gateHeld = new Set<string>()
-const gateWaits = new Map<string, (said: GateSaid | 'gone') => void>()
+const gateWaits = new Map<string, (said: GateSaid | 'gone' | 'words') => void>()
+const gateParked = new Map<string, string>()
+const gateWords = new Map<string, string>()
+const gateOnce = new Map<string, { kind: 'admin' | 'file'; host: string; command: string; at: number }[]>()
+const takeOnce = async ($: EngineInterface, card: string, kind: 'admin' | 'file', host: string, command: string) => {
+  const now = await $.clock.now()
+  const list = (gateOnce.get(card) ?? []).filter(one => now - one.at < RELEASE_ALLOWED)
+  const at = list.findIndex(one => one.kind === kind && one.host === host && one.command === command)
+  const left = at < 0 ? list : list.filter((_, n) => n !== at)
+  if (left.length) gateOnce.set(card, left)
+  else gateOnce.delete(card)
+  return at >= 0
+}
 const HELD_STEP = 60
 const heldStep = ($: EngineInterface) => $.process.run(['/bin/sleep', String(HELD_STEP)], { timeoutMs: (HELD_STEP + 10) * 1000 }).then(() => undefined, () => undefined)
 let looseGates: Gate[] = []
 const workAllowed = new Set<string>()
 const GATE_DENIED = (gate?: Pick<Gate, 'kind'>) =>
   named(`Refused by {name}: {name} pressed Don't allow on this ${gate?.kind === 'release' ? "release, so nothing was released. Don't try to release it another way" : gate?.kind === 'file' ? "change, so the file was not changed. Don't try to change it another way" : "admin command, so it didn't run. Don't try to run it another way"}. Continue without it, or say what it is needed for and ask again.`)
+const gateNoun = (gate?: Pick<Gate, 'kind'>) => (gate?.kind === 'release' ? 'release' : gate?.kind === 'file' ? 'change to their file' : 'admin command')
+const GATE_WORDS = (gate: Pick<Gate, 'kind'>, words: string) =>
+  named(
+    `This ${gateNoun(gate)} did not run yet: {name} neither allowed nor refused it, and wrote to you about it instead, in their own words: “${words}”\nAnswer them with the \`ask\` tool: your answer in \`text\` (one plain line) and \`details\` (what it does and why, in everyday words), with no \`choices\`. Claudopus shows it inside the permission on your card, under their words, where Allow and Don't allow stay until {name} presses one. Typed words never allow anything. Don't run it again until then: when {name} presses Allow, Claudopus tells you, and your next run of exactly the same ${gate.kind === 'file' ? 'change' : 'command'} goes through once, with nothing more asked. With nothing else to do, end your step.`,
+  )
+const GATE_WORDS_AGAIN = (gate: Gate, words: string) =>
+  named(`{name} wrote to you again about the ${gateNoun(gate)} that waits on your card (${gateWhat(gate)}), in their own words: “${words}”\nAnswer them with the \`ask\` tool as before, with no \`choices\`: Claudopus shows it inside that permission, which stays until {name} presses Allow or Don't allow.`)
+const GATE_ALLOWED_LATER = (gate: Gate) =>
+  named(
+    `{name} pressed Allow on the ${gateNoun(gate)} that waited on your card (${gateWhat(gate)}). ${gate.kind === 'file' ? 'Make exactly the same change again now' : 'Run exactly the same command again now, as your rules say'}: it goes through once, within the hour, with nothing more asked.`,
+  )
 const gateThing = (gate?: Pick<Gate, 'kind'>) => (gate?.kind === 'release' ? 'This release did not run' : gate?.kind === 'file' ? 'This change was not made' : 'This admin command did not run')
 const GATE_GONE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: the wait for {name} to allow it was interrupted. Run it again if it is still needed.`)
 const GATE_LATE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: {name} didn't answer in time. Run it again when it is needed, and Claudopus will ask {name} again.`)
@@ -7462,13 +7485,14 @@ const setGates = async ($: EngineInterface, top: string, fn: (list: Gate[]) => G
 }
 const clearGates = async ($: EngineInterface) => {
   looseGates = looseGates.filter(one => gateHeld.has(one.id))
-  if ((await read($, todos)).some(one => one.admins?.some(gate => !gateHeld.has(gate.id))))
-    await changeTodos($, list => list.map(one => (one.admins ? { ...one, admins: one.admins.filter(gate => gateHeld.has(gate.id)).length ? one.admins.filter(gate => gateHeld.has(gate.id)) : undefined } : one)))
+  const isKept = (gate: Gate) => gateHeld.has(gate.id) || gateParked.has(gate.id)
+  if ((await read($, todos)).some(one => one.admins?.some(gate => !isKept(gate))))
+    await changeTodos($, list => list.map(one => (one.admins ? { ...one, admins: one.admins.filter(isKept).length ? one.admins.filter(isKept) : undefined } : one)))
 }
-const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget?: { remainingMs: number } }, gate: Gate, top: string): Promise<GateSaid | 'gone' | 'late' | 'blind'> => {
+const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget?: { remainingMs: number } }, gate: Gate, top: string): Promise<GateSaid | 'gone' | 'late' | 'blind' | 'words'> => {
   if (!(await $.session.surfaces().catch(() => [])).length) return 'blind'
-  const wait: { said?: GateSaid | 'gone' | 'late' } = {}
-  let end: (said: GateSaid | 'gone') => void = () => undefined
+  const wait: { said?: GateSaid | 'gone' | 'late' | 'words' } = {}
+  let end: (said: GateSaid | 'gone' | 'words') => void = () => undefined
   const pressed = new Promise<void>(resolve => (end = said => void (wait.said === undefined && ((wait.said = said), resolve()))))
   const stop = () => end('gone')
   gateHeld.add(gate.id)
@@ -7493,9 +7517,11 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
     whenLeft.delete(stop)
     gateHeld.delete(gate.id)
     if (gateWaits.get(gate.id) === end) gateWaits.delete(gate.id)
-    await setGates($, top, list => list.filter(one => one.id !== gate.id)).catch(() => undefined)
+    if (wait.said === 'words' && top) gateParked.set(gate.id, top)
+    else await setGates($, top, list => list.filter(one => one.id !== gate.id)).catch(() => undefined)
   }
   const said = wait.said ?? 'gone'
+  if (said === 'words') return (await log($, `${gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on'} ${gate.host}: answered in words, still waiting for the press`), said)
   const press = gatePressed.get(gate.id)
   gatePressed.delete(gate.id)
   if (press && press !== said) pressedLine($, top, gateLabel(press), `it had stopped waiting, so ${gateNothing(gate)}`)
@@ -7517,6 +7543,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') =
       .catch(err => log($, `undone change not answered: ${String(err)}`))
       .finally(() => (gatePressed.delete(id), redraw($)))
   }
+  if (gateParked.has(id)) return answerParked($, gate, said, gateParked.get(id) ?? card)
   const end = gateWaits.get(id)
   if (gateHeld.has(id) && !gatePressed.has(id) && end) {
     gatePressed.set(id, said)
@@ -7525,6 +7552,57 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') =
   }
   redraw($)
 }
+
+const wordsOnGate = ($: EngineInterface, card: string, id: string, value: string) => {
+  const run = (async () => {
+    const words = value.trim()
+    const one = (await read($, todos)).find(other => other.id === card)
+    const gate = one?.admins?.find(other => other.id === id)
+    if (!words || !one || !gate || gatePressed.has(id) || gate.isUndone) return
+    presses += 1
+    await setGates($, card, list => list.map(other => (other.id === id ? { ...other, talk: [...(other.talk ?? []), { by: 'you' as const, text: cut(words, ASK_DETAILS) }].slice(-PERMIT_TALK_KEPT) } : other)))
+    gateWords.set(id, words)
+    pressedLine($, card, '', '', `You answered “${cut(oneLine(words), 80)}”`)
+    const end = gateWaits.get(id)
+    if (gateHeld.has(id) && end) return end('words')
+    if (gateParked.has(id)) await toTask($, card, gate.from ?? card, GATE_WORDS_AGAIN(gate, words), words, gateWhat(gate))
+  })()
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(err => log($, `words on a permission not sent: ${String(err)}`))
+  return run
+}
+const toTask = async ($: EngineInterface, card: string, target: string, text: string, label: string, asked: string) => {
+  const one = (await read($, todos)).find(other => other.id === card)
+  if (!one) return
+  const working = (await read($, todos)).find(other => other.id === target)?.status === 'working'
+  const told = working ? await tell($, target, text) : undefined
+  if (told && !told.deny) return void writtenIn($, target, card)
+  await toEnded($, one, target, `${text}\n${RESUMED_BY_ANSWER}`, { text: label, ask: asked, at: await $.clock.now(), line: lineOf(one), isCard: true, isPress: true })
+}
+const answerParked = ($: EngineInterface, gate: Gate, said: GateSaid, card: string) => {
+  const id = gate.id
+  if (gatePressed.has(id)) return
+  gatePressed.set(id, said)
+  pressedLine($, card, gateLabel(said))
+  redraw($)
+  const run = (async () => {
+    const now = await $.clock.now()
+    if (said !== 'deny') {
+      if (gate.kind === 'release') releaseAllowed.set(card, { folder: gate.folder ?? '', branch: gate.branch ?? '', at: now })
+      else gateOnce.set(card, [...(gateOnce.get(card) ?? []), { kind: gate.kind === 'file' ? 'file' : 'admin', host: gate.host, command: gate.command, at: now }])
+      if (said === 'always' && !gate.kind) await allowAlways($, { host: gate.host, command: gate.command }).catch(err => log($, `admin command not always allowed: ${String(err)}`))
+    }
+    gateParked.delete(id)
+    gateWords.delete(id)
+    await setGates($, card, list => list.filter(one => one.id !== id))
+    await log($, `${gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on'} ${gate.host}: ${said === 'deny' ? 'not allowed' : 'allowed once'} after words`)
+    await toTask($, card, gate.from ?? card, said === 'deny' ? GATE_DENIED(gate) : GATE_ALLOWED_LATER(gate), gateLabel(said), gateWhat(gate))
+    pressedLine($, card, gateLabel(said))
+  })().finally(() => (gatePressed.delete(id), redraw($)))
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(err => log($, `press on a permission not sent: ${String(err)}`))
+}
+const PERMIT_TALK_KEPT = 8
 
 const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
   const calls = adminCalls(String((e as { command?: unknown }).command ?? ''), $.plugin.root)
@@ -7537,12 +7615,12 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
   const grants: string[] = []
   for (const [n, call] of calls.entries()) {
     const isWork = gate.mode === 'work' && Boolean(card)
-    const isCovered = (isWork && workAllowed.has(top)) || (await isAllowed($, call))
+    const isCovered = (isWork && workAllowed.has(top)) || (await isAllowed($, call)) || (Boolean(card) && (await takeOnce($, top, 'admin', call.host, call.command)))
     if (!isCovered) {
       const said = await holdGate($, next, { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}), ...(isWork ? { isWork: true } : {}) }, card ? top : '')
       if (said !== 'once' && said !== 'always') {
         await dropGrants($, grants)
-        return { deny: said === 'deny' ? GATE_DENIED() : said === 'late' ? GATE_LATE() : said === 'blind' ? GATE_BLIND() : GATE_GONE(), grants: [] }
+        return { deny: said === 'deny' ? GATE_DENIED() : said === 'words' ? GATE_WORDS({}, gateWords.get(`${e.tool_use_id}-${n}`) ?? '') : said === 'late' ? GATE_LATE() : said === 'blind' ? GATE_BLIND() : GATE_GONE(), grants: [] }
       }
       if (said === 'always')
         await allowAlways($, call).catch(async err => {
@@ -7562,7 +7640,7 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
   return { grants }
 }
 
-type ReleaseCall = { folder: string; branch: string }
+type ReleaseCall = { folder: string; branch: string; title?: string }
 const releaseArgs = (words: string[]) => {
   const args: string[] = []
   for (let n = 0; n < words.length; n++) {
@@ -7602,7 +7680,8 @@ const releaseCalls = (command: string, root: string, from: string): ReleaseCall[
     const args = releaseArgs(words.slice(at + 1))
     if (args[0] === '--status') continue
     const rest = args[0] === '-m' ? args.slice(2) : args
-    found.push({ folder, branch: rest[0] ?? '' })
+    const title = args[0] === '-m' ? oneLine(args[1] ?? '') : ''
+    found.push({ folder, branch: rest[0] ?? '', ...(title ? { title: cut(title, 300) } : {}) })
   }
   return found
 }
@@ -7617,6 +7696,16 @@ const allowRelease = async ($: EngineInterface, card: string, folder: string) =>
   releaseAllowed.set(card, { folder: repo, branch, at: await $.clock.now() })
   await log($, `release of ${branch} from ${repo} allowed once for ${card} by ${who()}'s press on its go-ahead`)
   return true
+}
+const RELEASE_COMMITS_SHOWN = 8
+const releaseFacts = async (git: (args: string[]) => Promise<string>, branch: string): Promise<{ commits?: string[]; more?: number; files?: number }> => {
+  const named = (await git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])) || ((await git(['rev-parse', '--verify', '-q', 'refs/remotes/origin/main'])) ? 'origin/main' : 'main')
+  const subjects = (await git(['log', '--no-merges', '--format=%s', '-n', '200', `${named}..${branch}`])).split('\n').map(line => oneLine(line)).filter(Boolean)
+  const changed = (await git(['diff', '--name-only', `${named}...${branch}`])).split('\n').filter(Boolean).length
+  return {
+    ...(subjects.length ? { commits: subjects.slice(0, RELEASE_COMMITS_SHOWN).map(one => cut(one, 200)), ...(subjects.length > RELEASE_COMMITS_SHOWN ? { more: subjects.length - RELEASE_COMMITS_SHOWN } : {}) } : {}),
+    ...(changed ? { files: changed } : {}),
+  }
 }
 const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
   const calls = releaseCalls(String((e as { command?: unknown }).command ?? ''), $.plugin.root, cwd || dir.replace(/\/\.claude\/claudopus$/, ''))
@@ -7638,11 +7727,11 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
     const isPressed = Boolean(allowed && allowed.folder === repo && allowed.branch === branch && now - allowed.at < RELEASE_ALLOWED)
     if (allowed && (isPressed || now - allowed.at >= RELEASE_ALLOWED)) releaseAllowed.delete(top)
     if (isPressed) await log($, `release of ${branch} in ${name}: allowed by the press on its task's go-ahead`)
-    const said = isPressed ? 'once' : await holdGate($, next, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: now, ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
+    const said = isPressed ? 'once' : await holdGate($, next, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: now, ...(e.agentId ? { from: e.agentId } : {}), ...(await releaseFacts(git, branch)), ...(call.title ? { reason: call.title } : {}) }, card ? top : '')
     if (said !== 'once') {
       await dropGrants($, grants)
       const gate = { kind: 'release' as const }
-      return { deny: said === 'deny' ? GATE_DENIED(gate) : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate), grants: [] }
+      return { deny: said === 'deny' ? GATE_DENIED(gate) : said === 'words' ? GATE_WORDS(gate, gateWords.get(id) ?? '') : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate), grants: [] }
     }
     const grant = await issueGrant($, id, { host: 'release', command: `${repo}\n${branch}` }, 'release-grant')
     if (!grant) {
@@ -7683,9 +7772,10 @@ const gateOwnFile = async ($: EngineInterface, e: ToolCallInput, next: { signal?
   const list = await read($, todos)
   const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
   const card = list.find(one => one.id === top)
+  if (card && (await takeOnce($, top, 'file', file, cut(change, 2000)))) return ''
   const said = await holdGate($, next, { id: `${e.tool_use_id}-f`, call: e.tool_use_id, kind: 'file', host: file, command: cut(change, 2000), at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
   const gate = { kind: 'file' as const }
-  return said === 'once' ? '' : said === 'deny' ? GATE_DENIED(gate) : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate)
+  return said === 'once' ? '' : said === 'deny' ? GATE_DENIED(gate) : said === 'words' ? GATE_WORDS(gate, gateWords.get(`${e.tool_use_id}-f`) ?? '') : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate)
 }
 
 const PERSON_FILES = ['config.json', 'rules/CLAUDE.md', 'roles/chat.md', 'roles/work.md', 'admin-allowed.json']
@@ -8190,6 +8280,9 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
 }
 const REFUSAL_ANSWERED = (command: string, said: string, isReply: boolean) =>
   `${isReply ? `${who(true)} replied, in their own words, when asked whether to run the command Claude Code refused you (${cut(oneLine(command), 200)}): ${said}` : `${who(true)} pressed "${DONT_ALLOW}" when asked whether to run the command Claude Code refused you (${cut(oneLine(command), 200)}).`} What Claude Code refused stays refused: do not do it, nor reach its result by other means. Carry on without it, and say in your report what was left out.`
+
+const REFUSAL_WORDS = (command: string, said: string) =>
+  `${who(true)} wrote to you, in their own words, about the command Claude Code refused you (${cut(oneLine(command), 200)}), which waits on your card for their Allow: “${said}”\nAnswer them with the \`ask\` tool: your answer in \`text\` (one plain line) and \`details\` (what it does and why, in everyday words), with no \`choices\`. Claudopus shows it inside that permission, which keeps Allow and Don't allow: only their press runs the command, once, as theirs. Do not run it, or another way to the same end, yourself. With nothing else to do, end your step.`
 
 const OWN_CALLS = ['SendMessage', 'TaskStop']
 const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
@@ -8745,10 +8838,14 @@ const askNeed = ($: EngineInterface, one: Todo, surface: string, now: number): N
   const line = sentLine(one, now)
   const base = { id, at: ask.at, text: ask.text, ...(ask.details ? { details: ask.details } : {}), ...(ask.copy ? { command: ask.copy } : {}), card: one, ...(line ? { line, wholeLine: sentLine(one, now, Infinity) } : {}) }
   const elsewhere = one.chat ? `Answer it in its own chat, “${one.chat.title || 'another chat'}”${one.chat.host ? `, on ${one.chat.host}` : ''}.` : ''
+  const inBar = repliesInBar(surface)
   if (ask.refused) {
     const run = offeredRun(one)
+    const talk = talkText(ask.talk)
+    const words = wordsOn($, `${id}-words`, one.id, inBar, isReplyOpen(one), { kind: 'answer', id: one.id, one }, value => void sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
     return {
       ...base,
+      ...(talk ? { details: [ask.details, talk].filter(Boolean).join('\n\n') } : {}),
       kind: 'permission',
       ...(elsewhere ? { where: elsewhere } : {}),
       buttons: elsewhere
@@ -8756,13 +8853,14 @@ const askNeed = ($: EngineInterface, one: Todo, surface: string, now: number): N
         : [
             ...(run ? [{ key: `${id}-allow-${ask.at}-${loadMark}`, label: ALLOW, onPress: () => void runIt($, one).catch(err => log($, `refused command not run: ${String(err)}`)) }] : []),
             { key: `${id}-deny-${ask.at}-${loadMark}`, label: DONT_ALLOW, onPress: () => void ((presses += 1), answerAsk($, one, DONT_ALLOW).catch(err => log($, `answer not sent: ${String(err)}`))) },
+            ...words.buttons,
           ],
+      ...(elsewhere || !words.field ? {} : { field: words.field }),
     }
   }
   if (isActingOnReply(one)) return { ...base, kind: 'question', isActing: true, buttons: [] }
   if (elsewhere) return { ...base, kind: 'question', where: elsewhere, buttons: [] }
   const mark = askMark(ask)
-  const inBar = repliesInBar(surface)
   const send = (value: string) => void (value.trim() && (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`))))
   return {
     ...base,
@@ -8785,18 +8883,42 @@ const askNeed = ($: EngineInterface, one: Todo, surface: string, now: number): N
   }
 }
 
-const gateNeed = ($: EngineInterface, gate: Gate, card: string, elsewhere: boolean, from = ''): Need => {
+const talkText = (talk: { by: 'you' | 'task'; text: string }[] | undefined) =>
+  (talk ?? []).map(one => (one.by === 'you' ? `**You asked:** ${one.text}` : `**The answer:** ${one.text}`)).join('\n\n')
+const wordsOn = ($: EngineInterface, key: string, draft: string, inBar: boolean, isOpen: boolean, to: { kind: BarKind; id: string; one?: Todo }, send: (value: string) => void): { buttons: NeedButton[]; field?: Need['field'] } =>
+  inBar
+    ? { buttons: [isOpen ? { key: `${key}-close-${presses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, undefined, press.surface) } : { key: `${key}-open-${presses}`, label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: (press: { surface: string }) => openBar($, to, press.surface) }] }
+    : {
+        buttons: [],
+        field: {
+          key: `${key}-field-${replies.get(draft) ?? 0}`,
+          placeholder: ANSWER_IN_WORDS,
+          onInput: () => void holdTimes($),
+          onSubmit: (value: string) => void (value.trim() && (replies.set(draft, (replies.get(draft) ?? 0) + 1), freeTimes($), send(value))),
+        },
+      }
+const releaseAbout = (gate: Gate) => {
+  const count = (gate.commits?.length ?? 0) + (gate.more ?? 0)
+  const commits = gate.commits?.length ? [...gate.commits.map(one => `- ${one}`), ...(gate.more ? [`- and ${gate.more} more`] : [])].join('\n') : ''
+  const facts = [count ? `${count} ${count === 1 ? 'commit' : 'commits'}` : '', gate.files ? `${gate.files} changed ${gate.files === 1 ? 'file' : 'files'}` : '', `branch ${gate.branch ?? ''}`, gate.folder ? `from ${shortPath(gate.folder)}` : '']
+    .filter(Boolean)
+    .join(' · ')
+  return [gate.reason ?? (commits ? 'Claude gave no reason for it. Its commits say:' : ''), commits, `${facts.charAt(0).toUpperCase()}${facts.slice(1)}`].filter(Boolean).join('\n\n')
+}
+const gateNeed = ($: EngineInterface, gate: Gate, card: string, elsewhere: boolean, from = '', surface = ''): Need => {
   const id = `gate-${gate.id}`
-  const isHeld = gateHeld.has(gate.id) && !elsewhere
-  const details = gate.isUndone
+  const isHeld = (gateHeld.has(gate.id) || gateParked.has(gate.id)) && !elsewhere
+  const about = gate.isUndone
     ? `${gate.isOutside ? 'Something outside the panel changed this file, maybe you in an editor' : 'A command wrote to this file'}, so the change was undone. ${ALLOW} makes it again. Either way the changed text is kept beside the file as a .put-back copy.`
     : gate.kind === 'release'
-      ? `Branch ${gate.branch ?? ''}${gate.folder ? ` · from ${shortPath(gate.folder)}` : ''}`
+      ? releaseAbout(gate)
       : gate.isWork
         ? `${ALLOW} also covers this task's next admin commands.`
         : !gate.command
           ? 'Its details show only on its own Mac.'
           : ''
+  const details = [about, talkText(gate.talk)].filter(Boolean).join('\n\n')
+  const words = isHeld && card && !gate.isUndone ? wordsOn($, `${id}-words`, `gate:${gate.id}`, repliesInBar(surface), isBarOpen('permission', gate.id), { kind: 'permission', id: gate.id }, value => void wordsOnGate($, card, gate.id, value)) : undefined
   return {
     id,
     kind: 'permission',
@@ -8811,8 +8933,10 @@ const gateNeed = ($: EngineInterface, gate: Gate, card: string, elsewhere: boole
           { key: `${id}-once-${loadMark}`, label: ALLOW, onPress: () => answerGate($, gate, 'once', card) },
           { key: `${id}-deny-${loadMark}`, label: DONT_ALLOW, onPress: () => answerGate($, gate, 'deny', card) },
           ...(gate.kind ? [] : [{ key: `${id}-always-${loadMark}`, label: ALWAYS_ALLOW, isPlain: true, onPress: () => answerGate($, gate, 'always', card) }]),
+          ...(words?.buttons ?? []),
         ]
       : [],
+    ...(words?.field ? { field: words.field } : {}),
   }
 }
 
@@ -8894,7 +9018,7 @@ const firstBox = () => [...boxes.filter(box => box.chat === boxChat), ...boxes.f
 const needsOf = ($: EngineInterface, one: Todo, surface: string, now: number, canFocus = false): Need[] => {
   const ask = askNeed($, one, surface, now)
   const own = one.chat ? [] : [...waiting.filter(p => p.card === one.id).map(p => promptNeed($, p, undefined, true)), ...boxes.filter(box => box.card === one.id).map(box => boxNeed($, box, surface, canFocus && box === firstBox()))]
-  const gates = (one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).map(gate => gateNeed($, gate, one.chat ? '' : one.id, Boolean(one.chat)))
+  const gates = (one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).map(gate => gateNeed($, gate, one.chat ? '' : one.id, Boolean(one.chat), '', surface))
   return [...(ask ? [ask] : []), ...gates, ...own].sort((a, b) => a.at - b.at)
 }
 const looseNeeds = ($: EngineInterface, surface: string, shown: (card: string | undefined) => boolean, chats: Shared[], canFocus = false): Need[] => {
@@ -11597,6 +11721,16 @@ const toolHooks = (on: On) => {
     const at = await $.clock.now()
     const before = await read($, todos)
     const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask
+    const own = before.find(one => one.id === topOf(before, e.agentId ?? ''))
+    const parked = own && !own.chat ? own.admins?.find(gate => gateParked.has(gate.id) && gate.talk?.at(-1)?.by === 'you') : undefined
+    const refused = own?.ask?.refused && own.ask.replied ? own.ask : undefined
+    if (own && text && !choices.length && (parked || refused)) {
+      const answer = { by: 'task' as const, text: cut([asked, given1].filter(Boolean).join('\n\n'), ASK_DETAILS) }
+      if (parked) await setGates($, own.id, list => list.map(gate => (gate.id === parked.id ? { ...gate, talk: [...(gate.talk ?? []), answer].slice(-PERMIT_TALK_KEPT) } : gate)))
+      else await changeTodos($, list => list.map(one => (one.id === own.id && one.ask?.at === refused?.at ? { ...one, ask: { ...one.ask, talk: [...(one.ask.talk ?? []), answer].slice(-PERMIT_TALK_KEPT), replied: undefined } } : one)))
+      await askAloud($, own, text).catch(err => log($, `answer not told: ${String(err)}`))
+      return { result: `Shown inside the permission on your card, under ${who()}'s words. It keeps Allow and Don't allow until ${who()} presses one, and that press comes back to you as a message. Don't run it again before then. With nothing else to do, end your step.` }
+    }
     const releaseGiven = typeof input.release === 'string' ? input.release.trim() : ''
     const release = releaseGiven.startsWith('/') && choices.length && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(releaseGiven).catch(() => undefined))?.kind === 'dir' ? releaseGiven : ''
     await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(release ? { release } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices } : {}), from: e.agentId, ...(pictures.length ? { pictures } : {}), at } : undefined }))
@@ -11936,6 +12070,10 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
   if (open.kind === 'change') {
     const one = changeTarget(cards)
     return one && { head: `↳ ${stageOf(cards, one) === 'delivered' && one.questions?.length ? 'Reply' : 'Message'} to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) }
+  }
+  if (open.kind === 'permission') {
+    const one = gatePressed.has(open.id) || !(gateHeld.has(open.id) || gateParked.has(open.id)) ? undefined : cards.find(card => !card.chat && card.admins?.some(gate => gate.id === open.id))
+    return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), send: value => void (value.trim() && ((barBoxAt = 0), drafts.delete(barDraft()), keepDraft($, barDraft(), undefined), replies.set(open.id, (replies.get(open.id) ?? 0) + 1), (barOpen = undefined), freeTimes($), redraw($), wordsOnGate($, one.id, open.id, value))) }
   }
   if (open.kind === 'continue') {
     const r = kept.find(one => one.id === open.id)

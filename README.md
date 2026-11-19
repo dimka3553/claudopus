@@ -118,7 +118,7 @@ The panel's header has these buttons (Results once there is a result):
 ### Keys, passwords and admin commands
 
 - Claudopus asks for a key or token once, in a box at the top of the panel, and saves it in the macOS keychain (on Linux, in a file only you can read). It is never put in a chat, and its value is hidden in anything a command prints. If Claude asks for a key you've already given, Claudopus tells Claude where it is.
-- Before Claude runs a command as administrator, the task's card shows the exact command and the machine, with **Allow**, **Don't allow** and **Always allow this command**. In Config you choose whether Claudopus asks each time, once per task, or never. Config also lists what you always allow. Claudopus never saves an admin password. Each admin command asks for it, in macOS's own box on this Mac, or otherwise in a box at the top of the panel.
+- Before Claude runs a command as administrator, the task's card shows the exact command and the machine, with **Allow**, **Don't allow** and **Always allow this command**, and **Answer in words** to ask the task about it first. In Config you choose whether Claudopus asks each time, once per task, or never. Config also lists what you always allow. Claudopus never saves an admin password. Each admin command asks for it, in macOS's own box on this Mac, or otherwise in a box at the top of the panel.
 - These boxes catch mistakes and common tricks, but code running as you on your machine could still get around them.
 
 ### One release at a time

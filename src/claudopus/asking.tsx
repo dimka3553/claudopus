@@ -397,7 +397,7 @@ const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = fals
 // or one that begins with the words of one of its buttons. Any other reply, such as a request first, leaves the ask open while the work acts on it
 const plainWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) =>
-  !isReply || Boolean(ask.refused) || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))
+  !isReply || (!ask.refused && (!ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))))
 // The asks a press answered, by card, as `${at}:${text}`: the panel draws the card answered from the press itself, its block
 // gone in the press's own drawing, before the answer is written; the mark goes once the card's file no longer carries the ask
 const askPressed = new Map<string, string>()
@@ -433,7 +433,7 @@ const isBarBox = (element: string | undefined) => /^band-.*-reply-/.test(element
 // while what it is for still waits: when a task puts a new question in place of the one the box was opened on, the box stays as it
 // is, with what is typed in it, and what is sent from it answers the question the task asks then (16 Nov, the person: "it should
 // just allow me to keep typing until I myself either close it or open the new question")
-type BarKind = 'answer' | 'change' | 'key' | 'words' | 'password' | 'continue'
+type BarKind = 'answer' | 'change' | 'key' | 'words' | 'password' | 'continue' | 'permission'
 let barOpen: { kind: BarKind; id: string; mark: string } | undefined
 const isBarOpen = (kind: BarKind, id: string) => barOpen?.kind === kind && barOpen.id === id
 const isReplyOpen = (one: Todo) => Boolean(one.ask) && isBarOpen('answer', one.id)
@@ -872,7 +872,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   const listed = await read($, todos)
   const isWaking = listed.find(card => card.id === one.id)?.status !== 'working' && listed.find(card => card.id === target)?.status !== 'working'
   await changeTodos($, list =>
-    ((isHeld = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
+    ((isHeld = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) }, ...(card.ask.refused ? { talk: [...(card.ask.talk ?? []), { by: 'you' as const, text: cut(said, ASK_DETAILS) }].slice(-PERMIT_TALK_KEPT) } : {}) }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isHeld) return
   // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
@@ -888,7 +888,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   // Said in the chat once; the ask is then done with there, so the work asking again is sent to the chat afresh
   if (inChat.has(one.id)) (inChat.delete(one.id), void tellChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`))))
   const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
-  const to = `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
+  const to = ask.refused ? REFUSAL_WORDS(ask.copy ?? ask.text, said) : `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
   const told = working ? await tell($, target, to) : undefined
   if (told && !told.deny) return void (writtenIn($, target, one.id), redraw($))
   await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at })

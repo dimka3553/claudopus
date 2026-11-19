@@ -1,4 +1,16 @@
-// The keys remembered: names and stores only, made again from the stores, read by work in keys.md, and an ask for a kept key refused
+// The keys remembered: names and stores only, made again from the stores, read by work in keys.md, and an ask for a kept key refused;
+// and how a password or a key a command waits for is asked and given
+var __assign = (this && this.__assign) || function () {
+    __assign = Object.assign || function(t) {
+        for (var s, i = 1, n = arguments.length; i < n; i++) {
+            s = arguments[i];
+            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
+                t[p] = s[p];
+        }
+        return t;
+    };
+    return __assign.apply(this, arguments);
+};
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -237,7 +249,7 @@ test('an ask for a key the list has is refused with where it is; a key not kept 
             case 11:
                 _h.apply(void 0, [(_3.sent()).deny]).toBeUndefined();
                 _j = expect;
-                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'f4', agentId: 'w1', text: 'Release the list of keys?', details: 'It lists ElevenLabs and Kaggle.', choices: ['Release it', 'Not now'] })];
+                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'f4', agentId: 'w1', text: 'Release the list of keys?', details: 'It lists ElevenLabs and Kaggle.', choices: ['Release it'] })];
             case 12:
                 _j.apply(void 0, [(_3.sent()).deny]).toBeUndefined();
                 _k = expect;
@@ -365,6 +377,395 @@ test('work never writes the list of keys itself, by any tool', function ($, on) 
                 return [4 /*yield*/, $.tool.call({ tool: 'Bash', tool_use_id: 'w2', agentId: 'w1', command: 'echo x > ~/.claude/claudopus/keys.json' })];
             case 3:
                 _b.apply(void 0, [(_c.sent()).deny]).toBeDefined();
+                return [2 /*return*/];
+        }
+    });
+}); });
+test("a password and a key a command waits for are each one block (its label, the question in amber, its buttons); typed in the box above the chat on the desktop and in the block's one field in the terminal; given or refused, one grey line says so and the value is nowhere on screen", function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, files, clock, keep, settle, keychain, logged, list, bar, PASSWORD, KEY, PASSWORD_ASKS, KEY_ASKS, made, asked, buttons, fields, all, press, gone, _loop_1, _i, _b, one, worded, words, _c, _d, _loop_2, _e, _f, value, term, _loop_3, _g, _h, one;
+    var _this = this;
+    var _j, _k, _l, _m, _o;
+    return __generator(this, function (_p) {
+        switch (_p.label) {
+            case 0:
+                _a = world(on), files = _a.files, clock = _a.clock, keep = _a.keep, settle = _a.settle, keychain = _a.keychain, logged = _a.logged;
+                return [4 /*yield*/, $.session.start(start)];
+            case 1:
+                _p.sent();
+                return [4 /*yield*/, $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })];
+            case 2:
+                _p.sent();
+                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Deploy the site', prompt: 'deploy it' }))
+                    // One command of the task waits for a Mac's password, another for a key
+                ];
+            case 3:
+                _p.sent();
+                // One command of the task waits for a Mac's password, another for a key
+                void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: "hold /plug/claudopus/bin/admin m4 'id -u'" }));
+                void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-2', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret STRIPE_KEY here deploy' }));
+                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { props: __assign(__assign({}, LIST.props), { bodyColumns: 80 }), surface: 'desktop' }))];
+            case 4:
+                list = _p.sent();
+                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, BAND), { surface: 'desktop' }))];
+            case 5:
+                bar = _p.sent();
+                PASSWORD = { kind: 'admin', host: 'm4', key: BOX_PUBLIC };
+                KEY = { kind: 'secret', name: 'STRIPE_KEY' };
+                PASSWORD_ASKS = 'The password of m4 is needed to run this as admin.';
+                KEY_ASKS = "STRIPE_KEY is needed to run this task's command.";
+                made = 0;
+                asked = function (request) { return __awaiter(_this, void 0, void 0, function () {
+                    var id;
+                    return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0:
+                                id = "".concat((made += 1), "a1e2d3c-4b5a-4987-a654-3210fedcba98");
+                                files.set("".concat(MEMORY, "/boxes/").concat(id, ".json"), JSON.stringify(__assign(__assign({ id: id }, request), { chat: 'engine-id', at: 1700000000000 })));
+                                return [4 /*yield*/, clock.advance(1000)];
+                            case 1:
+                                _a.sent();
+                                return [2 /*return*/, id];
+                        }
+                    });
+                }); };
+                buttons = function (site, id) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                    switch (_a.label) {
+                        case 0: return [4 /*yield*/, site.findAll({ type: 'Button' })];
+                        case 1: return [2 /*return*/, (_a.sent()).filter(function (b) { var _a; return ((_a = b.key) !== null && _a !== void 0 ? _a : '').startsWith("box-".concat(id, "-")); })];
+                    }
+                }); }); };
+                fields = function (site, id) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                    switch (_a.label) {
+                        case 0: return [4 /*yield*/, site.findAll({ type: 'Input' })];
+                        case 1: return [2 /*return*/, (_a.sent()).filter(function (one) { var _a; return ((_a = one.key) !== null && _a !== void 0 ? _a : '').includes(id); })];
+                    }
+                }); }); };
+                all = function (site) { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                    switch (_a.label) {
+                        case 0: return [4 /*yield*/, site.findAll({ type: 'Text' })];
+                        case 1: return [2 /*return*/, (_a.sent()).map(function (one) { var _a; return String((_a = one.text) !== null && _a !== void 0 ? _a : ''); })];
+                    }
+                }); }); };
+                press = function (site, id, label) { return __awaiter(_this, void 0, void 0, function () {
+                    var _a, _b;
+                    var _c;
+                    var _this = this;
+                    var _d, _e;
+                    return __generator(this, function (_f) {
+                        switch (_f.label) {
+                            case 0:
+                                _b = (_a = site).press;
+                                _c = {};
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        switch (_a.label) {
+                                            case 0: return [4 /*yield*/, buttons(site, id)];
+                                            case 1: return [2 /*return*/, (_a.sent()).find(function (b) { return b.props.label === label; })];
+                                        }
+                                    }); }); })];
+                            case 1: return [2 /*return*/, _b.apply(_a, [(_c.key = (_e = (_d = (_f.sent())) === null || _d === void 0 ? void 0 : _d.key) !== null && _e !== void 0 ? _e : '', _c)])
+                                // Gone from the panel, with one grey line of what was done in its place, and nothing green
+                            ];
+                        }
+                    });
+                }); };
+                gone = function (site, id, line) { return __awaiter(_this, void 0, void 0, function () {
+                    var _a, _b, _c, _d, _e, _f;
+                    var _this = this;
+                    var _g;
+                    return __generator(this, function (_h) {
+                        switch (_h.label) {
+                            case 0:
+                                _a = expect;
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, site.find({ type: 'Text', text: line })];
+                                    }); }); })];
+                            case 1:
+                                _a.apply(void 0, [(_g = (_h.sent())) === null || _g === void 0 ? void 0 : _g.props.dimColor]).toBe(true);
+                                _b = expect;
+                                return [4 /*yield*/, buttons(site, id)];
+                            case 2:
+                                _b.apply(void 0, [_h.sent()]).toEqual([]);
+                                _c = expect;
+                                return [4 /*yield*/, all(site)];
+                            case 3:
+                                _c.apply(void 0, [(_h.sent()).filter(function (one) { return one.startsWith('✓ '); })]).toEqual([line]);
+                                _d = expect;
+                                _e = [[]];
+                                return [4 /*yield*/, site.findAll({ type: 'Box' })];
+                            case 4:
+                                _f = [__spreadArray.apply(void 0, _e.concat([(_h.sent()), true]))];
+                                return [4 /*yield*/, site.findAll({ type: 'Text' })];
+                            case 5:
+                                _d.apply(void 0, [__spreadArray.apply(void 0, _f.concat([(_h.sent()), true])).some(function (one) { return ['color', 'borderColor', 'backgroundColor'].some(function (prop) { return one.props[prop] === 'success'; }); })]).toBe(false);
+                                return [2 /*return*/];
+                        }
+                    });
+                }); };
+                _loop_1 = function (one) {
+                    var id, question, drawn, _q, _r, _s, _t, field, _u, _v, _w, _x, kept, _y, refused, _z;
+                    return __generator(this, function (_0) {
+                        switch (_0.label) {
+                            case 0: return [4 /*yield*/, asked(one.request)
+                                // The block, on its task's card: a dim label of its kind, the question in amber, then its buttons, and no field in the panel
+                            ];
+                            case 1:
+                                id = _0.sent();
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, list.find({ type: 'Text', text: one.asks })];
+                                    }); }); })];
+                            case 2:
+                                question = _0.sent();
+                                expect([question === null || question === void 0 ? void 0 : question.props.color, question === null || question === void 0 ? void 0 : question.props.bold]).toEqual(['#E5A50A', true]);
+                                return [4 /*yield*/, all(list)];
+                            case 3:
+                                drawn = _0.sent();
+                                expect(drawn.slice(drawn.indexOf(one.label), drawn.indexOf(one.label) + 2)).toEqual([one.label, one.asks]);
+                                expect(drawn.indexOf('Deploy the site')).toBeLessThan(drawn.indexOf(one.label));
+                                _q = expect;
+                                return [4 /*yield*/, list.find({ type: 'Text', text: one.label })];
+                            case 4:
+                                _q.apply(void 0, [(_j = (_0.sent())) === null || _j === void 0 ? void 0 : _j.props.dimColor]).toBe(true);
+                                _r = expect;
+                                return [4 /*yield*/, buttons(list, id)];
+                            case 5:
+                                _r.apply(void 0, [(_0.sent()).map(function (b) { return b.props.label; })]).toEqual(one.labels);
+                                _s = expect;
+                                return [4 /*yield*/, list.findAll({ type: 'Input' })];
+                            case 6:
+                                _s.apply(void 0, [_0.sent()]).toEqual([]);
+                                _t = expect;
+                                return [4 /*yield*/, list.findAll({ type: 'Button' })];
+                            case 7:
+                                _t.apply(void 0, [(_0.sent()).map(function (b) { return String(b.props.label); }).filter(function (label) { return ['Cancel', 'Paste the key', 'Reply in your own words', 'Close the reply box'].includes(label); })]).toEqual([]);
+                                // Its button opens the one box above the chat, which says what it is for and where what is typed goes
+                                return [4 /*yield*/, press(list, id, one.open)];
+                            case 8:
+                                // Its button opens the one box above the chat, which says what it is for and where what is typed goes
+                                _0.sent();
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        switch (_a.label) {
+                                            case 0: return [4 /*yield*/, fields(bar, id)];
+                                            case 1: return [2 /*return*/, (_a.sent())[0]];
+                                        }
+                                    }); }); })];
+                            case 9:
+                                field = _0.sent();
+                                expect(field === null || field === void 0 ? void 0 : field.props.placeholder).toBe(one.placeholder);
+                                _u = expect;
+                                return [4 /*yield*/, all(bar)];
+                            case 10:
+                                _u.apply(void 0, [_0.sent()]).toEqual(expect.arrayContaining([one.head]));
+                                _v = expect;
+                                return [4 /*yield*/, all(bar)];
+                            case 11:
+                                _v.apply(void 0, [(_0.sent()).filter(function (text) { return /^Enter sends/.test(String(text)); })]).toEqual([]);
+                                _w = expect;
+                                return [4 /*yield*/, bar.findAll({ type: 'Button' })];
+                            case 12:
+                                _w.apply(void 0, [(_0.sent()).map(function (b) { return b.props.label; })]).toEqual(expect.arrayContaining(['Send', 'Close']));
+                                _x = expect;
+                                return [4 /*yield*/, list.findAll({ type: 'Input' })];
+                            case 13:
+                                _x.apply(void 0, [_0.sent()]).toEqual([]);
+                                return [4 /*yield*/, bar.input({ key: (_k = field === null || field === void 0 ? void 0 : field.key) !== null && _k !== void 0 ? _k : '', text: one.typed })];
+                            case 14:
+                                _0.sent();
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, keychain.find(function (entry) { return entry.includes(id); })];
+                                    }); }); })
+                                    // A password goes only sealed to its command's key; a key as it was pasted
+                                ];
+                            case 15:
+                                kept = _0.sent();
+                                // A password goes only sealed to its command's key; a key as it was pasted
+                                if (one.request === PASSWORD)
+                                    expect([kept === null || kept === void 0 ? void 0 : kept.includes(one.typed), kept === null || kept === void 0 ? void 0 : kept.includes(boxSealed(BOX_PUBLIC, one.typed))]).toEqual([false, true]);
+                                else
+                                    expect(kept).toContain("-w \"".concat(one.typed, "\""));
+                                return [4 /*yield*/, gone(list, id, one.given)];
+                            case 16:
+                                _0.sent();
+                                _y = expect;
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        switch (_a.label) {
+                                            case 0: return [4 /*yield*/, fields(bar, id)];
+                                            case 1: return [2 /*return*/, ((_a.sent()).length ? undefined : true)];
+                                        }
+                                    }); }); })];
+                            case 17:
+                                _y.apply(void 0, [_0.sent()]).toBe(true);
+                                return [4 /*yield*/, asked(one.request)];
+                            case 18:
+                                refused = _0.sent();
+                                return [4 /*yield*/, press(list, refused, one.refuse)];
+                            case 19:
+                                _0.sent();
+                                return [4 /*yield*/, gone(list, refused, "\u2713 You pressed \u201C".concat(one.refuse, "\u201D"))];
+                            case 20:
+                                _0.sent();
+                                _z = expect;
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, (files.has("".concat(MEMORY, "/boxes/").concat(refused, ".json")) ? undefined : true)];
+                                    }); }); })];
+                            case 21:
+                                _z.apply(void 0, [_0.sent()]).toBe(true);
+                                expect(keychain.some(function (entry) { return entry.includes(refused); })).toBe(false);
+                                return [2 /*return*/];
+                        }
+                    });
+                };
+                _i = 0, _b = [
+                    { request: PASSWORD, label: 'Password', asks: PASSWORD_ASKS, labels: ['Type it', "Don't allow"], open: 'Type it', head: '↳ The password of m4 for “Deploy the site”', placeholder: 'Type it here', typed: 'hunter-22', given: '✓ You gave the password', refuse: "Don't allow" },
+                    { request: KEY, label: 'Key', asks: KEY_ASKS, labels: ['Paste it', "Don't give it", 'Answer in words'], open: 'Paste it', head: '↳ STRIPE_KEY for “Deploy the site”', placeholder: 'Paste it here', typed: 'sk_live_made_up_0042', given: '✓ You gave STRIPE_KEY', refuse: "Don't give it" },
+                ];
+                _p.label = 6;
+            case 6:
+                if (!(_i < _b.length)) return [3 /*break*/, 9];
+                one = _b[_i];
+                return [5 /*yield**/, _loop_1(one)];
+            case 7:
+                _p.sent();
+                _p.label = 8;
+            case 8:
+                _i++;
+                return [3 /*break*/, 6];
+            case 9: return [4 /*yield*/, asked(KEY)];
+            case 10:
+                worded = _p.sent();
+                return [4 /*yield*/, press(list, worded, 'Answer in words')];
+            case 11:
+                _p.sent();
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0: return [4 /*yield*/, fields(bar, worded)];
+                            case 1: return [2 /*return*/, (_a.sent())[0]];
+                        }
+                    }); }); })];
+            case 12:
+                words = _p.sent();
+                expect(words === null || words === void 0 ? void 0 : words.props.placeholder).toBe('Type your answer');
+                _c = expect;
+                return [4 /*yield*/, all(bar)];
+            case 13:
+                _c.apply(void 0, [_p.sent()]).toContain('↳ Your answer in place of STRIPE_KEY');
+                return [4 /*yield*/, bar.input({ key: (_l = words === null || words === void 0 ? void 0 : words.key) !== null && _l !== void 0 ? _l : '', text: 'It is in the vault under Stripe' })];
+            case 14:
+                _p.sent();
+                _d = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        return [2 /*return*/, files.get("".concat(MEMORY, "/boxes/").concat(worded, ".reply"))];
+                    }); }); })];
+            case 15:
+                _d.apply(void 0, [_p.sent()]).toContain('in their own words: It is in the vault under Stripe');
+                return [4 /*yield*/, gone(list, worded, '✓ You answered “It is in the vault under Stripe”')];
+            case 16:
+                _p.sent();
+                expect(keychain.some(function (entry) { return entry.includes(worded); })).toBe(false);
+                // The chat was told only what is asked and where to type it
+                expect(logged).toEqual(expect.arrayContaining(["".concat(PASSWORD_ASKS, " Press Type it on it in the Claudopus panel (/claudopus opens it) and type it in the box above the chat, never in the chat itself.")]));
+                _loop_2 = function (value) {
+                    var _1, _2, _3;
+                    return __generator(this, function (_4) {
+                        switch (_4.label) {
+                            case 0:
+                                _1 = expect;
+                                _2 = [__spreadArray([], logged, true)];
+                                return [4 /*yield*/, all(list)];
+                            case 1:
+                                _3 = [__spreadArray.apply(void 0, _2.concat([(_4.sent()), true]))];
+                                return [4 /*yield*/, all(bar)];
+                            case 2:
+                                _1.apply(void 0, [__spreadArray.apply(void 0, _3.concat([(_4.sent()), true])).some(function (line) { return line.includes(value); })]).toBe(false);
+                                return [2 /*return*/];
+                        }
+                    });
+                };
+                _e = 0, _f = ['hunter-22', 'sk_live_made_up_0042'];
+                _p.label = 17;
+            case 17:
+                if (!(_e < _f.length)) return [3 /*break*/, 20];
+                value = _f[_e];
+                return [5 /*yield**/, _loop_2(value)];
+            case 18:
+                _p.sent();
+                _p.label = 19;
+            case 19:
+                _e++;
+                return [3 /*break*/, 17];
+            case 20: return [4 /*yield*/, bar.unmount()];
+            case 21:
+                _p.sent();
+                return [4 /*yield*/, list.unmount()
+                    // In the terminal the bar draws no field: the block has the one field itself, and no button to open one
+                ];
+            case 22:
+                _p.sent();
+                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { props: __assign(__assign({}, LIST.props), { bodyColumns: 80 }), surface: 'terminal' }))];
+            case 23:
+                term = _p.sent();
+                _loop_3 = function (one) {
+                    var id, _5, _6, _7, own, _8, _9;
+                    return __generator(this, function (_10) {
+                        switch (_10.label) {
+                            case 0: return [4 /*yield*/, asked(one.request)];
+                            case 1:
+                                id = _10.sent();
+                                _5 = expect;
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, term.find({ type: 'Text', text: one.asks })];
+                                    }); }); })];
+                            case 2:
+                                _5.apply(void 0, [_10.sent()]).toBeDefined();
+                                _6 = expect;
+                                return [4 /*yield*/, term.find({ type: 'Text', text: one.label })];
+                            case 3:
+                                _6.apply(void 0, [_10.sent()]).toBeDefined();
+                                _7 = expect;
+                                return [4 /*yield*/, buttons(term, id)];
+                            case 4:
+                                _7.apply(void 0, [(_10.sent()).map(function (b) { return b.props.label; })]).toEqual(one.labels);
+                                return [4 /*yield*/, fields(term, id)];
+                            case 5:
+                                own = _10.sent();
+                                expect(own.map(function (field) { var _a; return [(_a = field.key) === null || _a === void 0 ? void 0 : _a.startsWith("box-".concat(id, "-field-")), field.props.placeholder]; })).toEqual([[true, one.placeholder]]);
+                                return [4 /*yield*/, term.input({ key: (_o = (_m = own[0]) === null || _m === void 0 ? void 0 : _m.key) !== null && _o !== void 0 ? _o : '', text: one.typed })];
+                            case 6:
+                                _10.sent();
+                                _8 = expect;
+                                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                                        return [2 /*return*/, keychain.find(function (entry) { return entry.includes(id); })];
+                                    }); }); })];
+                            case 7:
+                                _8.apply(void 0, [_10.sent()]).toBeDefined();
+                                return [4 /*yield*/, gone(term, id, one.given)];
+                            case 8:
+                                _10.sent();
+                                _9 = expect;
+                                return [4 /*yield*/, fields(term, id)];
+                            case 9:
+                                _9.apply(void 0, [_10.sent()]).toEqual([]);
+                                return [2 /*return*/];
+                        }
+                    });
+                };
+                _g = 0, _h = [
+                    { request: PASSWORD, label: 'Password', asks: PASSWORD_ASKS, labels: ["Don't allow"], placeholder: 'Type it here', typed: 'hunter-23', given: '✓ You gave the password' },
+                    { request: KEY, label: 'Key', asks: KEY_ASKS, labels: ["Don't give it", 'Answer in words'], placeholder: 'Paste it here', typed: 'sk_live_made_up_0043', given: '✓ You gave STRIPE_KEY' },
+                ];
+                _p.label = 24;
+            case 24:
+                if (!(_g < _h.length)) return [3 /*break*/, 27];
+                one = _h[_g];
+                return [5 /*yield**/, _loop_3(one)];
+            case 25:
+                _p.sent();
+                _p.label = 26;
+            case 26:
+                _g++;
+                return [3 /*break*/, 24];
+            case 27: return [4 /*yield*/, settle()];
+            case 28:
+                _p.sent();
                 return [2 /*return*/];
         }
     });

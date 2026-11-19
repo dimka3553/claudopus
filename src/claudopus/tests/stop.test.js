@@ -1,4 +1,5 @@
-// A Stop the person presses holds: the chat is told it was theirs, and nothing starts the work again until they ask
+// A Stop the person presses holds: the task stays stopped, grey, with its helpers and commands; the chat is told it was theirs, and
+// nothing starts the task again but their word or their press on Start again
 var __assign = (this && this.__assign) || function () {
     __assign = Object.assign || function(t) {
         for (var s, i = 1, n = arguments.length; i < n; i++) {
@@ -46,73 +47,162 @@ var __generator = (this && this.__generator) || function (thisArg, body) {
         if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
     }
 };
+var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
+    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
+        if (ar || !(i in from)) {
+            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
+            ar[i] = from[i];
+        }
+    }
+    return to.concat(ar || Array.prototype.slice.call(from));
+};
 var _this = this;
 // The case of 15 Nov: a message sent by mistake started work, the person pressed Stop on its card, the engine's notice said it was
 // "stopped by Claude", and the chat sent it a message that started it again, twice
-test('work the person stopped on its card is not started again by the chat, a message, an answer or the mod until they ask', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var _a, stopped, resumed, sent, pane, notice, told, message, again, resume, fresh, _b, other, next, asked;
-    var _c, _d;
-    return __generator(this, function (_e) {
-        switch (_e.label) {
+test('a task the person stopped on its card stays stopped, grey, its helpers and commands stopped with it: the chat, a message, an answer and the mod start it again by no way, and only their word or their press on Start again does', SLOW, function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, stopped, resumed, sent, submitted, clock, files, pane, notice, told, message, again, resume, fresh, line, _b, _c, _d, _e, mine, _f, other, next, asked, _g, _h, _j, _k;
+    var _this = this;
+    var _l, _m, _o, _p, _q, _r, _s;
+    return __generator(this, function (_t) {
+        switch (_t.label) {
             case 0:
-                _a = world(on), stopped = _a.stopped, resumed = _a.resumed, sent = _a.sent;
+                _a = world(on), stopped = _a.stopped, resumed = _a.resumed, sent = _a.sent, submitted = _a.submitted, clock = _a.clock, files = _a.files;
                 return [4 /*yield*/, $.session.start(start)];
             case 1:
-                _e.sent();
+                _t.sent();
                 return [4 /*yield*/, $.prompt.submit({ text: 'The bar above the input box just disappeared completely now.', wait: false, origin: composer })];
             case 2:
-                _e.sent();
-                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Bar above the input box disappeared', prompt: 'Their words: "The bar above the input box just disappeared completely now."' }))];
+                _t.sent();
+                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Bar above the input box disappeared', prompt: 'Their words: "The bar above the input box just disappeared completely now."' }))
+                    // A helper of its own at work, and a command each of them runs in the background
+                ];
             case 3:
-                _e.sent();
-                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { surface: 'desktop' }))];
+                _t.sent();
+                // A helper of its own at work, and a command each of them runs in the background
+                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Read the bar code', prompt: 'read', parentAgentId: 'a1' }))];
             case 4:
-                pane = _e.sent();
-                return [4 /*yield*/, pane.press({ key: 'stop-a1' })];
+                // A helper of its own at work, and a command each of them runs in the background
+                _t.sent();
+                return [4 /*yield*/, $.tool.call({ tool: 'Bash', tool_use_id: 'c1', agentId: 'a1', command: 'npm run build', description: 'Build the app', run_in_background: true })];
             case 5:
-                _e.sent();
-                expect(stopped).toContain('a1');
+                _t.sent();
+                return [4 /*yield*/, $.tool.call({ tool: 'Bash', tool_use_id: 'c2', agentId: 'a2', command: 'npm test', description: 'Run the tests', run_in_background: true })];
+            case 6:
+                _t.sent();
+                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { surface: 'desktop' }))];
+            case 7:
+                pane = _t.sent();
+                return [4 /*yield*/, pane.press({ key: 'stop-a1' })
+                    // The task, its helper and the commands of both are stopped
+                ];
+            case 8:
+                _t.sent();
+                // The task, its helper and the commands of both are stopped
+                expect(__spreadArray([], stopped, true).sort()).toEqual(['a1', 'a2', 'bg-c1', 'bg-c2']);
                 notice = '<task-notification>\n<task-id>a1</task-id>\n<status>killed</status>\n<summary>Agent "Bar above the input box disappeared" was stopped by Claude</summary>\n</task-notification>';
                 return [4 /*yield*/, $.prompt.submit({ text: notice, wait: false, origin: { kind: 'task-notification' } })];
-            case 6:
-                told = (_e.sent());
-                expect(((_c = told.context) !== null && _c !== void 0 ? _c : []).join('\n')).toContain('The person stopped this, not you: do not restart it, message it or start the same task again unless the person asks');
+            case 9:
+                told = (_t.sent());
+                expect(((_l = told.context) !== null && _l !== void 0 ? _l : []).join('\n')).toContain('The person stopped this, not you: do not restart it, message it or start the same task again unless the person asks');
                 return [4 /*yield*/, $.tool.call({ tool: 'SendMessage', tool_use_id: 'm1', to: 'a1', message: 'Carry on from where you stood.' })];
-            case 7:
-                message = _e.sent();
+            case 10:
+                message = _t.sent();
                 expect(String(message.deny)).toContain('the person stopped');
                 expect(sent).toHaveLength(0);
                 return [4 /*yield*/, $.tool.call({ tool: 'Agent', tool_use_id: 'm2', subagent_type: 'general-purpose', model: 'opus', description: 'Find why the prompt bar vanished', prompt: 'Their words: "The bar above the input box just disappeared completely now."' })];
-            case 8:
-                again = _e.sent();
+            case 11:
+                again = _t.sent();
                 expect(String(again.deny)).toContain('the person stopped');
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { resume: { agentId: 'a1' }, prompt: 'go on' }))];
-            case 9:
-                resume = (_e.sent());
+            case 12:
+                resume = (_t.sent());
                 expect(String(resume.deny)).toContain('the person stopped');
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Bar above the input box disappeared', prompt: 'again' }))];
-            case 10:
-                fresh = (_e.sent());
+            case 13:
+                fresh = (_t.sent());
                 expect(String(fresh.deny)).toContain('the person stopped');
                 expect(resumed.filter(function (line) { return line.startsWith('a1: '); })).toHaveLength(0);
-                // Its card says so and keeps where it stood, with a way to start it again
+                line = function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                    return [2 /*return*/, pane.find({ type: 'Text', text: 'Stopped' })];
+                }); }); };
                 _b = expect;
-                return [4 /*yield*/, pane.find({ type: 'Text', text: /Stopped by you/ })];
-            case 11:
-                // Its card says so and keeps where it stood, with a way to start it again
-                _b.apply(void 0, [_e.sent()]).toBeDefined();
+                return [4 /*yield*/, line()];
+            case 14:
+                _c = [(_m = (_t.sent())) === null || _m === void 0 ? void 0 : _m.props.color];
+                return [4 /*yield*/, line()];
+            case 15:
+                _b.apply(void 0, [_c.concat([(_o = (_t.sent())) === null || _o === void 0 ? void 0 : _o.props.dimColor])]).toEqual([undefined, true]);
+                _d = expect;
+                return [4 /*yield*/, pane.find({ type: 'Text', text: /Build the app|Run the tests|Building the app|Running the tests/ })];
+            case 16:
+                _d.apply(void 0, [_t.sent()]).toBeUndefined();
+                _e = expect;
+                return [4 /*yield*/, keyed(pane, 'again-small-a1')];
+            case 17:
+                _e.apply(void 0, [_t.sent()]).toBeDefined();
+                // and stays so: twenty minutes on it is still stopped, as the other chats read it too, nothing is at work, and nothing of
+                // Claudopus has started it or its helper, written to the chat about it or stopped anything more
+                return [4 /*yield*/, pane.unmount()];
+            case 18:
+                // and stays so: twenty minutes on it is still stopped, as the other chats read it too, nothing is at work, and nothing of
+                // Claudopus has started it or its helper, written to the chat about it or stopped anything more
+                _t.sent();
+                return [4 /*yield*/, clock.advance(20 * 60000)];
+            case 19:
+                _t.sent();
+                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { surface: 'desktop' }))];
+            case 20:
+                pane = _t.sent();
+                mine = JSON.parse((_p = files.get("".concat(MEMORY, "/live/engine-id.json"))) !== null && _p !== void 0 ? _p : '{}');
+                expect([mine.cards, (_q = mine.ended) === null || _q === void 0 ? void 0 : _q.map(function (one) { return [one.id, one.status]; }), (_r = mine.helpers) === null || _r === void 0 ? void 0 : _r.map(function (one) { return [one.id, one.status]; })]).toEqual([[], [['a1', 'stopped']], [['a2', 'stopped']]]);
+                _f = expect;
+                return [4 /*yield*/, pane.find({ type: 'Text', text: 'Nothing waits for you' })];
+            case 21:
+                _f.apply(void 0, [_t.sent()]).toBeDefined();
+                expect([resumed, submitted.filter(function (one) { return !one.startsWith('<task-notification>'); }), sent, stopped.length]).toEqual([[], [], [], 4]);
                 return [4 /*yield*/, $.tool.call({ tool: 'Agent', tool_use_id: 'm3', subagent_type: 'general-purpose', model: 'opus', description: 'Check the ears', prompt: 'check the ears' })];
-            case 12:
-                other = _e.sent();
+            case 22:
+                other = _t.sent();
                 expect(other.deny).toBeUndefined();
                 return [4 /*yield*/, $.prompt.submit({ text: 'Carry on with the bar work.', wait: false, origin: composer })];
-            case 13:
-                next = (_e.sent());
-                expect(((_d = next.context) !== null && _d !== void 0 ? _d : []).join('\n')).toContain('only if this message asks for that');
+            case 23:
+                next = (_t.sent());
+                expect(((_s = next.context) !== null && _s !== void 0 ? _s : []).join('\n')).toContain('only if this message asks for that');
                 return [4 /*yield*/, $.tool.call({ tool: 'SendMessage', tool_use_id: 'm4', to: 'a1', message: 'Carry on with the bar work.' })];
-            case 14:
-                asked = _e.sent();
+            case 24:
+                asked = _t.sent();
                 expect(asked.deny).toBeUndefined();
+                // Stopped again, it is held again; their press on Start again asks the chat in their name to send it a message
+                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { resume: { agentId: 'a1' }, prompt: 'Carry on with the bar work.' }))];
+            case 25:
+                // Stopped again, it is held again; their press on Start again asks the chat in their name to send it a message
+                _t.sent();
+                _g = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        return [2 /*return*/, pane.find({ key: 'stop-a1' })];
+                    }); }); })];
+            case 26:
+                _g.apply(void 0, [_t.sent()]).toBeDefined();
+                return [4 /*yield*/, pane.press({ key: 'stop-a1' })];
+            case 27:
+                _t.sent();
+                _h = expect;
+                _j = String;
+                return [4 /*yield*/, $.tool.call({ tool: 'SendMessage', tool_use_id: 'm5', to: 'a1', message: 'And once more.' })];
+            case 28:
+                _h.apply(void 0, [_j.apply(void 0, [(_t.sent()).deny])]).toContain('the person stopped');
+                return [4 /*yield*/, pressed(pane, 'again-small-a1')];
+            case 29:
+                _t.sent();
+                _k = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        return [2 /*return*/, submitted.find(function (one) { return one.includes('pressed "Start again" on "Bar above the input box disappeared" (a1), which they had stopped') && one.includes('SendMessage'); })];
+                    }); }); })];
+            case 30:
+                _k.apply(void 0, [_t.sent()]).toBeDefined();
+                return [4 /*yield*/, pane.unmount()];
+            case 31:
+                _t.sent();
                 return [2 /*return*/];
         }
     });
@@ -194,89 +284,101 @@ test('a helper the person stopped stays stopped: the work above it is told, and 
     });
 }); });
 test('a stop holds while the chat\'s turn for that message is still open, by name, for its helpers, and lets other work by alike titles go', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var sent, BAR, pane, _a, _b, _c, _d, _e, _f, _g, _h, _j, notice, told, _k;
-    var _l;
-    return __generator(this, function (_m) {
-        switch (_m.label) {
+    var sent, BAR, pane, _a, _b, _c, _d, _e, _f, _g, _h, _j, notice, told, _k, _l;
+    var _this = this;
+    var _m, _o;
+    return __generator(this, function (_p) {
+        switch (_p.label) {
             case 0:
                 sent = world(on).sent;
                 return [4 /*yield*/, $.session.start(start)];
             case 1:
-                _m.sent();
+                _p.sent();
                 BAR = 'The bar above the input box just disappeared completely now.';
                 return [4 /*yield*/, $.prompt.submit({ text: BAR, wait: false, origin: composer })];
             case 2:
-                _m.sent();
+                _p.sent();
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Bar above the input box disappeared', prompt: "Their words: \"".concat(BAR, "\"") }))];
             case 3:
-                _m.sent();
+                _p.sent();
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Read the bar code', prompt: 'read', parentAgentId: 'a1' }))];
             case 4:
-                _m.sent();
+                _p.sent();
                 return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { surface: 'desktop' }))];
             case 5:
-                pane = _m.sent();
+                pane = _p.sent();
                 return [4 /*yield*/, pane.press({ key: 'stop-a1' })
                     // Their own words passed on in the same turn are no way round it
                 ];
             case 6:
-                _m.sent();
+                _p.sent();
                 // Their own words passed on in the same turn are no way round it
                 _a = expect;
                 _b = String;
                 return [4 /*yield*/, $.tool.call({ tool: 'SendMessage', tool_use_id: 'm1', to: 'a1', message: BAR })];
             case 7:
                 // Their own words passed on in the same turn are no way round it
-                _a.apply(void 0, [_b.apply(void 0, [(_m.sent()).deny])]).toContain('the person stopped');
+                _a.apply(void 0, [_b.apply(void 0, [(_p.sent()).deny])]).toContain('the person stopped');
                 // nor its name instead of its id
                 _c = expect;
                 _d = String;
                 return [4 /*yield*/, $.tool.call({ tool: 'SendMessage', tool_use_id: 'm2', to: 'Bar above the input box disappeared', message: 'carry on' })];
             case 8:
                 // nor its name instead of its id
-                _c.apply(void 0, [_d.apply(void 0, [(_m.sent()).deny])]).toContain('the person stopped');
+                _c.apply(void 0, [_d.apply(void 0, [(_p.sent()).deny])]).toContain('the person stopped');
                 // nor its helper, by a message or a resume
                 _e = expect;
                 _f = String;
                 return [4 /*yield*/, $.tool.call({ tool: 'SendMessage', tool_use_id: 'm3', to: 'a2', message: 'go on' })];
             case 9:
                 // nor its helper, by a message or a resume
-                _e.apply(void 0, [_f.apply(void 0, [(_m.sent()).deny])]).toContain('the person stopped');
+                _e.apply(void 0, [_f.apply(void 0, [(_p.sent()).deny])]).toContain('the person stopped');
                 _g = expect;
                 _h = String;
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: '', resume: { agentId: 'a2' }, prompt: 'go on' }))];
             case 10:
-                _g.apply(void 0, [_h.apply(void 0, [(_m.sent()).deny])]).toContain('the person stopped');
+                _g.apply(void 0, [_h.apply(void 0, [(_p.sent()).deny])]).toContain('the person stopped');
                 expect(sent).toHaveLength(0);
                 // Other work whose title shares most of its words is not held
                 _j = expect;
                 return [4 /*yield*/, $.tool.call({ tool: 'Agent', tool_use_id: 'm4', subagent_type: 'general-purpose', model: 'opus', description: 'Move the input box above the bar', prompt: 'move it' })];
             case 11:
                 // Other work whose title shares most of its words is not held
-                _j.apply(void 0, [(_m.sent()).deny]).toBeUndefined();
+                _j.apply(void 0, [(_p.sent()).deny]).toBeUndefined();
                 // Once their message lifts it and the work goes on, a later stop by the chat is not theirs
                 return [4 /*yield*/, $.prompt.submit({ text: 'Go on with the bar.', wait: false, origin: composer })];
             case 12:
                 // Once their message lifts it and the work goes on, a later stop by the chat is not theirs
-                _m.sent();
+                _p.sent();
                 return [4 /*yield*/, $.tool.call({ tool: 'SendMessage', tool_use_id: 'm5', to: 'a1', message: 'Go on with the bar.' })];
             case 13:
-                _m.sent();
+                _p.sent();
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { resume: { agentId: 'a1' }, prompt: 'Go on with the bar.' }))];
             case 14:
-                _m.sent();
+                _p.sent();
                 return [4 /*yield*/, $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' })];
             case 15:
-                _m.sent();
+                _p.sent();
                 notice = '<task-notification><task-id>a1</task-id><status>killed</status></task-notification>';
                 return [4 /*yield*/, $.prompt.submit({ text: notice, wait: false, origin: { kind: 'task-notification' } })];
             case 16:
-                told = (_m.sent());
-                expect(((_l = told.context) !== null && _l !== void 0 ? _l : []).join('\n')).not.toContain('stopped this');
+                told = (_p.sent());
+                expect(((_m = told.context) !== null && _m !== void 0 ? _m : []).join('\n')).not.toContain('stopped this');
+                // Its card is stopped all the same, grey, but with no Start again: that is for a stop of the person's own
                 _k = expect;
-                return [4 /*yield*/, pane.find({ type: 'Text', text: /Stopped by you/ })];
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        return [2 /*return*/, pane.find({ type: 'Text', text: 'Stopped' })];
+                    }); }); })];
             case 17:
-                _k.apply(void 0, [_m.sent()]).toBeUndefined();
+                // Its card is stopped all the same, grey, but with no Start again: that is for a stop of the person's own
+                _k.apply(void 0, [(_o = (_p.sent())) === null || _o === void 0 ? void 0 : _o.props.dimColor]).toBe(true);
+                _l = expect;
+                return [4 /*yield*/, keyed(pane, 'again-small-a1')];
+            case 18:
+                _l.apply(void 0, [_p.sent()]).toBeUndefined();
+                return [4 /*yield*/, pane.unmount()];
+            case 19:
+                _p.sent();
                 return [2 /*return*/];
         }
     });

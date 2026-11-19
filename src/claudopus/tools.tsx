@@ -93,6 +93,18 @@ const toolHooks = (on: On) => {
     const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask
     // A go-ahead for a release: the worktree a press on its first choice allows one release run for (gate.tsx, allowRelease).
     // Only a task's own question with buttons, for a folder that is there
+    // An answer to the person's words on a permission of its card, given with no buttons: shown inside that permission, under their
+    // words, never as a question of its own, so Allow and Don't allow stay where they were (gate.tsx, wordsOnGate)
+    const own = before.find(one => one.id === topOf(before, e.agentId ?? ''))
+    const parked = own && !own.chat ? own.admins?.find(gate => gateParked.has(gate.id) && gate.talk?.at(-1)?.by === 'you') : undefined
+    const refused = own?.ask?.refused && own.ask.replied ? own.ask : undefined
+    if (own && text && !choices.length && (parked || refused)) {
+      const answer = { by: 'task' as const, text: cut([asked, given1].filter(Boolean).join('\n\n'), ASK_DETAILS) }
+      if (parked) await setGates($, own.id, list => list.map(gate => (gate.id === parked.id ? { ...gate, talk: [...(gate.talk ?? []), answer].slice(-PERMIT_TALK_KEPT) } : gate)))
+      else await changeTodos($, list => list.map(one => (one.id === own.id && one.ask?.at === refused?.at ? { ...one, ask: { ...one.ask, talk: [...(one.ask.talk ?? []), answer].slice(-PERMIT_TALK_KEPT), replied: undefined } } : one)))
+      await askAloud($, own, text).catch(err => log($, `answer not told: ${String(err)}`))
+      return { result: `Shown inside the permission on your card, under ${who()}'s words. It keeps Allow and Don't allow until ${who()} presses one, and that press comes back to you as a message. Don't run it again before then. With nothing else to do, end your step.` }
+    }
     const releaseGiven = typeof input.release === 'string' ? input.release.trim() : ''
     const release = releaseGiven.startsWith('/') && choices.length && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(releaseGiven).catch(() => undefined))?.kind === 'dir' ? releaseGiven : ''
     await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(release ? { release } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices } : {}), from: e.agentId, ...(pictures.length ? { pictures } : {}), at } : undefined }))
