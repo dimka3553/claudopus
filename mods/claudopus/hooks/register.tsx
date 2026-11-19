@@ -1412,12 +1412,23 @@ const isDismissed = (one: Todo) => one.status !== 'working' && Boolean(one.close
 const dismissedNow = new Map<string, number>()
 const dismiss = async ($: EngineInterface, id: string) => {
   const at = await $.clock.now()
+  const card = (await read($, todos)).find(one => one.id === id)
+  if (!card || card.status === 'working' || card.closedAt || dismissedNow.has(id)) return
   dismissedNow.set(id, at)
+  doneMoments.set(id, { pressedAt: at, shownAt: 0 })
   redraw($)
-  $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
+  $.clock.after(DONE_UNSEEN + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
   await changeTodos($, list => list.map(one => (one.id === id && one.status !== 'working' && !one.closedAt ? { ...one, closedAt: at, ask: undefined } : one))).finally(() => dismissedNow.delete(id))
   redraw($)
   await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
+}
+const beginDoneMoment = ($: EngineInterface, one: Todo, at: number) => {
+  const moment = doneMoments.get(one.id)
+  if (!moment || moment.shownAt || !isDoneMoment(one, at)) return
+  moment.shownAt = at
+  $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
+  void playDone($)
+  void log($, `marked done: drawn green ${at - moment.pressedAt} ms after the press`)
 }
 const tell = ($: EngineInterface, id: string, text: string) =>
   $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] }, agentId: id }).catch(async err => void (await log($, `work ${id} not told: ${String(err)}`)))
@@ -1658,7 +1669,13 @@ const stageOf = (_list: readonly Staged[], card: Staged): Stage => {
   if (needsPerson(card)) return 'waiting'
   return card.status === 'done' ? (card.up && !card.closedAt ? 'delivered' : 'done') : 'working'
 }
-const isDoneMoment = (one: Pick<Todo, 'status' | 'closedAt'>, at: number) => one.status === 'done' && Boolean(one.closedAt) && at >= (one.closedAt ?? 0) && at - (one.closedAt ?? 0) < LINGER
+const doneMoments = new Map<string, { pressedAt: number; shownAt: number }>()
+const DONE_UNSEEN = 10_000
+const isDoneMoment = (one: Pick<Todo, 'id' | 'status' | 'closedAt'>, at: number) => {
+  const moment = doneMoments.get(one.id)
+  if (one.status !== 'done' || !one.closedAt || !moment || moment.pressedAt !== one.closedAt) return false
+  return at >= moment.pressedAt && (moment.shownAt ? at - moment.shownAt < LINGER : at - moment.pressedAt < DONE_UNSEEN)
+}
 const hasResult = (stage: Stage) => stage === 'delivered' || stage === 'done'
 const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', delivered: 'Delivered', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
 const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, delivered: DELIVERED, done: DONE, stopped: undefined, failed: 'error' })[stage]
@@ -4297,6 +4314,14 @@ const readyOf = ({ id }: { id: string }, cards: Todo[], runs: Flow[]) => {
   return { title: one.title || 'Task', isDone: one.status === 'done', what }
 }
 
+const playDone = async ($: EngineInterface) => {
+  let config: { sound?: unknown } = {}
+  try {
+    config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as typeof config
+  } catch {
+  }
+  if (config.sound !== false) await $.audio.play({ asset: READY_SOUND }).catch(err => log($, `done sound not played: ${String(err)}`))
+}
 const announce = async ($: EngineInterface) => {
   isSettling = false
   const ids = ready
@@ -11588,6 +11613,7 @@ const panelHooks = (on: On) => {
     shownAsked.set(shownKey, askedNo)
     const madeFrom = Date.now()
     let isMade = false
+    const doneDrawn: Todo[] = []
     try {
     const shape = await paneShape($, paneId)
     const content = await paneContent($)
@@ -11635,6 +11661,7 @@ const panelHooks = (on: On) => {
     const helpersThere = helpersOf(otherChats)
     const chat = await read($, me)
     const at = await $.clock.now()
+    if (paneId === LIST) doneDrawn.push(...own.filter(one => isDoneMoment(one, at)))
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     const shownWork = own.filter(one => !isDismissed(one) || isDoneMoment(one, at)).filter(one => stage(one) === 'working' || stage(one) === 'waiting' || staysUp(one) || isLingering(one, at) || isDoneMoment(one, at) || runningOn(one.id).length > 0)
     const keysHeldNow = () => e.surface === 'terminal' && Boolean(keysAsk && hasDraft(keysAsk))
@@ -11796,6 +11823,7 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
+    const looksDelivered = (one: Todo) => stage(one) === 'delivered' || isDoneMoment(one, at)
     const small = (one: Todo) => {
       const isMomentNow = (isFinishMoment(one) && !keptUpNow.has(one.id) && !isDismissed(one)) || isDoneMoment(one, at)
       if (!isMomentNow) cardNo += 1
@@ -11805,8 +11833,9 @@ const panelHooks = (on: On) => {
       const tree = treeUnder(one)
       const scope = `card-${one.id}`
       const isMoment = isMomentNow && !isAbovePrompt
+      const isMarkedNow = isDoneMoment(one, at)
       return (
-        <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isMoment ? { borderStyle: 'round' as const, borderColor: stageColor(stage(one)) ?? DONE } : {})}>
+        <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isMoment ? { borderStyle: 'round' as const, borderColor: stageColor(stage(one)) ?? DONE, paddingX: 0, paddingY: 0 } : {})}>
           {edge(one, kept.length, done, kept.some(item => item.state === 'doing'))}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
             <Box flexDirection="column">
@@ -11824,7 +11853,7 @@ const panelHooks = (on: On) => {
                 ) : null}
                 {/* Done, at the top or under Finished: a press opens the box above the chat for what to change, where that bar
                     takes a box; the same task then carries on with what is typed */}
-                {canChange(one) && stage(one) !== 'delivered' && 'Input' in table && repliesInBar(e.surface) ? (
+                {canChange(one) && !looksDelivered(one) && 'Input' in table && repliesInBar(e.surface) ? (
                   <Box flexShrink={0}>
                     <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : 'Message'} plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
                   </Box>
@@ -11883,7 +11912,7 @@ const panelHooks = (on: On) => {
             {/* A card that waits says so with its block alone: no line of what the task last did under it. A delivered card's line is
                 one row: what it asks and its presses come right under it */}
             {needsPerson(one) ? null : (
-            <Box flexDirection="row" alignItems="flex-start" gap={1} height={stage(one) === 'delivered' ? 1 : 2} overflow="hidden" paddingLeft={lead}>
+            <Box flexDirection="row" alignItems="flex-start" gap={1} height={looksDelivered(one) ? 1 : 2} overflow="hidden" paddingLeft={lead}>
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* Ended, the line begins with its stage, in its colour: green done, grey stopped, red failed with why; then what
@@ -11910,13 +11939,13 @@ const panelHooks = (on: On) => {
                 presses (19 Nov, the person: "buttons at the bottom to mark as done, provide feedback", "it makes the most sense
                 to just send one message for both the questions"). The reply is typed in the box above the chat, as every
                 message is, and puts the task back to work; Mark as done puts the card under Finished */}
-            {stage(one) === 'delivered' ? questionLines(one, `asks-${one.id}`, lead) : null}
-            {stage(one) === 'delivered' && (canDismiss(one) || (canChange(one) && 'Input' in table && repliesInBar(e.surface))) ? (
+            {looksDelivered(one) ? questionLines(one, `asks-${one.id}`, lead) : null}
+            {looksDelivered(one) && (canDismiss(one) || isDoneMoment(one, at) || (canChange(one) && 'Input' in table && repliesInBar(e.surface))) ? (
               <Box key={`delivered-${one.id}`} flexDirection="row" flexWrap="wrap" gap={1} paddingLeft={lead}>
                 {canChange(one) && 'Input' in table && repliesInBar(e.surface) ? (
-                  <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : one.questions?.length ? 'Reply' : 'Give feedback'} variant={isBarOpen('change', one.id) ? undefined : 'primary'} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
+                  <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : one.questions?.length ? 'Reply' : 'Give feedback'} variant={isBarOpen('change', one.id) ? undefined : 'primary'} onPress={press => (isMarkedNow ? undefined : openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface))} />
                 ) : null}
-                {canDismiss(one) ? <Button key={`dismiss-${one.id}-${presses}`} label="Mark as done" onPress={() => void ((presses += 1), dismiss($, one.id).catch(err => log($, `card not marked done: ${String(err)}`)))} /> : null}
+                {canDismiss(one) || isMarkedNow ? <Button key={`dismiss-${one.id}-${presses}`} label="Mark as done" onPress={() => void (isMarkedNow || ((presses += 1), dismiss($, one.id).catch(err => log($, `card not marked done: ${String(err)}`))))} /> : null}
               </Box>
             ) : null}
           </Box>
@@ -12972,7 +13001,7 @@ const panelHooks = (on: On) => {
             <Box flexDirection="row" alignItems="center" gap={2}>
               {/* Just moved to a newer version: the octopus turns blue and jumps for the moment. Above the prompt in a narrow terminal the
                   panel is a few rows tall, so it keeps them for the work and leaves the octopus to the line above the prompt */}
-              {isInline ? null : updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`, $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, waiting for you', happy: 'Claudopus, a task is done', working: 'Claudopus, Claude is working', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
+              {isInline ? null : updated && !own.some(one => isDoneMoment(one, at)) ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`, $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, waiting for you', happy: 'Claudopus, a task is done', working: 'Claudopus, Claude is working', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* The version this chat loaded beside the name, and a newer one when the Mac has it, so two Macs on different ones are told apart */}
                 {/* Just moved to a newer version: "Claudopus updated" in blue, then the new version, for the moment */}
@@ -13059,6 +13088,10 @@ const panelHooks = (on: On) => {
     lastShown.set(shownKey, drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     isMade = true
+    if (doneDrawn.length) {
+      const madeAt = await $.clock.now()
+      for (const one of doneDrawn) beginDoneMoment($, one, madeAt)
+    }
     return drawing
     } finally {
       freshEnds($, shownKey, isMade ? { at: heldAt, ms: Date.now() - madeFrom, fresh: freshness } : undefined)

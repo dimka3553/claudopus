@@ -1,0 +1,3 @@
+- Mark as done always shows its green moment, with the happy octopus and the chime, even when the panel is slow to draw, as it is right after an update: its two seconds now start when you first see the card turn green, not at the press.
+- Through that moment the card keeps its shape and its presses, which do nothing then, so a second click can't land on another button or link; a second press on Mark as done changes nothing.
+- A card marked done during the update's moment shows the happy octopus instead of the update's blue one.
