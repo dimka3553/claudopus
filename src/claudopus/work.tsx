@@ -572,7 +572,12 @@ const workHooks = (on: On) => {
       if (!r.deny && !r.isError) handedBack.set(agent, report)
       return r
     }
-    if (e.agentId !== undefined) return next(e)
+    if (e.agentId !== undefined) {
+      const r = await next(e)
+      // (the pull request, release or page a command of its put up is what it made: linksPutUp)
+      if (dir && !isOff) await keepPutUp($, e.agentId, linksPutUp(e, r)).catch(err => log($, `links a command put up not kept: ${String(err)}`))
+      return r
+    }
     if (isOff || !(await read($, me)).isChat) return next(e)
     // Work the chat starts is a fresh agent on a model it names: a copy of the chat, or an agent left to the chat's own model, is refused
     if (e.tool === 'Agent') {

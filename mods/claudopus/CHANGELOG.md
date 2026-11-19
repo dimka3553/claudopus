@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.227 · 19 November 2026
+- A task's card keeps everything it made for its whole life, however often it starts again: the pages and documents each of its results named, its pictures, and its changed files, even once a worktree they were in is taken away.
+- Pull requests, issues, releases and published pages show on the card wherever a result names them, as in a table, each by its repo and number, such as clipify #70, and one a command opened is there even when the result names it only by its number.
+- More than eight things on a card end in a "N more" you can press, which opens the task's Details with all of them.
+
 ## 0.2.226 · 19 November 2026
 - Cards stand by colour: what waits for you (yellow) on top, then what was delivered (blue), then what works (purple). A card you just answered goes at once to its place among the working, under every blue card, instead of staying up with what waits.
 - A workflow that finishes stays where it was, green, for its two seconds, instead of jumping to the top.
