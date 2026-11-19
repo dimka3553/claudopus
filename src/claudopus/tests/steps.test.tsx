@@ -266,6 +266,7 @@ test('a task keeps the rules it was started with: a compaction is told to keep t
   expect(await toldOf(batch($, 'a1', reads))).toBe('')
   // The rules change under it, saved in Config: the running task is told nothing
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
+  await moreShown(config)
   await pressed(config, 'config-text-work-edit')
   await config.input({ key: 'config-text-work-input', text: '- Every run says how far it is.' })
   expect(files.get(`${MEMORY}/roles/work.md`)).toBe('- Every run says how far it is.\n')

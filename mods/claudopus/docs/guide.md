@@ -14,7 +14,7 @@ Everything Claudopus does, in full. The short version is the [README](../README.
 
 Claudopus never installs an update by itself. Claude Code leaves automatic updates off for any marketplace other than Anthropic's own, and Claudopus does too.
 
-A check reads the version page on claudopus.ai (`https://www.claudopus.ai/version.json`) and nothing more. It runs every hour as shipped, or as often as Config's Look for new versions says (every 6 hours, once a day, once a week, or only when you press Check now). The page names the version, git's fingerprint of Claudopus's folder as released (`tree`), its size, and the first line of each recent version's changes.
+A check reads the version page on claudopus.ai (`https://www.claudopus.ai/version.json`) and nothing more. It runs every hour as shipped, or as often as Config's Update checks (under More) says (every 6 hours, once a day, once a week, or only when you press Check now). The page names the version, git's fingerprint of Claudopus's folder as released (`tree`), its size, and the first line of each recent version's changes.
 
 When the page names a newer version, a small grey box in the panel's header says "Claudopus <version> is out". It also says how many versions that covers since yours, and gives a line on what's new. Then there are two steps, and you press each one. (A folder of the code has just one, Update.) The box shows how far along you are:
 
@@ -28,7 +28,7 @@ If a chat runs from a worktree of the code, from a branch other than main, or fr
 
 Config's Updates section says which version the chat runs, where it loads from, and when the last check was. It has Check now, which only checks.
 
-When a chat moves to a newer version, the octopus in the panel's header turns blue and jumps for five seconds. A short sound plays (once for each version on a Mac; the Config sound setting turns it off). The same small box then says "Updated to Claudopus <version>", with What's new (the changelog) and Close.
+When a chat moves to a newer version, the octopus in the panel's header turns blue and jumps for five seconds. A short sound plays (once for each version on a Mac; Config's When a task ends turns it off). The same small box then says "Updated to Claudopus <version>", with What's new (the changelog) and Close.
 
 ## What you see
 
@@ -127,7 +127,7 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 - Only a command with no chat open on this Mac to draw a panel (a `claude -p` command) asks in a macOS dialog on this Mac's screen instead. Over SSH it says that no panel is open.
 - Before an admin command runs, the task's card asks you. It shows the exact command and the Mac, with Allow, Don't allow and Always allow this command. Only your press allows it, in the panel of the chat the task runs in. Nothing typed in a chat does, and other chats' panels show it without buttons.
 - Don't allow tells Claude you refused the command. Always allow saves that exact command for that Mac in `~/.claude/claudopus/admin-allowed.json`, and Config lists them, each with Remove.
-- Config's "Ask before an admin command" (`admin`) chooses when you're asked. The options are: each time, as shipped; once for a task and its helpers, until it ends; or never, which is how it was before this setting existed.
+- Config's Admin commands, under More (`admin`), chooses when you're asked. The options are: each time, as shipped; once for a task and its helpers, until it ends; or never, which is how it was before this setting existed.
 - The hook holds the command, and the admin tool itself runs nothing you didn't allow. So a script, another spelling of its path, or a command the shell builds is refused too.
 - What runs as root has the system's own `PATH`, never the one the caller set, so a program planted earlier on that path isn't the one run.
 - What you allowed, the always-allowed list, and a "work" or "never" setting each count only with a seal your press made. The seal uses a key in this Mac's keychain. An entry or setting written into those files by anything else allows nothing. Removing one makes a new key, so an old seal put back counts for nothing.
@@ -220,7 +220,7 @@ Claude Code runs on Linux in a terminal (there is no Claude desktop app for Linu
 
 ## Settings
 
-The panel's Config tab lists everything you can set, shows what's in force, and puts each back to what shipped.
+The panel's Config tab lists everything you can set, shows what's in force, and puts each back to what shipped. What you'd change most is in sight: your name, your principles, when a task ends, the models and the second check, and updates. The rest is under More: how often to check for updates, the busy Mac, admin commands, the chat's and the tasks' rules, and background tasks.
 
 When you edit the principles, the chat's rules or the task rules, Claudopus makes your own copy at the same path under `~/.claude/claudopus` (`rules/CLAUDE.md`, `roles/chat.md`, `roles/work.md`). Claudopus uses your copy when there is one, and an update never touches it.
 
@@ -254,7 +254,7 @@ The settings are in `~/.claude/claudopus/config.json`. Every key is optional:
 | `notifications` | `false` stops the notification that names a task when it's done, stopped or failed. |
 | `admin` | When you're asked before an admin command runs: `each` time, once for a task (`work`) and its helpers until it ends, or `never`. `work` and `never` count only when chosen in Config, which seals them (`adminSealed`). Written by hand, every command still asks. |
 | `models` | Which model runs most tasks, long searching and reading and helpers, and heavy tasks (`opus`, `sonnet`, `fable` or `haiku`). Checks of finished work run on the most-tasks or heavy-tasks model, never on the long-searching one. |
-| `lean` | Which tasks run on Fable (`fable`: `heavy`, `all` or `named`) and when a second helper checks (`second`: `asked`, `beyond` or `every`). Only what you changed is kept. |
+| `lean` | Which tasks run on Fable (`fable`: `heavy`, `all` or `named`) and when a second helper checks (`second`: `asked`, `beyond` or `every`). Config writes `named` as Heavy tasks' Same as most tasks; `all`, which only an older Config wrote, shows as Most tasks on Fable 5.2. Only what you changed is kept. |
 | `macs` | Up to four other Macs, as `user@host` or a `Host` of `~/.ssh/config`, that this Mac's panel lists the chats of. It uses your own SSH, which must log in without asking. Each Mac needs Claudopus of this version or newer. That Mac's panels list this Mac's chats in turn, with nothing to set there: each visit hands it this Mac's chats, without the commands and texts their tasks run or send. Their questions are answered in their own chats. Results are saved the same on both, about every two minutes: each Mac gets the results it lacks, with paths moved onto its own home, and what you did to a result (archived, brought back, answered) reaches the other. Nothing is deleted or overwritten. Saved chats stay on the Mac they ran on. |
 
 `name`, `agents` and `macs` are read when a chat starts. `models`, `lean` and your own copies of the rules reach new chats and new tasks. `sound` and `notifications` are read each time a task ends or needs you.
