@@ -1,0 +1,2 @@
+- A Claude artifact a task or its helpers publish shows first on the task's card, under the title it was published with and with its own icon. Pressing it opens Claude Code's artifact pane beside the chat, or your browser where the app can't.
+- A link a result gives only to try something, such as an address with a query or an API address, no longer shows as something the task made.
