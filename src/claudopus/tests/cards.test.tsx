@@ -1748,7 +1748,7 @@ test('every run under a card says how it stands: a command that printed nothing 
   const outputs: Record<string, () => string> = { [`${TASKS}/bg-r1.output`]: () => '', [`${TASKS}/mon-m1.output`]: () => 'series arrived\nwrote vsd-02.png\n' }
   const wrote: Record<string, () => number> = { [`${TASKS}/bg-r1.output`]: () => 1_700_000_000_000, [`${TASKS}/mon-m1.output`]: () => now - 30_000 }
   let use: number | undefined
-  const { clock, shown: opened, tabs } = world(on, { jobs: { output: file => outputs[file]?.() ?? '', wroteAt: file => wrote[file]?.() ?? 0, live: file => (file.endsWith('bg-r1.output') ? use : undefined) } })
+  const { clock, shown: opened, tabs, appended } = world(on, { jobs: { output: file => outputs[file]?.() ?? '', wroteAt: file => wrote[file]?.() ?? 0, live: file => (file.endsWith('bg-r1.output') ? use : file.endsWith('bg-c1.output') ? 0 : undefined) } })
   on('session.cwd', () => ({ value: '/repo' }) as never)
   const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
   await $.session.start(start)
@@ -1756,6 +1756,10 @@ test('every run under a card says how it stands: a command that printed nothing 
   await $.agent.spawn({ ...spawn, description: 'Redraw and fetch', prompt: 'go' } as never)
   // A script that sends all it prints to files of its own, and a watch, the work's own words for each
   await $.tool.call({ tool: 'Bash', tool_use_id: 'r1', agentId: 'a1', command: 'bash /s/round3b_figs.sh', description: 'Redraw all pictures (about 1 min)', run_in_background: true } as never)
+  // (and a job on a cloud machine, which sends nothing back)
+  outputs[`${TASKS}/bg-c1.output`] = () => ''
+  wrote[`${TASKS}/bg-c1.output`] = () => 1_700_000_000_000
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'c1', agentId: 'a1', command: "ssh gpu-vm 'cd fits && python3 fit.py'", description: 'Run the fit on the cloud machine', run_in_background: true } as never)
   await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'tail -n0 -F sheet.log', description: 'Azure jobs finishing' } as never)
   for (let n = 0; n < 15; n++) await advance(20_000)
   const texts = async () => {
@@ -1788,6 +1792,13 @@ test('every run under a card says how it stands: a command that printed nothing 
   use = 0
   await advance(25_000)
   expect(await until(async () => (await texts()).find(text => /^No output yet · started \d+m ago · idle$/.test(text)))).toBeDefined()
+  // A cloud job is never called idle or busy by what its command here uses, as its work is on another computer: silent, its row
+  // says nothing has come back and that the command still waits on that machine, and its task is told to bring the job's own
+  // output back (19 Nov: four cloud jobs at work read "No output yet · started 48m ago · idle")
+  const cloud = (await texts()).filter(text => /cloud/.test(text) && !/^Remote command|^Run the fit/.test(text))
+  expect(cloud.some(text => /^Nothing back from the cloud yet · started \d+m ago · still waiting on the cloud machine$/.test(text))).toBe(true)
+  expect(await until(async () => appended.find(line => /^a1: Your cloud job "Run the fit on the cloud machine" has sent nothing back for \d+m.*follow the job's log from its first line/.test(line)))).toBeDefined()
+  expect(appended.some(line => /Your command "Run the fit on the cloud machine" has printed nothing/.test(line))).toBe(false)
   // A press on a run's name opens its log in a tab of the panel, named after it: what it is, how it stands, and the end of what
   // it wrote as it wrote it, without colour codes (19 Nov: the log opened in the Terminal app, outside the panel)
   outputs[`${TASKS}/bg-r1.output`] = () => 'stage: drawing figure 3\n\x1b[32mprogress: 3/9 figures drawing\x1b[0m\n'

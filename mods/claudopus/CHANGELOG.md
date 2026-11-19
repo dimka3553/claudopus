@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.237 · 19 November 2026
+- A cloud job that sends nothing back is no longer called idle. Its row says `Nothing back from the cloud yet · started 48m ago · still waiting on the cloud machine`, and its log tab says the same in a sentence.
+- A task whose cloud job is silent for a minute is told to bring the job's own output back while it runs: its log from the first line, its state (queued, starting, running), its progress, and about once a minute how busy its machine is. That output then shows in the job's row and in its log tab. Tasks are told to start cloud jobs this way from the outset.
+
 ## 0.2.236 · 19 November 2026
 - Once you answer a permission in words, its buttons go and the card shows one grey line of your words while the task answers. Allow and Don't allow come back with the task's answer, inside the permission, and the grey line goes then.
 
