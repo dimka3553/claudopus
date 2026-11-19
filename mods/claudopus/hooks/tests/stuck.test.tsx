@@ -840,9 +840,10 @@ test('work that gets nothing new back for 12 minutes is flagged on its card and 
   await clock.advance(13 * 60_000)
   expect(await until(async () => isFlagged() || undefined)).toBe(true)
   expect(appended.filter(line => line.startsWith('undefined: ')).filter(line => line.includes('Nothing new from'))).toHaveLength(2)
-  // Nothing of Claudopus's started it again or sent it a word, at any point
+  // Nothing of Claudopus's started it again or sent it a word about it, at any point: at a step of its own it is only asked, as
+  // any task is, for a note of what it does now
   expect(resumed).toEqual([])
-  expect(appended.filter(line => line.startsWith('a1: '))).toEqual([])
+  expect(appended.filter(line => line.startsWith('a1: ') && !line.includes('send a `note` saying in one plain line what you are doing now'))).toEqual([])
   await settle()
 })
 
