@@ -1409,11 +1409,12 @@ const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: n
 }
 
 const isDismissed = (one: Todo) => one.status !== 'working' && Boolean(one.closedAt)
-const dismissedNow = new Set<string>()
+const dismissedNow = new Map<string, number>()
 const dismiss = async ($: EngineInterface, id: string) => {
-  dismissedNow.add(id)
-  redraw($)
   const at = await $.clock.now()
+  dismissedNow.set(id, at)
+  redraw($)
+  $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
   await changeTodos($, list => list.map(one => (one.id === id && one.status !== 'working' && !one.closedAt ? { ...one, closedAt: at, ask: undefined } : one))).finally(() => dismissedNow.delete(id))
   redraw($)
   await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
@@ -1657,6 +1658,7 @@ const stageOf = (_list: readonly Staged[], card: Staged): Stage => {
   if (needsPerson(card)) return 'waiting'
   return card.status === 'done' ? (card.up && !card.closedAt ? 'delivered' : 'done') : 'working'
 }
+const isDoneMoment = (one: Pick<Todo, 'status' | 'closedAt'>, at: number) => one.status === 'done' && Boolean(one.closedAt) && at >= (one.closedAt ?? 0) && at - (one.closedAt ?? 0) < LINGER
 const hasResult = (stage: Stage) => stage === 'delivered' || stage === 'done'
 const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', delivered: 'Delivered', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
 const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, delivered: DELIVERED, done: DONE, stopped: undefined, failed: 'error' })[stage]
@@ -2997,7 +2999,7 @@ const DELIVERED = '#4C9AFF'
 const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: '', wave: '', asking: '', updated: '' }
 const ART_FILES: Record<Exclude<keyof typeof ART, 'asking' | 'updated'>, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg', wave: 'wave.svg' }
 const isHappy = (cards: (Staged & { id: string; parentId?: string; endedAt: number })[], at: number) =>
-  cards.some(one => !one.parentId && hasResult(stageOf(cards, one)) && isLingering(one, at))
+  cards.some(one => !one.parentId && hasResult(stageOf(cards, one)) && (isLingering(one, at) || isDoneMoment(one, at)))
 const HEAD_MARK = 48
 const BAND_MARK = 16
 const moments = new Map<string, { art: keyof typeof ART; mark: string; at: number }>()
@@ -5244,7 +5246,7 @@ const draftDrawn = (key: string) => {
 }
 const paneShape = async ($: EngineInterface, paneId: string) => {
   const at = await $.clock.now()
-  const card = (one: Todo) => [one.id, one.status, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, one.parentId ?? '', lingers(one, at), (one.admins ?? []).map(gate => gate.id), one.stuckAt ?? 0, one.running?.at ?? 0, jobsOf(one).length]
+  const card = (one: Todo) => [one.id, one.status, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, one.parentId ?? '', lingers(one, at), isDoneMoment(one, at), (one.admins ?? []).map(gate => gate.id), one.stuckAt ?? 0, one.running?.at ?? 0, jobsOf(one).length]
   const own = await read($, todos)
   const chats = await read($, others)
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
@@ -5295,7 +5297,8 @@ const personSign = async ($: EngineInterface) => {
   const chats = await read($, others)
   const cards = await read($, todos)
   const asks = [...cards, ...cardsOf(chats), ...helpersOf(chats)].filter(one => one.ask || one.admins?.length).map(one => [one.id, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, (one.admins ?? []).map(gate => gate.id)])
-  const own = [cards.filter(one => one.closedAt).map(one => one.id), [...dismissedNow]]
+  const momentAt = await $.clock.now()
+  const own = [cards.filter(one => one.closedAt).map(one => one.id), [...dismissedNow.keys()], cards.filter(one => isDoneMoment(one, momentAt)).map(one => one.id)]
   return JSON.stringify([
     presses, asks, own, chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0]), waiting.map(one => [one.agent, one.tool]), asked.length, [...promptWaits.keys()], [...promptHeld],
     [...gateHeld], [...gateWaits.keys()], [...gatePressed.keys()], looseGates.map(one => one.id), [...askPressed], [...undoneOffers.keys()], boxes.map(one => one.id), [...boxSaid], [...boxSent], boxPresses,
@@ -5412,7 +5415,7 @@ const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) 
   !isReply || Boolean(ask.refused) || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))
 const askPressed = new Map<string, string>()
 const asPressed = (given: Todo): Todo => {
-  const closed = given.status !== 'working' && !given.closedAt && dismissedNow.has(given.id) ? { ...given, closedAt: given.endedAt || 1 } : given
+  const closed = given.status !== 'working' && !given.closedAt && dismissedNow.has(given.id) ? { ...given, closedAt: dismissedNow.get(given.id) ?? (given.endedAt || 1) } : given
   const one: Todo = closed.closedAt && closed.ask ? { ...closed, ask: undefined } : closed
   const isAnswered = Boolean(one.ask && askPressed.get(one.id) === `${one.ask.at}:${one.ask.text}`)
   const admins = one.admins?.filter(gate => !gatePressed.has(gate.id))
@@ -11633,7 +11636,7 @@ const panelHooks = (on: On) => {
     const chat = await read($, me)
     const at = await $.clock.now()
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
-    const shownWork = own.filter(one => !isDismissed(one)).filter(one => stage(one) === 'working' || stage(one) === 'waiting' || staysUp(one) || isLingering(one, at) || runningOn(one.id).length > 0)
+    const shownWork = own.filter(one => !isDismissed(one) || isDoneMoment(one, at)).filter(one => stage(one) === 'working' || stage(one) === 'waiting' || staysUp(one) || isLingering(one, at) || isDoneMoment(one, at) || runningOn(one.id).length > 0)
     const keysHeldNow = () => e.surface === 'terminal' && Boolean(keysAsk && hasDraft(keysAsk))
     const shownIds = new Set(shownWork.map(one => one.id))
     const needsFor = (one: Todo) => needsOf($, one, e.surface, at, !keysHeldNow()).filter(need => one.chat || shownIds.has(one.id) || !/^(?:box|prompt)-/.test(need.id))
@@ -11777,7 +11780,7 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
-    const canDismiss = (one: Todo) => !one.chat && !one.parentId && one.status !== 'working' && shownWork.some(up => up.id === one.id) && !isActingOnReply(one) && !one.admins?.length && !needsFor(one).some(need => need.kind !== 'question')
+    const canDismiss = (one: Todo) => !one.chat && !one.parentId && one.status !== 'working' && !isDismissed(one) && shownWork.some(up => up.id === one.id) && !isActingOnReply(one) && !one.admins?.length && !needsFor(one).some(need => need.kind !== 'question')
     const questionLines = (one: Todo, key: string, left: number | 'xs') => {
       const asked = one.questions ?? []
       if (!asked.length) return null
@@ -11794,7 +11797,7 @@ const panelHooks = (on: On) => {
       )
     }
     const small = (one: Todo) => {
-      const isMomentNow = isFinishMoment(one) && !keptUpNow.has(one.id) && !isDismissed(one)
+      const isMomentNow = (isFinishMoment(one) && !keptUpNow.has(one.id) && !isDismissed(one)) || isDoneMoment(one, at)
       if (!isMomentNow) cardNo += 1
       const digit = keyed && cardNo <= 9 && !isMomentNow ? String(cardNo) : undefined
       const kept = one.items.filter(item => item.state !== 'dropped')
@@ -12736,7 +12739,7 @@ const panelHooks = (on: On) => {
     const endedElsewhere = elsewhere.filter(one => stageOf(elsewhere, one) !== 'working' && stageOf(elsewhere, one) !== 'waiting' && !lingers(one, at) && !isVanished(one.id))
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (stageOf(elsewhere, one) === 'working' || stageOf(elsewhere, one) === 'waiting' || lingers(one, at)))
     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
-    const finished = [...own.filter(one => isDismissed(one) || (one.status !== 'working' && !shownWork.some(up => up.id === one.id))), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
+    const finished = [...own.filter(one => one.status !== 'working' && !shownWork.some(up => up.id === one.id)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
         <Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
@@ -12922,6 +12925,7 @@ const panelHooks = (on: On) => {
       for (const key of [...topPlaces.keys()]) if (!waitingNow.has(key)) (topPlaces.delete(key), topClosed.delete(key))
     }
     const restHere = shownWork.filter(one => !isUp(one))
+    const isHandedIn = (one: Todo) => stage(one) === 'delivered' || isDoneMoment(one, at)
     const restFlows = shownFlows.filter(f => !isFlowMoment(f))
     const begun = (one: Todo) => one.begunAt ?? one.startedAt
     const finishingFlows = shownFlows.filter(isFlowMoment)
@@ -13029,7 +13033,7 @@ const panelHooks = (on: On) => {
           ? big(alone, talked?.lines)
           : [
               ...(listedChats.length && (restHere.length || restFlows.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
-              ...[...restHere.map(one => ({ at: begun(one), card: () => small(one) })), ...restFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
+              ...[...restHere.map(one => (isHandedIn(one) ? { rank: 0, at: -one.endedAt, card: () => small(one) } : { rank: 1, at: begun(one), card: () => small(one) })), ...restFlows.map(f => ({ rank: 1, at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.rank - b.rank || a.at - b.at).map(one => one.card()),
               ...listedChats.flatMap(c => {
                 const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => begun(a) - begun(b))
                 return cards.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...cards.map(one => small(one))] : []

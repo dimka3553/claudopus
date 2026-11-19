@@ -1,0 +1,2 @@
+- Delivered cards now stand at the top of the panel, the newest first, above the tasks still working and under anything that waits for you.
+- Mark as done turns the card green where it stands, outlined, with the happy octopus, for two seconds; then it goes under Finished.

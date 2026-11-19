@@ -412,8 +412,14 @@ test('work that hands in its result with everything it set out to do done, leavi
   await clock.advance(60 * 60_000)
   expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect(await fold()).toBeUndefined()
-  // Only the person's Dismiss puts it under Finished
+  // Only the person's Mark as done puts it under Finished, after its green moment, the octopus happy for it however long ago
+  // the task finished
+  const moods = async () => (await pane.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
+  expect(await moods()).not.toContain('happy')
   await pressed(pane, 'dismiss-a1')
+  expect(await until(async () => ((await moods()).includes('happy') ? true : undefined))).toBe(true)
+  await clock.advance(2_100)
+  expect(await moods()).not.toContain('happy')
   expect(await until(async () => fold())).toBe('▸ Finished 1')
   expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeUndefined()
   // One that hands in while a command of its own that ends by itself still runs is refused: it stays at work with its Stop, never
@@ -558,7 +564,7 @@ const dozen = async ($: Parameters<TestBody>[0], on: On, asking = false) => {
 }
 const others = (but: number[]) => Array.from({ length: 12 }, (_, n) => n + 1).filter(n => !but.includes(n)).map(n => `Piece ${n}`)
 
-test('a finished card in the middle of a dozen comes to the top at once, outlined green, for two seconds on time, then is back in its place among the cards, still green and never under Finished, after an hour and after another task finishes; only Mark as done puts it under Finished; delivered, it has only Give feedback and Mark as done to press, at its bottom, failed Message and Dismiss at its top right, and neither press tells its task anything', SLOW, async ($, on) => {
+test('a finished card in the middle of a dozen comes to the top at once, outlined for two seconds on time, and stays there over what works, delivered and never under Finished, after an hour and after another task finishes; only Mark as done puts it under Finished; delivered, it has only Give feedback and Mark as done to press, at its bottom, failed Message and Dismiss at its top right, and neither press tells its task anything', SLOW, async ($, on) => {
   const { list, order, green, fold, end, clock, appended, resumed, sent, submitted } = await dozen($, on)
   const doneLines = async () => (await list.findAll({ type: 'Text' })).filter(one => one.text === '◐ Delivered' && one.props.color === '#4C9AFF').length
   expect(await order()).toEqual(others([]))
@@ -569,30 +575,31 @@ test('a finished card in the middle of a dozen comes to the top at once, outline
   await clock.advance(1_900)
   expect(await order()).toEqual(['Piece 7', ...others([7])])
   expect(await green()).toBe(1)
-  // The two seconds end on time, by the clock alone: no card is left outlined, and it is back in its place, done and green, with
+  // The two seconds end on time, by the clock alone: no card is left outlined, and it stays on top, delivered, with
   // nothing under Finished
   await clock.advance(150)
   expect(await green()).toBe(0)
-  expect(await order()).toEqual(others([]))
+  expect(await order()).toEqual(['Piece 7', ...others([7])])
   expect(await doneLines()).toBe(1)
   expect(await fold()).toBeUndefined()
   // An hour on it is there as it was
   await clock.advance(60 * 60_000)
-  expect(await order()).toEqual(others([]))
+  expect(await order()).toEqual(['Piece 7', ...others([7])])
   expect(await doneLines()).toBe(1)
   expect(await fold()).toBeUndefined()
   // Another task finishes and has its own moment: the first stays among the cards, and after it both are there
   await end('a9')
-  expect(await order()).toEqual(['Piece 9', ...others([9])])
+  expect(await order()).toEqual(['Piece 9', 'Piece 7', ...others([7, 9])])
   expect(await green()).toBe(1)
   await clock.advance(2_100)
-  expect(await order()).toEqual(others([]))
+  expect(await order()).toEqual(['Piece 9', 'Piece 7', ...others([7, 9])])
   expect(await doneLines()).toBe(2)
   expect(await fold()).toBeUndefined()
   // Only the person's Dismiss puts one under Finished, and only that one
   await pressed(list, 'dismiss-a7')
+  await clock.advance(2_100)
   expect(await until(async () => fold())).toBe('▸ Finished 1')
-  expect(await order()).toEqual(others([7]))
+  expect(await order()).toEqual(['Piece 9', ...others([7, 9])])
   expect(await doneLines()).toBe(1)
 
   // A delivered card has two buttons at its bottom and nothing else to press but its title: Give feedback, filled, where the bar
@@ -620,6 +627,7 @@ test('a finished card in the middle of a dozen comes to the top at once, outline
     const told = [appended.length, resumed.length, sent.length, submitted.length]
     const folded = Number(/\d+/.exec(String(await fold()))?.[0])
     await pressed(list, `dismiss-${id}`)
+    await clock.advance(2_100)
     expect(await until(async () => ((await fold()) === `▸ Finished ${folded + 1}` ? true : undefined))).toBe(true)
     expect(await list.find({ type: 'Box', key: `todo-${id}` })).toBeUndefined()
     await clock.advance(5_000)
@@ -636,22 +644,22 @@ test('two that finish close together stack at the top newest first, each for its
   expect(await order()).toEqual(['Piece 9', 'Piece 4', ...others([4, 9])])
   expect(await green()).toBe(2)
   await clock.advance(1_300)
-  // (the first, its moment over, is back in its place among the cards)
-  expect(await order()).toEqual(['Piece 9', ...others([9])])
+  // (the first, its moment over, stays on top under the newer one)
+  expect(await order()).toEqual(['Piece 9', 'Piece 4', ...others([4, 9])])
   expect(await green()).toBe(1)
   await clock.advance(800)
   expect(await green()).toBe(0)
-  expect(await order()).toEqual(others([]))
+  expect(await order()).toEqual(['Piece 9', 'Piece 4', ...others([4, 9])])
 })
 
-test('a finish while an ask waits goes right under the ask, never above it', async ($, on) => {
+test('a finish while an ask waits goes right under the ask, never above it, and stays there, over what works', async ($, on) => {
   const { order, green, end, clock } = await dozen($, on, true)
   expect(await order()).toEqual(['Piece 3', ...others([3])])
   await end('a7')
   expect(await order()).toEqual(['Piece 3', 'Piece 7', ...others([3, 7])])
   expect(await green()).toBe(1)
   await clock.advance(2_100)
-  expect(await order()).toEqual(['Piece 3', ...others([3])])
+  expect(await order()).toEqual(['Piece 3', 'Piece 7', ...others([3, 7])])
 })
 
 test('stopped and failed work is not brought up nor green: it stays in its place, the stopped one grey and the failed one in red, saying why, with Start again, each until it is dismissed', SLOW, async ($, on) => {
