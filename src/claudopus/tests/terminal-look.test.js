@@ -185,7 +185,7 @@ test('in the terminal an ask is above the prompt with its answers numbered, and 
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Release it', prompt: 'release it' }))];
             case 2:
                 _p.sent();
-                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release it?', choices: ['Approve', 'Refuse'] })];
+                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release it?', choices: ['Approve', 'Not now'] })];
             case 3:
                 _p.sent();
                 return [4 /*yield*/, $.ui.mount(__assign(__assign({}, BAND), { surface: 'terminal' }))];
@@ -198,7 +198,7 @@ test('in the terminal an ask is above the prompt with its answers numbered, and 
                 return [4 /*yield*/, band.findAll({ type: 'Button' })];
             case 6:
                 answers = (_p.sent()).map(function (one) { return [one.props.label, one.props.hotkey, one.props.plain]; });
-                expect(answers).toEqual([['Approve', '1', true], ['Refuse', '2', true]]);
+                expect(answers).toEqual([['Approve', '1', true], ['Not now', '2', true]]);
                 _c = (_b = band).press;
                 _k = {};
                 _d = String;

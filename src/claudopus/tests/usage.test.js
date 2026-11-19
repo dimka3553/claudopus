@@ -862,30 +862,30 @@ test('the battery card says what the Mac draws, the processors and graphics each
         }
     });
 }); });
-test("a task's heavy command that must wait, while the Mac is busy and another of the chat's runs, is refused at once with why and what it waits for, a helper's as a task's: no place is kept for it, its card says nothing of a turn, however long it waits it is never let through for that, and nothing starts its work again or sends it later, so it runs when its task sends it again once there is room; a watch in the background for that room is allowed; one with nothing else heavy running, or with the setting at Never, runs at once (16 Nov: ten tasks drove headless browsers on one Mac at once)", SLOW, function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var n, load, _a, clock, files, appended, resumed, _i, _b, description, shoot, _c, HELD, second, _d, _e, _f, texts, QUEUE, held, watch, _g, _h, _j, sent, k, _k, k, _l, _m, _o, _p;
+test("a task's heavy command waits its turn while the Mac is busy and another runs: refused at once with its place in the line, its card says so and stays at work through its step's end and any wake_me of its own, and its work (a helper too) is started again in order once there is room or after 15 minutes; one with nothing else heavy running, or with the setting at Never, runs at once; nothing waits in a hook (16 Nov: ten tasks drove headless browsers on one Mac at once)", SLOW, function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var n, load, _a, clock, files, appended, resumed, _i, _b, description, shoot, _c, _d, _e, texts, _f, held, _g, _h, _j, _k, _l, agentId, waited, woken, _m, _o, _p, _q, _r, _s, _t, _u, k, _v, _w;
     var _this = this;
-    return __generator(this, function (_q) {
-        switch (_q.label) {
+    return __generator(this, function (_x) {
+        switch (_x.label) {
             case 0:
                 n = 0;
                 load = 60;
                 _a = world(on, { usage: function () { return lookAt((n += 1), 1583261, "@@LOAD@@\n{ ".concat(load, ".00 50.00 40.00 }")); } }), clock = _a.clock, files = _a.files, appended = _a.appended, resumed = _a.resumed;
                 return [4 /*yield*/, $.session.start(start)];
             case 1:
-                _q.sent();
+                _x.sent();
                 return [4 /*yield*/, $.prompt.submit({ text: 'shoot every page', wait: false, origin: composer })];
             case 2:
-                _q.sent();
+                _x.sent();
                 _i = 0, _b = ['Shoot the pages', 'Shoot the cards', 'Shoot the menus'];
-                _q.label = 3;
+                _x.label = 3;
             case 3:
                 if (!(_i < _b.length)) return [3 /*break*/, 6];
                 description = _b[_i];
                 return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: description, prompt: description }))];
             case 4:
-                _q.sent();
-                _q.label = 5;
+                _x.sent();
+                _x.label = 5;
             case 5:
                 _i++;
                 return [3 /*break*/, 3];
@@ -899,31 +899,17 @@ test("a task's heavy command that must wait, while the Mac is busy and another o
                 return [4 /*yield*/, shoot('s1', 'a1', 'Take the page shots', true)];
             case 7:
                 // Load 60 on 10 cores: the first heavy command still starts at once, as nothing else heavy of the chat's runs
-                _c.apply(void 0, [(_q.sent()).deny]).toBeUndefined();
-                HELD = function (what) { return new RegExp("^Not run: the Mac is busy \\(load 60 on 10 cores, .* GB memory in use\\), and \"".concat(what, "\" is a heavy command, so it waits for \"Take the page shots\" to end\\. Do what does not need it, and send the same command again once one of those has ended, or the Mac has room\\.$")); };
+                _c.apply(void 0, [(_x.sent()).deny]).toBeUndefined();
+                // A second and a third are refused at once, each with its place, and their cards say they wait
+                _d = expect;
                 return [4 /*yield*/, shoot('s2', 'a2', 'Take the card shots')];
             case 8:
-                second = (_q.sent()).deny;
-                expect(second).toMatch(HELD('Take the card shots'));
-                _d = expect;
+                // A second and a third are refused at once, each with its place, and their cards say they wait
+                _d.apply(void 0, [(_x.sent()).deny]).toMatch(/^Not run yet: the Mac is busy \(load 60 on 10 cores, .*\) and other heavy commands of Claudopus's tasks run, so this one \("Take the card shots"\) waits its turn, next in line\. Do other work that does not need it, or end your step: Claudopus starts you again when its turn comes, in 15 minutes at the latest\. Then send the same command again\.$/);
+                _e = expect;
                 return [4 /*yield*/, shoot('s3', 'a3', 'Take the menu shots')];
             case 9:
-                _d.apply(void 0, [(_q.sent()).deny]).toMatch(HELD('Take the menu shots'));
-                // The same command sent again while the Mac is busy is refused in the same words: it has no place to keep
-                _e = expect;
-                return [4 /*yield*/, shoot('s2b', 'a2', 'Take the card shots')];
-            case 10:
-                // The same command sent again while the Mac is busy is refused in the same words: it has no place to keep
-                _e.apply(void 0, [(_q.sent()).deny]).toBe(second);
-                // A helper's is refused as a task's is
-                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Shoot the footer', prompt: 'footer', parentAgentId: 'a1' }))];
-            case 11:
-                // A helper's is refused as a task's is
-                _q.sent();
-                _f = expect;
-                return [4 /*yield*/, shoot('s9', 'a4', 'Take the footer shots')];
-            case 12:
-                _f.apply(void 0, [(_q.sent()).deny]).toMatch(HELD('Take the footer shots'));
+                _e.apply(void 0, [(_x.sent()).deny]).toMatch(/waits its turn, 2nd in line\./);
                 texts = function () { return __awaiter(_this, void 0, void 0, function () {
                     var list, all;
                     return __generator(this, function (_a) {
@@ -941,90 +927,158 @@ test("a task's heavy command that must wait, while the Mac is busy and another o
                         }
                     });
                 }); };
-                QUEUE = /less busy|in line|its turn|room on the Mac|starts Claude again/;
-                return [4 /*yield*/, texts()];
-            case 13:
-                held = _q.sent();
-                expect(held.filter(function (text) { return QUEUE.test(text); })).toEqual([]);
-                expect(held.some(function (text) { return /Take the (card|menu|footer) shots/.test(text); })).toBe(false);
-                expect(held.some(function (text) { return /^Shoot the cards$/.test(text); })).toBe(true);
-                watch = { tool: 'Bash', agentId: 'a2', command: 'until [ -f /w/a1.png ]; do sleep 10; done', description: 'Watch for the page shots to end' };
-                _g = expect;
-                return [4 /*yield*/, $.tool.call(__assign(__assign({}, watch), { tool_use_id: 'w0' }))];
-            case 14:
-                _g.apply(void 0, [(_q.sent()).deny]).toContain('this command only waits, and held open it keeps you from everything else');
-                _h = expect;
-                return [4 /*yield*/, $.tool.call(__assign(__assign({}, watch), { tool_use_id: 'w1', run_in_background: true }))];
-            case 15:
-                _h.apply(void 0, [(_q.sent()).deny]).toBeUndefined();
-                _j = expect;
+                _f = expect;
                 return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
                         switch (_a.label) {
                             case 0: return [4 /*yield*/, texts()];
-                            case 1: return [2 /*return*/, ((_a.sent()).some(function (text) { return /^Watch for the page shots to end/.test(text); }) || undefined)];
+                            case 1: return [2 /*return*/, ((_a.sent()).some(function (text) { return /^Waiting until the Mac is less busy · 2nd in line/.test(text); }) || undefined)];
                         }
                     }); }); })];
-            case 16:
-                _j.apply(void 0, [_q.sent()]).toBe(true);
-                // A step that ends starts nothing, and however long the Mac stays busy the command is never let through for having waited
-                return [4 /*yield*/, $.turn.complete({ answer: 'Waiting for room.', durationMs: 1, isAborted: false, turnId: 't-a3', reason: 'answer', agentId: 'a3' })];
-            case 17:
-                // A step that ends starts nothing, and however long the Mac stays busy the command is never let through for having waited
-                _q.sent();
-                sent = function () { return __spreadArray(__spreadArray([], appended, true), resumed, true).filter(function (line) { return /turn|the Mac has room|has waited|[Ss]end it again/.test(line); }); };
-                k = 0;
-                _q.label = 18;
-            case 18:
-                if (!(k < 16)) return [3 /*break*/, 21];
-                return [4 /*yield*/, clock.advance(60000)];
-            case 19:
-                _q.sent();
-                _q.label = 20;
-            case 20:
-                k++;
-                return [3 /*break*/, 18];
-            case 21:
-                _k = expect;
-                return [4 /*yield*/, shoot('s3b', 'a3', 'Take the menu shots')];
-            case 22:
-                _k.apply(void 0, [(_q.sent()).deny]).toMatch(HELD('Take the menu shots'));
-                // The load falls: nobody is started again or told, and the command runs when its task sends it again
-                load = 3;
-                k = 0;
-                _q.label = 23;
-            case 23:
-                if (!(k < 10)) return [3 /*break*/, 26];
-                return [4 /*yield*/, clock.advance(6000)];
-            case 24:
-                _q.sent();
-                _q.label = 25;
-            case 25:
-                k++;
-                return [3 /*break*/, 23];
-            case 26:
-                expect(sent()).toEqual([]);
-                _l = expect;
+            case 10:
+                _f.apply(void 0, [_x.sent()]).toBe(true);
                 return [4 /*yield*/, texts()];
-            case 27:
-                _l.apply(void 0, [(_q.sent()).filter(function (text) { return QUEUE.test(text); })]).toEqual([]);
+            case 11:
+                held = _x.sent();
+                expect(held.some(function (text) { return /^Wait · its turn to run Take the card shots/.test(text); })).toBe(true);
+                expect(held.some(function (text) { return /^Waiting until the Mac is less busy · next in line/.test(text); })).toBe(true);
+                expect(held.some(function (text) { return /^Wait · its turn to run Take the menu shots/.test(text); })).toBe(true);
+                // (said once, on the row: the card's line does not say a time it is started again by)
+                expect(held.some(function (text) { return /starts Claude again/.test(text); })).toBe(false);
+                // The same command sent again before its turn keeps its place
+                _g = expect;
+                return [4 /*yield*/, shoot('s2b', 'a2', 'Take the card shots')];
+            case 12:
+                // The same command sent again before its turn keeps its place
+                _g.apply(void 0, [(_x.sent()).deny]).toMatch(/waits its turn, next in line\./);
+                // A helper waits its turn as a task does, told to end its step without handing back
+                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Shoot the footer', prompt: 'footer', parentAgentId: 'a1' }))];
+            case 13:
+                // A helper waits its turn as a task does, told to end its step without handing back
+                _x.sent();
+                _h = expect;
+                return [4 /*yield*/, shoot('s9', 'a4', 'Take the footer shots')];
+            case 14:
+                _h.apply(void 0, [(_x.sent()).deny]).toMatch(/waits its turn, 3rd in line\. Do other work that does not need it, or end your step without handing back: Claudopus starts you again/);
+                // Their steps end: still at work, whatever a wake_me of their own does meanwhile (one set and gone off leaves the wait standing)
+                _j = expect;
+                return [4 /*yield*/, $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w1', agentId: 'a2', what: 'a short pause', minutes: 1 })];
+            case 15:
+                // Their steps end: still at work, whatever a wake_me of their own does meanwhile (one set and gone off leaves the wait standing)
+                _j.apply(void 0, [(_x.sent()).result]).toBeDefined();
+                _k = 0, _l = ['a2', 'a4'];
+                _x.label = 16;
+            case 16:
+                if (!(_k < _l.length)) return [3 /*break*/, 19];
+                agentId = _l[_k];
+                return [4 /*yield*/, $.turn.complete({ answer: 'Waiting my turn.', durationMs: 1, isAborted: false, turnId: "t-".concat(agentId), reason: 'answer', agentId: agentId })];
+            case 17:
+                _x.sent();
+                _x.label = 18;
+            case 18:
+                _k++;
+                return [3 /*break*/, 16];
+            case 19: return [4 /*yield*/, clock.advance(90000)];
+            case 20:
+                _x.sent();
+                return [4 /*yield*/, texts()];
+            case 21:
+                waited = _x.sent();
+                expect(waited.filter(function (text) { return /^Wait · its turn to run Take the (card|footer) shots/.test(text); })).toHaveLength(2);
+                expect(waited.some(function (text) { return /^Shoot the cards$/.test(text); })).toBe(true);
+                woken = function () { return __spreadArray(__spreadArray([], appended, true), resumed, true).filter(function (line) { return /your command's turn|has waited 15 minutes/.test(line); }); };
+                return [4 /*yield*/, clock.advance(20000)];
+            case 22:
+                _x.sent();
+                expect(woken()).toEqual([]);
+                // The load falls: the first in line is started again first, and its command, sent again, runs
+                load = 3;
                 _m = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0: return [4 /*yield*/, clock.advance(6000)];
+                            case 1: return [2 /*return*/, (_a.sent(), woken().length > 0 || undefined)];
+                        }
+                    }); }); })];
+            case 23:
+                _m.apply(void 0, [_x.sent()]).toBe(true);
+                expect(woken()[0]).toBe('a2: It is your command\'s turn: the Mac has room for "Take the card shots" now. Send it again now, and it runs at once.');
+                _o = expect;
                 return [4 /*yield*/, shoot('s2c', 'a2', 'Take the card shots')];
+            case 24:
+                _o.apply(void 0, [(_x.sent()).deny]).toBeUndefined();
+                _p = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0: return [4 /*yield*/, clock.advance(6000)];
+                            case 1: return [2 /*return*/, (_a.sent(), woken().some(function (line) { return line.startsWith('a3: '); }) || undefined)];
+                        }
+                    }); }); })];
+            case 25:
+                _p.apply(void 0, [_x.sent()]).toBe(true);
+                _q = expect;
+                return [4 /*yield*/, shoot('s3b', 'a3', 'Take the menu shots')];
+            case 26:
+                _q.apply(void 0, [(_x.sent()).deny]).toBeUndefined();
+                // and the helper whose step had ended is started again with its turn, its command then run
+                _r = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0: return [4 /*yield*/, clock.advance(6000)];
+                            case 1: return [2 /*return*/, (_a.sent(), woken().some(function (line) { return line === 'a4: It is your command\'s turn: the Mac has room for "Take the footer shots" now. Send it again now, and it runs at once.'; }) || undefined)];
+                        }
+                    }); }); })];
+            case 27:
+                // and the helper whose step had ended is started again with its turn, its command then run
+                _r.apply(void 0, [_x.sent()]).toBe(true);
+                _s = expect;
+                return [4 /*yield*/, shoot('s9b', 'a4', 'Take the footer shots')];
             case 28:
-                _m.apply(void 0, [(_q.sent()).deny]).toBeUndefined();
-                // Busy again, it is refused again; with the setting at Never, a heavy command runs at once however busy the Mac is
+                _s.apply(void 0, [(_x.sent()).deny]).toBeUndefined();
+                _t = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0: return [4 /*yield*/, texts()];
+                            case 1: return [2 /*return*/, (!(_a.sent()).some(function (text) { return /its turn|room on the Mac/.test(text); }) || undefined)];
+                        }
+                    }); }); })];
+            case 29:
+                _t.apply(void 0, [_x.sent()]).toBe(true);
+                // Busy again, one more waits; after 15 minutes its work is started again however busy the Mac is
                 load = 60;
                 return [4 /*yield*/, clock.advance(6000)];
-            case 29:
-                _q.sent();
-                _o = expect;
-                return [4 /*yield*/, shoot('s4', 'a3', 'Take the header shots')];
             case 30:
-                _o.apply(void 0, [(_q.sent()).deny]).toMatch(/^Not run: the Mac is busy \(load 60 on 10 cores, .*, and "Take the header shots" is a heavy command, so it waits for /);
-                ownSet(files, 'config.json', JSON.stringify({ heavy: 'never' }));
-                _p = expect;
-                return [4 /*yield*/, shoot('s5', 'a3', 'Take the header shots')];
+                _x.sent();
+                _u = expect;
+                return [4 /*yield*/, shoot('s4', 'a2', 'Take the footer shots')];
             case 31:
-                _p.apply(void 0, [(_q.sent()).deny]).toBeUndefined();
+                _u.apply(void 0, [(_x.sent()).deny]).toMatch(/waits its turn, next in line\./);
+                k = 0;
+                _x.label = 32;
+            case 32:
+                if (!(k < 15)) return [3 /*break*/, 35];
+                return [4 /*yield*/, clock.advance(60000)];
+            case 33:
+                _x.sent();
+                _x.label = 34;
+            case 34:
+                k++;
+                return [3 /*break*/, 32];
+            case 35:
+                _v = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0: return [4 /*yield*/, clock.advance(6000)];
+                            case 1: return [2 /*return*/, (_a.sent(), woken().some(function (line) { return line === 'a2: Your command "Take the footer shots" has waited 15 minutes for room on the Mac: send it again now, and it runs whatever the load. If it fails or times out for lack of room, try it again later.'; }) || undefined)];
+                        }
+                    }); }); })];
+            case 36:
+                _v.apply(void 0, [_x.sent()]).toBe(true);
+                // With the setting at Never, a heavy command runs at once however busy the Mac is
+                ownSet(files, 'config.json', JSON.stringify({ heavy: 'never' }));
+                _w = expect;
+                return [4 /*yield*/, shoot('s5', 'a3', 'Take the header shots')];
+            case 37:
+                _w.apply(void 0, [(_x.sent()).deny]).toBeUndefined();
                 return [2 /*return*/];
         }
     });

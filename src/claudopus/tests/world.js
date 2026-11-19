@@ -133,8 +133,6 @@ var world = function (on, options) {
     if (!options.isNew)
         files.set("".concat(MEMORY, "/index.md"), '# Streams\n\nname | repo | session | state | summary\n\n');
     var titles = [];
-    // Each request to a model, as asked
-    var completed = [];
     var compacts = [];
     var opened = [];
     // Folders listed and panes opened, in the order they happened
@@ -149,8 +147,6 @@ var world = function (on, options) {
     var copied = [];
     // The terminal tabs opened beside the chat, by what they were opened with
     var terminals = [];
-    // What the app's view tool was asked to show beside the chat; it refuses where the test lays ccd_view:refused
-    var viewed = [];
     // What was sent on to an agent, what the mod wrote into an agent's chat, and what it submitted to this one
     var sent = [];
     var appended = [];
@@ -303,21 +299,14 @@ var world = function (on, options) {
         return { value: { kind: kind, size: 1, mtimeMs: Number((_a = files.get("mtime:".concat(e.path))) !== null && _a !== void 0 ? _a : 0), isLink: false } };
     });
     on('mcp.call', function (_, e) {
-        var _a;
         if (e.server === 'terminal')
             terminals.push(e.args);
-        if (e.server === 'ccd_view') {
-            viewed.push(e.args);
-            if (files.has('ccd_view:refused'))
-                return { value: { content: [{ type: 'text', text: (_a = files.get('ccd_view:refused')) !== null && _a !== void 0 ? _a : '' }], isError: true } };
-        }
         if (e.tool === 'set_session_title')
             titles.push(String(e.args.title));
         var text = e.tool === 'get_session' ? JSON.stringify({ sessionId: 'local_1', title: 'Old title' }) : '[]';
         return { value: { content: [{ type: 'text', text: text }], isError: false } };
     });
-    // (another chat, where the test lays session:id)
-    on('session.id', function () { var _a; return ({ value: (_a = files.get('session:id')) !== null && _a !== void 0 ? _a : 'engine-id' }); });
+    on('session.id', function () { return ({ value: 'engine-id' }); });
     // The mod's pause in a long step (breathe): answered after the test's own timers have had their turn, as the engine answers from
     // outside the helper
     on('session.turns', function () { return __awaiter(void 0, void 0, void 0, function () { return __generator(this, function (_a) {
@@ -348,20 +337,15 @@ var world = function (on, options) {
     }); });
     on('session.measure', function (_, e) { return ({ changed: e.changed }); });
     on('session.usage', function () { var _a; return ({ value: { startedAt: 0, context: { tokens: (_a = options.tokens) !== null && _a !== void 0 ? _a : 1000, window: 500000 }, rateLimits: [] } }); });
-    // `complete`: the model's answer to each request, by what it was asked (a small model naming commands), or none
-    on('model.complete', function (_, e) {
-        var _a, _b;
-        completed.push(e);
-        var own = (_a = options.complete) === null || _a === void 0 ? void 0 : _a.call(options, e);
-        if (own !== undefined)
-            return own === null ? { value: { isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } } : { value: { isAnswered: true, text: own, usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } };
-        return {
+    on('model.complete', function () {
+        var _a;
+        return ({
             value: {
                 isAnswered: true,
-                text: (_b = options.reply) !== null && _b !== void 0 ? _b : 'title: Old title',
+                text: (_a = options.reply) !== null && _a !== void 0 ? _a : 'title: Old title',
                 usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
             },
-        };
+        });
     });
     // One response of a model: its text, then what the API says it was answered over
     on('turn.step', function (_, e) {
@@ -404,8 +388,8 @@ var world = function (on, options) {
     });
     // What the Mac answers: a dev server on 3100 started by a chat, and the system's own listener, which is not the person's
     on('process.run', function (_, e) {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26;
-        var _27 = e.argv, tool = _27[0], rest = _27.slice(1);
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22;
+        var _23 = e.argv, tool = _23[0], rest = _23.slice(1);
         var ok = function (stdout, exitCode) {
             if (stdout === void 0) { stdout = ''; }
             if (exitCode === void 0) { exitCode = 0; }
@@ -467,14 +451,6 @@ var world = function (on, options) {
         // The jobs' outputs as the panel reads them in one go, where the test gives them: each output it asks for ends in what the test
         // says, last written when it says, and every detached process it names still runs
         // (and, where the test gives them, the processes and the file each held-open command's shell writes to)
-        // (as the mod asks now: every word after the script's name is an output, with no count before them, and nothing follows the last)
-        // (a log's end, as its tab reads it; and how much of the processor the programs that hold each silent log open use)
-        if (options.jobs && tool === 'sh' && String(rest[1]).includes('# the log tab'))
-            return ok(options.jobs.output(String(rest[3])));
-        if (options.jobs && tool === 'sh' && String(rest[1]).includes('@@LIVE@@'))
-            return ok(rest.slice(3).flatMap(function (file) { var _a, _b; var use = (_b = (_a = options.jobs) === null || _a === void 0 ? void 0 : _a.live) === null || _b === void 0 ? void 0 : _b.call(_a, String(file)); return use === undefined ? [] : ["@@LIVE@@ ".concat(use, " ").concat(String(file))]; }).join('\n'));
-        if (options.jobs && tool === 'sh' && String(rest[1]).startsWith('for f; do ') && String(rest[1]).includes('@@JOB@@'))
-            return ok(rest.slice(3).map(function (file) { var _a, _b, _c, _d; return "\n@@JOB@@ ".concat(Math.floor(((_b = (_a = options.jobs) === null || _a === void 0 ? void 0 : _a.wroteAt(String(file))) !== null && _b !== void 0 ? _b : 0) / 1000), " ").concat(String(file), "\n").concat((_d = (_c = options.jobs) === null || _c === void 0 ? void 0 : _c.output(String(file))) !== null && _d !== void 0 ? _d : ''); }).join(''));
         if (options.jobs && tool === 'sh' && String(rest[1]).includes('@@JOB@@')) {
             var n = Number((_k = rest[3]) !== null && _k !== void 0 ? _k : 0);
             var asked_1 = rest.slice(4, 4 + n).map(String);
@@ -504,21 +480,18 @@ var world = function (on, options) {
             return { value: { exitCode: 0, stdout: sipsSaid, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } };
         if (tool === 'osascript')
             osa.push(__spreadArray([], e.argv, true));
-        // The file picker Attach opens: what the test lays as picker:chosen is picked, else the person cancels it
-        if (tool === 'osascript' && e.argv.some(function (one) { return String(one).includes('choose file'); }))
-            return files.has('picker:chosen') ? ok((_u = files.get('picker:chosen')) !== null && _u !== void 0 ? _u : '') : ok('', 1);
         // What was handed to this Mac's keychain on security's stdin
         if (tool === '/usr/bin/security' && !files.has(KEYCHAIN))
             files.set('keychain:dialog', String(rest[0]));
         if (tool === '/usr/bin/security')
-            return (keychain.push(String((_w = (_v = e.init) === null || _v === void 0 ? void 0 : _v.stdin) !== null && _w !== void 0 ? _w : '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } });
+            return (keychain.push(String((_v = (_u = e.init) === null || _u === void 0 ? void 0 : _u.stdin) !== null && _v !== void 0 ? _v : '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } });
         // bin/catch-up, started in a session of its own
-        if (tool === '/bin/sh' && String((_x = rest[4]) !== null && _x !== void 0 ? _x : '').endsWith('/bin/catch-up'))
+        if (tool === '/bin/sh' && String((_w = rest[4]) !== null && _w !== void 0 ? _w : '').endsWith('/bin/catch-up'))
             return (own.push(__spreadArray([], e.argv, true)), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } });
         // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
         if (tool === null || tool === void 0 ? void 0 : tool.endsWith('bin/notify')) {
             own.push(__spreadArray([], e.argv, true));
-            return { value: { exitCode: (_0 = (rest[0] === '--asks' ? (_y = options.app) === null || _y === void 0 ? void 0 : _y.asks : (_z = options.app) === null || _z === void 0 ? void 0 : _z.claudopus)) !== null && _0 !== void 0 ? _0 : 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } };
+            return { value: { exitCode: (_z = (rest[0] === '--asks' ? (_x = options.app) === null || _x === void 0 ? void 0 : _x.asks : (_y = options.app) === null || _y === void 0 ? void 0 : _y.claudopus)) !== null && _z !== void 0 ? _z : 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } };
         }
         if (tool === 'open')
             shown.push(__spreadArray([], e.argv, true));
@@ -554,7 +527,7 @@ var world = function (on, options) {
         if (release && tool === 'sh' && String(rest[1]).includes('BISECT_LOG'))
             return ok(release.midWay ? '' : 'clear\n');
         if (release && tool === 'sh' && String(rest[1]).includes('write-tree'))
-            return ok("".concat((_1 = files.get('tree:installed')) !== null && _1 !== void 0 ? _1 : release.tree, "\n"));
+            return ok("".concat((_0 = files.get('tree:installed')) !== null && _0 !== void 0 ? _0 : release.tree, "\n"));
         if (release && tool === 'env' && rest.includes('git')) {
             var args = rest.slice(rest.indexOf('-C') + 2).map(String);
             gitRan.push(args.join(' '));
@@ -572,15 +545,15 @@ var world = function (on, options) {
             if (args.includes('--symbolic-full-name'))
                 return ok('origin/main\n');
             if (args[0] === 'rev-parse' && args.includes('--verify')) {
-                var what = (_2 = args.at(-1)) !== null && _2 !== void 0 ? _2 : '';
+                var what = (_1 = args.at(-1)) !== null && _1 !== void 0 ? _1 : '';
                 if (what.startsWith('refs/claudopus/update'))
                     return files.has('git:ref') ? ok("".concat(files.get('git:ref'), "\n")) : ok('', 1);
                 if (what.includes(':'))
-                    return what.startsWith("".concat(release.commit, ":")) && files.has('git:ref') ? ok("".concat((_3 = release.got) !== null && _3 !== void 0 ? _3 : release.tree, "\n")) : ok('', 1);
+                    return what.startsWith("".concat(release.commit, ":")) && files.has('git:ref') ? ok("".concat((_2 = release.got) !== null && _2 !== void 0 ? _2 : release.tree, "\n")) : ok('', 1);
                 return ok("".concat(at(what), "\n"));
             }
             if (args[0] === 'show')
-                return ok(JSON.stringify({ name: 'claudopus', version: (_4 = release.manifest) !== null && _4 !== void 0 ? _4 : release.version }));
+                return ok(JSON.stringify({ name: 'claudopus', version: (_3 = release.manifest) !== null && _3 !== void 0 ? _3 : release.version }));
             if (args[0] === 'update-ref' && args[1] === '-d')
                 return (files.delete('git:ref'), ok());
             if (args[0] === 'merge-base') {
@@ -595,7 +568,7 @@ var world = function (on, options) {
                 return ok();
             }
             if (args[0] === 'ls-remote')
-                return ok("".concat((_5 = release.online) !== null && _5 !== void 0 ? _5 : release.commit, "\tHEAD\n"));
+                return ok("".concat((_4 = release.online) !== null && _4 !== void 0 ? _4 : release.commit, "\tHEAD\n"));
             return ok();
         }
         // git in the mod's folder: no checkout unless the test lays git:online, the version its branch online has; then the folder is on
@@ -608,7 +581,7 @@ var world = function (on, options) {
             gitRan.push(args.join(' '));
             if (args[0] === 'merge' && args[1] !== undefined && args[1].startsWith('--ff')) {
                 if (files.has('git:merge'))
-                    return { value: { exitCode: 1, stdout: '', stderr: (_6 = files.get('git:merge')) !== null && _6 !== void 0 ? _6 : '', isStdoutTruncated: false, isStderrTruncated: false } };
+                    return { value: { exitCode: 1, stdout: '', stderr: (_5 = files.get('git:merge')) !== null && _5 !== void 0 ? _5 : '', isStdoutTruncated: false, isStderrTruncated: false } };
                 files.set('manifest', JSON.stringify({ name: 'claudopus', version: online }));
                 return ok();
             }
@@ -624,10 +597,10 @@ var world = function (on, options) {
         }
         // Another Mac over ssh: what it answers is laid by the test as ssh:<what>; an answer sent there is kept as it was handed over
         if (tool === 'ssh') {
-            sshed.push([String(e.argv.at(-1)), String((_8 = (_7 = e.init) === null || _7 === void 0 ? void 0 : _7.stdin) !== null && _8 !== void 0 ? _8 : '')]);
+            sshed.push([String(e.argv.at(-1)), String((_7 = (_6 = e.init) === null || _6 === void 0 ? void 0 : _6.stdin) !== null && _7 !== void 0 ? _7 : '')]);
             var command = String(e.argv.at(-1));
             // Presses left there for this Mac are taken once, as moving each aside there takes it
-            var opens = (_9 = files.get('ssh:opens')) !== null && _9 !== void 0 ? _9 : '';
+            var opens = (_8 = files.get('ssh:opens')) !== null && _8 !== void 0 ? _8 : '';
             if (command.startsWith("sh -c 'cd $HOME/.claude/claudopus/live/outbox/"))
                 files.delete('ssh:opens');
             var said = command.startsWith("sh -c 'cd $HOME/.claude/claudopus/live/outbox/") ? opens : command.startsWith("sh -c 'L=") ? files.get('ssh:fetch') : command.startsWith("sh -c 'echo $HOME;") ? files.get('ssh:results') : files.has('ssh:down') ? undefined : '';
@@ -636,7 +609,7 @@ var world = function (on, options) {
         // The looks for chats running without Claudopus here and for what the app's log says: what the test lays as sh:off and sh:applog.
         // A notification told once makes its folder under live/macs/told, which a second try finds there
         if (tool === 'sh' && (String(rest[1]).includes('custom-title.json') || String(rest[1]).includes('Starting app'))) {
-            var said = (_10 = files.get(String(rest[1]).includes('Starting app') ? 'sh:applog' : 'sh:off')) !== null && _10 !== void 0 ? _10 : '';
+            var said = (_9 = files.get(String(rest[1]).includes('Starting app') ? 'sh:applog' : 'sh:off')) !== null && _9 !== void 0 ? _9 : '';
             return { value: { exitCode: 0, stdout: said, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } };
         }
         if (tool === 'sh' && String(rest[1]).startsWith('mkdir -p "$1" && mkdir "$2"')) {
@@ -649,7 +622,7 @@ var world = function (on, options) {
         if (tool === 'sh' && rest[1] === 'set -C; printf %s "$2" > "$1"' && rest[3] !== undefined) {
             if (files.has(String(rest[3])))
                 return ok('', 1);
-            files.set(String(rest[3]), String((_11 = rest[4]) !== null && _11 !== void 0 ? _11 : ''));
+            files.set(String(rest[3]), String((_10 = rest[4]) !== null && _10 !== void 0 ? _10 : ''));
             return ok();
         }
         // A shell run here: bringing results from another Mac lays there what the test laid as remote:<folder>/<file>, and a folder moved
@@ -660,18 +633,14 @@ var world = function (on, options) {
             return files.has(path) ? ok(files.get(path)) : ok('', 1);
         }
         // The lines a task added to and took from its files, as the test lays git:numstat
-        // (git:numstat:<repo> for a repo of its own)
         if (tool === 'sh' && String(rest[1]).includes('git diff --numstat'))
-            return ok((_13 = (_12 = files.get("git:numstat:".concat(String(rest[3])))) !== null && _12 !== void 0 ? _12 : files.get('git:numstat')) !== null && _13 !== void 0 ? _13 : '');
-        // What changed in one file, as the test lays git:diff:<the file in its repo>; a file it lays none for is new
-        if (tool === 'sh' && String(rest[1]).includes('# the changes tab'))
-            return ok((_14 = files.get("git:diff:".concat(String(rest.at(-1))))) !== null && _14 !== void 0 ? _14 : 'NEW\n');
+            return ok((_11 = files.get('git:numstat')) !== null && _11 !== void 0 ? _11 : '');
         if (tool === 'sh' || tool === 'bash') {
             sshed.push([String(rest[1]), String(rest.slice(3).join(' '))]);
             // A stream cut short lays half of what it carried and fails
             if (String(rest[1]).includes('tar xf - -C "$S"')) {
-                for (var _i = 0, _28 = __spreadArray([], files, true); _i < _28.length; _i++) {
-                    var _29 = _28[_i], key = _29[0], text = _29[1];
+                for (var _i = 0, _24 = __spreadArray([], files, true); _i < _24.length; _i++) {
+                    var _25 = _24[_i], key = _25[0], text = _25[1];
                     if (key.startsWith('remote:') && !(files.has('pull:cut') && key.endsWith('report.md')))
                         files.set("".concat(rest[3], "/").concat(key.slice(7)), text);
                 }
@@ -683,10 +652,10 @@ var world = function (on, options) {
                 files.set("".concat(rest[3], "/_end"), '');
             }
             if (String(rest[1]).startsWith('mkdir "$3"')) {
-                var _30 = [String(rest[3]), String(rest[4])], _31 = _30[0], from = _31 === void 0 ? '' : _31, _32 = _30[1], to_1 = _32 === void 0 ? '' : _32;
+                var _26 = [String(rest[3]), String(rest[4])], _27 = _26[0], from = _27 === void 0 ? '' : _27, _28 = _26[1], to_1 = _28 === void 0 ? '' : _28;
                 if (!__spreadArray([], files.keys(), true).some(function (key) { return key.startsWith("".concat(to_1, "/")); }))
-                    for (var _33 = 0, _34 = __spreadArray([], files, true); _33 < _34.length; _33++) {
-                        var _35 = _34[_33], key = _35[0], text = _35[1];
+                    for (var _29 = 0, _30 = __spreadArray([], files, true); _29 < _30.length; _29++) {
+                        var _31 = _30[_29], key = _31[0], text = _31[1];
                         if (key.startsWith("".concat(from, "/")))
                             (files.set("".concat(to_1).concat(key.slice(from.length)), text), files.delete(key));
                     }
@@ -700,10 +669,10 @@ var world = function (on, options) {
             files.delete(String(rest.at(-1)));
         // A file moved aside
         if (tool === 'mv')
-            (files.set(String(rest.at(-1)), (_15 = files.get(String(rest.at(-2)))) !== null && _15 !== void 0 ? _15 : ''), files.delete(String(rest.at(-2))));
+            (files.set(String(rest.at(-1)), (_12 = files.get(String(rest.at(-2)))) !== null && _12 !== void 0 ? _12 : ''), files.delete(String(rest.at(-2))));
         // A copy the mod makes of a file
         if (tool === 'cp')
-            (copied.push(String(rest[2])), files.set(String(rest[2]), (_16 = files.get(String(rest[1]))) !== null && _16 !== void 0 ? _16 : ''));
+            (copied.push(String(rest[2])), files.set(String(rest[2]), (_13 = files.get(String(rest[1]))) !== null && _13 !== void 0 ? _13 : ''));
         var isGone = killed.includes('700');
         // bin/keyring, as the runners keep a value: laid by the test as keyring:<service>/<account>
         if (tool === null || tool === void 0 ? void 0 : tool.endsWith('bin/keyring')) {
@@ -711,7 +680,7 @@ var world = function (on, options) {
             if (rest[0] === 'get')
                 return files.has(key) ? ok(files.get(key)) : ok('', 1);
             if (rest[0] === 'set')
-                return (files.set(key, String((_18 = (_17 = e.init) === null || _17 === void 0 ? void 0 : _17.stdin) !== null && _18 !== void 0 ? _18 : '').replace(/\n$/, '')), ok());
+                return (files.set(key, String((_15 = (_14 = e.init) === null || _14 === void 0 ? void 0 : _14.stdin) !== null && _15 !== void 0 ? _15 : '').replace(/\n$/, '')), ok());
             if (rest[0] === 'delete')
                 return files.has(key) ? (files.delete(key), ok()) : ok('', 1);
             if (rest[0] === 'list')
@@ -734,13 +703,14 @@ var world = function (on, options) {
             return ok("".concat(on_1 === 'worktree' ? "".concat(folder, "/../.git/worktrees/x") : "".concat(folder, "/.git"), "\n").concat(folder, "/.git\n").concat(folder, "\n"));
         }
         // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
-        // (git:top:<folder> for a folder in a repo of its own)
-        var topLaid = (_19 = files.get("git:top:".concat(String(rest[rest.indexOf('-C') + 1])))) !== null && _19 !== void 0 ? _19 : files.get('git:top');
         if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel'))
-            return ok(topLaid !== undefined ? "".concat(topLaid, "\n") : '', topLaid !== undefined ? 0 : 128);
+            return ok(files.has('git:top') ? "".concat(files.get('git:top'), "\n") : '', files.has('git:top') ? 0 : 128);
         // and where the repo a worktree belongs to keeps its git folder, as git:common lays it
         if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--git-common-dir'))
             return ok(files.has('git:common') ? "".concat(files.get('git:common'), "\n") : '', files.has('git:common') ? 0 : 128);
+        // (a folder's own branch, where the test lays git:branch:<folder>)
+        if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref') && files.has("git:branch:".concat(rest[rest.indexOf('-C') + 1])))
+            return ok("".concat(files.get("git:branch:".concat(rest[rest.indexOf('-C') + 1])), "\n"));
         if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref'))
             return ok(files.has('git:branch') ? "".concat(files.get('git:branch'), "\n") : '', files.has('git:branch') ? 0 : 128);
         // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
@@ -759,7 +729,7 @@ var world = function (on, options) {
             var hidden = more.reduce(function (text, _a) {
                 var name = _a[0], value = _a[1];
                 return text.replaceAll(value, "[hidden ".concat(name, "]"));
-            }, kept ? String((_21 = (_20 = e.init) === null || _20 === void 0 ? void 0 : _20.stdin) !== null && _21 !== void 0 ? _21 : '').replaceAll(kept, '[hidden API_KEY]') : String((_23 = (_22 = e.init) === null || _22 === void 0 ? void 0 : _22.stdin) !== null && _23 !== void 0 ? _23 : ''));
+            }, kept ? String((_17 = (_16 = e.init) === null || _16 === void 0 ? void 0 : _16.stdin) !== null && _17 !== void 0 ? _17 : '').replaceAll(kept, '[hidden API_KEY]') : String((_19 = (_18 = e.init) === null || _18 === void 0 ? void 0 : _18.stdin) !== null && _19 !== void 0 ? _19 : ''));
             var said = rest[0] === '--list' ? "".concat(kept ? 'API_KEY\n' : '').concat(more.map(function (_a) {
                 var name = _a[0];
                 return "".concat(name, "\n");
@@ -768,10 +738,10 @@ var world = function (on, options) {
         }
         // grep handed a .env file for the names before each =, as the list of keys reads one: only what -o matches comes back
         if (tool === '/usr/bin/grep' && rest[0] === '-ohE')
-            return ok(((_24 = files.get(String(rest[2]))) !== null && _24 !== void 0 ? _24 : '').split('\n').flatMap(function (line) { var _a, _b; return (_b = (_a = line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/)) === null || _a === void 0 ? void 0 : _a[0]) !== null && _b !== void 0 ? _b : []; }).map(function (one) { return "".concat(one, "\n"); }).join(''));
+            return ok(((_20 = files.get(String(rest[2]))) !== null && _20 !== void 0 ? _20 : '').split('\n').flatMap(function (line) { var _a, _b; return (_b = (_a = line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/)) === null || _a === void 0 ? void 0 : _a[0]) !== null && _b !== void 0 ? _b : []; }).map(function (one) { return "".concat(one, "\n"); }).join(''));
         var stdout = (tool === null || tool === void 0 ? void 0 : tool.endsWith('jq'))
             ? // What jq makes of a transcript: the test lays it beside it
-                ((_25 = files.get("".concat(String(e.argv.at(-1)), ".sum"))) !== null && _25 !== void 0 ? _25 : '{"s":[],"u":[],"d":[]}')
+                ((_21 = files.get("".concat(String(e.argv.at(-1)), ".sum"))) !== null && _21 !== void 0 ? _21 : '{"s":[],"u":[],"d":[]}')
             : tool === 'grep'
                 ? "".concat(MEMORY, "/work/local_1.md:9:the nose model returned\n").concat(MEMORY, "/words/local_1.md:2:the nose is flawed\n")
                 : tool === 'lsof' && rest.includes('-iTCP')
@@ -780,7 +750,7 @@ var world = function (on, options) {
                         ? "p635\nfcwd\nn/\np700\nfcwd\nn".concat(HOME, "/Documents/GitHub/3d-sandbox\n")
                         : tool === 'ps' && rest.includes('-ww')
                             ? // The commands running on this Mac, as a test lays them
-                                ((_26 = files.get('ps:running')) !== null && _26 !== void 0 ? _26 : '')
+                                ((_22 = files.get('ps:running')) !== null && _22 !== void 0 ? _22 : '')
                             : tool === 'ps' && rest.includes('-A')
                                 ? '  1 0 /sbin/launchd\n500 1 /Users/sam/Library/claude.app/Contents/MacOS/claude\n600 500 /bin/zsh\n700 600 /usr/local/bin/node\n635 1 /System/ControlCenter\n'
                                 : tool === 'ps'
@@ -952,9 +922,6 @@ var world = function (on, options) {
                                 var text = _a[1];
                                 return JSON.parse(text);
                             }) });
-                    // A command prints what the test lays as stdout:<the command>
-                    if (e.tool === 'Bash' && files.has("stdout:".concat(command)))
-                        return [2 /*return*/, { result: { stdout: files.get("stdout:".concat(command)), stderr: '', interrupted: false } }];
                     if (e.tool === 'TaskStop')
                         stopped.push(String(e.task_id));
                     if (e.tool === 'SendMessage')
@@ -1037,7 +1004,7 @@ var world = function (on, options) {
         compacts.push(e.instructions);
         return { messages: e.messages };
     });
-    return { files: files, completed: completed, pressRuns: pressRuns, titles: titles, compacts: compacts, opened: opened, tabs: tabs, viewed: viewed, stopped: stopped, killed: killed, closed: closed, logged: logged, sent: sent, appended: appended, submitted: submitted, resumed: resumed, atHandback: atHandback, resumedAtHandback: resumedAtHandback, clock: clock, copied: copied, stepped: stepped, played: played, notified: notified, osa: osa, own: own, shown: shown, dropped: dropped, terminals: terminals, sshed: sshed, events: events, held: held, keep: keep, settle: settle, keychain: keychain, admins: admins, wake: wake, gitRan: gitRan, backgrounds: backgrounds, agentModels: agentModels, asked: asked, types: types, registered: registered, kindTools: kindTools };
+    return { files: files, pressRuns: pressRuns, titles: titles, compacts: compacts, opened: opened, tabs: tabs, stopped: stopped, killed: killed, closed: closed, logged: logged, sent: sent, appended: appended, submitted: submitted, resumed: resumed, atHandback: atHandback, resumedAtHandback: resumedAtHandback, clock: clock, copied: copied, stepped: stepped, played: played, notified: notified, osa: osa, own: own, shown: shown, dropped: dropped, terminals: terminals, sshed: sshed, events: events, held: held, keep: keep, settle: settle, keychain: keychain, admins: admins, wake: wake, gitRan: gitRan, backgrounds: backgrounds, agentModels: agentModels, asked: asked, types: types, registered: registered, kindTools: kindTools };
 };
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
 var fakeSeal = function (key, message) {
@@ -1118,26 +1085,6 @@ var until = function (look) { return __awaiter(void 0, void 0, void 0, function 
                 _a.label = 4;
             case 4: return [3 /*break*/, 1];
             case 5: return [2 /*return*/];
-        }
-    });
-}); };
-// Config's More opened, where it is closed
-var moreShown = function (pane) { return __awaiter(void 0, void 0, void 0, function () {
-    return __generator(this, function (_a) {
-        switch (_a.label) {
-            case 0: return [4 /*yield*/, keyed(pane, 'config-more-show')];
-            case 1:
-                if (!_a.sent()) return [3 /*break*/, 3];
-                return [4 /*yield*/, pressed(pane, 'config-more-show')];
-            case 2:
-                _a.sent();
-                _a.label = 3;
-            case 3: return [2 /*return*/, until(function () { return __awaiter(void 0, void 0, void 0, function () { return __generator(this, function (_a) {
-                    switch (_a.label) {
-                        case 0: return [4 /*yield*/, keyed(pane, 'config-more-hide')];
-                        case 1: return [2 /*return*/, ((_a.sent()) ? true : undefined)];
-                    }
-                }); }); })];
         }
     });
 }); };

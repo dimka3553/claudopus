@@ -801,6 +801,8 @@ test('answering one of two asks at the top takes the answered card at once to it
   // Both are answered: both go back to where they began
   const labelled = async (label: string) => ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === label)?.key ?? ''
   await list.press({ key: await labelled('Release it') })
+  // (once the other has stood still for a moment: a press on a card that just moved is held back)
+  await clock.advance(2000)
   await list.press({ key: await labelled('Yes') })
   await clock.advance(1000)
   expect(await until(async () => ((await order())[0] === 'Piece 5' ? true : undefined))).toBe(true)

@@ -63,82 +63,6 @@ var journal = function () {
     }
     return lines.map(function (one) { return JSON.stringify(one); }).join('\n');
 };
-test('a workflow that finishes stays where it was for its green two seconds, under a task begun before it, never at the top', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
-    var clock, _a, pane, order, _b, _c, _d, _e, _f;
-    var _this = this;
-    return __generator(this, function (_g) {
-        switch (_g.label) {
-            case 0:
-                clock = world(on, { panes: ['claudopus'] }).clock;
-                return [4 /*yield*/, $.session.start(start)];
-            case 1:
-                _g.sent();
-                return [4 /*yield*/, $.prompt.submit({ text: 'two things', wait: false, origin: composer })];
-            case 2:
-                _g.sent();
-                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { description: 'Draw the eyes', prompt: 'draw the eyes' }))];
-            case 3:
-                _g.sent();
-                return [4 /*yield*/, clock.advance(1000)];
-            case 4:
-                _g.sent();
-                _a = expect;
-                return [4 /*yield*/, $.tool.call({ tool: 'Workflow', tool_use_id: 'w1', script: ROUNDS, args: { title: 'Roman numerals', task: 'Write to_roman.', bar: 'Every case holds.', folder: '/repo', cap: 3 } })];
-            case 5:
-                _a.apply(void 0, [(_g.sent()).deny]).toBeUndefined();
-                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { surface: 'desktop' }))];
-            case 6:
-                pane = _g.sent();
-                order = function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                    switch (_a.label) {
-                        case 0: return [4 /*yield*/, pane.findAll({ type: 'Text' })];
-                        case 1: return [2 /*return*/, (_a.sent()).map(function (one) { var _a; return String((_a = one.text) !== null && _a !== void 0 ? _a : ''); }).filter(function (one) { return one === 'Draw the eyes' || one === 'Roman numerals'; })];
-                    }
-                }); }); };
-                return [4 /*yield*/, clock.advance(2000)];
-            case 7:
-                _g.sent();
-                _b = expect;
-                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        switch (_a.label) {
-                            case 0: return [4 /*yield*/, order()];
-                            case 1: return [2 /*return*/, ((_a.sent()).length === 2 ? true : undefined)];
-                        }
-                    }); }); })];
-            case 8:
-                _b.apply(void 0, [_g.sent()]).toBe(true);
-                _c = expect;
-                return [4 /*yield*/, order()];
-            case 9:
-                _c.apply(void 0, [_g.sent()]).toEqual(['Draw the eyes', 'Roman numerals']);
-                return [4 /*yield*/, $.prompt.submit({ text: '<task-notification><task-id>wt1</task-id><status>completed</status><result>passed in 1 round</result></task-notification>', wait: false, origin: { kind: 'task-notification' } })
-                    // (in its green moment: outlined green, done)
-                ];
-            case 10:
-                _g.sent();
-                // (in its green moment: outlined green, done)
-                _d = expect;
-                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
-                        return [2 /*return*/, pane.find({ type: 'Text', text: /^Done · / })];
-                    }); }); })];
-            case 11:
-                // (in its green moment: outlined green, done)
-                _d.apply(void 0, [_g.sent()]).toBeDefined();
-                _e = expect;
-                return [4 /*yield*/, pane.findAll({ type: 'Box' })];
-            case 12:
-                _e.apply(void 0, [(_g.sent()).filter(function (b) { var _a; return ((_a = b.key) === null || _a === void 0 ? void 0 : _a.startsWith('outline-')) && b.props.backgroundColor === 'success'; }).length]).toBeGreaterThan(0);
-                _f = expect;
-                return [4 /*yield*/, order()];
-            case 13:
-                _f.apply(void 0, [_g.sent()]).toEqual(['Draw the eyes', 'Roman numerals']);
-                return [4 /*yield*/, pane.unmount()];
-            case 14:
-                _g.sent();
-                return [2 /*return*/];
-        }
-    });
-}); });
 test('a workflow the chat starts is one blue card: how many agents, its rounds as squares with the step being run, the last round checked, nothing cut at any width, and Details with each round and agent chat; ended, it is under Finished', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
     var _a, files, tabs, clock, played, notified, call, _b, _c, _d, _, e_1_1, pane, _e, _f, _g, _h, _j, _k, alts, first, _l, _m, _o, _p, _q, narrow, _r, words, _s, _t, _u, tab, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, octopus, _11, _12, _13, _14, _15;
     var _this = this;
@@ -321,7 +245,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
             case 43:
                 _23.sent();
                 _t = expect;
-                return [4 /*yield*/, pane.find({ type: 'Text', text: /^1 working$/ })];
+                return [4 /*yield*/, pane.find({ type: 'Text', text: /^1 task working$/ })];
             case 44:
                 _t.apply(void 0, [_23.sent()]).toBeDefined();
                 // Kept in a file of its own, for the chat that started this session
@@ -410,7 +334,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
                 _7 = expect;
                 return [4 /*yield*/, pane.findAll({ type: 'Box' })];
             case 61:
-                _7.apply(void 0, [(_23.sent()).filter(function (b) { var _a; return !((_a = b.key) === null || _a === void 0 ? void 0 : _a.startsWith('outline-')) && b.props.backgroundColor === 'success'; }).length]).toBe(1);
+                _7.apply(void 0, [(_23.sent()).filter(function (b) { return b.props.backgroundColor === 'success'; }).length]).toBe(1);
                 _8 = expect;
                 return [4 /*yield*/, pane.find({ type: 'Button', key: 'flow-stop-wf_1' })];
             case 62:

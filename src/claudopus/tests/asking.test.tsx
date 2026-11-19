@@ -569,10 +569,53 @@ test('a press on one ended work\'s ask leaves the other asks\' buttons where the
   await list.press({ key: linux })
   expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it"')))).toBeDefined()
   // The second press names the key it was drawn with: it still answers its own ask, takes the card out of amber, and wakes its work
+  // (once the card has stood still for a moment: the answered one went under it, and a press just then is held back)
+  await clock.advance(2000)
   await list.press({ key: azure }).catch(() => undefined)
   expect(await until(async () => resumed.find(line => line.startsWith('a2: ') && line.includes('pressed "Release it"') && line.includes('Release the Azure route?')))).toBeDefined()
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'Release the Azure route?' })) ? undefined : true))).toBe(true)
   await list.unmount()
+})
+
+test('a press on a question that moved under the pointer a moment before does nothing and says so: with two cards waiting, the first answered goes to its own place, the second moves up, and its Answer in words, pressed just then, opens no box until pressed again, then opens it for that card (19 Nov: an answer in words went to the card that slid under the pointer)', async ($, on) => {
+  const { appended, clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two questions', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Sort the invoices', prompt: 'sort the invoices' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old scans?', choices: ['Approve'] } as never)
+  await clock.advance(1000)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Which month?', choices: ['October', 'November'] } as never)
+  const order = async () => (await list.findAll({ type: 'Text' })).map(one => one.text).filter(text => text === 'May I delete the old scans?' || text === 'Which month?')
+  expect(await until(async () => ((await order()).length === 2 ? order() : undefined))).toEqual(['May I delete the old scans?', 'Which month?'])
+  await clock.advance(5000)
+  const inWordsOf = async (card: string) => (await list.findAll({ type: 'Button' })).find(one => new RegExp(`^ask-${card}-inbar-\\d+$`).test(one.key ?? ''))?.key ?? ''
+  expect(await until(async () => (await inWordsOf('a2')) || undefined)).toBeTruthy()
+  // The first card answered: it goes to its own place under the second, which moves up under the pointer
+  const titles = async () => (await list.findAll({ type: 'Text' })).map(one => one.text).filter(text => text === 'Check the ears' || text === 'Sort the invoices')
+  expect(await titles()).toEqual(['Check the ears', 'Sort the invoices'])
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')?.key ?? '' })
+  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('"Approve"')))).toBeDefined()
+  expect(await until(async () => ((await titles())[0] === 'Sort the invoices' ? true : undefined))).toBe(true)
+  // Pressed just then, the second card's Answer in words opens nothing, and its block says why
+  await list.press({ key: await inWordsOf('a2') })
+  const moved = 'This moved as you pressed, so nothing was sent. Press again.'
+  expect((await until(async () => list.find({ type: 'Text', text: moved })))?.props.color).toBe(AMBER)
+  expect(await bar.findAll({ type: 'Input' } as never)).toEqual([])
+  // Pressed again once it stood still, it opens the box for its own card, and the line goes
+  await clock.advance(2000)
+  await list.press({ key: await inWordsOf('a2') })
+  const box = await until(async () => (await bar.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith('band-a2-reply-answer-')))
+  expect(box).toBeDefined()
+  expect((await bar.findAll({ type: 'Text' })).some(one => one.text === '↳ Your answer to “Sort the invoices”')).toBe(true)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: moved })) ? undefined : true))).toBe(true)
+  await bar.input({ key: box?.key ?? '', text: 'The one before' })
+  expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('in their own words: The one before')))).toContain('Which month?')
+  expect(appended.some(line => line.startsWith('a1: ') && line.includes('The one before'))).toBe(false)
+  await list.unmount()
+  await bar.unmount()
 })
 
 // The go-ahead for a release is one press: the task asks with its worktree, and Release it is the permission for its release run
@@ -2062,6 +2105,8 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   expect((await labelled(list, OPEN)).length).toBe(1)
   // The bar folded by the person with a reply half typed in it: nothing of the bar is on screen, so the card has its own box
   // again, with what was typed, and offers no box elsewhere
+  // (pressed once the card has stood still for a moment: the question answered above it went, and a press just then is held back)
+  await clock.advance(2000)
   await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
   expect(await until(async () => ((await boxesIn(bar)).length === 1 ? true : undefined))).toBe(true)
   await bar.input({ key: (await boxesIn(bar))[0]?.key ?? '', text: 'Nov', kind: 'change' } as never)
