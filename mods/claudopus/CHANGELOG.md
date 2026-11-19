@@ -2,6 +2,14 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.229 · 19 November 2026
+- When you answer a question in words, Attach and Paste sit under the box. Attach picks files of any kind, and Paste takes the picture or files you copied. The task gets each one with how to open it.
+- What you attach shows as tiles, the same as a task's files in its Details: a preview of a picture, video, PDF or document, else an icon for its kind. A press on a name opens the file, and its ✕ takes it off before you send.
+- Paste is under Message and Reply too, and Message on a result can take files as well.
+
+## 0.2.228 · 19 November 2026
+- A press on a question right after the cards above it moved does nothing, and the question says "This moved as you pressed, so nothing was sent. Press again." Before, the button that slid under your pointer was pressed instead, so an answer in words could go to another task.
+
 ## 0.2.227 · 19 November 2026
 - A task's card keeps everything it made for its whole life, however often it starts again: the pages and documents each of its results named, its pictures, and its changed files, even once a worktree they were in is taken away.
 - Pull requests, issues, releases and published pages show on the card wherever a result names them, as in a table, each by its repo and number, such as clipify #70, and one a command opened is there even when the result names it only by its number.

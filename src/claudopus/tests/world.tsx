@@ -336,6 +336,13 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     if (tool === 'osascript') osa.push([...e.argv])
     // The file picker Attach opens: what the test lays as picker:chosen is picked, else the person cancels it
     if (tool === 'osascript' && e.argv.some(one => String(one).includes('choose file'))) return files.has('picker:chosen') ? ok(files.get('picker:chosen') ?? '') : ok('', 1)
+    // What Paste finds on the clipboard: files copied, by their paths, as the test lays clipboard:files; a picture copied
+    // (clipboard:picture), saved where the mod asks; else nothing
+    if (tool === 'osascript' && e.argv.some(one => String(one).includes('NSPasteboard'))) {
+      const to = String(e.argv.at(-1))
+      if (files.has('clipboard:picture')) return (files.set(to, files.get('clipboard:picture') ?? ''), ok(`${to}\n`))
+      return ok(files.get('clipboard:files') ?? '')
+    }
     // What was handed to this Mac's keychain on security's stdin
     if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
