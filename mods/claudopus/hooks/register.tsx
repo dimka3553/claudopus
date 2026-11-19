@@ -7735,7 +7735,7 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   if (!top || top.chat) return
   const runnable = runnableOf(tool, call)
   if (!runnable) return void (await log($, `refusal of ${tool} for ${agent}: nothing the person could run, so nothing is asked`))
-  const details = [`Why: ${refusal.who}${refusal.reason ? ` (${refusal.reason})` : ''}.`, own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '', runDetails(runnable)].filter(Boolean).join('\n\n')
+  const details = [runDetails(runnable, refusal.reason), own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : ''].filter(Boolean).join('\n\n')
   const at = await $.clock.now()
   let isPut = false
   await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text: BLOCKED_ASK, details, copy: runnable.command, isCommand: true, cwd: runnable.cwd, from: agent, at, refused: true } }))
@@ -7849,7 +7849,7 @@ const offerRun = async ($: EngineInterface, card: string, from: string, askAt: n
   await saveRuns($, list => [...list.filter(one => !isSameRun(one, { card, askAt })), { card, from, askAt, ...runnable }])
   if (dir) void $.process.run(['find', `${dir}/runs`, '-type', 'f', '-name', '*.log', '-mtime', '+1', '-delete'], { timeoutMs: 15_000 }).catch(() => undefined)
 }
-const runDetails = (run: { cwd: string; limitMs: number }) => `${ALLOW} runs it once, as yours, in ${shortPath(run.cwd, 60)}, for at most ${limitText(run.limitMs)}, and the task gets what it printed.`
+const runDetails = (run: { cwd: string; limitMs: number }, reason = '') => `Runs once in ${shortPath(run.cwd, 60)}, for at most ${limitText(run.limitMs)}${reason ? ` · blocked as “${reason}”` : ''}.`
 
 const runIt = async ($: EngineInterface, one: Todo) => {
   presses += 1
@@ -8453,6 +8453,8 @@ const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boo
   const one = need.card
   const ask = one?.ask
   const Link = (ui as Ui & { Link: ElementTable['Link'] }).Link
+  const copyButton = one && ask?.copy && !ask.refused ? <ui.Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} /> : null
+  const terminalButton = one && ask && !ask.refused && canOpenTerminal(one) ? <ui.Button key={`${need.id}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Typed, not run yet' : 'Open in Terminal'} plain onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} /> : null
   return (
     <ui.Box key={`need-${need.id}`} flexDirection="column" flexShrink={0} {...(opts.isCompact ? {} : { gap: 1, borderStyle: 'round' as const, borderColor: need.isActing ? LIVE : NEEDS, paddingX: 1 })}>
       <ui.Text dimColor wrap="truncate-end">{`${NEED_LABEL[need.kind]}${need.from ? ` · ${need.from}` : ''}`}</ui.Text>
@@ -8466,13 +8468,21 @@ const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boo
       ) : null}
       {opts.pictures ?? null}
       {need.command ? (
-        <ui.Box flexDirection="row" alignItems="center" gap={1} backgroundColor={FILL} paddingLeft={2}>
-          <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
-            <ui.Text mono wrap="wrap">{withLinks(Link, need.command, `${need.id}-copy`)}</ui.Text>
+        <ui.Box flexDirection="column" backgroundColor={FILL} paddingLeft={2}>
+          <ui.Box flexDirection="row" alignItems="center" gap={1}>
+            <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
+              <ui.Text mono wrap="wrap">{withLinks(Link, need.command, `${need.id}-copy`)}</ui.Text>
+            </ui.Box>
+            {/* A question's code or command is copied with one press */}
+            {copyButton && !terminalButton ? copyButton : null}
           </ui.Box>
-          {/* A question's code or command is copied with one press; a command to type also opens in Terminal, typed and not run */}
-          {one && ask?.copy && !ask.refused ? <ui.Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} /> : null}
-          {one && ask && !ask.refused && canOpenTerminal(one) ? <ui.Button key={`${need.id}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Typed, not run yet' : 'Open in Terminal'} plain onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} /> : null}
+          {/* A command to type also opens in Terminal, typed and not run: with it, the two are under the command, which keeps its width */}
+          {terminalButton ? (
+            <ui.Box flexDirection="row" gap={1}>
+              {copyButton}
+              {terminalButton}
+            </ui.Box>
+          ) : null}
         </ui.Box>
       ) : null}
       {need.where ? <ui.Text key={`${need.id}-where`} dimColor wrap="wrap">{need.where}</ui.Text> : null}

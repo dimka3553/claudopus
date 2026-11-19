@@ -297,7 +297,7 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   // Only a command, short enough to read, shown whole: what the person's press would run (runit.tsx)
   const runnable = runnableOf(tool, call)
   if (!runnable) return void (await log($, `refusal of ${tool} for ${agent}: nothing the person could run, so nothing is asked`))
-  const details = [`Why: ${refusal.who}${refusal.reason ? ` (${refusal.reason})` : ''}.`, own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '', runDetails(runnable)].filter(Boolean).join('\n\n')
+  const details = [runDetails(runnable, refusal.reason), own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : ''].filter(Boolean).join('\n\n')
   const at = await $.clock.now()
   // A question waiting on the person, there already or put up meanwhile, is never replaced: the refusal is in the task's own result
   let isPut = false

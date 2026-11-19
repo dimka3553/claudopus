@@ -1308,7 +1308,7 @@ test('the panel shows how full the context of this chat and of each piece of wor
   await slim.unmount()
 })
 
-test("a card's title, its line of facts and every line under them start at one left edge, on a desktop and in a terminal, at work, asking and finished", async ($, on) => {
+test("a card's title, its line of facts and every line under them start at one left edge, on a desktop and in a terminal, at work, asking (the question's outline at that edge) and finished", async ($, on) => {
   const { clock } = world(on, { model: 'claude-opus-5-5-20261001' })
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -1337,16 +1337,17 @@ test("a card's title, its line of facts and every line under them start at one l
     const [head, ...rest] = (column.children ?? []).filter(one => one && typeof one === 'object') as Drawn[]
     return [...(head?.children ?? []), ...rest].filter(one => one && typeof one === 'object').map(line => insetOf(line, surface).join('+'))
   }
-  const expectOneEdge = async (lines: number) => {
-    // A desktop moves every line in by the step a plain Button pads its label with; a terminal draws each at the card's edge
-    expect(await edges('desktop')).toEqual(Array(lines).fill('xs'))
-    expect(await edges('terminal')).toEqual(Array(lines).fill(''))
+  const expectOneEdge = async (lines: number, block = -1) => {
+    // A desktop moves every line in by the step a plain Button pads its label with; a terminal draws each at the card's edge.
+    // What waits for the person is an outlined block: its outline starts at that edge, and its words one cell inside the outline
+    expect(await edges('desktop')).toEqual(Array.from({ length: lines }, (_, n) => (n === block ? 'xs+1' : 'xs')))
+    expect(await edges('terminal')).toEqual(Array.from({ length: lines }, (_, n) => (n === block ? '1' : '')))
   }
   // At work: the title, the model's name that opens the choice of models, the step it is on, the line beside the dots, the helper tree
   await expectOneEdge(5)
-  // Asking: the ask comes between the step and the line it wrote
-  await call('ask', { text: 'May I replace the nose?', choices: ['Approve', 'Not now'] })
-  await expectOneEdge(6)
+  // Asking: the question's block takes the place of the line it wrote, between the step and the helper tree
+  await call('ask', { text: 'May I replace the nose?', choices: ['Approve', 'Refuse'] })
+  await expectOneEdge(5, 3)
   await call('ask', { text: '' })
   // Finished, in its pause: the facts are plain text, the line says it finished
   await $.turn.complete({ answer: 'Measured.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)

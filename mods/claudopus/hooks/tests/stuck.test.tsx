@@ -1345,7 +1345,7 @@ test('a task that asked "Shall I build this?", was told Build it, and ended its 
   // The person presses Build it: the task is started again with the answer, from inside the press's own hook
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await list.press({ key: (await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Build it')))?.key ?? '' })
-  expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Build it"')))).toContain('You had finished; this answer starts you again')
+  expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Build it"')))).toContain('You were paused or had finished; this answer starts you again')
   await list.unmount()
   expect({ unseen, at: 'after the press' }).toEqual({ unseen: [], at: 'after the press' })
   // It builds, then ends its step saying its tests run, when nothing of its own runs; Claude Code asks it three times for its result
@@ -1387,30 +1387,6 @@ test('a task that asked "Shall I build this?", was told Build it, and ended its 
   expect(await until(async () => ((await isDone()) || undefined))).toBe(true)
   await clock.advance(3_000)
   expect(notified.slice(told).map(line => line.split(' | ')[1])).toEqual(['The Files tiles are built into the panel and pushed on their own branch.'])
-})
-
-test('with no hook of the mod to send it from for a minute (no panel or bar drawn, nothing at work in the chat), the message that starts a task again goes from the timer after all, and tells the task it runs unseen: to finish without the panel and hand back, not to end its step and wait', SLOW, async ($, on) => {
-  const agents: Record<string, string> = { a1: 'running' }
-  const PRESS = { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' }
-  const talk: unknown[] = [{ role: 'assistant', content: [{ type: 'text', text: 'Waiting for the build.' }] }, PRESS, { role: 'assistant', content: [{ type: 'text', text: 'Waiting for the build.' }] }]
-  const unseen: string[] = []
-  const { clock, resumed } = world(on, { agents, talk, unseen })
-  await $.session.start(start)
-  await $.agent.spawn({ ...spawn, description: 'Paint the skin', prompt: 'paint it' } as never)
-  await $.tool.call({ tool: 'Bash', tool_use_id: 's1', agentId: 'a1', command: 'git status' } as never)
-  agents.a1 = 'completed'
-  await $.turn.complete({ answer: 'Waiting for the build.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
-  const carried = () => resumed.filter(line => line.startsWith('a1: From Claudopus, not ') && line.includes('left stopped partway. Carry on from where you were'))
-  // The moment to start it again comes, and half a minute more, with no hook: nothing is sent from the timer
-  await clock.advance(6_000)
-  await clock.advance(30_000)
-  expect(carried()).toEqual([])
-  // A minute on, still none: it goes after all, once, and says where the task now runs
-  await clock.advance(40_000)
-  expect(await until(async () => (carried().length ? carried() : undefined))).toHaveLength(1)
-  expect(carried()[0]).toContain('this message starts you where Claudopus cannot see you')
-  expect(carried()[0]).toContain('do not end your step to wait for anything')
-  expect(unseen).toEqual(['a1'])
 })
 
 test("a task ending its step with to-dos still to do and nothing of its own running goes on in the same run, told what is left, and its long word of how far it has got is never its result; with a helper at work it may end its step; kept three times in a row with no call between, it is let end; its report with to-dos still to do is refused until it says what is not done or sends it a third time, then goes through with them shown as not done on its card, in its result and to the chat, never on a task waiting on your answer", SLOW, async ($, on) => {

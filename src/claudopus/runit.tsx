@@ -81,7 +81,7 @@ const offerRun = async ($: EngineInterface, card: string, from: string, askAt: n
   if (dir) void $.process.run(['find', `${dir}/runs`, '-type', 'f', '-name', '*.log', '-mtime', '+1', '-delete'], { timeoutMs: 15_000 }).catch(() => undefined)
 }
 // What the card and the chat say of it before the press (where and for how long are said under the command: runWhere)
-const runDetails = (run: { cwd: string; limitMs: number }) => `${ALLOW} runs it once, as yours, in ${shortPath(run.cwd, 60)}, for at most ${limitText(run.limitMs)}, and the task gets what it printed.`
+const runDetails = (run: { cwd: string; limitMs: number }, reason = '') => `Runs once in ${shortPath(run.cwd, 60)}, for at most ${limitText(run.limitMs)}${reason ? ` · blocked as “${reason}”` : ''}.`
 
 // Allow on the card in this chat's own panel: the one way a run starts. The question is answered first, as any press answers
 // it; only once it has been cleared does the command start (answerCleared calls startRun). A press whose answer could not be

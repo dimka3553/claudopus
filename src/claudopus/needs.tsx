@@ -219,6 +219,8 @@ const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boo
   const one = need.card
   const ask = one?.ask
   const Link = (ui as Ui & { Link: ElementTable['Link'] }).Link
+  const copyButton = one && ask?.copy && !ask.refused ? <ui.Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} /> : null
+  const terminalButton = one && ask && !ask.refused && canOpenTerminal(one) ? <ui.Button key={`${need.id}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Typed, not run yet' : 'Open in Terminal'} plain onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} /> : null
   return (
     // (compact, in the terminal's bar above the prompt, which has a few rows: no outline and no gaps)
     <ui.Box key={`need-${need.id}`} flexDirection="column" flexShrink={0} {...(opts.isCompact ? {} : { gap: 1, borderStyle: 'round' as const, borderColor: need.isActing ? LIVE : NEEDS, paddingX: 1 })}>
@@ -233,13 +235,21 @@ const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boo
       ) : null}
       {opts.pictures ?? null}
       {need.command ? (
-        <ui.Box flexDirection="row" alignItems="center" gap={1} backgroundColor={FILL} paddingLeft={2}>
-          <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
-            <ui.Text mono wrap="wrap">{withLinks(Link, need.command, `${need.id}-copy`)}</ui.Text>
+        <ui.Box flexDirection="column" backgroundColor={FILL} paddingLeft={2}>
+          <ui.Box flexDirection="row" alignItems="center" gap={1}>
+            <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
+              <ui.Text mono wrap="wrap">{withLinks(Link, need.command, `${need.id}-copy`)}</ui.Text>
+            </ui.Box>
+            {/* A question's code or command is copied with one press */}
+            {copyButton && !terminalButton ? copyButton : null}
           </ui.Box>
-          {/* A question's code or command is copied with one press; a command to type also opens in Terminal, typed and not run */}
-          {one && ask?.copy && !ask.refused ? <ui.Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} /> : null}
-          {one && ask && !ask.refused && canOpenTerminal(one) ? <ui.Button key={`${need.id}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Typed, not run yet' : 'Open in Terminal'} plain onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} /> : null}
+          {/* A command to type also opens in Terminal, typed and not run: with it, the two are under the command, which keeps its width */}
+          {terminalButton ? (
+            <ui.Box flexDirection="row" gap={1}>
+              {copyButton}
+              {terminalButton}
+            </ui.Box>
+          ) : null}
         </ui.Box>
       ) : null}
       {need.where ? <ui.Text key={`${need.id}-where`} dimColor wrap="wrap">{need.where}</ui.Text> : null}

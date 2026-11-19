@@ -1232,7 +1232,7 @@ test('work that reports with nothing of its own running finishes, though the eng
   // As at 22:24: everything it set out to do is done, it asks for the release and hands in its report. Every command and helper of
   // its had ended, yet the engine went on listing it as held on background work of its own
   await call('mcp__claudopus__todo', 't1', { item: 'One command that runs a job on Azure', state: 'done' })
-  await call('mcp__claudopus__ask', 'k1', { text: 'Release the Azure heavy-jobs route?', choices: ['Release it', 'Not now'] })
+  await call('mcp__claudopus__ask', 'k1', { text: 'Release the Azure heavy-jobs route?', choices: ['Release it', 'Hold it'] })
   await call('SubagentHandback', 'h1', { message: 'Heavy work can now run on Azure. Built, tested and pushed on its own branch; it waits for your Release it.' })
   agents.a1 = 'waiting'
   await stop('a1')
@@ -1286,17 +1286,17 @@ test('the same words as a card answer still go when they answer a newer question
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Merge the branch', prompt: 'merge' } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Proceed?', choices: ['Yes', 'Not now'] } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Proceed?', choices: ['Yes', 'No'] } as never)
   const yes = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Yes')
   await list.press({ key: yes?.key ?? '' })
   await clock.advance(5_000)
   // The work asks again, with the same answer to give: the chat passing the person's "Yes" on goes
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Also merge it?', choices: ['Yes', 'Not now'] } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Also merge it?', choices: ['Yes', 'No'] } as never)
   const sent = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Yes' } as never)
   expect((sent as { deny?: unknown }).deny).toBeUndefined()
   // An answer typed in the chat and passed on, then passed on again in the same words: only a card's answer is refused as a repeat
   await clock.advance(5_000)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'Tag it?', choices: ['Yes', 'Not now'] } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'Tag it?', choices: ['Yes', 'No'] } as never)
   await $.prompt.submit({ text: 'Yes', wait: false, origin: composer })
   const first = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a1', message: 'Yes' } as never)
   const second = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's3', to: 'a1', message: 'Yes' } as never)
@@ -1314,7 +1314,7 @@ const dozen = async ($: Parameters<TestBody>[0], on: On, asking = false) => {
   await $.prompt.submit({ text: 'twelve things', wait: false, origin: composer })
   for (let n = 1; n <= 12; n += 1) await $.agent.spawn({ ...spawn, description: `Piece ${n}`, prompt: `piece ${n}` } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  if (asking) await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a3', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  if (asking) await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a3', text: 'May I delete the old repo?', choices: ['Approve', 'Refuse'] } as never)
   await w.clock.advance(5000)
   const order = async () => (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(one => /^Piece \d+$/.test(one)).filter((one, n, all) => all.indexOf(one) === n)
   const green = async () => (await list.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.borderColor === 'success').length
@@ -1324,8 +1324,8 @@ const dozen = async ($: Parameters<TestBody>[0], on: On, asking = false) => {
 }
 const others = (but: number[]) => Array.from({ length: 12 }, (_, n) => n + 1).filter(n => !but.includes(n)).map(n => `Piece ${n}`)
 
-test('a finished card in the middle of a dozen comes to the top at once, outlined green, for two seconds on time, then goes under Finished', async ($, on) => {
-  const { list, order, green, fold, end, clock } = await dozen($, on)
+test('a finished card in the middle of a dozen comes to the top at once, outlined green, for two seconds on time, then goes under Finished; done or failed, it has only Change something and Dismiss to press, and Dismiss tells its task nothing', async ($, on) => {
+  const { list, order, green, fold, end, clock, appended, resumed, sent, submitted } = await dozen($, on)
   expect(await order()).toEqual(others([]))
   await end('a7')
   expect(await order()).toEqual(['Piece 7', ...others([7])])
@@ -1339,6 +1339,36 @@ test('a finished card in the middle of a dozen comes to the top at once, outline
   expect(await green()).toBe(0)
   expect(await order()).toEqual(others([7]))
   expect(await fold()).toBe('▸ Finished 1')
+
+  // A finished card, done or failed, has two quiet buttons at its top right and nothing else to press but its title: Change
+  // something, where the bar above the chat takes its box, and Dismiss, which puts it under Finished at once and sends its task
+  // nothing
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const onCard = async (id: string) => {
+    type Drawn = { type?: string; key?: string; props?: Record<string, unknown>; children?: unknown[] }
+    const found: (string | boolean | undefined)[][] = []
+    const walk = (node: unknown) => {
+      const one = (node ?? {}) as Drawn
+      if (one.type === 'Button') found.push([String(one.props?.label ?? one.key ?? one.props?.key ?? '').replace(/-\d+$/, ''), one.props?.plain as boolean, one.props?.dimColor as boolean])
+      for (const child of one.children ?? []) walk(child)
+    }
+    walk(await list.find({ type: 'Box', key: `todo-${id}` }))
+    return found
+  }
+  for (const [id, reason, said] of [['a8', 'answer', '✓ Done'], ['a9', 'error', '✕ Failed']] as const) {
+    await end(id, reason)
+    expect(await until(async () => ((await onCard(id)).length === 3 ? true : undefined))).toBe(true)
+    expect(await list.find({ type: 'Text', text: said })).toBeDefined()
+    expect([id, await onCard(id)]).toEqual([id, [[`open-${id}`, true, undefined], ['Change something', true, true], ['Dismiss', true, true]]])
+    const told = [appended.length, resumed.length, sent.length, submitted.length]
+    const folded = Number(/\d+/.exec(String(await fold()))?.[0])
+    await pressed(list, `dismiss-${id}`)
+    expect(await until(async () => ((await fold()) === `▸ Finished ${folded + 1}` ? true : undefined))).toBe(true)
+    expect(await list.find({ type: 'Box', key: `todo-${id}` })).toBeUndefined()
+    await clock.advance(5_000)
+    expect([id, appended.length, resumed.length, sent.length, submitted.length]).toEqual([id, ...told])
+  }
+  await bar.unmount()
 })
 
 test('two that finish close together stack at the top newest first, each for its own two seconds', async ($, on) => {
@@ -1407,9 +1437,9 @@ test('scrolled down, a finish at the top is pointed at in green above the prompt
   await w.clock.advance(2_100)
   expect(await band.find({ type: 'Text', text: /finished/ })).toBeUndefined()
   // With an ask waiting, the amber line says both
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a3', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a3', text: 'May I delete the old repo?', choices: ['Approve', 'Refuse'] } as never)
   await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't9', reason: 'answer', agentId: 'a9' } as never)
-  expect((await until(async () => band.find({ type: 'Text', text: / · 1 done$/ })))?.text).toBe('● 1 question waiting for you · first: May I delete the old repo? · 1 done')
+  expect((await until(async () => band.find({ type: 'Text', text: / · 1 done$/ })))?.text).toBe('● 1 waiting for you · Piece 3: May I delete the old repo? · 1 done')
   await band.unmount()
   await down.unmount()
 })
