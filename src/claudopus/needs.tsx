@@ -11,7 +11,7 @@ type NeedButton = { key: string; label: string; onPress: (press: { surface: stri
 // `from`: whose it is, said beside its kind when it is not on its task's card. `card`: the card whose question it is, for its
 // pictures, its Copy and its Open in Terminal. `where`: where it is answered when no press here answers it. `said`: what went wrong
 // with what was last typed for it. `field`: the one field it keeps where the bar above the chat draws none (the terminal).
-// `isActing`: a question the person answered in words, which its task is acting on: in the task's purple, with nothing to press,
+// `isActing`: a question or a permission the person answered in words, which its task is acting on: in the task's purple, with nothing to press,
 // drawn in Details alone (the small card folds it to the one grey line of the answer). `wholeLine`: that line uncut, for Details
 type Need = {
   id: string
@@ -48,6 +48,8 @@ const askNeed = ($: EngineInterface, one: Todo, surface: string, now: number): N
     const talk = talkText(ask.talk)
     // Words go to the task, which answers inside this block; only Allow runs the command
     const words = wordsOn($, `${id}-words`, one.id, inBar, isReplyOpen(one), { kind: 'answer', id: one.id, one }, value => void sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
+    // Answered in words: nothing to press while the task answers; Allow and Don't allow come back with its answer
+    if (isActingOnReply(one)) return { ...base, ...(talk ? { details: [ask.details, talk].filter(Boolean).join('\n\n') } : {}), kind: 'permission', isActing: true, buttons: [] }
     return {
       ...base,
       ...(talk ? { details: [ask.details, talk].filter(Boolean).join('\n\n') } : {}),
@@ -121,6 +123,8 @@ const releaseAbout = (gate: Gate) => {
 const gateNeed = ($: EngineInterface, gate: Gate, card: string, elsewhere: boolean, from = '', surface = ''): Need => {
   const id = `gate-${gate.id}`
   const isHeld = (gateHeld.has(gate.id) || gateParked.has(gate.id)) && !elsewhere
+  // Answered in words: in the task's purple with nothing to press while it answers, as an answered question is; its answer brings the buttons back
+  const isActing = isHeld && isGateActing(gate)
   const about = gate.isUndone
     ? `${gate.isOutside ? 'Something outside the panel changed this file, maybe you in an editor' : 'A command wrote to this file'}, so the change was undone. ${ALLOW} makes it again. Either way the changed text is kept beside the file as a .put-back copy.`
     : gate.kind === 'release'
@@ -142,7 +146,8 @@ const gateNeed = ($: EngineInterface, gate: Gate, card: string, elsewhere: boole
     ...(details ? { details } : {}),
     ...(gate.kind !== 'release' && gate.command ? { command: gate.command } : {}),
     ...(isHeld ? {} : { where: elsewhere ? 'Allow it on its card in its own chat.' : "It's no longer waiting for you." }),
-    buttons: isHeld
+    ...(isActing ? { isActing: true } : {}),
+    buttons: isHeld && !isActing
       ? [
           { key: `${id}-once-${loadMark}`, label: ALLOW, onPress: () => answerGate($, gate, 'once', card) },
           { key: `${id}-deny-${loadMark}`, label: DONT_ALLOW, onPress: () => answerGate($, gate, 'deny', card) },
@@ -151,7 +156,7 @@ const gateNeed = ($: EngineInterface, gate: Gate, card: string, elsewhere: boole
           ...(words?.buttons ?? []),
         ]
       : [],
-    ...(words?.field ? { field: words.field } : {}),
+    ...(words?.field && !isActing ? { field: words.field } : {}),
   }
 }
 
