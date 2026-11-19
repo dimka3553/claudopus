@@ -298,6 +298,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The jobs' outputs as the panel reads them in one go, where the test gives them: each output it asks for ends in what the test
     // says, last written when it says, and every detached process it names still runs
     // (and, where the test gives them, the processes and the file each held-open command's shell writes to)
+    // (as the mod asks now: every word after the script's name is an output, with no count before them, and nothing follows the last)
+    if (options.jobs && tool === 'sh' && String(rest[1]).startsWith('for f; do ') && String(rest[1]).includes('@@JOB@@'))
+      return ok(rest.slice(3).map(file => `\n@@JOB@@ ${Math.floor((options.jobs?.wroteAt(String(file)) ?? 0) / 1000)} ${String(file)}\n${options.jobs?.output(String(file)) ?? ''}`).join(''))
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('@@JOB@@')) {
       const n = Number(rest[3] ?? 0)
       const asked = rest.slice(4, 4 + n).map(String)

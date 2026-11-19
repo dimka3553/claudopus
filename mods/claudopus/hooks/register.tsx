@@ -924,7 +924,6 @@ const NOT_HANDED_HELPERS = (helpers: string[]) =>
   `Not handed in: ${helpers.length === 1 ? 'a helper of yours is' : `${helpers.length} helpers of yours are`} still at work: ${quotedItems(helpers)}. ${helpers.length === 1 ? 'Its result comes' : 'Their results come'} to you as ${helpers.length === 1 ? 'it ends' : 'each ends'}: carry on with what needs nothing from ${helpers.length === 1 ? 'it' : 'them'}, or end your step until then. One you no longer need: tell it with SendMessage to hand in what it has now.`
 const NOT_HANDED_RUNS = (runs: string[]) =>
   `Not handed in: ${runs.length === 1 ? 'a command of yours' : `${runs.length} commands of yours`} still ${runs.length === 1 ? 'runs' : 'run'}: ${quotedItems(runs)}. Hand in your result once ${runs.length === 1 ? 'it has' : 'they have'} ended, or stop ${runs.length === 1 ? 'it' : 'them'} with TaskStop; only a server {name} uses may stay, started with a description that begins with Serve and named in your result.`
-const UNRECORDED_WAITS = `Not sent: your report asks {name} something, but you recorded nothing as waiting on {name}, so the panel would show your task as done. Record each question only {name} can answer with the waits tool, or call it with [] if nothing waits on {name}, then send your report again.`
 const REPORT_TAKEN = 'Report delivered to your caller: Claudopus gives it to the chat, which shows it to {name}. Your work is done: end your step now, writing nothing more.'
 const REPORT_IN_CHAT = 100_000
 const REPORT_FOR_CHAT = (title: string, id: string, report: string, kept = '') =>
@@ -1385,8 +1384,9 @@ const lookOver = async ($: EngineInterface, live: { id: string; status: string }
       overSince.set(one.id, since)
       if (isListed ? now - since < OVER_GRACE : now - Math.max(one.startedAt, one.newAt ?? 0) < UNHEARD_QUIET) continue
     }
-    if (!isListed && parsedOr<{ finished?: boolean }>(folder ? await readOr($, `${folder}/agent-${one.id}.meta.json`) : '', {}).finished !== true) continue
-    const words = isListed ? { answer: '', isHandback: false, isPressed: !(await isUnpressed($, one.id)), at: now } : await lastWordsOf($, folder, one.id, now)
+    const isHeard = one.id === heard
+    if (!isListed && !isHeard && parsedOr<{ finished?: boolean }>(folder ? await readOr($, `${folder}/agent-${one.id}.meta.json`) : '', {}).finished !== true) continue
+    const words = isListed || isHeard ? { answer: '', isHandback: false, isPressed: !(await isUnpressed($, one.id)), at: now } : await lastWordsOf($, folder, one.id, now)
     const isFailed = statusOf(one) === 'failed'
     const answer = words.answer || one.answer
     const isReceived = !isFailed && (words.isHandback || (!words.isPressed && Boolean(answer.trim())))
@@ -2171,26 +2171,6 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
   return copies
 }
 
-const asksInText = (text: string) => {
-  const unfenced = text.replace(/```[\s\S]*?```/g, '')
-  if (/^[\s#*_>-]*(waiting (on|for) you|waits (on|for) you)\b/im.test(unfenced)) return true
-  const prose = unfenced
-    .split('\n')
-    .filter(line => !/^(\s{4}|\t)(?!\s*([-*]|\d+\.)\s)/.test(line) && !/^\s*(#|\|)/.test(line))
-    .map(line => line.replace(/^\s*([-*]|\d+\.)\s+/, ''))
-    .join('\n')
-    .replace(/`[^`\n]*`/g, 'code')
-    .replace(/"[^"\n]*"|“[^”\n]*”/g, '')
-  return /(?:^|[.!:]\s+|\*\*\s*)(?:[^\s.!?:*]+[ \t]+)+[^\s.!?:*]*[A-Za-z0-9)]\?(?=[\s*_)]|$)/m.test(prose)
-}
-const WAITS_KINDS = new Set(['claudopus:task', 'claudopus:quick', 'general-purpose', 'fork'])
-const unrecordedAtHandback = async ($: EngineInterface, id: string, message: string): Promise<string> => {
-  const one = (await read($, todos)).find(card => card.id === id)
-  if (!one || isOff || !dir || one.parentId || one.chat || one.flagged || one.ask || !WAITS_KINDS.has(one.kind ?? '') || one.waitsSet || one.toldWaits === one.startedAt || !asksInText(message)) return ''
-  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, toldWaits: one.startedAt } : card)))
-  await log($, `work ${id} handed back a report that asks something with nothing recorded as waiting: refused once`)
-  return named(UNRECORDED_WAITS)
-}
 
 const CARD_WAITS_SHOWN = 60_000
 const openResultWaits = (one: Todo, kept: Report[], at: number): { r?: Report; wait: Wait; index: number }[] => {
@@ -12480,7 +12460,7 @@ const panelHooks = (on: On) => {
       const ran = at - job.at
       const time = took(ran)
       const owner = t.one?.id ?? ''
-      const isStoppable = Boolean(owner) && canStopJob(job) && !job.id.startsWith('more-') && width >= 44
+      const isStoppable = Boolean(owner) && canStopJob(job) && !job.id.startsWith('more-') && width >= 24
       const name = cut(jobHead(job), Math.max(12, width - time.length - 1))
       const head = (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>

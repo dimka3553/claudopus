@@ -87,7 +87,9 @@ test('as shipped the chat does a short request itself: it is told so with each m
   for (const key of ['git:branch', 'git:branch:/wt', 'git:branch:/My Repo', 'git:branch:/repo']) files.delete(key)
   for (const [i, command] of ['git -C /code checkout feature', 'cd /code; git reset --hard v0.2.191', 'cd /code && git commit -qam x'].entries())
     expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `own-c${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('never changes what is checked out there')])
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l1', command: 'npm run build', description: 'Run the build (about 5 min)' } as never)).deny).toContain('keeps this chat from answering')
+  // (a build, by its kind, that asks for a long time limit; a time said in its words refuses nothing)
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l1', command: 'npm run build', description: 'Run the build', timeout: 600_000 } as never)).deny).toContain('keeps this chat from answering')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l0', command: 'npm run build', description: 'Run the build (about 5 min)' } as never)).deny).toBeUndefined()
   // A server left in the background stays up: nothing of Claudopus's stops it
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'own-l2', command: 'npm run dev', description: 'Serve the site', run_in_background: true } as never)).deny).toBeUndefined()
   expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain("the chat's own command started in the background")
@@ -182,8 +184,12 @@ test("the mod's own kinds start the cheapest measured way: a reader and a quick 
   await $.session.start(start)
   // The kinds are the engine's own from the session's start
   expect(await until(async () => (registered.length >= 5 ? [...registered].sort() : undefined))).toEqual(['check', 'helper', 'quick', 'reader', 'task'])
-  // Each kind told to call wake_me rather than wait has it (16 Nov: a task had none, and had the chat start it again by hand)
-  expect(Object.keys(kindTools).filter(kind => kindTools[kind]?.includes('mcp__claudopus__wake_me')).sort()).toEqual(['helper', 'quick', 'task'])
+  // Nothing of Claudopus starts a task again, so there is no wake_me: no kind is given one, and a call of that name is answered by
+  // nothing of the mod's, as a call of a tool that never was is, while a tool it has answers in its own words
+  expect(Object.keys(kindTools).filter(kind => kindTools[kind]?.some(tool => /wake_me/.test(tool)))).toEqual([])
+  const called = async (tool: string, input: Record<string, unknown>) => JSON.stringify(await $.tool.call({ tool, tool_use_id: `k-${tool}`, ...input } as never))
+  expect(await called('mcp__claudopus__wake_me', { what: 'the deploy', minutes: 5 })).toBe((await called('mcp__claudopus__no_such_tool', { what: 'the deploy', minutes: 5 })).replace('no_such_tool', 'wake_me'))
+  expect(await called('mcp__claudopus__recall', { query: 'nose' })).not.toBe((await called('mcp__claudopus__no_such_tool', { query: 'nose' })).replace('no_such_tool', 'recall'))
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   const go = async (subagentType: string, e: Record<string, unknown> = {}) => {
     await $.agent.spawn({ ...spawn, subagentType, prompt: 'p', description: 'The nose', parentModel: 'claude-opus-5-5', parentAgentId: 'a0', ...e } as never)
@@ -697,6 +703,31 @@ test("a chat's own thread may only read, run a single command in the background,
     const kept = await quietly(text)
     expect([text, kept.drop, kept.isAsked]).toEqual([text, undefined, true])
     expect(kept.text).toBe(text)
+  }
+  // The same word of a task that only paused, its card at work, brings the chat nothing: its turn is quiet, where the one above,
+  // of an agent with no card at work, was kept
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'NOSE' } as never)
+  const paused = await quietly(withResult('a1', 'Agent "Fix the nose" finished', ENDED))
+  expect([paused.drop, paused.isAsked, paused.said]).toEqual([undefined, false, 'No response requested.'])
+  // (not when it brings anything more than Claude Code's own sentences)
+  expect((await quietly(withResult('a1', 'Agent "Fix the nose" finished', `${ENDED}\nThe nose is fixed.`))).isAsked).toBe(true)
+  // The line that ends a quiet turn is drawn as nothing, on the desktop and in the terminal: an empty box with no text; any other
+  // reply, and one that only holds that line among other words, is drawn as before
+  const MSG = { plugin: 'claudopus', component: 'AssistantMessage' } as const
+  for (const surface of ['desktop', 'terminal'] as const) {
+    for (const [i, text] of ['No response requested.', '\nNo response requested.\n'].entries()) {
+      const quiet = await $.ui.mount({ ...MSG, requestId: `quiet-${surface}-${i}`, props: { text, isFirstOfReply: true }, surface } as never)
+      expect([surface, text, (await quiet.findAll({ type: 'Text' })).map(one => one.text), (await quiet.findAll({ type: 'Markdown' })).length]).toEqual([surface, text, [], 0])
+      const box = await quiet.find({ type: 'Box' })
+      expect(box).toBeDefined()
+      expect(box?.props.children ?? []).toEqual([])
+      await quiet.unmount()
+    }
+    for (const [i, text] of ['Pushed.', 'It answered "No response requested." and went on.', 'No response requested. The build is green.'].entries()) {
+      const said = await $.ui.mount({ ...MSG, requestId: `said-${surface}-${i}`, props: { text, isFirstOfReply: true }, surface } as never)
+      expect([surface, text, Boolean(await said.find({ type: 'Text', text: "the engine's own" }))]).toEqual([surface, text, true])
+      await said.unmount()
+    }
   }
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1b', command: 'git add -A && git commit -m x' } as never)).deny).toContain('sent with `run_in_background: true`')
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1c', command: 'git log > /tmp/x' } as never)).deny).toContain('only a single command')

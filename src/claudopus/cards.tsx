@@ -267,8 +267,10 @@ const lookOver = async ($: EngineInterface, live: { id: string; status: string }
       if (isListed ? now - since < OVER_GRACE : now - Math.max(one.startedAt, one.newAt ?? 0) < UNHEARD_QUIET) continue
     }
     // One no longer listed is over only when its own record says it finished
-    if (!isListed && parsedOr<{ finished?: boolean }>(folder ? await readOr($, `${folder}/agent-${one.id}.meta.json`) : '', {}).finished !== true) continue
-    const words = isListed ? { answer: '', isHandback: false, isPressed: !(await isUnpressed($, one.id)), at: now } : await lastWordsOf($, folder, one.id, now)
+    // (one whose turn's end was just heard is over by that)
+    const isHeard = one.id === heard
+    if (!isListed && !isHeard && parsedOr<{ finished?: boolean }>(folder ? await readOr($, `${folder}/agent-${one.id}.meta.json`) : '', {}).finished !== true) continue
+    const words = isListed || isHeard ? { answer: '', isHandback: false, isPressed: !(await isUnpressed($, one.id)), at: now } : await lastWordsOf($, folder, one.id, now)
     const isFailed = statusOf(one) === 'failed'
     const answer = words.answer || one.answer
     // Received: handed in, or its last words where Claude Code pressed for no hand-back

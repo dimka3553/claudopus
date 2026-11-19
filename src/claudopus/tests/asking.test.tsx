@@ -903,7 +903,7 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
   expect([isPurple(held.desk), isPurple(held.term), isPurple(held.band), held.heading]).toEqual([true, true, true, 'acting'])
   agents.a1 = 'completed'
   // The header counts it as running, not as needing the person
-  expect(await desk.find({ type: 'Text', text: '1 task working' })).toBeDefined()
+  expect(await desk.find({ type: 'Text', text: '1 working' })).toBeDefined()
   // It stops again with the ask still open, the engine listing it as running for a moment as its turn ends: amber again a moment
   // later, once the engine lists its run as over
   agents.a1 = 'running'
@@ -917,7 +917,7 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
   })
   expect(after ?? (await look())).toMatchObject({ desk: AMBER, term: AMBER, band: AMBER, heading: 'needs' })
   for (const labels of (await look()).buttons) expect(labels).toEqual(expect.arrayContaining(['Release it', 'Not now']))
-  expect(await desk.find({ type: 'Text', text: '1 question waiting for you' })).toBeDefined()
+  expect(await desk.find({ type: 'Text', text: '1 waiting for you' })).toBeDefined()
   // Release it pressed goes back to the work and the ask goes; the card is at work on it, purple, until the work is done
   await desk.press({ key: (await desk.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it')?.key ?? '' })
   expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it"')))).toBeDefined()

@@ -888,8 +888,8 @@ const panelHooks = (on: On) => {
       const time = took(ran)
       // Stop, at its end, where it can be stopped from here: it ends the run and tells the work it was stuck
       const owner = t.one?.id ?? ''
-      // (not on a row too narrow to say how far it is beside it; Details, wider, has it)
-      const isStoppable = Boolean(owner) && canStopJob(job) && !job.id.startsWith('more-') && width >= 44
+      // (every row has it, down to the narrowest that still has room for a word of how far it is beside it)
+      const isStoppable = Boolean(owner) && canStopJob(job) && !job.id.startsWith('more-') && width >= 24
       const name = cut(jobHead(job), Math.max(12, width - time.length - 1))
       const head = (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>

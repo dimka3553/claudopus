@@ -298,6 +298,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The jobs' outputs as the panel reads them in one go, where the test gives them: each output it asks for ends in what the test
     // says, last written when it says, and every detached process it names still runs
     // (and, where the test gives them, the processes and the file each held-open command's shell writes to)
+    // (as the mod asks now: every word after the script's name is an output, with no count before them, and nothing follows the last)
+    if (options.jobs && tool === 'sh' && String(rest[1]).startsWith('for f; do ') && String(rest[1]).includes('@@JOB@@'))
+      return ok(rest.slice(3).map(file => `\n@@JOB@@ ${Math.floor((options.jobs?.wroteAt(String(file)) ?? 0) / 1000)} ${String(file)}\n${options.jobs?.output(String(file)) ?? ''}`).join(''))
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('@@JOB@@')) {
       const n = Number(rest[3] ?? 0)
       const asked = rest.slice(4, 4 + n).map(String)
@@ -768,7 +771,8 @@ const otherChat = (at: number, chat = 'chat-b', title = 'Billing page') =>
     ],
   })
 
-// Every chat's work in every panel: other chats listed, answered from here, the header agreeing, ended work shared, names opening chats
+// Every chat's work in every panel: other chats listed, each card by its stage, the header counting by stage and the octopus
+// agreeing, ended work shared, names opening chats
 
 // ---- Every chat's work in every panel ----
 
@@ -794,14 +798,14 @@ test("the panel shows every open chat's running work under that chat's name, thi
   expect(bold.indexOf('Billing page')).toBeLessThan(bold.indexOf('Check the totals'))
   expect(bold).not.toContain('Old landing page')
   expect(await list.find({ type: 'Text', text: 'billing' })).toBeDefined()
-  // The header counts every chat's: the ask first, then all that runs, here and there
-  expect(await list.find({ type: 'Text', text: '1 question waiting for you · 2 working' })).toBeDefined()
+  // The header counts every chat's cards by stage: what waits for the person first, then all that works, here and there
+  expect(await list.find({ type: 'Text', text: '1 waiting for you · 2 working' })).toBeDefined()
   // Another chat's work is stopped in its own chat: no Stop here, and its model is no control
   const buttons = (await list.findAll({ type: 'Button' })).map(one => one.key ?? '')
   expect(buttons.filter(key => key.startsWith('stop-'))).toEqual(['stop-a1'])
   expect(buttons.some(key => key.startsWith('model-r-'))).toBe(false)
-  // The chat's own work ends: its file says so at once, so the others show it finished as this chat does
-  await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', agentId: 'a1' } as never)
+  // The chat's own task hands in its result: its file says it is done at once, so the others show it done as this chat does
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb1', agentId: 'a1', message: 'Done.' } as never)
   await clock.advance(1000)
   expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{"cards":[]}').ended?.[0]?.status === 'done' ? true : undefined))).toBe(true)
   // Ended work is written apart from the running, so a chat still on a version that reads only the running cards never shows it as running
@@ -872,27 +876,31 @@ test("with another Mac named in config.json, its chats' work shows here under it
   await list.unmount()
 })
 
-test("the header says in one line what every chat's cards say, and the octopus beside it agrees", () => {
-  const head = (here: number, there: number, chats: number, asks = 0, isDone = false) => {
+test("the header says in one line what every chat's cards say, counted by stage, and the octopus beside it agrees", () => {
+  // [working here, working in other chats, how many chats those are in, waiting for the person, one just finished], its line, the octopus
+  const cases: [[number, number, number, number?, boolean?], string, string][] = [
+    [[0, 0, 0], 'Nothing waits for you', 'mark'],
+    [[1, 0, 0], '1 working', 'working'],
+    [[2, 0, 0], '2 working', 'working'],
+    [[0, 1, 1], '1 working in another chat', 'working'],
+    [[0, 3, 2], '3 working in 2 other chats', 'working'],
+    [[1, 1, 1], '2 working, here and in 1 other chat', 'working'],
+    [[2, 3, 2], '5 working, here and in 2 other chats', 'working'],
+    [[0, 0, 0, 1], '1 waiting for you', 'asking'],
+    [[0, 0, 0, 3], '3 waiting for you', 'asking'],
+    [[1, 2, 1, 2], '2 waiting for you · 3 working', 'asking'],
+    // A finish shows on the octopus for its moment whatever else goes on, the line still saying what waits for the person or works
+    [[0, 0, 0, 1, true], '1 waiting for you', 'happy'],
+    [[0, 1, 1, 0, true], '1 working in another chat', 'happy'],
+    [[0, 0, 0, 0, true], 'Just finished', 'happy'],
+  ]
+  for (const [[here, there, chats, asks = 0, isDone = false], line, mood] of cases) {
     const one = { here, there, chats, asks, isDone }
-    return [headLine(one), headMood(one)]
+    expect([headLine(one), headMood(one)]).toEqual([line, mood])
   }
-  expect(head(0, 0, 0)).toEqual(['Nothing running', 'mark'])
-  expect(head(1, 0, 0)).toEqual(['1 task working', 'working'])
-  expect(head(2, 0, 0)).toEqual(['2 tasks working', 'working'])
-  expect(head(0, 1, 1)).toEqual(['1 task working in another chat', 'working'])
-  expect(head(0, 3, 2)).toEqual(['3 tasks working in 2 other chats', 'working'])
-  expect(head(1, 1, 1)).toEqual(['2 tasks working, here and in 1 other chat', 'working'])
-  expect(head(2, 3, 2)).toEqual(['5 tasks working, here and in 2 other chats', 'working'])
-  expect(head(0, 0, 0, 1)).toEqual(['1 question waiting for you', 'asking'])
-  expect(head(1, 2, 1, 2)).toEqual(['2 questions waiting for you · 3 working', 'asking'])
-  // A finish shows on the octopus for its moment whatever else goes on, the line still saying what needs the person or runs
-  expect(head(0, 0, 0, 1, true)).toEqual(['1 question waiting for you', 'happy'])
-  expect(head(0, 1, 1, 0, true)).toEqual(['1 task working in another chat', 'happy'])
-  expect(head(0, 0, 0, 0, true)).toEqual(['Just finished', 'happy'])
 })
 
-test("with work only in another chat the header and octopus are at work, amber while it asks, happy as it finishes, then at rest", async ($, on) => {
+test("with work only in another chat the header and octopus are at work, amber while it asks, happy as it finishes, then at rest; another chat's cards are shown and counted by stage, done, failed with why and stopped alike, with nothing of what an older version kept on them", async ($, on) => {
   const { files, clock } = world(on, { art: true })
   await $.session.start(start)
   const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
@@ -902,23 +910,58 @@ test("with work only in another chat the header and octopus are at work, amber w
   files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, cards: file.cards.slice(1) }))
   await clock.advance(5000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => list.find({ type: 'Text', text: '1 task working in another chat' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: '1 working in another chat' }))).toBeDefined()
   expect(await drawn(list)).toEqual(['working'])
   expect(await list.find({ type: 'Text', text: /^Nothing/ })).toBeUndefined()
   // It asks: the line turns amber and says so, and the octopus waves amber
   files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at: NOW + 5000 }))
   await clock.advance(5000)
-  const asks = await until(async () => list.find({ type: 'Text', text: '1 question waiting for you · 1 working' }))
+  const asks = await until(async () => list.find({ type: 'Text', text: '1 waiting for you · 1 working' }))
   expect(asks?.props.color).toBe('#E5A50A')
   expect(await drawn(list)).toEqual(['wave'])
-  // Both finish: happy, "Just finished", for the pause; then at rest, "Nothing is running"
+  // Both finish: happy, "Just finished", for the pause; then at rest, "Nothing waits for you"
   files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at: NOW + 11_000, cards: file.cards.map(card => ({ ...card, status: 'done', endedAt: NOW + 10_500, ask: undefined })) }))
   await clock.advance(5000)
   expect(await until(async () => list.find({ type: 'Text', text: 'Just finished' }))).toBeDefined()
   expect(await drawn(list)).toEqual(['happy'])
   await clock.advance(3000)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Nothing running' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'Nothing waits for you' }))).toBeDefined()
   expect(await drawn(list)).toEqual(['mark'])
+  // That chat then shares a card in each stage. One at work still carries what a version before kept on a card (commands left
+  // detached, a wait, a count of to-dos left); one done has a to-do open, which that version showed as "Not done"
+  const at = NOW + 20_000
+  const card = (id: string, title: string, status: string, more: object = {}) => ({ id, parentId: '', isFork: false, tokens: 0, title, words: '', items: [], entries: [], answer: '', startedAt: at - 60_000, endedAt: status === 'working' ? 0 : at - 500, status, ...more })
+  const staged = [
+    card('s1', 'Train the splats', 'working', { detached: [{ id: 'd1', what: 'Trainer left running', at, cmd: 'nohup python train.py &', log: '/tmp/train.log', isLeft: true }], waitsSince: at, leftSince: at, leftOwn: true, notDone: true }),
+    card('s2', 'Send the invoices', 'working', { ask: { text: 'May I send 12 invoices?', choices: ['Send', 'Not now'], from: 's2', at } }),
+    card('s3', 'Check the totals', 'done', { items: [{ text: 'Add up March', state: 'done' }, { text: 'Add up April', state: 'open' }], leftOpen: 1, answer: 'March adds up.' }),
+    card('s4', 'Solve the cameras', 'failed', { why: 'The app closed while it worked' }),
+    card('s5', 'Draw the chart', 'stopped', { byYou: { at } }),
+  ]
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at, cards: staged.slice(0, 2), ended: staged.slice(2) }))
+  // (to this panel's next look at the other chats, from which their pause runs)
+  await clock.advance(2000)
+  // Each ended one says its stage in its colour for its pause: green done, red failed with why, grey stopped
+  const lineOf = async (text: string) => {
+    const one = await until(async () => list.find({ type: 'Text', text }))
+    return [one?.props.color, Boolean(one?.props.dimColor)]
+  }
+  expect(await lineOf('✓ Done')).toEqual(['success', false])
+  expect(await lineOf('✕ Failed · The app closed while it worked')).toEqual(['error', false])
+  expect(await lineOf('Stopped')).toEqual([undefined, true])
+  // The header counts one waiting and one working, and none of the three that ended; the octopus is happy for the one done
+  expect((await list.find({ type: 'Text', text: '1 waiting for you · 1 working' }))?.props.color).toBe('#E5A50A')
+  expect(await drawn(list)).toEqual(['happy'])
+  // No "Not done", no row for a detached command, no line of a wait
+  const said = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  expect(said.filter(text => /Not done|Trainer left running|nohup|left running|Waiting for its command/.test(text))).toEqual([])
+  expect(said).toEqual(expect.arrayContaining(['Train the splats', 'Send the invoices', 'Check the totals', 'Solve the cameras', 'Draw the chart']))
+  // After their pause the three are under Finished, and the header and octopus say only what waits and works
+  await clock.advance(3000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Done' })) ? undefined : true))).toBe(true)
+  expect((await list.findAll({ type: 'Button' })).some(b => /Finished 3/.test(String(b.props.label)))).toBe(true)
+  expect(await list.find({ type: 'Text', text: '1 waiting for you · 1 working' })).toBeDefined()
+  expect(await drawn(list)).toEqual(['wave'])
   await list.unmount()
 })
 
@@ -934,7 +977,7 @@ test("open chats with nothing going on are listed nowhere, on any Mac and howeve
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'billing · on m4' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: '1 question waiting for you · 1 working' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: '1 waiting for you · 1 working' })).toBeDefined()
   // No idle chat by name, no row or count of them, and this chat, with nothing going on, gets no heading
   const texts = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
   expect(texts.filter(one => /^Quiet \d+$|^M4 idle$|^[▸▾]? ?\d+ other chats?$/.test(one))).toEqual([])
@@ -994,8 +1037,8 @@ test("while the person types a reply into an ask, work finishing here and in ano
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Submit it to the plugin directory.' } as never)
   const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   await list.input({ key: box?.key ?? '', text: 'Not y', kind: 'change' } as never)
-  // This chat's work finishes mid-typing: green and happy at once, then gone after its pause, the times still held
-  await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
+  // This chat's task hands in its result mid-typing: green and happy at once, then gone after its pause, the times still held
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'a2', message: 'Done.' } as never)
   expect((await until(async () => list.find({ type: 'Text', text: '✓ Done' })))?.props.color).toBe('success')
   expect(await drawn(list)).toContain('happy')
   await clock.advance(2_100)

@@ -351,7 +351,8 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
   await clock.advance(1000)
   expect(await until(async () => ((files.get(`${MEMORY}/log.md`) ?? '').includes('not put on its card: its card asks something already') ? true : undefined))).toBe(true)
   expect(put()).toHaveLength(2)
-  // Pressed once the task has ended, nothing starts it again
+  // Pressed once the task has ended, having handed in its result, nothing starts it again
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h-end', agentId: 'a1', message: 'The notes are written, without the files Claude Code refused.' } as never)
   agents.a1 = 'completed'
   await $.turn.complete({ answer: 'The notes are written, without the files Claude Code refused.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(1000)

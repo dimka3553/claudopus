@@ -298,6 +298,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The jobs' outputs as the panel reads them in one go, where the test gives them: each output it asks for ends in what the test
     // says, last written when it says, and every detached process it names still runs
     // (and, where the test gives them, the processes and the file each held-open command's shell writes to)
+    // (as the mod asks now: every word after the script's name is an output, with no count before them, and nothing follows the last)
+    if (options.jobs && tool === 'sh' && String(rest[1]).startsWith('for f; do ') && String(rest[1]).includes('@@JOB@@'))
+      return ok(rest.slice(3).map(file => `\n@@JOB@@ ${Math.floor((options.jobs?.wroteAt(String(file)) ?? 0) / 1000)} ${String(file)}\n${options.jobs?.output(String(file)) ?? ''}`).join(''))
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('@@JOB@@')) {
       const n = Number(rest[3] ?? 0)
       const asked = rest.slice(4, 4 + n).map(String)
@@ -941,7 +944,7 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
   await clock.advance(10_000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Check the totals' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: '1 task working in another chat' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: '1 working in another chat' })).toBeDefined()
   // The work ends: that chat, still open, writes its file with no card at all
   const quiet = JSON.stringify({ chat: 'chat-old', title: 'Remote connector', folder: '/repo/billing', host: '', at: NOW + 11_000, cards: [] })
   files.set('ssh:fetch', `${(NOW + 11_000) / 1000}\n---claudopus-live---\n${quiet}\n`)
@@ -955,7 +958,7 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
   // After its pause it is gone, and not kept under Finished, since its chat said nothing of how it ended
   await clock.advance(3000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'Check the totals' })) ? undefined : true))).toBe(true)
-  expect(await list.find({ type: 'Text', text: 'Nothing running' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Nothing waits for you' })).toBeDefined()
   expect(await drawn(list)).toEqual(['mark'])
   expect((await list.findAll({ type: 'Button' })).some(b => /Finished/.test(String(b.props.label)))).toBe(false)
   // A chat that closes with its work running shows nothing finished: its work just leaves
