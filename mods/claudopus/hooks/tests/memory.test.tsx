@@ -348,6 +348,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // bin/catch-up, started in a session of its own
     if (tool === '/bin/sh' && String(rest[4] ?? '').endsWith('/bin/catch-up')) return (own.push([...e.argv]), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    // bin/tidy, started the same way
+    if (tool === '/bin/sh' && String(rest[4] ?? '').endsWith('/bin/tidy')) return (own.push([...e.argv]), ok())
+    // The disk left, as df's last line, where the test lays it as df
+    if (tool === 'sh' && String(rest[1]).startsWith('# disk left')) return ok(files.get('df') ?? '')
     // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
     if (tool?.endsWith('bin/notify')) {
       own.push([...e.argv])
@@ -858,15 +862,30 @@ test('Memory, beside Stats, opens the memory folder in Finder', async ($, on) =>
   expect(await until(async () => shown.find(argv => argv[1] === MEMORY))).toEqual(['open', MEMORY])
 })
 
-test('every chat starts the catch-up a minute after it loads and every ten minutes, with memory and its chat records only, never the other Macs', async ($, on) => {
+test('every chat starts the catch-up a minute after it loads and every ten minutes, with memory and its chat records only, never the other Macs; and the tidy of what tasks left two minutes after it loads, every ten minutes and as a task stops', async ($, on) => {
   const { files, own, clock } = world(on)
+  on('classic.SubagentStop', () => ({ value: {} }) as never)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
   await $.session.start(start)
   const runs = () => own.filter(one => String(one[5] ?? '').endsWith('/bin/catch-up'))
+  const tidies = () => own.filter(one => String(one[5] ?? '').endsWith('/bin/tidy'))
   expect(runs()).toHaveLength(0)
   await clock.advance(61_000)
   expect(runs()).toHaveLength(1)
   expect(runs()[0]?.slice(6)).toEqual([MEMORY, `${HOME}/.claude/projects`])
-  await clock.advance(10 * 60_000)
+  expect(tidies()).toHaveLength(0)
+  await clock.advance(60_000)
+  expect(tidies().map(one => one.slice(6))).toEqual([[MEMORY]])
+  await clock.advance(9 * 60_000)
   expect(runs()).toHaveLength(2)
+  expect(tidies()).toHaveLength(2)
+  // A task that stops starts it again, at once (bin/tidy keeps its own pause); a helper's stop does not
+  await $.prompt.submit({ text: 'shoot the pages', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Shoot the pages', prompt: 'shoot' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Shoot the footer', prompt: 'footer', parentAgentId: 'a1' } as never)
+  const stop = (id: string) => $.classic.SubagentStop({ agent_id: id, agent_type: 'general-purpose', agent_transcript_path: '', stop_hook_active: false, background_tasks: [] } as never)
+  await stop('a2')
+  expect(tidies()).toHaveLength(2)
+  await stop('a1')
+  expect(tidies().map(one => one.slice(6))).toEqual([[MEMORY], [MEMORY], [MEMORY]])
 })
