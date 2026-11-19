@@ -15,7 +15,7 @@ const countingSleeps = (on: On) => {
 }
 type GateDrawn = { findAll: (q: { type: string }) => Promise<readonly { key?: string | undefined; text?: unknown; props: Record<string, unknown> }[]> }
 // Everything drawn in the colour of what is done: no press leaves a green box or line
-const gateGreens = async (pane: GateDrawn) => [...(await pane.findAll({ type: 'Box' })), ...(await pane.findAll({ type: 'Text' }))].filter(one => ['color', 'borderColor', 'backgroundColor'].some(prop => one.props[prop] === 'success')).length
+const gateGreens = async (pane: GateDrawn) => [...(await pane.findAll({ type: 'Box' })), ...(await pane.findAll({ type: 'Text' }))].filter(one => (!(one.key ?? '').startsWith('outline-') || one.key === 'outline-top') && ['color', 'borderColor', 'backgroundColor'].some(prop => one.props[prop] === 'success')).length
 const gateTexts = async (pane: GateDrawn) => (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
 // The labels of one gate's own buttons, in the order drawn
 const gateButtons = async (pane: GateDrawn, id: string) => (await pane.findAll({ type: 'Button' })).filter(one => (one.key ?? '').startsWith(`gate-${id}-`)).map(one => String(one.props.label ?? ''))

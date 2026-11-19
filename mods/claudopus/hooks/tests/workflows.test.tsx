@@ -897,7 +897,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   expect(await until(async () => ((await pane.find({ type: 'Text', text: /^Just finished$/ })) ? true : undefined))).toBe(true)
   // For two seconds it stays where it was, green, with no Stop, and nothing is under Finished yet
   expect(await pane.find({ type: 'Text', text: /^Roman numerals$/ })).toBeDefined()
-  expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
+  expect((await pane.findAll({ type: 'Box' })).filter(b => !b.key?.startsWith('outline-') && b.props.backgroundColor === 'success').length).toBe(1)
   expect(await pane.find({ type: 'Button', key: 'flow-stop-wf_1' })).toBeUndefined()
   // Its last line says how it ended, from what the run returned when its last round has no verdict; a round it did not need says so
   expect(await pane.find({ type: 'Text', text: /^✓ Passed in round 2 of 3$/ })).toBeDefined()

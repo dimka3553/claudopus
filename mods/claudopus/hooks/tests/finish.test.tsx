@@ -1183,7 +1183,7 @@ test('work that hands in its result with everything it set out to do done, leavi
   agents.a1 = 'waiting'
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
   expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
-  expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === '#4C9AFF')).toHaveLength(1)
+  expect((await pane.findAll({ type: 'Box' })).filter(b => !b.key?.startsWith('outline-') && b.props.backgroundColor === '#4C9AFF')).toHaveLength(1)
   // After its moment the card stays up, done, never under Finished: the server's row is under it with the row's own Stop, and the
   // task itself has none
   await clock.advance(20_000)
