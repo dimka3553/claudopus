@@ -1,249 +1,195 @@
-"use strict";
-var __assign = (this && this.__assign) || function () {
-    __assign = Object.assign || function(t) {
-        for (var s, i = 1, n = arguments.length; i < n; i++) {
-            s = arguments[i];
-            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
-                t[p] = s[p];
-        }
-        return t;
-    };
-    return __assign.apply(this, arguments);
-};
-var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
-    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
-        if (ar || !(i in from)) {
-            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
-            ar[i] = from[i];
-        }
-    }
-    return to.concat(ar || Array.prototype.slice.call(from));
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.capOf = exports.titleOfFlow = exports.rowsOf = exports.endOf = exports.castOf = exports.firstFit = exports.fitWords = exports.doing = exports.SQUARE_GLYPH = exports.squaresBefore = exports.squaresKept = exports.SQUARES_MOST = exports.squaresSvg = exports.squaresWidth = exports.SQUARE_COLOR = exports.squaresOf = exports.stageOf = exports.roundsOf = exports.withJournal = exports.outcomeOf = exports.journalOf = exports.metaOf = exports.flowPaneOf = exports.FLOW_PANE = exports.FLOW = void 0;
 // The panel's blue, for work that runs as a workflow: the purple of other work moved round to blue, as light and as strong
-exports.FLOW = '#4E93EF';
+export const FLOW = '#4E93EF';
 // A workflow's Details is a tab of its own, as a piece of work's is
-exports.FLOW_PANE = 'flow-';
-var flowPaneOf = function (id) { return "".concat(exports.FLOW_PANE).concat(id.replace(/[^A-Za-z0-9_-]/g, '-')).slice(0, 64); };
-exports.flowPaneOf = flowPaneOf;
-var oneLine = function (text) { return text.replace(/\s+/g, ' ').trim(); };
-var short = function (text, most) { return (text.length <= most ? text : "".concat(text.slice(0, most - 1).trimEnd(), "\u2026")); };
+export const FLOW_PANE = 'flow-';
+export const flowPaneOf = (id) => `${FLOW_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64);
+const oneLine = (text) => text.replace(/\s+/g, ' ').trim();
+const short = (text, most) => (text.length <= most ? text : `${text.slice(0, most - 1).trimEnd()}…`);
 // A string field of the script's meta, as written: meta is a pure literal, so its fields are read as text
-var field = function (text, name) {
-    var _a, _b;
-    var m = new RegExp("\\b".concat(name, "\\s*:\\s*(['\"`])((?:\\\\.|(?!\\1).)*)\\1")).exec(text);
-    return (_b = (_a = m === null || m === void 0 ? void 0 : m[2]) === null || _a === void 0 ? void 0 : _a.replace(/\\(.)/g, '$1')) !== null && _b !== void 0 ? _b : '';
+const field = (text, name) => {
+    const m = new RegExp(`\\b${name}\\s*:\\s*(['"\`])((?:\\\\.|(?!\\1).)*)\\1`).exec(text);
+    return m?.[2]?.replace(/\\(.)/g, '$1') ?? '';
 };
 // The meta at the head of a workflow script: its name, what it does, and its stages in order
-var metaOf = function (script) {
-    var _a, _b, _c, _d;
-    var head = (_b = (_a = /export\s+const\s+meta\s*=\s*\{([\s\S]*?)\n\}/.exec(script)) === null || _a === void 0 ? void 0 : _a[1]) !== null && _b !== void 0 ? _b : script.slice(0, 4000);
-    var list = (_d = (_c = /phases\s*:\s*\[([\s\S]*?)\]/.exec(head)) === null || _c === void 0 ? void 0 : _c[1]) !== null && _d !== void 0 ? _d : '';
-    var phases = __spreadArray([], list.matchAll(/\{([^{}]*)\}/g), true).map(function (one) { var _a; return (_a = one[1]) !== null && _a !== void 0 ? _a : ''; })
-        .map(function (body) { return (__assign(__assign({ title: field(body, 'title') }, (field(body, 'detail') ? { detail: field(body, 'detail') } : {})), (field(body, 'model') ? { model: field(body, 'model') } : {}))); })
-        .filter(function (one) { return one.title; });
-    var outside = head.replace(/phases\s*:\s*\[[\s\S]*?\]/, '');
-    return { name: field(outside, 'name'), description: field(outside, 'description'), phases: phases };
+export const metaOf = (script) => {
+    const head = /export\s+const\s+meta\s*=\s*\{([\s\S]*?)\n\}/.exec(script)?.[1] ?? script.slice(0, 4000);
+    const list = /phases\s*:\s*\[([\s\S]*?)\]/.exec(head)?.[1] ?? '';
+    const phases = [...list.matchAll(/\{([^{}]*)\}/g)]
+        .map(one => one[1] ?? '')
+        .map(body => ({ title: field(body, 'title'), ...(field(body, 'detail') ? { detail: field(body, 'detail') } : {}), ...(field(body, 'model') ? { model: field(body, 'model') } : {}) }))
+        .filter(one => one.title);
+    const outside = head.replace(/phases\s*:\s*\[[\s\S]*?\]/, '');
+    return { name: field(outside, 'name'), description: field(outside, 'description'), phases };
 };
-exports.metaOf = metaOf;
-var journalOf = function (text) {
-    return text.split('\n').flatMap(function (row) {
-        try {
-            return row.trim() ? [JSON.parse(row)] : [];
-        }
-        catch (_a) {
-            return [];
-        }
-    });
-};
-exports.journalOf = journalOf;
-// What an agent returned, in a few words: a verdict's pass and why, else its text's first line
-var outcomeOf = function (value) {
-    var _a, _b;
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-        var o_1 = value;
-        var pass = typeof o_1.pass === 'boolean' ? o_1.pass : typeof o_1.passed === 'boolean' ? o_1.passed : undefined;
-        var why = (_a = ['why', 'summary', 'reason', 'verdict'].map(function (key) { return o_1[key]; }).find(function (one) { return typeof one === 'string'; })) !== null && _a !== void 0 ? _a : '';
-        var findings = Array.isArray(o_1.findings) ? o_1.findings.filter(function (one) { return typeof one === 'string' && Boolean(one.trim()); }).slice(0, 20).map(function (one) { return short(oneLine(one), 300); }) : [];
-        return __assign(__assign(__assign(__assign({}, (pass === undefined ? {} : { pass: pass })), { why: short(oneLine(why), 160) }), (findings.length ? { findings: findings } : {})), { result: short(oneLine(JSON.stringify(value)), 600) });
+export const journalOf = (text) => text.split('\n').flatMap(row => {
+    try {
+        return row.trim() ? [JSON.parse(row)] : [];
     }
-    var text = typeof value === 'string' ? value : value === undefined || value === null ? '' : JSON.stringify(value);
-    return { why: short(oneLine((_b = text.split('\n').find(function (line) { return line.trim(); })) !== null && _b !== void 0 ? _b : ''), 160), result: short(text.trim(), 600) };
+    catch {
+        return [];
+    }
+});
+// What an agent returned, in a few words: a verdict's pass and why, else its text's first line
+export const outcomeOf = (value) => {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const o = value;
+        const pass = typeof o.pass === 'boolean' ? o.pass : typeof o.passed === 'boolean' ? o.passed : undefined;
+        const why = ['why', 'summary', 'reason', 'verdict'].map(key => o[key]).find((one) => typeof one === 'string') ?? '';
+        const findings = Array.isArray(o.findings) ? o.findings.filter((one) => typeof one === 'string' && Boolean(one.trim())).slice(0, 20).map(one => short(oneLine(one), 300)) : [];
+        return { ...(pass === undefined ? {} : { pass }), why: short(oneLine(why), 160), ...(findings.length ? { findings } : {}), result: short(oneLine(JSON.stringify(value)), 600) };
+    }
+    const text = typeof value === 'string' ? value : value === undefined || value === null ? '' : JSON.stringify(value);
+    return { why: short(oneLine(text.split('\n').find(line => line.trim()) ?? ''), 160), result: short(text.trim(), 600) };
 };
-exports.outcomeOf = outcomeOf;
 // The journal laid over what the panel knew: each agent's label and stage, and how it ended
-var withJournal = function (flow, lines, now) {
-    var agents = __spreadArray([], flow.agents, true);
-    var _loop_1 = function (line) {
+export const withJournal = (flow, lines, now) => {
+    const agents = [...flow.agents];
+    for (const line of lines) {
         if (!line.agentId)
-            return "continue";
-        var at = agents.findIndex(function (one) { return one.id === line.agentId; });
-        var was = at >= 0 ? agents[at] : { id: line.agentId, label: '', phase: '', status: 'working', at: now };
-        var next = line.type === 'started'
-            ? __assign(__assign({}, was), { label: line.label || was.label, phase: line.phase || was.phase }) : line.type === 'result'
-            ? __assign(__assign(__assign({}, was), { status: 'done', endedAt: was.endedAt || now }), (0, exports.outcomeOf)(line.result)) : line.type === 'failed'
-            ? __assign(__assign({}, was), { status: 'failed', endedAt: was.endedAt || now }) : was;
+            continue;
+        const at = agents.findIndex(one => one.id === line.agentId);
+        const was = at >= 0 ? agents[at] : { id: line.agentId, label: '', phase: '', status: 'working', at: now };
+        const next = line.type === 'started'
+            ? { ...was, label: line.label || was.label, phase: line.phase || was.phase }
+            : line.type === 'result'
+                ? { ...was, status: 'done', endedAt: was.endedAt || now, ...outcomeOf(line.result) }
+                : line.type === 'failed'
+                    ? { ...was, status: 'failed', endedAt: was.endedAt || now }
+                    : was;
         if (at >= 0)
             agents[at] = next;
         else
             agents.push(next);
-    };
-    for (var _i = 0, lines_1 = lines; _i < lines_1.length; _i++) {
-        var line = lines_1[_i];
-        _loop_1(line);
     }
-    return __assign(__assign({}, flow), { agents: agents });
+    return { ...flow, agents };
 };
-exports.withJournal = withJournal;
 // An agent's stage: the journal's, else, before the journal names it, the stage of an earlier agent with the same label
-var phaseOf = function (flow, agent) { var _a; return agent.phase || ((_a = flow.agents.find(function (one) { return one.phase && one.label && one.label === agent.label; })) === null || _a === void 0 ? void 0 : _a.phase) || ''; };
-var roundsOf = function (flow) {
-    var _a, _b, _c;
-    var first = (_a = flow.phases[0]) === null || _a === void 0 ? void 0 : _a.title;
-    var last = (_b = flow.phases.at(-1)) === null || _b === void 0 ? void 0 : _b.title;
-    var rounds = [];
-    for (var _i = 0, _d = flow.agents; _i < _d.length; _i++) {
-        var was = _d[_i];
-        var agent = __assign(__assign({}, was), { phase: phaseOf(flow, was) });
-        var open_1 = rounds.at(-1);
+const phaseOf = (flow, agent) => agent.phase || flow.agents.find(one => one.phase && one.label && one.label === agent.label)?.phase || '';
+export const roundsOf = (flow) => {
+    const first = flow.phases[0]?.title;
+    const last = flow.phases.at(-1)?.title;
+    const rounds = [];
+    for (const was of flow.agents) {
+        const agent = { ...was, phase: phaseOf(flow, was) };
+        const open = rounds.at(-1);
         // A new round begins when the first stage starts again; and, before the journal names an agent's stage, when the round so far
         // has been judged by its last stage
-        var isNew = !open_1 ||
-            (first !== undefined && agent.phase === first && open_1.agents.some(function (one) { return one.phase !== first; })) ||
-            (!agent.phase && last !== undefined && open_1.agents.some(function (one) { return one.phase === last && one.status !== 'working'; }));
+        const isNew = !open ||
+            (first !== undefined && agent.phase === first && open.agents.some(one => one.phase !== first)) ||
+            (!agent.phase && last !== undefined && open.agents.some(one => one.phase === last && one.status !== 'working'));
         if (isNew)
             rounds.push({ n: rounds.length + 1, agents: [], phase: '', isOpen: true, why: '', findings: [] });
-        (_c = rounds.at(-1)) === null || _c === void 0 ? void 0 : _c.agents.push(agent);
+        rounds.at(-1)?.agents.push(agent);
     }
-    return rounds.map(function (round) {
-        var _a, _b, _c, _d;
-        var judge = __spreadArray([], round.agents, true).reverse().find(function (one) { return (last ? one.phase === last : true) && one.status !== 'working'; });
-        var running = round.agents.find(function (one) { return one.status === 'working'; });
-        var isOpen = flow.status === 'working' && (Boolean(running) || !judge);
-        return __assign(__assign(__assign(__assign({}, round), { phase: (_b = (_a = (running !== null && running !== void 0 ? running : round.agents.at(-1))) === null || _a === void 0 ? void 0 : _a.phase) !== null && _b !== void 0 ? _b : '', isOpen: isOpen }), ((judge === null || judge === void 0 ? void 0 : judge.pass) === undefined ? {} : { pass: judge.pass })), { why: (_c = judge === null || judge === void 0 ? void 0 : judge.why) !== null && _c !== void 0 ? _c : '', findings: (_d = judge === null || judge === void 0 ? void 0 : judge.findings) !== null && _d !== void 0 ? _d : [] });
+    return rounds.map(round => {
+        const judge = [...round.agents].reverse().find(one => (last ? one.phase === last : true) && one.status !== 'working');
+        const running = round.agents.find(one => one.status === 'working');
+        const isOpen = flow.status === 'working' && (Boolean(running) || !judge);
+        return { ...round, phase: (running ?? round.agents.at(-1))?.phase ?? '', isOpen, ...(judge?.pass === undefined ? {} : { pass: judge.pass }), why: judge?.why ?? '', findings: judge?.findings ?? [] };
     });
 };
-exports.roundsOf = roundsOf;
 // The stage being run now: the stage of the agent started last that has not ended, else of the last one started
-var stageOf = function (flow) {
-    var _a, _b;
+export const stageOf = (flow) => {
     if (flow.status !== 'working')
         return '';
-    var one = (_a = __spreadArray([], flow.agents, true).reverse().find(function (agent) { return agent.status === 'working'; })) !== null && _a !== void 0 ? _a : flow.agents.at(-1);
-    return (one ? phaseOf(flow, one) : '') || ((_b = flow.phases[0]) === null || _b === void 0 ? void 0 : _b.title) || '';
+    const one = [...flow.agents].reverse().find(agent => agent.status === 'working') ?? flow.agents.at(-1);
+    return (one ? phaseOf(flow, one) : '') || flow.phases[0]?.title || '';
 };
-exports.stageOf = stageOf;
 // The run as squares, one per stage of each round started, grouped by round. A round's stages not yet started are open squares
-var squaresOf = function (flow, rounds) {
-    if (rounds === void 0) { rounds = (0, exports.roundsOf)(flow); }
-    var stages = flow.phases.map(function (p) { return p.title; });
-    var last = stages.at(-1);
-    var of = function (one) {
-        return !one
-            ? 'waiting'
-            : one.status === 'failed'
-                ? 'broke'
-                : one.status === 'working'
-                    ? flow.status === 'working'
-                        ? 'running'
-                        : 'broke'
-                    : one.phase === last && one.pass !== undefined
-                        ? one.pass
-                            ? 'passed'
-                            : 'failed'
-                        : 'done';
-    };
-    return rounds.map(function (round) {
+export const squaresOf = (flow, rounds = roundsOf(flow)) => {
+    const stages = flow.phases.map(p => p.title);
+    const last = stages.at(-1);
+    const of = (one) => !one
+        ? 'waiting'
+        : one.status === 'failed'
+            ? 'broke'
+            : one.status === 'working'
+                ? flow.status === 'working'
+                    ? 'running'
+                    : 'broke'
+                : one.phase === last && one.pass !== undefined
+                    ? one.pass
+                        ? 'passed'
+                        : 'failed'
+                    : 'done';
+    return rounds.map(round => {
         if (!stages.length)
             return round.agents.map(of);
-        var slots = stages.map(function (stage) { return __spreadArray([], round.agents, true).reverse().find(function (one) { return one.phase === stage; }); });
+        const slots = stages.map(stage => [...round.agents].reverse().find(one => one.phase === stage));
         // Agents the journal has not yet named take the first slots still empty
-        for (var _i = 0, _a = round.agents.filter(function (agent) { return !agent.phase; }); _i < _a.length; _i++) {
-            var one = _a[_i];
-            var at = slots.findIndex(function (slot) { return !slot; });
+        for (const one of round.agents.filter(agent => !agent.phase)) {
+            const at = slots.findIndex(slot => !slot);
             if (at >= 0)
                 slots[at] = one;
         }
         return slots.map(of);
     });
 };
-exports.squaresOf = squaresOf;
-var SQUARE = 11;
-var STEP_GAP = 3;
-var ROUND_GAP = 10;
+const SQUARE = 11;
+const STEP_GAP = 3;
+const ROUND_GAP = 10;
 // The colours of the squares: grey for a step done, the panel's blue for one running, green and red for a check's verdict
-exports.SQUARE_COLOR = { done: '#9A9A9A', running: '#4E93EF', waiting: '#8C8C8C', passed: '#3FB950', failed: '#E5534B', broke: '#E5534B' };
+export const SQUARE_COLOR = { done: '#9A9A9A', running: '#4E93EF', waiting: '#8C8C8C', passed: '#3FB950', failed: '#E5534B', broke: '#E5534B' };
 // How wide the squares are, in the app's pixels
-var squaresWidth = function (groups) { return Math.max(SQUARE, groups.reduce(function (w, g, i) { return w + (i ? ROUND_GAP : 0) + g.length * SQUARE + Math.max(0, g.length - 1) * STEP_GAP; }, 0)); };
-exports.squaresWidth = squaresWidth;
+export const squaresWidth = (groups) => Math.max(SQUARE, groups.reduce((w, g, i) => w + (i ? ROUND_GAP : 0) + g.length * SQUARE + Math.max(0, g.length - 1) * STEP_GAP, 0));
 // The squares drawn, as Claude's own view of a workflow draws its agents: filled when done, blue and breathing while running, an
 // outline when not started; a check filled green or red by its verdict, a step that broke outlined red
-var squaresSvg = function (groups, height) {
-    var width = (0, exports.squaresWidth)(groups);
-    var y = (height - SQUARE) / 2;
-    var x = 0;
-    var shapes = [];
-    groups.forEach(function (group, i) {
+export const squaresSvg = (groups, height) => {
+    const width = squaresWidth(groups);
+    const y = (height - SQUARE) / 2;
+    let x = 0;
+    const shapes = [];
+    groups.forEach((group, i) => {
         if (i)
             x += ROUND_GAP;
-        group.forEach(function (one, j) {
+        group.forEach((one, j) => {
             if (j)
                 x += STEP_GAP;
-            var color = exports.SQUARE_COLOR[one];
-            var isOpen = one === 'waiting' || one === 'broke';
-            var pulse = one === 'running' ? '<animate attributeName="opacity" values="1;0.7;1" dur="1.6s" repeatCount="indefinite"/>' : '';
+            const color = SQUARE_COLOR[one];
+            const isOpen = one === 'waiting' || one === 'broke';
+            const pulse = one === 'running' ? '<animate attributeName="opacity" values="1;0.7;1" dur="1.6s" repeatCount="indefinite"/>' : '';
             shapes.push(isOpen
-                ? "<rect x=\"".concat(x + 0.75, "\" y=\"").concat(y + 0.75, "\" width=\"").concat(SQUARE - 1.5, "\" height=\"").concat(SQUARE - 1.5, "\" rx=\"2.5\" fill=\"none\" stroke=\"").concat(color, "\" stroke-width=\"1.5\" opacity=\"").concat(one === 'waiting' ? 0.7 : 1, "\"/>")
-                : "<rect x=\"".concat(x, "\" y=\"").concat(y, "\" width=\"").concat(SQUARE, "\" height=\"").concat(SQUARE, "\" rx=\"2.5\" fill=\"").concat(color, "\">").concat(pulse, "</rect>"));
+                ? `<rect x="${x + 0.75}" y="${y + 0.75}" width="${SQUARE - 1.5}" height="${SQUARE - 1.5}" rx="2.5" fill="none" stroke="${color}" stroke-width="1.5" opacity="${one === 'waiting' ? 0.7 : 1}"/>`
+                : `<rect x="${x}" y="${y}" width="${SQUARE}" height="${SQUARE}" rx="2.5" fill="${color}">${pulse}</rect>`);
             x += SQUARE;
         });
     });
-    return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"".concat(width, "\" height=\"").concat(height, "\" viewBox=\"0 0 ").concat(width, " ").concat(height, "\">").concat(shapes.join(''), "</svg>");
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${shapes.join('')}</svg>`;
 };
-exports.squaresSvg = squaresSvg;
 // The most squares one drawing holds: the app refuses an Svg over 131,072 characters, and a running square, the longest, takes
 // about 165, so 600 stay under it with room. A longer run draws its last rounds that fit, and says how many came before
-exports.SQUARES_MOST = 600;
-var squaresKept = function (groups) {
-    var _a, _b, _c, _d, _e;
-    var _f = [0, groups.length], n = _f[0], from = _f[1];
-    while (from > 0 && n + ((_b = (_a = groups[from - 1]) === null || _a === void 0 ? void 0 : _a.length) !== null && _b !== void 0 ? _b : 0) <= exports.SQUARES_MOST)
-        n += (_d = (_c = groups[--from]) === null || _c === void 0 ? void 0 : _c.length) !== null && _d !== void 0 ? _d : 0;
+export const SQUARES_MOST = 600;
+export const squaresKept = (groups) => {
+    let [n, from] = [0, groups.length];
+    while (from > 0 && n + (groups[from - 1]?.length ?? 0) <= SQUARES_MOST)
+        n += groups[--from]?.length ?? 0;
     // One round alone with more steps than that still draws its last steps, and says how many of its steps came before
-    var last = (_e = groups.at(-1)) !== null && _e !== void 0 ? _e : [];
+    const last = groups.at(-1) ?? [];
     if (from === groups.length && groups.length)
-        return { groups: [last.slice(-exports.SQUARES_MOST)], earlier: groups.length - 1, steps: last.length - exports.SQUARES_MOST };
+        return { groups: [last.slice(-SQUARES_MOST)], earlier: groups.length - 1, steps: last.length - SQUARES_MOST };
     return { groups: groups.slice(from), earlier: from, steps: 0 };
 };
-exports.squaresKept = squaresKept;
 // What came before the squares drawn, in words: '' when nothing did
-var squaresBefore = function (kept) {
-    return [kept.earlier ? "".concat(kept.earlier, " earlier round").concat(kept.earlier === 1 ? '' : 's') : '', kept.steps ? "".concat(kept.steps, " earlier stage").concat(kept.steps === 1 ? '' : 's') : ''].filter(Boolean).join(', ');
-};
-exports.squaresBefore = squaresBefore;
+export const squaresBefore = (kept) => [kept.earlier ? `${kept.earlier} earlier round${kept.earlier === 1 ? '' : 's'}` : '', kept.steps ? `${kept.steps} earlier stage${kept.steps === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ');
 // The squares for a surface that draws no pictures: one letter each, grouped by round
-exports.SQUARE_GLYPH = { done: '■', running: '■', waiting: '□', passed: '■', failed: '■', broke: '□' };
+export const SQUARE_GLYPH = { done: '■', running: '■', waiting: '□', passed: '■', failed: '■', broke: '□' };
 // A stage's name as what is being done: Make is Making, Check is Checking
-var doing = function (stage) {
-    var word = stage.trim();
+export const doing = (stage) => {
+    const word = stage.trim();
     if (!word || /ing$/i.test(word) || /\s/.test(word))
         return word;
     if (/[^e]e$/i.test(word))
-        return "".concat(word.slice(0, -1), "ing");
+        return `${word.slice(0, -1)}ing`;
     if (/^[^aeiou]*[aeiou][^aeiouwxy]$/i.test(word))
-        return "".concat(word).concat(word.slice(-1), "ing");
-    return "".concat(word, "ing");
+        return `${word}${word.slice(-1)}ing`;
+    return `${word}ing`;
 };
-exports.doing = doing;
 // Text made to fit a number of letters by leaving out its last whole words, never cut inside a word and never marked with an ellipsis
-var fitWords = function (text, most) {
-    var _a;
-    var words = oneLine(text).split(' ');
-    var kept = '';
-    for (var _i = 0, words_1 = words; _i < words_1.length; _i++) {
-        var word = words_1[_i];
-        var next = kept ? "".concat(kept, " ").concat(word) : word;
+export const fitWords = (text, most) => {
+    const words = oneLine(text).split(' ');
+    let kept = '';
+    for (const word of words) {
+        const next = kept ? `${kept} ${word}` : word;
         if (next.length > most)
             break;
         kept = next;
@@ -251,40 +197,31 @@ var fitWords = function (text, most) {
     // Shortened, it does not end on a small word that leans on the next
     if (kept.length < oneLine(text).length)
         kept = kept.replace(/(\s+(?:a|an|the|is|are|was|not|no|of|to|in|on|at|for|with|and|or|but|by|from|as|its|it|·|:|-))+$/i, '');
-    return kept || ((_a = words[0]) !== null && _a !== void 0 ? _a : '').slice(0, Math.max(1, most));
+    return kept || (words[0] ?? '').slice(0, Math.max(1, most));
 };
-exports.fitWords = fitWords;
 // The first of several wordings, fullest first, that fits a number of letters; the last when none does
-var firstFit = function (wordings, most) {
-    var _a, _b;
-    var lines = wordings.map(function (parts) { return parts.filter(Boolean).join(' · '); });
-    return (_b = (_a = lines.find(function (line) { return line.length <= most; })) !== null && _a !== void 0 ? _a : lines.at(-1)) !== null && _b !== void 0 ? _b : '';
+export const firstFit = (wordings, most) => {
+    const lines = wordings.map(parts => parts.filter(Boolean).join(' · '));
+    return lines.find(line => line.length <= most) ?? lines.at(-1) ?? '';
 };
-exports.firstFit = firstFit;
 // Who is in it: each role once, by its label, with the model it ran on
-var castOf = function (flow) {
-    var _a;
-    var seen = new Map();
-    for (var _i = 0, _b = flow.agents; _i < _b.length; _i++) {
-        var one = _b[_i];
-        var role = one.label.replace(/[-\s#]*\d+$/, '') || one.phase || 'helper';
+export const castOf = (flow) => {
+    const seen = new Map();
+    for (const one of flow.agents) {
+        const role = one.label.replace(/[-\s#]*\d+$/, '') || one.phase || 'helper';
         if (!seen.has(role) || (!seen.get(role) && one.model))
-            seen.set(role, (_a = one.model) !== null && _a !== void 0 ? _a : '');
+            seen.set(role, one.model ?? '');
     }
-    return __spreadArray([], seen.entries(), true).map(function (_a) {
-        var role = _a[0], model = _a[1];
-        return ({ role: role, model: model });
-    });
+    return [...seen.entries()].map(([role, model]) => ({ role, model }));
 };
-exports.castOf = castOf;
 // The end of a run as the notice that it ended says it: its status, and the value it returned. Nothing when the text is no such notice
-var endOf = function (text, taskId) {
+export const endOf = (text, taskId) => {
     if (!taskId || !text.includes('<task-notification') || !text.includes(taskId))
         return undefined;
-    var tag = function (name) { var _a, _b, _c; return (_c = (_b = (_a = new RegExp("<".concat(name, ">([\\s\\S]*?)</").concat(name, ">")).exec(text)) === null || _a === void 0 ? void 0 : _a[1]) === null || _b === void 0 ? void 0 : _b.trim()) !== null && _c !== void 0 ? _c : ''; };
+    const tag = (name) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(text)?.[1]?.trim() ?? '';
     if (tag('task-id') && tag('task-id') !== taskId)
         return undefined;
-    var status = tag('status');
+    const status = tag('status');
     // Only a notice of how it ended ends it
     if (!['completed', 'failed', 'killed', 'stopped'].includes(status))
         return undefined;
@@ -293,60 +230,53 @@ var endOf = function (text, taskId) {
         result: short(tag('result') || tag('summary'), 4000),
     };
 };
-exports.endOf = endOf;
 // An agent's saved transcript as the rows a chat is drawn from: what it was told, what it wrote and each tool call, never its thinking
-var rowsOf = function (text) {
-    var rows = [];
-    var uses = new Map();
-    for (var _i = 0, _a = text.split('\n'); _i < _a.length; _i++) {
-        var line = _a[_i];
-        var o = void 0;
+export const rowsOf = (text) => {
+    const rows = [];
+    const uses = new Map();
+    for (const line of text.split('\n')) {
+        let o;
         try {
             o = line.trim() ? JSON.parse(line) : undefined;
         }
-        catch (_b) {
+        catch {
             o = undefined;
         }
         if (!o || (o.type !== 'user' && o.type !== 'assistant') || !o.message)
             continue;
-        var content = o.message.content;
-        var blocks = typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : [];
-        var said_1 = blocks.filter(function (b) { return b.type === 'text' && typeof b.text === 'string'; }).map(function (b) { var _a; return (_a = b.text) !== null && _a !== void 0 ? _a : ''; }).join('\n');
-        var toolUses = [];
-        for (var _c = 0, blocks_1 = blocks; _c < blocks_1.length; _c++) {
-            var b = blocks_1[_c];
+        const content = o.message.content;
+        const blocks = typeof content === 'string' ? [{ type: 'text', text: content }] : Array.isArray(content) ? content : [];
+        const said = blocks.filter(b => b.type === 'text' && typeof b.text === 'string').map(b => b.text ?? '').join('\n');
+        const toolUses = [];
+        for (const b of blocks) {
             if (b.type === 'tool_use' && b.id && b.name) {
-                var use = { tool_use_id: b.id, tool: b.name, input: (b.input && typeof b.input === 'object' ? b.input : {}) };
+                const use = { tool_use_id: b.id, tool: b.name, input: (b.input && typeof b.input === 'object' ? b.input : {}) };
                 uses.set(b.id, use);
                 toolUses.push(use);
             }
             if (b.type === 'tool_result' && b.tool_use_id && b.is_error) {
-                var use = uses.get(b.tool_use_id);
+                const use = uses.get(b.tool_use_id);
                 if (use)
                     use.isError = true;
             }
         }
         // A row that only carries tool results is no message of the chat
-        if (o.type === 'user' && !said_1.trim())
+        if (o.type === 'user' && !said.trim())
             continue;
-        rows.push({ role: o.type, text: said_1, toolUses: toolUses });
+        rows.push({ role: o.type, text: said, toolUses });
     }
     return rows;
 };
-exports.rowsOf = rowsOf;
 // What a run is called on its card: the title its args give, else its task's first words, else what its script says it does
-var titleOfFlow = function (args, meta) {
-    var a = args && typeof args === 'object' ? args : {};
-    var given = typeof a.title === 'string' ? a.title : '';
-    var task = typeof a.task === 'string' ? a.task : typeof args === 'string' ? args : '';
+export const titleOfFlow = (args, meta) => {
+    const a = args && typeof args === 'object' ? args : {};
+    const given = typeof a.title === 'string' ? a.title : '';
+    const task = typeof a.task === 'string' ? a.task : typeof args === 'string' ? args : '';
     return short(oneLine(given || task.split(/(?<=[.!?])\s/)[0] || meta.description || meta.name || 'Workflow'), 90);
 };
-exports.titleOfFlow = titleOfFlow;
 // The cap on rounds the args give; none when they give none
-var capOf = function (args) {
-    var _a;
-    var a = args && typeof args === 'object' ? args : {};
-    var cap = Number((_a = a.cap) !== null && _a !== void 0 ? _a : a.rounds);
+export const capOf = (args) => {
+    const a = args && typeof args === 'object' ? args : {};
+    const cap = Number(a.cap ?? a.rounds);
     return Number.isFinite(cap) && cap > 0 ? Math.min(Math.round(cap), 99) : undefined;
 };
-exports.capOf = capOf;

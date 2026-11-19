@@ -11451,7 +11451,7 @@ const commandHooks = (on: On) => {
   on('ui.select', { plugin: 'claudopus' }, async ($, e, next) => (freeTimes($), next(e)))
   on('ui.close', async ($, e, next) => {
     const r = await next(e)
-    if (e.id === LIST) (listOffsets.clear(), topPlaces.clear(), topClosed.clear(), drawAgain($))
+    if (e.id === LIST) (listOffsets.clear(), topPlaces.clear(), drawAgain($))
     if (e.id === LIST && e.origin.kind === 'person' && dir) await choosePanel($, false)
     return r
   })
@@ -12139,8 +12139,6 @@ const listOffsets = new Map<string, number>()
 let waitsAtTop = 0
 let firstAtTop = ''
 const topPlaces = new Map<string, number>()
-const topClosed = new Map<string, number>()
-const KEPT_MOST = 10 * 60_000
 const shownAsked = new Map<string, number>()
 const shownKept = new Map<string, number>()
 const shownSigns = new Map<string, string>()
@@ -13601,18 +13599,11 @@ const panelHooks = (on: On) => {
     const waiting2 = (one: Todo) => needsFor(one).filter(need => !need.isActing)
     const waitsOn = (one: Todo) => waiting2(one).length
     const isOpen = (one: Todo) => waitsOn(one) > 0
-    const answeredSince = (one: Todo) => {
-      return heldAnswer(one, at)?.at ?? 0
-    }
-    const answeredPlace = (one: Todo) => (answeredSince(one) ? (sentReplies.get(one.id)?.askAt ?? answeredSince(one)) : 0)
     const placeKey = (one: Todo) => `${one.chat?.host ?? ''}/${one.chat?.id ?? ''}/${one.id}`
-    const isAnyOpen = notices.length > 0 || shownWork.some(isOpen) || listedChats.some(c => shownOf(c).some(isOpen))
-    const isOpenHere = notices.length > otherChats.reduce((n, c) => n + (c.prompts?.length ?? 0), 0) || shownWork.some(isOpen)
-    const isKeptPlace = (one: Todo) => topPlaces.has(placeKey(one)) && (isOpenHere || at - (topClosed.get(placeKey(one)) ?? at) < KEPT_MOST)
-    const isWaits = (one: Todo) => isOpen(one) || answeredSince(one) > 0 || (isAnyOpen && isKeptPlace(one))
+    const isWaits = (one: Todo) => isOpen(one)
     const isKeptUp = (one: Todo) => isWaits(one)
     const cameAt = (one: Todo) => Math.min(...waiting2(one).map(need => need.at), Infinity)
-    const placeOf = (one: Todo) => topPlaces.get(placeKey(one)) ?? (Number.isFinite(cameAt(one)) ? cameAt(one) : answeredPlace(one) || at)
+    const placeOf = (one: Todo) => topPlaces.get(placeKey(one)) ?? (Number.isFinite(cameAt(one)) ? cameAt(one) : at)
     const isFinishing = (one: Todo) => !isWaits(one) && isFinishMoment(one)
     const finishFrom = (one: Todo) => (one.chat ? (endSeen.get(`${one.id}:${one.endedAt}`) ?? one.endedAt) : pauseFrom(one))
     const isLeftUp = (one: Todo) => !one.chat && hasResult(stage(one)) && Boolean(one.bg?.length) && !isWaits(one) && !isFinishing(one)
@@ -13623,26 +13614,17 @@ const panelHooks = (on: On) => {
     const askCards = [...askingHere, ...askingThere]
     if (paneId === LIST) {
       const waitingNow = new Set(askCards.filter(isKeptUp).map(placeKey))
-      for (const one of askCards) {
-        const key = placeKey(one)
-        if (!topPlaces.has(key)) continue
-        if (!isOpen(one)) {
-          if (!topClosed.has(key)) topClosed.set(key, at)
-        } else if (topClosed.has(key)) ((topClosed.get(key) ?? 0) <= cameAt(one) ? topPlaces.set(key, cameAt(one)) : undefined, topClosed.delete(key))
-      }
       for (const one of askCards.filter(isWaits)) if (!topPlaces.has(placeKey(one))) topPlaces.set(placeKey(one), placeOf(one))
-      for (const key of [...topPlaces.keys()]) if (!waitingNow.has(key)) (topPlaces.delete(key), topClosed.delete(key))
+      for (const key of [...topPlaces.keys()]) if (!waitingNow.has(key)) topPlaces.delete(key)
     }
     const restHere = shownWork.filter(one => !isUp(one))
     const isHandedIn = (one: Todo) => stage(one) === 'delivered' || isDoneMoment(one, at)
-    const restFlows = shownFlows.filter(f => !isFlowMoment(f))
+    const restFlows = shownFlows
     const begun = (one: Todo) => one.begunAt ?? one.startedAt
-    const finishingFlows = shownFlows.filter(isFlowMoment)
     const whatOf = (one: Todo) => (waiting2(one)[0] ? `${cut(titleOf(one), 40)}: ${oneLine(waiting2(one)[0]?.text ?? '')}` : '')
     const top = [
       ...notices.map(one => ({ rank: 0, at: one.at, what: one.what, draw: () => one.node })),
-      ...askCards.map(one => (isKeptUp(one) ? { rank: isOpen(one) ? 0 : 0.5, at: placeOf(one), what: isOpen(one) ? whatOf(one) : '', draw: () => small(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: () => small(one) } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: () => small(one) })),
-      ...finishingFlows.map(f => ({ rank: 1, at: -pauseFrom(f), what: '', draw: () => flowSmall(f) })),
+      ...askCards.map(one => (isKeptUp(one) ? { rank: 0, at: placeOf(one), what: whatOf(one), draw: () => small(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: () => small(one) } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: () => small(one) })),
     ].sort((a, b) => a.rank - b.rank || a.at - b.at)
     const waitsCount = notices.length + askCards.reduce((n, one) => n + waitsOn(one), 0)
     keptUpNow = new Set(askCards.filter(isKeptUp).map(one => one.id))
@@ -13665,7 +13647,7 @@ const panelHooks = (on: On) => {
       const was = listOffsets.get(e.surface) ?? 0
       listOffsets.set(e.surface, Math.max(0, e.props.scroll.offset))
       const count = waitsCount
-      const finishedNow = [...askCards.filter(isFinishing).map(titleOf), ...finishingFlows.map(f => f.title)]
+      const finishedNow = askCards.filter(isFinishing).map(titleOf)
       if (finishedNow.join('\n') !== finishedAtTop.join('\n')) ((finishedAtTop = finishedNow), drawAgain($))
       const first = top.find(one => one.rank === 0 && one.what)?.what ?? ''
       if (count !== waitsAtTop || first !== firstAtTop || (was > 0) !== ((listOffsets.get(e.surface) ?? 0) > 0)) ((waitsAtTop = count), (firstAtTop = first), drawAgain($))
@@ -13744,7 +13726,8 @@ const panelHooks = (on: On) => {
               ...(listedChats.length && (restHere.length || restFlows.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
               ...[...restHere.map(one => (isHandedIn(one) ? { rank: 0, at: -one.endedAt, card: () => small(one) } : { rank: 1, at: begun(one), card: () => small(one) })), ...restFlows.map(f => ({ rank: 1, at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.rank - b.rank || a.at - b.at).map(one => one.card()),
               ...listedChats.flatMap(c => {
-                const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => begun(a) - begun(b))
+                const handedIn = (one: Todo) => stageOf(shownOf(c), one) === 'delivered'
+                const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => Number(handedIn(b)) - Number(handedIn(a)) || (handedIn(a) ? b.endedAt - a.endedAt : begun(a) - begun(b)))
                 return cards.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...cards.map(one => small(one))] : []
               }),
             ]}

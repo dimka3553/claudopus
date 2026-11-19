@@ -1299,7 +1299,7 @@ const longList = (at: number, gates: Record<string, number>, asks: Record<string
   })
 const textOrder = async (pane: { findAll: (q: { type: string }) => Promise<{ text?: unknown }[]> }) => (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
 
-test('a work that waits for a press comes to the top whole, its amber block in it, the oldest first with the cards that asked; answered, it goes under all that still waits, and back once nothing does', async ($, on) => {
+test('a work that waits for a press comes to the top whole, its amber block in it, the oldest first with the cards that asked; answered, it goes at once to the place it began in, under all that still waits', async ($, on) => {
   const { files, clock } = world(on)
   await $.session.start(start)
   const at = 1_700_000_000_000
@@ -1321,16 +1321,15 @@ test('a work that waits for a press comes to the top whole, its amber block in i
   expect(first('run step six')).toBeLessThan(first('Card one'))
   const rest = (all: string[]) => all.filter(one => /^Card (one|two|three)$/.test(one))
   expect(rest(texts)).toEqual(['Card one', 'Card two', 'Card three'])
-  // The older gate is answered (in its own chat) while the others still wait: its card goes under them, never above what waits,
-  // and stays up there over the rest
+  // The older gate is answered (in its own chat) while the others still wait: its card goes at once to the place it began in among
+  // the working, never above what waits
   files.set(`${MEMORY}/live/chat-b.json`, longList(at + 6000, { w6: at - 1000 }, { w4: at - 1500 }))
   await clock.advance(5000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'run step five' })) ? undefined : true))).toBe(true)
   const after = await textOrder(list)
   expect(after.indexOf('Card four')).toBeLessThan(after.indexOf('Card six'))
-  expect(after.indexOf('Card six')).toBeLessThan(after.indexOf('Card five'))
-  expect(after.filter(one => /^Card (one|two|three)$/.test(one))).toEqual(['Card one', 'Card two', 'Card three'])
-  expect(after.indexOf('Card five')).toBeLessThan(after.indexOf('Card one'))
+  expect(after.indexOf('Card six')).toBeLessThan(after.indexOf('Card one'))
+  expect(after.filter(one => /^Card (one|two|three|five)$/.test(one))).toEqual(['Card one', 'Card two', 'Card three', 'Card five'])
   // Once nothing waits, the cards go back to where they began
   files.set(`${MEMORY}/live/chat-b.json`, longList(at + 12_000, {}, {}))
   await clock.advance(5000)
@@ -1478,16 +1477,16 @@ const askingFourth = async ($: Parameters<TestBody>[0], on: On, choices?: string
   return { ...w, list, order }
 }
 
-test('Release it on an ended ask leaves its card where it was, saying the answer, and the work started again keeps its place, never the end', async ($, on) => {
+test('Release it on an ended ask takes its card at once to the place its work began in, saying the answer, never the end', async ($, on) => {
   const { list, order, clock, resumed } = await askingFourth($, on, ['Release it'], true)
   const release = ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Release it')
   await list.press({ key: release?.key ?? '' })
   expect(await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('pressed "Release it"')))).toBeDefined()
   expect(await until(async () => list.find({ type: 'Text', text: /You answered “Release it”/ } as never))).toBeDefined()
-  expect(await order()).toEqual(['Piece 4', 'Piece 1', 'Piece 2', 'Piece 3', 'Piece 5'])
-  // A minute on, it takes its own place among the others: where it began, not after them
-  await clock.advance(65_000)
   expect(await until(async () => ((await order())[0] === 'Piece 1' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5'])
+  // and so a minute on
+  await clock.advance(65_000)
   expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5'])
 })
 
@@ -1496,47 +1495,52 @@ const answeredStays = async ($: Parameters<TestBody>[0], on: On, how: 'press' | 
   if (how === 'press') await list.press({ key: ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Go on')?.key ?? '' })
   else await list.input({ key: ((await list.findAll({ type: 'Input' } as never)) as { key?: string }[]).find(one => /-reply-/.test(one.key ?? ''))?.key ?? '', text: 'It is pasted' })
   expect(await until(async () => list.find({ type: 'Text', text: /You answered/ } as never))).toBeDefined()
-  expect(await order()).toEqual(['Piece 4', 'Piece 1', 'Piece 2', 'Piece 3', 'Piece 5'])
-  await clock.advance(30_000)
-  expect((await order())[0]).toBe('Piece 4')
-  // A minute on, it takes its own place among the others
-  await clock.advance(35_000)
   expect(await until(async () => ((await order())[0] === 'Piece 1' ? true : undefined))).toBe(true)
   expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5'])
+  // It says the answer there for a minute
+  await clock.advance(30_000)
+  expect(await list.find({ type: 'Text', text: /You answered/ } as never)).toBeDefined()
+  expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5'])
 }
-test("a press on an ask's own button leaves the card at the top saying the answer for a minute, then in its own place", async ($, on) => answeredStays($, on, 'press'))
-test('an answer sent from an ask\'s box leaves the card at the top saying the answer for a minute, then in its own place', async ($, on) => answeredStays($, on, 'reply'))
-test('answering one of two asks at the top puts the one still waiting first and the answered one under it, for as long as the other still waits; once nothing waits they go back to their places', async ($, on) => {
+test("a press on an ask's own button takes the card at once to its own place among the working, saying the answer", async ($, on) => answeredStays($, on, 'press'))
+test('an answer sent from an ask\'s box takes the card at once to its own place among the working, saying the answer', async ($, on) => answeredStays($, on, 'reply'))
+test('answering one of two asks at the top takes the answered card at once to its own place among the working, under the one still waiting and under what was delivered; asked again, it goes under what already waits', async ($, on) => {
   const { list, order, clock } = await askingFourth($, on, ['Go on'])
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Release piece two?', choices: ['Release it'] } as never)
   await clock.advance(5000)
   // The newer ask goes under the older one, never above it
   expect(await until(async () => ((await order())[1] === 'Piece 2' ? true : undefined))).toBe(true)
   expect(await order()).toEqual(['Piece 4', 'Piece 2', 'Piece 1', 'Piece 3', 'Piece 5'])
-  // The older ask, first at the top, is answered: the one still waiting goes above it at once, while the answered card still says
-  // the answer and holds the space its question took, and stays so under the line its work then writes
+  // Piece 5 hands in its result: delivered, blue, it is under what waits and over what works
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h-a5', agentId: 'a5', message: 'Done.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'turn-a5', reason: 'answer', agentId: 'a5' } as never)
+  await clock.advance(5000)
+  expect(await until(async () => ((await order())[2] === 'Piece 5' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 4', 'Piece 2', 'Piece 5', 'Piece 1', 'Piece 3'])
+  // The older ask, first at the top, is answered: at once the one still waiting is first and the answered card is in its own place
+  // among the working, saying the answer while it holds the space its question took, and under the line its work then writes
   await list.press({ key: ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Go on')?.key ?? '' })
   expect(await until(async () => list.find({ type: 'Text', text: /You answered “Go on”/ } as never))).toBeDefined()
-  expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
+  expect(await until(async () => ((await order())[0] === 'Piece 2' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 2', 'Piece 5', 'Piece 1', 'Piece 3', 'Piece 4'])
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n4', agentId: 'a4', text: 'Now doing the next part' } as never)
   await clock.advance(5000)
-  expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
+  expect(await order()).toEqual(['Piece 2', 'Piece 5', 'Piece 1', 'Piece 3', 'Piece 4'])
   expect(await list.find({ type: 'Text', text: /You answered “Go on”/ } as never)).toBeDefined()
-  // Past its minute, with the other ask still waiting, it stays up under it: nothing moves by itself
   await clock.advance(65_000)
-  expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
+  expect(await order()).toEqual(['Piece 2', 'Piece 5', 'Piece 1', 'Piece 3', 'Piece 4'])
   // It asks again: new, it goes under what already waits
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4b', agentId: 'a4', text: 'And the next part?', choices: ['Yes', 'No'] } as never)
   await clock.advance(1000)
-  expect(await until(async () => ((await order())[0] === 'Piece 2' ? true : undefined))).toBe(true)
-  expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
-  // Both are answered: a minute on, both go back to where they began
+  expect(await until(async () => ((await order())[1] === 'Piece 4' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 5', 'Piece 1', 'Piece 3'])
+  // Both are answered: both go back to where they began
   const labelled = async (label: string) => ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === label)?.key ?? ''
   await list.press({ key: await labelled('Release it') })
   await list.press({ key: await labelled('Yes') })
-  await clock.advance(65_000)
-  expect(await until(async () => ((await order())[0] === 'Piece 1' ? true : undefined))).toBe(true)
-  expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5'])
+  await clock.advance(1000)
+  expect(await until(async () => ((await order())[0] === 'Piece 5' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 5', 'Piece 1', 'Piece 2', 'Piece 3', 'Piece 4'])
 })
 
 // 15 Nov: Allow was pressed and the amber block with its buttons stayed up to a second, until the gate's wait (a one-second
