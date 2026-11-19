@@ -346,6 +346,14 @@ const panelHooks = (on: On) => {
     // The small pictures every ask in this drawing draws, in characters: together they stay under ASK_PICS_CHARS, and in Details under
     // what the app draws in one tab beside the chat's own small pictures; one past that is a row that opens it
     let askChars = 0
+    // The list on the desktop, where a press on a block that just moved under the pointer is held back (markMoved). What each small
+    // card drew of its question's pictures and how many rows of helpers and commands it has, for what stands above the cards under it
+    const isListed = paneId === LIST && e.surface === 'desktop'
+    const picsShown = new Map<string, string[]>()
+    const treeRows = new Map<string, number>()
+    // How many rows a block takes on the small card, and the space held under its grey line once pressed the same (foldRows), so a
+    // press that folds a block moves nothing under it
+    const blockRows = (need: Need) => Math.min(foldRows(need, room), Math.max(4, e.props.scroll.bodyRows))
     const askPictures = (one: Todo, key: string, isWhole: boolean) => {
       const paths = one.ask?.pictures ?? []
       if (!paths.length) return null
@@ -355,6 +363,9 @@ const panelHooks = (on: On) => {
       const canDraw = e.surface !== 'terminal' && 'Svg' in drawing
       // The terminal draws no picture: a row each that opens it, with no small copy made
       const made = canDraw ? askPicturesOf($, one) : paths.map(path => ({ name: fileName(path), path, thumb: null }) as Pic)
+      // (what of them the small card draws, for what stands above its buttons and the cards under it: markMoved)
+      const shownPics: string[] = made ? [] : ['wait']
+      if (!isWhole) picsShown.set(one.id, shownPics)
       if (!made) return <Text key={`${key}-pics`} dimColor>Shrinking its pictures…</Text>
       if (!made.length) return null
       // In Details the chat's own small pictures are drawn too: all of them together stay near what that tab keeps for pictures
@@ -365,6 +376,7 @@ const panelHooks = (on: On) => {
           {made.map((pic, n) => {
             const isDrawn = canDraw && pic.thumb !== null && askChars + pic.thumb.source.length <= most
             if (isDrawn && pic.thumb) askChars += pic.thumb.source.length
+            shownPics.push(isDrawn ? 'p' : 'o')
             const row = `${key}-pic-${n}`
             // Drawn at most ASK_PIC_WIDE across, from a copy up to twice as wide, so two sit side by side on a wide sidebar
             const size = pic.thumb && pic.thumb.width && pic.thumb.height ? sizedAskPic(pic.thumb.width, pic.thumb.height) : undefined
@@ -404,7 +416,7 @@ const panelHooks = (on: On) => {
       const blocks = cardNeeds(one, isWhole).map(need => {
         const isOwnField = Boolean(need.field && need.card)
         const autoFocus = isOwnField && e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : false
-        const node = needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(one, need.id, isWhole) : null, autoFocus })
+        const node = needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(one, need.id, isWhole) : null, autoFocus, isMoving: isListed && !isWhole })
         // (on the small card each block starts at the title's left edge; the grey line is a press, which the app moves in itself)
         return { at: need.at, node: isWhole ? node : <Box key={`lead-${need.id}`} flexDirection="column" paddingLeft={lead}>{node}</Box> }
       })
@@ -486,6 +498,7 @@ const panelHooks = (on: On) => {
       const kept = one.items.filter(item => item.state !== 'dropped')
       const done = kept.filter(item => item.state === 'done').length
       const tree = treeUnder(one)
+      treeRows.set(one.id, tree.length)
       const scope = `card-${one.id}`
       // Just finished, in its moment at the top: outlined in the green of what is done, as an allowed notice is. The outline takes
       // none of the card's room (the app pads a box with a border by 12 by 16 px of its own), so nothing in it moves under the pointer
@@ -1783,7 +1796,7 @@ const panelHooks = (on: On) => {
     // around"). What a task's own command raised is a block on that task's card; what belongs to no card shown here (a box or a
     // prompt of the chat itself, a gate with no card, another chat's prompt) is the same block among the cards
     // (a box that comes while the person types a reply in the terminal leaves the keys with that reply)
-    const notices = looseNeeds($, e.surface, card => Boolean(card && shownIds.has(card)), otherChats, !keysHeldNow()).map(need => ({ at: need.at, what: need.text, node: needBlock($, ui, need, { room, surface: e.surface }) }))
+    const notices = looseNeeds($, e.surface, card => Boolean(card && shownIds.has(card)), otherChats, !keysHeldNow()).map(need => ({ at: need.at, what: need.text, sign: `${need.id}:${blockRows(need)}`, node: needBlock($, ui, need, { room, surface: e.surface }) }))
     // A task that waits on the person comes to the top whole, its blocks in it; once one is answered, one grey line says what was
     // pressed, and the card keeps its place while it says so
     const isAsking = (one: Todo) => Boolean(one.ask) && !isActingOnReply(one)
@@ -1851,11 +1864,46 @@ const panelHooks = (on: On) => {
     // What the first thing waiting on a card asks, under its task's name, for the line above the chat
     const whatOf = (one: Todo) => (waiting2(one)[0] ? `${cut(titleOf(one), 40)}: ${oneLine(waiting2(one)[0]?.text ?? '')}` : '')
     const top = [
-      ...notices.map(one => ({ rank: 0, at: one.at, what: one.what, draw: () => one.node })),
-      ...askCards.map(one => (isKeptUp(one) ? { rank: isOpen(one) ? 0 : 0.5, at: placeOf(one), what: isOpen(one) ? whatOf(one) : '', draw: () => small(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '', draw: () => small(one) } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '', draw: () => small(one) })),
-      ...finishingFlows.map(f => ({ rank: 1, at: -pauseFrom(f), what: '', draw: () => flowSmall(f) })),
+      ...notices.map(one => ({ rank: 0, at: one.at, what: one.what, draw: () => one.node, sign: () => one.sign, card: undefined })),
+      ...askCards.map(one => ({ ...(isKeptUp(one) ? { rank: isOpen(one) ? 0 : 0.5, at: placeOf(one), what: isOpen(one) ? whatOf(one) : '' } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '' } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '' }), draw: () => small(one), sign: () => cardSign(one), card: one })),
+      ...finishingFlows.map(f => ({ rank: 1, at: -pauseFrom(f), what: '', draw: () => flowSmall(f), sign: () => `flow-${f.id}`, card: undefined })),
     ].sort((a, b) => a.rank - b.rank || a.at - b.at)
     const waitsCount = notices.length + askCards.reduce((n, one) => n + waitsOn(one), 0)
+    // What stands above a small card's blocks: its title's rows, what it made, its to-do line, then its blocks, each by its rows, the
+    // space held under a pressed one, and the pictures it draws. A whole card adds what it shows under them too. Of a card's own
+    // blocks, its question's is left out (`isOwn`), pictures and all: that one changing is the question itself, there before the
+    // person's eyes
+    const blocksSign = (one: Todo, isOwn = false) => {
+      const fold = heldFold(one)
+      const isKept = (need: string) => !isOwn || need !== `ask-${one.id}`
+      const rows = [...cardNeeds(one).filter(need => isKept(need.id)).map(need => ({ at: need.at, rows: blockRows(need) })), ...(fold && isKept(fold.need) ? [{ at: fold.came, rows: Math.min(fold.rows, Math.max(4, e.props.scroll.bodyRows)) }] : [])]
+      const made = madeNow($, one)
+      return [one.id, made?.made.length || made?.code ? 'made' : '', one.items.some(item => item.state === 'doing') ? 'doing' : '', rows.sort((a, b) => a.at - b.at).map(block => block.rows).join(','), isOwn ? '' : (picsShown.get(one.id) ?? []).join('')].join(':')
+    }
+    const cardSign = (one: Todo) =>
+      [
+        blocksSign(one),
+        runsShownOn(one, at).length,
+        !heldFold(one) && (!one.ask || isActingOnReply(one)) && sentLine(one, at) ? 'answered' : '',
+        needsPerson(one) ? 0 : looksDelivered(one) ? 1 : 2,
+        treeRows.get(one.id) ?? 0,
+        looksDelivered(one) ? `asks ${one.questions?.length ?? 0}` : '',
+        cardNeeds(one).filter(need => movedPresses.get(need.id) === need.at).length,
+      ].join(':')
+    // The cards at the top, drawn in order, each card with blocks marked with what stands above them (markMoved)
+    const drawTop = () => {
+      const now = new Map<string, string>()
+      // (with the notice of an update above them all, or none)
+      let above = outCard ? 'notice' : ''
+      const nodes = top.map(item => {
+        const node = item.draw()
+        if (item.card && cardNeeds(item.card).length) now.set(item.card.id, `${above}|${blocksSign(item.card, true)}`)
+        above += `|${item.sign()}`
+        return node
+      })
+      if (isListed) markMoved(now, at)
+      return nodes
+    }
     keptUpNow = new Set(askCards.filter(isKeptUp).map(one => one.id))
     // The terminal's keys stay with the ask they were on while it waits
     if (keysAsk && !askingHere.some(one => one.id === keysAsk && isAsking(one))) keysAsk = ''
@@ -1958,7 +2006,7 @@ const panelHooks = (on: On) => {
             ) : null}
           </Box>
         ) : null}
-        {!alone ? top.map(one => one.draw()) : null}
+        {!alone ? drawTop() : null}
         {/* What was pressed on a block that belonged to no task, in one grey line where it was */}
         {!alone ? loosePressedShown(at).map((one, n) => (
           <Box key={`pressed-loose-${n}`} paddingX={2} flexShrink={0}>

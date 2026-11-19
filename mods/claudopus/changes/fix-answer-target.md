@@ -1,0 +1,1 @@
+- A press on a question right after the cards above it moved does nothing, and the question says "This moved as you pressed, so nothing was sent. Press again." Before, the button that slid under your pointer was pressed instead, so an answer in words could go to another task.
