@@ -222,7 +222,7 @@ const panelHooks = (on: On) => {
     // How a workflow's card says it ended; one under way says nothing of its state: the moving dots do
     const stood: Record<Flow['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
     // Work the app sent to an older model says so, and which one; work that answers from one all the same says so
-    const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `Claude Code moved it to ${one.moved}` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
+    const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `It was moved to ${one.moved}` : rightModel(one.model ?? '') ? "Tasks don't run on this model" : '')
     // A card's top row is its facts alone: model, how full, to-dos and time, never its stage, which its colour and the line under
     // it say (18 Nov, the person: "This top row should never say 'waiting for its command'. It should only have context, model,
     // how many to-dos, and time"). Details, whose header is the whole card, still begins with how it ended

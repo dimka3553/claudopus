@@ -11,3 +11,4 @@
 - A helper's result goes only to the task that started it, and no longer appears in the chat.
 - A helper's to-dos stay on its own row, not on its task's list.
 - A row shows a time left only when the command itself prints one.
+- A card's line about its model no longer names Claude Code or Claudopus.

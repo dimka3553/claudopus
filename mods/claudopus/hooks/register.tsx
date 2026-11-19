@@ -11474,7 +11474,7 @@ const panelHooks = (on: On) => {
     const isFinishMoment = (one: Todo) => stage(one) === 'done' && lingers(one, at)
     const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
     const stood: Record<Flow['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
-    const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `Claude Code moved it to ${one.moved}` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
+    const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `It was moved to ${one.moved}` : rightModel(one.model ?? '') ? "Tasks don't run on this model" : '')
     const glance = (one: Todo, count = '', isWhole = false) =>
       [isWhole && stage(one) !== 'working' ? `${STAGE_WORD[stage(one)]}${stage(one) === 'failed' && one.why ? ` · ${one.why}` : ''}` : '', modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     const { picking = '' } = await read($, view)

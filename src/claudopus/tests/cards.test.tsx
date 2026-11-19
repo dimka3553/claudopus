@@ -756,7 +756,7 @@ test('work that answers from an older model all the same says so on its card', a
   for await (const _ of $.turn.step({ turnId: 'turn-2', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect((await keyed(pane, 'model-a1'))?.props.label).toBe('Opus 4.8')
-  expect((await pane.findAll({ type: 'Text' })).map(one => String(one.props.children ?? one.text ?? '')).join('\n')).toContain("Claudopus doesn't run tasks on this model")
+  expect((await pane.findAll({ type: 'Text' })).map(one => String(one.props.children ?? one.text ?? '')).join('\n')).toContain("Tasks don't run on this model")
 })
 
 test('the model a running work is on is pressed and another chosen: its next step runs on it, its card says so at once, and its chat and the work are told', async ($, on) => {
