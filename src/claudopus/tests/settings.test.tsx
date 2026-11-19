@@ -54,16 +54,21 @@ test('Config lists each thing a person can set with what is in force, edits a te
   await pressed(list, 'config-open')
   expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBe('config: Config')
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
-  for (const name of ['Principles', 'Chat rules', 'Task rules', 'Your name', 'Background tasks', 'Sound', 'Notifications', 'Most tasks', 'Clearly stated tasks', 'Heavy tasks'])
+  // What is rarely changed is under More, closed until pressed
+  expect(await config.find({ type: 'Text', text: 'Chat rules' })).toBeUndefined()
+  expect(await moreShown(config)).toBe(true)
+  for (const name of ['Your principles', 'Chat rules', 'Task rules', 'Your name', 'Background tasks', 'When a task ends', 'Most tasks', 'Simple tasks', 'Heavy tasks', 'Busy Mac', 'Admin commands', 'Update checks'])
     expect(await config.find({ type: 'Text', text: name })).toBeDefined()
   // Only what differs from what shipped has a Reset: here the name
   expect((await config.findAll({ type: 'Button' })).filter(one => one.props.label === 'Reset').length).toBe(1)
-  // Open file makes the person's own copy from the shipped text and opens it in their editor
+  // Open file, beside Cancel while editing, makes the person's own copy from the shipped text and opens it in their editor
+  await pressed(config, 'config-text-principles-edit')
   await pressed(config, 'config-text-principles-open')
+  expect(await until(async () => ((await config.find({ type: 'Input', key: 'config-text-principles-input' })) ? undefined : true))).toBe(true)
   expect(files.get(`${MEMORY}/rules/CLAUDE.md`)).toBe(PRINCIPLES)
   expect(shown.at(-1)).toEqual(['open', '-t', `${MEMORY}/rules/CLAUDE.md`])
   // A copy still the same as what shipped is no change of theirs
-  expect((await config.findAll({ type: 'Text', text: /The default\.$/ })).length).toBe(3)
+  expect(await config.find({ type: 'Text', text: /You changed it/ })).toBeUndefined()
   // Edit opens the text in the tab; Save makes it the person's own
   await pressed(config, 'config-text-work-edit')
   await config.input({ key: 'config-text-work-input', text: 'MY WORK RULES' })
@@ -75,11 +80,14 @@ test('Config lists each thing a person can set with what is in force, edits a te
   await pressed(config, 'config-text-work-back')
   expect(files.has(`${MEMORY}/roles/work.md`)).toBe(false)
   expect([...files.entries()].find(([path]) => /\/roles\/work\.md\.\d{8}-\d{6}\.old$/.test(path))?.[1]).toBe('MY WORK RULES\n')
-  expect((await config.findAll({ type: 'Text', text: /The default\.$/ })).length).toBe(3)
-  // A setting is written to config.json, every other key kept; Reset takes the key out
-  await pressed(config, 'config-sound-off')
+  expect(await config.find({ type: 'Text', text: /You changed it/ })).toBeUndefined()
+  // A setting is written to config.json, every other key kept; Reset takes the key out. When a task ends is the two keys
+  await config.select({ key: 'config-alerts-pick', value: 'notice' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, sound: false })
-  await pressed(config, 'config-sound-back')
+  await config.select({ key: 'config-alerts-pick', value: 'none' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, sound: false, notifications: false })
+  expect((await until(async () => config.find({ type: 'Select', key: 'config-alerts-pick' } as never)))?.props.value).toBe('none')
+  await pressed(config, 'config-alerts-back')
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1 })
   // Nothing in Config turns on updates that install by themselves, nor keeps an admin password
   expect(await config.find({ type: 'Text', text: 'Automatic updates' })).toBeUndefined()
@@ -96,7 +104,7 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   await config.select({ key: 'config-model-legwork-pick', value: 'opus' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ models: { legwork: 'opus' } })
-  expect(await config.find({ type: 'Text', text: /A change to the rules, the models or the second check reaches new chats and new tasks; open ones keep what they started with\./ })).toBeDefined()
+  expect(await config.find({ type: 'Text', text: 'Changes reach new chats and new tasks. Reset puts one back to the default.' })).toBeDefined()
   // The chat is told with its first message, and the work's rules name the helpers' model
   const told = (await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })) as { context?: string[] }
   expect((told.context ?? []).join('\n')).toContain('A clearly stated job, and long legwork such as indexing, runs on Opus 5.5, `model: "opus"`.')
@@ -116,17 +124,16 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   expect(((await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })) as { context?: string[] }).context?.join('\n')).toContain('long legwork such as indexing, runs on Sonnet 5.5')
 })
 
-test("Config's Tasks band shows only when Fable runs and when a second agent checks, each with its shipped choice, and a choice is written as lean in config.json; the choices of how work is handed out and of who does a short request are gone, and a saved one goes at the next save", async ($, on) => {
+test("Config's Tasks band shows the second check with its shipped choice, written as lean in config.json, and when Fable runs as the Heavy tasks model; the choices of how work is handed out and of who does a short request are gone, and a saved one goes at the next save", async ($, on) => {
   const { files } = world(on)
   // (a choice of 0.2.201 to 0.2.205's, still in the file)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ lean: { chat: 'itself' } }))
   await $.session.start(start)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   const settings: [string, string, string, string][] = [
-    ['fable', 'Fable 5.2 tasks', 'heavy', 'named'],
     ['second', 'Second check', 'asked', 'every'],
   ]
-  for (const [key, name] of [['chat', 'Short requests'], ['small', 'Small jobs'], ['quick', 'Quick task model'], ['start', 'What a task starts with'], ['checker', 'Checker model'], ['readers', 'Helpers that only read']])
+  for (const [key, name] of [['fable', 'Fable 5.2 tasks'], ['chat', 'Short requests'], ['small', 'Small jobs'], ['quick', 'Quick task model'], ['start', 'What a task starts with'], ['checker', 'Checker model'], ['readers', 'Helpers that only read']])
     expect([name, Boolean(await config.find({ type: 'Text', text: name })), Boolean(await config.find({ type: 'Select', key: `config-lean-${key}-pick` } as never))]).toEqual([name, false, false])
   for (const [key, name, shipped, other] of settings) {
     expect([name, Boolean(await config.find({ type: 'Text', text: name }))]).toEqual([name, true])
@@ -138,6 +145,22 @@ test("Config's Tasks band shows only when Fable runs and when a second agent che
     await config.select({ key: `config-lean-${key}-pick`, value: shipped })
     expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
   }
+  // Heavy tasks' Same as most tasks keeps Fable for when the person names it, and a model picked there takes that out
+  const heavy = async () => (await until(async () => config.find({ type: 'Select', key: 'config-model-heavy-pick' } as never)))?.props.value
+  expect(await heavy()).toBe('fable')
+  await config.select({ key: 'config-model-heavy-pick', value: 'same' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ lean: { fable: 'named' } })
+  expect(await until(async () => ((await heavy()) === 'same' ? 'same' : undefined))).toBe('same')
+  await config.select({ key: 'config-model-heavy-pick', value: 'opus' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ models: { heavy: 'opus' } })
+  await pressed(config, 'config-model-heavy-back')
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
+  // Fable for every task, which only an older Config wrote, shows as Most tasks on Fable, and stays so when another model is picked
+  ownSet(files, 'config.json', JSON.stringify({ lean: { fable: 'all' } }))
+  await config.redraw()
+  expect((await until(async () => config.find({ type: 'Select', key: 'config-model-work-pick' } as never)))?.props.value).toBe('fable')
+  await config.select({ key: 'config-model-legwork-pick', value: 'opus' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ models: { work: 'fable', legwork: 'opus' } })
 })
 
 test('Check now in Config only looks: it shows it is checking, then what it found, and a second press meanwhile starts no second look; nothing is fetched or moved until Update, pressed right there in Config', async ($, on) => {
@@ -159,7 +182,8 @@ test('Check now in Config only looks: it shows it is checking, then what it foun
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   expect(await until(() => config.find({ type: 'Text', text: 'This chat runs v0.1.0' }))).toBeDefined()
   // Where it loads from, said as it is
-  expect(await until(() => config.find({ type: 'Text', text: /^It runs from the released code on this Mac\. Not checked yet\.$/ }))).toBeDefined()
+  expect(await until(() => config.find({ type: 'Text', text: /^It runs from the released code on this Mac\. Claudopus looks every hour\.$/ }))).toBeDefined()
+  expect(await config.find({ type: 'Text', text: 'Not checked yet' })).toBeDefined()
   await pressed(config, 'config-check')
   expect(await until(() => config.find({ type: 'Text', text: 'Checking…' }))).toBeDefined()
   expect((await config.findAll({ type: 'Button' })).some(one => one.props.label === 'Check now')).toBe(false)
@@ -190,7 +214,8 @@ test('Check now in Config only looks: it shows it is checking, then what it foun
   release()
   const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check: the version page doesn't say how to check the download/ }))
   expect(failed?.props.color).toBe('error')
-  // How often: one choice, written as the two keys; Only when I ask is updates false
+  // How often, under More: one choice, written as the two keys; Only when I ask is updates false
+  expect(await moreShown(config)).toBe(true)
   await config.select({ key: 'config-look-pick', value: '24' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toMatchObject({ updateEvery: 24 })
   await config.select({ key: 'config-look-pick', value: '0' })

@@ -726,6 +726,11 @@ const until = async <T,>(look: () => Promise<T | undefined>) => {
     await new Promise<void>(resolve => setTimeout(() => resolve(), 5))
   }
 }
+// Config's More opened, where it is closed
+const moreShown = async (pane: Parameters<typeof pressed>[0]) => {
+  if (await keyed(pane, 'config-more-show')) await pressed(pane, 'config-more-show')
+  return until(async () => ((await keyed(pane, 'config-more-hide')) ? true : undefined))
+}
 
 // ---- Set-ups more than one area uses ----
 

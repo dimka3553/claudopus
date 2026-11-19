@@ -733,6 +733,11 @@ const until = async <T,>(look: () => Promise<T | undefined>) => {
     await new Promise<void>(resolve => setTimeout(() => resolve(), 5))
   }
 }
+// Config's More opened, where it is closed
+const moreShown = async (pane: Parameters<typeof pressed>[0]) => {
+  if (await keyed(pane, 'config-more-show')) await pressed(pane, 'config-more-show')
+  return until(async () => ((await keyed(pane, 'config-more-hide')) ? true : undefined))
+}
 
 // ---- Set-ups more than one area uses ----
 
@@ -1129,7 +1134,7 @@ test('F-021 · what a chat or work is told, the gate and a Config press read the
   await pressed(list, 'config-open')
   expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBeDefined()
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 80 }, surface: 'desktop' } as never)
-  await pressed(config, 'config-sound-off')
+  await config.select({ key: 'config-alerts-pick', value: 'notice' })
   expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').sound === false ? true : undefined))).toBe(true)
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', sound: false })
 })
@@ -1143,7 +1148,7 @@ test('F-021 · an old kept copy put back with the old file is not taken by a cha
   await bash('o0', 'ls')
   const old = [files.get(`${MEMORY}/admin-known.json`) ?? '', files.get(config) ?? '']
   const pane = await (async () => (await pressed(list, 'config-open'), $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 80 }, surface: 'desktop' } as never)))()
-  await pressed(pane, 'config-sound-off')
+  await pane.select({ key: 'config-alerts-pick', value: 'notice' })
   expect(await until(async () => (JSON.parse(files.get(config) ?? '{}').sound === false ? true : undefined))).toBe(true)
   // Both put back later: the old seal was made under a key that is gone, so the settings as last set stay
   files.set(`${MEMORY}/admin-known.json`, old[0] ?? '')

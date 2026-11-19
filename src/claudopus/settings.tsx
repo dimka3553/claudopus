@@ -195,7 +195,12 @@ const configAct = ($: EngineInterface, what: string, act: () => Promise<string |
     })
 }
 const configActs = ($: EngineInterface) => ({
-  open: (text: (typeof TEXTS)[number]) => configAct($, `Couldn't open ${text.name}`, () => editText($, $.plugin.root, dir, text.path)),
+  // Open file, beside Cancel while a text is edited in the tab: the edit there is left, and the person's own copy opens in their editor
+  open: (text: (typeof TEXTS)[number]) =>
+    configAct($, `Couldn't open ${text.name}`, async () => {
+      Object.assign(editing, { key: '', draft: '' })
+      return editText($, $.plugin.root, dir, text.path)
+    }),
   // Edit opens the text in the tab itself; Save makes it the person's own copy
   edit: (text: (typeof TEXTS)[number], body: string) => configAct($, '', async () => void Object.assign(editing, { key: text.key, draft: body })),
   save: (text: (typeof TEXTS)[number], body: string) =>
@@ -210,6 +215,28 @@ const configActs = ($: EngineInterface) => ({
     configAct($, "Couldn't save the setting", async () => {
       await setConfig($, dir, key, value, role)
     }),
+  // A model as Config shows it: Same as most tasks for heavy work is Fable kept for when the person names it (lean.fable "named"), and
+  // any model picked turns an older Config's Fable for every task (lean.fable "all") into Most tasks on Fable, so what runs stays
+  model: (role: Role, value: string) =>
+    configAct($, "Couldn't save the setting", async () => {
+      const fable = leanOf(await readConfig($, dir)).fable
+      const shipped = (one: Role) => ROLES.find(r => r.key === one)?.shipped
+      if (fable === 'all' && role !== 'work') await setConfig($, dir, 'models', 'fable' === shipped('work') ? undefined : 'fable', 'work')
+      if (role === 'heavy' && value === SAME) {
+        await setConfig($, dir, 'models', undefined, 'heavy')
+        return setConfig($, dir, 'lean', 'named', 'fable')
+      }
+      await setConfig($, dir, 'models', value === shipped(role) ? undefined : value, role)
+      if (fable === 'all' || (fable === 'named' && role === 'heavy')) await setConfig($, dir, 'lean', undefined, 'fable')
+    }),
+  // When a task ends: one choice, written as the two keys, each on as shipped
+  alerts: (value: (typeof ALERTS)[number]['value']) =>
+    configAct($, "Couldn't save the setting", async () => {
+      const one = ALERTS.find(a => a.value === value) ?? ALERTS[0]
+      await setConfig($, dir, 'sound', one.sound ? undefined : false)
+      await setConfig($, dir, 'notifications', one.notifications ? undefined : false)
+    }),
+  more: (isOpen: boolean) => configAct($, '', async () => void (configMore.isOpen = isOpen)),
   // Admin commands: each choice is sealed as it is made, and one that takes something back makes every earlier seal void
   gateMode: (mode: 'each' | 'work' | 'never') => configAct($, "Couldn't save the setting", () => regate($, { mode })),
   gateRemove: (host: string, command: string) => configAct($, "Couldn't remove the command", () => regate($, { remove: { host, command } })),

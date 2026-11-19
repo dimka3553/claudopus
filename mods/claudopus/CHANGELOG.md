@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.215 · 19 November 2026
+- Config is shorter: your name, your principles, when a task ends, the models, the second check and updates are in sight, and what you rarely change is under More.
+- Sound and Notifications are one choice, When a task ends: sound and notification, notification only, sound only, or nothing.
+- Fable 5.2 tasks is gone: Heavy tasks has Same as most tasks, which keeps Fable 5.2 for when you name it, and Most tasks can be Fable 5.2. Your saved choices still count.
+- Admin commands and the commands you always allow are one row, and Open file is beside Cancel once you press Edit.
+
 ## 0.2.214 · 19 November 2026
 - Mark as done takes the card's buttons away the moment you press it, so you can't press them twice; the card keeps its size through its green moment, so nothing moves under the pointer.
 
