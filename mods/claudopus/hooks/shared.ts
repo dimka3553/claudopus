@@ -40,7 +40,7 @@ export const shareable = (list: readonly Todo[], now = 0): Todo[] =>
       ...one,
       words: one.words.slice(0, WORDS_SHARED),
       items: one.items.slice(-ITEMS_SHARED),
-      entries: [...one.entries].reverse().filter(entry => entry.kind !== 'steer').slice(0, 1),
+      entries: [...one.entries].reverse().filter(entry => entry.kind !== 'steer' && entry.kind !== 'event').slice(0, 1),
       answer: upTo(one.answer, ANSWER_SHARED),
     }))
 // The helpers under the work a chat shares, however deep, cut as their work is: another chat's Details lists them, and opens each
@@ -60,7 +60,7 @@ export const shareableHelpers = (list: readonly Todo[], shared: readonly Todo[])
     // Those at work first, so a busy chat never drops a running helper behind ended ones
     .sort((a, b) => Number(b.status === 'working') - Number(a.status === 'working') || b.startedAt - a.startedAt)
     .slice(0, HELPERS_SHARED)
-    .map(one => ({ ...one, words: '', items: one.items.slice(-HELPER_ITEMS), entries: [...one.entries].reverse().filter(entry => entry.kind !== 'steer').slice(0, 1), answer: upTo(one.answer, ANSWER_SHARED / 2) }))
+    .map(one => ({ ...one, words: '', items: one.items.slice(-HELPER_ITEMS), entries: [...one.entries].reverse().filter(entry => entry.kind !== 'steer' && entry.kind !== 'event').slice(0, 1), answer: upTo(one.answer, ANSWER_SHARED / 2) }))
 }
 
 // What tells one shared state from another, the running times aside: a file is written again when it changes or its beat is due

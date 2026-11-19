@@ -48,6 +48,27 @@ const offeredRun = (one: Todo) => {
 }
 // The runs on a card under way, and those ended whose output is kept for their task's next step
 const runningOn = (card: string) => runList.filter(run => run.card === card && run.startedAt && (!run.endedAt || Boolean(run.waiting)))
+// How long a run's end stays one grey line where it ran, unless its task writes a line of its own first: after that its end is
+// the ended row under the card and in Details
+const RUN_END_SHOWN = 60_000
+// The runs said on a card: those running or kept, and one that ended just now
+const runsShownOn = (one: Todo, at: number) => [...runningOn(one.id), ...runList.filter(run => run.card === one.id && run.startedAt && run.endedAt && !run.waiting && at - run.endedAt < RUN_END_SHOWN && (ownNote(one)?.at ?? 0) <= run.endedAt)]
+// How a run the person allowed ended, in the card's own words: its grey line for a while, never the task's line (19 Nov)
+const endedSaid = (run: PressRun, what = 'your command') => {
+  const ran = took((run.endedAt ?? 0) - (run.startedAt ?? run.endedAt ?? 0))
+  const What = what.charAt(0).toUpperCase() + what.slice(1)
+  if (!run.log) return `${What} didn't start`
+  return { exited: run.exit === 0 ? `${What} ended after ${ran}` : `${What} failed after ${ran}`, limit: `${What} was stopped at its limit of ${limitText(run.limitMs)}`, stopped: `You stopped ${what} after ${ran}`, lost: `${What} stopped after ${ran}` }[run.end ?? 'lost']
+}
+// An allowed run that ended is a row of the card's ended commands, as one of the task's own is: its words, how it ended, its log
+const keepRunEnded = async ($: EngineInterface, run: PressRun, why?: string) => {
+  const kept = runList.find(one => isSameRun(one, run)) ?? run
+  if (!kept.endedAt) return
+  const how = ({ exited: kept.exit === 0 ? 'finished' : 'failed', limit: 'timed out', stopped: 'stopped', lost: why ? 'failed' : 'ended' } as const)[kept.end ?? 'lost']
+  const ended: EndedRun = { id: `press-${kept.askAt}`, what: kept.description || 'Your command', at: kept.startedAt ?? kept.endedAt, endedAt: kept.endedAt, how, cmd: kept.command, ...(kept.exit !== undefined && kept.exit !== 0 ? { code: String(kept.exit) } : {}), ...(why ? { why } : {}), ...(kept.log ? { file: kept.log } : {}) }
+  await changeTodos($, list => list.map(card => (card.id === kept.card ? { ...card, ...keepEnded(card, [ended]) } : card)))
+  redraw($)
+}
 // The ones the person stopped, for this load (the stop is also written in its output)
 const runStopped = new Set<string>()
 const runKey = (run: Pick<PressRun, 'card' | 'askAt'>) => `${run.card}:${run.askAt}`
@@ -112,7 +133,7 @@ const startRun = async ($: EngineInterface, one: Todo, run: PressRun): Promise<s
     const why = cut(oneLine(r.stderr), 100) || 'no reason given'
     await log($, `run of the refused command for ${one.id} not started: ${why}`)
     await saveRuns($, list => list.map(other => (isSameRun(other, run) ? { ...other, startedAt: at, endedAt: at, end: 'lost' as const } : other)))
-    await stepLine($, one.id, `Your command didn't start (${why})`)
+    await keepRunEnded($, run, why)
     return named(`{Name} pressed "${ALLOW}" on your card for the command Claude Code refused, but it could not be started (${why}), so it did not run. What Claude Code refused stays refused: do not do it yourself. Carry on without it, and say in your report what was left out.`)
   }
   await saveRuns($, list => list.map(other => (isSameRun(other, run) ? { ...other, startedAt: at, log: logFile, pid } : other)))
@@ -215,18 +236,17 @@ const endRun = async ($: EngineInterface, run: PressRun, end: NonNullable<PressR
   const text = named(
     `{Name} pressed "${ALLOW}" on your card for the command Claude Code refused, and it ran for them, exactly as shown, once, as their own, in ${run.cwd}:\n${run.command}\nIt ${how}. Its whole output is in ${run.log}; ${tail ? `its last lines:\n${tail}` : 'it printed nothing.'}\nThat ran on {name}'s own press, as theirs: it is no permission. Claude Code still decides each call of yours, so do not run it, or another way to the same end, yourself. Use what it printed; if you need it run again, ask {name} with the command.`,
   )
-  const sent = await deliverRun($, run.card, run.from || run.card, run, text)
-  // (said to the person in the card's own words: the task is told the exit code above)
-  const ended = { exited: exit === 0 ? `Your command ended after ${ran}` : `Your command failed after ${ran}`, limit: `Your command was stopped at its limit of ${limitText(run.limitMs)}`, stopped: `You stopped your command after ${ran}`, lost: `Your command stopped after ${ran}` }[end]
-  // (an output kept for the task's next step is said by the card's grey line for it: runBlock)
-  const said = { sent: '', waits: '', held: ` · its output is in ${run.log ?? 'its output file'}` }[sent]
-  await stepLine($, run.card, `${ended}${said}`)
+  await deliverRun($, run.card, run.from || run.card, run, text)
+  // Said to the person where commands are: a row of the card's ended ones, with its log, and a grey line for a while where it ran
+  // (runBlock), never on the line that says what the task does now (19 Nov). An output kept for the task's next step is said by
+  // the card's grey line for it
+  await keepRunEnded($, run)
 }
 
 // While it runs: one quiet line, how long it has run, and Stop; the command itself is not shown again, the person saw it before
 // pressing (17 Nov). Once it has ended with its task not at a step: one grey line that its output is kept for the task's next step
 const runBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number) => {
-  const list = one.chat ? [] : runningOn(one.id)
+  const list = one.chat ? [] : runsShownOn(one, at)
   if (!list.length) return null
   return (
     <ui.Box key={key} flexDirection="column">
@@ -234,7 +254,7 @@ const runBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number
         const isStopping = runStopped.has(runKey(run))
         const isEnded = Boolean(run.endedAt)
         const what = list.length > 1 && run.description ? `“${cut(run.description, 60)}”` : 'your command'
-        const said = isEnded ? (what === 'your command' ? "Your command's output is kept for the task's next step" : `${what} · its output is kept for the task's next step`) : isStopping ? `Stopping ${what}` : `Running ${what}`
+        const said = isEnded && !run.waiting ? endedSaid(run, what) : isEnded ? (what === 'your command' ? "Your command's output is kept for the task's next step" : `${what} · its output is kept for the task's next step`) : isStopping ? `Stopping ${what}` : `Running ${what}`
         return (
           <ui.Box key={`${key}-${run.askAt}`} flexDirection="row" gap={1} height={1} overflow="hidden">
             <ui.Box flexDirection="row" flexShrink={1} minWidth={0} height={1} overflow="hidden">

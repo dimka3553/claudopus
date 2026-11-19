@@ -57,7 +57,7 @@ const SAID_CHARS = 8000
 const TOLD_CHARS = 300
 const STEP_CHARS = 160
 const FILL = '#80808024'
-const OUTLINE = 0.15
+const OUTLINE = 0.1
 const squareOutline = (Box: Ui['Box'], color: string | undefined, key: string, card: JSX.Element) =>
   color ? (
     <Box key={`outline-${key}`} flexDirection="column" flexShrink={0}>
@@ -937,6 +937,9 @@ const STOPPED_EARLIER = (titles: string[]) =>
   `{Name} stopped ${titles.length === 1 ? 'this' : 'these'} earlier with Stop on ${titles.length === 1 ? 'its card' : 'their cards'}: ${titles.join('; ')}. Start ${titles.length === 1 ? 'it' : 'one'} again, message it or start the same task afresh only if this message asks for that.`
 const OWED_AFTER = 2
 const QUIET_STEPS = 12
+const NOTE_STALE = 3 * 60_000
+const unnoted = (mins: number, last: string) =>
+  `${last ? `Your card has said "${cut(oneLine(last), 80)}" for ${minutesSaid(mins)}, while you have gone on working` : `Your card has not yet said what you are doing, ${minutesSaid(mins)} in`}: that line is how {name} sees what you are doing right now. In your next step, send a \`note\` saying in one plain line what you are doing now, together with your next working call in that same step, never in a step of its own.`
 const ASKS_SYSTEM = `You log one exchange of a chat between a user and an AI coding assistant. The user dictates, so messages ramble. Reply in plain lines and nothing else.
 First, one line per distinct thing the user asked for in this message, asides included. Each starts with "- ", has at most 20 words, and uses the user's words where short. A bare approval (yes, continue, push) is not a request: write no line for it. With no user message there are no such lines.
 Then, when the reply reports a result, a finding or a decision, one line "did: <what was done or found, in at most 25 words, with the names and numbers that matter>". A reply that only acknowledges gets no such line.
@@ -1230,6 +1233,7 @@ const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, be
 const stoppedAs = (one: Todo): Todo['status'] => (hasReport(one) ? 'done' : 'stopped')
 const handedBack = new Map<string, string>()
 const stoppedHere = new Set<string>()
+const noteAsked = new Map<string, number>()
 const isHeld = (one: Todo | undefined) => Boolean(one?.byYou && !one.byYou.isLifted)
 const taskWords = (text: string) => new Set((text.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter(word => word.length > 2 && !['the', 'and', 'for', 'with', 'from', 'that', 'this'].includes(word)))
 const isSameTask = (held: Todo, title: string, prompt: string) => {
@@ -1883,7 +1887,7 @@ const withSteers = (lines: Line[], entries: Entry[]): Line[] => {
       from = Math.max(from, at + 1)
       return
     }
-    const later = entries.slice(i + 1).filter(one => one.kind !== 'steer').map(one => one.text)
+    const later = entries.slice(i + 1).filter(isOwnEntry).map(one => one.text)
     let at = all.findIndex((line, n) => n >= from && line.kind === 'said' && later.includes(oneLine(line.text).slice(0, NOTE_CHARS)))
     while (at > from && isTool(all[at - 1]?.tool, 'todo')) at -= 1
     all.splice(at < 0 ? all.length : at, 0, { kind: 'steer', text, isWaiting: later.length === 0 })
@@ -5746,7 +5750,7 @@ const readDrafts = async ($: EngineInterface) => {
   if (live.length !== Object.keys(kept).length) await update($, draftsKept, () => Object.fromEntries(live))
 }
 type Sent = { text: string; ask: string; details?: string; to: 'sending' | 'work' | 'read' | 'chat' | 'pressed' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; isPress?: boolean; said?: string; whole?: string; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
-const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
+const lineOf = (one: Todo) => { const last = ownNote(one); return last ? `${last.at}:${last.text}` : '' }
 const ANSWER_SHOWN = 60_000
 const ASK_TEXT = 300
 const ASK_DETAILS = 12_000
@@ -8209,6 +8213,22 @@ const offeredRun = (one: Todo) => {
   return runList.find(run => isSameRun(run, { card: one.id, askAt: ask.at }) && run.command === ask.copy && !run.startedAt)
 }
 const runningOn = (card: string) => runList.filter(run => run.card === card && run.startedAt && (!run.endedAt || Boolean(run.waiting)))
+const RUN_END_SHOWN = 60_000
+const runsShownOn = (one: Todo, at: number) => [...runningOn(one.id), ...runList.filter(run => run.card === one.id && run.startedAt && run.endedAt && !run.waiting && at - run.endedAt < RUN_END_SHOWN && (ownNote(one)?.at ?? 0) <= run.endedAt)]
+const endedSaid = (run: PressRun, what = 'your command') => {
+  const ran = took((run.endedAt ?? 0) - (run.startedAt ?? run.endedAt ?? 0))
+  const What = what.charAt(0).toUpperCase() + what.slice(1)
+  if (!run.log) return `${What} didn't start`
+  return { exited: run.exit === 0 ? `${What} ended after ${ran}` : `${What} failed after ${ran}`, limit: `${What} was stopped at its limit of ${limitText(run.limitMs)}`, stopped: `You stopped ${what} after ${ran}`, lost: `${What} stopped after ${ran}` }[run.end ?? 'lost']
+}
+const keepRunEnded = async ($: EngineInterface, run: PressRun, why?: string) => {
+  const kept = runList.find(one => isSameRun(one, run)) ?? run
+  if (!kept.endedAt) return
+  const how = ({ exited: kept.exit === 0 ? 'finished' : 'failed', limit: 'timed out', stopped: 'stopped', lost: why ? 'failed' : 'ended' } as const)[kept.end ?? 'lost']
+  const ended: EndedRun = { id: `press-${kept.askAt}`, what: kept.description || 'Your command', at: kept.startedAt ?? kept.endedAt, endedAt: kept.endedAt, how, cmd: kept.command, ...(kept.exit !== undefined && kept.exit !== 0 ? { code: String(kept.exit) } : {}), ...(why ? { why } : {}), ...(kept.log ? { file: kept.log } : {}) }
+  await changeTodos($, list => list.map(card => (card.id === kept.card ? { ...card, ...keepEnded(card, [ended]) } : card)))
+  redraw($)
+}
 const runStopped = new Set<string>()
 const runKey = (run: Pick<PressRun, 'card' | 'askAt'>) => `${run.card}:${run.askAt}`
 const runPressed = new Set<string>()
@@ -8261,7 +8281,7 @@ const startRun = async ($: EngineInterface, one: Todo, run: PressRun): Promise<s
     const why = cut(oneLine(r.stderr), 100) || 'no reason given'
     await log($, `run of the refused command for ${one.id} not started: ${why}`)
     await saveRuns($, list => list.map(other => (isSameRun(other, run) ? { ...other, startedAt: at, endedAt: at, end: 'lost' as const } : other)))
-    await stepLine($, one.id, `Your command didn't start (${why})`)
+    await keepRunEnded($, run, why)
     return named(`{Name} pressed "${ALLOW}" on your card for the command Claude Code refused, but it could not be started (${why}), so it did not run. What Claude Code refused stays refused: do not do it yourself. Carry on without it, and say in your report what was left out.`)
   }
   await saveRuns($, list => list.map(other => (isSameRun(other, run) ? { ...other, startedAt: at, log: logFile, pid } : other)))
@@ -8352,14 +8372,12 @@ const endRun = async ($: EngineInterface, run: PressRun, end: NonNullable<PressR
   const text = named(
     `{Name} pressed "${ALLOW}" on your card for the command Claude Code refused, and it ran for them, exactly as shown, once, as their own, in ${run.cwd}:\n${run.command}\nIt ${how}. Its whole output is in ${run.log}; ${tail ? `its last lines:\n${tail}` : 'it printed nothing.'}\nThat ran on {name}'s own press, as theirs: it is no permission. Claude Code still decides each call of yours, so do not run it, or another way to the same end, yourself. Use what it printed; if you need it run again, ask {name} with the command.`,
   )
-  const sent = await deliverRun($, run.card, run.from || run.card, run, text)
-  const ended = { exited: exit === 0 ? `Your command ended after ${ran}` : `Your command failed after ${ran}`, limit: `Your command was stopped at its limit of ${limitText(run.limitMs)}`, stopped: `You stopped your command after ${ran}`, lost: `Your command stopped after ${ran}` }[end]
-  const said = { sent: '', waits: '', held: ` · its output is in ${run.log ?? 'its output file'}` }[sent]
-  await stepLine($, run.card, `${ended}${said}`)
+  await deliverRun($, run.card, run.from || run.card, run, text)
+  await keepRunEnded($, run)
 }
 
 const runBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number) => {
-  const list = one.chat ? [] : runningOn(one.id)
+  const list = one.chat ? [] : runsShownOn(one, at)
   if (!list.length) return null
   return (
     <ui.Box key={key} flexDirection="column">
@@ -8367,7 +8385,7 @@ const runBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number
         const isStopping = runStopped.has(runKey(run))
         const isEnded = Boolean(run.endedAt)
         const what = list.length > 1 && run.description ? `“${cut(run.description, 60)}”` : 'your command'
-        const said = isEnded ? (what === 'your command' ? "Your command's output is kept for the task's next step" : `${what} · its output is kept for the task's next step`) : isStopping ? `Stopping ${what}` : `Running ${what}`
+        const said = isEnded && !run.waiting ? endedSaid(run, what) : isEnded ? (what === 'your command' ? "Your command's output is kept for the task's next step" : `${what} · its output is kept for the task's next step`) : isStopping ? `Stopping ${what}` : `Running ${what}`
         return (
           <ui.Box key={`${key}-${run.askAt}`} flexDirection="row" gap={1} height={1} overflow="hidden">
             <ui.Box flexDirection="row" flexShrink={1} minWidth={0} height={1} overflow="hidden">
@@ -8638,9 +8656,11 @@ const isQuietTurn = (text: string, quiet: ReadonlySet<string>) => {
 
 const stepLine = async ($: EngineInterface, id: string, text: string) => {
   const at = await $.clock.now()
-  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, entries: [...card.entries, { at, kind: 'note' as const, text }].slice(-ENTRIES_KEPT) } : card)))
+  await changeTodos($, list => list.map(card => (card.id === id ? { ...card, entries: [...card.entries, { at, kind: 'event' as const, text }].slice(-ENTRIES_KEPT) } : card)))
   redraw($)
 }
+const isOwnEntry = (entry: Entry) => entry.kind === 'note' || entry.kind === 'decision'
+const ownNote = (one: Pick<Todo, 'entries'>) => [...one.entries].reverse().find(entry => isOwnEntry(entry) && entry.text)
 
 
 type NeedKind = 'permission' | 'question' | 'password' | 'key'
@@ -8858,7 +8878,7 @@ const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boo
   const copyButton = one && ask?.copy && !ask.refused ? <ui.Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} /> : null
   const terminalButton = one && ask && !ask.refused && canOpenTerminal(one) ? <ui.Button key={`${need.id}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Typed, not run yet' : 'Open in Terminal'} plain onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} /> : null
   return squareOutline(ui.Box, opts.isCompact ? undefined : need.isActing ? LIVE : NEEDS, `need-outline-${need.id}`, (
-    <ui.Box key={`need-${need.id}`} flexDirection="column" flexShrink={0} {...(opts.isCompact ? {} : { gap: 1, paddingX: 1 })}>
+    <ui.Box key={`need-${need.id}`} flexDirection="column" flexShrink={0} {...(opts.isCompact ? {} : { gap: 1, paddingX: 1, paddingY: 1 })}>
       <ui.Text dimColor wrap="truncate-end">{`${NEED_LABEL[need.kind]}${need.from ? ` · ${need.from}` : ''}`}</ui.Text>
       {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
       <ui.Text wrap="wrap" color={need.isActing ? LIVE : NEEDS} bold>{withLinks(Link, isWhole ? need.text : cut(need.text, Math.round(room * 1.6)), `${need.id}-text`, need.text)}</ui.Text>
@@ -9436,7 +9456,7 @@ const callWords = (tool: string, input?: { description?: unknown; command?: unkn
 }
 const helperNow = (one: Todo, at: number, commands = 0, most = 200) => {
   const call = lastCall.get(one.id)
-  const note = [...one.entries].reverse().find(entry => entry.kind !== 'steer' && entry.text)
+  const note = ownNote(one)
   const last = (words: string, tail: string) => `Last: ${cut(words, Math.max(8, most - tail.length - 9))} · ${tail}`
   const waits = (idle: number) => `${commands === 1 ? 'Waiting for its command' : 'Waiting for its commands'} · ${took(idle)}`
   if (note && (!call || (note.at ?? 0) >= call.at)) {
@@ -11155,7 +11175,11 @@ const workHooks = (on: On) => {
             const owes = one.owes === undefined ? undefined : one.owes + 1
             const quiet = (one.quiet ?? 0) + 1
             const isQuiet = !one.parentId && owes === undefined && quiet >= QUIET_STEPS
-            nudge = owes === OWED_AFTER ? named(OWED) : isQuiet ? drifted(quiet) : ''
+            const note = ownNote(one)
+            const since = now - (note?.at ?? one.startedAt)
+            const isStale = !one.parentId && owes === undefined && since >= NOTE_STALE && now - (noteAsked.get(id) ?? -Infinity) >= NOTE_STALE
+            nudge = owes === OWED_AFTER ? named(OWED) : isQuiet ? drifted(quiet) : isStale ? named(unnoted(Math.floor(since / 60_000), note?.text ?? '')) : ''
+            if (isQuiet || isStale) noteAsked.set(id, now)
             return { ...base, owes, quiet: isQuiet ? 0 : quiet }
           })
         })
@@ -12308,11 +12332,12 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
-    const now = (one: Todo) => {
-      const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
-      return entry?.text ?? ''
+    const now = (one: Todo) => ownNote(one)?.text ?? ''
+    const noteOf = (one: Todo) => ownNote(one)?.text ?? ''
+    const stepNow = (one: Todo) => {
+      const call = one.status === 'working' ? lastCall.get(one.id) : undefined
+      return !call ? '' : !call.endedAt ? cut(call.what, room) : at - call.endedAt < 60_000 ? 'Thinking' : ''
     }
-    const noteOf = (one: Todo) => [...one.entries].reverse().find(entry => entry.kind !== 'steer')?.text ?? ''
 
     const table = uiOf($, e)
     const room = Math.max(40, Math.floor((e.props.bodyColumns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)))
@@ -12497,7 +12522,7 @@ const panelHooks = (on: On) => {
               </Box>
             ) : null}
             {/* A command the person allowed, while it runs or its output is kept for the task's next step */}
-            {runningOn(one.id).length && !one.chat ? (
+            {runsShownOn(one, at).length && !one.chat ? (
               <Box key={`run-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
                 {runBlock($, table, one, `runs-${one.id}`, at)}
               </Box>
@@ -12524,7 +12549,7 @@ const panelHooks = (on: On) => {
                     {noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}
                   </Box>
                 ) : (
-                  <Text wrap="wrap">{cut(noteOf(one), room) || (at - one.startedAt < 60_000 ? 'Starting' : 'Working')}</Text>
+                  <Text wrap="wrap">{cut(noteOf(one), room) || stepNow(one) || (at - one.startedAt < 60_000 ? 'Starting' : 'Working')}</Text>
                 )}
               </Box>
             </Box>
@@ -13354,7 +13379,7 @@ const panelHooks = (on: On) => {
               </Box>
             </Box>
           ) : null}
-          {runningOn(one.id).length && !one.chat ? (
+          {runsShownOn(one, at).length && !one.chat ? (
             <Box key="part-runs" flexDirection="column" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
               {runBlock($, table, one, `runs-big-${one.id}`, at)}
             </Box>

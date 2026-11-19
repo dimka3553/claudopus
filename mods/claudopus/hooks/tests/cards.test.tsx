@@ -860,6 +860,12 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   await call('todo', { item: 'Try the other model', state: 'doing' })
   const doing = await call('todo', { item: 'Fit the nostril again', state: 'doing' })
   expect(String(doing.result)).toBe('[doing] Fit the nostril again\n[ ] Try the other model')
+  // With no note of its own yet, its line says in plain words what it is doing now, never a bare "Starting" (19 Nov)
+  const early = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await $.tool.call({ tool: 'Read', tool_use_id: 'r0', agentId: 'a1', file_path: '/repo/nose.obj' } as never)
+  expect(await until(async () => early.find({ type: 'Text', text: /^(Reading files|Thinking)$/ }))).toBeDefined()
+  expect(await early.find({ type: 'Text', text: 'Starting' })).toBeUndefined()
+  await early.unmount()
   await call('note', { text: 'I am fitting the nostril again, because the first fit left it open.' })
 
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -1240,8 +1246,8 @@ test("the person's words sent to work that has ended are theirs, and the chat's 
   expect(appended.at(-1)).toContain('that begins "From the chat, not Sam: release through the release command." is from the chat, not from the person: that one is not theirs')
 })
 
-test('work that takes many steps without touching its to-dos is reminded to bring them up to date', async ($, on) => {
-  const { appended } = world(on)
+test('work that takes many steps without touching its to-dos is reminded to bring them up to date, and work whose card has said nothing of its own for minutes is asked to say what it does now', async ($, on) => {
+  const { appended, clock } = world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
   const step = (tool: string, input: object = {}) => $.tool.call({ tool, tool_use_id: 't', agentId: 'a1', ...input } as never)
@@ -1258,6 +1264,18 @@ test('work that takes many steps without touching its to-dos is reminded to brin
   expect(appended).toHaveLength(1)
   await step('Bash')
   expect(appended).toHaveLength(2)
+  // Its card's line gone stale by the clock, however it keeps its to-dos, it is asked at its next step, once, for a note of what it
+  // does now (19 Nov: the line still said what it did minutes before)
+  await step('mcp__claudopus__note', { text: 'Fitting the nostril' })
+  await clock.advance(3 * 60_000)
+  await step('mcp__claudopus__todo', { item: 'Fit the nostril again', state: 'doing' })
+  expect(appended).toHaveLength(2)
+  await step('Bash')
+  expect(appended).toHaveLength(3)
+  expect(appended[2]).toContain('a1: Your card has said "Fitting the nostril" for 3m')
+  expect(appended[2]).toContain('send a `note` saying in one plain line what you are doing now')
+  await step('Bash')
+  expect(appended).toHaveLength(3)
 })
 
 test('work that ends in an error is kept as failed, saying why; a run that is over with nothing of its own running is failed too, "Ended without its result", with Start again, where Claude Code pressed it for a hand-back that never came, and done with its last words where it never did; time lying ended is not counted, and work under way is never forgotten; past 40 tasks, work that ended before cards stayed up and a dismissed card are forgotten before an ended card never dismissed', SLOW, async ($, on) => {

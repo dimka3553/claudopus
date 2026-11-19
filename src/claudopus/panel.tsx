@@ -309,15 +309,19 @@ const panelHooks = (on: On) => {
     // A launcher whose programs still work as rows of their own has not ended for the person, and is not said; the runs that are
     // said are named with how each ended, never a bare count that reads as the rows still working (16 Nov "2 commands have ended"
     // stood above the two programs a launcher that had ended left working)
-    const now = (one: Todo) => {
-      const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
-      // (nor what one command left going while other programs of it still work)
-      // (a command that ended is a row of its own under the one that started it, never said here again, 19 Nov)
-      return entry?.text ?? ''
-    }
+    // (nor what one command left going while other programs of it still work)
+    // (a command that ended is a row of its own under the one that started it, never said here again, 19 Nov)
+    const now = (one: Todo) => ownNote(one)?.text ?? ''
     // The card's line: the task's own latest note, in its own words, whatever ran or ended since (those are rows on its tree and in
-    // its Details), never words of Claudopus's own about its actions, how long it was quiet or which command ended (18 Nov)
-    const noteOf = (one: Todo) => [...one.entries].reverse().find(entry => entry.kind !== 'steer')?.text ?? ''
+    // its Details), never words of Claudopus's own about its actions, how long it was quiet or which command ended (18 Nov), nor
+    // how a command the person allowed ended (19 Nov, "Your command ended after 20s" stood there until the task wrote again)
+    const noteOf = (one: Todo) => ownNote(one)?.text ?? ''
+    // With no note of its own yet, what it is doing now in plain words: the call it is on, or thinking just after one; never how
+    // long it has been quiet, which is no step of its own (18 Nov)
+    const stepNow = (one: Todo) => {
+      const call = one.status === 'working' ? lastCall.get(one.id) : undefined
+      return !call ? '' : !call.endedAt ? cut(call.what, room) : at - call.endedAt < 60_000 ? 'Thinking' : ''
+    }
 
     const table = uiOf($, e)
     // How much text two rows of a small card hold: the pane's cells less the card's bar, padding and dots. The app's letters are
@@ -543,7 +547,7 @@ const panelHooks = (on: On) => {
               </Box>
             ) : null}
             {/* A command the person allowed, while it runs or its output is kept for the task's next step */}
-            {runningOn(one.id).length && !one.chat ? (
+            {runsShownOn(one, at).length && !one.chat ? (
               <Box key={`run-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
                 {runBlock($, table, one, `runs-${one.id}`, at)}
               </Box>
@@ -570,7 +574,7 @@ const panelHooks = (on: On) => {
                     {noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}
                   </Box>
                 ) : (
-                  <Text wrap="wrap">{cut(noteOf(one), room) || (at - one.startedAt < 60_000 ? 'Starting' : 'Working')}</Text>
+                  <Text wrap="wrap">{cut(noteOf(one), room) || stepNow(one) || (at - one.startedAt < 60_000 ? 'Starting' : 'Working')}</Text>
                 )}
               </Box>
             </Box>
@@ -1540,7 +1544,7 @@ const panelHooks = (on: On) => {
               </Box>
             </Box>
           ) : null}
-          {runningOn(one.id).length && !one.chat ? (
+          {runsShownOn(one, at).length && !one.chat ? (
             <Box key="part-runs" flexDirection="column" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
               {runBlock($, table, one, `runs-big-${one.id}`, at)}
             </Box>

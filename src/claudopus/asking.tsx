@@ -361,7 +361,7 @@ const readDrafts = async ($: EngineInterface) => {
 // A button's answer keeps the ask it answered and the work it went to (asked, target), so it can be taken back (takeBack)
 type Sent = { text: string; ask: string; details?: string; to: 'sending' | 'work' | 'read' | 'chat' | 'pressed' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; isPress?: boolean; said?: string; whole?: string; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
 // The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
-const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
+const lineOf = (one: Todo) => { const last = ownNote(one); return last ? `${last.at}:${last.text}` : '' }
 // How long the card says what was answered, unless the work writes a newer line first
 const ANSWER_SHOWN = 60_000
 // An ask's question is one line of at most ASK_TEXT letters; what it is about, its details, is kept whole up to ASK_DETAILS
