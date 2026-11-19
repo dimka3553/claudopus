@@ -196,7 +196,8 @@ const bandHooks = (on: On) => {
     if (e.surface !== 'desktop' || e.props.hasSurvey) return drawBar()
     const key = `bar|${e.requestId ?? ''}|${e.surface}|${e.props.bodyColumns}|${e.props.isCollapsed ? 1 : 0}`
     const at = await $.clock.now()
-    const recent = lastShown.get(key) as Awaited<ReturnType<typeof next>> | undefined
+    const line = `bar|${e.requestId ?? ''}|${e.surface}`
+    const recent = newestFor(line, key) as Awaited<ReturnType<typeof next>> | undefined
     const isBarHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
     if (recent && !isBarHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
     if (recent && !isBarHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
@@ -207,7 +208,7 @@ const bandHooks = (on: On) => {
       const drawing = await drawBar()
       // A click begun while it was made: the bar on screen is given instead, and this one made again once the click is over
       if (recent && !isBarHeld && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent)
-      lastShown.set(key, drawing)
+      paneNewest.set(line, { key, drawing })
       made = { at, ms: Date.now() - madeFrom, fresh: freshness }
       return drawing
     } finally {

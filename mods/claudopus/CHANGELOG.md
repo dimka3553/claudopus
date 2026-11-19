@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.210 · 19 November 2026
+- A card no longer flickers between an older and a newer look after you press a button on it, such as Release it: once the panel has shown a card as it is now, it never shows it as it was before.
+- The same holds for the tabs and for the bar above the chat box.
+
 ## 0.2.209 · 19 November 2026
 - Delivered cards now stand at the top of the panel, the newest first, above the tasks still working and under anything that waits for you.
 - Mark as done turns the card green where it stands, outlined, with the happy octopus, for two seconds; then it goes under Finished.
