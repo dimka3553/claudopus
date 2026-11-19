@@ -94,7 +94,9 @@ const lookJobs = async ($: EngineInterface) => {
       const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
       // One that ended, by the engine's last line on its output, and when: as that output last changed
       const end = runEndOf(text)
-      if (end) (ended.includes(id) || ended.push(id), (endedAs[id] = { ...end, ...(m ? { at: m } : {}) }))
+      // (one that failed with why, read from the end of what it wrote)
+      const why = end?.how === 'failed' ? whyOf(text) : ''
+      if (end) (ended.includes(id) || ended.push(id), (endedAs[id] = { ...end, ...(m ? { at: m } : {}), ...(why ? { why } : {}) }))
       // A task's background command that failed is read as one held open is: an error in its last lines naming a file another running
       // task changed lately in the same checkout tells that task, and the task whose command it was (crossing.tsx)
       const failedCmd = end?.how === 'failed' && job?.owner ? (list.find(one => one.id === job.owner)?.bg?.find(b => b.id === id)?.cmd ?? '') : ''
@@ -244,13 +246,15 @@ const runWords = (what: string, cmd = '') => labelOf(describedOf(what).text, cmd
 
 // A press on a run's row opens a Terminal window that shows its output as it is, from its start (the last thousand lines) and as
 // it goes on; on this Mac only, as the window is this Mac's
-const canOpenJob = (job: Job) => Boolean(jobFiles.get(job.id)) && !isRunFromAfar && !isLinux
-const openJobOutput = async ($: EngineInterface, job: Job) => {
-  const file = jobFiles.get(job.id)
+// A command that has ended keeps the file it wrote to, so its output opens the same way from where its end is said
+const canOpenFile = (file: string | undefined) => Boolean(file) && !isRunFromAfar && !isLinux
+const canOpenJob = (job: Job) => canOpenFile(jobFiles.get(job.id))
+const openJobOutput = async ($: EngineInterface, job: Pick<Job, 'id' | 'label'>, written?: string) => {
+  const file = written ?? jobFiles.get(job.id)
   // A press moves the buttons' keys, so the panel does not keep pulling back to this row
   presses += 1
   drawAgain($)
-  if (!file || !canOpenJob(job)) return
+  if (!file || !canOpenFile(file)) return
   const at = await $.clock.now()
   const base = `${dir}/terminal`
   const home = `${base}/output-${slug(job.id) || 'job'}-${at}`

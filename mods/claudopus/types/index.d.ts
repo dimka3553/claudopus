@@ -116,7 +116,7 @@ export type Todo = {
   // What it ran in the background that has ended, newest last: its words, when it began and ended, and how it ended
   // (finished, failed with its exit code, killed, timed out at the engine's limit, stopped by the work, or ended as far as the mod
   // can tell). Its card sums these up in a row, and Details lists them
-  endedRuns?: { id: string; what: string; at: number; endedAt: number; how: 'finished' | 'failed' | 'killed' | 'timed out' | 'stopped' | 'ended'; code?: string; count?: number }[]
+  endedRuns?: { id: string; what: string; at: number; endedAt: number; how: 'finished' | 'failed' | 'killed' | 'timed out' | 'stopped' | 'ended'; code?: string; count?: number; kind?: 'server' | 'download' | 'upload' | 'script' | 'watch'; why?: string; file?: string }[]
   // In another chat's file only: how each of its jobs stands as that chat last read it (its latest line, how far, its last lines),
   // by the job's id, so its Details shows them as that chat's own does
   seenJobs?: Record<string, { latest: string; pct?: string; done?: string; total?: string; wroteAt?: number; tail?: string[]; words?: string; isOwn?: boolean; isEarlier?: boolean; isEmpty?: boolean; target?: string }>

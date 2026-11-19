@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { heavyOf, commandName, describedOf, endOf, expiresIn, leftSeconds, foldJobs, isOutputEnded, isOwnLongScript, isWaitOnly, jobKindOf, labelOf, latestOf, plainOf, portOf, waitOf, waitingOf, watcherOf, PLAIN_MOST } from './jobs'
+import { heavyOf, commandName, describedOf, endOf, expiresIn, leftSeconds, foldJobs, isOutputEnded, isOwnLongScript, isWaitOnly, jobKindOf, labelOf, latestOf, plainOf, portOf, waitOf, waitingOf, watcherOf, whyOf, PLAIN_MOST, WHY_MOST, JOB_GLYPH, JOB_SHAPE } from './jobs'
 import type { WaitKind } from './jobs'
 import type { Job } from './jobs'
 
@@ -389,7 +389,8 @@ test('the work names each run in one form, its kind first, and the card reads th
   const cases: [string, string, string | undefined][] = [
     ['Download the CT scans (about 3 min)', 'Download the CT scans', 'download'],
     ['Download the CT scans (3 min)', 'Download the CT scans', 'download'],
-    ['Upload the fits to Azure (~1h 30m)', 'Upload the fits to Azure', 'download'],
+    // (an upload is a kind of its own, with its own mark, never a download's)
+    ['Upload the fits to Azure (~1h 30m)', 'Upload the fits to Azure', 'upload'],
     ['Run the fit on all scans (about 20 min)', 'Run the fit on all scans', 'script'],
     ['Serve the preview page (up to 90s)', 'Serve the preview page', 'server'],
     // a wait or a poll is a watch, as it is written
@@ -420,6 +421,20 @@ test('how a run ended, from the last line the engine writes on its output: finis
   expect(endOf('Traceback\n\n[exited with code 137]\n')).toEqual({ how: 'failed', code: '137' })
   expect(endOf('\n[killed]\n')).toEqual({ how: 'killed' })
   expect(endOf('progress: 3/6 steps\n')).toBeUndefined()
+  // Why one failed, from the end of what it wrote: the last line that names a fault, over lines that only point at code and
+  // whatever it wrote after; else its last line; cut short; and never a line that names a secret
+  const whys: [string, string][] = [
+    ['loading\nTraceback (most recent call last):\n  File "fit.py", line 3\nRuntimeError: CUDA out of memory\n\n[exited with code 1]\n', 'RuntimeError: CUDA out of memory'],
+    ['step 1\nerror: could not read the scans\ncleaning up\n\n[exited with code 2]\n', 'error: could not read the scans'],
+    ['3 of 9 heads\nstopping early\n\n[exited with code 1]\n', 'stopping early'],
+    ['\n[exited with code 1]\n', ''],
+    ['error: bad token sk-abcdefgh12345\n\n[exited with code 1]\n', ''],
+  ]
+  for (const [text, why] of whys) expect(whyOf(text)).toBe(why)
+  expect(whyOf(`Error: ${'the fit did not settle '.repeat(20)}\n\n[exited with code 1]\n`).length).toBeLessThanOrEqual(WHY_MOST)
+  // Each kind of command has a mark of its own, in a terminal and drawn
+  expect(new Set(Object.values(JOB_GLYPH)).size).toBe(5)
+  expect(new Set(Object.values(JOB_SHAPE)).size).toBe(5)
   expect(endOf('it printed [killed] mid-line and goes on\n')).toBeUndefined()
   expect(isOutputEnded('\n[killed]\n')).toBe(true)
   expect(expiresIn('Monitor started (task b0zhjoyke, expires in 30m unless the source ends first')).toBe(1_800_000)

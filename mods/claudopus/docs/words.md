@@ -44,7 +44,25 @@ A running command or helper is two lines:
 - A server: `Serving`, and its row stays under a Done card until you stop it. A watch for something far away: `Watching · last: series arrived`.
 - A helper's line 2 is what it is doing now, in plain words: `Reading files`, `Rendering the song stills · 4m`, `Searching the web`, `Waiting for its commands`, or its own last note. Quiet for three minutes, it is `Last: Reading files · nothing new for 29m`.
 - A task's card says only its stage, the to-do marked doing (`To-do 5 of 7 · Mend the nose`), and its own last note as its line, plus in amber what needs you. A paused task is Working, and its card says nothing of the pause; a command that ended never takes the place of the task's own line.
-- Ended: `Done in 2m 05s`, `Failed after 2m 05s`, `Stopped after 1m`.
+- Ended: `Done in 2m 05s`, `Failed after 2m 05s`, `Stopped after 1m`, `Ran out of time after 30m`.
+- A count that is full while the command still runs never says 100%: `7 of 7 heads · still running`.
+- A command that failed keeps a row on its card, in red, until it is run again and finishes: its name, `Failed after 2m 05s`, and under it why, the last line it wrote that names a fault. The closing row names what else did not finish: `13 commands ended · 2 ran out of time: Watch the cloud jobs and 1 more`, `2 helpers ended · 1 helper failed: Read the scans`.
+- A press on a command's name opens what it wrote, running or ended.
+
+## Marks
+One mark for each kind of row, the same on a card and in Details; a ring moves around one that runs.
+
+| Mark | Kind | Its row begins | With nothing of its own to say |
+|---|---|---|---|
+| ● purple | helper | its title | `Thinking`, or what its step does: `Reading files`, `Searching the web` |
+| ■ teal | command | `Run …` | `Running` |
+| ▼ blue | download | `Download …` | `Downloading` |
+| ▲ blue | upload | `Upload …` | `Uploading` |
+| ◆ green | server | `Serve …` | `Serving` |
+| ◇ grey | watch for something far away, such as a cloud job | `Watch …` | `Watching` |
+| ■ grey | the commands folded away | `3 more commands` | |
+| the same shape in red | a command that failed | its name | `Failed after 2m 05s` |
+| ○ grey | what has ended | `13 commands ended` | |
 
 ## Questions, notices, errors
 - **Everything that waits for you is one block**, the same on the card, in Details and at the top of the panel: a small label (Permission, Question, Password, Key), the question in amber ending in "?", then what it is about in short lines, the command whole, and the buttons.

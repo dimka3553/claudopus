@@ -1,0 +1,4 @@
+- A command whose count is full while it still runs no longer shows 100%, which read as done: its row says `7 of 7 heads · still running`. Tasks are told to count what has finished, never what has started.
+- A command that failed keeps a row on its card, in red, with how long it ran and why (the last line it wrote that names a fault), until it is run again and finishes. The closing row names what else did not finish, and a helper that failed, instead of a bare count.
+- A press on an ended command's name, on its card or under Commands ended in Details, opens what it wrote, as a running one's does. Details shows why under each command that failed.
+- An upload has a mark of its own, an up arrow, and says Uploading. A command with nothing to say reads Running, not Working. The row for commands folded away is a grey square that opens Details.

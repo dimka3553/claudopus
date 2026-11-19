@@ -2271,6 +2271,13 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   const plain = await until(async () => (await texts()).find(text => /(^| · )waiting for the machine to start$/.test(text)))
   expect(plain).toBeDefined()
   expect((await texts()).some(text => /\[run|Running\)|\d MB ·/.test(text))).toBe(false)
+  // A count that is full while the command still runs never reads 100%, as done: it says it is still running, with its own words
+  // (19 Nov "7 of 7 heads · 100% · started, finishing", from a script that counted the heads it had started)
+  output = 'progress: 7/7 heads started, finishing\n'
+  wroteAt = now + 19_000
+  await advance(20_000)
+  expect(await until(async () => (await texts()).find(text => /^7 of 7 heads · still running · started, finishing$/.test(text)))).toBeDefined()
+  expect((await texts()).some(text => /100%/.test(text))).toBe(false)
   // A wait's count of tries is how far it is, its words that say its name again are left out, and when it last tried changes
   output = 'progress: 6 tries waiting for the CT scans\nprogress: 7 tries waiting for the CT scans\n'
   // (written a second before the end of the step, whenever in it the panel looks)
@@ -2538,11 +2545,17 @@ test('only runs really running are listed: a watch the engine killed at its time
   })) ?? []
   // The watches the engine killed at their limit, the failed and the finished command are gone from the tree, and no clock runs for them
   expect(shown.some(text => /\[killed\]/.test(text))).toBe(false)
-  expect(shown.some(text => /^(Wait for first screening pass ×2|Run the fetch of the list|Run the tidy up)\b(?!: (failed|done))/.test(text))).toBe(false)
+  expect(shown.some(text => /^(Wait for first screening pass ×2|Run the tidy up)$/.test(text))).toBe(false)
+  // The one that failed has a row of its own over the closing row: what it was, that it failed and after how long, and why,
+  // from the end of what it wrote (19 Nov "13 commands ended · 1 failed" said neither which nor why)
+  expect(shown).toContain('Run the fetch of the list')
+  expect(shown.some(text => /^Failed after \dm \d\ds$/.test(text))).toBe(true)
+  expect(shown).toContain('Traceback: boom')
   // (the card's own line never names the commands that ended: how each ended is in Details, 18 Nov)
   expect(shown.some(text => /^Run the (tidy up|fetch of the list): (done|failed)/.test(text))).toBe(false)
   // The closing row counts them and says, in words, how many did not finish well
-  expect(shown).toContain('4 commands ended · 1 failed, 2 ran out of time')
+  // (each kind of bad end names its newest and how many more; the failed one is named on its own row above)
+  expect(shown).toContain('4 commands ended · 1 failed · 2 ran out of time: Wait for first screening pass and 1 more')
   // The wait still running stays, and the two fits: each row with how long it has run and nothing of the time its description
   // gave, within it or long past it
   expect(shown).toContain('Wait for the details screening to finish')
@@ -2550,12 +2563,15 @@ test('only runs really running are listed: a watch the engine killed at its time
   expect(shown.some(text => /of about|\bover$|\(about|\d+ min\b/.test(text))).toBe(false)
   // Details names each ended run with how it ended
   const pane = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
-  const details = (await pane.findAll({ type: 'Text' })).map(one => one.text)
+  // (an ended command's name is a button where what it wrote is still there: a press opens it, as a running one's does)
+  const details = [...(await pane.findAll({ type: 'Text' })).map(one => one.text), ...(await pane.findAll({ type: 'Button' })).filter(one => String(one.key ?? '').startsWith('ended-open-')).map(one => String(one.props.label))]
   await pane.unmount()
   expect(details).toContain('Commands ended')
   expect(details.filter(text => text === 'Wait for first screening pass').length).toBe(2)
   expect(details.filter(text => /^Ran out of time after (29|30)m \d\ds · /.test(text)).length).toBe(2)
   expect(details.some(text => /^Failed after \dm \d\ds · /.test(text))).toBe(true)
+  // (with why under the one that failed)
+  expect(details).toContain('Traceback: boom')
   expect(details.some(text => /^Done in \dm \d\ds · /.test(text))).toBe(true)
   // Later the wait is past the time its description gave too: its row still says only how long it has run
   for (let n = 0; n < 8; n++) await advance(MIN)

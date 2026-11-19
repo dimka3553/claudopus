@@ -646,15 +646,18 @@ const panelHooks = (on: On) => {
     // row, laid out as the others, that says how many have ended and opens the card's Details, where every helper is listed
     // A job on the tree: its line ends in a dot in the colour of its kind (green a server, blue a download, purple a script),
     // with a ring while it runs; then what it is, the latest line it wrote, dim, and its percent and time last
+    // (the row that stands for the commands folded away is a command's square in grey, with no ring: it is no one command)
+    const isMore = (job: Job) => job.id.startsWith('more-')
+    const MORE_COLOR = '#9A9A9A'
     const jobLines = (t: Twig, key: string, job: Job) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !(job.isEmpty ? at - job.at >= JOB_QUIET : job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, isMore(job) ? MORE_COLOR : JOB_COLOR[job.kind], !isMore(job) && !(job.isEmpty ? at - job.at >= JOB_QUIET : job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={isMore(job) ? 'More commands running' : JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
         </Box>
       ) : (
         <Box key={key} flexDirection="row" flexShrink={0}>
           <Text dimColor>{twigText(t)}</Text>
-          <Text color={JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
+          <Text color={isMore(job) ? MORE_COLOR : JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
         </Box>
       )
     // Under a row's name, the tree's lines carried down past it, as wide as its own lines and mark, so each line under it starts
@@ -687,7 +690,10 @@ const panelHooks = (on: On) => {
     // as time goes so the line never stands still while the run goes on. Nothing raw is shown: a line that is not plain words is
     // left out, and a run that has given no word says so and for how long, in amber past a few minutes
     const jobStand = (job: Job, width: number) => {
-      const pct = job.pct ? [job.pct] : []
+      // A count that is full while the command still runs says so in place of its percent: 100% beside a running row read as
+      // done (19 Nov "7 of 7 heads · 100% · started, finishing", from a script that counted what it had started)
+      const isFull = job.pct === '100%' || Boolean(job.done && job.total && job.done === job.total)
+      const pct = isFull ? ['still running'] : job.pct ? [job.pct] : []
       const quiet = job.wroteAt && !job.isEmpty ? at - job.wroteAt : undefined
       const ran = at - job.at
       // (to ten seconds past a minute, so the line moves at each drawing however long it has been)
@@ -743,7 +749,7 @@ const panelHooks = (on: On) => {
         const kindLead = job.kind === 'server' ? 'Serving' : job.kind === 'watch' ? 'Watching' : ''
         const shownLead = kindLead ? `${kindLead} · ${said ? 'last: ' : ''}` : lead && (nums.length || said) ? lead : ''
         const line = `${shownLead}${text}`
-        return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : kindLead || (job.kind === 'download' ? 'Downloading' : 'Working'), isWarn }
+        return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : JOB_NOW[job.kind], isWarn }
       }
       return { text: short, isWarn }
     }
@@ -766,7 +772,9 @@ const panelHooks = (on: On) => {
           {jobLines(t, `twig-lines-${key}`, job)}
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
             {/* A press shows its output whole in a Terminal window, where this Mac can open one */}
-            {canOpenJob(job) ? (
+            {isMore(job) && owner ? (
+              <Button key={`more-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openWork($, owner)} />
+            ) : canOpenJob(job) ? (
               <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => void openJobOutput($, job).catch(err => log($, `output not opened: ${String(err)}`))} />
             ) : (
               <Text wrap="truncate-end">{name}</Text>
@@ -786,7 +794,7 @@ const panelHooks = (on: On) => {
       ) : null
       const { text: stand, isWarn } = jobStand(job, width - (isStoppable ? 10 : 0))
       // Its percent, in blue, where the line says it as a part of its own
-      const pctAt = job.pct && !isWarn ? (stand.startsWith(`${job.pct} · `) || stand === job.pct ? 0 : stand.includes(` · ${job.pct}`) ? stand.indexOf(` · ${job.pct}`) + 3 : -1) : -1
+      const pctAt = job.pct && !isWarn && !/still running/i.test(stand) ? (stand.startsWith(`${job.pct} · `) || stand === job.pct ? 0 : stand.includes(` · ${job.pct}`) ? stand.indexOf(` · ${job.pct}`) + 3 : -1) : -1
       // (its plain words are in the line itself, which every run has)
       const detail = ''
       return (
@@ -818,6 +826,61 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
+    // A command that ended, as a row: its kind's mark, red where it failed and grey otherwise, never moving
+    const endedMark = (run: EndedRun) => (
+      <Text color={run.how === 'failed' ? 'error' : run.how === 'finished' ? DONE : undefined} dimColor={run.how !== 'failed' && run.how !== 'finished'}>
+        {JOB_GLYPH[run.kind ?? 'script']}
+      </Text>
+    )
+    const endedLines = (t: Twig, key: string, run: EndedRun) =>
+      'Svg' in table && e.surface !== 'terminal' ? (
+        <Box key={key} flexShrink={0}>
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, run.how === 'failed' ? TWIG_FAILED : '#808080', false, JOB_SHAPE[run.kind ?? 'script'])} alt={endedWord(run)} width={twigWidth(t)} height={LINE} isInteractive />
+        </Box>
+      ) : (
+        <Box key={key} flexDirection="row" flexShrink={0}>
+          <Text dimColor>{twigText(t)}</Text>
+          {endedMark(run)}
+        </Box>
+      )
+    // A press on an ended command's name opens what it wrote, where that is still there and this Mac can show it; else its card's Details
+    const openEnded = (run: EndedRun, owner: string) => (canOpenFile(run.file) ? void openJobOutput($, { id: run.id, label: runWords(run.what) || 'A command' }, run.file).catch(err => log($, `output not opened: ${String(err)}`)) : openWork($, owner))
+    const failedRow = (t: Twig, run: EndedRun, owner: string) => {
+      const key = `failed-${owner}-${run.id}`
+      const width = perRow - 4 - t.depth * 2
+      const side = endedLine(run, took(run.endedAt - run.at))
+      const name = cut(runWords(run.what) || 'A command', Math.max(12, width))
+      return (
+        <Box key={`job-${key}`} flexDirection="column" flexShrink={0}>
+          <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+            {endedLines(t, `twig-lines-${key}`, run)}
+            <Box flexGrow={1} flexShrink={1} minWidth={0}>
+              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => openEnded(run, owner)} />
+            </Box>
+          </Box>
+          {/* (that it failed and after how long, in red, then why, as a running row's second line says how it stands) */}
+          {twigUnder(
+            t,
+            `why-${key}`,
+            <Box flexDirection="row" flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+              <Box flexShrink={0}>
+                <Text color="error">{side}</Text>
+              </Box>
+              {run.why ? (
+                <Box flexShrink={0}>
+                  <Text dimColor>{' · '}</Text>
+                </Box>
+              ) : null}
+              {run.why ? (
+                <Box flexShrink={1} minWidth={0}>
+                  <Text dimColor wrap="truncate-end">{run.why}</Text>
+                </Box>
+              ) : null}
+            </Box>,
+          )}
+        </Box>
+      )
+    }
     // Each branch with the jobs its helper has running first, under it, as the card's own come first under the card
     // At most JOBS_SHOWN each, the newest; the rest one row that says how many more run and opens the card's Details
     // In Details every one is shown
@@ -826,7 +889,7 @@ const panelHooks = (on: On) => {
       if (isAll || jobs.length <= JOBS_SHOWN) return jobs.map(job => ({ one: card, job, kids: [] }))
       const more = jobs.length - JOBS_SHOWN + 1
       const shown = jobs.slice(-(JOBS_SHOWN - 1))
-      const rest: Job = { id: `more-${card.id}`, label: `${jobs.slice(0, more).reduce((n, job) => n + (job.count ?? 1), 0)} more commands`, cmd: '', kind: 'watch', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
+      const rest: Job = { id: `more-${card.id}`, label: `${jobs.slice(0, more).reduce((n, job) => n + (job.count ?? 1), 0)} more commands`, cmd: '', kind: 'script', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
       return [...shown, rest].map(job => ({ one: card, job, kids: [] }))
     }
     const withJobs = (branches: Branch[], isAll = false): Branch[] =>
@@ -850,7 +913,13 @@ const panelHooks = (on: On) => {
       const rest = under.length - twigs.filter(t => !t.job).length
       if (!rest && !runs.length) return twigsOf(branches).map(rowOf)
       const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
-      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs), true, '', () => openWork($, one.id))]
+      // The command that failed last, not yet run again and finished, has its own row over the closing one: what it was, that it
+      // failed and after how long, and why under it
+      const failed = failureOf(runs)
+      // (and the helpers that failed and have left the tree, by name)
+      const onTree = new Set(twigs.flatMap(t => (!t.job && t.one ? [t.one.id] : [])))
+      const lost = under.filter(kid => kid.status === 'failed' && !onTree.has(kid.id)).map(kid => titleOf(kid))
+      return [...twigs.map(rowOf), ...(failed ? [failedRow({ ...closing, isLast: false }, failed, one.id)] : []), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs, failed?.id, lost), true, '', () => openWork($, one.id))]
     }
 
     // ---- A workflow's card, in blue: its stages in order with the one being run, who is in it, and its rounds ----
@@ -1221,22 +1290,34 @@ const panelHooks = (on: On) => {
       const runs = endedRunsOf(one, one.chat ? helpersThere : all).reverse()
       if (!runs.length) return null
       const isBad = (run: (typeof runs)[number]) => run.how === 'failed' || run.how === 'killed' || run.how === 'timed out'
-      const bad = runs.filter(isBad).length
       return part(
         'part-ended-runs',
         'Commands ended',
-        endedSummary(0, runs),
+        // (its rows name each one, so the count beside the heading names none)
+        endedSummary(0, runs.map(run => ({ ...run, what: '' }))),
         <Box flexDirection="column">
-          {runs.map(run => (
+          {runs.flatMap(run => [
             <Box key={`ended-${run.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+              <Box flexShrink={0}>{endedMark(run)}</Box>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                <Text wrap="truncate-end">{describedOf(run.what).text || run.what || 'A command'}</Text>
+                {canOpenFile(run.file) ? (
+                  <Button key={`ended-open-${run.id}-${presses}`} label={describedOf(run.what).text || run.what || 'A command'} plain hover={{ scope: `ended-${run.id}`, underline: true }} onPress={() => openEnded(run, one.id)} />
+                ) : (
+                  <Text wrap="truncate-end">{describedOf(run.what).text || run.what || 'A command'}</Text>
+                )}
               </Box>
               <Box flexShrink={0}>
-                <Text dimColor={!isBad(run)} color={isBad(run) ? NEEDS : undefined}>{`${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(at - run.endedAt)} ago`}</Text>
+                <Text dimColor={!isBad(run)} color={run.how === 'failed' ? 'error' : undefined}>{`${endedLine(run, took(run.endedAt - run.at))} · ${shortAgo(at - run.endedAt)} ago`}</Text>
               </Box>
-            </Box>
-          ))}
+            </Box>,
+            ...(run.how === 'failed' && run.why
+              ? [
+                  <Box key={`ended-why-${run.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0} paddingLeft={2}>
+                    <Text dimColor wrap="truncate-end">{run.why}</Text>
+                  </Box>,
+                ]
+              : []),
+          ])}
         </Box>,
       )
     }

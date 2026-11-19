@@ -1,7 +1,7 @@
 // The running jobs a piece of work has, told apart and read: a server, a download or a script, from its command or its own words,
 // and the latest line it wrote, from the end of its output. Nothing here touches the engine
 
-export type JobKind = 'server' | 'download' | 'script' | 'watch'
+export type JobKind = 'server' | 'download' | 'upload' | 'script' | 'watch'
 // A job as its row shows it: when its output last changed and how many alike it stands for
 export type Job = {
   id: string
@@ -37,12 +37,15 @@ export const JOBS_SHOWN = 4
 export const JOB_TAIL = 4000
 
 // Purple and a round dot are a helper's alone: a job has its own colour and shape, and its kind in words at the head of its row
-export const JOB_COLOR: Record<JobKind, string> = { server: '#4EBA65', download: '#5AA7E6', script: '#36B5A8', watch: '#9A9A9A' }
-export const JOB_GLYPH: Record<JobKind, string> = { server: '◆', download: '▼', script: '■', watch: '◇' }
-export const JOB_WORD: Record<JobKind, string> = { server: 'Server running', download: 'Downloading', script: 'Command running', watch: 'Watching' }
-export const JOB_HEAD: Record<JobKind, string> = { server: 'Server', download: 'Download', script: 'Command', watch: 'Watch' }
+// (a download and an upload share their blue: the arrow says which way it goes)
+export const JOB_COLOR: Record<JobKind, string> = { server: '#4EBA65', download: '#5AA7E6', upload: '#5AA7E6', script: '#36B5A8', watch: '#9A9A9A' }
+export const JOB_GLYPH: Record<JobKind, string> = { server: '◆', download: '▼', upload: '▲', script: '■', watch: '◇' }
+export const JOB_WORD: Record<JobKind, string> = { server: 'Server running', download: 'Downloading', upload: 'Uploading', script: 'Command running', watch: 'Watching' }
+export const JOB_HEAD: Record<JobKind, string> = { server: 'Server', download: 'Download', upload: 'Upload', script: 'Command', watch: 'Watch' }
+// What a row says while its command gives no plain word of its own: its kind, as a doing word
+export const JOB_NOW: Record<JobKind, string> = { server: 'Serving', download: 'Downloading', upload: 'Uploading', script: 'Running', watch: 'Watching' }
 // Its mark on the tree, drawn: a square, a diamond, a down arrow, an open diamond, never a helper's round dot
-export const JOB_SHAPE: Record<JobKind, 'square' | 'diamond' | 'down' | 'open'> = { server: 'diamond', download: 'down', script: 'square', watch: 'open' }
+export const JOB_SHAPE: Record<JobKind, 'square' | 'diamond' | 'down' | 'up' | 'open'> = { server: 'diamond', download: 'down', upload: 'up', script: 'square', watch: 'open' }
 // A job whose output has not changed for this long says, in amber, that it has gone quiet, and one that has printed nothing at all
 // says so: work is told to print progress at least every 10 seconds, so a few minutes of nothing is worth a look
 export const JOB_QUIET = 3 * 60_000
@@ -76,7 +79,8 @@ const isFetching = (step: string) => {
 // The work's own words for a run, in the one form it is told to write them, so its card reads them as they are and guesses
 // nothing from the command: its kind first (Download, Upload, Watch, Serve, Run), then what it does: `Download the CT scans`
 const KIND_WORDS: [RegExp, JobKind][] = [
-  [/^(download|upload|fetch|copy|sync|clone)\b/i, 'download'],
+  [/^upload\b/i, 'upload'],
+  [/^(download|fetch|copy|sync|clone)\b/i, 'download'],
   [/^(watch|wait(ing)?|poll(ing)?)\b/i, 'watch'],
   [/^serve\b/i, 'server'],
   [/^run\b/i, 'script'],
@@ -175,6 +179,8 @@ export const PLAIN_MOST = 60
 // shown, not even in part
 const SECRETISH =
   /\b(pass(?:word|phrase|wd|code)?s?|secrets?|tokens?|api[-_ ]?keys?|keys?|bearer|authori[sz]ation|credentials?|codes?|pins?|verification|verify|otp|2fa|mfa|ssh-(?:rsa|ed25519)|log(?:s|ging|ged)?[ -]?in|sign(?:s|ing|ed)?[ -]?in|authenticat\w*|user ?names?|accounts?|e-?mail)\b|\b(?:sk|pk|ghp|gho|xox[abp])[-_][A-Za-z0-9]{8,}|\S@\S|\(\w*\):\s*\S|[?:]\s*$/i
+// (a failure's reason is shown as written, so only what names a secret itself is kept out of it)
+const SECRETISH_WHY = /\b(pass(?:word|phrase|wd|code)?s?|secrets?|tokens?|api[-_ ]?keys?|bearer|authori[sz]ation|credentials?|otp|2fa|mfa|ssh-(?:rsa|ed25519))\b|\b(?:sk|pk|ghp|gho|xox[abp])[-_][A-Za-z0-9]{8,}/i
 const PROGRAMS = /\b(?:curl|wget|python3?(?:\.\d+)?|node|npm|npx|pnpm|yarn|pip3?|git|az|aws|gcloud|gsutil|azcopy|rsync|scp|ssh|bash|zsh|sh|sudo|docker|kubectl|make|tar|unzip|ffmpeg|brew|uv|conda|apt(?:-get)?)\b:?/gi
 const FILES = /\b[\w.-]+\.(?:py|sh|js|mjs|ts|tsx|json|jsonl|log|txt|csv|tsv|zip|tar|gz|tgz|png|jpe?g|webp|gif|mp4|nii|dcm|ply|obj|stl|pkl|pt|pth|ckpt|safetensors|bin|h5|npz|npy|ya?ml|toml|md|html|out|err|lock|rs|go|java|c|cpp|h)\b/gi
 // A line that is a command or a build step, not news of how a run goes
@@ -457,6 +463,24 @@ export const endOf = (text: string): RunEnd | undefined => {
   return /(^|\n)\[killed\]\s*$/.test(text) ? { how: 'killed' } : undefined
 }
 export const isOutputEnded = (text: string) => Boolean(endOf(text))
+// Why a command failed, from the end of its output: the last line that names an error, or else the last line it wrote, as it
+// wrote it and cut short. Nothing for a line that names a password, key or login, or where it wrote nothing
+const FAULT = /\b(?:error|errno|exception|traceback|fatal|failed|failure|cannot|can't|couldn't|could not|unable|denied|refused|not found|no such|missing|invalid|unexpected|timed? ?out|killed|out of memory|oom|panic|abort(?:ed)?|segmentation)\b/i
+export const WHY_MOST = 120
+export const whyOf = (text: string): string => {
+  const lines = text
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\[exited with code [^\]\n]*\]\s*$/, '')
+    .split('\n')
+    .map(line => (line.split('\r').map(part => part.trim()).filter(Boolean).at(-1) ?? '').replace(/\s+/g, ' '))
+    .filter(line => /[A-Za-z]{3}/.test(line))
+    .slice(-12)
+  // (a traceback's own heading, or a line that only points at code, says nothing of why)
+  const said = lines.filter(line => !/^Traceback \(most recent call last\)|^\s*at\s+\S+\s+\(|^File "|^\^+$/.test(line))
+  const line = [...said].reverse().find(one => FAULT.test(one)) ?? said.at(-1) ?? ''
+  if (!line || SECRETISH_WHY.test(line)) return ''
+  return line.length > WHY_MOST ? `${line.slice(0, WHY_MOST - 1).replace(/\s+\S*$/, '')}…` : line
+}
 // How long a watch runs before the engine ends it, as the engine said when it started it ("expires in 30m"), in ms
 export const expiresIn = (said: string) => {
   const m = said.match(/expires in ((?:\d+(?:\.\d+)?\s?(?:h|m|s)\s*){1,3})/i)
