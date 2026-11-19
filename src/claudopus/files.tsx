@@ -20,7 +20,7 @@ const TEXT_DOC = /\.(md|txt|html?|csv)$/i
 const WROTE_KEPT = 300
 const MADE_LOOKED = 300
 // The most things a card's row names before "and N more", and the most tiles a Files part draws before the same
-const CHIPS_MOST = 6
+const CHIPS_MOST = 8
 const TILES_MOST = 24
 // The most small copies one Files part has made: the first tiles only, the rest keep their icon
 const FACES_MOST = 12
@@ -82,23 +82,60 @@ const codeOf = async ($: EngineInterface, byTop: Map<string, string[]>, since: n
   files.sort((a, b) => b.plus + b.minus - (a.plus + a.minus))
   return { count: files.length, plus: files.reduce((sum, one) => sum + one.plus, 0), minus: files.reduce((sum, one) => sum + one.minus, 0), files, since: Math.floor(since / 1000) }
 }
-// Links a result names on a line that says it made or put them up, the first few: a page it put online, a report it added. A page
-// it only cites is no thing it made
+// Links a result names on a line that says it made or put them up, and those whose shape says something was put up (a pull request,
+// an issue, a release, a published page) wherever they stand. A page it only cites is no thing it made
 const MADE_LINK_LINE = /\b(made|added|created|published|deployed|live|online|posted|uploaded|opened|pushed|report|pull request|PR|release[sd]?)\b/i
-const linksIn = (text: string) =>
-  [...new Set(text.split('\n').filter(line => MADE_LINK_LINE.test(line)).flatMap(line => (line.match(/https?:\/\/[^\s`'"()<>[\]{}|,;*]+/g) ?? []).map(link => link.replace(/[.:!?]+$/, ''))))].slice(0, 3)
+const MADE_LINK = /^https?:\/\/(www\.)?(github\.com\/[^/\s]+\/[^/\s]+\/(pull|issues|releases)\/|gitlab\.com\/\S+\/-\/(merge_requests|issues)\/|claude\.ai\/(public\/)?artifacts?\/)/i
+const LINK = /https?:\/\/[^\s`'"()<>[\]{}|,;*\\]+/g
+const LINKS_MOST = 30
+const linksOf = (text: string) => (text.match(LINK) ?? []).map(link => link.replace(/[.:!?]+$/, ''))
+const linksIn = (text: string) => [...new Set(text.split('\n').flatMap(line => linksOf(line).filter(link => MADE_LINK_LINE.test(line) || MADE_LINK.test(link))))].slice(0, LINKS_MOST)
+const isLink = (said: string) => /^https?:\/\//.test(said)
 const linkName = (link: string) => {
-  const [host = '', ...rest] = link.replace(/^https?:\/\//, '').replace(/\/$/, '').split('/')
+  const [host = '', ...rest] = link.replace(/^https?:\/\//, '').replace(/[?#].*$/, '').replace(/\/$/, '').split('/')
+  // A pull request or an issue by its repo and number, "clipify #70", as it is spoken of; a published page as one
+  if (/^(www\.)?(github|gitlab)\.com$/.test(host) && /^(pull|issues|merge_requests)$/.test(rest.at(-2) ?? '') && /^\d+$/.test(rest.at(-1) ?? '')) return `${rest.at(-3) === '-' ? rest.at(-4) : rest[1]} #${rest.at(-1)}`
+  if (/^claude\.ai$/.test(host) && /^artifacts?$/.test(rest.at(-2) ?? '')) return 'claude.ai page'
   const last = rest.at(-1) ?? ''
   // "os.example.com/reports/362" is "os report 362": the site's first word, the kind of page in the singular, and the page
   const kind = rest.length > 1 ? (rest.at(-2) ?? '').replace(/(?<=\w{3})s$/, '') : ''
   return last ? `${host.replace(/^www\./, '').split('.')[0]} ${kind ? `${kind} ` : ''}${last}`.slice(0, 40) : host.replace(/^www\./, '')
 }
-// What a task made: the files its steps wrote or its commands named, and the files and links its result names, that are there and
-// were made since it began. A picture, video, PDF, spreadsheet or document is a thing of its own, as is any file the result names;
-// the other files it wrote inside a repo are its code, counted and never listed
-const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since: number, isDated = true): Promise<FilesMade> => {
-  const named = namedPaths(answer)
+// What a task's words name as made: a result's files and links, and of the words a step ends with only its links
+const saidIn = (text: string, isResult: boolean) => [...(isResult ? namedPaths(text) : []), ...linksIn(text)]
+const SAID_KEPT = 300
+const withSaid = (one: Todo, found: string[]): Todo => {
+  const said = [...new Set([...(one.said ?? []), ...found])].slice(-SAID_KEPT)
+  return said.length === (one.said ?? []).length && said.every((item, n) => item === one.said?.[n]) ? one : { ...one, said }
+}
+// Every change to the cards keeps what each new answer of a task's names, on its card and its task's (a helper's result is what its
+// task made too): the answer is replaced at each step's end and each result, so what an earlier one named is never lost
+const saidKept = (before: Todo[], next: Todo[]) => {
+  const was = new Map(before.map(one => [one.id, one]))
+  const found = new Map<string, string[]>()
+  for (const one of next) {
+    if (one.chat || !one.answer.trim() || one.answer === was.get(one.id)?.answer) continue
+    const named = saidIn(one.answer, one.status !== 'working')
+    if (named.length) for (const id of new Set([one.id, topOf(next, one.id)])) found.set(id, [...(found.get(id) ?? []), ...named])
+  }
+  return found.size ? next.map(one => (found.has(one.id) ? withSaid(one, found.get(one.id) ?? []) : one)) : next
+}
+// A command that opens a pull request, a release or a page prints where it is: kept as what its task made, which a result that names
+// it only by its number ("pull request #284") would leave out
+const PUTS_UP = /\b(gh\s+(pr|release|gist)\s+create|glab\s+mr\s+create)\b/
+const linksPutUp = (e: { tool: string }, r: { deny?: unknown; isError?: unknown; result?: unknown }) => {
+  if (r.deny || r.isError) return []
+  const isPutting = (e.tool === 'Bash' && PUTS_UP.test(String((e as { command?: unknown }).command ?? ''))) || /artifact/i.test(e.tool)
+  return isPutting ? [...new Set(linksOf(JSON.stringify(r.result ?? '')).filter(link => MADE_LINK.test(link)))] : []
+}
+const keepPutUp = async ($: EngineInterface, id: string, links: string[]) => {
+  if (links.length) await changeTodos($, list => list.map(one => (one.id === id || one.id === topOf(list, id) ? withSaid(one, links) : one)))
+}
+// What a task made: the files its steps wrote or its commands named, and the files and links its results name (`said`, from every
+// one it gave, and `answer`), that are there and were made since it began. A picture, video, PDF, spreadsheet or document is a
+// thing of its own, as is any file a result names; the other files it wrote inside a repo are its code, counted and never listed
+const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since: number, isDated = true, said: string[] = []): Promise<FilesMade> => {
+  const named = [...new Set([...said.filter(one => !isLink(one)), ...namedPaths(answer)])]
   const made: Made[] = []
   const byTop = new Map<string, string[]>()
   const seen = new Set<string>()
@@ -130,13 +167,37 @@ const madeBy = async ($: EngineInterface, wrote: string[], answer: string, since
   const order = new Map<string, number>()
   for (const [n, given] of [...named, ...wrote].entries()) if (!order.has(given.replace(/^\/private(?=\/(tmp|var)\/)/, ''))) order.set(given.replace(/^\/private(?=\/(tmp|var)\/)/, ''), n)
   made.sort((a, b) => (order.get(a.path) ?? 0) - (order.get(b.path) ?? 0))
-  for (const link of linksIn(answer)) made.push({ path: link, name: linkName(link), kind: 'link' })
+  for (const link of [...new Set([...said.filter(isLink), ...linksIn(answer)])]) made.push({ path: link, name: linkName(link), kind: 'link' })
   const code = byTop.size ? await codeOf($, byTop, since).catch(() => undefined) : undefined
   return { made, ...(code ? { code } : {}) }
 }
+// What a task made in its whole life: listed now, with what it was listed with before (kept on its card and with each result it
+// gave) that the listing no longer finds. A thing of its own or a link stays; a changed file stays only once it is gone (its
+// worktree taken away once merged), with the lines it was counted with, as one still there that is no longer changed is not
+const listMade = async ($: EngineInterface, one: Todo, answer: string): Promise<FilesMade> => {
+  const now = await madeBy($, one.wrote ?? [], answer, one.begunAt ?? one.startedAt, true, one.said ?? [])
+  const earlier = [one.made, ...(await read($, reports)).filter(r => r.agent === one.id && r.made).map(r => r.made)].filter((files): files is FilesMade => Boolean(files))
+  if (!earlier.length) return now
+  const paths = new Set(now.made.map(made => made.path))
+  const kept = earlier.flatMap(files => files.made).filter(made => !paths.has(made.path) && (paths.add(made.path), true))
+  const counted = new Set((now.code?.files ?? []).map(file => file.path))
+  const gone: CodeFile[] = []
+  for (const file of earlier.flatMap(files => files.code?.files ?? [])) {
+    if (counted.has(file.path)) continue
+    counted.add(file.path)
+    if (!(await $.fs.exists(file.path).catch(() => true))) gone.push(file)
+  }
+  const files = [...(now.code?.files ?? []), ...gone].sort((a, b) => b.plus + b.minus - (a.plus + a.minus))
+  const since = now.code?.since ?? earlier.find(files => files.code?.since)?.code?.since
+  const code: CodeMade | undefined = files.length ? { count: files.length, plus: files.reduce((sum, file) => sum + file.plus, 0), minus: files.reduce((sum, file) => sum + file.minus, 0), files, ...(since ? { since } : {}) } : now.code
+  // Links last, as a listing has them
+  const all = [...now.made, ...kept]
+  return { made: [...all.filter(made => made.kind !== 'link'), ...all.filter(made => made.kind === 'link')], ...(code ? { code } : {}) }
+}
 // What a card draws: its task's files as last listed, and listed again, out of the drawing, once it has made a step since (a file a
 // step writes is there only after the step), at most every MADE_AGAIN while it works, and once it ends. The listings take turns, so a
-// panel opened on many cards lists them one after another
+// panel opened on many cards lists them one after another. What a listing found is kept on the card, so it is drawn at once after a
+// reload and nothing it once listed is lost
 const MADE_AGAIN = 20_000
 const MADE_HOLD = 15_000
 // What a listing shows: nothing at all is the same as not listed yet
@@ -147,26 +208,28 @@ let madeTurn: Promise<unknown> = Promise.resolve()
 const madeNow = ($: EngineInterface, one: Todo): FilesMade | undefined => {
   if (one.chat) return undefined
   // While it works a helper's edits change no count of the task's own, so time is part of what is listed
-  const key = `${one.steps ?? 0}:${(one.wrote ?? []).length}:${one.answer.length}:${one.status}:${one.status === 'working' ? Math.floor(Date.now() / MADE_AGAIN) : ''}`
+  const key = `${one.steps ?? 0}:${(one.wrote ?? []).length}:${(one.said ?? []).length}:${one.answer.length}:${one.status}:${one.status === 'working' ? Math.floor(Date.now() / MADE_AGAIN) : ''}`
   const was = madeOf.get(one.id)
   const isDue = !was || (was.key !== key && (one.status !== 'working' || Date.now() - was.at >= MADE_AGAIN))
-  if (isDue && !madeLoading.has(one.id) && ((one.wrote ?? []).length || one.answer)) {
+  if (isDue && !madeLoading.has(one.id) && ((one.wrote ?? []).length || (one.said ?? []).length || one.made || one.answer)) {
     madeLoading.add(one.id)
-    const run = madeTurn.then(() => madeBy($, one.wrote ?? [], one.status === 'working' ? '' : one.answer, one.begunAt ?? one.startedAt))
+    // (the words a step ends with name no file as made: only a result does, and each one's is in `said`)
+    const run = madeTurn.then(() => listMade($, one, one.status === 'working' ? '' : one.answer))
     // A listing that never ends (a file on a volume that does not answer) holds the others up no longer than MADE_HOLD
     madeTurn = Promise.race([run.catch(() => undefined), $.clock.sleep(MADE_HOLD)])
     let isNew = false
     void run
-      .then(files => {
+      .then(async files => {
         if (madeOf.size > 200) madeOf.delete(madeOf.keys().next().value ?? '')
-        isNew = shownOf(files) !== shownOf(madeOf.get(one.id)?.files)
+        isNew = shownOf(files) !== shownOf(madeOf.get(one.id)?.files ?? one.made)
         madeOf.set(one.id, { key, at: Date.now(), files })
+        if (shownOf(files) && shownOf(files) !== shownOf(one.made)) await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, made: files } : card)))
       })
       .catch(err => log($, `files of ${one.id} not listed: ${String(err)}`))
       // The panel is drawn again only when what it shows changed
       .finally(() => (madeLoading.delete(one.id), isNew ? redraw($) : undefined))
   }
-  return was?.files
+  return was?.files ?? one.made
 }
 // What a result's pane draws: what its task made, kept with the result when it was saved. One saved before that is listed once, out
 // of the drawing (which writes nothing), from its task's card while that is kept and else from the paths its text names. A picture
@@ -178,7 +241,7 @@ const madeOfReport = ($: EngineInterface, r: Report, text: string): FilesMade =>
     madeLoading.add(r.id)
     void (async () => {
       const one = (await read($, todos)).find(card => card.id === r.agent)
-      const listed = await madeBy($, one?.wrote ?? [], text, one ? (one.begunAt ?? one.startedAt) : 0, Boolean(one)).catch(() => ({ made: [] }))
+      const listed = await madeBy($, one?.wrote ?? [], text, one ? (one.begunAt ?? one.startedAt) : 0, Boolean(one), one?.said ?? []).catch(() => ({ made: [] }))
       if (madeOfOld.size > 200) madeOfOld.delete(madeOfOld.keys().next().value ?? '')
       madeOfOld.set(r.id, listed)
     })()
@@ -393,7 +456,8 @@ const madeChips = ($: EngineInterface, ui: Ui, one: Todo, key: string, onOpenWor
           />
         </Box>
       ))}
-      {things.length > shown.length ? <Text key={`${key}-more`} dimColor>{`${things.length - shown.length} more`}</Text> : null}
+      {/* (the rest are in its Details, which the press opens) */}
+      {things.length > shown.length ? <Button key={`${key}-more-${presses}`} label={`${things.length - shown.length} more`} plain dimColor hover={{ underline: true }} onPress={() => void ((presses += 1), onOpenWork())} /> : null}
       {files.code ? (
         <Box key={`${key}-code`} flexDirection="row" alignItems="center" gap={1} flexShrink={0} height={1} overflow="hidden">
           {icon('code', `${key}-code`)}

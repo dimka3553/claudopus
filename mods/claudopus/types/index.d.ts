@@ -58,6 +58,11 @@ export type Todo = {
   steps?: number
   // The files its steps wrote, and the pictures, videos and documents its commands named: what it may have made
   wrote?: string[]
+  // The files and links every result of its named, the links every step's words named as made, and the pull requests, releases
+  // and pages its commands put up, the oldest first: what it made, kept for its whole life however often it starts again
+  said?: string[]
+  // What it made as last listed, kept with it: a changed file no longer there (in a worktree taken away once merged) stays listed
+  made?: FilesMade
   // How many of them since it last touched its to-dos or said where it stands
   quiet?: number
   // How many since a steer it has not yet answered with a line saying what it decided; absent when it owes none

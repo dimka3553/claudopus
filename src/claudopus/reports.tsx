@@ -157,8 +157,8 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
     folder: [(await readIndex($)).find(s => one.subject && slug(s.name) === slug(one.subject))?.repo ?? ''].find(repo => repo.startsWith('/')) ?? cwd,
     gist: gistOf(text, title),
     files,
-    // What its task made, listed now and kept with it, so its tiles are there once the task's card is gone
-    ...(await madeBy($, one.wrote ?? [], text, one.begunAt ?? one.startedAt)
+    // What its task made in its whole life, listed now and kept with it, so its tiles are there once the task's card is gone
+    ...(await listMade($, one, text)
       .then(made => ({ made }))
       .catch(err => (void log($, `files of report ${id} not listed: ${String(err)}`), {}))),
     agent: one.id,

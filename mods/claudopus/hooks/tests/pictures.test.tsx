@@ -471,7 +471,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
       return files.has(path) ? ok(files.get(path)) : ok('', 1)
     }
     // The lines a task added to and took from its files, as the test lays git:numstat
-    if (tool === 'sh' && String(rest[1]).includes('git diff --numstat')) return ok(files.get('git:numstat') ?? '')
+    // (git:numstat:<repo> for a repo of its own)
+    if (tool === 'sh' && String(rest[1]).includes('git diff --numstat')) return ok(files.get(`git:numstat:${String(rest[3])}`) ?? files.get('git:numstat') ?? '')
     // What changed in one file, as the test lays git:diff:<the file in its repo>; a file it lays none for is new
     if (tool === 'sh' && String(rest[1]).includes('# the changes tab')) return ok(files.get(`git:diff:${String(rest.at(-1))}`) ?? 'NEW\n')
     if (tool === 'sh' || tool === 'bash') {
@@ -520,7 +521,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
       return ok(`${on === 'worktree' ? `${folder}/../.git/worktrees/x` : `${folder}/.git`}\n${folder}/.git\n${folder}\n`)
     }
     // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
-    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(files.has('git:top') ? `${files.get('git:top')}\n` : '', files.has('git:top') ? 0 : 128)
+    // (git:top:<folder> for a folder in a repo of its own)
+    const topLaid = files.get(`git:top:${String(rest[rest.indexOf('-C') + 1])}`) ?? files.get('git:top')
+    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(topLaid !== undefined ? `${topLaid}\n` : '', topLaid !== undefined ? 0 : 128)
     // and where the repo a worktree belongs to keeps its git folder, as git:common lays it
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--git-common-dir')) return ok(files.has('git:common') ? `${files.get('git:common')}\n` : '', files.has('git:common') ? 0 : 128)
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref')) return ok(files.has('git:branch') ? `${files.get('git:branch')}\n` : '', files.has('git:branch') ? 0 : 128)
@@ -639,6 +642,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     }
     if (e.tool === 'Bash' && command.startsWith('hold ')) return { result: { stdout: await new Promise<string>(done => held.set(command.slice(5), done)), stderr: '', interrupted: false } } as never
     if (e.tool === 'Bash' && command.includes('admin')) admins.push({ command, grants: [...files].filter(([path]) => path.startsWith(`${MEMORY}/admin-grants/`)).map(([, text]) => JSON.parse(text)) })
+    // A command prints what the test lays as stdout:<the command>
+    if (e.tool === 'Bash' && files.has(`stdout:${command}`)) return { result: { stdout: files.get(`stdout:${command}`), stderr: '', interrupted: false } } as never
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))
     if (e.tool === 'SendMessage') sent.push(String((e as { message?: string }).message))
     // A command that prints the key, as one could print it by mistake
@@ -1127,7 +1132,36 @@ test("what a task made is on its card under its title, side by side, and as tile
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: `The report is made: ${pdf}. The fix is in /repo/src/app.ts.\n\nReport added: https://os.example.com/reports/9\nSee the guide at https://docs.example.com/guide` } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a1' } as never)
   await until(async () => (await keyed(pane, 'made-a1-link-0-open')) || undefined)
-  expect((await pane.findAll({ type: 'Button' })).filter(one => String(one.key).startsWith('made-a1-')).map(one => String(one.props.label))).toEqual(['3 pictures', 'vat-report', 'os report 9 ↗', '2 changed files'])
+  const madeShown = async () => (await pane.findAll({ type: 'Button' })).filter(one => String(one.key).startsWith('made-a1-')).map(one => String(one.props.label))
+  expect(await madeShown()).toEqual(['3 pictures', 'vat-report', 'os report 9 ↗', '2 changed files'])
+  // Started again, it changes a file in a worktree of its own and opens a pull request, and its next result names that only by its
+  // number: what its first result named stays, and the pull request is there from what the command printed (19 Nov: a card started
+  // again showed only "3 changed files" of seven pull requests, a published page and a document)
+  files.set('git:top:/wt/s6/src', '/wt/s6')
+  files.set('/wt/s6/src/drop.ts', 'x')
+  files.set('mtime:/wt/s6/src/drop.ts', NEW)
+  files.set('git:numstat:/wt/s6', '7\t0\tsrc/drop.ts\tnew\n')
+  await $.tool.call({ tool: 'Write', tool_use_id: 'w4', agentId: 'a1', file_path: '/wt/s6/src/drop.ts', content: 'x' } as never)
+  files.set('stdout:gh pr create --fill', 'Creating pull request for s6 into main in acme/web\n\nhttps://github.com/acme/web/pull/284\n')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', agentId: 'a1', command: 'gh pr create --fill', description: 'Open the pull request' } as never)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'a1', message: 'The fix is in pull request #284.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't3', reason: 'answer', agentId: 'a1' } as never)
+  await until(async () => ((await madeShown()).includes('web #284 ↗') ? true : undefined))
+  expect(await madeShown()).toEqual(['3 pictures', 'vat-report', 'os report 9 ↗', 'web #284 ↗', '3 changed files'])
+  // Started a third time: its worktree is taken away once merged, a step ends with words of its own, and its result lists pull
+  // requests in a table and a published page with no word saying it made them. The file it changed there stays with its count, and
+  // a page it only cites is still no thing it made
+  files.delete('/wt/s6/src/drop.ts')
+  files.delete('git:numstat:/wt/s6')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b3', agentId: 'a1', command: 'npm test', description: 'Test the upgrades' } as never)
+  await $.turn.complete({ answer: 'Watching https://github.com/acme/web/pull/285 build.', durationMs: 1, isAborted: false, turnId: 't4', reason: 'answer', agentId: 'a1' } as never)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a1', message: 'Two upgrades are open.\n\n| App | Pull request |\n|---|---|\n| Main app | https://github.com/acme/web/pull/285 |\n| Clipify | https://github.com/acme/clipify/pull/70 |\n\nTracker page: https://claude.ai/artifact/NP6UV\nSee https://docs.example.com/guide' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't5', reason: 'answer', agentId: 'a1' } as never)
+  await until(async () => ((await madeShown()).includes('clipify #70 ↗') ? true : undefined))
+  expect(await madeShown()).toEqual(['3 pictures', 'vat-report', 'os report 9 ↗', 'web #284 ↗', 'web #285 ↗', 'clipify #70 ↗', 'claude.ai page ↗', '3 changed files'])
+  // Each opens on a press, as the system opens a link
+  await pressed(pane, 'made-a1-link-4-open')
+  expect(shown.at(-1)).toEqual(['open', 'https://claude.ai/artifact/NP6UV'])
   await pane.unmount()
   expect(logged).toEqual([])
 })

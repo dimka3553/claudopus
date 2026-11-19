@@ -448,6 +448,25 @@ const barDraft = () => (barOpen ? `${barOpen.id}|${barOpen.kind === 'answer' ? b
 // This chat's cards that wait for an answer
 const asksForBar = (cards: Todo[]) => cards.filter(one => !one.parentId && !one.chat && Boolean(asPressed(one).ask) && !isActingOnReply(one))
 const barTarget = (cards: Todo[]) => (barOpen?.kind === 'answer' ? asksForBar(cards).find(isReplyOpen) : undefined)
+// A card's blocks moved under the pointer: what the panel draws above them changed a moment before a press on one of them. The press
+// was aimed at what stood there before, so it does nothing, and the block says so (19 Nov: an empty space above closed as the person
+// reached for Answer in words on one card, and the same button of the card below slid under the pointer: the press, the box and the
+// answer went to that other task). Judged on the list as last drawn on the desktop: what stands above each card's first block
+// (askAbove), and when that last changed (askMovedAt)
+const askAbove = new Map<string, string>()
+const askMovedAt = new Map<string, number>()
+// (a person takes about half a second to see a change and a little more to stop a click already on its way)
+const MOVED_HOLD = 1500
+const isMovedUnder = (card: string) => pressedAt - (askMovedAt.get(card) ?? -Infinity) < MOVED_HOLD
+// The blocks a press was held back on, by block, with when the block came: it says so until it is pressed again or goes
+const movedPresses = new Map<string, number>()
+const MOVED_SAID = 'This moved as you pressed, so nothing was sent. Press again.'
+// The list as just drawn on the desktop: each card whose block moved is marked so from `at`
+const markMoved = (now: Map<string, string>, at: number) => {
+  for (const [card, sign] of now) if (askAbove.has(card) && askAbove.get(card) !== sign) askMovedAt.set(card, at)
+  askAbove.clear()
+  for (const [card, sign] of now) askAbove.set(card, sign)
+}
 // The bar's own id on each surface, as its drawing is asked for: where the cursor is put when the box opens
 const barIds = new Map<string, string>()
 // What was typed in the bar's box is its card's: when the work has since put a new question in place of the one the box was
