@@ -55,6 +55,21 @@ const SAID_CHARS = 8000
 const TOLD_CHARS = 300
 const STEP_CHARS = 160
 const FILL = '#80808024'
+const OUTLINE = 0.15
+const squareOutline = (Box: Ui['Box'], color: string | undefined, key: string, card: JSX.Element) =>
+  color ? (
+    <Box key={`outline-${key}`} flexDirection="column" flexShrink={0}>
+      <Box key="outline-top" height={OUTLINE} flexShrink={0} backgroundColor={color} />
+      <Box key="outline-row" flexDirection="row" flexShrink={0}>
+        <Box key="outline-left" width={OUTLINE} flexShrink={0} backgroundColor={color} />
+        <Box key="outline-card" flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>{card}</Box>
+        <Box key="outline-right" width={OUTLINE} flexShrink={0} backgroundColor={color} />
+      </Box>
+      <Box key="outline-bottom" height={OUTLINE} flexShrink={0} backgroundColor={color} />
+    </Box>
+  ) : (
+    card
+  )
 const EDGE_PARTS = 14
 const NOTE_CHARS = 200
 const QUESTIONS_KEPT = 6
@@ -8804,8 +8819,8 @@ const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boo
   const Link = (ui as Ui & { Link: ElementTable['Link'] }).Link
   const copyButton = one && ask?.copy && !ask.refused ? <ui.Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} /> : null
   const terminalButton = one && ask && !ask.refused && canOpenTerminal(one) ? <ui.Button key={`${need.id}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Typed, not run yet' : 'Open in Terminal'} plain onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} /> : null
-  return (
-    <ui.Box key={`need-${need.id}`} flexDirection="column" flexShrink={0} {...(opts.isCompact ? {} : { gap: 1, borderStyle: 'round' as const, borderColor: need.isActing ? LIVE : NEEDS, paddingX: 1 })}>
+  return squareOutline(ui.Box, opts.isCompact ? undefined : need.isActing ? LIVE : NEEDS, `need-outline-${need.id}`, (
+    <ui.Box key={`need-${need.id}`} flexDirection="column" flexShrink={0} {...(opts.isCompact ? {} : { gap: 1, paddingX: 1 })}>
       <ui.Text dimColor wrap="truncate-end">{`${NEED_LABEL[need.kind]}${need.from ? ` · ${need.from}` : ''}`}</ui.Text>
       {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
       <ui.Text wrap="wrap" color={need.isActing ? LIVE : NEEDS} bold>{withLinks(Link, isWhole ? need.text : cut(need.text, Math.round(room * 1.6)), `${need.id}-text`, need.text)}</ui.Text>
@@ -8862,7 +8877,7 @@ const needBlock = ($: EngineInterface, ui: Ui, need: Need, opts: { isWhole?: boo
       {/* What was last pressed or typed for it, while it is still there: a reply that left it open, an answer that did not go */}
       {need.line ? <ui.Text key={`${need.id}-sent`} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{need.line}</ui.Text> : null}
     </ui.Box>
-  )
+  ))
 }
 
 
@@ -12257,8 +12272,8 @@ const panelHooks = (on: On) => {
       const scope = `card-${one.id}`
       const isMoment = isMomentNow && !isAbovePrompt
       const isMarkedNow = isDoneMoment(one, at)
-      return (
-        <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isMoment ? { borderStyle: 'round' as const, borderColor: stageColor(stage(one)) ?? DONE, paddingX: 0, paddingY: 0 } : {})}>
+      return squareOutline(Box, isMoment ? stageColor(stage(one)) ?? DONE : undefined, `todo-${one.id}`, (
+        <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
           {edge(one, kept.length, done, kept.some(item => item.state === 'doing'))}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
             <Box flexDirection="column">
@@ -12376,7 +12391,7 @@ const panelHooks = (on: On) => {
             ) : null}
           </Box>
         </Box>
-      )
+      ))
     }
     const edge = (one: Todo, count: number, done: number, isDoing: boolean) => {
       const now: Stage = stage(one)
@@ -12847,8 +12862,8 @@ const panelHooks = (on: On) => {
       const count = Math.max(rounds.length, f.cap ?? 0)
       const isPassed = f.status === 'done' && flowPassed(f, rounds) === true
       const scope = `flow-${f.id}`
-      return (
-        <Box key={`flow-${f.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isFlowMoment(f) && !isAbovePrompt ? { borderStyle: 'round' as const, borderColor: DONE } : {})}>
+      return squareOutline(Box, isFlowMoment(f) && !isAbovePrompt ? DONE : undefined, `flow-${f.id}`, (
+        <Box key={`flow-${f.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
           {/* Blue while it runs, green only when it finished and its last round did not fail */}
           {f.status === 'working' || (f.status === 'done' && flowPassed(f, rounds) !== false) ? <Box width={1} flexShrink={0} backgroundColor={f.status === 'working' ? FLOW : DONE} /> : <Box width={1} flexShrink={0} />}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
@@ -12886,7 +12901,7 @@ const panelHooks = (on: On) => {
             {flowEnd(f, rounds)}
           </Box>
         </Box>
-      )
+      ))
     }
 
     const flowOpen = flowShown ? pickedOf(flowShown) : undefined

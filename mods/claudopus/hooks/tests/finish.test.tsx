@@ -808,7 +808,7 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   const moment = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
     (await view.findAll({ type: 'Svg' })).map(one => /^<svg data-moment="([\w-]+)"/.exec(String(one.props.source))?.[1]).filter(Boolean)[0]
   // The cards in their finish moment: outlined green at the top
-  const outlined = async (view: { findAll: (q: { type: 'Box' }) => Promise<{ props: Record<string, unknown> }[]> }) => (await view.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.borderColor === '#4C9AFF').length
+  const outlined = async (view: { findAll: (q: { type: 'Box' }) => Promise<{ props: Record<string, unknown> }[]> }) => (await view.findAll({ type: 'Box' })).filter(b => b.key === 'outline-top' && b.props.backgroundColor === '#4C9AFF').length
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   expect(await drawn(pane)).toEqual(['working'])
@@ -1347,7 +1347,7 @@ const dozen = async ($: Parameters<TestBody>[0], on: On, asking = false) => {
   if (asking) await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a3', text: 'May I delete the old repo?', choices: ['Approve', 'Refuse'] } as never)
   await w.clock.advance(5000)
   const order = async () => (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(one => /^Piece \d+$/.test(one)).filter((one, n, all) => all.indexOf(one) === n)
-  const green = async () => (await list.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.borderColor === '#4C9AFF').length
+  const green = async () => (await list.findAll({ type: 'Box' })).filter(b => b.key === 'outline-top' && b.props.backgroundColor === '#4C9AFF').length
   const fold = async () => (await list.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label)))?.props.label
   // Its run over, as Claude Code lists it: with its last words taken as its result it is done, and ended by an error it failed
   const end = (agentId: string, reason = 'answer') => ((agents[agentId] = reason === 'answer' ? 'completed' : 'failed'), (kinds[agentId] = 'general-purpose'), $.turn.complete({ answer: reason === 'answer' ? 'Done.' : '', durationMs: 1, isAborted: false, turnId: `t-${agentId}`, reason, agentId } as never))

@@ -874,7 +874,7 @@ test("asked each time: the call is held and its card has one block (Permission, 
   expect(grants()).toEqual([])
   // The block: an amber outline, a dim label of its kind, the question in amber, the command whole in a row of its own, the buttons
   const boxes = (await list.findAll({ type: 'Box' })) as { key?: string; props: Record<string, unknown> }[]
-  expect(boxes.filter(one => one.props.borderStyle === 'round' && one.props.borderColor === '#E5A50A').map(one => one.key)).toEqual(['need-gate-b1-0'])
+  expect(boxes.filter(one => one.key === 'outline-top' && one.props.backgroundColor === '#E5A50A').length).toBe(1)
   const drawn = await gateTexts(list)
   expect(drawn.slice(drawn.indexOf('Permission'), drawn.indexOf('Permission') + 3)).toEqual(['Permission', 'Run this as admin on this Mac?', 'chmod 644 /etc/hosts'])
   expect((await list.find({ type: 'Text', text: 'Permission' }))?.props.dimColor).toBe(true)
@@ -1336,7 +1336,7 @@ test('a gate answered on its card says what was pressed in that same card, in on
   await press('gate-b1-0-once')
   await call
   expect(await until(async () => list.find({ type: 'Text', text: ALLOWED_LINE }))).toBeDefined()
-  expect(((await list.findAll({ type: 'Box' })) as { key?: string; props: Record<string, unknown> }[]).filter(one => one.props.borderStyle === 'round' || (one.key ?? '').startsWith('done-gate-'))).toEqual([])
+  expect(((await list.findAll({ type: 'Box' })) as { key?: string; props: Record<string, unknown> }[]).filter(one => one.key === 'outline-top' || (one.key ?? '').startsWith('done-gate-'))).toEqual([])
   const drawn = await textOrder(list)
   // In its card, under the work's title, not a line of its own at the top
   expect(drawn.indexOf('Fix the hosts file')).toBeLessThan(drawn.indexOf(ALLOWED_LINE))

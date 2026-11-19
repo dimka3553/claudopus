@@ -457,8 +457,8 @@ const panelHooks = (on: On) => {
       const isMoment = isMomentNow && !isAbovePrompt
       // (read as it is drawn)
       const isMarkedNow = isDoneMoment(one, at)
-      return (
-        <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isMoment ? { borderStyle: 'round' as const, borderColor: stageColor(stage(one)) ?? DONE, paddingX: 0, paddingY: 0 } : {})}>
+      return squareOutline(Box, isMoment ? stageColor(stage(one)) ?? DONE : undefined, `todo-${one.id}`, (
+        <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
           {edge(one, kept.length, done, kept.some(item => item.state === 'doing'))}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
             <Box flexDirection="column">
@@ -576,7 +576,7 @@ const panelHooks = (on: On) => {
             ) : null}
           </Box>
         </Box>
-      )
+      ))
     }
     // The card's coloured edge is its stage: purple while it works, amber while it waits for the person, green once done, red
     // when it failed, none when it was stopped. While it works the edge is also its to-dos, one part each from the top down:
@@ -1148,8 +1148,8 @@ const panelHooks = (on: On) => {
       const count = Math.max(rounds.length, f.cap ?? 0)
       const isPassed = f.status === 'done' && flowPassed(f, rounds) === true
       const scope = `flow-${f.id}`
-      return (
-        <Box key={`flow-${f.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isFlowMoment(f) && !isAbovePrompt ? { borderStyle: 'round' as const, borderColor: DONE } : {})}>
+      return squareOutline(Box, isFlowMoment(f) && !isAbovePrompt ? DONE : undefined, `flow-${f.id}`, (
+        <Box key={`flow-${f.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
           {/* Blue while it runs, green only when it finished and its last round did not fail */}
           {f.status === 'working' || (f.status === 'done' && flowPassed(f, rounds) !== false) ? <Box width={1} flexShrink={0} backgroundColor={f.status === 'working' ? FLOW : DONE} /> : <Box width={1} flexShrink={0} />}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
@@ -1187,7 +1187,7 @@ const panelHooks = (on: On) => {
             {flowEnd(f, rounds)}
           </Box>
         </Box>
-      )
+      ))
     }
 
     // The work this Details tab is for, if it is one; a workflow's tab folds each of its agents' chats apart
