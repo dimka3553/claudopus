@@ -811,6 +811,26 @@ const ROUNDS = `export const meta = {
 phase('Make')`
 const journal = (...lines: object[]) => lines.map(one => JSON.stringify(one)).join('\n')
 
+test('a workflow that finishes stays where it was for its green two seconds, under a task begun before it, never at the top', async ($, on) => {
+  const { clock } = world(on, { panes: ['claudopus'] })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two things', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' } as never)
+  await clock.advance(1000)
+  expect((await $.tool.call({ tool: 'Workflow', tool_use_id: 'w1', script: ROUNDS, args: { title: 'Roman numerals', task: 'Write to_roman.', bar: 'Every case holds.', folder: '/repo', cap: 3 } } as never)).deny).toBeUndefined()
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const order = async () => (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(one => one === 'Draw the eyes' || one === 'Roman numerals')
+  await clock.advance(2000)
+  expect(await until(async () => ((await order()).length === 2 ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Draw the eyes', 'Roman numerals'])
+  await $.prompt.submit({ text: '<task-notification><task-id>wt1</task-id><status>completed</status><result>passed in 1 round</result></task-notification>', wait: false, origin: { kind: 'task-notification' } } as never)
+  // (in its green moment: outlined green, done)
+  expect(await until(async () => pane.find({ type: 'Text', text: /^Done · / }))).toBeDefined()
+  expect((await pane.findAll({ type: 'Box' })).filter(b => b.key?.startsWith('outline-') && b.props.backgroundColor === 'success').length).toBeGreaterThan(0)
+  expect(await order()).toEqual(['Draw the eyes', 'Roman numerals'])
+  await pane.unmount()
+})
+
 test('a workflow the chat starts is one blue card: how many agents, its rounds as squares with the step being run, the last round checked, nothing cut at any width, and Details with each round and agent chat; ended, it is under Finished', async ($, on) => {
   const { files, tabs, clock, played, notified } = world(on, { panes: ['claudopus'], art: true })
   await $.session.start(start)

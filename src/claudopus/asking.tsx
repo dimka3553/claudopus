@@ -789,7 +789,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   const sent = { text: said, ask: ask.text, ...(ask.details ? { details: ask.details } : {}), at, line, isCard: true, askAt: ask.at, ...(ask.refused && !isReply ? { isPress: true } : {}), ...back }
   sentReplies.set(one.id, { ...sent, to: 'sending' })
   redraw($)
-  // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
+  // The card says the answer for ANSWER_SHOWN, and no more after
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   const to = ask.refused
     ? isRun && run
@@ -902,7 +902,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true, askAt: ask.at })
   redraw($)
-  // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
+  // The card says the answer for ANSWER_SHOWN, and no more after
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   // Said in the chat once; the ask is then done with there, so the work asking again is sent to the chat afresh
   if (inChat.has(one.id)) (inChat.delete(one.id), void tellChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`))))
@@ -1057,7 +1057,7 @@ const replyUnread = async ($: EngineInterface, agentId: string) => {
   const isHeld = one.ask?.replied?.text === sent.text
   await toEnded($, one, agentId, `${who(true)} ${isHeld ? 'replied to' : 'answered'} your question ("${sent.ask}"), and you ended before reading it: ${sent.text}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
 }
-// An answer or a press given on the card in the last ANSWER_SHOWN: the card stays where it was meanwhile (answeredSince), and says it
+// An answer or a press given on the card in the last ANSWER_SHOWN: the card says it
 const heldAnswer = (one: Todo, now: number) => {
   const sent = one.chat ? undefined : sentReplies.get(one.id)
   return sent?.isCard && sent.to !== 'lost' && now - sent.at < ANSWER_SHOWN ? sent : undefined
