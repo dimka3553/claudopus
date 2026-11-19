@@ -1,0 +1,1 @@
+- A card's outline, such as the green one on Mark as done, now has square corners, so the to-do bar on its left edge sits flush inside it instead of sticking out past a rounded corner.
