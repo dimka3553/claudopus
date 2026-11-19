@@ -187,12 +187,17 @@ const tabFailed = async ($: EngineInterface, e: Parameters<EngineInterface['ui']
   await log($, `tab ${id} not drawn (${error?.kind ?? 'unknown'}): ${why}`)
   const isAgain = fails.length < 3
   if (isAgain) await watchTabs($, [id], 'its drawing failed')
-  const { Box, Text } = uiOf($, e)
+  const { Box, Button, Text } = uiOf($, e)
   return (
     <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
       <Text bold>Claudopus couldn't show this tab</Text>
       <Text dimColor wrap="wrap">{cut(why, 300)}</Text>
       <Text dimColor wrap="wrap">{isAgain ? 'Claudopus tries again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
+      {id !== LIST ? (
+        <Box alignItems="flex-start">
+          <Button key={`failed-back-${presses}`} label="Back to the list" plain onPress={() => ((presses += 1), void front($, LIST, LIST_TITLE).catch(err => log($, `list not shown: ${String(err)}`)))} />
+        </Box>
+      ) : null}
     </Box>
   )
 }

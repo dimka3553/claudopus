@@ -1,0 +1,2 @@
+- A task's Details tab with a lot in it, such as many helpers and ended commands, no longer stays on "Nothing to show yet": it is drawn with its ended commands folded and fewer lines of its conversation, so the app draws it.
+- A tab that still holds more than the app can draw at once, or whose drawing fails, says so in plain words, with Back to the list.
