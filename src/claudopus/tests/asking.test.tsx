@@ -1602,6 +1602,54 @@ test('while the person uses the panel its running times stand still, and move ag
   await list.unmount()
 })
 
+// One line of pictures for a pane: the app asks for the panel with the view at the top and scrolled down in turn as a card changes
+// its height, and each once kept a picture of its own age
+test('a card never goes back to an older picture once a newer one was shown, however the view moves between the top and scrolled down: the 19 Nov card that "went big, then small, then big again" after Release it', async ($, on) => {
+  const { files, appended, clock } = world(on)
+  files.set('/repo/wt/.release', 'mods/claudopus/bin/release')
+  files.set('git:top', '/repo/wt')
+  files.set('git:branch', 'fix-nose')
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn } as never)
+  const DOWN = { ...LIST, props: { ...LIST.props, scroll: { offset: 6, bodyRows: 20 } }, surface: 'desktop' }
+  const TOP = { ...LIST, surface: 'desktop' }
+  let pane = await $.ui.mount(DOWN as never)
+  // (the app asks for the same pane again with the view elsewhere)
+  const viewAt = async (where: typeof DOWN | typeof TOP) => (await pane.unmount(), (pane = await $.ui.mount(where as never)))
+  const card = async () => (await pane.findAll({ type: 'Text' })).map(one => one.text).filter(text => !/Claudopus|^v\d|chat/.test(text ?? ''))
+  await ($.ui as any).scroll({ component: 'Pane', requestId: LIST.requestId, offset: 6, by: 1, bodyRows: 20, contentRows: 40, origin: { kind: 'person' } }).catch(() => undefined)
+  await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 't1', agentId: 'a1', item: 'Ask you before releasing', state: 'doing' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'Built and tested.' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release the nose fix?', details: 'It straightens the nose.', choices: ['Release it'], release: '/repo/wt' } as never)
+  const release = await until(async () => (await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it'))
+  await clock.advance(4000)
+  await pane.press({ key: release?.key ?? '' })
+  expect(await until(async () => appended.find(line => line.includes('pressed "Release it"')))).toBeDefined()
+  expect(await until(async () => pane.find({ type: 'Text', text: '✓ You answered “Release it”' }))).toBeDefined()
+  await clock.advance(1000)
+  const answered = await card()
+  expect(answered).toContain('Built and tested.')
+  // The task carries on while the person is still at the panel: its last to-do is ticked, so its card gets shorter
+  await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 't2', agentId: 'a1', item: 'Ask you before releasing', state: 'done' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n2', agentId: 'a1', text: 'Releasing the nose fix.' } as never)
+  // Scrolled down and in use, the picture on screen stays as it was
+  expect(await card()).toEqual(answered)
+  // The view comes to the top, as when the list gets shorter under it: the card as it is now
+  await viewAt(TOP)
+  const now = await card()
+  expect(now).toContain('Releasing the nose fix.')
+  expect(now).not.toContain('Ask you before releasing')
+  // and from there on that picture or a newer one, wherever the view goes: never the taller one from before
+  for (const where of [DOWN, TOP, DOWN]) (await viewAt(where), expect(await card()).toEqual(now))
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n3', agentId: 'a1', text: 'Released as 1.2.3' } as never)
+  await viewAt(TOP)
+  const later = await card()
+  expect(later).toContain('Released as 1.2.3')
+  for (const where of [DOWN, TOP, DOWN]) (await viewAt(where), expect(await card()).toEqual(later))
+  await pane.unmount()
+})
+
 test('folding Finished while scrolled down draws one card and the fold at their own height, even after the list was long', async ($, on) => {
   const { clock } = world(on)
   await $.session.start(start)

@@ -1,0 +1,2 @@
+- A card no longer flickers between an older and a newer look after you press a button on it, such as Release it: once the panel has shown a card as it is now, it never shows it as it was before.
+- The same holds for the tabs and for the bar above the chat box.
