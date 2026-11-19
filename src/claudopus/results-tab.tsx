@@ -4,19 +4,19 @@
 // while its card can be changed, else as the person's own message naming the result by its path, a real submit as Start again's is. Nothing is put in the chat's own box
 const CONTINUE_FROM = (r: Report, now: number, words: string) => `Continue from the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: ${words}`
 // (on its way from the press's own hook, which waits for it before it sends what the press left to send: answersOnWay)
-const continueFrom = ($: EngineInterface, id: string, words: string) => {
-  const run = continueNow($, id, words)
+const continueFrom = ($: EngineInterface, id: string, words: string, files: string[] = []) => {
+  const run = continueNow($, id, words, files)
   answersOnWay.add(run)
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
   return run
 }
-const continueNow = async ($: EngineInterface, id: string, words: string): Promise<void> => {
+const continueNow = async ($: EngineInterface, id: string, words: string, files: string[] = []): Promise<void> => {
   const r = (await read($, reports)).find(one => one.id === id)
-  if (!r || !words.trim()) return
+  if (!r || (!words.trim() && !files.length)) return
   // To that result's own task while its card is still there to carry on from; else as the person's message naming the result
   const card = r.agent ? (await read($, todos)).find(one => one.id === r.agent && canChange(one)) : undefined
-  if (card) return changeTask($, card.id, words.trim())
-  await sendForPerson($, CONTINUE_FROM(r, await $.clock.now(), words.trim()))
+  if (card) return changeTask($, card.id, words.trim(), files)
+  await sendForPerson($, `${CONTINUE_FROM(r, await $.clock.now(), words.trim() || '(no words, only the files below)')}${filesNote(files)}`)
 }
 // ---- Reports in panes of their own: the list as "Reports", and each report opened as a pane titled with its name ----
 

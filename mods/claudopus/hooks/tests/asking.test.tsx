@@ -343,6 +343,13 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     if (tool === 'osascript') osa.push([...e.argv])
     // The file picker Attach opens: what the test lays as picker:chosen is picked, else the person cancels it
     if (tool === 'osascript' && e.argv.some(one => String(one).includes('choose file'))) return files.has('picker:chosen') ? ok(files.get('picker:chosen') ?? '') : ok('', 1)
+    // What Paste picture finds on the clipboard: files copied, by their paths, as the test lays clipboard:files; a picture copied
+    // (clipboard:picture), saved where the mod asks; else nothing
+    if (tool === 'osascript' && e.argv.some(one => String(one).includes('NSPasteboard'))) {
+      const to = String(e.argv.at(-1))
+      if (files.has('clipboard:picture')) return (files.set(to, files.get('clipboard:picture') ?? ''), ok(`${to}\n`))
+      return ok(files.get('clipboard:files') ?? '')
+    }
     // What was handed to this Mac's keychain on security's stdin
     if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
@@ -836,7 +843,8 @@ const askButtons = async (pane: Drawn, card: string) => (await pane.findAll({ ty
 test('work that needs the person\'s hands asks: its card stands out first with the question in its block, the text to paste with its Copy, and only the answers the task gave, with Answer in words after them; what is typed goes in the one box above the chat, and each answer goes back to the work', async ($, on) => {
   // Once its run has ended, a work's chat takes no more lines
   const ended = new Set<string>()
-  const { played, notified, appended, terminals, submitted, resumed, shown, files } = world(on, { ended })
+  // (a picture attached under the box gets its small copy: sips gives its size, and its bytes are read)
+  const { played, notified, appended, terminals, submitted, resumed, shown, files } = world(on, { ended, sips: argv => (argv.includes('-g') ? 'pixelWidth: 160\npixelHeight: 120\n' : ''), bytes: path => (path.includes('/attached/thumbs/') ? 'AAAA' : undefined) })
   const clip: string[] = []
   on('ui.copy', (_, e) => (clip.push(e.text), { value: { isCopied: true } }) as never)
   const filled: string[] = []
@@ -945,6 +953,44 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   expect(submitted.some(line => line.includes('claudopus'))).toBe(false)
   expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “claudopus”' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Tell me the repo name.' })).toBeUndefined()
+  // Pictures go with an answer in words. The box takes only words (the app gives a mod's field no pasted picture), so under it
+  // Paste picture takes what the clipboard holds and Attach picks files; each picture shows as a small copy above its name, a
+  // press on the name takes it off, and the task gets each path with how to open it (19 Nov, the person: "answering in words
+  // should give the ability to attach images")
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k8b', agentId: 'a2', text: 'Which skin looks wrong?' } as never)
+  await list.press({ key: (await until(async () => (await list.findAll({ type: 'Button' })).find(one => /^ask-a2-inbar-\d+$/.test(one.key ?? ''))))?.key ?? '' })
+  const picBox = await until(async () => (await bar.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith('band-a2-reply-answer-')))
+  const barLabels = async () => (await bar.findAll({ type: 'Button' })).filter(b => String(b.key ?? '').startsWith('band-box-')).map(b => String(b.props.label))
+  expect(await barLabels()).toEqual(['Attach', 'Paste picture', 'Send', 'Close'])
+  const pressBar = async (label: string) => bar.press({ key: (await bar.findAll({ type: 'Button' })).find(b => b.props.label === label)?.key ?? '' })
+  // Nothing on the clipboard: it says so, and nothing is attached
+  const nothing = "There's no picture to paste. Copy one first, then press Paste picture."
+  await pressBar('Paste picture')
+  expect(await until(async () => bar.find({ type: 'Text', text: nothing }))).toBeDefined()
+  // A picture copied is saved in the memory folder; files copied go by their own paths; Attach adds what is picked
+  const chipsIn = async () => (await barLabels()).filter(label => label.startsWith('📎'))
+  files.set('clipboard:picture', 'png')
+  await pressBar('Paste picture')
+  expect(await until(async () => ((await chipsIn()).length === 1 ? await chipsIn() : undefined))).toEqual([expect.stringMatching(/^📎 pasted-\d{1,2}-[A-Z][a-z]{2}-\d{2}\.\d{2}\.\d{2}\.png ✕$/)])
+  expect(await bar.find({ type: 'Text', text: nothing })).toBeUndefined()
+  files.delete('clipboard:picture')
+  files.set('clipboard:files', '/Users/me/Desktop/skin-2.png\n')
+  await pressBar('Paste picture')
+  files.set('picker:chosen', '/Users/me/Desktop/old.png\n')
+  await pressBar('Attach')
+  expect(await until(async () => ((await chipsIn()).length === 3 ? (await chipsIn()).slice(1) : undefined))).toEqual(['📎 skin-2.png ✕', '📎 old.png ✕'])
+  const smallCopies = async () => (await bar.findAll({ type: 'Svg' } as never)).map(one => String(one.props.alt)).filter(alt => alt.startsWith('Picture: '))
+  expect(await smallCopies()).toEqual([expect.stringMatching(/^Picture: pasted-\d{1,2}-[A-Z][a-z]{2}-\d{2}\.\d{2}\.\d{2}\.png$/), 'Picture: skin-2.png', 'Picture: old.png'])
+  await pressBar('📎 old.png ✕')
+  expect(await until(async () => ((await chipsIn()).length === 2 ? true : undefined))).toBe(true)
+  expect(await smallCopies()).toHaveLength(2)
+  await bar.input({ key: picBox?.key ?? '', text: 'The second one' })
+  const withPictures = (await until(async () => resumed.find(line => line.startsWith('a2: ') && line.includes('in their own words: The second one')))) ?? ''
+  expect(withPictures).toMatch(/\n- \/\S+\/attached\/pasted-\d{1,2}-[A-Z][a-z]{2}-\d{2}\.\d{2}\.\d{2}\.png \(open it with Read\)/)
+  expect(withPictures).toContain('\n- /Users/me/Desktop/skin-2.png (open it with Read)')
+  expect(withPictures).not.toContain('old.png')
+  // The card says what was answered, the pictures by name
+  expect(await until(async () => (await list.findAll({ type: 'Text' })).find(one => String(one.text ?? '').startsWith('✓ You answered “The second one 📎 pasted-')))).toBeDefined()
   // Instructions passed as text to copy get no Copy: only what is pasted elsewhere does
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k6', agentId: 'a2', text: 'Open the plugin directory and submit the form.', copy: 'Open the plugin directory page and fill in the form with the details' } as never)
   expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Copy')).toBe(false)
@@ -3008,7 +3054,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   // Under the box, while the task works: Attach, Stop and send, and Send (19 Nov, the person: "either send and interrupt, or just
   // send for the next turn. Have the ability to attach pictures, videos, files, whatever")
   const footOf = async (site: Site, from: string) => (await site.findAll({ type: 'Button' })).filter(b => String(b.key ?? '').startsWith(from)).map(b => String(b.props.label))
-  expect(await footOf(top, 'band-box-')).toEqual(['Attach', 'Stop and send', 'Send', 'Close'])
+  expect(await footOf(top, 'band-box-')).toEqual(['Attach', 'Paste picture', 'Stop and send', 'Send', 'Close'])
   await top.input({ key: atWork?.key ?? '', text: 'Keep the tuft' })
   expect(await until(async () => appended.find(line => line.startsWith('a3: ') && line.includes('wrote to you from your card, in their own words: Keep the tuft\n')))).toBeDefined()
   expect(submitted).toHaveLength(wasSubmitted)
@@ -3021,7 +3067,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   expect((await viewBox())?.props.rows).toBe(4)
   const heads = (await view3.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
   expect(heads.lastIndexOf('Message')).toBeGreaterThan(heads.indexOf('Conversation'))
-  expect(await footOf(view3, 'details-a3-')).toEqual(['Attach', 'Stop and send', 'Send'])
+  expect(await footOf(view3, 'details-a3-')).toEqual(['Attach', 'Paste picture', 'Stop and send', 'Send'])
   // Typed in, while the task writes its card: the same box, never drawn anew under the person (its ring would flash, and the app
   // pulls the tab back to it at every drawing)
   const viewNumber = async () => {
@@ -3076,7 +3122,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   await $.turn.complete({ agentId: 'a3', answer: 'The tip is longer now.', durationMs: 1, isAborted: false, turnId: 'c2', reason: 'answer' })
   expect(await until(async () => (await key('change-a3')) ?? undefined)).toBeDefined()
   // Done, its view keeps the box, with only Send: the message starts it again
-  expect(await until(async () => ((await footOf(view3, 'details-a3-')).join() === 'Attach,Send' ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await footOf(view3, 'details-a3-')).join() === 'Attach,Paste picture,Send' ? true : undefined))).toBe(true)
   await view3.input({ key: (await viewBox())?.key ?? '', text: 'One more ear' })
   expect(await until(async () => changes().find(line => line.includes('in their own words: One more ear\n')))).toBeDefined()
   await view3.unmount()

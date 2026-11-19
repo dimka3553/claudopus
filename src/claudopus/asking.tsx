@@ -131,7 +131,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], barOpen?.kind ?? '', barOpen?.id ?? '', barOpen?.mark ?? '', [...attached], [...replies]])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], barOpen?.kind ?? '', barOpen?.id ?? '', barOpen?.mark ?? '', [...attached], [...attachSaid], [...replies]])
 }
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
@@ -386,8 +386,10 @@ const answeredAsks = new Set<string>()
 const answeredAt = new Map<string, number>()
 // Answers on their way, so a press hook can wait for the one its press started (a button's handler does not await it)
 const answersOnWay = new Set<Promise<unknown>>()
-const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
-  const run = answerNow($, one, choice, isReply)
+// `picked`: what was attached under the box, named on the card after the words; `files`: those and the files the words name, each
+// listed for the task with how to open it (filesNote)
+const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = false, picked: string[] = [], files: string[] = picked) => {
+  const run = answerNow($, one, choice, isReply, picked, files)
   if (one.chat) return run
   answersOnWay.add(run)
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
@@ -491,9 +493,12 @@ const openBar = ($: EngineInterface, to: { kind: BarKind; id: string; one?: Todo
 // A reply sent from the bar's box answers what its card asks as it is sent: the box may have been drawn for an earlier question.
 // On its way from the press itself, as an answer from the card is (answersOnWay)
 const sendFromBar = ($: EngineInterface, id: string, value: string) => {
+  // The pictures and files attached under the box go with the words, and the box is clear of them at once
+  const picked = takeAttached(id)
   const run = (async () => {
     const one = (await read($, todos)).find(card => card.id === id)
-    if (one?.ask && value.trim()) await answerAsk($, one, value, true)
+    const files = [...new Set([...picked, ...(await pathsIn($, value))])]
+    if (one?.ask && (value.trim() || files.length)) await answerAsk($, one, value, true, picked, files)
   })()
   answersOnWay.add(run)
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
@@ -511,16 +516,80 @@ const canChange = (one: Todo) => !one.chat && !one.parentId && (one.status === '
 // stop ends the task's own commands and helpers too (engine 2.1.326, read 19 Nov). The files picked with Attach go with it, each by
 // its path: a message to a task is text alone
 const sendChange = ($: EngineInterface, id: string, value: string, isNow = false) => {
-  const files = attached.get(id) ?? []
-  attached.delete(id)
+  const files = takeAttached(id)
   const run = changeTask($, id, value.trim(), files, isNow)
   answersOnWay.add(run)
   void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
   return run
 }
 // The files picked for a message to each task, by its card, until the message goes or the person takes one off
+// (also under the box that answers a card's question in words, and under Message on a result: by the result's id)
 const attached = new Map<string, string[]>()
 const ATTACH_MOST = 20
+// Taken for what is sent: the box's files go with it, and its line about the clipboard with them
+const takeAttached = (id: string) => {
+  const files = attached.get(id) ?? []
+  attached.delete(id)
+  attachSaid.delete(id)
+  return files
+}
+// A small copy of each picture attached, by its path, drawn above its name under the box; made as it is attached
+const attachThumbs = new Map<string, { source: string; width: number; height: number }>()
+const ATTACH_THUMB = 160
+const ATTACH_THUMB_TALL = 56
+// What Paste picture said, by the box's id, when the clipboard held nothing to attach; it goes with the next file attached or sent
+const attachSaid = new Map<string, string>()
+const NOTHING_TO_PASTE = "There's no picture to paste. Copy one first, then press Paste picture."
+// Where pasted pictures and the small copies are kept: the person's own memory folder, never the repo or a shared place
+const attachedDir = () => `${dir}/attached`
+// What the drawing of a box's files depends on, for the drawings given again while a box is typed in (barShape, paneBoxShape)
+const attachShape = (id: string) => JSON.stringify([attached.get(id) ?? [], (attached.get(id) ?? []).map(path => attachThumbs.has(path)), attachSaid.get(id) ?? ''])
+const thumbAttached = async ($: EngineInterface, path: string) => {
+  if (attachThumbs.has(path) || fileKind(path) !== 'picture' && fileKind(path) !== 'picture-other') return
+  const to = `${attachedDir()}/thumbs/${hashOf(path)}.jpg`
+  await $.process.run(['mkdir', '-p', `${attachedDir()}/thumbs`])
+  const made = await $.process.run([sips($), '-Z', String(ATTACH_THUMB), '-s', 'format', 'jpeg', '-s', 'formatOptions', '60', path, '--out', to]).catch(() => undefined)
+  if (made?.exitCode !== 0) return
+  const thumb = await thumbOf($, to)
+  if (thumb) attachThumbs.set(path, thumb)
+}
+const addAttached = async ($: EngineInterface, id: string, picked: string[]) => {
+  await Promise.all(picked.map(path => thumbAttached($, path).catch(err => log($, `small copy of an attached picture not made: ${String(err)}`))))
+  attached.set(id, [...new Set([...(attached.get(id) ?? []), ...picked])].slice(0, ATTACH_MOST))
+  attachSaid.delete(id)
+  ;((presses += 1), (boxPresses += 1), drawAgain($, true))
+}
+// Paste picture: what the computer's clipboard holds goes under the box. Files copied in the Finder go by their own paths; a picture
+// copied (a screenshot taken to the clipboard, an image copied from a page) is saved as a PNG in the memory folder first. The box
+// itself takes only words: the app gives a mod's field no pasted picture, nor a dropped file (engine 2.1.326)
+const PASTE_MAC = `ObjC.import('AppKit')
+function run(argv) {
+  const pb = $.NSPasteboard.generalPasteboard
+  const out = []
+  const urls = pb.readObjectsForClassesOptions($([$.NSURL]), $({ NSPasteboardURLReadingFileURLsOnlyKey: true }))
+  if (!urls.isNil()) for (let i = 0; i < urls.count; i++) out.push(urls.objectAtIndex(i).path.js)
+  if (out.length) return out.join('\\n')
+  let data = pb.dataForType($.NSPasteboardTypePNG)
+  if (data.isNil()) {
+    const tiff = pb.dataForType($.NSPasteboardTypeTIFF)
+    if (!tiff.isNil()) data = $.NSBitmapImageRep.imageRepWithData(tiff).representationUsingTypeProperties(4, $({}))
+  }
+  if (data.isNil()) return ''
+  return data.writeToFileAtomically(argv[0], true) ? argv[0] : ''
+}`
+const PASTE_LINUX = 'xclip -selection clipboard -t image/png -o > "$1" 2>/dev/null && [ -s "$1" ] && echo "$1"'
+const pastePicture = async ($: EngineInterface, id: string) => {
+  if (!canAttach()) return
+  await $.process.run(['mkdir', '-p', attachedDir()])
+  // Named by when it was pasted, as a person reads it: pasted-19-Nov-14.05.09.png
+  const at = new Date(await $.clock.now())
+  const to = `${attachedDir()}/pasted-${at.getDate()}-${MONTHS[at.getMonth()]}-${[at.getHours(), at.getMinutes(), at.getSeconds()].map(n => String(n).padStart(2, '0')).join('.')}.png`
+  const r = await $.process.run(isLinux ? ['sh', '-c', PASTE_LINUX, 'sh', to] : ['osascript', '-l', 'JavaScript', '-e', PASTE_MAC, to], { timeoutMs: 15_000 }).catch(err => (log($, `clipboard not read: ${String(err)}`), undefined))
+  const got = (r?.exitCode === 0 ? r.stdout : '').split('\n').map(line => line.trim()).filter(line => line.startsWith('/'))
+  if (got.length) return addAttached($, id, got)
+  attachSaid.set(id, NOTHING_TO_PASTE)
+  ;((presses += 1), (boxPresses += 1), drawAgain($, true))
+}
 // Attach opens the computer's own file picker, where the engine runs: so not in a chat run on another Mac over ssh, whose picker
 // would open on that Mac's screen (isRunFromAfar). macOS through osascript, Linux through zenity
 const canAttach = () => !isRunFromAfar
@@ -534,8 +603,7 @@ const pickFiles = async ($: EngineInterface, id: string) => {
   if (!r || r.exitCode !== 0) return
   const picked = r.stdout.split('\n').map(line => line.trim()).filter(line => line.startsWith('/'))
   if (!picked.length) return
-  attached.set(id, [...new Set([...(attached.get(id) ?? []), ...picked])].slice(0, ATTACH_MOST))
-  ;((presses += 1), (boxPresses += 1), drawAgain($, true))
+  await addAttached($, id, picked)
 }
 const unattach = ($: EngineInterface, id: string, path: string) => {
   const left = (attached.get(id) ?? []).filter(one => one !== path)
@@ -560,25 +628,57 @@ const sendMessageFrom = ($: EngineInterface, id: string, value: string, isNow: b
   redraw($)
   void sendChange($, id, value, isNow).catch(err => log($, `message not sent: ${String(err)}`))
 }
+// What is attached under a box: each picture as a small copy above its name, each file by its name alone, a press on the name
+// taking it off; and what Paste picture said when the clipboard held nothing. The terminal draws no picture: names alone there
+const attachedRow = ($: EngineInterface, ui: Ui, id: string, key: string) => {
+  const files = attached.get(id) ?? []
+  const said = attachSaid.get(id)
+  if (!files.length && !said) return null
+  const canDraw = 'Svg' in ui && !('isTerminal' in ui)
+  return (
+    <ui.Box key={`${key}-files`} flexDirection="column" gap={1} width="100%">
+      {files.length ? (
+        <ui.Box flexDirection="row" flexWrap="wrap" alignItems="flex-end" columnGap={2} rowGap={1}>
+          {files.map((path, n) => {
+            const thumb = canDraw ? attachThumbs.get(path) : undefined
+            const label = `📎 ${cut(path.split('/').pop() ?? path, 40)} ✕`
+            const chip = <ui.Button key={`${key}-file-${n}-${presses}`} label={label} plain dimColor onPress={() => unattach($, id, path)} />
+            if (!thumb || !('Svg' in ui)) return chip
+            const tall = Math.min(ATTACH_THUMB_TALL, thumb.height)
+            return (
+              <ui.Box key={`${key}-pic-${n}`} flexDirection="column" alignItems="flex-start" gap={0}>
+                <ui.Svg key={`${key}-pic-${n}-svg`} source={thumb.source} alt={`Picture: ${path.split('/').pop() ?? path}`} width={Math.max(1, Math.round((thumb.width * tall) / thumb.height))} height={tall} />
+                {chip}
+              </ui.Box>
+            )
+          })}
+        </ui.Box>
+      ) : null}
+      {said ? <ui.Text key={`${key}-files-said`} color={NEEDS} wrap="wrap">{said}</ui.Text> : null}
+    </ui.Box>
+  )
+}
+// Attach and Paste picture, where the computer's own picker and clipboard are this one's (canAttach)
+const attachButtons = ($: EngineInterface, ui: Ui, id: string, key: string) =>
+  canAttach()
+    ? [
+        <ui.Button key={`${key}-attach-${presses}-${boxPresses}`} label="Attach" plain onPress={() => void pickFiles($, id).catch(err => log($, `files not picked: ${String(err)}`))} />,
+        <ui.Button key={`${key}-paste-${presses}-${boxPresses}`} label={PASTE_PICTURE} plain onPress={() => void pastePicture($, id).catch(err => log($, `picture not pasted: ${String(err)}`))} />,
+      ]
+    : null
+const PASTE_PICTURE = 'Paste picture'
 // The row under a message box, the same in the box above the chat and at the bottom of Details: the files picked, each taken off
 // with a press on its name; Attach; then, while the task is in the middle of a step, Send now, and Send, the big one; `close`,
 // the box above the chat's own Close
 const SEND_NOW = 'Stop and send'
 const messageFoot = ($: EngineInterface, ui: Ui, one: Todo, key: string, close: JSX.Element | null = null) => {
-  const files = attached.get(one.id) ?? []
   const typed = () => drafts.get(messageDraft(one.id)) ?? ''
   const isMidStep = one.status === 'working'
   return (
     <ui.Box key={`${key}-foot`} flexDirection="column" flexShrink={0} gap={1} width="100%">
-      {files.length ? (
-        <ui.Box key={`${key}-files`} flexDirection="row" flexWrap="wrap" columnGap={2}>
-          {files.map((path, n) => (
-            <ui.Button key={`${key}-file-${n}-${presses}`} label={`📎 ${cut(path.split('/').pop() ?? path, 40)} ✕`} plain dimColor onPress={() => unattach($, one.id, path)} />
-          ))}
-        </ui.Box>
-      ) : null}
+      {attachedRow($, ui, one.id, key)}
       <ui.Box flexDirection="row" alignItems="center" flexWrap="wrap" gap={1}>
-        {canAttach() ? <ui.Button key={`${key}-attach-${presses}-${boxPresses}`} label="Attach" plain onPress={() => void pickFiles($, one.id).catch(err => log($, `files not picked: ${String(err)}`))} /> : null}
+        {attachButtons($, ui, one.id, key)}
         {/* The sends keep together at the right, on the next line when the pane is narrow */}
         <ui.Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} justifyContent="flex-end">
           {isMidStep ? <ui.Button key={`${key}-now-${presses}-${boxPresses}`} label={SEND_NOW} onPress={() => sendMessageFrom($, one.id, typed(), true)} /> : null}
@@ -601,7 +701,7 @@ const paneBoxKey = (id: string) => `details-${id}-reply-change-${replies.get(id)
 const isPaneBoxHeld = (paneId: string, at: number) => paneBoxIn === paneId && paneBoxAt > 0 && at - paneBoxAt < BAR_BOX_HELD
 // The Details drawing given again while its box is held, by pane, with what the box was drawn for: its key and its files
 const paneBoxHeld = new Map<string, { id: string; shape: string; drawing: unknown }>()
-const paneBoxShape = (id: string) => JSON.stringify([paneBoxKey(id), attached.get(id) ?? [], presses, boxPresses])
+const paneBoxShape = (id: string) => JSON.stringify([paneBoxKey(id), attachShape(id), presses, boxPresses])
 const messageBox = ($: EngineInterface, ui: Ui, one: Todo, paneId: string) => (
   <ui.Box key={`message-${one.id}`} flexDirection="column" gap={1} flexShrink={0}>
     {'Input' in ui ? (
@@ -705,14 +805,17 @@ const changeTask = async ($: EngineInterface, id: string, said: string, picked: 
   else await toEnded($, card, id, text, sent)
   await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(shown, 120)}”`)))
 }
-const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
+const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false, picked: string[] = [], files: string[] = picked) => {
   // Another chat's ask is answered only in that chat: no file carries an answer to it, from this Mac or another
   if (one.chat) return
   const ask = one.ask
-  const said = choice.trim()
+  const words = choice.trim()
+  // What the card and the chat say was answered: the words, then each file attached by its name
+  const said = [words, ...picked.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join(' ')
+  const note = isReply ? filesNote(files) : ''
   if (!ask || !said) return
   const target = ask.from ?? one.id
-  if (!settles(ask, said, isReply)) return holdAsk($, one, ask, said, target)
+  if (!settles(ask, words, isReply)) return holdAsk($, one, ask, said, target, note)
   // The amber goes and the box clears at once. Only the first answer to the ask it was made for counts: a second press, or a press
   // on an ask the work has since replaced, sends nothing. Marked before anything is awaited, so two presses at once count once
   const asked = `${one.id}:${ask.at}:${ask.text}`
@@ -739,7 +842,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
     if (askPressed.get(one.id) === mark) askPressed.delete(one.id)
     // The work has since asked something else, or it was answered elsewhere: nothing went, and the card shows what it carries now
     if (!isCleared) return void (sentReplies.get(one.id)?.to === 'sending' && sentReplies.delete(one.id), redraw($))
-    await answerCleared($, one, ask, said, isReply, target, at, line)
+    await answerCleared($, one, ask, said, isReply, target, at, line, note)
   } catch (err) {
     // It did not reach the work: the card says so, and its buttons come back to be pressed again, with nothing of the answer left
     if (askPressed.get(one.id) === mark) askPressed.delete(one.id)
@@ -755,7 +858,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   }
 }
 // The rest of an answer once its ask is cleared from the card's file: written into its task at a step, or sent to it paused
-const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, isReply: boolean, target: string, at: number, line: string) => {
+const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, isReply: boolean, target: string, at: number, line: string, note = '') => {
   answeredAt.set(one.id, ask.at)
   dropDrafts($, one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
@@ -775,9 +878,9 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   const to = ask.refused
     ? isRun && run
       ? await startRun($, one, run)
-      : REFUSAL_ANSWERED(ask.copy ?? ask.text, said, isReply)
+      : `${REFUSAL_ANSWERED(ask.copy ?? ask.text, said, isReply)}${note}`
     : isReply
-      ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}`
+      ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}`
       : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
   // A task whose run ended a moment ago refuses the line: it is sent to it as a message instead, which starts it with it
   // Marked on its way once written, so a step that began before it never counts as reading it
@@ -861,7 +964,7 @@ const TAKEN_BACK = (said: string, asked: string) =>
 // A reply in the person's own words that does not settle the ask: the ask stays on the card, its question with the reply under it,
 // and the work is told so; its card stays among the running cards while the work acts on it. The person has answered, so its
 // buttons and box go at once, and come back only when the work asks again, or ends with the ask still open
-const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, target: string) => {
+const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, target: string, note = '') => {
   // The same words twice at once count once; typed again later, after an earlier reply, they go again
   const key = `${one.id}:${ask.at}:${ask.text}:reply:${ask.replied?.at ?? ''}:${said}`
   if (answeredAsks.has(key)) return
@@ -888,7 +991,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   // Said in the chat once; the ask is then done with there, so the work asking again is sent to the chat afresh
   if (inChat.has(one.id)) (inChat.delete(one.id), void tellChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`))))
   const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
-  const to = `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
+  const to = `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}\n${named(REPLY_HOLDS)}`
   const told = working ? await tell($, target, to) : undefined
   if (told && !told.deny) return void (writtenIn($, target, one.id), redraw($))
   await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at })
