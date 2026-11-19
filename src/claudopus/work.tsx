@@ -572,7 +572,23 @@ const workHooks = (on: On) => {
         await log($, `report of ${agent} taken at its hand-back, for the chat to give with the notice of its end`)
         return { result: { success: true, message: named(REPORT_TAKEN) } } as never
       }
-      // A helper's goes on to its task as Claude Code hands it, and is its turn's answer once it went through
+      // A helper's goes only to the task that started it, never into the chat (Claude Code draws a hand-back it delivers as a box
+      // in the chat, and some came twice): Claudopus answers the hand-back itself, as a task's, and gives the result to that task
+      // from this hook, once: a message to it, which it reads at its next step or which starts its next step where it has paused
+      const above = taken?.parentId ? (await read($, todos)).find(one => one.id === taken.parentId) : undefined
+      if (dir && !isOff && taken && above && !above.chat && !flowAgents.has(agent) && !flowAgents.has(above.id)) {
+        handedBack.set(agent, report)
+        const now = await $.clock.now()
+        await changeTodos($, list => list.map(one => (one.id !== agent ? one : { ...ended(one, one.flagged ? 'failed' : 'done', now), ...(one.flagged ? { why: WHY_FLAGGED } : {}), answer: report.slice(0, ANSWER_CHARS) || one.answer, tookReport: String(e.tool_use_id) })))
+        const text = named(HELPER_RESULT(titleOf(taken), agent, report))
+        // (a task that has ended, or that the person stopped, is not started by it: the result is written into its chat)
+        const r = above.status === 'working' ? await sendOwn($, { to: { agentId: above.id }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) })) : { isDelivered: false as const, reason: `its task is ${above.status}` }
+        if (!r.isDelivered) await tell($, above.id, text)
+        await log($, `result of helper ${agent} taken at its hand-back and ${r.isDelivered ? 'sent' : `written (${r.reason})`} to its task ${above.id}`)
+        await lookEnds($)
+        return { result: { success: true, message: named(HELPER_REPORT_TAKEN) } } as never
+      }
+      // (one whose task the mod does not know goes on as Claude Code hands it, and is its turn's answer once it went through)
       const r = await next(e)
       if (!r.deny && !r.isError) handedBack.set(agent, report)
       return r

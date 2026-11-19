@@ -207,10 +207,11 @@ const panelHooks = (on: On) => {
     const answeredOf = (list: Prompt[] | undefined) => (list ?? []).filter(p => !p.endedAt || at - p.endedAt < PROMPT_SHOWN)
     const promptsAnswered = answeredShown(at)
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
-    // The cards kept up: every one working or waiting for the person, one that just ended for its pause, one that failed (it says
-    // why, and has Start again) until it is dismissed or a day old, one that finished with a server left for the person, whose row
-    // and Stop are under it, one whose result still asks the person something, and one a command run on a press still shows on. A card the person dismissed is under Finished
-    const shownWork = own.filter(one => !isDismissed(one)).filter(one => stage(one) === 'working' || stage(one) === 'waiting' || isLingering(one, at) || runningOn(one.id).length > 0 || (stage(one) === 'failed' && at - one.endedAt < FAILED_UP) || (stage(one) === 'done' && Boolean(one.bg?.length)) || resultWaits(one).length > 0)
+    // The cards kept up: every one working or waiting for the person, and every one that ended, done, stopped or failed, until the
+    // person presses Dismiss on it: nothing else moves a card under Finished, no time and no other task's end (the person,
+    // iterating on a result: "tasks shouldn't be dismissed on their own"). A card that ended before cards stayed up is under
+    // Finished, as it was
+    const shownWork = own.filter(one => !isDismissed(one)).filter(one => stage(one) === 'working' || stage(one) === 'waiting' || staysUp(one) || isLingering(one, at) || runningOn(one.id).length > 0)
     // A key box or a prompt of the app's that a task's own command raised, by that task's card: drawn on the card, never above it
     // (filled where the top of the panel is put together, below)
     let onCards = new Map<string, { at: number; key: string; what: string; node: JSX.Element }[]>()
@@ -573,7 +574,7 @@ const panelHooks = (on: On) => {
                 ) : null}
                 {/* Done, at the top or under Finished: a press opens the box above the chat for what to change, where that bar
                     takes a box; the same task then carries on with what is typed */}
-                {(canChange(one) && !resultWaits(one).length) && 'Input' in table && repliesInBar(e.surface) ? (
+                {canChange(one) && 'Input' in table && repliesInBar(e.surface) ? (
                   <Box flexShrink={0}>
                     <Button key={`change-${one.id}-${presses}`} label="Change something" plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openChange($, one, press.surface)} />
                   </Box>
@@ -610,12 +611,6 @@ const panelHooks = (on: On) => {
                   {askBlock(one, `ask-${one.id}`)}
                 </Box>
               ) }] : []),
-              // what its result still asks: the first question with its answers, as its result offers them, and how many more
-              ...(resultWaits(one).length ? [{ at: one.endedAt, node: (
-                <Box key={`result-ask-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
-                  {resultAskBlock(one, `result-ask-${one.id}`)}
-                </Box>
-              ) }] : []),
               // a command the person ran on a press: where it began
               ...(runningOn(one.id).length && !one.chat ? [{ at: Math.min(...runningOn(one.id).map(run => run.startedAt ?? 0)), node: (
                 <Box key={`run-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
@@ -634,8 +629,7 @@ const panelHooks = (on: On) => {
               ) })),
             ].sort((a, b) => a.at - b.at).map(part => part.node)}
             {/* A card says its stage, its to-do and what it does now, and in amber only what waits for the person */}
-            {/* A result's question is all a card waiting for its answer says: no line of what Claude last did */}
-            {resultWaits(one).length ? null : (
+            {(
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden" paddingLeft={lead}>
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -805,13 +799,6 @@ const panelHooks = (on: On) => {
     // speed and time left as the run printed them, or worked out from its percent where it says none; then paused, a wait's target,
     // a watch's last event, nothing printed since it began, or quiet for minutes (in amber). A run that prints says nothing of when:
     // its line is read every few seconds, so what it says is now
-    // a run whose own progress line gives its percent but no time left has one worked out from how long it has run, marked as a
-    // guess: only the work's own line, which counts the whole run (a tool's bar starts again at each epoch, package or phase),
-    // only while that line is the latest, and never for a wait, whose count is how long it is willing to wait
-    const guessLeft = (job: Job, ran: number) => {
-      const share = Number.parseFloat(job.pct ?? '') / 100
-      return !job.left && job.isOwn && !job.isEarlier && job.kind !== 'watch' && share >= 0.01 && share < 1 && ran >= 20_000 ? timeLeftText((ran / 1000) * ((1 - share) / share)) : undefined
-    }
     // Every run's second line has the one shape plainOf describes: how far, a few plain words, and its sign of life, which changes
     // as time goes so the line never stands still while the run goes on. Nothing raw is shown: a line that is not plain words is
     // left out, and a run that has given no word says so and for how long, in amber past a few minutes
@@ -831,8 +818,8 @@ const panelHooks = (on: On) => {
       const isSilent = job.kind !== 'server' && job.kind !== 'watch' && !(quiet === undefined && !job.isEmpty && ran < SILENT_WARN) && still >= SILENT_AFTER
       // its speed and time left only while it prints: ten seconds old, they are no longer how it goes
       const isFresh = quiet !== undefined && quiet < 10_000
-      const guess = guessLeft(job, ran)
-      const left = isFresh ? (job.left ? [job.left] : guess ? [`about ${guess}`] : []) : []
+      // (a time left only where the command's own line says one, its `eta`: none is worked out here)
+      const left = isFresh && job.left ? [job.left] : []
       const rate = job.rate && isFresh ? [job.rate] : []
       const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
       const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
@@ -852,8 +839,7 @@ const panelHooks = (on: On) => {
       const isWarn = isSilent
       // A server or a watch leads with what it does, then the last thing it said
       const lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving · ') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching · ') : isSilent && hasSaid ? 'Last: ' : ''
-      // (a narrow row drops the "about" of a time left worked out from its percent)
-      const near = left.map(one => one.replace(/^about /, ''))
+      const near = left
       const numbers = [[...full, ...pct, ...rate, ...left], [...full, ...pct, ...left], ...(near.length ? [[...full, ...near]] : []), [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...compact, ...near], [...bare, ...near]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]
       const tails = [[state], [short]].map(t => t.filter(Boolean))
       // How far it is comes first, then its sign of life: the fullest counts with each tail, then any

@@ -19,8 +19,6 @@ const stageOf = (_list: readonly Staged[], card: Staged): Stage => {
 // Each stage in the words a card says it with, and its colour
 const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
 const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, done: DONE, stopped: undefined, failed: 'error' })[stage]
-// A card that failed stays up, saying why, for this long unless it is dismissed
-const FAILED_UP = 24 * 3600_000
 // Why a card failed, where it says so
 const WHY_NO_RESULT = 'Ended without its result'
 const WHY_APP_CLOSED = 'The app closed while it worked'

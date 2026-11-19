@@ -23,7 +23,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // A reply its ask was held with has been acted on once the run it started ends: the ask waits on the person again, every answer back
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => {
   const servers = status === 'done' ? (one.bg ?? []).filter(b => isServerRun(b.cmd, b.what)) : []
-  return { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, why: undefined, bg: servers.length ? servers : undefined, ...(status === 'done' ? {} : { waitsSet: undefined }) }
+  return { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, up: true, why: undefined, bg: servers.length ? servers : undefined, ...(status === 'done' ? {} : { waitsSet: undefined }) }
 }
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
 const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, releasing: one.releasing?.by === 'task' ? undefined : one.releasing, released: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, newAt: at })
@@ -60,11 +60,15 @@ const openItems = (one: Todo | undefined) => (one?.items ?? []).filter(item => i
 
 // Work that has ended, the oldest first, then work under way: what `capped` forgets first comes first
 const byEnd = (list: Todo[]) => [...list].sort((a, b) => (a.status === 'working' ? Infinity : a.endedAt) - (b.status === 'working' ? Infinity : b.endedAt) || 0)
-// The list is kept short by forgetting work that has ended, the oldest first; work under way, and work still asking, is never forgotten
+// The list is kept short, at KEPT tasks, by forgetting work that has ended, the oldest first; work under way, and work still
+// asking, is never forgotten, and an ended card still up, which the person never dismissed, is forgotten only after every other
 // Helpers are not counted: each is kept as long as the work it runs under, and goes with it
+const staysUp = (one: Todo) => Boolean(one.up) && !one.parentId && !one.chat && one.status !== 'working' && !one.closedAt
 const capped = (list: Todo[]) => {
-  let over = list.filter(one => !one.parentId).length - KEPT
-  const kept = over > 0 ? list.filter(one => Boolean(one.parentId) || one.status === 'working' || Boolean(one.ask) || (over -= 1) < 0) : list
+  const over = list.filter(one => !one.parentId).length - KEPT
+  const spare = over > 0 ? list.filter(one => !one.parentId && one.status !== 'working' && !one.ask) : []
+  const gone = new Set([...spare.filter(one => !staysUp(one)), ...spare.filter(staysUp)].slice(0, Math.max(0, over)))
+  const kept = gone.size ? list.filter(one => !gone.has(one)) : list
   const tops = new Set(kept.filter(one => !one.parentId).map(one => one.id))
   const held = kept.some(one => one.parentId && one.status !== 'working' && !tops.has(topOf(kept, one.id))) ? kept.filter(one => !one.parentId || one.status === 'working' || tops.has(topOf(kept, one.id))) : kept
   // Long work that keeps starting helpers keeps only its newest ended ones; one that still has a helper at work under it stays
@@ -295,11 +299,12 @@ const lookOver = async ($: EngineInterface, live: { id: string; status: string }
 }
 
 // Changes the to-do a piece of work belongs to; work the mod never saw start is looked up first, and a helper of unknown work changes nothing
-const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: number) => Todo) => {
+// (`isOwn`: a helper's own card where it has one, as for its to-dos, which are never the task's above it)
+const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: number) => Todo, isOwn = false) => {
   const now = await $.clock.now()
   if (!(await read($, todos)).some(one => one.id === agentId)) await sync($)
   await changeTodos($, list => {
-    const id = topOf(list, agentId)
+    const id = isOwn && list.some(one => one.id === agentId) ? agentId : topOf(list, agentId)
     return list.map(one => (one.id === id ? fn(one, now) : one))
   })
   // Work that was running before the panel had ever opened brings it up with its first line

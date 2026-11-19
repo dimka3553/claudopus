@@ -137,7 +137,8 @@ test("pressed by Claude Code for its report, a task is answered with no model, b
 
 test("a task that ends its step while its helpers work stays at work, and nothing of Claudopus starts it again or looks in on it: told once that their results come by themselves, it is let go as it stops with a to-do open, may not hand in its result while one works, and each helper's result, in words or handed in, reaches it through Claude Code alone; the chat's turn for the notice of its pause is answered with no model; with its helpers ended its own result goes through and its card is done; stopped by the chat, the helpers a task has at work are stopped with it", SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
-  const { stopped, resumed, appended, submitted, sent, clock, stepped } = world(on, { agents })
+  const talk: unknown[] = []
+  const { stopped, resumed, appended, submitted, sent, clock, stepped, files } = world(on, { agents, talk })
   on('classic.SubagentStop', () => ({}) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -199,14 +200,40 @@ test("a task that ends its step while its helpers work stays at work, and nothin
   expect(texts).toContain('1 working')
   expect(texts).toContain('Fix the nose')
   expect(texts.filter(text => /looked in on|shown nothing new|Nothing new|told to check|starts Claude again|stuck/i.test(text))).toEqual([])
-  // The second helper hands in its result, which Claude Code gives the task, starting its next step: Claudopus passes nothing on
-  // and starts nothing, before the hand-back or after the helper's turn ends
-  const handed = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a3', message: 'The nose is drawn at every size.' } as never)) as { deny?: string }
-  expect(handed.deny).toBeUndefined()
+  // The second helper hands in its result. It goes only to the task that started it, never into the chat (Claude Code draws a
+  // hand-back it delivers as a box in the chat, where it doubled the task's own words): Claudopus answers the hand-back itself,
+  // so Claude Code delivers nothing, and gives the result to the task once, as its helper's, by the helper's title
+  // (the engine here would answer "Nothing was sent": that answer is never seen, as the hand-back never reaches it)
+  files.set('handback-not-sent', '1')
+  // (to-dos of its own are its own: they hold its own hand-back, and are never on the list of the task that started it)
+  await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 'd3', agentId: 'a3', item: 'Draw at every size' } as never)
+  const helperOpen = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3a', agentId: 'a3', message: 'Half drawn.' } as never)) as { deny?: string }
+  expect(helperOpen.deny).toContain('"Draw at every size"')
+  const ownList = (await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 'd4', agentId: 'a3', item: 'Draw at every size', state: 'done' } as never)) as { result?: string }
+  expect(ownList.result).toBe('[x] Draw at every size')
+  expect(((await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 'd5', agentId: 'a1', item: 'Mend the nose', state: 'done' } as never)) as { result?: string }).result).toBe('[x] Mend the nose')
+  const before = { resumed: resumed.length, submitted: submitted.length, appended: appended.length }
+  const handed = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a3', message: 'The nose is drawn at every size.\nSee nose.svg.' } as never)) as { deny?: string; result?: { message?: string } }
+  expect([handed.deny, handed.result?.message]).toEqual([undefined, expect.stringContaining('Report delivered to the task that started you')])
+  files.delete('handback-not-sent')
+  expect(resumed.slice(before.resumed)).toEqual([expect.stringMatching(/^a1: From Claudopus: your helper "Draw the nose" \(a3\) has finished, and its result follows\.[\s\S]*\n  The nose is drawn at every size\.\n  See nose\.svg\.$/)])
+  // Pressed by Claude Code afterwards, which saw nothing delivered, the helper is answered with no model
+  const pressedAfter: string[] = []
+  const askedBefore = stepped.length
+  talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'tool_use', id: 'hb3', name: 'SubagentHandback', input: {} }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'hb3', content: 'ok' }] })
+  for await (const chunk of $.turn.step({ turnId: 'h3p', index: 0, model: 'm', messageCount: 2, agentId: 'a3' } as never)) if (chunk.kind === 'text') pressedAfter.push((chunk as { text: string }).text)
+  expect([pressedAfter.join(''), stepped.length]).toEqual(['<system-reminder>Waiting for an answer.</system-reminder>', askedBefore])
+  talk.splice(0, talk.length)
   agents.a3 = 'completed'
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h3', reason: 'answer', agentId: 'a3' } as never)
+  // Claude Code's notice to the chat that the helper ended without its report is nothing of the chat's: no word, no model
+  const helperNotice = endedNotice('a3')
+  expect([(await asNotice(helperNotice)).context ?? [], await answeredQuietly(helperNotice)]).toEqual([[], true])
   await clock.advance(60_000)
-  expect(fromClaudopus()).toEqual([])
+  // The task got it exactly once, and nothing reached the chat's own thread: no prompt to the chat, no line written into it
+  expect(resumed.slice(before.resumed)).toHaveLength(1)
+  expect(submitted.slice(before.submitted).filter(one => !one.startsWith('<task-notification>'))).toEqual([])
+  expect(appended.slice(before.appended).filter(one => /^(a1|undefined): /.test(one))).toEqual([])
   // With both ended, its own result goes through, and its card is done
   agents.a1 = 'running'
   const late = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb1', agentId: 'a1', message: 'The nose is fixed.' } as never)) as { deny?: string; result?: { message?: string } }

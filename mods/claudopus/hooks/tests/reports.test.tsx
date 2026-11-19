@@ -832,17 +832,16 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(await pane.find({ type: 'Text', text: /^Results$/ })).toBeUndefined()
   expect((await keyed(pane, 'reports-open'))?.props.label).toBe('Results 1')
   expect(await pane.find({ type: 'Text', text: /^●$/ })).toBeUndefined()
-  // A finished task whose result asks something more is done, in green: its card stays at the top, never under Finished, with
-  // the first question and its answers, until it is answered or dismissed, and the header counts each question
+  // A finished task whose result asks something more is done, in green: its card stays among the cards, never under Finished,
+  // until it is dismissed, the header counts each question, and no question of its result is drawn on the card: each is
+  // answered in the result itself
   expect(await pane.find({ type: 'Text', text: /^2 waiting for you/ })).toBeDefined()
-  const asking = await pane.find({ type: 'Text', text: 'Result ready · Shall I send it to the team?' })
-  expect([asking?.props.color, asking?.props.bold]).toEqual([undefined, true])
+  expect(await pane.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /^Waiting for you · / })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeDefined()
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === '#E5A50A').length).toBe(0)
-  expect((await pane.findAll({ type: 'Button' })).filter(b => /^result-ask-a1-say-/.test(b.key ?? '')).map(b => b.props.label)).toEqual(['Yes', 'No', 'Not now', 'Answer in words'])
-  expect((await pane.findAll({ type: 'Button' })).find(b => /^result-ask-a1-more-/.test(b.key ?? ''))?.props.label).toBe('Result')
-  expect(await pane.find({ type: 'Text', text: '1 more question' })).toBeDefined()
+  expect((await pane.findAll({ type: 'Button' })).filter(b => /^result-ask-/.test(b.key ?? ''))).toEqual([])
+  expect(await keyed(pane, 'dismiss-a1')).toBeDefined()
   // Pressed, it opens the list as a pane of its own; the Claudopus pane stays as it was
   await pressed(pane, 'reports-open')
   expect(opened).toContain('reports')
@@ -898,10 +897,9 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeDefined()
   expect(await until(async () => ((await one.find({ type: 'Text', text: /^Shall I send it to the team\?$/ })) ? undefined : true))).toBe(true)
   expect(await one.find({ type: 'Text', text: 'Post it in the channel too?' })).toBeDefined()
-  // The card goes on to the next question, the last one
-  expect(await until(async () => (await pane.find({ type: 'Text', text: 'Result ready · Post it in the channel too?' })) ?? undefined)).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^1 waiting for you/ })).toBeDefined()
-  expect((await pane.findAll({ type: 'Button' })).some(b => /^result-ask-a1-more-/.test(b.key ?? ''))).toBe(false)
+  // The header counts the one question left, which is still asked nowhere on the card
+  expect(await until(async () => (await pane.find({ type: 'Text', text: /^1 waiting for you/ })) ?? undefined)).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Result ready/ })).toBeUndefined()
   // Not now clears the other and sends nothing
   await pressed(one, 'report-say-1-Not now')
   await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[1]?.answer ? true : undefined))
@@ -910,9 +908,8 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   await until(async () => ((await list.find({ type: 'Text', text: /^Waiting for you$/ })) ? undefined : true))
   expect(await list.find({ type: 'Text', text: /^Waiting for you$/ })).toBeUndefined()
   expect(await one.find({ type: 'Text', text: /^Waiting for you$/ })).toBeUndefined()
-  // Nothing open, the card waits on nothing: the header and its line say so, and it is done
-  expect(await until(async () => ((await pane.find({ type: 'Text', text: /^Result ready/ })) ? undefined : true))).toBe(true)
-  expect(await pane.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
+  // Nothing open, the card waits on nothing: the header says so, and it is done
+  expect(await until(async () => ((await pane.find({ type: 'Text', text: /waiting for you/i })) ? undefined : true))).toBe(true)
   expect(await pane.find({ type: 'Text', text: '✓ Done' })).toBeDefined()
 
   // The chat is told of the reports with each message, and reads one itself to answer from it
@@ -932,14 +929,16 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   await clock.advance(3_000)
   await pane.unmount()
   const cards = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
-  expect(await until(async () => (await cards.find({ type: 'Text', text: 'Result ready · Which opening should go out?' })) ?? undefined)).toBeDefined()
-  // (the two that ended before it are under Finished once their two seconds are over)
+  expect(await until(async () => (await cards.find({ type: 'Text', text: /^1 waiting for you/ })) ?? undefined)).toBeDefined()
+  // (the two that ended before it stay up, with nothing under Finished, until each is dismissed)
+  expect(await finishedCount()).toBe(0)
+  for (const id of ['a1', 'a3']) await pressed(cards, `dismiss-${id}`)
   await until(async () => ((await finishedCount()) === 2 ? true : undefined))
   const before = await finishedCount()
   expect(before).toBe(2)
   expect((await keyed(cards, 'dismiss-a4'))?.props.label).toBe('Dismiss')
   await pressed(cards, 'dismiss-a4')
-  expect(await until(async () => ((await cards.find({ type: 'Text', text: /^Result ready/ })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await keyed(cards, 'dismiss-a4')) ? undefined : true))).toBe(true)
   expect(await until(async () => ((await finishedCount()) === before + 1 ? true : undefined))).toBe(true)
   expect(await cards.find({ type: 'Text', text: /waiting for you/i })).toBeUndefined()
   await $.agent.spawn({ ...spawn, description: 'Save another rule', prompt: 'save it' } as never)

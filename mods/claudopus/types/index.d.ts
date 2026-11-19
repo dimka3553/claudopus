@@ -144,6 +144,8 @@ export type Todo = {
   // The round (its start) whose report was refused once for asking something with nothing recorded as waiting
   toldWaits?: number
   // When the person dismissed its card: it is under Finished, whatever it still asks, until the task works again
+  /** Ended, and kept up among the cards until the person dismisses it: nothing else moves it under Finished */
+  up?: true
   closedAt?: number
   // The kind of agent it was started as (claudopus:task, general-purpose, fork…), when the chat started it
   kind?: string

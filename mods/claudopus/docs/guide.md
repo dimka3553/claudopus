@@ -99,7 +99,7 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
 
 ### When a task is done
 
-- When a task finishes, its card turns green with the happy octopus for a moment. Then the chat passes on its result, and the panel lists it under Finished.
+- When a task finishes, its card turns green with the happy octopus for a moment. Then the chat passes on its result. The card stays where it is, saying `✓ Done` and the task's last note, until you press Dismiss, which puts it under Finished. To change or continue what it made, say so in the chat or press Change something: the same task carries on, on the same card.
 - A task can't finish while a command it started still runs, except a server it leaves for you: that keeps its row under the Done card, with Stop.
 - If a task ends while Claudopus reloads, it gets its green moment once the panel draws again.
 - What a task left for you to read is listed under Results.
