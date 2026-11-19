@@ -989,6 +989,10 @@ test("a task that ends its step while its helpers work stays at work, and nothin
   const handed = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a3', message: 'The nose is drawn at every size.\nSee nose.svg.' } as never)) as { deny?: string; result?: { message?: string } }
   expect([handed.deny, handed.result?.message]).toEqual([undefined, expect.stringContaining('Report delivered to the task that started you')])
   files.delete('handback-not-sent')
+  // Never sent from the tool call's own hook, which the task it starts must keep: the hand-back is answered at once, and the
+  // result goes to the task from the next hook that may send it (here a measure)
+  expect(resumed.slice(before.resumed)).toEqual([])
+  await clock.advance(1000)
   expect(resumed.slice(before.resumed)).toEqual([expect.stringMatching(/^a1: From Claudopus: your helper "Draw the nose" \(a3\) has finished, and its result follows\.[\s\S]*\n  The nose is drawn at every size\.\n  See nose\.svg\.$/)])
   // Pressed by Claude Code afterwards, which saw nothing delivered, the helper is answered with no model
   const pressedAfter: string[] = []

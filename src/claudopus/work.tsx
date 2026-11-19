@@ -58,8 +58,6 @@ const asksNow = (list: Todo[], agent: string) => {
 }
 const NO_PERSON_WAIT = (name: string) =>
   `Not run: this command waits for ${name}, and a wait with a time limit gives them one. Don't wait for ${name} with a command at all. End your step now: your question stays on the card for as long as it takes, and ${name}'s answer comes to you as a message the moment they give it. Anything you need to see of what they did (a recording, a file, a page), look at once their answer has come.`
-const NO_PROGRESS_SCRIPT =
-  'Not run: this long command would print nothing to show how far it has got. Make its script print, flushed right away, a plain line `progress: <done>/<total> <unit> <what>` at each step, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, counting things done and never seconds, with no paths, file names or codes in it, then start it again.'
 // The note Claude Code adds when a task ends its step without its report. Where the press can bring nothing (its report was taken
 // already, or it ended its step with a question or a permission open for the person), it is answered with no model, by a line the
 // app draws as nothing in a task's chat (it takes system reminders out of an agent's text, and leaves out a block left empty)
@@ -288,13 +286,15 @@ const workHooks = (on: On) => {
         return { deny: NO_FOLLOW }
       }
     }
-    // A long script of the work's own held open that would say nothing of how far it is is not started, and the work is told in one
-    // sentence how to make it report
+    // A long script of the work's own is never held open, whatever it prints: held, it keeps the person's reply from the work until
+    // it ends. It is refused with the call to send it in the background, where its end starts the work's next step. What it prints
+    // of how far it is is for its row, never a condition of starting it (19 Nov: told to print progress before it could start, a
+    // wait counted seconds, and its row read "60 of 150 seconds")
     if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash' && !(e as { run_in_background?: unknown }).run_in_background) {
       const command = String((e as { command?: unknown }).command ?? '')
-      if (reportsOf(command, String((e as { description?: unknown }).description ?? ''), await scriptsRun($, command), Number((e as { timeout?: unknown }).timeout ?? 0))) {
-        await log($, `refused work ${e.agentId}'s long script that gives no progress`)
-        return { deny: NO_PROGRESS_SCRIPT }
+      if (isOwnLongScript(command, String((e as { description?: unknown }).description ?? ''), await scriptsRun($, command), Number((e as { timeout?: unknown }).timeout ?? 0))) {
+        await log($, `refused work ${e.agentId}'s long script held open`)
+        return { deny: SEND_BACKGROUND(who()) }
       }
     }
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
@@ -548,9 +548,17 @@ const workHooks = (on: On) => {
         await changeTodos($, list => list.map(one => (one.id !== agent ? one : { ...ended(one, one.flagged ? 'failed' : 'done', now), ...(one.flagged ? { why: WHY_FLAGGED } : {}), answer: report.slice(0, ANSWER_CHARS) || one.answer, tookReport: String(e.tool_use_id) })))
         const text = named(HELPER_RESULT(titleOf(taken), agent, report))
         // (a task that has ended, or that the person stopped, is not started by it: the result is written into its chat)
-        const r = above.status === 'working' ? await sendOwn($, { to: { agentId: above.id }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) })) : { isDelivered: false as const, reason: `its task is ${above.status}` }
-        if (!r.isDelivered) await tell($, above.id, text)
-        await log($, `result of helper ${agent} taken at its hand-back and ${r.isDelivered ? 'sent' : `written (${r.reason})`} to its task ${above.id}`)
+        // Never sent from this hook: the engine leaves the hook a message is sent from out of the run it starts (prompts.tsx), and
+        // this one carries every check of a task's calls, its rows and its own hand-back. It waits for the next hook that may send
+        // it (a drawing, a measure, the hook before a tool call), and this call is answered at once, never held for it
+        const parent = above.id
+        const written = (why: string) => tell($, parent, text).then(() => log($, `result of helper ${agent} written to its task ${parent} (${why})`))
+        if (above.status !== 'working') await written(`its task is ${above.status}`)
+        else
+          void sendOwn($, { to: { agentId: parent }, text }, undefined, true)
+            .then(r => (r.isDelivered ? log($, `result of helper ${agent} sent to its task ${parent} from a later hook`) : written(r.reason ?? 'not delivered')))
+            .catch(err => written(String(err)).catch(() => undefined))
+        await log($, `result of helper ${agent} taken at its hand-back, for its task ${parent}`)
         await lookEnds($)
         return { result: { success: true, message: named(HELPER_REPORT_TAKEN) } } as never
       }

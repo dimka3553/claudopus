@@ -130,8 +130,10 @@ const sendOwnNow = async ($: EngineInterface, message: OwnMessage) => {
     ownSent($, since)
   }
 }
-const sendOwn = async ($: EngineInterface, message: OwnMessage, isStill?: () => Promise<boolean>): Promise<SendResult> => {
-  if (await isInHook($)) return sendOwnNow($, message)
+// `isLater`: asked from a hook the task it starts must keep (a tool call's), it waits for the next hook that may send it, as one
+// asked from no hook does
+const sendOwn = async ($: EngineInterface, message: OwnMessage, isStill?: () => Promise<boolean>, isLater = false): Promise<SendResult> => {
+  if (!isLater && (await isInHook($))) return sendOwnNow($, message)
   // (the same words for the same task wait once: a look that comes round again while they wait joins them)
   const same = heldSends.find(one => one.message.to.agentId === message.to.agentId && one.message.text === message.text)
   if (same?.result) return same.result

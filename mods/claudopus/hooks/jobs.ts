@@ -248,24 +248,14 @@ export const plainOf = (line: string | undefined, title = ''): string => {
   const cut = t.slice(0, PLAIN_MOST - 1)
   return `${cut.slice(0, cut.lastIndexOf(' ') > 30 ? cut.lastIndexOf(' ') : cut.length).replace(/[\s,;:]+$/, '')}…`
 }
-// A long command that would give no word of how far it is: a script of the work's own (a file it runs, as read), held open with a
-// long time limit, that prints no progress line and runs no tool with a meter of its own. '' for any other: a short one, one that
-// reports, a watch or a server, or a program whose words the mod reads as they come. The mod's own runners report for themselves
-const METER = /\b(?:curl|wget|rsync|azcopy|pip3?|git\s+clone|hf\s+download|huggingface-cli|tqdm|rich\.progress|aria2c|docker\s+pull)\b/
-const SILENCED = /\bcurl\b[^|;&\n]*\s(?:-[a-zA-Z]*s[a-zA-Z]*|--silent)\b|\bwget\b[^|;&\n]*\s(?:-q\b|--quiet\b|-[a-zA-Z]*q[a-zA-Z]*O\b)|\btqdm\([^)\n]*disable\s*=\s*True/
-// A line it prints that the card reads as how far it is: a count of a total (`{i}/{n}`, `$i/$n`, `%d/%d`) or a percent
-const PRINTS_COUNT = /\b(?:print|echo|printf|log\w*|console\.log|write)\b[^\n]*(?:\{[^}\n]*\}\s*\/\s*\{|\$\{?\w+\}?\s*\/\s*\$|%[ds]\s*\/\s*%[ds]|\{[^}\n]*:\.?\d*%\}|%%)/
-// The word progress, once what only turns it off is taken out (# no progress bar, --no-progress, progress_bar=False)
-const saysProgress = (text: string) => /\bprogress\b/i.test(text.replace(/\bno[-_ ]progress[\w-]*|progress[-_ ]?bar\s*=\s*(?:False|off|0|None)\b/gi, ' '))
-export const reportsOf = (command: string, description: string, scripts: string[], timeoutMs = 0): 'script' | '' => {
-  if (/\bbin\/(?:helpers|admin|secret|release|keyring)\b/.test(command)) return ''
+// A long command of the work's own script: a file it runs, as read, asked for with a long time limit. False for any other: a short
+// one, a watch or a server, or a program that is no script of its own (a long time limit alone says nothing: most such calls are a
+// push, a short test or a look). The mod's own runners are never told from here. What the script prints is not looked at
+export const isOwnLongScript = (command: string, description: string, scripts: string[], timeoutMs = 0) => {
+  if (/\bbin\/(?:helpers|admin|secret|release|keyring)\b/.test(command)) return false
   const said = describedOf(description)
-  // A server or a watch never says how far it is: its row says when it was last asked or its last event
-  if (said.kind === 'server' || said.kind === 'watch' || SERVER_CMD.test(command)) return ''
-  const all = [command, ...scripts]
-  if (all.some(saysProgress)) return ''
-  if (timeoutMs <= 2 * 60_000 || !scripts.length) return ''
-  return all.some(text => (METER.test(text) && !SILENCED.test(text)) || PRINTS_COUNT.test(text)) ? '' : 'script'
+  if (said.kind === 'server' || said.kind === 'watch' || SERVER_CMD.test(command)) return false
+  return timeoutMs > 2 * 60_000 && scripts.length > 0
 }
 // The plain words after the numbers of a work's own progress line, without the time left it gives (said on its own)
 const ownWords = (rest: string) =>

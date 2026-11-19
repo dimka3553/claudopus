@@ -239,8 +239,8 @@ declare global {
   export import OUTPUT_LINES = M10.OUTPUT_LINES
   export import portOf = M10.portOf
   export import SERVER_CMD = M10.SERVER_CMD
+  export import isOwnLongScript = M10.isOwnLongScript
   export import plainOf = M10.plainOf
-  export import reportsOf = M10.reportsOf
   export import SILENT_AFTER = M10.SILENT_AFTER
   export import SILENT_WARN = M10.SILENT_WARN
   export import heavyOf = M10.heavyOf

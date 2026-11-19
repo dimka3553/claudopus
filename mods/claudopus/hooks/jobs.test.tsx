@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { heavyOf, commandName, describedOf, endOf, expiresIn, leftSeconds, foldJobs, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, plainOf, portOf, reportsOf, waitOf, waitingOf, watcherOf, PLAIN_MOST } from './jobs'
+import { heavyOf, commandName, describedOf, endOf, expiresIn, leftSeconds, foldJobs, isOutputEnded, isOwnLongScript, isWaitOnly, jobKindOf, labelOf, latestOf, plainOf, portOf, waitOf, waitingOf, watcherOf, PLAIN_MOST } from './jobs'
 import type { WaitKind } from './jobs'
 import type { Job } from './jobs'
 
@@ -42,36 +42,36 @@ test("a run's raw line becomes a few plain words or nothing: no paths, file name
   expect(latestOf('progress: 3/6 steps fitting the face, eta 4m\n')).toMatchObject({ done: '3', total: '6 steps', words: 'fitting the face', left: '4m left' })
 })
 
-test("a long script of its own, held open, that would give no word of how far it is, is told apart from one that reports, a short one, a watch, a server, a meter and the mod's own runners; a time in its words decides nothing", async () => {
+test("a long script of its own asked for with a long time limit is told apart from a short one, a watch, a server, a program that is no script of its own and the mod's own runners, whatever it prints of how far it is; a time in its words decides nothing", async () => {
   const loop = 'until az group show -n rg 2>&1 | grep -q NotFound; do sleep 15; done'
   const LONG = 600_000
-  const cases: [string, string, string[], number, string][] = [
-    // a script that prints nothing of how far it is, held open with a long time limit; one whose only progress word turns it off
-    ['python3 sort.py', 'Run the sorting of the scans', ['import os\nfor f in os.listdir("."):\n  pass\n'], LONG, 'script'],
-    ['python fit.py', 'Run the fit', ['# no progress bar here\nfor i in range(n): fit(i)\n'], LONG, 'script'],
-    // one that prints the progress line, or a count of a total
-    ['python3 sort.py', 'Run the sorting of the scans', ['for i, f in enumerate(fs):\n  print(f"progress: {i}/{len(fs)} scans", flush=True)\n'], LONG, ''],
-    ['python fit.py', 'Run the fit', ['for i in range(n):\n  print(f"step {i}/{n} loss {l}")\n'], LONG, ''],
+  const cases: [string, string, string[], number, boolean][] = [
+    // a script of its own with a long time limit: one that prints nothing of how far it is
+    ['python3 sort.py', 'Run the sorting of the scans', ['import os\nfor f in os.listdir("."):\n  pass\n'], LONG, true],
+    ['python fit.py', 'Run the fit', ['# no progress bar here\nfor i in range(n): fit(i)\n'], LONG, true],
+    // and one that prints the progress line, or a count of a total: what it prints is for its row, and lets nothing be held open
+    ['python3 sort.py', 'Run the sorting of the scans', ['for i, f in enumerate(fs):\n  print(f"progress: {i}/{len(fs)} scans", flush=True)\n'], LONG, true],
+    ['python fit.py', 'Run the fit', ['for i in range(n):\n  print(f"step {i}/{n} loss {l}")\n'], LONG, true],
     // a short one, and one with no long time limit, whatever time its words say (a bracketed time is read by nothing)
-    ['node scripts/x.mjs', 'Run a quick check', ['console.log(1)\n'], 60_000, ''],
-    ['python3 sort.py', 'Run the sorting of the scans (about 6 min)', ['import os\n'], 0, ''],
-    ['python3 sort.py', 'Run the sorting of the scans (about 6 min)', ['import os\n'], 120_000, ''],
-    // a watch (wait and poll words too) and a server never say how far they are
-    [loop, 'Wait for the Azure deletion to finish', ['import time\n'], LONG, ''],
-    ['python poll.py', 'Poll the queue until it is empty', ['import time\n'], LONG, ''],
-    ['python watch.py', 'Watch the folder for new scans', ['import time\n'], LONG, ''],
-    ['python serve.py', 'Serve the preview page', ['import http.server\n'], LONG, ''],
-    ['npm run dev', 'Start the site', ['import os\n'], LONG, ''],
-    // a tool with a meter of its own reports; one silenced does not
-    ['bash fetch.sh', 'Download the scans', ['curl -L -o a.zip https://example.com/a.zip\n'], LONG, ''],
-    ['bash fetch.sh', 'Download the scans', ['curl -sL -o a.zip https://example.com/a.zip\n'], LONG, 'script'],
+    ['node scripts/x.mjs', 'Run a quick check', ['console.log(1)\n'], 60_000, false],
+    ['python3 sort.py', 'Run the sorting of the scans (about 6 min)', ['import os\n'], 0, false],
+    ['python3 sort.py', 'Run the sorting of the scans (about 6 min)', ['import os\n'], 120_000, false],
+    // a watch (wait and poll words too) and a server are told by their own checks
+    [loop, 'Wait for the Azure deletion to finish', ['import time\n'], LONG, false],
+    ['python poll.py', 'Poll the queue until it is empty', ['import time\n'], LONG, false],
+    ['python watch.py', 'Watch the folder for new scans', ['import time\n'], LONG, false],
+    ['python serve.py', 'Serve the preview page', ['import http.server\n'], LONG, false],
+    ['npm run dev', 'Start the site', ['import os\n'], LONG, false],
+    // a script that runs a tool with a meter of its own, shown or silenced, is still a long script of its own
+    ['bash fetch.sh', 'Download the scans', ['curl -L -o a.zip https://example.com/a.zip\n'], LONG, true],
+    ['bash fetch.sh', 'Download the scans', ['curl -sL -o a.zip https://example.com/a.zip\n'], LONG, true],
     // a program that is no script of its own, and the mod's own runners
-    ['npm run build', 'Run the build', [], LONG, ''],
-    ['/p/bin/release', 'Run the release', ['while true; do sleep 1; done\n'], LONG, ''],
+    ['npm run build', 'Run the build', [], LONG, false],
+    ['/p/bin/release', 'Run the release', ['while true; do sleep 1; done\n'], LONG, false],
   ]
-  for (const [command, description, scripts, timeout, said] of cases) expect({ command, description, timeout, said: reportsOf(command, description, scripts, timeout) }).toEqual({ command, description, timeout, said })
+  for (const [command, description, scripts, timeout, isLong] of cases) expect({ command, description, timeout, isLong: isOwnLongScript(command, description, scripts, timeout) }).toEqual({ command, description, timeout, isLong })
   // with no time limit given it is never held long
-  expect(reportsOf('python3 sort.py', 'Run the sorting of the scans', ['import os\n'])).toBe('')
+  expect(isOwnLongScript('python3 sort.py', 'Run the sorting of the scans', ['import os\n'])).toBe(false)
 })
 
 test('a job is told by its command: a server with its port, a download, else a script; its latest line is what a progress bar shows last', async () => {

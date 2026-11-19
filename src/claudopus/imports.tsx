@@ -18,7 +18,7 @@ import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUD
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
 import { DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, isKindSaid, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, portOf, SERVER_CMD } from './jobs'
-import { plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
+import { isOwnLongScript, plainOf, SILENT_AFTER, SILENT_WARN } from './jobs'
 import { heavyOf, waitingOf, watcherOf } from './jobs'
 import type { HeavyKind, WaitKind } from './jobs'
 import type { Job, JobKind } from './jobs'

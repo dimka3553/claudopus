@@ -16,7 +16,7 @@ import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUD
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
 import { DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, isKindSaid, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, portOf, SERVER_CMD } from './jobs'
-import { plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
+import { isOwnLongScript, plainOf, SILENT_AFTER, SILENT_WARN } from './jobs'
 import { heavyOf, waitingOf, watcherOf } from './jobs'
 import type { HeavyKind, WaitKind } from './jobs'
 import type { Job, JobKind } from './jobs'
@@ -7445,8 +7445,8 @@ const sendOwnNow = async ($: EngineInterface, message: OwnMessage) => {
     ownSent($, since)
   }
 }
-const sendOwn = async ($: EngineInterface, message: OwnMessage, isStill?: () => Promise<boolean>): Promise<SendResult> => {
-  if (await isInHook($)) return sendOwnNow($, message)
+const sendOwn = async ($: EngineInterface, message: OwnMessage, isStill?: () => Promise<boolean>, isLater = false): Promise<SendResult> => {
+  if (!isLater && (await isInHook($))) return sendOwnNow($, message)
   const same = heldSends.find(one => one.message.to.agentId === message.to.agentId && one.message.text === message.text)
   if (same?.result) return same.result
   const one: HeldSend = { message, isStill, resolve: () => undefined, reject: () => undefined }
@@ -10028,8 +10028,6 @@ const asksNow = (list: Todo[], agent: string) => {
 }
 const NO_PERSON_WAIT = (name: string) =>
   `Not run: this command waits for ${name}, and a wait with a time limit gives them one. Don't wait for ${name} with a command at all. End your step now: your question stays on the card for as long as it takes, and ${name}'s answer comes to you as a message the moment they give it. Anything you need to see of what they did (a recording, a file, a page), look at once their answer has come.`
-const NO_PROGRESS_SCRIPT =
-  'Not run: this long command would print nothing to show how far it has got. Make its script print, flushed right away, a plain line `progress: <done>/<total> <unit> <what>` at each step, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, counting things done and never seconds, with no paths, file names or codes in it, then start it again.'
 const HANDBACK_PRESS = '[handback-send-enforce]'
 const PRESS_ANSWER = '<system-reminder>Waiting for an answer.</system-reminder>'
 const isPressedForReport = async ($: EngineInterface, id: string, isAnyWords = false) => {
@@ -10218,9 +10216,9 @@ const workHooks = (on: On) => {
     }
     if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash' && !(e as { run_in_background?: unknown }).run_in_background) {
       const command = String((e as { command?: unknown }).command ?? '')
-      if (reportsOf(command, String((e as { description?: unknown }).description ?? ''), await scriptsRun($, command), Number((e as { timeout?: unknown }).timeout ?? 0))) {
-        await log($, `refused work ${e.agentId}'s long script that gives no progress`)
-        return { deny: NO_PROGRESS_SCRIPT }
+      if (isOwnLongScript(command, String((e as { description?: unknown }).description ?? ''), await scriptsRun($, command), Number((e as { timeout?: unknown }).timeout ?? 0))) {
+        await log($, `refused work ${e.agentId}'s long script held open`)
+        return { deny: SEND_BACKGROUND(who()) }
       }
     }
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
@@ -10423,9 +10421,14 @@ const workHooks = (on: On) => {
         const now = await $.clock.now()
         await changeTodos($, list => list.map(one => (one.id !== agent ? one : { ...ended(one, one.flagged ? 'failed' : 'done', now), ...(one.flagged ? { why: WHY_FLAGGED } : {}), answer: report.slice(0, ANSWER_CHARS) || one.answer, tookReport: String(e.tool_use_id) })))
         const text = named(HELPER_RESULT(titleOf(taken), agent, report))
-        const r = above.status === 'working' ? await sendOwn($, { to: { agentId: above.id }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) })) : { isDelivered: false as const, reason: `its task is ${above.status}` }
-        if (!r.isDelivered) await tell($, above.id, text)
-        await log($, `result of helper ${agent} taken at its hand-back and ${r.isDelivered ? 'sent' : `written (${r.reason})`} to its task ${above.id}`)
+        const parent = above.id
+        const written = (why: string) => tell($, parent, text).then(() => log($, `result of helper ${agent} written to its task ${parent} (${why})`))
+        if (above.status !== 'working') await written(`its task is ${above.status}`)
+        else
+          void sendOwn($, { to: { agentId: parent }, text }, undefined, true)
+            .then(r => (r.isDelivered ? log($, `result of helper ${agent} sent to its task ${parent} from a later hook`) : written(r.reason ?? 'not delivered')))
+            .catch(err => written(String(err)).catch(() => undefined))
+        await log($, `result of helper ${agent} taken at its hand-back, for its task ${parent}`)
         await lookEnds($)
         return { result: { success: true, message: named(HELPER_REPORT_TAKEN) } } as never
       }

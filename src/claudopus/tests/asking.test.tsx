@@ -1711,7 +1711,7 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
 })
 
 test('a reply never waits behind a long command: one that may run for minutes is refused with the same call to send in the background, a wait for the person is refused, and a reply given while a short one is held open is taken at once', async ($, on) => {
-  const { keep, settle, clock, held } = world(on)
+  const { keep, settle, clock, held, files } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'try the reply box', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Reply box that never drags the panel', prompt: 'try the reply box' } as never)
@@ -1728,10 +1728,12 @@ test('a reply never waits behind a long command: one that may run for minutes is
     expect(wait.deny).toContain('End your step now')
   }
   expect(held.has('record')).toBe(false)
-  // A build, render, browser run or download asking for a longer time limit is
+  // A build, render, browser run or download asking for a longer time limit, or a script of its own asking for one, whatever it
+  // prints of how far it is (19 Nov: told to print progress before it could start held open, a wait counted seconds), is
   // refused with the same call to send in the background, never changed on its way (auto mode refuses a call a hook changed after it
   // reviewed it: 484 calls on 16-17 Nov); sent so, it runs as written
-  for (const [id, more] of [['s1', { timeout: 600000, command: 'npm run build', description: 'Run the build' }], ['s5', { timeout: 600000, command: 'curl -L -o scans.zip https://example.com/scans.zip', description: 'Get the scans' }]] as const) {
+  files.set('/repo/sort.py', 'for i, f in enumerate(fs):\n  print(f"progress: {i}/{len(fs)} scans", flush=True)\n')
+  for (const [id, more] of [['s1', { timeout: 600000, command: 'npm run build', description: 'Run the build' }], ['s5', { timeout: 600000, command: 'curl -L -o scans.zip https://example.com/scans.zip', description: 'Get the scans' }], ['s7', { timeout: 600000, command: 'python3 /repo/sort.py', description: 'Run the sorting of the scans' }]] as const) {
     const r = (await $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', ...more } as never)) as { deny?: string }
     expect([id, r.deny]).toEqual([id, expect.stringContaining('Send the same call again with `run_in_background: true` and nothing else changed')])
     expect(r.deny).toContain('replies reach you while it runs')
