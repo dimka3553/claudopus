@@ -205,8 +205,9 @@ test('finished work leaves a result for good that asks nothing: its pictures cop
   isWriteHeld = true
   await used.press({ key: String((await keyed(used, 'dismiss-a6'))?.key) })
   await used.findAll({ type: 'Text' })
-  // (drawn at once as marked done: green where it stood, its presses kept in place for the moment and doing nothing)
+  // (drawn at once as marked done: green where it stood, its presses gone)
   expect((await until(async () => (await used.find({ type: 'Text', text: '✓ Done' })) ?? undefined))?.props.color).toBe('success')
+  expect(await keyed(used, 'dismiss-a6')).toBeUndefined()
   writeHeld?.()
   // (green where it stood for its two seconds, then under Finished, in the drawing kept while they use the panel too)
   await clock.advance(2_200)

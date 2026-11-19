@@ -1,0 +1,1 @@
+- Mark as done takes the card's buttons away the moment you press it, so you can't press them twice; the card keeps its size through its green moment, so nothing moves under the pointer.
