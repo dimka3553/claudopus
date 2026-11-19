@@ -12,6 +12,7 @@ use warnings;
 use Fcntl qw(SEEK_SET);
 use File::Basename qw(basename dirname);
 use File::Path qw(make_path remove_tree);
+use File::Spec;
 use File::Temp qw(tempdir);
 use Digest::MD5 qw(md5_hex);
 use POSIX qw(strftime);
@@ -35,6 +36,8 @@ make_path($state_dir, "$mem/words", "$mem/work", "$mem/locks");
 my $lock = "$mem/locks/catch-up";
 my $isMine = 0;
 END { rmdir $lock if $isMine }
+# A run stopped by a signal ends as any run does, so its lock and its scratch folder go
+$SIG{$_} = sub { exit 1 } for qw(TERM HUP INT);
 if (!mkdir $lock) {
   my $age = time - ((stat $lock)[9] // time);
   exit 0 if $age < 3 * 3600;
@@ -240,7 +243,19 @@ $walk = sub {
 };
 $walk->($projects, 0) if $JQ && -d $projects;
 
-# What lines a run reads wait outside memory, so no search finds them
+# What lines a run reads wait outside memory, so no search finds them. A scratch folder a run left when it died goes first: only
+# this run holds the lock, so none is in use (one changed in the last 10 minutes stays, for a run over another memory folder)
+my $tmpdir = File::Spec->tmpdir;
+if (opendir my $dh, $tmpdir) {
+  for my $e (grep { /^claudopus-catch-up\.[A-Za-z0-9_]{6}$/ } readdir $dh) {
+    my $p = "$tmpdir/$e";
+    next if -l $p || !-d _;
+    my $newest = (lstat $p)[9];
+    if (opendir my $in, $p) { for (grep { $_ ne "." && $_ ne ".." } readdir $in) { my $m = (lstat "$p/$_")[9]; $newest = $m if defined $m && $m > $newest } closedir $in }
+    remove_tree($p) if time - $newest > 600;
+  }
+  closedir $dh;
+}
 my $scratch = tempdir('claudopus-catch-up.XXXXXX', TMPDIR => 1, CLEANUP => 1);
 my $tmp = "$scratch/lines";
 my %seen;
