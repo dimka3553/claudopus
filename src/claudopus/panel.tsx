@@ -506,7 +506,8 @@ const panelHooks = (on: On) => {
     // Delivered, or in the green moment after Mark as done: through that moment the card keeps its delivered shape, its line one row,
     // what it asked, and the row of its two presses, empty then, so nothing moves under the pointer and a second click lands on
     // nothing (19 Nov: the card shrank as its presses went, and the person's next click opened its helpers)
-    const looksDelivered = (one: Todo) => stage(one) === 'delivered' || isDoneMoment(one, at)
+    // (a result that still asks the person something has the same shape, in the amber of what waits)
+    const looksDelivered = (one: Todo) => stage(one) === 'delivered' || asksOnResult(one) || isDoneMoment(one, at)
     const small = (one: Todo) => {
       // In the terminal, while the letters are keys, the first nine cards are numbered and the number opens the card's Details
       // A card in its moment at the top is not numbered, so the others keep their numbers through it
@@ -555,7 +556,7 @@ const panelHooks = (on: On) => {
                 ) : null}
                 {/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again. A
                     delivered card has its two presses at its bottom instead, and none up here */}
-                {canDismiss(one) && stage(one) !== 'delivered' ? (
+                {canDismiss(one) && !looksDelivered(one) ? (
                   <Box flexShrink={0}>
                     <Button key={`dismiss-${one.id}-${presses}`} label="Dismiss" plain dimColor hover={{ scope: `dismiss-${one.id}`, underline: true }} onPress={() => void ((presses += 1), dismiss($, one.id).catch(err => log($, `card not dismissed: ${String(err)}`)))} />
                   </Box>
@@ -595,12 +596,12 @@ const panelHooks = (on: On) => {
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* Ended, the line begins with its stage, in its colour: green done, grey stopped, red failed with why; then what
                     it last said */}
-                {hasResult(stage(one)) || stage(one) === 'stopped' || stage(one) === 'failed' ? (
+                {hasResult(stage(one)) || asksOnResult(one) || stage(one) === 'stopped' || stage(one) === 'failed' ? (
                   <Box flexDirection="row" minWidth={0}>
                     {/* (the stage's own word is never the part cut short: on a narrow panel a long note beside it left "✓ …") */}
                     <Box flexShrink={stage(one) === 'failed' ? 1 : 0} minWidth={0}>
                       <Text wrap="truncate-end" color={stageColor(stage(one))} dimColor={stage(one) === 'stopped'}>
-                        {stage(one) === 'delivered' ? '◐ Delivered' : stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? `✕ Failed${one.why ? ` · ${one.why}` : ''}` : 'Stopped'}
+                        {stage(one) === 'waiting' ? `● ${STAGE_WORD.waiting}` : stage(one) === 'delivered' ? '◐ Delivered' : stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? `✕ Failed${one.why ? ` · ${one.why}` : ''}` : 'Stopped'}
                       </Text>
                     </Box>
                     {noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}
@@ -1604,7 +1605,7 @@ const panelHooks = (on: On) => {
             </Box>
           ) : null}
           {resultPart(one)}
-          {stage(one) === 'delivered' && one.questions?.length ? part('part-questions', 'Questions', '', questionLines(one, 'asks-whole', 0) ?? <Box />) : null}
+          {asksOnResult(one) ? part('part-questions', 'Questions', '', questionLines(one, 'asks-whole', 0) ?? <Box />) : null}
           {one.words ? askPart(one) : null}
           {todoPart(one)}
           {helpersPart(one)}
@@ -1827,7 +1828,8 @@ const panelHooks = (on: On) => {
     const isAsking = (one: Todo) => Boolean(one.ask) && !isActingOnReply(one)
     // Each thing that waits, counted once: a card with a question and a key box waits on two
     const waiting2 = (one: Todo) => needsFor(one).filter(need => !need.isActing)
-    const waitsOn = (one: Todo) => waiting2(one).length
+    // (and a result that still asks something: one thing, however many it asks, answered by one reply)
+    const waitsOn = (one: Todo) => waiting2(one).length + Number(asksOnResult(one))
     const isOpen = (one: Todo) => waitsOn(one) > 0
     const placeKey = (one: Todo) => `${one.chat?.host ?? ''}/${one.chat?.id ?? ''}/${one.id}`
     // Only what still waits is up there: a card answered goes at once to its place by its colour, under every card that waits, and
@@ -1836,7 +1838,7 @@ const panelHooks = (on: On) => {
     const isWaits = (one: Todo) => isOpen(one)
     const isKeptUp = (one: Todo) => isWaits(one)
     // Where a card stands among what waits: where it first came, kept for as long as it stays up there
-    const cameAt = (one: Todo) => Math.min(...waiting2(one).map(need => need.at), Infinity)
+    const cameAt = (one: Todo) => Math.min(...waiting2(one).map(need => need.at), asksOnResult(one) ? one.endedAt : Infinity)
     const placeOf = (one: Todo) => topPlaces.get(placeKey(one)) ?? (Number.isFinite(cameAt(one)) ? cameAt(one) : at)
     // Just finished: up at the top, right under what waits, the newest first, each for its own two seconds
     const isFinishing = (one: Todo) => !isWaits(one) && isFinishMoment(one)
@@ -1864,7 +1866,7 @@ const panelHooks = (on: On) => {
     // What waits first, notices and cards in the order they came; under it what just finished, blue, the newest first; then ended
     // cards that left something running. A card is drawn when the panel is
     // What the first thing waiting on a card asks, under its task's name, for the line above the chat
-    const whatOf = (one: Todo) => (waiting2(one)[0] ? `${cut(titleOf(one), 40)}: ${oneLine(waiting2(one)[0]?.text ?? '')}` : '')
+    const whatOf = (one: Todo) => (waiting2(one)[0] ? `${cut(titleOf(one), 40)}: ${oneLine(waiting2(one)[0]?.text ?? '')}` : asksOnResult(one) ? `${cut(titleOf(one), 40)}: ${oneLine(one.questions?.[0] ?? '')}` : '')
     const top = [
       ...notices.map(one => ({ rank: 0, at: one.at, what: one.what, draw: () => one.node, sign: () => one.sign, card: undefined as Todo | undefined })),
       ...askCards.map(one => ({ ...(isKeptUp(one) ? { rank: 0, at: placeOf(one), what: whatOf(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '' } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '' }), draw: () => small(one), sign: () => cardSign(one), card: one as Todo | undefined })),

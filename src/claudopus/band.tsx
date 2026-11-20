@@ -66,7 +66,7 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
   }
   if (open.kind === 'change') {
     const one = changeTarget(cards)
-    return one && { head: `↳ ${stageOf(cards, one) === 'delivered' && one.questions?.length ? 'Reply' : 'Message'} to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) }
+    return one && { head: `↳ ${asksOnResult(one) ? 'Reply' : 'Message'} to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) }
   }
   // Words on a permission of a task's card: they go to that task, and the block keeps Allow and Don't allow (gate.tsx, wordsOnGate)
   if (open.kind === 'permission') {
@@ -263,8 +263,9 @@ const bandHooks = (on: On) => {
     if (e.props.hasSurvey) return next(e)
     const bandAt = await $.clock.now()
     const bandKept = await read($, reports)
-    // (each card by its stage: at work from its start until its result, waiting only while something of its own waits for the person)
-    const working = cards.filter(one => !one.parentId && (stageOf(cards, one) === 'working' || stageOf(cards, one) === 'waiting'))
+    // (each card by its stage: at work from its start until its result, waiting only while something of its own waits for the person;
+    // a result that still asks the person something is not at work)
+    const working = cards.filter(one => !one.parentId && (stageOf(cards, one) === 'working' || (stageOf(cards, one) === 'waiting' && !asksOnResult(one))))
     // Work that just finished makes the octopus happy for its pause, the band staying that long even when nothing else runs;
     // the redraw set for the pause's end is read so the band leaves or goes back to work then
     const happy = isHappy(cards, bandAt)

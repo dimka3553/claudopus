@@ -1,0 +1,1 @@
+- A task that hands in its result but still asks you something, such as a release, now stays yellow and waiting for you at the top, saying `Waiting for you`, and is counted as waiting in the header; it turns Delivered only once nothing is left for you to answer

@@ -1151,21 +1151,23 @@ test("work that finishes comes to the top, outlined for two seconds, and stays t
   agents.a3 = 'running'
   await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'Shade the eyes too.', resume: { agentId: 'a3' } } as never)
   expect([await titles(again), await offered(again, 'a3'), await dones(again), await head(again), await fold(again)]).toEqual([['Check the ears', 'Draw the eyes'], ['Stop', 'Message'], [['#4C9AFF'], 1], '1 working · 1 delivered', '▸ Finished 1'])
-  // When it hands in it is done again: at the top for its two seconds, then among the cards as before, the dismissed one still
-  // under Finished
-  // (its last note lists what the result leaves open: numbered on the card with no press of their own, and the first press reads Reply)
+  // When it hands in, its last note listing what the result leaves open, it is not delivered but waits for the person: amber, among
+  // what waits, counted as waiting in the header, its line saying so, what it asks numbered under it with no press of their own, and
+  // its first press reads Reply (20 Nov, the person: "'Delivered' should only mean after it's already been deployed or the task has
+  // actually completed"); the dismissed one is still under Finished
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n3', agentId: 'a3', text: 'The eyes are shaded.', questions: ['Should the lashes be longer?', 'Which eye colour?'] } as never)
   expect(await again.find({ type: 'Text', text: 'It asks 2 things' })).toBeUndefined()
   agents.a3 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h3', agentId: 'a3', message: 'The eyes are shaded.' } as never)
-  expect([await titles(again), await offered(again, 'a3'), await dones(again), await fold(again)]).toEqual([['Draw the eyes', 'Check the ears'], ['Reply', 'Mark as done'], [['#4C9AFF', '#4C9AFF'], 2], '▸ Finished 1'])
+  const waits = async () => [(await again.findAll({ type: 'Text', text: '● Waiting for you' })).map(one => one.props.color), (await again.findAll({ type: 'Box' })).filter(b => b.props.width === 1 && b.props.backgroundColor === '#E5A50A').length]
+  expect([await titles(again), await offered(again, 'a3'), await dones(again), await waits(), await head(again), await fold(again)]).toEqual([['Draw the eyes', 'Check the ears'], ['Reply', 'Mark as done'], [['#4C9AFF'], 1], [['#E5A50A'], 1], '1 waiting for you · 1 delivered', '▸ Finished 1'])
   expect((await again.findAll({ type: 'Text' })).map(one => one.text).filter(text => /^It asks|^\d\.$|\?$/.test(text))).toEqual(['It asks 2 things', '1.', 'Should the lashes be longer?', '2.', 'Which eye colour?'])
   // Reply opens the box above the chat, headed as a reply; a message sent puts it back to work with nothing left listed
   await pressed(again, 'change-a3')
   expect((await until(() => band.find({ type: 'Text', text: /^↳ / })))?.text).toBe('↳ Reply to “Draw the eyes”')
   await pressed(again, 'change-a3')
   await clock.advance(2_100)
-  expect([await titles(again), await dones(again), await fold(again)]).toEqual([['Draw the eyes', 'Check the ears'], [['#4C9AFF', '#4C9AFF'], 2], '▸ Finished 1'])
+  expect([await titles(again), await dones(again), await waits(), await fold(again)]).toEqual([['Draw the eyes', 'Check the ears'], [['#4C9AFF'], 1], [['#E5A50A'], 1], '▸ Finished 1'])
   await again.unmount()
   await band.unmount()
 })
