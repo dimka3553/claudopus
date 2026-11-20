@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.247 · 20 November 2026
+- When a task's result asks you something, your answer in words, or a message you send the task, now counts as the answer: the card stops being yellow while the task works on it, and the question doesn't come back when it finishes
+
 ## 0.2.246 · 20 November 2026
 - The button at the right end of the line above the prompt now follows the panel: Open panel while it is closed, Close panel while it is open, and Close panel closes it in every chat as your own close does
 

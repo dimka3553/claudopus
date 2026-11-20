@@ -1271,6 +1271,7 @@ const ended = (one: Todo, status: Todo['status'], at: number): Todo => {
   return resultAsk({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, up: true, why: undefined, bg: servers.length ? servers : undefined }, at)
 }
 const YES_NO = ['Yes', 'No']
+const isStaleResultAsk = (one: Todo) => one.status === 'working' && Boolean(one.ask?.isResult) && !one.ask?.replied
 const resultAsk = (one: Todo, at: number): Todo => {
   const asked = one.questions ?? []
   if (one.parentId || one.chat || one.status !== 'done' || !one.up || one.closedAt || !asked.length || one.ask) return one
@@ -1281,7 +1282,7 @@ const resultAsk = (one: Todo, at: number): Todo => {
   const details = asked.length === 1 ? (text === first ? '' : first) : asked.map((line, n) => `${n + 1}. ${line}`).join('\n')
   return { ...one, questions: undefined, questionChoices: undefined, ask: { text, ...(details ? { details } : {}), ...(choices.length ? { choices } : {}), from: one.id, at, isResult: true } }
 }
-const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, questions: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask?.isResult ? undefined : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, questions: undefined, newAt: at })
 const stoppedAs = (one: Todo): Todo['status'] => (hasReport(one) ? 'done' : 'stopped')
 const handedBack = new Map<string, string>()
 const stoppedHere = new Set<string>()
@@ -5948,7 +5949,7 @@ const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = fals
 }
 const plainWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) =>
-  !isReply || (!ask.refused && (!ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))))
+  !isReply || Boolean(ask.isResult) || (!ask.refused && (!ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))))
 const askPressed = new Map<string, string>()
 const asPressed = (given: Todo): Todo => {
   const closed = given.status !== 'working' && !given.closedAt && dismissedNow.has(given.id) ? { ...given, closedAt: dismissedNow.get(given.id) ?? (given.endedAt || 1) } : given
@@ -9558,7 +9559,8 @@ const chatHooks = (on: On) => {
     await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id === id ? m.needsContext : true }))
     await tidyKeptRules($, id).catch(err => log($, `kept rules not tidied: ${String(err)}`))
     await noteClosed($, id).catch(err => log($, `work the app closed on not looked for: ${String(err)}`))
-    if ((await read($, todos)).some(one => one.questions?.length && resultAsk(one, one.endedAt) !== one)) await changeTodos($, list => list.map(one => resultAsk(one, one.endedAt)))
+    const isOld = (one: Todo) => isStaleResultAsk(one) || (Boolean(one.questions?.length) && resultAsk(one, one.endedAt) !== one)
+    if ((await read($, todos)).some(isOld)) await changeTodos($, list => list.map(one => (isStaleResultAsk(one) ? { ...one, ask: undefined } : resultAsk(one, one.endedAt))))
     during('load: read the other chats')
     await readOthers($).catch(() => undefined)
     keysOnStart($)
