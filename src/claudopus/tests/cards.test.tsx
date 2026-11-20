@@ -1169,6 +1169,31 @@ test("work that finishes comes to the top, outlined for two seconds, and stays t
   await again.press({ key: release?.key ?? '' })
   expect(await until(async () => ((await offered(again, 'a3')).includes('Stop') ? offered(again, 'a3') : undefined))).toEqual(['Stop', 'Message'])
   expect([await ambers(), await answers(), await head(again)]).toEqual([0, [], '1 working · 1 delivered'])
+  // Words answer it too, whatever its buttons: at work with them, nothing left waiting, and nothing comes back yellow once it hands
+  // in (20 Nov, the person: "if my answer has been sent … that response should be counted towards the question")
+  const handsIn = async (n: number, questions: string[]) => {
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `n${n}`, agentId: 'a3', text: 'Done again.', ...(questions.length ? { questions, choices: ['Yes', 'No'] } : {}) } as never)
+    agents.a3 = 'completed'
+    await $.tool.call({ tool: 'SubagentHandback', tool_use_id: `h${n}`, agentId: 'a3', message: 'Done again.' } as never)
+  }
+  const atWork = () => until(async () => ((await offered(again, 'a3')).includes('Stop') ? offered(again, 'a3') : undefined))
+  await handsIn(4, ['Darker lashes too?'])
+  expect(await until(async () => ((await ambers()) ? true : undefined))).toBe(true)
+  const inWords = await until(async () => (await again.findAll({ type: 'Button' })).find(one => /^ask-a3-inbar-\d+$/.test(one.key ?? '')))
+  await again.press({ key: inWords?.key ?? '' })
+  const box = await until(async () => (await band.findAll({ type: 'Input' })).find(one => (one.key ?? '').startsWith('band-a3-reply-answer-')))
+  await band.input({ key: box?.key ?? '', text: 'Only a little darker.' })
+  expect([await atWork(), await ambers(), await answers()]).toEqual([['Stop', 'Message'], 0, []])
+  await handsIn(5, [])
+  expect(await until(async () => ((await dones(again))[1] === 2 ? dones(again) : undefined))).toEqual([['#4C9AFF', '#4C9AFF'], 2])
+  expect(await ambers()).toBe(0)
+  // And so does a message sent to it instead: its card works, never yellow
+  await handsIn(6, ['Thinner brows?'])
+  expect(await until(async () => ((await ambers()) ? true : undefined))).toBe(true)
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's6', to: 'a3', message: 'Smooth the neck first.' } as never)
+  agents.a3 = 'running'
+  await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'Smooth the neck first.', resume: { agentId: 'a3' } } as never)
+  expect([await atWork(), await ambers(), await answers(), await head(again)]).toEqual([['Stop', 'Message'], 0, [], '1 working · 1 delivered'])
   await again.unmount()
   await band.unmount()
 })

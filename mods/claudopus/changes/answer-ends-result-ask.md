@@ -1,0 +1,1 @@
+- When a task's result asks you something, your answer in words, or a message you send the task, now counts as the answer: the card stops being yellow while the task works on it, and the question doesn't come back when it finishes

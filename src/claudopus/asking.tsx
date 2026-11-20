@@ -393,10 +393,12 @@ const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = fals
   return run
 }
 // Whether an answer settles its ask: a press does, and so does a reply to an ask that wanted words (it gave no buttons of its own)
-// or one that begins with the words of one of its buttons. Any other reply, such as a request first, leaves the ask open while the work acts on it
+// or one that begins with the words of one of its buttons, or any reply to what a result still asks (resultAsk): the person's words
+// are the answer to it (20 Nov, the person: "if my answer has been sent … that response should be counted towards the question").
+// Any other reply, such as a request first, leaves the ask open while the work acts on it
 const plainWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) =>
-  !isReply || (!ask.refused && (!ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))))
+  !isReply || Boolean(ask.isResult) || (!ask.refused && (!ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))))
 // The asks a press answered, by card, as `${at}:${text}`: the panel draws the card answered from the press itself, its block
 // gone in the press's own drawing, before the answer is written; the mark goes once the card's file no longer carries the ask
 const askPressed = new Map<string, string>()

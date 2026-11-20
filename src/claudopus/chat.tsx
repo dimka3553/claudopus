@@ -201,7 +201,9 @@ const chatHooks = (on: On) => {
     // What was at work when this chat's process last ended is read before this load writes its own: it ended with that process
     await noteClosed($, id).catch(err => log($, `work the app closed on not looked for: ${String(err)}`))
     // A result kept from before that still lists what it asks is that question on its card, as one handed in now
-    if ((await read($, todos)).some(one => one.questions?.length && resultAsk(one, one.endedAt) !== one)) await changeTodos($, list => list.map(one => resultAsk(one, one.endedAt)))
+    // and one at work again that still shows it has had its answer
+    const isOld = (one: Todo) => isStaleResultAsk(one) || (Boolean(one.questions?.length) && resultAsk(one, one.endedAt) !== one)
+    if ((await read($, todos)).some(isOld)) await changeTodos($, list => list.map(one => (isStaleResultAsk(one) ? { ...one, ask: undefined } : resultAsk(one, one.endedAt))))
     // The other chats, on this Mac and the others, are read before the panel is drawn: a chat that starts, or comes back, showed
     // its panel without them until the rest of its start was done, and they seemed to drop out of it for a while
     during('load: read the other chats')

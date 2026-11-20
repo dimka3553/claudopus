@@ -32,6 +32,8 @@ const ended = (one: Todo, status: Todo['status'], at: number): Todo => {
 // Its buttons are the ones the task gave; a single question that reads as yes or no has Yes and No; else only Answer in words.
 // A card that still has a question of its own keeps its result's lines as they were
 const YES_NO = ['Yes', 'No']
+// A result's question on a card at work again: answered by the message that started it (a card resumed by 0.2.243 kept it, yellow)
+const isStaleResultAsk = (one: Todo) => one.status === 'working' && Boolean(one.ask?.isResult) && !one.ask?.replied
 const resultAsk = (one: Todo, at: number): Todo => {
   const asked = one.questions ?? []
   if (one.parentId || one.chat || one.status !== 'done' || !one.up || one.closedAt || !asked.length || one.ask) return one
@@ -42,8 +44,9 @@ const resultAsk = (one: Todo, at: number): Todo => {
   const details = asked.length === 1 ? (text === first ? '' : first) : asked.map((line, n) => `${n + 1}. ${line}`).join('\n')
   return { ...one, questions: undefined, questionChoices: undefined, ask: { text, ...(details ? { details } : {}), ...(choices.length ? { choices } : {}), from: one.id, at, isResult: true } }
 }
-// Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, questions: undefined, newAt: at })
+// Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work.
+// What its result still asked goes: the message is the person's answer to it, and the card works, never yellow (isStaleResultAsk)
+const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask?.isResult ? undefined : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, questions: undefined, newAt: at })
 // How work that is stopped ends: done when its result was already received, stopped otherwise
 const stoppedAs = (one: Todo): Todo['status'] => (hasReport(one) ? 'done' : 'stopped')
 // Work that called SubagentHandback in the turn now ending: what it ends that turn with is its report
