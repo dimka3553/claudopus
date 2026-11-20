@@ -1611,6 +1611,14 @@ const followPanel = async ($: EngineInterface) => {
   return choice
 }
 
+const showPanel = async ($: EngineInterface) => {
+  await update($, me, one => ({ ...one, isListOpened: true }))
+  await update($, paneShown, () => true)
+  const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS })
+  if (opened.isPlaced) await choosePanel($, true)
+  return opened
+}
+
 const openList = async ($: EngineInterface) => {
   if ((await read($, me)).isListOpened) return
   const choice = await readPanel($)
@@ -11996,11 +12004,7 @@ const workHooks = (on: On) => {
 const commandHooks = (on: On) => {
 
   on('command.run', { command: 'claudopus' }, async $ => {
-    await update($, me, one => ({ ...one, isListOpened: true }))
-    await update($, paneShown, () => true)
-    const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS })
-    if (opened.isPlaced) await choosePanel($, true)
-
+    const opened = await showPanel($)
     return { text: opened.isPlaced ? 'Claudopus opened its panel.' : nowhere('Claudopus') }
   })
 
@@ -12707,6 +12711,12 @@ const bandHooks = (on: On) => {
           {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, a task is done' : 'Claudopus, Claude is working', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
           {spacers}
           {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
+          {/* At the very right on the desktop, Open panel brings the panel back once it was closed; open, a press does nothing */}
+          {e.surface !== 'terminal' ? (
+            <Box key="band-panel" flexGrow={1} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+              <ui.Button key="band-panel-open" label="Open panel" plain dimColor onPress={() => void (async () => (await isListPlaced($)) || (await showPanel($)))().catch(err => log($, `panel not opened: ${String(err)}`))} />
+            </Box>
+          ) : null}
           {/* The figures fill a phone's terminal: the hint shows until they come */}
           {isPanelAway && !figures ? (
             <Box flexShrink={0}>

@@ -911,6 +911,28 @@ test('/claudopus opens the panel for every chat; closed by hand it closes in eve
   expect(again.at).toBeGreaterThan(closedAt.at)
 })
 
+test('Open panel at the right of the line above the prompt opens the closed panel for every chat, and pressed while it is open does nothing', async ($, on) => {
+  const { opened, files } = world(on, { live: [] })
+  // Closed by hand earlier: work that starts leaves it closed
+  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: false, at: 1_699_999_999_000 }))
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'The nose on head A is flawed, can you fix it?' } as never)
+  expect(opened).toEqual([])
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const open = async () => (await until(async () => (await bar.findAll({ type: 'Button' })).find(b => b.props.label === 'Open panel')))?.key ?? ''
+  await bar.press({ key: await open() })
+  expect(await until(async () => (opened.length ? opened : undefined))).toEqual(['claudopus'])
+  expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}').isOpen).toBe(true)
+  // Open now, the same press opens nothing again
+  await bar.press({ key: await open() })
+  expect(opened).toEqual(['claudopus'])
+  await bar.unmount()
+  // The terminal keeps its own line, with no button
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+  expect((await term.findAll({ type: 'Button' })).some(b => b.props.label === 'Open panel')).toBe(false)
+  await term.unmount()
+})
+
 test("closed by hand in another chat, the panel closes here; the mod's own close and a screen with nowhere to draw it choose nothing", async ($, on) => {
   const { closed, files, clock } = world(on, { panes: ['claudopus'] })
   files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1_699_999_999_000 }))

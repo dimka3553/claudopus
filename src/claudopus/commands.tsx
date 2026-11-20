@@ -3,12 +3,7 @@
 const commandHooks = (on: On) => {
 
   on('command.run', { command: 'claudopus' }, async $ => {
-    await update($, me, one => ({ ...one, isListOpened: true }))
-    await update($, paneShown, () => true)
-    const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS })
-    // Asked for where it can be drawn, it is open in every chat from now on
-    if (opened.isPlaced) await choosePanel($, true)
-
+    const opened = await showPanel($)
     return { text: opened.isPlaced ? 'Claudopus opened its panel.' : nowhere('Claudopus') }
   })
 

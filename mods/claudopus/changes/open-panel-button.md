@@ -1,0 +1,1 @@
+- An Open panel button now sits at the right end of the memory, processor and graphics line above the prompt: when the Claudopus panel is closed, a press opens it again in every chat, and when it is open, a press does nothing
