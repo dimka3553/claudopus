@@ -122,6 +122,13 @@ const IN_HOOK = 'CLAUDOPUS_IN_HOOK'
 const isInHook = async ($: EngineInterface) => (await $.env.get('CLAUDOPUS_IN_HOOK').catch(() => undefined)) === 'hook'
 type HeldSend = { message: OwnMessage; isStill?: () => Promise<boolean>; resolve: (r: SendResult) => void; reject: (err: unknown) => void; result?: Promise<SendResult> }
 const heldSends: HeldSend[] = []
+// Messages for the chat itself (a part of a task's result, handed in from that task's tool call), sent from the next hook that may
+// send, as the chat's turn they start loses the hook they were sent from
+const heldPrompts: string[] = []
+const submitLater = ($: EngineInterface, text: string) => {
+  if (!heldPrompts.includes(text)) heldPrompts.push(text)
+  redraw($)
+}
 const sendOwnNow = async ($: EngineInterface, message: OwnMessage) => {
   const since = await $.clock.now()
   try {
@@ -156,10 +163,14 @@ const sendOne = async ($: EngineInterface, { message, isStill, resolve, reject }
 // the engine leaves the hook a message is sent from out of the run it starts, and a task must keep those
 let isSendingHeld = false
 const sendHeld = async ($: EngineInterface) => {
-  if (!heldSends.length || isSendingHeld) return
+  if ((!heldSends.length && !heldPrompts.length) || isSendingHeld) return
   isSendingHeld = true
   try {
     if (!(await isInHook($)) || (await isReplaced($))) return
+    for (let text = heldPrompts.shift(); text !== undefined; text = heldPrompts.shift()) {
+      await $.prompt.submit({ text }).catch(err => log($, `message for the chat not sent: ${String(err)}`))
+      await log($, 'a message for the chat that waited went from a hook')
+    }
     // (a sender told how its message went may send its next, as a row of tasks started again one after another: that goes from
     // this hook too, so the hook stays a moment for it)
     for (let idle = 0; idle < 4; idle += 1) {
@@ -329,7 +340,7 @@ const promptHooks = (on: On) => {
   // here while anything is at work, and the task it starts loses no hook it needs, as the engine leaves out of its run only the
   // hook the message was sent from (sendHeld)
   on('classic.PreToolUse', async ($, e, next) => {
-    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
+    if (heldSends.length || heldPrompts.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     return next(e)
   })
 

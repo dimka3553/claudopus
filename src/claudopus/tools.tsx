@@ -138,6 +138,24 @@ const toolHooks = (on: On) => {
     return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare}${plain}${leftOut}${released} It stays until ${who()} answers; the answer comes back to you as a message the moment it is given, at your next step or to you paused. Never wait for it with a command or a timer: with nothing else to do, end your step. Ask again if the answer leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
   })
 
+  // A task hands the person a part of its result that is finished while it goes on with the rest (20 Nov: "allow subagents to have
+  // multiple reports and then also to report without finishing a task"): kept as a result of its own, and given to the chat to show
+  // as its reply, from the next hook that may send it. Nothing on the card ends: its to-dos, helpers and commands go on
+  on('tool.call', { tool: 'mcp__claudopus__report' }, async ($, e) => {
+    const text = String((e as unknown as { message?: unknown }).message ?? '').trim()
+    if (e.agentId === undefined) return { result: `Only a background task hands in a part of its result; the chat tells ${who()} in its reply.` }
+    if (!text) return { result: 'A report needs its text, in `message`.' }
+    const card = (await read($, todos)).find(one => one.id === e.agentId)
+    if (!card || card.chat || isOff || !dir) return { result: `Not handed in: Claudopus does not follow this task. Put it in your last report instead.` }
+    if (card.parentId) return { result: named(PART_FROM_HELPER) }
+    if (card.status !== 'working') return { result: 'Not handed in: your task has ended. Hand in your result with SubagentHandback.' }
+    await changeTodos($, list => list.map(one => (one.id === card.id ? { ...one, partsForChat: [...(one.partsForChat ?? []), text].slice(-PARTS_KEPT) } : one)))
+    await saveReport($, card, text, true).catch(err => log($, `part of ${card.id}'s result not kept: ${String(err)}`))
+    submitLater($, named(PART_NOTICE(titleOf(card))))
+    await log($, `part of ${card.id}'s result taken, for the chat to give now`)
+    return { result: named(PART_TAKEN) }
+  })
+
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides
   on('tool.call', { tool: 'mcp__claudopus__note' }, async ($, e) => {
     const input = e as unknown as { text?: string; decision?: boolean; task?: string; questions?: unknown; choices?: unknown }

@@ -93,6 +93,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
   const sent: string[] = []
   const appended: string[] = []
   const submitted: string[] = []
+  // (and what each of those carried for the chat's model to read with it)
+  const submittedContext: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
   const pressRuns: string[][] = []
@@ -690,7 +692,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
   on('agent.list', () => ({ value: Object.entries(options.agents ?? {}).map(([id, status]) => ({ id, description: 'Listed by the engine', type: options.kinds?.[id] ?? 'fork', status, ...(options.parents?.[id] ? { parentId: options.parents[id] } : {}) })) as never }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('prompt.submit', (_, e) => {
-    if (e.origin.kind !== 'composer') submitted.push(e.text)
+    if (e.origin.kind !== 'composer') (submitted.push(e.text), submittedContext.push((e.context ?? []).join('\n')))
     return { text: e.text, context: e.context }
   })
   on('turn.complete', (_, e) => ({ text: e.answer }))
@@ -716,7 +718,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     return { messages: e.messages }
   })
 
-  return { files, completed, pressRuns, titles, compacts, opened, tabs, viewed, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, completed, pressRuns, titles, compacts, opened, tabs, viewed, stopped, killed, closed, logged, sent, appended, submitted, submittedContext, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -1608,6 +1610,52 @@ test('a finished card that left a server running stays at the top after its mome
   expect((await list.findAll({ type: 'Button' })).filter(b => b.props.label === 'Stop' && String(b.key ?? '').startsWith('stop-list-job-'))).toHaveLength(1)
   expect((await list.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect(await order()).toEqual(['Piece 3', 'Piece 1', 'Piece 2', 'Piece 4'])
+})
+
+test('a task hands in a finished part of its result while it works on: its card keeps working with its to-dos and helper, the part is kept as a result of its own and given to the chat once, in a message of its own; its last report still ends it', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = {}
+  const parents: Record<string, string> = {}
+  const { files, submitted, submittedContext, clock } = world(on, { agents, kinds, parents })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'look into the beards and the jawline', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Beards and jawline', prompt: 'look into them' } as never)
+  agents.a1 = 'running'
+  kinds.a1 = 'general-purpose'
+  await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 'd1', agentId: 'a1', item: 'Build the jawline', state: 'doing' } as never)
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Build the jawline', prompt: 'build it', parentAgentId: 'a1' } as never)
+  ;((agents.a2 = 'running'), (kinds.a2 = 'general-purpose'), (parents.a2 = 'a1'))
+  const reportsOf = () => [...files.keys()].filter(path => path.startsWith(`${MEMORY}/reports/`) && path.endsWith('/report.md'))
+  const part = 'The beard research is done: short beards fit the films best.'
+  const taken = (await $.tool.call({ tool: 'mcp__claudopus__report', tool_use_id: 'r1', agentId: 'a1', message: part } as never)) as { result?: string }
+  expect(taken.result).toContain('Your task goes on')
+  // A helper's result goes to its task, never to the chat
+  expect(((await $.tool.call({ tool: 'mcp__claudopus__report', tool_use_id: 'r2', agentId: 'a2', message: 'Half a jaw.' } as never)) as { result?: string }).result).toContain('you are a helper')
+  // Kept at once as a result of its own, however short; the chat's message waits for a hook that may send it, as the turn it
+  // starts would lose the tool call's
+  expect(await until(async () => (reportsOf().length === 1 ? reportsOf() : undefined))).toHaveLength(1)
+  expect(files.get(reportsOf()[0] ?? '')).toBe(`${part}\n`)
+  expect(submitted.filter(text => text.includes('handed in a part'))).toEqual([])
+  await clock.advance(1000)
+  expect(await until(async () => submitted.find(text => text.includes('handed in a part')))).toBe('From Claudopus: the task "Beards and jawline" handed in a part of its result, and is still working on the rest.')
+  const carried = submittedContext[submitted.findIndex(text => text.includes('handed in a part'))] ?? ''
+  expect(carried).toContain(`is still working, and handed in this part of its result`)
+  expect(carried).toContain(`  ${part}`)
+  // The card still works, its to-do and helper with it, and the part is never given again
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
+  const texts = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  expect(texts).toContain('1 working')
+  const next = ((await $.prompt.submit({ text: 'how is it going?', wait: false, origin: composer } as never)) as { context?: string[] }).context?.join('\n') ?? ''
+  expect(next).not.toContain(part)
+  // Its last report ends it, kept beside the part
+  agents.a2 = 'completed'
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'a2', message: 'The jaw is built.' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 'd2', agentId: 'a1', item: 'Build the jawline', state: 'done' } as never)
+  const last = `The jawline is built and fits all 47 films. ${'It holds at every angle. '.repeat(25)}`
+  const handed = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb1', agentId: 'a1', message: last } as never)) as { deny?: string; result?: { message?: string } }
+  expect([handed.deny, handed.result?.message]).toEqual([undefined, expect.stringContaining('Report delivered to your caller')])
+  await clock.advance(1000)
+  expect(await until(async () => (reportsOf().length === 2 ? reportsOf() : undefined))).toHaveLength(2)
 })
 
 test("a task's report whose notice of its end never comes goes to the chat with the person's next message, once; a message to the task after its hand-back is a step of its own", async ($, on) => {

@@ -111,6 +111,9 @@ export type Todo = {
   // `reportGiven`, so a later notice of the same end repeats nothing, until a message starts it again
   reportForChat?: string
   reportGiven?: true
+  // The parts of its result it handed in while still at work (the `report` tool), each kept as a result of its own, until the chat
+  // is given them with the message Claudopus sends it for them, or with the next message or notice that comes first
+  partsForChat?: string[]
   // The hand-back call whose report Claudopus took, until the task takes a step of its own: what comes next is that call's result,
   // or Claude Code's press for a report it did not see delivered, answered with no model
   tookReport?: string

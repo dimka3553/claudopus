@@ -1,0 +1,2 @@
+- A task can now hand you a report on a part that is finished while it goes on with the rest, as many times as it has one: each reaches you in the chat and is kept as a result of its own, and its card keeps working with its to-dos, helpers and commands. Its last report still ends it
+- Tasks are told to hand in finished work as soon as you can look at it or act on it, instead of keeping it until the end and filling their card with notes that they wait

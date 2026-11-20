@@ -52,7 +52,7 @@ const stepOf = (use: ToolUseSummary): Line => {
   const input = use.input ?? {}
   const given = (key: string) => (typeof input[key] === 'string' ? String(input[key]) : '')
   if (isTool(use.tool, 'note')) return { kind: 'said', text: given('text'), isUse: true }
-  if (use.tool === 'SubagentHandback') return { kind: 'said', text: whole(given('message')), isUse: true }
+  if (use.tool === 'SubagentHandback' || isTool(use.tool, 'report')) return { kind: 'said', text: whole(given('message')), isUse: true }
   if (use.tool === 'Agent') return { kind: 'step', text: `Started a helper: ${given('description') || 'unnamed'}`, isError: use.isError, isUse: true, tool: use.tool, name: given('description') }
   const file = given('file_path') || given('notebook_path')
   const text =
