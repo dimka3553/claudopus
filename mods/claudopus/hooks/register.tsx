@@ -1531,6 +1531,18 @@ const beginDoneMoment = ($: EngineInterface, one: Todo, at: number) => {
 }
 const tell = ($: EngineInterface, id: string, text: string) =>
   $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] }, agentId: id }).catch(async err => void (await log($, `work ${id} not told: ${String(err)}`)))
+const inTurn = new Set<string>()
+const toldAtStep = new Map<string, string[]>()
+const tellAtStep = ($: EngineInterface, id: string, text: string) => {
+  if (!inTurn.has(id)) return tell($, id, text)
+  toldAtStep.set(id, [...(toldAtStep.get(id) ?? []), text])
+  return Promise.resolve(undefined)
+}
+const takeToldAtStep = (id: string) => {
+  const lines = toldAtStep.get(id) ?? []
+  toldAtStep.delete(id)
+  return lines
+}
 
 const stop = async ($: EngineInterface, id: string) => {
   if ((await read($, todos)).some(one => one.id === id && one.status === 'working')) pressed.add(id)
@@ -9822,6 +9834,7 @@ const chatHooks = (on: On) => {
 
   on('turn.start', async ($, e, next) => {
     const started = await next(e)
+    if (e.agentId !== undefined) inTurn.add(e.agentId)
     if (e.agentId === undefined && quietHeld.size) {
       if (isQuietTurn(e.text, quietHeld)) quietTurns.add(e.turnId)
       quietHeld.clear()
@@ -9835,6 +9848,8 @@ const chatHooks = (on: On) => {
     if (!dir) return done
     if (e.agentId !== undefined) {
       const id = e.agentId
+      inTurn.delete(id)
+      for (const line of takeToldAtStep(id)) await tell($, id, line)
       turnEnding.add(id)
       try {
         return await agentTurnEnded($, e, id, done)
@@ -10193,7 +10208,7 @@ const lookJobs = async ($: EngineInterface) => {
       if (failedCmd && job?.owner) {
         const owner = job.owner
         void crossEnded($, { tool: 'Bash', agentId: owner, command: failedCmd }, {}, text, true)
-          .then(line => (line ? tell($, owner, line) : undefined))
+          .then(line => (line ? tellAtStep($, owner, line) : undefined))
           .catch(err => log($, `a failed background command not read for crossing: ${String(err)}`))
       }
       const seen = { ...latestOf(text), ...(m && !text.trim() ? { isEmpty: true } : {}) }
@@ -10306,8 +10321,8 @@ const stopping = async ($: EngineInterface, owner: string, job: Job, said?: stri
   await dropBackground($, [bg.id], 'stopped')
   const silent = job.wroteAt && !job.isEmpty ? now - job.wroteAt : now - job.at
   if (card?.status === 'working') {
-    if (said === undefined) void tell($, owner, RUN_STOPPED(job.label, job.kind !== 'server' && job.kind !== 'watch' && silent >= SILENT_WARN ? shortAgo(silent) : ''))
-    else if (said) void tell($, owner, said)
+    if (said === undefined) void tellAtStep($, owner, RUN_STOPPED(job.label, job.kind !== 'server' && job.kind !== 'watch' && silent >= SILENT_WARN ? shortAgo(silent) : ''))
+    else if (said) void tellAtStep($, owner, said)
   }
   jobLog.delete(job.id)
   silentTold.delete(job.id)
@@ -10329,7 +10344,7 @@ const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
       const silent = job.isEmpty ? now - job.at : now - job.wroteAt
       if (silent < RUN_SILENT_TOLD) continue
       silentTold.add(job.id)
-      void tell($, one.id, job.kind === 'remote' ? CLOUD_SILENT(job.title || job.label, shortAgo(silent)) : RUN_SILENT(job.label, shortAgo(silent), job.live))
+      void tellAtStep($, one.id, job.kind === 'remote' ? CLOUD_SILENT(job.title || job.label, shortAgo(silent)) : RUN_SILENT(job.label, shortAgo(silent), job.live))
       await log($, `work ${one.id} told its run ${job.id} has been silent ${shortAgo(silent)}`)
     }
   }
@@ -10757,8 +10772,10 @@ const stepLines = (agent: string, calls: { tool: string; input: unknown; tookMs:
 
 const stepHooks = (on: On) => {
   on('classic.PostToolBatch', async ($, e, next) => {
-    const r = await next(e)
+    const given = await next(e)
     const agent = (e as { agent_id?: string }).agent_id
+    const held = agent ? takeToldAtStep(agent) : []
+    const r = held.length ? { ...given, additionalContext: [...(given.additionalContext ?? []), ...held] } : given
     if (!agent || !dir || isOff) return r
     const now = await $.clock.now()
     const calls = e.tool_calls.map(call => ({ tool: call.tool_name, input: call.tool_input, tookMs: now - (callStarts.get(call.tool_use_id) ?? now) }))
@@ -11358,7 +11375,7 @@ const crossEnded = async ($: EngineInterface, e: { tool: string; agentId?: strin
       const file = path.slice(one.root.length + 1)
       const said = cut(oneLine(lines.slice(i, i + 3).join(' ')), 160)
       await log($, `work ${top}'s command failed on ${file}, which work ${one.top} changed: told it`)
-      void tell($, one.top, BROKE_TOLD(met ? titleOf(met) : 'another task', file, crossAgo(one.at, now), said))
+      void tellAtStep($, one.top, BROKE_TOLD(met ? titleOf(met) : 'another task', file, crossAgo(one.at, now), said))
       return BROKE_HERE(writer ? titleOf(writer) : 'another task', file, crossAgo(one.at, now))
     }
   }
@@ -11775,14 +11792,14 @@ const workHooks = (on: On) => {
             return { ...base, owes, quiet: isQuiet ? 0 : quiet }
           })
         })
-        if (nudge) void tell($, id, nudge)
+        if (nudge) void tellAtStep($, id, nudge)
       }
     }
     if (steered) {
       const sent = await next(e)
       if (answer) await answeredInChat($, answer, steered, !sent.deny && !sent.isError)
       const line = named(answered ? ANSWERED_IN_CHAT(answered, words, Boolean(answer && !settles(answer.ask, words, true)), isWhole) : woke ? WOKE(woke, isWhole) : from ? FROM(from, cut(oneLine(message), 80)) : STEER(words, isWhole))
-      if (!sent.deny) void tell($, steered, line)
+      if (!sent.deny) void tellAtStep($, steered, line)
       return sent
     }
     if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {

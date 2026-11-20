@@ -509,7 +509,7 @@ const workHooks = (on: On) => {
             return { ...base, owes, quiet: isQuiet ? 0 : quiet }
           })
         })
-        if (nudge) void tell($, id, nudge)
+        if (nudge) void tellAtStep($, id, nudge)
       }
     }
     // The steer is sent as it was written; once it is on its way, the work it goes to is told what a steer asks of it
@@ -521,7 +521,7 @@ const workHooks = (on: On) => {
       // Each line names the message it is about: a message queued behind another is read later than its line, and a line about the
       // chat's own note that landed after the person's words once marked their words as not theirs
       const line = named(answered ? ANSWERED_IN_CHAT(answered, words, Boolean(answer && !settles(answer.ask, words, true)), isWhole) : woke ? WOKE(woke, isWhole) : from ? FROM(from, cut(oneLine(message), 80)) : STEER(words, isWhole))
-      if (!sent.deny) void tell($, steered, line)
+      if (!sent.deny) void tellAtStep($, steered, line)
       return sent
     }
     // Its result handed in: refused, every time, while a to-do is open, a helper of its is at work, or a command of its own that is

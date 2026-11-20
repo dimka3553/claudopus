@@ -526,6 +526,7 @@ const chatHooks = (on: On) => {
   // more, the person's words or a notice with news, is the model's
   on('turn.start', async ($, e, next) => {
     const started = await next(e)
+    if (e.agentId !== undefined) inTurn.add(e.agentId)
     if (e.agentId === undefined && quietHeld.size) {
       if (isQuietTurn(e.text, quietHeld)) quietTurns.add(e.turnId)
       quietHeld.clear()
@@ -540,6 +541,9 @@ const chatHooks = (on: On) => {
     if (!dir) return done
     if (e.agentId !== undefined) {
       const id = e.agentId
+      // Lines held for a step that never came go into its chat now, after its last words (tellAtStep)
+      inTurn.delete(id)
+      for (const line of takeToldAtStep(id)) await tell($, id, line)
       turnEnding.add(id)
       try {
         return await agentTurnEnded($, e, id, done)

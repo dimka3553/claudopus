@@ -1,0 +1,1 @@
+- Claudopus's reminders to a task (a command that has printed nothing, to-dos left alone, who a message came from) now reach it at the end of its step. Before, a reminder that came mid-step was moved later in the task's history, so Claude read the task's whole history again at full price when the task was next woken: about a tenth of all spending.

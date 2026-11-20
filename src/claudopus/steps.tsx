@@ -88,8 +88,11 @@ const stepLines = (agent: string, calls: { tool: string; input: unknown; tookMs:
 const stepHooks = (on: On) => {
   // After each step of a piece of work or a helper: the patterns its calls show, as lines in its next request
   on('classic.PostToolBatch', async ($, e, next) => {
-    const r = await next(e)
+    const given = await next(e)
     const agent = (e as { agent_id?: string }).agent_id
+    // What Claudopus held for the end of this step (tellAtStep) goes beside its results
+    const held = agent ? takeToldAtStep(agent) : []
+    const r = held.length ? { ...given, additionalContext: [...(given.additionalContext ?? []), ...held] } : given
     if (!agent || !dir || isOff) return r
     const now = await $.clock.now()
     const calls = e.tool_calls.map(call => ({ tool: call.tool_name, input: call.tool_input, tookMs: now - (callStarts.get(call.tool_use_id) ?? now) }))

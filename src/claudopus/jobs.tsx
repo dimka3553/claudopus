@@ -114,7 +114,7 @@ const lookJobs = async ($: EngineInterface) => {
       if (failedCmd && job?.owner) {
         const owner = job.owner
         void crossEnded($, { tool: 'Bash', agentId: owner, command: failedCmd }, {}, text, true)
-          .then(line => (line ? tell($, owner, line) : undefined))
+          .then(line => (line ? tellAtStep($, owner, line) : undefined))
           .catch(err => log($, `a failed background command not read for crossing: ${String(err)}`))
       }
       // An output that is there but holds nothing has printed nothing yet: its time is when it was made, not when it last wrote
@@ -249,8 +249,8 @@ const stopping = async ($: EngineInterface, owner: string, job: Job, said?: stri
   const silent = job.wroteAt && !job.isEmpty ? now - job.wroteAt : now - job.at
   // (a task that has finished is told nothing: the server it left for the person is the person's to stop)
   if (card?.status === 'working') {
-    if (said === undefined) void tell($, owner, RUN_STOPPED(job.label, job.kind !== 'server' && job.kind !== 'watch' && silent >= SILENT_WARN ? shortAgo(silent) : ''))
-    else if (said) void tell($, owner, said)
+    if (said === undefined) void tellAtStep($, owner, RUN_STOPPED(job.label, job.kind !== 'server' && job.kind !== 'watch' && silent >= SILENT_WARN ? shortAgo(silent) : ''))
+    else if (said) void tellAtStep($, owner, said)
   }
   jobLog.delete(job.id)
   silentTold.delete(job.id)
@@ -276,7 +276,7 @@ const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
       const silent = job.isEmpty ? now - job.at : now - job.wroteAt
       if (silent < RUN_SILENT_TOLD) continue
       silentTold.add(job.id)
-      void tell($, one.id, job.kind === 'remote' ? CLOUD_SILENT(job.title || job.label, shortAgo(silent)) : RUN_SILENT(job.label, shortAgo(silent), job.live))
+      void tellAtStep($, one.id, job.kind === 'remote' ? CLOUD_SILENT(job.title || job.label, shortAgo(silent)) : RUN_SILENT(job.label, shortAgo(silent), job.live))
       await log($, `work ${one.id} told its run ${job.id} has been silent ${shortAgo(silent)}`)
     }
   }

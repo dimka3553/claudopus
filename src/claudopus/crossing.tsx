@@ -267,7 +267,7 @@ const crossEnded = async ($: EngineInterface, e: { tool: string; agentId?: strin
       const file = path.slice(one.root.length + 1)
       const said = cut(oneLine(lines.slice(i, i + 3).join(' ')), 160)
       await log($, `work ${top}'s command failed on ${file}, which work ${one.top} changed: told it`)
-      void tell($, one.top, BROKE_TOLD(met ? titleOf(met) : 'another task', file, crossAgo(one.at, now), said))
+      void tellAtStep($, one.top, BROKE_TOLD(met ? titleOf(met) : 'another task', file, crossAgo(one.at, now), said))
       return BROKE_HERE(writer ? titleOf(writer) : 'another task', file, crossAgo(one.at, now))
     }
   }

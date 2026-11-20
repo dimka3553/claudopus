@@ -278,3 +278,25 @@ test('a task keeps the rules it was started with: a compaction is told to keep t
   expect(prompts.at(-1)).toContain('Every run says how far it is.')
   expect(prompts.at(-1)).not.toContain('WORK ROLE')
 })
+
+test("a line for work in the middle of a turn waits for its step to end: it goes with that step's results, or into its chat after its last words as the turn ends; between turns it goes straight in", async ($, on) => {
+  const { appended } = world(on)
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  const step = () => $.tool.call({ tool: 'Bash', tool_use_id: 't', agentId: 'a1' } as never)
+  const twelve = async () => {
+    for (let n = 0; n < 12; n += 1) await step()
+  }
+  await ($ as unknown as { turn: { start: (e: object) => Promise<unknown> } }).turn.start({ turnId: 'w1', text: 'fix the nose', agentId: 'a1' })
+  await twelve()
+  expect(appended).toEqual([])
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Bash' }]))).toContain('You have taken 12 steps since you last touched your to-dos')
+  // (taken once)
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Bash' }]))).toBe('')
+  await twelve()
+  expect(appended).toEqual([])
+  await $.turn.complete({ answer: 'Waiting.', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
+  expect(appended).toEqual([expect.stringContaining('a1: You have taken 12 steps since you last touched your to-dos')])
+  await twelve()
+  expect(appended).toHaveLength(2)
+})

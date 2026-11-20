@@ -373,6 +373,24 @@ const beginDoneMoment = ($: EngineInterface, one: Todo, at: number) => {
 // Writes a line into a piece of work's own chat, which it reads at its next step
 const tell = ($: EngineInterface, id: string, text: string) =>
   $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] }, agentId: id }).catch(async err => void (await log($, `work ${id} not told: ${String(err)}`)))
+// A line Claudopus has for work in the middle of a turn waits for the end of its step: it goes with the step's tool results
+// (stepHooks' PostToolBatch), or is written into its chat as its turn ends (chatHooks' turn.complete). A line written while a step
+// is under way is put by Claude Code beside that step's results at first, and before the step once the work is woken, which changes
+// its history and has the whole of it read and paid for again (measured 20 Nov: about a tenth of all spending). Work reads a line at
+// its next step either way
+const inTurn = new Set<string>()
+const toldAtStep = new Map<string, string[]>()
+const tellAtStep = ($: EngineInterface, id: string, text: string) => {
+  if (!inTurn.has(id)) return tell($, id, text)
+  toldAtStep.set(id, [...(toldAtStep.get(id) ?? []), text])
+  return Promise.resolve(undefined)
+}
+// The lines waiting for a step's end, taken once
+const takeToldAtStep = (id: string) => {
+  const lines = toldAtStep.get(id) ?? []
+  toldAtStep.delete(id)
+  return lines
+}
 
 const stop = async ($: EngineInterface, id: string) => {
   if ((await read($, todos)).some(one => one.id === id && one.status === 'working')) pressed.add(id)
