@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.244 · 20 November 2026
+- Each time the Claudopus panel closes, Claudopus's log now says who closed it, and when it closed to follow a close in another chat, which chat that was. Your panel went away by itself on 20 Nov, and nothing then recorded why.
+
 ## 0.2.243 · 20 November 2026
 - A task that hands in its result but still asks you something, such as whether to release, is no longer blue Delivered: it is a question on its card like any other, yellow at the top, with its buttons (such as Release it and Don't release, or Yes and No) and Answer in words, and your answer starts it again. It turns Delivered only once nothing is left for you to answer
 

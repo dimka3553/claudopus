@@ -59,6 +59,8 @@ const commandHooks = (on: On) => {
     // and where what waited stood at its top: opened again, it is put together afresh
     if (e.id === LIST) (listOffsets.clear(), topPlaces.clear(), drawAgain($))
     if (e.id === LIST && e.origin.kind === 'person' && dir) await choosePanel($, false)
+    // Every close of the list that comes here is said in the log with who closed it, so a panel that seemed to close by itself can be traced
+    if (e.id === LIST && dir) await log($, `panel closed in chat ${(await read($, me)).id || 'unknown'} by ${e.origin.kind === 'person' ? "the person's close (every chat follows it)" : `Claudopus's own call (${e.origin.kind})`}`)
     return r
   })
 

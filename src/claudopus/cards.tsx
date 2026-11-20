@@ -426,7 +426,8 @@ const choose = async ($: EngineInterface, id: string, model: string) => {
 // One panel for every chat on this Mac: each chat in the app runs on its own, so whether the person last opened or closed it is
 // kept in panel.json, and every chat follows it within PANEL_EVERY: opened in one chat, it is open in each chat they go to;
 // closed by hand in one, it closes in all and stays closed until asked for. Until they first choose, each chat goes on as before
-type PanelChoice = { isOpen: boolean; at: number }
+// `chat`: the chat it was made in, so a chat that follows a close can say whose close it followed (log.md)
+type PanelChoice = { isOpen: boolean; at: number; chat?: string }
 const PANEL_EVERY = 2000
 // The choice this chat last followed, as its time and whether it was open; a new load follows it afresh
 let panelSeen = ''
@@ -440,7 +441,8 @@ const choosePanel = async ($: EngineInterface, isOpen: boolean) => {
   // Kept later than any choice already there, so every chat sees it as new even when two come within one tick of the clock
   const at = Math.max(await $.clock.now(), ((await readPanel($))?.at ?? 0) + 1)
   panelSeen = seenOf({ isOpen, at })
-  await $.fs.write(`${dir}/panel.json`, JSON.stringify({ isOpen, at })).catch(err => log($, `panel choice not kept: ${String(err)}`))
+  const chat = (await read($, me)).id
+  await $.fs.write(`${dir}/panel.json`, JSON.stringify({ isOpen, at, ...(chat && { chat }) })).catch(err => log($, `panel choice not kept: ${String(err)}`))
 }
 // Brings this chat's panel in line with the last choice, once per choice. A pane opened where nothing draws it yet stays open and
 // is drawn once a screen that can attaches; an open the engine refused is tried again at the next look
@@ -455,7 +457,13 @@ const followPanel = async ($: EngineInterface) => {
     await update($, me, one => ({ ...one, isListOpened: true }))
     await update($, paneShown, () => true)
   }
-  if (!choice.isOpen && isOpen) await $.ui.close({ id: LIST }).catch(() => undefined)
+  if (!choice.isOpen && isOpen) {
+    // Said in the log, as nothing else keeps why a panel went away: the close it follows, where and when that was made
+    const here = (await read($, me)).id
+    const where = choice.chat === here ? 'in this chat' : choice.chat ? `in chat ${choice.chat}` : 'in another chat'
+    await log($, `panel closed in chat ${here || 'unknown'} to follow its close ${where} at ${new Date(choice.at).toISOString()}`)
+    await $.ui.close({ id: LIST }).catch(() => undefined)
+  }
   panelSeen = seenOf(choice)
   return choice
 }

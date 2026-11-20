@@ -1575,7 +1575,7 @@ const choose = async ($: EngineInterface, id: string, model: string) => {
   await tell($, id, movedTo(modelName(model), await $.clock.now()))
 }
 
-type PanelChoice = { isOpen: boolean; at: number }
+type PanelChoice = { isOpen: boolean; at: number; chat?: string }
 const PANEL_EVERY = 2000
 let panelSeen = ''
 const seenOf = (one: PanelChoice) => `${one.at}:${one.isOpen}`
@@ -1587,7 +1587,8 @@ const readPanel = ($: EngineInterface) =>
 const choosePanel = async ($: EngineInterface, isOpen: boolean) => {
   const at = Math.max(await $.clock.now(), ((await readPanel($))?.at ?? 0) + 1)
   panelSeen = seenOf({ isOpen, at })
-  await $.fs.write(`${dir}/panel.json`, JSON.stringify({ isOpen, at })).catch(err => log($, `panel choice not kept: ${String(err)}`))
+  const chat = (await read($, me)).id
+  await $.fs.write(`${dir}/panel.json`, JSON.stringify({ isOpen, at, ...(chat && { chat }) })).catch(err => log($, `panel choice not kept: ${String(err)}`))
 }
 const followPanel = async ($: EngineInterface) => {
   if (!dir) return undefined
@@ -1600,7 +1601,12 @@ const followPanel = async ($: EngineInterface) => {
     await update($, me, one => ({ ...one, isListOpened: true }))
     await update($, paneShown, () => true)
   }
-  if (!choice.isOpen && isOpen) await $.ui.close({ id: LIST }).catch(() => undefined)
+  if (!choice.isOpen && isOpen) {
+    const here = (await read($, me)).id
+    const where = choice.chat === here ? 'in this chat' : choice.chat ? `in chat ${choice.chat}` : 'in another chat'
+    await log($, `panel closed in chat ${here || 'unknown'} to follow its close ${where} at ${new Date(choice.at).toISOString()}`)
+    await $.ui.close({ id: LIST }).catch(() => undefined)
+  }
   panelSeen = seenOf(choice)
   return choice
 }
@@ -12025,6 +12031,7 @@ const commandHooks = (on: On) => {
     const r = await next(e)
     if (e.id === LIST) (listOffsets.clear(), topPlaces.clear(), drawAgain($))
     if (e.id === LIST && e.origin.kind === 'person' && dir) await choosePanel($, false)
+    if (e.id === LIST && dir) await log($, `panel closed in chat ${(await read($, me)).id || 'unknown'} by ${e.origin.kind === 'person' ? "the person's close (every chat follows it)" : `Claudopus's own call (${e.origin.kind})`}`)
     return r
   })
 
