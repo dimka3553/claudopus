@@ -72,7 +72,7 @@ test("closed by hand in another chat, the panel closes here; the mod's own close
   // That close is the mod's own and leaves the choice as it was
   expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}')).toEqual({ isOpen: false, at: 1_700_000_000_500, chat: 'chat-b' })
   // and the log says why the panel went away here: whose close it followed, and when
-  expect(files.get(`${MEMORY}/log.md`) ?? '').toContain(`to follow its close in chat chat-b at ${new Date(1_700_000_000_500).toISOString()}`)
+  expect(files.get(`${MEMORY}/log.md`) ?? '').toContain('to follow its close in chat chat-b at 2023-11-14T22:13:20.500Z')
 })
 
 test('/claudopus on a screen with nowhere to draw the panel does not open it for the other chats', async ($, on) => {
