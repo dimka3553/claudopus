@@ -456,6 +456,8 @@ const followPanel = async ($: EngineInterface) => {
     if (!opened) return choice
     await update($, me, one => ({ ...one, isListOpened: true }))
     await update($, paneShown, () => true)
+    // The bar above the prompt offers Close panel now
+    drawAgain($)
   }
   if (!choice.isOpen && isOpen) {
     // Said in the log, as nothing else keeps why a panel went away: the close it follows, where and when that was made
@@ -463,6 +465,7 @@ const followPanel = async ($: EngineInterface) => {
     const where = choice.chat === here ? 'in this chat' : choice.chat ? `in chat ${choice.chat}` : 'in another chat'
     await log($, `panel closed in chat ${here || 'unknown'} to follow its close ${where} at ${new Date(choice.at).toISOString()}`)
     await $.ui.close({ id: LIST }).catch(() => undefined)
+    drawAgain($)
   }
   panelSeen = seenOf(choice)
   return choice
@@ -474,7 +477,16 @@ const showPanel = async ($: EngineInterface) => {
   await update($, paneShown, () => true)
   const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS })
   if (opened.isPlaced) await choosePanel($, true)
+  // so the bar above the prompt offers Close panel
+  drawAgain($)
   return opened
+}
+// Closed by the person's Close panel above the prompt: as their own close, in every chat until asked for again
+const hidePanel = async ($: EngineInterface) => {
+  await choosePanel($, false)
+  await log($, `panel closed in chat ${(await read($, me)).id || 'unknown'} by the person's Close panel above the prompt (every chat follows it)`)
+  await $.ui.close({ id: LIST })
+  drawAgain($)
 }
 
 // The panel opens by itself with a chat's first piece of work; closed, it stays closed until asked for

@@ -1,0 +1,1 @@
+- The button at the right end of the line above the prompt now follows the panel: Open panel while it is closed, Close panel while it is open, and Close panel closes it in every chat as your own close does
