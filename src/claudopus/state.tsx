@@ -4,10 +4,8 @@
 // sound, the notifications and what other chats see all read it here; nothing else decides
 // - working (purple): from its start until its result, whether it takes steps or has ended a step with commands or helpers of its
 //   own running
-// - waiting (amber): only while something of its own waits for the person: a question, a permission, a key or password box, or
-//   what its handed-in result still asks of them (a release, a choice), until they reply or mark it done (20 Nov, the person:
-//   "'Delivered' should only mean after it's already been deployed or the task has actually completed")
-// - delivered (blue): only by handing in its result with nothing left to ask, every to-do ticked or dropped and nothing of its own running; a server
+// - waiting (amber): only while something of its own waits for the person: a question, a permission, a key or password box
+// - delivered (blue): only by handing in its result, with every to-do ticked or dropped and nothing of its own running; a server
 //   it left for the person keeps its row under the card. The result is the person's to look at: a reply puts it back to work
 // - done (green): only by the person's Mark as done on a delivered card, which puts it under Finished (19 Nov, the person:
 //   "distinguish between something that's completely done, which is something that you can mark as done as a person, and
@@ -15,13 +13,10 @@
 // - stopped (grey): only by the person's Stop, or the chat's on their word
 // - failed (red): it could not go on, and its card says why
 type Stage = 'working' | 'waiting' | 'delivered' | 'done' | 'stopped' | 'failed'
-type Staged = Pick<Todo, 'status' | 'up' | 'closedAt' | 'questions'> & Parameters<typeof needsPerson>[0]
-// Handed in its result, and what the result leaves open for the person is still unanswered: it waits, its questions listed under its
-// line with Reply and Mark as done, until a reply puts it back to work or they mark it done
-const asksOnResult = (card: Pick<Todo, 'status' | 'up' | 'closedAt' | 'questions'>) => card.status === 'done' && Boolean(card.up) && !card.closedAt && Boolean(card.questions?.length)
+type Staged = Pick<Todo, 'status' | 'up' | 'closedAt'> & Parameters<typeof needsPerson>[0]
 const stageOf = (_list: readonly Staged[], card: Staged): Stage => {
   if (card.status === 'failed' || card.status === 'stopped') return card.status
-  if (needsPerson(card) || asksOnResult(card)) return 'waiting'
+  if (needsPerson(card)) return 'waiting'
   return card.status === 'done' ? (card.up && !card.closedAt ? 'delivered' : 'done') : 'working'
 }
 // Just marked done by the person: for its two seconds the card stays where it was, green, before it goes under Finished

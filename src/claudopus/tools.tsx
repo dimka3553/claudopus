@@ -140,14 +140,16 @@ const toolHooks = (on: On) => {
 
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides
   on('tool.call', { tool: 'mcp__claudopus__note' }, async ($, e) => {
-    const input = e as unknown as { text?: string; decision?: boolean; task?: string; questions?: unknown }
+    const input = e as unknown as { text?: string; decision?: boolean; task?: string; questions?: unknown; choices?: unknown }
     // What its result leaves open, given with its last note: kept for its delivered card, each a line, the newest list in place of the one before
     const asked = Array.isArray(input.questions) ? input.questions.map(one => oneLine(typeof one === 'string' ? one : '').slice(0, QUESTION_CHARS)).filter(Boolean).slice(0, QUESTIONS_KEPT) : undefined
+    // (and the buttons that answer them, as an ask's are)
+    const answers = [...new Set((Array.isArray(input.choices) ? input.choices : []).filter((one): one is string => typeof one === 'string').map(one => oneLine(one).slice(0, 40)).filter(Boolean))].filter(one => !LEAVES_OPEN.test(plainWords(one))).slice(0, 4)
     const text = oneLine(input.text ?? '').slice(0, NOTE_CHARS)
     if (!text) return { result: 'A note needs its text.' }
     if (e.agentId === undefined) return { result: "Only a background task keeps a log in the panel; the chat has none." }
     const kind: Entry['kind'] = input.decision ? 'decision' : 'note'
-    await change($, e.agentId, (one, at) => ({ ...one, entries: [...one.entries, { at, kind, text }].slice(-ENTRIES_KEPT), ...(asked && one.id === e.agentId ? { questions: asked.length ? asked : undefined } : {}) }))
+    await change($, e.agentId, (one, at) => ({ ...one, entries: [...one.entries, { at, kind, text }].slice(-ENTRIES_KEPT), ...(asked && one.id === e.agentId ? { questions: asked.length ? asked : undefined, questionChoices: asked.length && answers.length ? answers : undefined } : {}) }))
     // A steer the work found to be a new task of its own goes back to the chat, which starts it. The work sends it itself, as a
     // message to the chat: it arrives as the work's and wakes the chat, where a prompt the mod submitted would show as the person's own.
     // A session cannot send to itself, so the mod cannot send it for the work

@@ -1268,7 +1268,18 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 })
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => {
   const servers = status === 'done' ? (one.bg ?? []).filter(b => isServerRun(b.cmd, b.what)) : []
-  return { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, up: true, why: undefined, bg: servers.length ? servers : undefined }
+  return resultAsk({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, up: true, why: undefined, bg: servers.length ? servers : undefined }, at)
+}
+const YES_NO = ['Yes', 'No']
+const resultAsk = (one: Todo, at: number): Todo => {
+  const asked = one.questions ?? []
+  if (one.parentId || one.chat || one.status !== 'done' || !one.up || one.closedAt || !asked.length || one.ask) return one
+  const [first = ''] = asked
+  const isYesNo = asked.length === 1 && !/^(?:which|what|how|where|when|who|whom|whose|why)\b/i.test(first) && !/\bor\b/i.test(first)
+  const choices = one.questionChoices?.length ? one.questionChoices : isYesNo ? YES_NO : []
+  const text = asked.length === 1 ? cut(first, ASK_TEXT) : `It asks ${asked.length} things`
+  const details = asked.length === 1 ? (text === first ? '' : first) : asked.map((line, n) => `${n + 1}. ${line}`).join('\n')
+  return { ...one, questions: undefined, questionChoices: undefined, ask: { text, ...(details ? { details } : {}), ...(choices.length ? { choices } : {}), from: one.id, at, isResult: true } }
 }
 const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, questions: undefined, newAt: at })
 const stoppedAs = (one: Todo): Todo['status'] => (hasReport(one) ? 'done' : 'stopped')
@@ -1750,11 +1761,10 @@ const withLinks = (Link: ElementTable['Link'], text: string, key: string, whole 
 
 
 type Stage = 'working' | 'waiting' | 'delivered' | 'done' | 'stopped' | 'failed'
-type Staged = Pick<Todo, 'status' | 'up' | 'closedAt' | 'questions'> & Parameters<typeof needsPerson>[0]
-const asksOnResult = (card: Pick<Todo, 'status' | 'up' | 'closedAt' | 'questions'>) => card.status === 'done' && Boolean(card.up) && !card.closedAt && Boolean(card.questions?.length)
+type Staged = Pick<Todo, 'status' | 'up' | 'closedAt'> & Parameters<typeof needsPerson>[0]
 const stageOf = (_list: readonly Staged[], card: Staged): Stage => {
   if (card.status === 'failed' || card.status === 'stopped') return card.status
-  if (needsPerson(card) || asksOnResult(card)) return 'waiting'
+  if (needsPerson(card)) return 'waiting'
   return card.status === 'done' ? (card.up && !card.closedAt ? 'delivered' : 'done') : 'working'
 }
 const doneMoments = new Map<string, { pressedAt: number; shownAt: number }>()
@@ -4734,6 +4744,7 @@ let ready: { id: string }[] = []
 let isSettling = false
 const announced = new Map<string, number>()
 const pressed = new Set<string>()
+const isResultAsking = (one: Todo) => one.status === 'done' && Boolean(one.ask?.isResult) && !one.ask?.replied
 const standing = (stage: string, endedAt: number) => (stage === 'working' || stage === 'waiting' ? 'working' : `${stage}:${endedAt}`)
 
 const lookEnds = async ($: EngineInterface) => {
@@ -4742,7 +4753,7 @@ const lookEnds = async ($: EngineInterface) => {
   const cards = list.filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
-  const all: { id: string; status: string; endedAt: number }[] = [...cards.map(one => ({ id: one.id, status: hasResult(stageOf(list, one)) || asksOnResult(one) ? 'done' : stageOf(list, one), endedAt: one.endedAt })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt }))]
+  const all: { id: string; status: string; endedAt: number }[] = [...cards.map(one => ({ id: one.id, status: hasResult(stageOf(list, one)) || isResultAsking(one) ? 'done' : stageOf(list, one), endedAt: one.endedAt })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt }))]
   const was = lastSeen
   lastSeen = new Map(all.map(one => [one.id, standing(one.status, one.endedAt)]))
   if (!was) return
@@ -4777,7 +4788,7 @@ const readyOf = ({ id }: { id: string }, cards: Todo[], runs: Flow[]) => {
   if (!kept) return undefined
   const one = kept
   const stage = stageOf(cards, one)
-  if ((stage === 'working' || stage === 'waiting') && !asksOnResult(one)) return undefined
+  if ((stage === 'working' || stage === 'waiting') && !isResultAsking(one)) return undefined
   const said = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text ?? ''
   const what =
     one.status === 'done'
@@ -9524,6 +9535,7 @@ const chatHooks = (on: On) => {
     await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id === id ? m.needsContext : true }))
     await tidyKeptRules($, id).catch(err => log($, `kept rules not tidied: ${String(err)}`))
     await noteClosed($, id).catch(err => log($, `work the app closed on not looked for: ${String(err)}`))
+    if ((await read($, todos)).some(one => one.questions?.length && resultAsk(one, one.endedAt) !== one)) await changeTodos($, list => list.map(one => resultAsk(one, one.endedAt)))
     during('load: read the other chats')
     await readOthers($).catch(() => undefined)
     keysOnStart($)
@@ -9573,7 +9585,8 @@ const chatHooks = (on: On) => {
         type: 'object',
         properties: {
           text: { type: 'string' },
-          questions: { type: 'array', items: { type: 'string' }, description: named('Only with your last note before you hand in, and only when your result leaves something open that {name} may want to decide on seeing it: each as one short plain question. Your delivered card lists them, and {name} answers them all in one reply, which starts you again. Never what holds you up: that is a question you ask before you finish') },
+          questions: { type: 'array', items: { type: 'string' }, description: named('Only with your last note before you hand in, and only when your result leaves something open that {name} may want to decide on seeing it: each as one short plain question. As you hand in they become your card\'s question, and {name}\'s answer starts you again. Never what holds you up: that is a question you ask before you finish') },
+          choices: { type: 'array', items: { type: 'string' }, description: named('With `questions`: the buttons that answer them, as for `ask`, such as Release it and Don\'t release. Answer in words is always there') },
           task: { type: 'string', description: named('Only after a message from {name} that is a new task of its own, which you do not do: that request in one line. The chat starts it as a task of its own') },
         },
         required: ['text'],
@@ -12138,13 +12151,14 @@ const toolHooks = (on: On) => {
   })
 
   on('tool.call', { tool: 'mcp__claudopus__note' }, async ($, e) => {
-    const input = e as unknown as { text?: string; decision?: boolean; task?: string; questions?: unknown }
+    const input = e as unknown as { text?: string; decision?: boolean; task?: string; questions?: unknown; choices?: unknown }
     const asked = Array.isArray(input.questions) ? input.questions.map(one => oneLine(typeof one === 'string' ? one : '').slice(0, QUESTION_CHARS)).filter(Boolean).slice(0, QUESTIONS_KEPT) : undefined
+    const answers = [...new Set((Array.isArray(input.choices) ? input.choices : []).filter((one): one is string => typeof one === 'string').map(one => oneLine(one).slice(0, 40)).filter(Boolean))].filter(one => !LEAVES_OPEN.test(plainWords(one))).slice(0, 4)
     const text = oneLine(input.text ?? '').slice(0, NOTE_CHARS)
     if (!text) return { result: 'A note needs its text.' }
     if (e.agentId === undefined) return { result: "Only a background task keeps a log in the panel; the chat has none." }
     const kind: Entry['kind'] = input.decision ? 'decision' : 'note'
-    await change($, e.agentId, (one, at) => ({ ...one, entries: [...one.entries, { at, kind, text }].slice(-ENTRIES_KEPT), ...(asked && one.id === e.agentId ? { questions: asked.length ? asked : undefined } : {}) }))
+    await change($, e.agentId, (one, at) => ({ ...one, entries: [...one.entries, { at, kind, text }].slice(-ENTRIES_KEPT), ...(asked && one.id === e.agentId ? { questions: asked.length ? asked : undefined, questionChoices: asked.length && answers.length ? answers : undefined } : {}) }))
     const task = oneLine(input.task ?? '').slice(0, 400)
     if (!task) return { result: 'Noted.' }
     const list = await read($, todos)
@@ -12450,7 +12464,7 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
   }
   if (open.kind === 'change') {
     const one = changeTarget(cards)
-    return one && { head: `↳ ${asksOnResult(one) ? 'Reply' : 'Message'} to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) }
+    return one && { head: `↳ ${stageOf(cards, one) === 'delivered' && one.questions?.length ? 'Reply' : 'Message'} to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) }
   }
   if (open.kind === 'permission') {
     const one = gatePressed.has(open.id) || !(gateHeld.has(open.id) || gateParked.has(open.id)) ? undefined : cards.find(card => !card.chat && card.admins?.some(gate => gate.id === open.id))
@@ -12604,7 +12618,7 @@ const bandHooks = (on: On) => {
     if (e.props.hasSurvey) return next(e)
     const bandAt = await $.clock.now()
     const bandKept = await read($, reports)
-    const working = cards.filter(one => !one.parentId && (stageOf(cards, one) === 'working' || (stageOf(cards, one) === 'waiting' && !asksOnResult(one))))
+    const working = cards.filter(one => !one.parentId && (stageOf(cards, one) === 'working' || stageOf(cards, one) === 'waiting'))
     const happy = isHappy(cards, bandAt)
     if (happy) await read($, tick)
     const ui = uiOf($, e)
@@ -13064,7 +13078,7 @@ const panelHooks = (on: On) => {
         </Box>
       )
     }
-    const looksDelivered = (one: Todo) => stage(one) === 'delivered' || asksOnResult(one) || isDoneMoment(one, at)
+    const looksDelivered = (one: Todo) => stage(one) === 'delivered' || isDoneMoment(one, at)
     const small = (one: Todo) => {
       const isMomentNow = (isFinishMoment(one) && !keptUpNow.has(one.id) && !isDismissed(one)) || isDoneMoment(one, at)
       if (!isMomentNow) cardNo += 1
@@ -13108,7 +13122,7 @@ const panelHooks = (on: On) => {
                 ) : null}
                 {/* Ended and still up here: a press puts it under Finished, whatever it asks, until its task works again. A
                     delivered card has its two presses at its bottom instead, and none up here */}
-                {canDismiss(one) && !looksDelivered(one) ? (
+                {canDismiss(one) && stage(one) !== 'delivered' ? (
                   <Box flexShrink={0}>
                     <Button key={`dismiss-${one.id}-${presses}`} label="Dismiss" plain dimColor hover={{ scope: `dismiss-${one.id}`, underline: true }} onPress={() => void ((presses += 1), dismiss($, one.id).catch(err => log($, `card not dismissed: ${String(err)}`)))} />
                   </Box>
@@ -13148,12 +13162,12 @@ const panelHooks = (on: On) => {
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* Ended, the line begins with its stage, in its colour: green done, grey stopped, red failed with why; then what
                     it last said */}
-                {hasResult(stage(one)) || asksOnResult(one) || stage(one) === 'stopped' || stage(one) === 'failed' ? (
+                {hasResult(stage(one)) || stage(one) === 'stopped' || stage(one) === 'failed' ? (
                   <Box flexDirection="row" minWidth={0}>
                     {/* (the stage's own word is never the part cut short: on a narrow panel a long note beside it left "✓ …") */}
                     <Box flexShrink={stage(one) === 'failed' ? 1 : 0} minWidth={0}>
                       <Text wrap="truncate-end" color={stageColor(stage(one))} dimColor={stage(one) === 'stopped'}>
-                        {stage(one) === 'waiting' ? `● ${STAGE_WORD.waiting}` : stage(one) === 'delivered' ? '◐ Delivered' : stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? `✕ Failed${one.why ? ` · ${one.why}` : ''}` : 'Stopped'}
+                        {stage(one) === 'delivered' ? '◐ Delivered' : stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? `✕ Failed${one.why ? ` · ${one.why}` : ''}` : 'Stopped'}
                       </Text>
                     </Box>
                     {noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}
@@ -14014,7 +14028,7 @@ const panelHooks = (on: On) => {
             </Box>
           ) : null}
           {resultPart(one)}
-          {asksOnResult(one) ? part('part-questions', 'Questions', '', questionLines(one, 'asks-whole', 0) ?? <Box />) : null}
+          {stage(one) === 'delivered' && one.questions?.length ? part('part-questions', 'Questions', '', questionLines(one, 'asks-whole', 0) ?? <Box />) : null}
           {one.words ? askPart(one) : null}
           {todoPart(one)}
           {helpersPart(one)}
@@ -14212,12 +14226,12 @@ const panelHooks = (on: On) => {
     const notices = looseNeeds($, e.surface, card => Boolean(card && shownIds.has(card)), otherChats, !keysHeldNow()).map(need => ({ at: need.at, what: need.text, sign: `${need.id}:${blockRows(need)}`, node: needBlock($, ui, need, { room, surface: e.surface }) }))
     const isAsking = (one: Todo) => Boolean(one.ask) && !isActingOnReply(one)
     const waiting2 = (one: Todo) => needsFor(one).filter(need => !need.isActing)
-    const waitsOn = (one: Todo) => waiting2(one).length + Number(asksOnResult(one))
+    const waitsOn = (one: Todo) => waiting2(one).length
     const isOpen = (one: Todo) => waitsOn(one) > 0
     const placeKey = (one: Todo) => `${one.chat?.host ?? ''}/${one.chat?.id ?? ''}/${one.id}`
     const isWaits = (one: Todo) => isOpen(one)
     const isKeptUp = (one: Todo) => isWaits(one)
-    const cameAt = (one: Todo) => Math.min(...waiting2(one).map(need => need.at), asksOnResult(one) ? one.endedAt : Infinity)
+    const cameAt = (one: Todo) => Math.min(...waiting2(one).map(need => need.at), Infinity)
     const placeOf = (one: Todo) => topPlaces.get(placeKey(one)) ?? (Number.isFinite(cameAt(one)) ? cameAt(one) : at)
     const isFinishing = (one: Todo) => !isWaits(one) && isFinishMoment(one)
     const finishFrom = (one: Todo) => (one.chat ? (endSeen.get(`${one.id}:${one.endedAt}`) ?? one.endedAt) : pauseFrom(one))
@@ -14236,7 +14250,7 @@ const panelHooks = (on: On) => {
     const isHandedIn = (one: Todo) => stage(one) === 'delivered' || isDoneMoment(one, at)
     const restFlows = shownFlows
     const begun = (one: Todo) => one.begunAt ?? one.startedAt
-    const whatOf = (one: Todo) => (waiting2(one)[0] ? `${cut(titleOf(one), 40)}: ${oneLine(waiting2(one)[0]?.text ?? '')}` : asksOnResult(one) ? `${cut(titleOf(one), 40)}: ${oneLine(one.questions?.[0] ?? '')}` : '')
+    const whatOf = (one: Todo) => (waiting2(one)[0] ? `${cut(titleOf(one), 40)}: ${oneLine(waiting2(one)[0]?.text ?? '')}` : '')
     const top = [
       ...notices.map(one => ({ rank: 0, at: one.at, what: one.what, draw: () => one.node, sign: () => one.sign, card: undefined as Todo | undefined })),
       ...askCards.map(one => ({ ...(isKeptUp(one) ? { rank: 0, at: placeOf(one), what: whatOf(one) } : isFinishing(one) ? { rank: 1, at: -finishFrom(one), what: '' } : { rank: 2, at: -Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0), what: '' }), draw: () => small(one), sign: () => cardSign(one), card: one as Todo | undefined })),

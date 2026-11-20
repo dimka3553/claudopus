@@ -23,7 +23,24 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // A reply its ask was held with has been acted on once the run it started ends: the ask waits on the person again, every answer back
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => {
   const servers = status === 'done' ? (one.bg ?? []).filter(b => isServerRun(b.cmd, b.what)) : []
-  return { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, up: true, why: undefined, bg: servers.length ? servers : undefined }
+  return resultAsk({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, up: true, why: undefined, bg: servers.length ? servers : undefined }, at)
+}
+// What a result still asks of the person is their question on its card, the same as any: amber at the top with what waits, its
+// buttons and Answer in words, and Delivered only once nothing is left to answer (20 Nov, the person: "'Delivered' should only mean
+// after it's already been deployed or the task has actually completed"; "The answer is 'yes, release,' 'no, don't release,' or
+// answer in my own words. Just like all the other release cards"). An answer starts the task again with it, as on any ended card.
+// Its buttons are the ones the task gave; a single question that reads as yes or no has Yes and No; else only Answer in words.
+// A card that still has a question of its own keeps its result's lines as they were
+const YES_NO = ['Yes', 'No']
+const resultAsk = (one: Todo, at: number): Todo => {
+  const asked = one.questions ?? []
+  if (one.parentId || one.chat || one.status !== 'done' || !one.up || one.closedAt || !asked.length || one.ask) return one
+  const [first = ''] = asked
+  const isYesNo = asked.length === 1 && !/^(?:which|what|how|where|when|who|whom|whose|why)\b/i.test(first) && !/\bor\b/i.test(first)
+  const choices = one.questionChoices?.length ? one.questionChoices : isYesNo ? YES_NO : []
+  const text = asked.length === 1 ? cut(first, ASK_TEXT) : `It asks ${asked.length} things`
+  const details = asked.length === 1 ? (text === first ? '' : first) : asked.map((line, n) => `${n + 1}. ${line}`).join('\n')
+  return { ...one, questions: undefined, questionChoices: undefined, ask: { text, ...(details ? { details } : {}), ...(choices.length ? { choices } : {}), from: one.id, at, isResult: true } }
 }
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
 const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, questions: undefined, newAt: at })
