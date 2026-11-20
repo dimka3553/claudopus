@@ -270,6 +270,10 @@ const took = (ms: number) => {
   if (isRunFromAfar) return hrs ? `${hrs}h ${two(m)}m` : m ? `${m}m` : '<1m'
   return hrs ? `${hrs}h ${two(m)}m` : m ? `${m}m ${two(sec)}s` : `${sec}s`
 }
+const clockAt = (ms: number) => {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
 const thousands = (tokens: number) =>
   isRunFromAfar ? (tokens < 10_000 ? '<10k' : `${Math.round(tokens / 10_000) * 10}k`) : `${(tokens / 1000).toFixed(tokens < 100_000 ? 1 : 0)}k`
 const fill = (tokens: number, window: number) => (window ? `${percent(tokens, window)}% full` : '')
@@ -891,8 +895,12 @@ const REPLY_HOLDS = `That reply does not settle your question by itself: act on 
 const CHANGE_WHAT = 'your message'
 const MESSAGE_SENT = (said: string) =>
   `${who(true)} wrote to you from your card, in their own words: ${said}\nThese are their own words to you, as a message of theirs in the chat would be: bring your to-dos in line with them first, then carry on.`
-const MESSAGE_NOW = (said: string) =>
-  `${who(true)} stopped you to write to you from your card, in their own words: ${said}\nWhat you were doing was cut off where it stood, and the commands and helpers you had running were stopped with it. Bring your to-dos in line with their words first, then carry on, starting again whatever they still need.`
+const MESSAGE_NOW = (said: string, earlier: string[] = []) =>
+  `${
+    earlier.length
+      ? `${who(true)} stopped you to write to you from your card. They had written to you before that, and you hadn't read it yet. Their messages, in the order they sent them, in their own words:\n${[...earlier, said].map((one, n) => `${n + 1}. ${one}`).join('\n')}\nThe earlier ones may reach you again after this: they are the same messages, not new ones.`
+      : `${who(true)} stopped you to write to you from your card, in their own words: ${said}`
+  }\nWhat you were doing was cut off where it stood, and the commands and helpers you had running were stopped with it. Bring your to-dos in line with their words first, then carry on, starting again whatever they still need.`
 const CHANGE_ASKED = (said: string) =>
   `${who(true)} wrote to you from the card of your finished task, in their own words: ${said}\nYou had finished. Carry on with their words: tick or add to-dos for what they ask, do it, then hand back again with only what is new.`
 const CHANGE_TOLD = (title: string, said: string) => `✓ {Name} wrote to the task "${title}" on its card: ${said}. The task has their words and carries on with them itself: start nothing for it.`
@@ -1806,7 +1814,8 @@ type Line = {
   at?: number
   name?: string
   covers?: string
-  isWaiting?: boolean
+  sentAt?: number
+  readAt?: number
   pictures?: string[]
   seen?: string[]
 }
@@ -1909,6 +1918,7 @@ const withSteers = (lines: Line[], entries: Entry[]): Line[] => {
   entries.forEach((entry, i) => {
     if (entry.kind !== 'steer') return
     const text = oneLine(entry.text.replace(/<\/?pasted_content[^>]*>/g, ' '))
+    const when = isFollowed(entry) ? { sentAt: entry.at, ...(entry.readAt ? { readAt: entry.readAt } : {}) } : {}
     const head = flat(text).slice(0, 40)
     const sent = all.findIndex((line, n) => n > 0 && flat(line.covers ?? (line.kind === 'told' ? line.text : '')).includes(head))
     if (sent >= 0) {
@@ -1916,14 +1926,14 @@ const withSteers = (lines: Line[], entries: Entry[]): Line[] => {
       const isFirst = all[sent]?.kind === 'told'
       let at = sent
       while (!isFirst && all[at + 1]?.covers === covers) at += 1
-      all.splice(isFirst ? sent : at + 1, isFirst ? 1 : 0, { kind: 'steer', text, covers })
+      all.splice(isFirst ? sent : at + 1, isFirst ? 1 : 0, { kind: 'steer', text, covers, ...when })
       from = Math.max(from, at + 1)
       return
     }
     const later = entries.slice(i + 1).filter(isOwnEntry).map(one => one.text)
     let at = all.findIndex((line, n) => n >= from && line.kind === 'said' && later.includes(oneLine(line.text).slice(0, NOTE_CHARS)))
     while (at > from && isTool(all[at - 1]?.tool, 'todo')) at -= 1
-    all.splice(at < 0 ? all.length : at, 0, { kind: 'steer', text, isWaiting: later.length === 0 })
+    all.splice(at < 0 ? all.length : at, 0, { kind: 'steer', text, ...when })
     from = at < 0 ? all.length : at + 1
   })
   return all
@@ -3624,7 +3634,7 @@ const loadWork = async ($: EngineInterface, id: string) => {
   try {
     const one = (await read($, todos)).find(card => card.id === id)
     if (!one) return
-    const key = [one.id, one.steps, one.tokens, one.entries.length, one.status].join(':')
+    const key = [one.id, one.steps, one.tokens, one.entries.length, one.entries.filter(entry => entry.readAt).length, one.status].join(':')
     const kept = await read($, reports)
     const shotsKey = `${key}:${kept.length}`
     const now = await $.clock.now()
@@ -3694,7 +3704,7 @@ const loadTheirs = async ($: EngineInterface, one: Todo) => {
   loading.add(id)
   let isChanged = false
   try {
-    const key = [one.steps ?? 0, one.entries.at(-1)?.text ?? '', one.status, one.items.length, one.endedAt].join(':')
+    const key = [one.steps ?? 0, one.entries.at(-1)?.text ?? '', one.entries.filter(entry => entry.readAt).length, one.status, one.items.length, one.endedAt].join(':')
     const now = await $.clock.now()
     const was = talks.get(id)
     if (was?.key === key && (was.lines || now - (was.at ?? 0) < RETRY_READ)) return
@@ -6151,8 +6161,48 @@ const paneBoxKey = (id: string) => `details-${id}-reply-change-${replies.get(id)
 const isPaneBoxHeld = (paneId: string, at: number) => paneBoxIn === paneId && paneBoxAt > 0 && at - paneBoxAt < BAR_BOX_HELD
 const paneBoxHeld = new Map<string, { id: string; shape: string; drawing: unknown }>()
 const paneBoxShape = (id: string) => JSON.stringify([paneBoxKey(id), attachShape(id), presses, boxPresses])
-const messageBox = ($: EngineInterface, ui: Ui, one: Todo, paneId: string) => (
+const MESSAGES_SHOWN = 5
+const isFollowed = (entry: Entry) => entry.kind === 'steer' && (entry.isUnread || entry.readAt !== undefined)
+const sentList = (ui: Ui, one: Todo, now: number) => {
+  const all = one.entries.filter(isFollowed)
+  if (!all.length) return null
+  const from = Math.max(0, all.length - MESSAGES_SHOWN)
+  const unread = all.filter(entry => entry.isUnread).length
+  const step = one.running ? `${one.running.label ? `“${cut(one.running.label, 80)}”` : one.running.what}, has run ${took(now - one.running.at)}` : ''
+  const meanwhile = !unread
+    ? ''
+    : one.status !== 'working'
+      ? `The task starts again with ${unread === 1 ? 'your message' : 'your messages'}.`
+      : needsPerson(one)
+        ? `The task reads ${unread === 1 ? 'your message' : 'your messages'} once you answer it above.`
+        : `The task reads messages between its steps.${step ? ` Its current step, ${step}.` : ''} Send adds yours after ${unread === 1 ? 'this one' : 'these'}. Stop and send ends that step, so it reads them all now, in this order.`
+  return (
+    <ui.Box key={`sent-${one.id}`} flexDirection="column" gap={1} width="100%">
+      <ui.Box flexDirection="column" width="100%">
+        {all.slice(from).map((entry, i) => {
+          const n = from + i + 1
+          const same = all.slice(0, n - 1).findIndex(other => plainWords(other.text) === plainWords(entry.text))
+          const state = [entry.isUnread ? 'Not read yet' : `✓ Read ${clockAt(entry.readAt ?? 0)}`, same >= 0 ? `the same words as ${same + 1}` : '', entry.isNow ? 'you stopped its step to send it' : ''].filter(Boolean).join(' · ')
+          return (
+            <ui.Box key={`sent-${one.id}-${entry.at}`} flexDirection="row" alignItems="flex-start" gap={1} width="100%">
+              <ui.Box flexShrink={0} width={String(all.length).length + 7}>
+                <ui.Text dimColor wrap="truncate-end">{`${n}  ${clockAt(entry.at)}`}</ui.Text>
+              </ui.Box>
+              <ui.Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+                <ui.Text wrap="truncate-end">{oneLine(entry.text)}</ui.Text>
+                <ui.Text dimColor wrap="wrap">{state}</ui.Text>
+              </ui.Box>
+            </ui.Box>
+          )
+        })}
+      </ui.Box>
+      {meanwhile ? <ui.Text wrap="wrap">{meanwhile}</ui.Text> : null}
+    </ui.Box>
+  )
+}
+const messageBox = ($: EngineInterface, ui: Ui, one: Todo, paneId: string, now = 0) => (
   <ui.Box key={`message-${one.id}`} flexDirection="column" gap={1} flexShrink={0}>
+    {sentList(ui, one, now)}
     {'Input' in ui ? (
       <ui.Input
         key={paneBoxKey(one.id)}
@@ -6233,10 +6283,12 @@ const changeTask = async ($: EngineInterface, id: string, said: string, picked: 
   const at = await $.clock.now()
   const files = [...new Set([...picked, ...(await pathsIn($, said))])]
   const shown = [said, ...picked.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join('\n')
-  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: shown }].slice(-ENTRIES_KEPT) } : one)))
+  const earlier = card.entries.filter(entry => entry.kind === 'steer' && entry.isUnread).map(entry => entry.text)
+  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: shown, isUnread: true }].slice(-ENTRIES_KEPT) } : one)))
   const words = `${said || '(no words, only the files below)'}${filesNote(files)}`
   if (isNow && card.status === 'working' && (await interruptStep($, card))) {
-    await toEnded($, card, id, MESSAGE_NOW(words), { text: shown, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true })
+    await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: one.entries.map(entry => (entry.kind === 'steer' && entry.at === at ? { ...entry, isNow: true } : entry)) } : one)))
+    await toEnded($, card, id, MESSAGE_NOW(words, earlier), { text: shown, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true })
     return void (await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(shown, 120)}”`))))
   }
   const text = card.status === 'working' ? MESSAGE_SENT(words) : CHANGE_ASKED(words)
@@ -6486,6 +6538,16 @@ const replyRead = ($: EngineInterface, agentId: string) => {
   const sent = sentReplies.get(card)
   if (sent?.to === 'work') (sentReplies.set(card, { ...sent, to: 'read' }), redraw($))
 }
+const markRead = async ($: EngineInterface, agentId: string) => {
+  if (!(await read($, todos)).some(one => one.id === agentId && one.entries.some(entry => entry.isUnread))) return
+  const now = await $.clock.now()
+  const readNow = (entry: Entry): Entry => {
+    if (!entry.isUnread || entry.at > now) return entry
+    const { isUnread: _, ...rest } = entry
+    return { ...rest, readAt: now }
+  }
+  await changeTodos($, list => list.map(one => (one.id === agentId ? { ...one, entries: one.entries.map(readNow) } : one)))
+}
 const replyUnread = async ($: EngineInterface, agentId: string) => {
   const card = pending.get(agentId)
   if (card === undefined || wakes.some(w => w.target === agentId)) return
@@ -6509,6 +6571,9 @@ const sentLine = (one: Todo, now: number, most = 60) => {
   if (!sent) return ''
   if (sent.to === 'failed') return one.ask?.text === sent.ask ? `Couldn't send “${cut(sent.text, most)}” · press it again` : ''
   if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Couldn't reach that Mac with “${cut(sent.text, most)}” · answer in its own chat` : ''
+  const message = sent.ask === CHANGE_WHAT && !one.ask ? one.entries.findLast(entry => entry.kind === 'steer' && entry.at === sent.at && entry.text === sent.text) : undefined
+  if (message?.isUnread && one.status === 'working') return `✓ You wrote “${cut(sent.text, most)}” · not read yet${one.running ? ` · its step has run ${took(now - one.running.at)}` : ''}`
+  if (message?.readAt && now - message.readAt < ANSWER_SHOWN) return `✓ You wrote “${cut(sent.text, most)}” · read`
   if (now - sent.at > ANSWER_SHOWN) return heldLine
   if (sent.to === 'pressed') return `✓ ${sent.whole || `You pressed “${sent.text}”`}${sent.said ? ` · ${sent.said}` : ''}`
   const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text))
@@ -11637,7 +11702,7 @@ const workHooks = (on: On) => {
               : {
                   ...one,
                   owes: isSteer ? 0 : one.owes,
-                  entries: words && one.entries.at(-1)?.text !== words ? [...one.entries, { at: now, kind: 'steer' as const, text: words }].slice(-ENTRIES_KEPT) : one.entries,
+                  entries: words && one.entries.at(-1)?.text !== words ? [...one.entries, { at: now, kind: 'steer' as const, text: words, ...(isSteer || woke ? { isUnread: true } : {}) }].slice(-ENTRIES_KEPT) : one.entries,
                 },
           ),
         )
@@ -11775,6 +11840,7 @@ const workHooks = (on: On) => {
     }
     const id = e.agentId
     if (id !== undefined) replyRead($, id)
+    if (id !== undefined && dir) await markRead($, id).catch(err => log($, `messages not marked read: ${String(err)}`))
     const took = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.tookReport : undefined
     if (id !== undefined && took) {
       if (await isAfterTaken($, id, took)) {
@@ -13844,7 +13910,7 @@ const panelHooks = (on: On) => {
               )
             return (
               <Box key={`talk-${i}`} flexDirection="column" alignItems="flex-start" backgroundColor={FILL} paddingX={2} paddingY={1}>
-                {first?.kind === 'steer' ? <Text dimColor>{first.isWaiting ? 'You · not yet answered' : 'You'}</Text> : null}
+                {first?.kind === 'steer' ? <Text dimColor>{first.sentAt ? `You · sent ${clockAt(first.sentAt)} · ${first.readAt ? `read ${clockAt(first.readAt)}` : 'not read yet'}` : 'You'}</Text> : null}
                 <Markdown text={isLong && !isOpen ? cut(text, TOLD_CHARS) : text} />
                 {isLong ? <Button key={`told-${at}-${presses}`} label={isOpen ? '▾ Show less' : '▸ Show all'} plain dimColor onPress={() => fold(-at - 1)} /> : null}
               </Box>
@@ -13930,7 +13996,8 @@ const panelHooks = (on: On) => {
             </Box>
           ) : null}
           {/* The question just answered, whole, and the answer whole under it (what the small card's grey line opens) */}
-          {!one.ask && sentLine(one, at) ? (
+          {/* (a message to the task is in its list under Message, never here as well) */}
+          {!one.ask && sentLine(one, at) && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (
             <Box key="part-answered" flexDirection="column" gap={1} backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
               {sentReplies.get(one.id)?.ask && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (
                 <Box key="answered-question" flexDirection="column" gap={1} minWidth={0}>
@@ -13956,7 +14023,8 @@ const panelHooks = (on: On) => {
           {/* At the bottom, under its conversation, a box to write to it, for a task of this chat's that works or has finished and
               asks nothing (one that asks is answered in its block above): the same message as the box Message opens above the chat */}
           {canChange(one) && 'Input' in table ? <Box key="message-gap" flexGrow={1} /> : null}
-          {canChange(one) && 'Input' in table ? part('part-message', 'Message', '', messageBox($, table, one, paneId)) : null}
+          {canChange(one) && 'Input' in table ? part('part-message', 'Message', '', messageBox($, table, one, paneId, at)) : null}
+          {!(canChange(one) && 'Input' in table) && one.entries.some(entry => entry.isUnread) && !one.chat ? part('part-sent', 'Your messages', '', sentList(table, one, at) ?? <Box />) : null}
         </Box>
       )
     }

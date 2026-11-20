@@ -382,6 +382,11 @@ const took = (ms: number) => {
   if (isRunFromAfar) return hrs ? `${hrs}h ${two(m)}m` : m ? `${m}m` : '<1m'
   return hrs ? `${hrs}h ${two(m)}m` : m ? `${m}m ${two(sec)}s` : `${sec}s`
 }
+// A time of day on this computer's clock, as the app writes it: "14:20"
+const clockAt = (ms: number) => {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
 // A count of tokens as the app writes it
 const thousands = (tokens: number) =>
   isRunFromAfar ? (tokens < 10_000 ? '<10k' : `${Math.round(tokens / 10_000) * 10}k`) : `${(tokens / 1000).toFixed(tokens < 100_000 ? 1 : 0)}k`

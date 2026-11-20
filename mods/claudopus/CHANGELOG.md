@@ -2,6 +2,13 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.242 · 20 November 2026
+- A task's Details lists the messages you sent it above its Message box, numbered in the order you sent them, each saying "Not read yet" or when the task read it, and whether it repeats an earlier one or stopped the task to be sent.
+- While a message waits, Details says what the task is doing meanwhile and how long its current step has run, so you can tell when Stop and send is worth it.
+- Stop and send gives the task every message it hasn't read yet in the order you sent them, where before the newest one reached it first.
+- The card's line says "not read yet" under your message until the task reads it, then "read"; Details no longer shows your message a second time at its top.
+- In a task's conversation your words say when you sent them and when the task read them, where "not yet answered" stood even after the task had answered.
+
 ## 0.2.241 · 20 November 2026
 - Results opens again with many results: Earlier and Archived now unfold 50 at a time, with Show 50 more under them, instead of every result at once, which was more than the app could draw.
 

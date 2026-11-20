@@ -1494,7 +1494,7 @@ const panelHooks = (on: On) => {
               )
             return (
               <Box key={`talk-${i}`} flexDirection="column" alignItems="flex-start" backgroundColor={FILL} paddingX={2} paddingY={1}>
-                {first?.kind === 'steer' ? <Text dimColor>{first.isWaiting ? 'You · not yet answered' : 'You'}</Text> : null}
+                {first?.kind === 'steer' ? <Text dimColor>{first.sentAt ? `You · sent ${clockAt(first.sentAt)} · ${first.readAt ? `read ${clockAt(first.readAt)}` : 'not read yet'}` : 'You'}</Text> : null}
                 <Markdown text={isLong && !isOpen ? cut(text, TOLD_CHARS) : text} />
                 {isLong ? <Button key={`told-${at}-${presses}`} label={isOpen ? '▾ Show less' : '▸ Show all'} plain dimColor onPress={() => fold(-at - 1)} /> : null}
               </Box>
@@ -1587,7 +1587,8 @@ const panelHooks = (on: On) => {
             </Box>
           ) : null}
           {/* The question just answered, whole, and the answer whole under it (what the small card's grey line opens) */}
-          {!one.ask && sentLine(one, at) ? (
+          {/* (a message to the task is in its list under Message, never here as well) */}
+          {!one.ask && sentLine(one, at) && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (
             <Box key="part-answered" flexDirection="column" gap={1} backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
               {sentReplies.get(one.id)?.ask && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (
                 <Box key="answered-question" flexDirection="column" gap={1} minWidth={0}>
@@ -1613,7 +1614,8 @@ const panelHooks = (on: On) => {
           {/* At the bottom, under its conversation, a box to write to it, for a task of this chat's that works or has finished and
               asks nothing (one that asks is answered in its block above): the same message as the box Message opens above the chat */}
           {canChange(one) && 'Input' in table ? <Box key="message-gap" flexGrow={1} /> : null}
-          {canChange(one) && 'Input' in table ? part('part-message', 'Message', '', messageBox($, table, one, paneId)) : null}
+          {canChange(one) && 'Input' in table ? part('part-message', 'Message', '', messageBox($, table, one, paneId, at)) : null}
+          {!(canChange(one) && 'Input' in table) && one.entries.some(entry => entry.isUnread) && !one.chat ? part('part-sent', 'Your messages', '', sentList(table, one, at) ?? <Box />) : null}
         </Box>
       )
     }

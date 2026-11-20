@@ -733,8 +733,51 @@ const isPaneBoxHeld = (paneId: string, at: number) => paneBoxIn === paneId && pa
 // The Details drawing given again while its box is held, by pane, with what the box was drawn for: its key and its files
 const paneBoxHeld = new Map<string, { id: string; shape: string; drawing: unknown }>()
 const paneBoxShape = (id: string) => JSON.stringify([paneBoxKey(id), attachShape(id), presses, boxPresses])
-const messageBox = ($: EngineInterface, ui: Ui, one: Todo, paneId: string) => (
+// The person's messages to a task, in the order sent, the newest MESSAGES_SHOWN of them: each numbered, with when it was sent and
+// whether the task has read it, a repeat of earlier words and a Stop and send said too. While some wait, one line says what they
+// wait behind: the task reads messages only between its steps
+const MESSAGES_SHOWN = 5
+const isFollowed = (entry: Entry) => entry.kind === 'steer' && (entry.isUnread || entry.readAt !== undefined)
+const sentList = (ui: Ui, one: Todo, now: number) => {
+  const all = one.entries.filter(isFollowed)
+  if (!all.length) return null
+  const from = Math.max(0, all.length - MESSAGES_SHOWN)
+  const unread = all.filter(entry => entry.isUnread).length
+  const step = one.running ? `${one.running.label ? `“${cut(one.running.label, 80)}”` : one.running.what}, has run ${took(now - one.running.at)}` : ''
+  const meanwhile = !unread
+    ? ''
+    : one.status !== 'working'
+      ? `The task starts again with ${unread === 1 ? 'your message' : 'your messages'}.`
+      : needsPerson(one)
+        ? `The task reads ${unread === 1 ? 'your message' : 'your messages'} once you answer it above.`
+        : `The task reads messages between its steps.${step ? ` Its current step, ${step}.` : ''} Send adds yours after ${unread === 1 ? 'this one' : 'these'}. Stop and send ends that step, so it reads them all now, in this order.`
+  return (
+    <ui.Box key={`sent-${one.id}`} flexDirection="column" gap={1} width="100%">
+      <ui.Box flexDirection="column" width="100%">
+        {all.slice(from).map((entry, i) => {
+          const n = from + i + 1
+          const same = all.slice(0, n - 1).findIndex(other => plainWords(other.text) === plainWords(entry.text))
+          const state = [entry.isUnread ? 'Not read yet' : `✓ Read ${clockAt(entry.readAt ?? 0)}`, same >= 0 ? `the same words as ${same + 1}` : '', entry.isNow ? 'you stopped its step to send it' : ''].filter(Boolean).join(' · ')
+          return (
+            <ui.Box key={`sent-${one.id}-${entry.at}`} flexDirection="row" alignItems="flex-start" gap={1} width="100%">
+              <ui.Box flexShrink={0} width={String(all.length).length + 7}>
+                <ui.Text dimColor wrap="truncate-end">{`${n}  ${clockAt(entry.at)}`}</ui.Text>
+              </ui.Box>
+              <ui.Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+                <ui.Text wrap="truncate-end">{oneLine(entry.text)}</ui.Text>
+                <ui.Text dimColor wrap="wrap">{state}</ui.Text>
+              </ui.Box>
+            </ui.Box>
+          )
+        })}
+      </ui.Box>
+      {meanwhile ? <ui.Text wrap="wrap">{meanwhile}</ui.Text> : null}
+    </ui.Box>
+  )
+}
+const messageBox = ($: EngineInterface, ui: Ui, one: Todo, paneId: string, now = 0) => (
   <ui.Box key={`message-${one.id}`} flexDirection="column" gap={1} flexShrink={0}>
+    {sentList(ui, one, now)}
     {'Input' in ui ? (
       <ui.Input
         key={paneBoxKey(one.id)}
@@ -822,11 +865,15 @@ const changeTask = async ($: EngineInterface, id: string, said: string, picked: 
   const at = await $.clock.now()
   const files = [...new Set([...picked, ...(await pathsIn($, said))])]
   const shown = [said, ...picked.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join('\n')
-  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: shown }].slice(-ENTRIES_KEPT) } : one)))
+  // The messages sent before this one that the task has not read yet, in the order sent
+  const earlier = card.entries.filter(entry => entry.kind === 'steer' && entry.isUnread).map(entry => entry.text)
+  await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: [...one.entries, { at, kind: 'steer' as const, text: shown, isUnread: true }].slice(-ENTRIES_KEPT) } : one)))
   const words = `${said || '(no words, only the files below)'}${filesNote(files)}`
-  // Send now on a task in the middle of a step: that step is stopped first, and the message starts it again from there
+  // Send now on a task in the middle of a step: that step is stopped first, and the message starts it again from there, with the
+  // ones it had not read yet before it
   if (isNow && card.status === 'working' && (await interruptStep($, card))) {
-    await toEnded($, card, id, MESSAGE_NOW(words), { text: shown, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true })
+    await changeTodos($, list => list.map(one => (one.id === id ? { ...one, entries: one.entries.map(entry => (entry.kind === 'steer' && entry.at === at ? { ...entry, isNow: true } : entry)) } : one)))
+    await toEnded($, card, id, MESSAGE_NOW(words, earlier), { text: shown, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true })
     return void (await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(shown, 120)}”`))))
   }
   const text = card.status === 'working' ? MESSAGE_SENT(words) : CHANGE_ASKED(words)
@@ -1159,6 +1206,17 @@ const replyRead = ($: EngineInterface, agentId: string) => {
   const sent = sentReplies.get(card)
   if (sent?.to === 'work') (sentReplies.set(card, { ...sent, to: 'read' }), redraw($))
 }
+// The person's messages to a task that a model step of it now holds are read from then: each one sent before the step began
+const markRead = async ($: EngineInterface, agentId: string) => {
+  if (!(await read($, todos)).some(one => one.id === agentId && one.entries.some(entry => entry.isUnread))) return
+  const now = await $.clock.now()
+  const readNow = (entry: Entry): Entry => {
+    if (!entry.isUnread || entry.at > now) return entry
+    const { isUnread: _, ...rest } = entry
+    return { ...rest, readAt: now }
+  }
+  await changeTodos($, list => list.map(one => (one.id === agentId ? { ...one, entries: one.entries.map(readNow) } : one)))
+}
 // Work whose run ended with an answer written in but never read is started again with it
 const replyUnread = async ($: EngineInterface, agentId: string) => {
   const card = pending.get(agentId)
@@ -1190,6 +1248,11 @@ const sentLine = (one: Todo, now: number, most = 60) => {
   if (!sent) return ''
   if (sent.to === 'failed') return one.ask?.text === sent.ask ? `Couldn't send “${cut(sent.text, most)}” · press it again` : ''
   if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Couldn't reach that Mac with “${cut(sent.text, most)}” · answer in its own chat` : ''
+  // A message to the task says whether the task has read it: as long as it has not, while it works, with how long the step it waits
+  // behind has run; once read, for ANSWER_SHOWN after
+  const message = sent.ask === CHANGE_WHAT && !one.ask ? one.entries.findLast(entry => entry.kind === 'steer' && entry.at === sent.at && entry.text === sent.text) : undefined
+  if (message?.isUnread && one.status === 'working') return `✓ You wrote “${cut(sent.text, most)}” · not read yet${one.running ? ` · its step has run ${took(now - one.running.at)}` : ''}`
+  if (message?.readAt && now - message.readAt < ANSWER_SHOWN) return `✓ You wrote “${cut(sent.text, most)}” · read`
   if (now - sent.at > ANSWER_SHOWN) return heldLine
   if (sent.to === 'pressed') return `✓ ${sent.whole || `You pressed “${sent.text}”`}${sent.said ? ` · ${sent.said}` : ''}`
   const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text))

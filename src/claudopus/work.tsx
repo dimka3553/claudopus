@@ -469,7 +469,7 @@ const workHooks = (on: On) => {
               : {
                   ...one,
                   owes: isSteer ? 0 : one.owes,
-                  entries: words && one.entries.at(-1)?.text !== words ? [...one.entries, { at: now, kind: 'steer' as const, text: words }].slice(-ENTRIES_KEPT) : one.entries,
+                  entries: words && one.entries.at(-1)?.text !== words ? [...one.entries, { at: now, kind: 'steer' as const, text: words, ...(isSteer || woke ? { isUnread: true } : {}) }].slice(-ENTRIES_KEPT) : one.entries,
                 },
           ),
         )
@@ -645,6 +645,7 @@ const workHooks = (on: On) => {
     }
     const id = e.agentId
     if (id !== undefined) replyRead($, id)
+    if (id !== undefined && dir) await markRead($, id).catch(err => log($, `messages not marked read: ${String(err)}`))
     // A task whose report Claudopus took ends there: its step after the hand-back, and Claude Code's presses for a report that it
     // does not see delivered, are answered with no model and draw nothing (PRESS_ANSWER). A message that starts it again is a step
     // of its own, and its next report is taken afresh

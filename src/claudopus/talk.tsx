@@ -13,7 +13,8 @@ type Line = {
   at?: number
   name?: string
   covers?: string
-  isWaiting?: boolean
+  sentAt?: number
+  readAt?: number
   pictures?: string[]
   seen?: string[]
 }
@@ -127,13 +128,15 @@ const folded = (steps: Line[]) => {
 const flat = (text: string) => oneLine(text.replace(/<\/?pasted_content[^>]*>/g, ' ')).replace(/["“”]/g, '')
 // Each steer of the person's is shown once, in their words, where it arrived. One sent to work that had stopped is a message in the rows
 // the engine gives: it takes that message's place. One sent to work under way is in no row: it goes before what the work did
-// about it, its to-dos and the line it then wrote. One the work has written nothing since is last, and is waiting
+// about it, its to-dos and the line it then wrote. One the work has written nothing since is last. One whose reading is followed
+// (isFollowed) says when it was sent and whether it was read
 const withSteers = (lines: Line[], entries: Entry[]): Line[] => {
   const all = [...lines]
   let from = 1
   entries.forEach((entry, i) => {
     if (entry.kind !== 'steer') return
     const text = oneLine(entry.text.replace(/<\/?pasted_content[^>]*>/g, ' '))
+    const when = isFollowed(entry) ? { sentAt: entry.at, ...(entry.readAt ? { readAt: entry.readAt } : {}) } : {}
     const head = flat(text).slice(0, 40)
     const sent = all.findIndex((line, n) => n > 0 && flat(line.covers ?? (line.kind === 'told' ? line.text : '')).includes(head))
     if (sent >= 0) {
@@ -141,14 +144,14 @@ const withSteers = (lines: Line[], entries: Entry[]): Line[] => {
       const isFirst = all[sent]?.kind === 'told'
       let at = sent
       while (!isFirst && all[at + 1]?.covers === covers) at += 1
-      all.splice(isFirst ? sent : at + 1, isFirst ? 1 : 0, { kind: 'steer', text, covers })
+      all.splice(isFirst ? sent : at + 1, isFirst ? 1 : 0, { kind: 'steer', text, covers, ...when })
       from = Math.max(from, at + 1)
       return
     }
     const later = entries.slice(i + 1).filter(isOwnEntry).map(one => one.text)
     let at = all.findIndex((line, n) => n >= from && line.kind === 'said' && later.includes(oneLine(line.text).slice(0, NOTE_CHARS)))
     while (at > from && isTool(all[at - 1]?.tool, 'todo')) at -= 1
-    all.splice(at < 0 ? all.length : at, 0, { kind: 'steer', text, isWaiting: later.length === 0 })
+    all.splice(at < 0 ? all.length : at, 0, { kind: 'steer', text, ...when })
     from = at < 0 ? all.length : at + 1
   })
   return all
