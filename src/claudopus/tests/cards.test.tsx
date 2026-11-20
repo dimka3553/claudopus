@@ -17,7 +17,8 @@ test('what I ask for becomes a box in the panel, the panel opens once, and the c
     const band = await $.ui.mount({ ...BAND, surface } as never)
     // One short line, and never what a piece of work is doing: that is on its card
     expect(await band.find({ type: 'Text', text: /more$|Check the ears|Fix the nose/ })).toBeUndefined()
-    expect(await band.findAll({ type: 'Button' })).toHaveLength(0)
+    // and nothing to press but Open panel at its right end on the desktop
+    expect((await band.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(surface === 'desktop' ? ['Open panel'] : [])
     await band.unmount()
   }
 
