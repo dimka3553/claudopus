@@ -62,25 +62,34 @@ test('/claudopus opens the panel for every chat; closed by hand it closes in eve
   expect(again.at).toBeGreaterThan(closedAt.at)
 })
 
-test('Open panel at the right of the line above the prompt opens the closed panel for every chat, and pressed while it is open does nothing', async ($, on) => {
-  const { opened, files } = world(on, { live: [] })
+test('at the right of the line above the prompt, Open panel opens the closed panel for every chat and Close panel then closes it for every chat', async ($, on) => {
+  const live: { id: string; isShown: boolean; isPlaced: boolean }[] = []
+  const { opened, closed, files } = world(on, { live })
   // Closed by hand earlier: work that starts leaves it closed
   files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: false, at: 1_699_999_999_000 }))
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, prompt: 'The nose on head A is flawed, can you fix it?' } as never)
   expect(opened).toEqual([])
   const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
-  const open = async () => (await until(async () => (await bar.findAll({ type: 'Button' })).find(b => b.props.label === 'Open panel')))?.key ?? ''
-  await bar.press({ key: await open() })
+  const shown = async (label: string) => (await until(async () => ((await bar.findAll({ type: 'Button' })).map(b => b.props.label).includes(label) ? (await bar.findAll({ type: 'Button' })).filter(b => /^Open panel$|^Close panel$/.test(String(b.props.label))) : undefined))) ?? []
+  // Closed, it offers Open panel alone
+  const open = await shown('Open panel')
+  expect(open.map(b => b.props.label)).toEqual(['Open panel'])
+  await bar.press({ key: open[0]?.key ?? '' })
   expect(await until(async () => (opened.length ? opened : undefined))).toEqual(['claudopus'])
   expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}').isOpen).toBe(true)
-  // Open now, the same press opens nothing again
-  await bar.press({ key: await open() })
-  expect(opened).toEqual(['claudopus'])
+  // Open, it offers Close panel alone, which closes it as the person's own close, for every chat
+  const close = await shown('Close panel')
+  expect(close.map(b => b.props.label)).toEqual(['Close panel'])
+  await bar.press({ key: close[0]?.key ?? '' })
+  expect(await until(async () => (closed.includes('claudopus') ? true : undefined))).toBe(true)
+  expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}').isOpen).toBe(false)
+  expect(files.get(`${MEMORY}/log.md`) ?? '').toContain("by the person's Close panel above the prompt")
+  expect((await shown('Open panel')).map(b => b.props.label)).toEqual(['Open panel'])
   await bar.unmount()
   // The terminal keeps its own line, with no button
   const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
-  expect((await term.findAll({ type: 'Button' })).some(b => b.props.label === 'Open panel')).toBe(false)
+  expect((await term.findAll({ type: 'Button' })).some(b => /panel$/.test(String(b.props.label)))).toBe(false)
   await term.unmount()
 })
 

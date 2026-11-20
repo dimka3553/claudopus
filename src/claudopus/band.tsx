@@ -357,6 +357,7 @@ const bandHooks = (on: On) => {
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
     const marker = await waitMarker($, ui, e.surface)
+    const isListHere = e.surface !== 'terminal' && (await isListPlaced($))
     const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
     const drawing = (spacers: JSX.Element | null) => {
       const row = (
@@ -364,10 +365,10 @@ const bandHooks = (on: On) => {
           {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, a task is done' : 'Claudopus, Claude is working', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
           {spacers}
           {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
-          {/* At the very right on the desktop, Open panel brings the panel back once it was closed; open, a press does nothing */}
+          {/* At the very right on the desktop, Open panel while the panel is closed and Close panel while it is open */}
           {e.surface !== 'terminal' ? (
             <Box key="band-panel" flexGrow={1} flexShrink={0} flexDirection="row" justifyContent="flex-end">
-              <ui.Button key="band-panel-open" label="Open panel" plain dimColor onPress={() => void (async () => (await isListPlaced($)) || (await showPanel($)))().catch(err => log($, `panel not opened: ${String(err)}`))} />
+              <ui.Button key={`band-panel-${isListHere ? 'close' : 'open'}`} label={isListHere ? 'Close panel' : 'Open panel'} plain dimColor onPress={() => void (isListHere ? hidePanel($) : showPanel($)).catch(err => log($, `panel not ${isListHere ? 'closed' : 'opened'}: ${String(err)}`))} />
             </Box>
           ) : null}
           {/* The figures fill a phone's terminal: the hint shows until they come */}
