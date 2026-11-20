@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.243 · 20 November 2026
+- A task that hands in its result but still asks you something, such as whether to release, is no longer blue Delivered: it is a question on its card like any other, yellow at the top, with its buttons (such as Release it and Don't release, or Yes and No) and Answer in words, and your answer starts it again. It turns Delivered only once nothing is left for you to answer
+
 ## 0.2.242 · 20 November 2026
 - A task's Details lists the messages you sent it above its Message box, numbered in the order you sent them, each saying "Not read yet" or when the task read it, and whether it repeats an earlier one or stopped the task to be sent.
 - While a message waits, Details says what the task is doing meanwhile and how long its current step has run, so you can tell when Stop and send is worth it.

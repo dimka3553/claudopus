@@ -200,6 +200,8 @@ const chatHooks = (on: On) => {
     await tidyKeptRules($, id).catch(err => log($, `kept rules not tidied: ${String(err)}`))
     // What was at work when this chat's process last ended is read before this load writes its own: it ended with that process
     await noteClosed($, id).catch(err => log($, `work the app closed on not looked for: ${String(err)}`))
+    // A result kept from before that still lists what it asks is that question on its card, as one handed in now
+    if ((await read($, todos)).some(one => one.questions?.length && resultAsk(one, one.endedAt) !== one)) await changeTodos($, list => list.map(one => resultAsk(one, one.endedAt)))
     // The other chats, on this Mac and the others, are read before the panel is drawn: a chat that starts, or comes back, showed
     // its panel without them until the rest of its start was done, and they seemed to drop out of it for a while
     during('load: read the other chats')
@@ -251,7 +253,8 @@ const chatHooks = (on: On) => {
         type: 'object',
         properties: {
           text: { type: 'string' },
-          questions: { type: 'array', items: { type: 'string' }, description: named('Only with your last note before you hand in, and only when your result leaves something open that {name} may want to decide on seeing it: each as one short plain question. Your delivered card lists them, and {name} answers them all in one reply, which starts you again. Never what holds you up: that is a question you ask before you finish') },
+          questions: { type: 'array', items: { type: 'string' }, description: named('Only with your last note before you hand in, and only when your result leaves something open that {name} may want to decide on seeing it: each as one short plain question. As you hand in they become your card\'s question, and {name}\'s answer starts you again. Never what holds you up: that is a question you ask before you finish') },
+          choices: { type: 'array', items: { type: 'string' }, description: named('With `questions`: the buttons that answer them, as for `ask`, such as Release it and Don\'t release. Answer in words is always there') },
           task: { type: 'string', description: named('Only after a message from {name} that is a new task of its own, which you do not do: that request in one line. The chat starts it as a task of its own') },
         },
         required: ['text'],

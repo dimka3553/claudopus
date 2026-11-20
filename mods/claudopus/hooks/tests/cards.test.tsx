@@ -2000,21 +2000,23 @@ test("work that finishes comes to the top, outlined for two seconds, and stays t
   agents.a3 = 'running'
   await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'Shade the eyes too.', resume: { agentId: 'a3' } } as never)
   expect([await titles(again), await offered(again, 'a3'), await dones(again), await head(again), await fold(again)]).toEqual([['Check the ears', 'Draw the eyes'], ['Stop', 'Message'], [['#4C9AFF'], 1], '1 working · 1 delivered', '▸ Finished 1'])
-  // When it hands in it is done again: at the top for its two seconds, then among the cards as before, the dismissed one still
-  // under Finished
-  // (its last note lists what the result leaves open: numbered on the card with no press of their own, and the first press reads Reply)
-  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n3', agentId: 'a3', text: 'The eyes are shaded.', questions: ['Should the lashes be longer?', 'Which eye colour?'] } as never)
-  expect(await again.find({ type: 'Text', text: 'It asks 2 things' })).toBeUndefined()
+  // When it hands in with its last note asking something of the person, it is not delivered: that is its question on its card, as
+  // any question is, amber at the top with what waits, counted as waiting, with the buttons the task gave and Answer in words
+  // (20 Nov, the person: "'Delivered' should only mean after it's already been deployed or the task has actually completed"; "The
+  // answer is 'yes, release,' 'no, don't release,' or answer in my own words. Just like all the other release cards")
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n3', agentId: 'a3', text: 'The eyes are shaded.', questions: ['Release the shaded eyes?'], choices: ['Release it', "Don't release"] } as never)
+  expect(await again.find({ type: 'Text', text: 'Release the shaded eyes?' })).toBeUndefined()
   agents.a3 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h3', agentId: 'a3', message: 'The eyes are shaded.' } as never)
-  expect([await titles(again), await offered(again, 'a3'), await dones(again), await fold(again)]).toEqual([['Draw the eyes', 'Check the ears'], ['Reply', 'Mark as done'], [['#4C9AFF', '#4C9AFF'], 2], '▸ Finished 1'])
-  expect((await again.findAll({ type: 'Text' })).map(one => one.text).filter(text => /^It asks|^\d\.$|\?$/.test(text))).toEqual(['It asks 2 things', '1.', 'Should the lashes be longer?', '2.', 'Which eye colour?'])
-  // Reply opens the box above the chat, headed as a reply; a message sent puts it back to work with nothing left listed
-  await pressed(again, 'change-a3')
-  expect((await until(() => band.find({ type: 'Text', text: /^↳ / })))?.text).toBe('↳ Reply to “Draw the eyes”')
-  await pressed(again, 'change-a3')
-  await clock.advance(2_100)
-  expect([await titles(again), await dones(again), await fold(again)]).toEqual([['Draw the eyes', 'Check the ears'], [['#4C9AFF', '#4C9AFF'], 2], '▸ Finished 1'])
+  const ambers = async () => (await again.findAll({ type: 'Box' })).filter(b => b.props.width === 1 && b.props.backgroundColor === '#E5A50A').length
+  const answers = async () => (await again.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => /^(?:Release it|Don't release|Answer in words|Reply)$/.test(label))
+  expect(await until(async () => ((await ambers()) ? true : undefined))).toBe(true)
+  expect([await titles(again), await dones(again), await ambers(), await head(again), await answers(), (await again.find({ type: 'Text', text: 'Release the shaded eyes?' }))?.props.color, await fold(again)]).toEqual([['Draw the eyes', 'Release the shaded eyes?', 'Check the ears'], [['#4C9AFF'], 1], 1, '1 waiting for you · 1 delivered', ['Release it', "Don't release", 'Answer in words'], '#E5A50A', '▸ Finished 1'])
+  // A press answers it: the task is started again with the answer, its card at work, nothing left to answer
+  const release = await until(async () => (await again.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it'))
+  await again.press({ key: release?.key ?? '' })
+  expect(await until(async () => ((await offered(again, 'a3')).includes('Stop') ? offered(again, 'a3') : undefined))).toEqual(['Stop', 'Message'])
+  expect([await ambers(), await answers(), await head(again)]).toEqual([0, [], '1 working · 1 delivered'])
   await again.unmount()
   await band.unmount()
 })

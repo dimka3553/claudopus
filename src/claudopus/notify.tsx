@@ -20,6 +20,8 @@ const announced = new Map<string, number>()
 // Work the person stopped with its Stop button: they saw it end, so it is not announced
 const pressed = new Set<string>()
 // How a card stands, by its stage: at work (working, or waiting for the person), or how and when it ended
+// (a result that hands in with a question for the person has ended, and is announced as it is handed in)
+const isResultAsking = (one: Todo) => one.status === 'done' && Boolean(one.ask?.isResult) && !one.ask?.replied
 const standing = (stage: string, endedAt: number) => (stage === 'working' || stage === 'waiting' ? 'working' : `${stage}:${endedAt}`)
 
 // Looks for work of this chat's that has ended since the last look; helpers are never listed, so never announced
@@ -30,7 +32,7 @@ const lookEnds = async ($: EngineInterface) => {
   const cards = list.filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
-  const all: { id: string; status: string; endedAt: number }[] = [...cards.map(one => ({ id: one.id, status: hasResult(stageOf(list, one)) ? 'done' : stageOf(list, one), endedAt: one.endedAt })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt }))]
+  const all: { id: string; status: string; endedAt: number }[] = [...cards.map(one => ({ id: one.id, status: hasResult(stageOf(list, one)) || isResultAsking(one) ? 'done' : stageOf(list, one), endedAt: one.endedAt })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt }))]
   const was = lastSeen
   lastSeen = new Map(all.map(one => [one.id, standing(one.status, one.endedAt)]))
   if (!was) return
@@ -67,7 +69,7 @@ const readyOf = ({ id }: { id: string }, cards: Todo[], runs: Flow[]) => {
   if (!kept) return undefined
   const one = kept
   const stage = stageOf(cards, one)
-  if (stage === 'working' || stage === 'waiting') return undefined
+  if ((stage === 'working' || stage === 'waiting') && !isResultAsking(one)) return undefined
   const said = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text ?? ''
   const what =
     one.status === 'done'

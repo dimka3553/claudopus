@@ -1268,7 +1268,18 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 })
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => {
   const servers = status === 'done' ? (one.bg ?? []).filter(b => isServerRun(b.cmd, b.what)) : []
-  return { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, up: true, why: undefined, bg: servers.length ? servers : undefined }
+  return resultAsk({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, up: true, why: undefined, bg: servers.length ? servers : undefined }, at)
+}
+const YES_NO = ['Yes', 'No']
+const resultAsk = (one: Todo, at: number): Todo => {
+  const asked = one.questions ?? []
+  if (one.parentId || one.chat || one.status !== 'done' || !one.up || one.closedAt || !asked.length || one.ask) return one
+  const [first = ''] = asked
+  const isYesNo = asked.length === 1 && !/^(?:which|what|how|where|when|who|whom|whose|why)\b/i.test(first) && !/\bor\b/i.test(first)
+  const choices = one.questionChoices?.length ? one.questionChoices : isYesNo ? YES_NO : []
+  const text = asked.length === 1 ? cut(first, ASK_TEXT) : `It asks ${asked.length} things`
+  const details = asked.length === 1 ? (text === first ? '' : first) : asked.map((line, n) => `${n + 1}. ${line}`).join('\n')
+  return { ...one, questions: undefined, questionChoices: undefined, ask: { text, ...(details ? { details } : {}), ...(choices.length ? { choices } : {}), from: one.id, at, isResult: true } }
 }
 const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, questions: undefined, newAt: at })
 const stoppedAs = (one: Todo): Todo['status'] => (hasReport(one) ? 'done' : 'stopped')
@@ -4733,6 +4744,7 @@ let ready: { id: string }[] = []
 let isSettling = false
 const announced = new Map<string, number>()
 const pressed = new Set<string>()
+const isResultAsking = (one: Todo) => one.status === 'done' && Boolean(one.ask?.isResult) && !one.ask?.replied
 const standing = (stage: string, endedAt: number) => (stage === 'working' || stage === 'waiting' ? 'working' : `${stage}:${endedAt}`)
 
 const lookEnds = async ($: EngineInterface) => {
@@ -4741,7 +4753,7 @@ const lookEnds = async ($: EngineInterface) => {
   const cards = list.filter(one => !one.parentId)
   const runs = (await read($, flows)).filter(f => f.session === mine)
   const now = await $.clock.now()
-  const all: { id: string; status: string; endedAt: number }[] = [...cards.map(one => ({ id: one.id, status: hasResult(stageOf(list, one)) ? 'done' : stageOf(list, one), endedAt: one.endedAt })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt }))]
+  const all: { id: string; status: string; endedAt: number }[] = [...cards.map(one => ({ id: one.id, status: hasResult(stageOf(list, one)) || isResultAsking(one) ? 'done' : stageOf(list, one), endedAt: one.endedAt })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt }))]
   const was = lastSeen
   lastSeen = new Map(all.map(one => [one.id, standing(one.status, one.endedAt)]))
   if (!was) return
@@ -4776,7 +4788,7 @@ const readyOf = ({ id }: { id: string }, cards: Todo[], runs: Flow[]) => {
   if (!kept) return undefined
   const one = kept
   const stage = stageOf(cards, one)
-  if (stage === 'working' || stage === 'waiting') return undefined
+  if ((stage === 'working' || stage === 'waiting') && !isResultAsking(one)) return undefined
   const said = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text ?? ''
   const what =
     one.status === 'done'
@@ -9523,6 +9535,7 @@ const chatHooks = (on: On) => {
     await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id === id ? m.needsContext : true }))
     await tidyKeptRules($, id).catch(err => log($, `kept rules not tidied: ${String(err)}`))
     await noteClosed($, id).catch(err => log($, `work the app closed on not looked for: ${String(err)}`))
+    if ((await read($, todos)).some(one => one.questions?.length && resultAsk(one, one.endedAt) !== one)) await changeTodos($, list => list.map(one => resultAsk(one, one.endedAt)))
     during('load: read the other chats')
     await readOthers($).catch(() => undefined)
     keysOnStart($)
@@ -9572,7 +9585,8 @@ const chatHooks = (on: On) => {
         type: 'object',
         properties: {
           text: { type: 'string' },
-          questions: { type: 'array', items: { type: 'string' }, description: named('Only with your last note before you hand in, and only when your result leaves something open that {name} may want to decide on seeing it: each as one short plain question. Your delivered card lists them, and {name} answers them all in one reply, which starts you again. Never what holds you up: that is a question you ask before you finish') },
+          questions: { type: 'array', items: { type: 'string' }, description: named('Only with your last note before you hand in, and only when your result leaves something open that {name} may want to decide on seeing it: each as one short plain question. As you hand in they become your card\'s question, and {name}\'s answer starts you again. Never what holds you up: that is a question you ask before you finish') },
+          choices: { type: 'array', items: { type: 'string' }, description: named('With `questions`: the buttons that answer them, as for `ask`, such as Release it and Don\'t release. Answer in words is always there') },
           task: { type: 'string', description: named('Only after a message from {name} that is a new task of its own, which you do not do: that request in one line. The chat starts it as a task of its own') },
         },
         required: ['text'],
@@ -12137,13 +12151,14 @@ const toolHooks = (on: On) => {
   })
 
   on('tool.call', { tool: 'mcp__claudopus__note' }, async ($, e) => {
-    const input = e as unknown as { text?: string; decision?: boolean; task?: string; questions?: unknown }
+    const input = e as unknown as { text?: string; decision?: boolean; task?: string; questions?: unknown; choices?: unknown }
     const asked = Array.isArray(input.questions) ? input.questions.map(one => oneLine(typeof one === 'string' ? one : '').slice(0, QUESTION_CHARS)).filter(Boolean).slice(0, QUESTIONS_KEPT) : undefined
+    const answers = [...new Set((Array.isArray(input.choices) ? input.choices : []).filter((one): one is string => typeof one === 'string').map(one => oneLine(one).slice(0, 40)).filter(Boolean))].filter(one => !LEAVES_OPEN.test(plainWords(one))).slice(0, 4)
     const text = oneLine(input.text ?? '').slice(0, NOTE_CHARS)
     if (!text) return { result: 'A note needs its text.' }
     if (e.agentId === undefined) return { result: "Only a background task keeps a log in the panel; the chat has none." }
     const kind: Entry['kind'] = input.decision ? 'decision' : 'note'
-    await change($, e.agentId, (one, at) => ({ ...one, entries: [...one.entries, { at, kind, text }].slice(-ENTRIES_KEPT), ...(asked && one.id === e.agentId ? { questions: asked.length ? asked : undefined } : {}) }))
+    await change($, e.agentId, (one, at) => ({ ...one, entries: [...one.entries, { at, kind, text }].slice(-ENTRIES_KEPT), ...(asked && one.id === e.agentId ? { questions: asked.length ? asked : undefined, questionChoices: asked.length && answers.length ? answers : undefined } : {}) }))
     const task = oneLine(input.task ?? '').slice(0, 400)
     if (!task) return { result: 'Noted.' }
     const list = await read($, todos)
