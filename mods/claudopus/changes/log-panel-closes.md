@@ -1,0 +1,1 @@
+- Each time the Claudopus panel closes, Claudopus's log now says who closed it, and when it closed to follow a close in another chat, which chat that was. Your panel went away by itself on 20 Nov, and nothing then recorded why.
