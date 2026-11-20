@@ -468,6 +468,15 @@ const followPanel = async ($: EngineInterface) => {
   return choice
 }
 
+// The panel asked for by the person, with /claudopus or Open panel above the prompt: where it can be drawn, it is open in every chat from now on
+const showPanel = async ($: EngineInterface) => {
+  await update($, me, one => ({ ...one, isListOpened: true }))
+  await update($, paneShown, () => true)
+  const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS })
+  if (opened.isPlaced) await choosePanel($, true)
+  return opened
+}
+
 // The panel opens by itself with a chat's first piece of work; closed, it stays closed until asked for
 const openList = async ($: EngineInterface) => {
   if ((await read($, me)).isListOpened) return

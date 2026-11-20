@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.245 · 20 November 2026
+- An Open panel button now sits at the right end of the memory, processor and graphics line above the prompt: when the Claudopus panel is closed, a press opens it again in every chat, and when it is open, a press does nothing
+
 ## 0.2.244 · 20 November 2026
 - Each time the Claudopus panel closes, Claudopus's log now says who closed it, and when it closed to follow a close in another chat, which chat that was. Your panel went away by itself on 20 Nov, and nothing then recorded why.
 
