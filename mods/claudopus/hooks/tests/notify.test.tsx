@@ -1026,7 +1026,7 @@ test('work that needs the person is heard once: its notification comes as the am
   // Claudopus Asks turned off in System Settings: the purple Claudopus, which carries no sound, and the mod's own chime
   ownSet(files, 'config.json', '{}')
   app.asks = 2
-  await ask('k4', 'Type your password.')
+  await ask('k4', 'Type the code from the email.')
   expect(lead(own.at(-2))).toEqual(['--asks', '--chime'])
   expect(lead(own.at(-1))).toEqual([])
   expect(played).toEqual(['sounds/ready.wav'])
