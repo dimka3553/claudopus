@@ -3208,8 +3208,8 @@ const statsButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
 )
 
 const BOARD_SITE = 'https://claudopus.ai/leaderboard'
-const BOARD_API = 'https://BOARD_PROJECT.supabase.co/rest/v1/rpc'
-const BOARD_KEY = 'BOARD_PUBLISHABLE_KEY'
+const BOARD_API = 'https://wezffxcyofkyhoowwjwi.supabase.co/rest/v1/rpc'
+const BOARD_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
 const BOARD_EVERY = 3 * 60_000
 type BoardFile = { name?: string; token?: string; isPublic?: boolean; sentAt?: number }
 const boardNow: { file: BoardFile; said: string; isBusy: boolean } = { file: {}, said: '', isBusy: false }

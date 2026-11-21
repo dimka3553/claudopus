@@ -1,6 +1,6 @@
 // claudopus.ai/leaderboard: the board, and one person's stats at /leaderboard/<name>. Plain script, no build step.
-const LB_URL = 'https://PROJECT.supabase.co'
-const LB_KEY = 'PUBLISHABLE_KEY'
+const LB_URL = 'https://wezffxcyofkyhoowwjwi.supabase.co'
+const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
 
 ;(() => {
   const $ = s => document.querySelector(s)
