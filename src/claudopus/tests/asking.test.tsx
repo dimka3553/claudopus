@@ -668,20 +668,22 @@ test('a press on a question that moved under the pointer a moment before does no
 })
 
 // The go-ahead for a release is one press: the task asks with its worktree, and Release it is the permission for its release run
-test('Release it on a go-ahead asked with its worktree reaches the task as its answer and lets that card\'s next release run for that folder through with no second question, once: a second run is asked on the card', async ($, on) => {
+test('Release it on a go-ahead asked with its worktree reaches the task as its answer and lets that card\'s release runs for that folder through with no second question until one has gone out: a run again after one that stopped before pushing goes through too (21 Nov, a second Allow after Release it), and one after it went out is asked on the card', async ($, on) => {
   const { list, files, appended, bash, holding, grants, wake, clock } = await gated($, on)
   const gateButton = async (start: string) => (await list.findAll({ type: 'Button' })).find(b => String(b.key ?? '').startsWith(start))
   files.set('/repo/wt/.release', 'mods/claudopus/bin/release')
   files.set('git:top', '/repo/wt')
   files.set('git:branch', 'fix-nose')
+  files.set('git:tip', 'tip1')
+  files.set('git:main', 'main1 main0')
   const RELEASE = 'hold xr1; /plug/claudopus/bin/release'
   const asked = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release the nose fix?', details: 'It straightens the nose.', choices: ['Release it'], release: '/repo/wt' } as never)
-  expect(asked.result).toContain('A press on Release it also allows your next run of the release runner for /repo/wt, once, with no second question')
+  expect(asked.result).toContain('A press on Release it also allows your runs of the release runner for /repo/wt until one has gone out, with no second question')
   expect(await until(async () => ((await askButtons(list, 'a1')).length ? askButtons(list, 'a1') : undefined))).toEqual(['Release it'])
   // The press is the task's answer, with what it allows; it has no way back
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it')?.key ?? '' })
   const told = (await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it" in answer to your question: Release the nose fix?')))) ?? ''
-  expect(told).toContain('That press is the permission for the release: your next run of the release runner for /repo/wt goes through once, within the hour, with nothing more asked.')
+  expect(told).toContain('That press is the permission for the release: your runs of the release runner for /repo/wt go through with nothing more asked, within the hour, until one has gone out')
   expect((await until(async () => list.find({ type: 'Text', text: '✓ You answered “Release it”' })))?.props.dimColor).toBe(true)
   expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Take back')).toBe(false)
   expect(files.get(`${MEMORY}/log.md`)).toContain('release of fix-nose from /repo/wt allowed once for a1')
@@ -700,7 +702,18 @@ test('Release it on a go-ahead asked with its worktree reaches the task as its a
   expect(early.deny).toContain('Not handed in: a command of yours still runs')
   expect(await list.find({ type: 'Text', text: /^◐ Delivered/ })).toBeUndefined()
   await $.tool.call({ tool: 'TaskStop', tool_use_id: 'bgr-s', agentId: 'a1', task_id: 'bg-bgr' } as never)
-  // Once: the same card's next release run is asked as any release nobody pressed for
+  // It stopped before pushing (main changed the same lines): the task merges main and runs it again, which goes through as well
+  await clock.advance(1000)
+  files.set('git:tip', 'tip2')
+  const again = bash('r1b', 'hold xr1b; /plug/claudopus/bin/release') as Promise<{ deny?: string }>
+  const rerun = await until(async () => holding.get('xr1b; /plug/claudopus/bin/release'))
+  expect((await list.findAll({ type: 'Button' })).some(b => String(b.key ?? '').startsWith('gate-r1b-'))).toBe(false)
+  rerun?.('released')
+  expect((await again).deny).toBeUndefined()
+  expect(files.get(`${MEMORY}/log.md`)).toContain('release of fix-nose in wt: allowed by the press on its task\'s go-ahead, run again as nothing went out before')
+  // That one went out, so the press is spent: the same card's next release run is asked as any release nobody pressed for
+  files.set('git:main', 'main2 tip2 main1 main0')
+  files.set('git:tip', 'tip3')
   await clock.advance(1000)
   const second = bash('r2', 'hold xr2; /plug/claudopus/bin/release') as Promise<{ deny?: string }>
   expect(await until(async () => gateButton('gate-r2-r0-once-'))).toBeDefined()

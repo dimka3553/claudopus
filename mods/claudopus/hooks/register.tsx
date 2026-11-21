@@ -6646,6 +6646,8 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
     ? isRun && run
       ? await startRun($, one, run)
       : `${REFUSAL_ANSWERED(ask.copy ?? ask.text, said, isReply)}${note}`
+    : ask.rule
+      ? `${CONNECTOR_ANSWERED(ask.rule, said, isReply)}${note}`
     : isReply
       ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}`
       : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
@@ -6666,7 +6668,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   void askGone($, one, said)
 }
 const RELEASE_PRESSED = (folder: string) =>
-  `That press is the permission for the release: your next run of the release runner for ${folder} goes through once, within the hour, with nothing more asked. Run it now as your rules say, in your background, say on your card what you are releasing, and hand in your result once it has finished.`
+  `That press is the permission for the release: your runs of the release runner for ${folder} go through with nothing more asked, within the hour, until one has gone out: a run again after it stopped (exit 2 or 3) needs no second press. Run it now as your rules say, in your background, say on your card what you are releasing, and hand in your result once it has finished.`
 const canTakeBack = (one: Todo, now: number) => {
   const sent = heldAnswer(one, now)
   return Boolean(sent?.asked && !sent.isHeld && !['pressed', 'sending', 'chat'].includes(sent.to) && !one.ask && !one.chat && sentLine(one, now))
@@ -8270,7 +8272,7 @@ const releaseCalls = (command: string, root: string, from: string): ReleaseCall[
 }
 const RELEASE_ALLOWED = 60 * 60_000
 const RELEASE_IT = 'Release it'
-const releaseAllowed = new Map<string, { folder: string; branch: string; at: number }>()
+const releaseAllowed = new Map<string, { folder: string; branch: string; at: number; tips?: string[] }>()
 const allowRelease = async ($: EngineInterface, card: string, folder: string) => {
   const git = (args: string[]) => $.process.run(['git', '-C', folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '')
   const repo = await git(['rev-parse', '--show-toplevel'])
@@ -8290,6 +8292,13 @@ const releaseFacts = async (git: (args: string[]) => Promise<string>, branch: st
     ...(changed ? { files: changed } : {}),
   }
 }
+const isReleased = async (git: (args: string[]) => Promise<string>, tips: string[]) => {
+  if (!tips.length) return false
+  if (tips.some(tip => !tip)) return true
+  const main = (await git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])) || 'origin/main'
+  for (const tip of tips) if ((await git(['merge-base', tip, main])) === tip) return true
+  return false
+}
 const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
   const calls = releaseCalls(String((e as { command?: unknown }).command ?? ''), $.plugin.root, cwd || dir.replace(/\/\.claude\/claudopus$/, ''))
   if (!calls.length || !dir) return { grants: [] }
@@ -8307,9 +8316,15 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
     const name = (/\/\.git$/.test(common) ? common.replace(/\/\.git$/, '') : repo).split('/').pop() || repo
     const now = await $.clock.now()
     const allowed = card ? releaseAllowed.get(top) : undefined
-    const isPressed = Boolean(allowed && allowed.folder === repo && allowed.branch === branch && now - allowed.at < RELEASE_ALLOWED)
-    if (allowed && (isPressed || now - allowed.at >= RELEASE_ALLOWED)) releaseAllowed.delete(top)
-    if (isPressed) await log($, `release of ${branch} in ${name}: allowed by the press on its task's go-ahead`)
+    const isSame = Boolean(allowed && allowed.folder === repo && allowed.branch === branch && now - allowed.at < RELEASE_ALLOWED)
+    const isSpent = isSame && (await isReleased(git, allowed?.tips ?? []))
+    const isPressed = isSame && !isSpent
+    if (allowed && (isSpent || now - allowed.at >= RELEASE_ALLOWED)) releaseAllowed.delete(top)
+    if (isPressed && allowed) {
+      const tip = await git(['rev-parse', '--verify', '-q', `refs/heads/${branch}`])
+      releaseAllowed.set(top, { ...allowed, tips: [...(allowed.tips ?? []), tip] })
+      await log($, `release of ${branch} in ${name}: allowed by the press on its task's go-ahead${allowed.tips?.length ? ', run again as nothing went out before' : ''}`)
+    }
     const said = isPressed ? 'once' : await holdGate($, next, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: now, ...(e.agentId ? { from: e.agentId } : {}), ...(await releaseFacts(git, branch)), ...(call.title ? { reason: call.title } : {}) }, card ? top : '')
     if (said !== 'once') {
       await dropGrants($, grants)
@@ -8863,6 +8878,7 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   const own = list.find(one => one.id === agent)
   if (!top || top.chat) return
   const runnable = runnableOf(tool, call)
+  if (!runnable && connectorRuleOf(tool)) return void (await refusedConnector($, agent, top.id, own, tool, call, refusal.reason))
   if (!runnable) return void (await log($, `refusal of ${tool} for ${agent}: nothing the person could run, so nothing is asked`))
   const details = [runDetails(runnable, refusal.reason), own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : ''].filter(Boolean).join('\n\n')
   const at = await $.clock.now()
@@ -8875,6 +8891,42 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   if (card) await askAloud($, card, BLOCKED_ASK).catch(err => log($, `ask not told: ${String(err)}`))
   if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
 }
+const CONNECTOR_ASK = 'Claude Code blocked this action. Let your tasks do it?'
+const TRY_AGAIN = 'Try again'
+const connectorRuleOf = (tool: string) => (/^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$/.test(tool) && !tool.startsWith('mcp__claudopus__') ? tool : '')
+const connectorInput = (call: Record<string, unknown>) => {
+  const { tool: _tool, tool_use_id: _id, agentId: _agent, ...input } = call
+  const text = Object.keys(input).length ? JSON.stringify(input) : ''
+  return text ? cut(oneLine(text), 300) : ''
+}
+const refusedConnector = async ($: EngineInterface, agent: string, top: string, own: Todo | undefined, tool: string, call: Record<string, unknown>, reason: string) => {
+  const rule = connectorRuleOf(tool)
+  const name = rule.split('__').slice(2).join('__').replace(/_/g, ' ')
+  const input = connectorInput(call)
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const command = `${zshQuoted(`${$.plugin.root}/bin/allow-tool`)} ${rule}`
+  const details = [
+    `It wanted to ${name}${input ? `: ${input}` : '.'}`,
+    `${reason ? `Blocked as “${reason}”. ` : ''}Claude Code never counts a yes on this card or in the chat as yours for this: only your own Claude Code settings let it through.`,
+    `Open in Terminal and press Return: it adds ${rule} to your Claude Code settings, so your tasks may do this from now on, and nothing else. Then press ${TRY_AGAIN}.`,
+    own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '',
+  ].filter(Boolean).join('\n\n')
+  const at = await $.clock.now()
+  let isPut = false
+  await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text: CONNECTOR_ASK, details, copy: command, isCommand: true, cwd: home, choices: [TRY_AGAIN, DONT_ALLOW], from: agent, at, rule } }))
+  if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: its card asks something already`))
+  await log($, `refusal of ${tool} for ${agent} put to the person on its card, with the rule that lets it through`)
+  const card = (await read($, todos)).find(one => one.id === top)
+  if (card) await askAloud($, card, CONNECTOR_ASK).catch(err => log($, `ask not told: ${String(err)}`))
+  if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
+}
+const CONNECTOR_ANSWERED = (rule: string, said: string, isReply: boolean) =>
+  isReply
+    ? `${who(true)} replied, in their own words, when asked to let your tasks use ${rule}, which Claude Code refused you: ${said}\nTheir words do not let it through: only the rule in their own Claude Code settings does, which the command on your card adds. If they say they have added it, call it once more exactly as before; otherwise answer them with the \`ask\` tool, or carry on without it.`
+    : said === TRY_AGAIN
+      ? `${who(true)} pressed "${TRY_AGAIN}" after being shown the command that adds ${rule} to their Claude Code settings. Call it once more now, exactly as before. If Claude Code refuses it again, the rule is not in yet and your card asks again: do not ask in words, and do not reach its result another way.`
+      : `${who(true)} pressed "${DONT_ALLOW}" when asked to let your tasks use ${rule}, which Claude Code refused you. Do not do it, nor reach its result by other means. Carry on without it, and say in your report what was left out.`
+
 const REFUSAL_ANSWERED = (command: string, said: string, isReply: boolean) =>
   `${isReply ? `${who(true)} replied, in their own words, when asked whether to run the command Claude Code refused you (${cut(oneLine(command), 200)}): ${said}` : `${who(true)} pressed "${DONT_ALLOW}" when asked whether to run the command Claude Code refused you (${cut(oneLine(command), 200)}).`} What Claude Code refused stays refused: do not do it, nor reach its result by other means. Carry on without it, and say in your report what was left out.`
 
@@ -9976,7 +10028,7 @@ const chatHooks = (on: On) => {
           pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the pictures the question is about, shown with it on the card and in the chat' },
           key: { type: 'string', description: named("Only when you ask {name} for a key, token or password a command of yours needs: the name it is saved under, such as SENTRY_READ_TOKEN. The box to paste it into shows with your question on your card at once; a saved key of that name is replaced, one of another name stays. Give no `choices` with it") },
           from: { type: 'string', description: named('With `key`: where {name} gets it, the full link of the page and what to press there, shown in the box') },
-          release: { type: 'string', description: 'Only when you ask for the go-ahead to release, with the single choice Release it: the full path of your worktree. That press reaches you as the answer and allows your next run of the release runner from that folder, once, with no second question' },
+          release: { type: 'string', description: 'Only when you ask for the go-ahead to release, with the single choice Release it: the full path of your worktree. That press reaches you as the answer and allows your runs of the release runner from that folder until one has gone out, with no second question' },
         },
         required: ['text'],
       },
@@ -12548,7 +12600,7 @@ const toolHooks = (on: On) => {
     const tooLong = whole.length > ASK_DETAILS ? ` Its details were longer than ${ASK_DETAILS} letters and were cut at a word: put what matters first.` : ''
     const plain = choices.length ? '' : ` It has no buttons, so ${who()} can only answer in words: give \`choices\` when a press would answer it.`
     const leftOut = (Array.isArray(input.choices) ? input.choices : []).some(one => typeof one === 'string' && LEAVES_OPEN.test(plainWords(one))) ? ' A choice that only leaves the question open (Not now, Later, Skip, Cancel) was left out: not pressing does that, and every button is an answer.' : ''
-    const released = release ? ` A press on ${choices[0]} also allows your next run of the release runner for ${release}, once, with no second question: run it then, in your background.` : releaseGiven ? ' `release` was left out: it needs buttons, and the full path of a folder that is there.' : ''
+    const released = release ? ` A press on ${choices[0]} also allows your runs of the release runner for ${release} until one has gone out, with no second question: run it then, in your background.` : releaseGiven ? ' `release` was left out: it needs buttons, and the full path of a folder that is there.' : ''
     const bare = choices.length && !details && !copy ? ` It carries no details: if deciding it needs more than this one line (what goes out, what it changes), ask it again with that in \`details\`; ${who()} sees the ask before your report.` : ''
     const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} drawn small on the card, each opening large on a press, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
     const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : ''

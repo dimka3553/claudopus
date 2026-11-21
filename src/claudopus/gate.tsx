@@ -527,12 +527,15 @@ const releaseCalls = (command: string, root: string, from: string): ReleaseCall[
   }
   return found
 }
-// What a press on a task's own go-ahead allows (asking.tsx, answerCleared): that card's next run of the release runner for that
-// worktree and its branch, once, within RELEASE_ALLOWED of the press and only until the card ends (state.tsx). Kept only in this
-// code's memory, as every press is: no file, message or typed reply allows a release
+// What a press on a task's own go-ahead allows (asking.tsx, answerCleared): that card's runs of the release runner for that worktree
+// and its branch until one of them goes out, within RELEASE_ALLOWED of the press and only until the card ends (state.tsx). A run
+// that stopped before pushing (main changed the same lines, a check failed) is run again as the rules say, and asking again for it
+// put a second Allow after Release it (21 Nov, twice). Each run keeps the branch's tip then: once one of those is on main, the
+// release went out and the press is spent. Kept only in this code's memory, as every press is: no file, message or typed reply
+// allows a release
 const RELEASE_ALLOWED = 60 * 60_000
 const RELEASE_IT = 'Release it'
-const releaseAllowed = new Map<string, { folder: string; branch: string; at: number }>()
+const releaseAllowed = new Map<string, { folder: string; branch: string; at: number; tips?: string[] }>()
 const allowRelease = async ($: EngineInterface, card: string, folder: string) => {
   const git = (args: string[]) => $.process.run(['git', '-C', folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '')
   const repo = await git(['rev-parse', '--show-toplevel'])
@@ -555,6 +558,15 @@ const releaseFacts = async (git: (args: string[]) => Promise<string>, branch: st
     ...(changed ? { files: changed } : {}),
   }
 }
+// Whether a run under a go-ahead went out: one of the tips it ran with is on main as the remote has it (the runner fetches main after
+// its push). A tip that could not be read counts as gone out, so nothing is let through on what was not seen
+const isReleased = async (git: (args: string[]) => Promise<string>, tips: string[]) => {
+  if (!tips.length) return false
+  if (tips.some(tip => !tip)) return true
+  const main = (await git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])) || 'origin/main'
+  for (const tip of tips) if ((await git(['merge-base', tip, main])) === tip) return true
+  return false
+}
 const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
   const calls = releaseCalls(String((e as { command?: unknown }).command ?? ''), $.plugin.root, cwd || dir.replace(/\/\.claude\/claudopus$/, ''))
   if (!calls.length || !dir) return { grants: [] }
@@ -576,9 +588,15 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
     // used once, by this card alone, within RELEASE_ALLOWED; any other release is asked on its card
     const now = await $.clock.now()
     const allowed = card ? releaseAllowed.get(top) : undefined
-    const isPressed = Boolean(allowed && allowed.folder === repo && allowed.branch === branch && now - allowed.at < RELEASE_ALLOWED)
-    if (allowed && (isPressed || now - allowed.at >= RELEASE_ALLOWED)) releaseAllowed.delete(top)
-    if (isPressed) await log($, `release of ${branch} in ${name}: allowed by the press on its task's go-ahead`)
+    const isSame = Boolean(allowed && allowed.folder === repo && allowed.branch === branch && now - allowed.at < RELEASE_ALLOWED)
+    const isSpent = isSame && (await isReleased(git, allowed?.tips ?? []))
+    const isPressed = isSame && !isSpent
+    if (allowed && (isSpent || now - allowed.at >= RELEASE_ALLOWED)) releaseAllowed.delete(top)
+    if (isPressed && allowed) {
+      const tip = await git(['rev-parse', '--verify', '-q', `refs/heads/${branch}`])
+      releaseAllowed.set(top, { ...allowed, tips: [...(allowed.tips ?? []), tip] })
+      await log($, `release of ${branch} in ${name}: allowed by the press on its task's go-ahead${allowed.tips?.length ? ', run again as nothing went out before' : ''}`)
+    }
     const said = isPressed ? 'once' : await holdGate($, next, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: now, ...(e.agentId ? { from: e.agentId } : {}), ...(await releaseFacts(git, branch)), ...(call.title ? { reason: call.title } : {}) }, card ? top : '')
     if (said !== 'once') {
       await dropGrants($, grants)
