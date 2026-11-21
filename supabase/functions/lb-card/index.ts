@@ -1,5 +1,5 @@
 // The leaderboard's link previews: a 1200×630 picture of the board's top five (no name), or of one person (?name=): their hours of
-// work, time on the clock, efficiency, favourite model, API cost and tasks, and, when their stats are public, their timeline
+// work, time on the clock, efficiency, favourite model, API cost and tasks, and, when their timeline is public, their timeline
 // as Stats draws it, with no task names. claudopus.ai/og/leaderboard.png and /og/leaderboard/<name> are rewrites to here
 import React from 'https://esm.sh/react@18.2.0'
 import { ImageResponse } from 'https://deno.land/x/og_edge@0.0.6/mod.ts'
@@ -98,7 +98,7 @@ const stat = (value: string, label: string, big = true) =>
 const personCard = (p: any, rg: string, octo: string | null) => {
   const f = p.stats?.[rg] ?? {}
   const rank = p.ranks?.[rg] ? `#${p.ranks[rg]} of ${num(p.total)}` : 'Not ranked'
-  const bars = p.is_public ? timelineBars(p.timeline, rg, 1072, 150) : []
+  const bars = timelineBars(p.timeline, rg, 1072, 150)
   return frame([
     h('div', { style: { display: 'flex', alignItems: 'baseline', marginTop: 26 } },
       h('div', { style: { fontSize: 84, fontWeight: 700, letterSpacing: -2 } }, String(p.name ?? '').slice(0, 20)),

@@ -595,12 +595,14 @@ export type BoardShown = {
   openPerson: (name: string) => void
   name: string
   isPublic: boolean
+  isTimelinePublic: boolean
   // What the last press or send came to, said in one line; '' when nothing needs saying
   said: string
   isBusy: boolean
   join: (name: string) => void
   leave: () => void
   setPublic: (isPublic: boolean) => void
+  setTimelinePublic: (isPublic: boolean) => void
   open: () => void
 }
 export const NAME_RULE = /^[A-Za-z0-9_-]{3,20}$/
@@ -640,6 +642,15 @@ const fact = (ui: Ui, key: string, name: string, text: string) => (
     <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
       <ui.Text wrap="wrap">{text}</ui.Text>
     </ui.Box>
+  </ui.Box>
+)
+// A setting of two: its name at the left, the switch at the right, its second choice the one that means on
+const toggle = (ui: Ui, key: string, name: string, labels: [string, string], isOn: boolean, set: (isOn: boolean) => void) => (
+  <ui.Box key={key} flexDirection="row" gap={2} height={1} flexShrink={0}>
+    <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
+      <ui.Text wrap="truncate-end">{name}</ui.Text>
+    </ui.Box>
+    {segments(ui, `${key}-switch`, labels.map((label, i) => ({ label, isOn: (i === 1) === isOn, onPress: () => void ((view.presses += 1), set(i === 1)) })), 9)}
   </ui.Box>
 )
 const note = (ui: Ui, key: string, text: string) => (
@@ -687,7 +698,7 @@ const tile = (ui: Ui, key: string, value: string, label: string, wraps = false) 
 // The Leaderboard tab: the board's top 10 for the range chosen, then joining, or your place and how you show
 // What everyone sees of a person on the board, and what Leave does, in the words of the joining and the You bands
 const BOARD_SHOWN = 'Your username, time of work, time on the clock, efficiency, favourite model, tokens and API cost'
-const BOARD_LEAVE = 'Deletes your username and stats from the board at once'
+const BOARD_OFF = 'Off deletes your username and stats from the board at once'
 export function boardView(ui: Ui, b: BoardShown, surface: string) {
   const { Box, Text } = ui
   const press = (fn: () => void) => () => void ((view.presses += 1), fn())
@@ -745,8 +756,8 @@ export function boardView(ui: Ui, b: BoardShown, surface: string) {
             {fact(ui, 'board-join-shown', 'Shown', BOARD_SHOWN)}
             {fact(ui, 'board-join-never', 'Never sent', 'Chat titles, your words or Claude’s, files and folders')}
             {fact(ui, 'board-join-sent', 'Sent', 'As you join, then every 3 minutes while Claude Code is open')}
-            {fact(ui, 'board-join-public', 'Public', 'Only if you turn it on: adds a breakdown by model and a timeline, with no task names')}
-            {fact(ui, 'board-join-leave', 'Leave', BOARD_LEAVE)}
+            {fact(ui, 'board-join-public', 'Public', 'Your stats and your timeline stay private until you switch each on. The timeline never has task names')}
+            {fact(ui, 'board-join-off', 'Off', BOARD_OFF)}
           </Box>
           {'Input' in ui ? (
             <Box key="board-field" width="100%" flexDirection="column">
@@ -762,20 +773,20 @@ export function boardView(ui: Ui, b: BoardShown, surface: string) {
         'You',
         b.isBusy ? 'Sending…' : '',
         <Box flexDirection="column" gap={1}>
-          <Box flexDirection="column" flexShrink={0}>
+          <Box flexDirection="column" flexShrink={0} gap={1}>
             {line(ui, 'board-name', 'Your username', b.name, true)}
-            {line(ui, 'board-public', 'Your stats', b.isPublic ? 'Public' : 'Private')}
+            {toggle(ui, 'board-on', 'On the leaderboard', ['Off', 'On'], true, isOn => void (isOn || b.leave()))}
+            {toggle(ui, 'board-stats', 'Your stats', ['Private', 'Public'], b.isPublic, b.setPublic)}
+            {toggle(ui, 'board-timeline', 'Your timeline', ['Private', 'Public'], b.isTimelinePublic, b.setTimelinePublic)}
           </Box>
           <Box flexDirection="column" flexShrink={0}>
-            {fact(ui, 'board-shown', 'Shown', b.isPublic ? `${BOARD_SHOWN}, plus a breakdown by model and a timeline, with no task names` : BOARD_SHOWN)}
+            {fact(ui, 'board-shown', 'Shown', `${BOARD_SHOWN}${b.isPublic ? ', and a breakdown by model' : ''}${b.isTimelinePublic ? ', and a timeline with no task names' : ''}`)}
             {fact(ui, 'board-sent', 'Sent', 'Every 3 minutes while Claude Code is open')}
-            {fact(ui, 'board-leave-how', 'Leave', BOARD_LEAVE)}
+            {fact(ui, 'board-off', 'Off', BOARD_OFF)}
           </Box>
           {said}
-          <Box flexDirection="row" flexWrap="wrap" gap={2} flexShrink={0}>
+          <Box flexShrink={0}>
             <ui.Button key={`board-mine-${view.presses}`} label="Open my page" plain onPress={() => b.openPerson(b.name)} />
-            <ui.Button key={`board-public-${view.presses}`} label={b.isPublic ? 'Make my stats private' : 'Make my stats public'} plain onPress={() => b.setPublic(!b.isPublic)} />
-            <ui.Button key={`board-leave-${view.presses}`} label="Leave" plain dimColor onPress={b.leave} />
           </Box>
         </Box>,
       )

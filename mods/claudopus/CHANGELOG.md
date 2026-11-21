@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.261 · 21 November 2026
+- The Leaderboard tab has three switches once you've joined: On the leaderboard (off deletes you from it), Your stats (private or public) and Your timeline (private or public, never with task names).
+
 ## 0.2.260 · 21 November 2026
 - A link to your own leaderboard page now always previews as your card, with your name, figures and picture, in Telegram and other apps; before, it could show the whole board instead. The picture updates in those apps when your figures change, and a link ending in a slash works too.
 

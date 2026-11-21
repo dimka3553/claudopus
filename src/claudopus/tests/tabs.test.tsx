@@ -86,7 +86,7 @@ test('the Leaderboard tab shows the board and is where you join with a username 
   await pressed(stats, 'board-site')
   expect(await until(async () => shown.find(one => one.includes('https://claudopus.ai/leaderboard')))).toBeDefined()
   // Before joining: what is shown, what is never sent, how often, what public adds and what Leave does, each on a line of its own
-  for (const text of [/^Your username, time of work/, /^Chat titles, your words/, /^As you join, then every 3 minutes/, /^Only if you turn it on/, /^Deletes your username and stats/]) expect(await said(text)).toBeDefined()
+  for (const text of [/^Your username, time of work/, /^Chat titles, your words/, /^As you join, then every 3 minutes/, /^Your stats and your timeline stay private/, /^Off deletes your username and stats/]) expect(await said(text)).toBeDefined()
   // Minutes pass with the tab open: the board is read again, and nothing of yours is sent
   await clock.advance(10 * M)
   expect(boarded.filter(one => one.fn !== 'lb_board')).toEqual([])
@@ -113,17 +113,24 @@ test('the Leaderboard tab shows the board and is where you join with a username 
   files.set('board:lb_push', 'true\n200')
   await clock.advance(4 * M)
   expect(await until(async () => boarded.find(one => one.fn === 'lb_push' && one.body.p_token === 'secret-1' && one.body.p_public === false))).toBeDefined()
-  // Public, then off the board at once
-  await pressed(stats, 'board-public')
+  // Stats public: the timeline stays private, and isn't sent
+  await pressed(stats, 'board-stats-switch-Public')
   expect(await said(/^✓ Your stats are public/)).toBeDefined()
-  expect(JSON.parse(files.get(`${MEMORY}/leaderboard.json`) ?? '{}').isPublic).toBe(true)
-  // The timeline, with no task names, goes only once the stats are public
+  expect(JSON.parse(files.get(`${MEMORY}/leaderboard.json`) ?? '{}')).toMatchObject({ isPublic: true, isTimelinePublic: false })
   const pushed = boarded.filter(one => one.fn === 'lb_push')
-  expect(Object.keys(pushed[0]?.body.p_stats as object)).not.toContain('timeline')
-  expect(Object.keys(pushed.at(-1)?.body.p_stats as object)).toContain('timeline')
-  expect(await said(/plus a breakdown by model and a timeline/)).toBeDefined()
+  expect(pushed.at(-1)?.body).toMatchObject({ p_public: true, p_timeline: false })
+  expect(Object.keys(pushed.at(-1)?.body.p_stats as object)).not.toContain('timeline')
+  expect(await said(/and a breakdown by model$/)).toBeDefined()
+  // The timeline, with no task names, goes only once it is switched to public, on a switch of its own
+  await pressed(stats, 'board-timeline-switch-Public')
+  expect(await said(/^✓ Your timeline is public/)).toBeDefined()
+  const last = boarded.filter(one => one.fn === 'lb_push').at(-1)
+  expect(last?.body).toMatchObject({ p_public: true, p_timeline: true })
+  expect(Object.keys(last?.body.p_stats as object)).toContain('timeline')
+  expect(await said(/and a timeline with no task names$/)).toBeDefined()
+  // Off takes you off the board at once
   files.set('board:lb_leave', 'true\n200')
-  await pressed(stats, 'board-leave')
+  await pressed(stats, 'board-on-switch-Off')
   expect(await said(/^✓ You left the leaderboard/)).toBeDefined()
   expect(boarded.filter(one => one.fn === 'lb_leave')).toEqual([{ fn: 'lb_leave', body: { p_token: 'secret-1' } }])
   const pushes = boarded.filter(one => one.fn === 'lb_push').length

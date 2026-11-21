@@ -12,10 +12,12 @@ create table if not exists leaderboard.people (
   key text not null unique,
   token_hash text not null unique,
   is_public boolean not null default false,
+  timeline_public boolean not null default false,
   stats jsonb not null default '{}'::jsonb,
   joined_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table leaderboard.people add column if not exists timeline_public boolean not null default false;
 alter table leaderboard.people enable row level security;
 revoke all on leaderboard.people from public, anon, authenticated;
 
@@ -80,11 +82,15 @@ exception when unique_violation then
   raise exception 'taken' using errcode = '23505';
 end $$;
 
--- New figures, and whether they're public; false when the secret is no one's (they left, or it was never theirs)
-create or replace function public.lb_push(p_token text, p_public boolean, p_stats jsonb) returns boolean
+-- New figures, whether the stats are public, and whether the timeline is (a Claudopus before 0.2.261 sends no p_timeline: its
+-- timeline goes with its stats); a private timeline is never kept. False when the secret is no one's (they left, or it was never theirs)
+drop function if exists public.lb_push(text, boolean, jsonb);
+create or replace function public.lb_push(p_token text, p_public boolean, p_stats jsonb, p_timeline boolean default null) returns boolean
 language plpgsql security definer set search_path = '' as $$
+declare shows boolean := coalesce(p_timeline, p_public, false);
 begin
-  update leaderboard.people set is_public = coalesce(p_public, is_public), stats = leaderboard.clean(p_stats), updated_at = now()
+  update leaderboard.people set is_public = coalesce(p_public, is_public), timeline_public = shows,
+    stats = case when shows then leaderboard.clean(p_stats) else leaderboard.clean(p_stats) - 'timeline' end, updated_at = now()
     where token_hash = encode(extensions.digest(coalesce(p_token, ''), 'sha256'), 'hex');
   return found;
 end $$;
@@ -128,8 +134,9 @@ begin
   end loop;
   return jsonb_build_object('name', p.name, 'is_public', p.is_public, 'joined_at', p.joined_at, 'updated_at', p.updated_at,
     'total', (select count(*) from leaderboard.people), 'ranks', ranks, 'stats', stats, 'model', models,
-    'timeline', case when p.is_public and jsonb_typeof(p.stats->'timeline') = 'object' then p.stats->'timeline' end);
+    'timeline_public', p.timeline_public,
+    'timeline', case when p.timeline_public and jsonb_typeof(p.stats->'timeline') = 'object' then p.stats->'timeline' end);
 end $$;
 
-revoke all on function public.lb_join(text, boolean, jsonb), public.lb_push(text, boolean, jsonb), public.lb_leave(text), public.lb_board(text, text), public.lb_person(text) from public;
-grant execute on function public.lb_join(text, boolean, jsonb), public.lb_push(text, boolean, jsonb), public.lb_leave(text), public.lb_board(text, text), public.lb_person(text) to anon, authenticated;
+revoke all on function public.lb_join(text, boolean, jsonb), public.lb_push(text, boolean, jsonb, boolean), public.lb_leave(text), public.lb_board(text, text), public.lb_person(text) from public;
+grant execute on function public.lb_join(text, boolean, jsonb), public.lb_push(text, boolean, jsonb, boolean), public.lb_leave(text), public.lb_board(text, text), public.lb_person(text) to anon, authenticated;

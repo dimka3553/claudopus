@@ -3211,7 +3211,7 @@ const BOARD_SITE = 'https://claudopus.ai/leaderboard'
 const BOARD_API = 'https://wezffxcyofkyhoowwjwi.supabase.co/rest/v1/rpc'
 const BOARD_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
 const BOARD_EVERY = 3 * 60_000
-type BoardFile = { name?: string; token?: string; isPublic?: boolean; sentAt?: number }
+type BoardFile = { name?: string; token?: string; isPublic?: boolean; isTimelinePublic?: boolean; sentAt?: number }
 const boardNow: { file: BoardFile; said: string; isBusy: boolean } = { file: {}, said: '', isBusy: false }
 const boardPath = () => `${dir}/leaderboard.json`
 const boardLoad = async ($: EngineInterface) => (boardNow.file = parsed<BoardFile>(await readOr($, boardPath()), {}))
@@ -3228,11 +3228,11 @@ const boardCall = async ($: EngineInterface, fn: string, args: Record<string, un
   const status = Number(text.slice(cut + 1)) || 0
   return { ok: r.exitCode === 0 && status >= 200 && status < 300, status, body: parsed<unknown>(cut > 0 ? text.slice(0, cut) : '', undefined) }
 }
-const boardFigures = async ($: EngineInterface, isPublic: boolean) => {
+const boardFigures = async ($: EngineInterface, isTimelinePublic: boolean) => {
   await statsRead($, 'all').catch(() => undefined)
   const runs = held.get('all')?.runs ?? []
   const since = await installedAt($)
-  return { ...boardOf(runs, await $.clock.now(), since), ...(isPublic ? { timeline: timelineOf(runs, 40_000, since) } : {}) }
+  return { ...boardOf(runs, await $.clock.now(), since), ...(isTimelinePublic ? { timeline: timelineOf(runs, 40_000, since) } : {}) }
 }
 const installedAt = async ($: EngineInterface) => {
   const kept = parsed<{ at?: number }>(await readOr($, `${dir}/installed.json`), {}).at
@@ -3272,18 +3272,20 @@ const leaveBoard = ($: EngineInterface) =>
     await boardSave($, {})
     return '✓ You left the leaderboard. Your figures are gone from it.'
   })
-const pushBoard = async ($: EngineInterface, isPublic: boolean) => {
+const timelineShown = (file: BoardFile) => Boolean(file.isTimelinePublic ?? file.isPublic)
+const pushBoard = async ($: EngineInterface, isPublic: boolean, isTimelinePublic: boolean) => {
   const file = boardNow.file
-  const r = await boardCall($, 'lb_push', { p_token: file.token ?? '', p_public: isPublic, p_stats: await boardFigures($, isPublic) })
+  const r = await boardCall($, 'lb_push', { p_token: file.token ?? '', p_public: isPublic, p_timeline: isTimelinePublic, p_stats: await boardFigures($, isTimelinePublic) })
   if (r.ok && r.body === false) return (await boardSave($, {}), 'gone' as const)
   if (!r.ok) return 'failed' as const
-  await boardSave($, { ...file, isPublic, sentAt: await $.clock.now() })
+  await boardSave($, { ...file, isPublic, isTimelinePublic, sentAt: await $.clock.now() })
   return 'sent' as const
 }
-const publicBoard = ($: EngineInterface, isPublic: boolean) =>
+const publicBoard = ($: EngineInterface, what: 'stats' | 'timeline', isPublic: boolean) =>
   boardAct($, async () => {
-    const r = await pushBoard($, isPublic)
-    return r === 'gone' ? 'You’re no longer on the leaderboard. Choose a username to join again.' : r === 'failed' ? UNREACHED : isPublic ? '✓ Your stats are public.' : '✓ Your stats are private.'
+    const file = boardNow.file
+    const r = await pushBoard($, what === 'stats' ? isPublic : Boolean(file.isPublic), what === 'timeline' ? isPublic : timelineShown(file))
+    return r === 'gone' ? 'You’re no longer on the leaderboard. Choose a username to join again.' : r === 'failed' ? UNREACHED : `✓ Your ${what} ${what === 'stats' ? 'are' : 'is'} ${isPublic ? 'public' : 'private'}.`
   })
 const sendBoard = async ($: EngineInterface) => {
   const file = await boardLoad($)
@@ -3292,7 +3294,7 @@ const sendBoard = async ($: EngineInterface) => {
   await boardSave($, { ...file, sentAt: now })
   boardNow.isBusy = true
   try {
-    await pushBoard($, Boolean(file.isPublic))
+    await pushBoard($, Boolean(file.isPublic), timelineShown(file))
   } finally {
     boardNow.isBusy = false
   }
@@ -3338,11 +3340,13 @@ const boardShown = ($: EngineInterface): BoardShown => ({
   openPerson: name => void openSite($, name).catch(err => log($, `leaderboard not opened: ${String(err)}`)),
   name: boardNow.file.name ?? '',
   isPublic: Boolean(boardNow.file.isPublic),
+  isTimelinePublic: timelineShown(boardNow.file),
   said: boardNow.said,
   isBusy: boardNow.isBusy,
   join: name => void joinBoard($, name),
   leave: () => void leaveBoard($),
-  setPublic: isPublic => void publicBoard($, isPublic),
+  setPublic: isPublic => void publicBoard($, 'stats', isPublic),
+  setTimelinePublic: isPublic => void publicBoard($, 'timeline', isPublic),
   open: () => void openSite($).catch(err => log($, `leaderboard not opened: ${String(err)}`)),
 })
 const boardButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (

@@ -161,7 +161,7 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
       tile('Tasks done', count(s.tasks)),
     ].join('')}</ul>`
     const back = `<p class="lb-back"><a href="${esc(boardLink())}">Back to the leaderboard</a></p>`
-    if (!p.is_public) return rank + tiles + `<p class="lb-private-line soft">${esc(p.name)} keeps the rest of their stats private.</p>` + back
+    if (!p.is_public) return rank + tiles + (p.timeline ? timelineHtml(p.timeline, range) : '') + `<p class="lb-private-line soft">${esc(p.name)} keeps the rest of their stats private.</p>` + back
     const all = s.tokens || ((s.read || 0) + (s.write || 0) + (s.input || 0) + (s.output || 0))
     const parts = [['read', 'Cache reads', s.read], ['write', 'Cache writes', s.write], ['input', 'Fresh input', s.input], ['output', 'Output', s.output]]
     const bar = `<div class="lb-stack" role="img" aria-label="${parts.map(([, l, v]) => l + ' ' + pct(v || 0, all)).join(', ')}">${parts.map(([k, , v]) => all && v ? `<i class="lb-${k}" style="width:${(v / all * 100).toFixed(2)}%"></i>` : '').join('')}</div>`
