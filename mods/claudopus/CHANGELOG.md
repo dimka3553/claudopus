@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.259 · 21 November 2026
+- Joining the leaderboard now says, one short line each, what the board shows, what is never sent, how often it sends, what public adds and what Leave does.
+- Your timeline goes to the leaderboard only while your stats are public; making them private deletes it there.
+
 ## 0.2.258 · 21 November 2026
 - The panel's Leaderboard button now opens a Leaderboard tab: the board's top 10 for today, 7 days, 30 days or all time, and right under it, joining with a username, or your place with Open my page, public or private, and Leave. Stats no longer holds it.
 - Time of work and time on the clock read in days, hours and minutes, such as 9d 0h 18m, in Stats, on the board, on each person's page and in link previews.

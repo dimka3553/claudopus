@@ -631,6 +631,17 @@ const line = (ui: Ui, key: string, name: string, value: string, isBold = false) 
     </ui.Box>
   </ui.Box>
 )
+// One fact on its own row: a short dim name at the left, what it says wrapping beside it
+const fact = (ui: Ui, key: string, name: string, text: string) => (
+  <ui.Box key={key} flexDirection="row" gap={2} flexShrink={0}>
+    <ui.Box width={12} flexShrink={0}>
+      <ui.Text dimColor>{name}</ui.Text>
+    </ui.Box>
+    <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
+      <ui.Text wrap="wrap">{text}</ui.Text>
+    </ui.Box>
+  </ui.Box>
+)
 const note = (ui: Ui, key: string, text: string) => (
   <ui.Text key={key} dimColor wrap="wrap">
     {text}
@@ -674,6 +685,9 @@ const tile = (ui: Ui, key: string, value: string, label: string, wraps = false) 
 )
 
 // The Leaderboard tab: the board's top 10 for the range chosen, then joining, or your place and how you show
+// What everyone sees of a person on the board, and what Leave does, in the words of the joining and the You bands
+const BOARD_SHOWN = 'Your username, time of work, time on the clock, efficiency, favourite model, tokens and API cost'
+const BOARD_LEAVE = 'Deletes your username and stats from the board at once'
 export function boardView(ui: Ui, b: BoardShown, surface: string) {
   const { Box, Text } = ui
   const press = (fn: () => void) => () => void ((view.presses += 1), fn())
@@ -727,7 +741,13 @@ export function boardView(ui: Ui, b: BoardShown, surface: string) {
         'Join the leaderboard',
         '',
         <Box flexDirection="column" gap={1}>
-          {note(ui, 'board-join-how', 'Choose a username to put your time of work, tokens and API cost on the board. Nothing about you is sent until you join, and Leave takes you off at once.')}
+          <Box flexDirection="column" flexShrink={0}>
+            {fact(ui, 'board-join-shown', 'Shown', BOARD_SHOWN)}
+            {fact(ui, 'board-join-never', 'Never sent', 'Chat titles, your words or Claude’s, files and folders')}
+            {fact(ui, 'board-join-sent', 'Sent', 'As you join, then every 3 minutes while Claude Code is open')}
+            {fact(ui, 'board-join-public', 'Public', 'Only if you turn it on: adds a breakdown by model and a timeline, with no task names')}
+            {fact(ui, 'board-join-leave', 'Leave', BOARD_LEAVE)}
+          </Box>
           {'Input' in ui ? (
             <Box key="board-field" width="100%" flexDirection="column">
               <ui.Input key={`board-name-${view.presses}`} placeholder="Choose a username: 3 to 20 letters, digits, - or _" submitLabel="Join" onSubmit={value => b.join(value.trim())} />
@@ -746,7 +766,11 @@ export function boardView(ui: Ui, b: BoardShown, surface: string) {
             {line(ui, 'board-name', 'Your username', b.name, true)}
             {line(ui, 'board-public', 'Your stats', b.isPublic ? 'Public' : 'Private')}
           </Box>
-          {note(ui, 'board-what', b.isPublic ? 'Everyone can open your stats and timeline from the board. Claudopus sends your figures every few minutes while Claude Code is open.' : 'The board shows your time of work, tokens and API cost, and keeps the rest private. Claudopus sends your figures every few minutes while Claude Code is open.')}
+          <Box flexDirection="column" flexShrink={0}>
+            {fact(ui, 'board-shown', 'Shown', b.isPublic ? `${BOARD_SHOWN}, plus a breakdown by model and a timeline, with no task names` : BOARD_SHOWN)}
+            {fact(ui, 'board-sent', 'Sent', 'Every 3 minutes while Claude Code is open')}
+            {fact(ui, 'board-leave-how', 'Leave', BOARD_LEAVE)}
+          </Box>
           {said}
           <Box flexDirection="row" flexWrap="wrap" gap={2} flexShrink={0}>
             <ui.Button key={`board-mine-${view.presses}`} label="Open my page" plain onPress={() => b.openPerson(b.name)} />
