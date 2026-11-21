@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.262 · 21 November 2026
+- Join on the leaderboard answers at once: it says "Joining as …" as you press it and you are on the board in a moment, where it showed nothing for half a minute after an update. Your full figures follow straight after.
+- A press on the leaderboard made while another is on its way now waits its turn, where it did nothing.
+
 ## 0.2.261 · 21 November 2026
 - The Leaderboard tab has three switches once you've joined: On the leaderboard (off deletes you from it), Your stats (private or public) and Your timeline (private or public, never with task names).
 

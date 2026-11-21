@@ -139,7 +139,7 @@ const BOARD_API = 'https://wezffxcyofkyhoowwjwi.supabase.co/rest/v1/rpc'
 const BOARD_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
 const BOARD_EVERY = 3 * 60_000
 type BoardFile = { name?: string; token?: string; isPublic?: boolean; isTimelinePublic?: boolean; sentAt?: number }
-const boardNow: { file: BoardFile; said: string; isBusy: boolean } = { file: {}, said: '', isBusy: false }
+const boardNow: { file: BoardFile; said: string; isBusy: boolean; waiting: number; turn: Promise<unknown> } = { file: {}, said: '', isBusy: false, waiting: 0, turn: Promise.resolve() }
 const boardPath = () => `${dir}/leaderboard.json`
 const boardLoad = async ($: EngineInterface) => (boardNow.file = parsed<BoardFile>(await readOr($, boardPath()), {}))
 const boardSave = async ($: EngineInterface, file: BoardFile) => {
@@ -156,9 +156,10 @@ const boardCall = async ($: EngineInterface, fn: string, args: Record<string, un
   const status = Number(text.slice(cut + 1)) || 0
   return { ok: r.exitCode === 0 && status >= 200 && status < 300, status, body: parsed<unknown>(cut > 0 ? text.slice(0, cut) : '', undefined) }
 }
-// The person's sums over every range, from every chat's records; the timeline only while they make it public
-const boardFigures = async ($: EngineInterface, isTimelinePublic: boolean) => {
-  await statsRead($, 'all').catch(() => undefined)
+// The person's sums over every range, from every chat's records; the timeline only while they make it public. Reading every chat's
+// records can take half a minute after a reload; isHeld sends what was read last instead, at once
+const boardFigures = async ($: EngineInterface, isTimelinePublic: boolean, isHeld = false) => {
+  if (!isHeld) await statsRead($, 'all').catch(() => undefined)
   const runs = held.get('all')?.runs ?? []
   const since = await installedAt($)
   return { ...boardOf(runs, await $.clock.now(), since), ...(isTimelinePublic ? { timeline: timelineOf(runs, 40_000, since) } : {}) }
@@ -175,29 +176,47 @@ const installedAt = async ($: EngineInterface) => {
   return at
 }
 const UNREACHED = 'Couldn’t reach the leaderboard. Try again in a minute.'
-const boardAct = async ($: EngineInterface, act: () => Promise<string>) => {
-  if (boardNow.isBusy) return
-  ;((boardNow.isBusy = true), (boardNow.said = ''), drawAgain($))
-  try {
-    boardNow.said = await act()
-  } catch (err) {
-    ;((boardNow.said = UNREACHED), log($, `leaderboard: ${String(err)}`))
-  } finally {
-    ;((boardNow.isBusy = false), drawAgain($))
-    void readBoard($, true).catch(() => undefined)
-  }
+// The board's calls, one at a time in the order made: a press never waits on a call it can't see, nor is dropped for one (on 0.2.261
+// a Join pressed while one was on its way did nothing at all)
+const boardInTurn = <T,>($: EngineInterface, call: () => Promise<T>): Promise<T> => {
+  ;((boardNow.waiting += 1), (boardNow.isBusy = true))
+  const done = () => void ((boardNow.waiting -= 1), (boardNow.isBusy = boardNow.waiting > 0), drawAgain($))
+  const r = boardNow.turn.then(call)
+  boardNow.turn = r.then(done, done)
+  return r
 }
-const joinBoard = ($: EngineInterface, name: string) =>
-  boardAct($, async () => {
-    if (!NAME_RULE.test(name)) return 'A username is 3 to 20 letters, digits, - or _, with no spaces.'
-    const r = await boardCall($, 'lb_join', { p_name: name, p_public: false, p_stats: await boardFigures($, false) })
+// A press: what it is doing shows at once, then what it came to
+const boardAct = ($: EngineInterface, doing: string, act: () => Promise<string>) => {
+  ;((boardNow.said = doing), drawAgain($))
+  return boardInTurn($, async () => {
+    ;((boardNow.said = doing), drawAgain($))
+    try {
+      boardNow.said = await act()
+    } catch (err) {
+      ;((boardNow.said = UNREACHED), log($, `leaderboard: ${String(err)}`))
+    } finally {
+      void readBoard($, true).catch(() => undefined)
+    }
+  })
+}
+// Joining sends the figures read last, so it answers in a moment; the full figures follow straight after, and the board is read again
+const joinBoard = ($: EngineInterface, name: string) => {
+  if (!NAME_RULE.test(name)) return void ((boardNow.said = 'A username is 3 to 20 letters, digits, - or _, with no spaces.'), drawAgain($))
+  return boardAct($, `Joining as ${name}…`, async () => {
+    if (boardNow.file.token) return boardNow.said
+    const r = await boardCall($, 'lb_join', { p_name: name, p_public: false, p_stats: await boardFigures($, false, true) })
     if (r.status === 409) return `Someone already has the username ${name}. Choose another.`
     if (!r.ok || typeof r.body !== 'string') return UNREACHED
     await boardSave($, { name, token: r.body, isPublic: false, sentAt: await $.clock.now() })
-    return `✓ You joined as ${name}. Your stats are private until you make them public.`
+    const joined = `✓ You joined as ${name}. Your stats are private until you make them public.`
+    ;((boardNow.said = joined), drawAgain($))
+    void readBoard($, true).catch(() => undefined)
+    await pushBoard($, false, false)
+    return joined
   })
+}
 const leaveBoard = ($: EngineInterface) =>
-  boardAct($, async () => {
+  boardAct($, 'Taking you off the leaderboard…', async () => {
     const r = await boardCall($, 'lb_leave', { p_token: boardNow.file.token ?? '' })
     if (!r.ok) return 'Couldn’t reach the leaderboard, so you’re still on it. Press Leave again in a minute.'
     await boardSave($, {})
@@ -216,7 +235,7 @@ const pushBoard = async ($: EngineInterface, isPublic: boolean, isTimelinePublic
   return 'sent' as const
 }
 const publicBoard = ($: EngineInterface, what: 'stats' | 'timeline', isPublic: boolean) =>
-  boardAct($, async () => {
+  boardAct($, `Making your ${what} ${isPublic ? 'public' : 'private'}…`, async () => {
     const file = boardNow.file
     const r = await pushBoard($, what === 'stats' ? isPublic : Boolean(file.isPublic), what === 'timeline' ? isPublic : timelineShown(file))
     return r === 'gone' ? 'You’re no longer on the leaderboard. Choose a username to join again.' : r === 'failed' ? UNREACHED : `✓ Your ${what} ${what === 'stats' ? 'are' : 'is'} ${isPublic ? 'public' : 'private'}.`
@@ -227,12 +246,7 @@ const sendBoard = async ($: EngineInterface) => {
   const now = await $.clock.now()
   if (!file.token || boardNow.isBusy || now - (file.sentAt ?? 0) < BOARD_EVERY) return
   await boardSave($, { ...file, sentAt: now })
-  boardNow.isBusy = true
-  try {
-    await pushBoard($, Boolean(file.isPublic), timelineShown(file))
-  } finally {
-    boardNow.isBusy = false
-  }
+  await boardInTurn($, () => (boardNow.file.token ? pushBoard($, Boolean(boardNow.file.isPublic), timelineShown(boardNow.file)) : Promise.resolve('gone' as const)))
 }
 const openSite = async ($: EngineInterface, name = '') => {
   const r = await openOn($, name ? `${BOARD_SITE}/${encodeURIComponent(name)}` : BOARD_SITE)

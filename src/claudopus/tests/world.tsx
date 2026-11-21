@@ -557,7 +557,14 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
       const fn = String(e.argv.at(-1)).split('/').at(-1) ?? ''
       boarded.push({ fn, body: JSON.parse(String(e.init?.stdin ?? '{}')) as Record<string, unknown> })
       const said = files.get(`board:${fn}`)
-      return said === undefined ? ok('', 7) : ok(said)
+      const answer = () => (said === undefined ? ok('', 7) : ok(said))
+      // hold:<fn> keeps the call on its way until the test lets it go: held.get(fn)?.('')
+      return files.has(`hold:${fn}`) ? (new Promise(done => held.set(fn, () => done(answer()))) as never) : answer()
+    }
+    // hold:jq keeps every chat's records being read, as they are for half a minute after a reload, until the test lets them go
+    if (tool?.endsWith('jq') && files.has('hold:jq')) {
+      const sum = files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}'
+      return new Promise(done => held.set(`jq:${String(e.argv.at(-1))}`, () => done(ok(sum)))) as never
     }
     // grep handed a .env file for the names before each =, as the list of keys reads one: only what -o matches comes back
     if (tool === '/usr/bin/grep' && rest[0] === '-ohE') return ok((files.get(String(rest[2])) ?? '').split('\n').flatMap(line => line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/)?.[0] ?? []).map(one => `${one}\n`).join(''))
