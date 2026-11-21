@@ -9,9 +9,10 @@ const SITE = 'https://www.claudopus.ai'
 
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const num = v => (typeof v === 'number' && isFinite(v) ? v : 0)
+// Days, hours and minutes: 9d 0h 18m
 const hours = ms => {
-  const m = Math.round(ms / 60000)
-  return m < 60 ? `${m}m` : `${Math.floor(m / 60).toLocaleString('en-US')}h`
+  const m = Math.round(ms / 60000), d = Math.floor(m / 1440), h = Math.floor(m / 60) % 24, mm = String(m % 60).padStart(2, '0')
+  return d ? `${d}d ${h}h ${mm}m` : h ? `${h}h ${mm}m` : `${m}m`
 }
 let page
 const pageOf = async () => {
@@ -38,7 +39,7 @@ export default async function handler(req, res) {
     const times = num(f.clock) > 0 ? `${(num(f.work) / num(f.clock)).toFixed(2)}×` : ''
     const title = `${person.name} on the Claudopus leaderboard`
     const rank = person.ranks?.d7 ? `#${person.ranks.d7} of ${num(person.total)} this week. ` : ''
-    const said = `${rank}${hours(num(f.work))} of work done in ${hours(num(f.clock))} on the clock${times ? `: ${times}` : ''}.`
+    const said = `${rank}${hours(num(f.work))} of work in ${hours(num(f.clock))} on the clock${times ? `: ${times}` : ''}.`
     const url = `${SITE}/leaderboard/${encodeURIComponent(person.name)}`
     const image = `${SITE}/og/leaderboard/${encodeURIComponent(person.name)}`
     const set = (attr, key, value) => {

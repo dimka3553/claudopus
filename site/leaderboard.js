@@ -6,7 +6,7 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
   const $ = s => document.querySelector(s)
   const q = new URLSearchParams(location.search)
   const RANGES = { today: 'Today', d7: '7 days', d30: '30 days', all: 'All time' }
-  const SORTS = { work: 'Hours of work done', clock: 'Hours on the clock', efficiency: 'Efficiency', tokens: 'Tokens', cost: 'API cost' }
+  const SORTS = { work: 'Time of work', clock: 'Time on the clock', efficiency: 'Efficiency', tokens: 'Tokens', cost: 'API cost' }
   const EVERY = 30000
 
   // the name comes from the path (/leaderboard/dima), or from ?u= where the page is opened as leaderboard.html
@@ -27,9 +27,10 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
 
   // ---- how figures are written ----
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
+  // Days, hours and minutes: 9d 0h 18m, 5h 03m, 45m
   const hours = ms => {
-    const m = Math.round((ms || 0) / 60000)
-    return m < 60 ? m + 'm' : Math.floor(m / 60).toLocaleString('en-US') + 'h ' + String(m % 60).padStart(2, '0') + 'm'
+    const m = Math.round((ms || 0) / 60000), d = Math.floor(m / 1440), h = Math.floor(m / 60) % 24, mm = String(m % 60).padStart(2, '0')
+    return d ? d + 'd ' + h + 'h ' + mm + 'm' : h ? h + 'h ' + mm + 'm' : m + 'm'
   }
   const span = ms => (ms || 0) < 60000 ? Math.round((ms || 0) / 1000) + 's' : hours(ms)
   const tokens = n => {
@@ -122,7 +123,7 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
   const board = rows => {
     title.textContent = 'Leaderboard'
     lead.hidden = false
-    document.title = 'Claudopus leaderboard: hours of work done by Claude tasks'
+    document.title = 'Claudopus leaderboard: how long Claude tasks worked'
     if (!rows.length) return `<div class="lb-empty"><h2>Nobody has joined yet.</h2><p class="soft">Be the first: <a href="#join">here is how to join</a>.</p></div>`
     const total = rows[0].total || rows.length
     const head = (key, label) => key
@@ -135,9 +136,9 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
         : `${esc(r.name)} <span class="lb-private">private</span>`
       return `<tr><td class="lb-rank">${r.rank}</td><td class="lb-who">${name}</td><td class="num">${hours(f.work)}</td><td class="num">${hours(f.clock)}</td><td class="num">${eff(f)}</td><td>${r.model ? esc(modelName(r.model)) : '–'}</td><td class="num">${tokens(f.tokens)}</td><td class="num">${money(f.cost)}</td><td class="num">${count(f.tasks)}</td></tr>`
     }).join('')
-    return `<div class="lb-scroll"><table class="lb-table"><thead><tr><th>#</th><th>Username</th>${head('work', 'Hours of work done')}${head('clock', 'Hours on the clock')}${head('efficiency', 'Efficiency')}<th>Favourite model</th>${head('tokens', 'Tokens')}${head('cost', 'API cost')}<th class="num">Tasks done</th></tr></thead><tbody>${body}</tbody></table></div>
+    return `<div class="lb-scroll"><table class="lb-table"><thead><tr><th>#</th><th>Username</th>${head('work', 'Time of work')}${head('clock', 'Time on the clock')}${head('efficiency', 'Efficiency')}<th>Favourite model</th>${head('tokens', 'Tokens')}${head('cost', 'API cost')}<th class="num">Tasks done</th></tr></thead><tbody>${body}</tbody></table></div>
 <p class="lb-count">${total === 1 ? '1 person' : count(total) + ' people'} on the board</p>
-<ul class="lb-notes note"><li>Efficiency: hours of work done for each hour on the clock.</li><li>Favourite model: the model that used the most tokens.</li><li>API cost: what the same use would cost at Anthropic's list prices.</li></ul>`
+<ul class="lb-notes note"><li>Time of work: how long Claude's tasks worked, added up.</li><li>Efficiency: how much work got done for each hour on the clock.</li><li>Favourite model: the model that used the most tokens.</li><li>API cost: what the same use would cost at Anthropic's list prices.</li></ul>`
   }
 
   const person = p => {
@@ -152,9 +153,9 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
     const s = (p.stats || {})[range] || {}, r = (p.ranks || {})[range]
     const rank = `<p class="lb-rankline">${r ? '#' + r + ' of ' + count(p.total) : 'Not ranked'} · ${RANGES[range]}</p>`
     const tiles = `<ul class="lb-tiles">${[
-      tile('Hours of work done', hours(s.work)),
-      tile('Hours on the clock', hours(s.clock)),
-      tile('Efficiency', eff(s), 'Hours of work done for each hour on the clock.'),
+      tile('Time of work', hours(s.work)),
+      tile('Time on the clock', hours(s.clock)),
+      tile('Efficiency', eff(s), 'How much work got done for each hour on the clock.'),
       tile('Favourite model', p.model && p.model[range] ? esc(modelName(p.model[range])) : '–', 'The model that used the most tokens.'),
       tile('API cost', money(s.cost), 'What the same use would cost at Anthropic\'s list prices.'),
       tile('Tasks done', count(s.tasks)),

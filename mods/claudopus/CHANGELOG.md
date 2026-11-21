@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.258 · 21 November 2026
+- The panel's Leaderboard button now opens a Leaderboard tab: the board's top 10 for today, 7 days, 30 days or all time, and right under it, joining with a username, or your place with Open my page, public or private, and Leave. Stats no longer holds it.
+- Time of work and time on the clock read in days, hours and minutes, such as 9d 0h 18m, in Stats, on the board, on each person's page and in link previews.
+
 ## 0.2.257 · 21 November 2026
 - A link to someone's leaderboard page now shows a picture of their stats wherever you paste it: hours of work done, hours on the clock, efficiency, favourite model, API cost and tasks, with their timeline when their stats are public. A link to the board shows the top five.
 - claudopus.ai's own link picture now shows the 3D octopus with a task on each arm.

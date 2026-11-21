@@ -1,5 +1,5 @@
 // The leaderboard's link previews: a 1200×630 picture of the board's top five (no name), or of one person (?name=): their hours of
-// work done, hours on the clock, efficiency, favourite model, API cost and tasks, and, when their stats are public, their timeline
+// work, time on the clock, efficiency, favourite model, API cost and tasks, and, when their stats are public, their timeline
 // as Stats draws it, with no task names. claudopus.ai/og/leaderboard.png and /og/leaderboard/<name> are rewrites to here
 import React from 'https://esm.sh/react@18.2.0'
 import { ImageResponse } from 'https://deno.land/x/og_edge@0.0.6/mod.ts'
@@ -37,9 +37,10 @@ const loadOctopus = async () => {
 }
 
 const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : 0)
+// Days, hours and minutes: 9d 0h 18m
 const hours = (ms: number) => {
-  const m = Math.round(ms / 60000)
-  return m < 60 ? `${m}m` : `${Math.floor(m / 60).toLocaleString('en-US')}h ${String(m % 60).padStart(2, '0')}m`
+  const m = Math.round(ms / 60000), d = Math.floor(m / 1440), h = Math.floor(m / 60) % 24, mm = String(m % 60).padStart(2, '0')
+  return d ? `${d}d ${h}h ${mm}m` : h ? `${h}h ${mm}m` : `${m}m`
 }
 const money = (d: number) => (d >= 100 ? `$${Math.round(d).toLocaleString('en-US')}` : `$${d.toFixed(2)}`)
 const times = (f: Record<string, unknown>) => (num(f.clock) > 0 ? `${(num(f.work) / num(f.clock)).toFixed(2)}×` : '–')
@@ -102,7 +103,7 @@ const personCard = (p: any, rg: string, octo: string | null) => {
     h('div', { style: { display: 'flex', alignItems: 'baseline', marginTop: 26 } },
       h('div', { style: { fontSize: 84, fontWeight: 700, letterSpacing: -2 } }, String(p.name ?? '').slice(0, 20)),
       h('div', { style: { fontSize: 30, color: PURPLE, fontWeight: 700, marginLeft: 24 } }, `${rank} · ${RANGES[rg]}`)),
-    h('div', { style: { display: 'flex', marginTop: 22 } }, stat(hours(num(f.work)), 'hours of work done'), stat(hours(num(f.clock)), 'hours on the clock'), stat(times(f), 'efficiency')),
+    h('div', { style: { display: 'flex', marginTop: 22 } }, stat(hours(num(f.work)), 'time of work'), stat(hours(num(f.clock)), 'time on the clock'), stat(times(f), 'efficiency')),
     h('div', { style: { display: 'flex', marginTop: 18, fontSize: 26, color: SOFT } },
       h('span', { style: { color: INK, fontWeight: 700, marginRight: 8 } }, modelName(p.model?.[rg])), 'favourite model ·',
       h('span', { style: { color: INK, fontWeight: 700, margin: '0 8px' } }, money(num(f.cost))), 'API cost ·',
@@ -117,7 +118,7 @@ const personCard = (p: any, rg: string, octo: string | null) => {
 const boardCard = (rows: any[], rg: string, octo: string | null) =>
   frame([
     h('div', { style: { display: 'flex', fontSize: 72, fontWeight: 700, letterSpacing: -2, marginTop: 22 } }, 'Who got the most done'),
-    h('div', { style: { display: 'flex', fontSize: 28, color: SOFT, marginTop: 6 } }, `${RANGES[rg]} · hours of work their Claude tasks did`),
+    h('div', { style: { display: 'flex', fontSize: 28, color: SOFT, marginTop: 6 } }, `${RANGES[rg]} · by how long their Claude tasks worked`),
     h('div', { style: { display: 'flex', flexDirection: 'column', marginTop: 30 } },
       ...(rows.length ? rows.slice(0, 5) : [null]).map((r: any) =>
         r

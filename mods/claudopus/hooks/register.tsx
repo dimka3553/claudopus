@@ -3,8 +3,8 @@ import type { ElementTable, EngineInterface, McpToolResult, On, RasterProps, Reg
 import type { CodeFile, CodeMade, Entry, FilesMade, Flow, FlowAgent, Item, Link, Made, MadeKind, Me, PressRun, Prompt, Report, Server, Shared, Stream, Todo } from '../types'
 import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresBefore, squaresKept, squaresOf, squaresSvg, squaresWidth, stageOf as flowStageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'
-import { boardOf, timelineOf, CACHE_V, GAP, held, memoryHeld, NAME_RULE, parsed, READ_EVERY, reading, statsView, SUM_JQ, svgFits, view as statsShown } from './stats'
-import type { BoardShown, Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
+import { boardOf, boardView, timelineOf, CACHE_V, GAP, held, memoryHeld, NAME_RULE, parsed, READ_EVERY, reading, statsView, SUM_JQ, svgFits, view as statsShown } from './stats'
+import type { BoardRow, BoardShown, Range, Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
 import { broughtBackBy, isResultId, marksOf, merged, markThere, parsedMeta, PLACE, PULL, pullThere, PUSH, PUSH_THERE, rehome, RESULTS_A_TRIP, RESULTS_EVERY, RESULTS_LOOK, resultsOf } from './results'
 import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, helpersOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, deliveredSaid, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, shareableHelpers, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
 import type { Answer, Off } from './shared'
@@ -3253,6 +3253,7 @@ const boardAct = async ($: EngineInterface, act: () => Promise<string>) => {
     ;((boardNow.said = UNREACHED), log($, `leaderboard: ${String(err)}`))
   } finally {
     ;((boardNow.isBusy = false), drawAgain($))
+    void readBoard($, true).catch(() => undefined)
   }
 }
 const joinBoard = ($: EngineInterface, name: string) =>
@@ -3296,11 +3297,45 @@ const sendBoard = async ($: EngineInterface) => {
     boardNow.isBusy = false
   }
 }
-const openBoard = async ($: EngineInterface) => {
-  const r = await openOn($, BOARD_SITE)
+const openSite = async ($: EngineInterface, name = '') => {
+  const r = await openOn($, name ? `${BOARD_SITE}/${encodeURIComponent(name)}` : BOARD_SITE)
   if (r.exitCode !== 0) log($, `leaderboard not opened: ${'stderr' in r ? String(r.stderr) : ''}`)
 }
+const BOARD_PANE = 'leaderboard'
+const BOARD_TITLE = 'Leaderboard'
+const BOARD_READ_EVERY = 30_000
+const boardTop: { range: Range; rows?: BoardRow[]; total: number; at: number; error: string; isReading: boolean } = { range: 'd7', total: 0, at: 0, error: '', isReading: false }
+const readBoard = async ($: EngineInterface, isNow = false) => {
+  const now = await $.clock.now()
+  if (boardTop.isReading || (!isNow && now - boardTop.at < BOARD_READ_EVERY)) return
+  boardTop.isReading = true
+  const range = boardTop.range
+  try {
+    const r = await boardCall($, 'lb_board', { p_range: range, p_sort: 'work' })
+    if (range !== boardTop.range) return
+    if (!r.ok || !Array.isArray(r.body)) return void (boardTop.error = 'Couldn’t reach the leaderboard. Claudopus tries again in 30 seconds.')
+    const n = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : 0)
+    const rows = (r.body as Record<string, unknown>[]).map((one): BoardRow => {
+      const f = (one.f ?? {}) as Record<string, unknown>
+      return { rank: n(one.rank), name: String(one.name ?? '').slice(0, 20), isPublic: one.is_public === true, work: n(f.work), clock: n(f.clock), model: typeof one.model === 'string' ? one.model : '' }
+    })
+    ;((boardTop.rows = rows), (boardTop.total = n((r.body as Record<string, unknown>[])[0]?.total)), (boardTop.error = ''))
+  } finally {
+    ;((boardTop.isReading = false), (boardTop.at = now), drawAgain($))
+  }
+}
+const openBoard = async ($: EngineInterface) => {
+  presses += 1
+  void readBoard($).catch(err => log($, `leaderboard not read: ${String(err)}`))
+  await front($, BOARD_PANE, BOARD_TITLE)
+}
 const boardShown = ($: EngineInterface): BoardShown => ({
+  rows: boardTop.rows,
+  total: boardTop.total,
+  error: boardTop.error,
+  range: boardTop.range,
+  setRange: range => void ((boardTop.range = range), (boardTop.rows = undefined), drawAgain($), readBoard($, true).catch(err => log($, `leaderboard not read: ${String(err)}`))),
+  openPerson: name => void openSite($, name).catch(err => log($, `leaderboard not opened: ${String(err)}`)),
   name: boardNow.file.name ?? '',
   isPublic: Boolean(boardNow.file.isPublic),
   said: boardNow.said,
@@ -3308,7 +3343,7 @@ const boardShown = ($: EngineInterface): BoardShown => ({
   join: name => void joinBoard($, name),
   leave: () => void leaveBoard($),
   setPublic: isPublic => void publicBoard($, isPublic),
-  open: () => void openBoard($).catch(err => log($, `leaderboard not opened: ${String(err)}`)),
+  open: () => void openSite($).catch(err => log($, `leaderboard not opened: ${String(err)}`)),
 })
 const boardButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="board-button" flexShrink={0}>
@@ -13264,7 +13299,7 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => (await givenIfDrawn($, e, await (async () => {
     const id = e.requestId ?? ''
     await noteTabAsked($, id)
-    const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, LOG_PANE, DIFF_PANE, 'report-'].some(start => id.startsWith(start))
+    const isTab = [REPORTS_PANE, STATS_PANE, BOARD_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, LOG_PANE, DIFF_PANE, 'report-'].some(start => id.startsWith(start))
     if (e.surface === 'desktop' && isTab && !id.startsWith(WORK_PANE) && !id.startsWith(FLOW_PANE)) {
       heldTabs.add(id)
       const key = `${id}|${e.surface}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.scroll.offset > 0 ? 1 : 0}`
@@ -15020,11 +15055,21 @@ const tabHooks = (on: On) => {
   on('ui.render', { component: 'Pane', requestId: STATS_PANE }, async ($, e) => {
     const { Box } = uiOf($, e)
     void statsRead($, statsShown.scope).catch(() => undefined)
-    if (!boardNow.isBusy) await boardLoad($).catch(() => undefined)
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {statsView(() => drawAgain($), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32, boardShown($))}
+        {statsView(() => drawAgain($), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
       </Box>
+    )
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
+
+  on('ui.render', { component: 'Pane', requestId: BOARD_PANE }, async ($, e) => {
+    const ui = uiOf($, e)
+    if (!boardNow.isBusy) await boardLoad($).catch(() => undefined)
+    void readBoard($).catch(() => undefined)
+    return (
+      <ui.Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
+        {boardView(ui, boardShown($), e.surface)}
+      </ui.Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 

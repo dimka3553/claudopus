@@ -184,6 +184,7 @@ const boardAct = async ($: EngineInterface, act: () => Promise<string>) => {
     ;((boardNow.said = UNREACHED), log($, `leaderboard: ${String(err)}`))
   } finally {
     ;((boardNow.isBusy = false), drawAgain($))
+    void readBoard($, true).catch(() => undefined)
   }
 }
 const joinBoard = ($: EngineInterface, name: string) =>
@@ -229,11 +230,46 @@ const sendBoard = async ($: EngineInterface) => {
     boardNow.isBusy = false
   }
 }
-const openBoard = async ($: EngineInterface) => {
-  const r = await openOn($, BOARD_SITE)
+const openSite = async ($: EngineInterface, name = '') => {
+  const r = await openOn($, name ? `${BOARD_SITE}/${encodeURIComponent(name)}` : BOARD_SITE)
   if (r.exitCode !== 0) log($, `leaderboard not opened: ${'stderr' in r ? String(r.stderr) : ''}`)
 }
+// The board as the Leaderboard tab shows it: the top 10 of the range chosen, read again at most every 30 seconds while the tab is drawn
+const BOARD_PANE = 'leaderboard'
+const BOARD_TITLE = 'Leaderboard'
+const BOARD_READ_EVERY = 30_000
+const boardTop: { range: Range; rows?: BoardRow[]; total: number; at: number; error: string; isReading: boolean } = { range: 'd7', total: 0, at: 0, error: '', isReading: false }
+const readBoard = async ($: EngineInterface, isNow = false) => {
+  const now = await $.clock.now()
+  if (boardTop.isReading || (!isNow && now - boardTop.at < BOARD_READ_EVERY)) return
+  boardTop.isReading = true
+  const range = boardTop.range
+  try {
+    const r = await boardCall($, 'lb_board', { p_range: range, p_sort: 'work' })
+    if (range !== boardTop.range) return
+    if (!r.ok || !Array.isArray(r.body)) return void (boardTop.error = 'Couldn’t reach the leaderboard. Claudopus tries again in 30 seconds.')
+    const n = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : 0)
+    const rows = (r.body as Record<string, unknown>[]).map((one): BoardRow => {
+      const f = (one.f ?? {}) as Record<string, unknown>
+      return { rank: n(one.rank), name: String(one.name ?? '').slice(0, 20), isPublic: one.is_public === true, work: n(f.work), clock: n(f.clock), model: typeof one.model === 'string' ? one.model : '' }
+    })
+    ;((boardTop.rows = rows), (boardTop.total = n((r.body as Record<string, unknown>[])[0]?.total)), (boardTop.error = ''))
+  } finally {
+    ;((boardTop.isReading = false), (boardTop.at = now), drawAgain($))
+  }
+}
+const openBoard = async ($: EngineInterface) => {
+  presses += 1
+  void readBoard($).catch(err => log($, `leaderboard not read: ${String(err)}`))
+  await front($, BOARD_PANE, BOARD_TITLE)
+}
 const boardShown = ($: EngineInterface): BoardShown => ({
+  rows: boardTop.rows,
+  total: boardTop.total,
+  error: boardTop.error,
+  range: boardTop.range,
+  setRange: range => void ((boardTop.range = range), (boardTop.rows = undefined), drawAgain($), readBoard($, true).catch(err => log($, `leaderboard not read: ${String(err)}`))),
+  openPerson: name => void openSite($, name).catch(err => log($, `leaderboard not opened: ${String(err)}`)),
   name: boardNow.file.name ?? '',
   isPublic: Boolean(boardNow.file.isPublic),
   said: boardNow.said,
@@ -241,7 +277,7 @@ const boardShown = ($: EngineInterface): BoardShown => ({
   join: name => void joinBoard($, name),
   leave: () => void leaveBoard($),
   setPublic: isPublic => void publicBoard($, isPublic),
-  open: () => void openBoard($).catch(err => log($, `leaderboard not opened: ${String(err)}`)),
+  open: () => void openSite($).catch(err => log($, `leaderboard not opened: ${String(err)}`)),
 })
 const boardButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="board-button" flexShrink={0}>
