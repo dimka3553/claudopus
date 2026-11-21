@@ -3,8 +3,8 @@ import type { ElementTable, EngineInterface, McpToolResult, On, RasterProps, Reg
 import type { CodeFile, CodeMade, Entry, FilesMade, Flow, FlowAgent, Item, Link, Made, MadeKind, Me, PressRun, Prompt, Report, Server, Shared, Stream, Todo } from '../types'
 import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresBefore, squaresKept, squaresOf, squaresSvg, squaresWidth, stageOf as flowStageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'
-import { boardOf, boardView, timelineOf, CACHE_V, GAP, held, memoryHeld, NAME_RULE, parsed, READ_EVERY, reading, statsView, SUM_JQ, svgFits, view as statsShown } from './stats'
-import type { BoardRow, BoardShown, Range, Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
+import { boardDelta, boardFrom, boardRange, boardView, CACHE_V, DAY, dayCells, dayNo, GAP, held, memoryHeld, monthFrom, monthName, monthNo, monthsKept, NAME_RULE, parsed, partOf, piecesIn, piecesKept, rangeFrom, RANGES, READ_EVERY, reading, rowPiece, statsFrom, statsView, SUM_JQ, sumKept, svgFits, timelineOf, view as statsShown } from './stats'
+import type { BoardRow, BoardSent, BoardShown, Cache, TokenSums, DayEntry, DayRows, FileSum, Held, Kept, Loaded, Meta, MemoryPart, MonthKept, Part, Piece, Range, Scope, What } from './stats'
 import { broughtBackBy, isResultId, marksOf, merged, markThere, parsedMeta, PLACE, PULL, pullThere, PUSH, PUSH_THERE, rehome, RESULTS_A_TRIP, RESULTS_EVERY, RESULTS_LOOK, resultsOf } from './results'
 import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, helpersOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, deliveredSaid, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, shareableHelpers, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
 import type { Answer, Off } from './shared'
@@ -3084,17 +3084,26 @@ const memoryHooks = (on: On) => {
 
 
 let jqPath = ''
+const jqLine: (() => void)[] = []
+let jqBusy = 0
 async function sumOf($: EngineInterface, path: string): Promise<FileSum> {
-  for (const jq of jqPath ? [jqPath] : ['/usr/bin/jq', '/opt/homebrew/bin/jq', '/usr/local/bin/jq', 'jq']) {
-    const r = await $.process.run([jq, '-cnR', '--argjson', 'gap', String(GAP), SUM_JQ, path]).catch(() => undefined)
-    if (!r || r.exitCode !== 0) continue
-    jqPath = jq
-    return parsed<FileSum>(r.stdout.trim(), { s: [], u: [], d: [] })
+  if (jqBusy >= 6) await new Promise<void>(go => jqLine.push(go))
+  else jqBusy += 1
+  try {
+    for (const jq of jqPath ? [jqPath] : ['/usr/bin/jq', '/opt/homebrew/bin/jq', '/usr/local/bin/jq', 'jq']) {
+      const r = await $.process.run([jq, '-cnR', '--argjson', 'gap', String(GAP), SUM_JQ, path]).catch(() => undefined)
+      if (!r || r.exitCode !== 0) continue
+      jqPath = jq
+      return parsed<FileSum>(r.stdout.trim(), { s: [], u: [], d: [] })
+    }
+    throw new Error('jq')
+  } finally {
+    const next = jqLine.shift()
+    if (next) next()
+    else jqBusy -= 1
   }
-  throw new Error('jq')
 }
-async function chatFolderOf($: EngineInterface, home: string, chatId: string, known?: string) {
-  if (known && (await $.fs.stat(`${known}/${chatId}.jsonl`).catch(() => undefined))) return known
+async function chatFolderOf($: EngineInterface, home: string, chatId: string) {
   const root = `${home}/.claude/projects`
   for (const entry of await $.fs.list(root).catch(() => [])) {
     if (entry.kind !== 'dir') continue
@@ -3102,63 +3111,319 @@ async function chatFolderOf($: EngineInterface, home: string, chatId: string, kn
   }
   return ''
 }
-async function runsOf($: EngineInterface, home: string, memory: string, chatId: string, hint = ''): Promise<Run[]> {
-  const cachePath = `${memory}/stats/${chatId}.json`
-  const read = parsed<Cache>(await readOr($, cachePath), { files: {} })
-  const cache: Cache = read.v === CACHE_V ? read : { files: {} }
-  const folder = await chatFolderOf($, home, chatId, hint || cache.folder)
-  if (!folder) return []
+async function chatsKept($: EngineInterface, memory: string, chatId: string) {
+  const kept = (await $.fs.list(`${memory}/finished`).catch(() => [])).map(e => /^(.+)\.json$/.exec(e.name)?.[1] ?? '').filter(Boolean)
+  return [...new Set([chatId, ...kept])]
+}
+const statsText = ($: EngineInterface, path: string) => $.fs.read(path).then(text => String(text), () => '')
+
+
+const PART_MOST = 1_500_000
+type Shards<T, H> = { base: string; head: H; of: Map<string, T>; home: Map<string, number>; lens: Map<string, number>; sizes: number[]; dirty: Set<number>; isBroken: boolean; other?: unknown }
+type PartFile<T, H> = { v?: number; e?: string; n?: number; head?: H; of?: Record<string, T> }
+const partPath = (base: string, i: number) => (i ? `${base}.${i}.json` : `${base}.json`)
+async function shardsRead<T, H>($: EngineInterface, base: string, epoch: string, head: H): Promise<Shards<T, H>> {
+  const kept: Shards<T, H> = { base, head, of: new Map(), home: new Map(), lens: new Map(), sizes: [0], dirty: new Set(), isBroken: false }
+  const text = await statsText($, partPath(base, 0))
+  if (!text) return kept
+  const first = parsed<PartFile<T, H> | undefined>(text, undefined)
+  if (!first || typeof first !== 'object') return ((kept.isBroken = true), kept)
+  if (first.v !== CACHE_V || first.e !== epoch) return ((kept.other = first), kept)
+  const rest = await Promise.all(Array.from({ length: Math.max(0, (first.n ?? 1) - 1) }, (_, i) => statsText($, partPath(base, i + 1))))
+  const parts = [first, ...rest.map(one => parsed<PartFile<T, H> | undefined>(one, undefined))]
+  if (parts.some(one => !one || one.v !== CACHE_V || one.e !== epoch)) return ((kept.isBroken = true), kept)
+  kept.head = first.head ?? head
+  kept.sizes = [text.length, ...rest.map(one => one.length)]
+  parts.forEach((part, i) => {
+    for (const [key, value] of Object.entries(part?.of ?? {})) (kept.of.set(key, value), kept.home.set(key, i))
+  })
+  return kept
+}
+const shardSet = <T, H>(kept: Shards<T, H>, key: string, value: T | undefined) => {
+  const home = kept.home.get(key)
+  const was = kept.of.get(key)
+  if (home !== undefined) ((kept.sizes[home] = (kept.sizes[home] ?? 0) - (was === undefined ? 0 : (kept.lens.get(key) ?? JSON.stringify(was).length + key.length + 4))), kept.dirty.add(home))
+  if (value === undefined) return void (kept.of.delete(key), kept.home.delete(key), kept.lens.delete(key))
+  const len = JSON.stringify(value).length + key.length + 4
+  const fits = (i: number) => (kept.sizes[i] ?? 0) + len <= PART_MOST || (kept.sizes[i] ?? 0) < 100
+  const found = home !== undefined && fits(home) ? home : kept.sizes.findIndex((_, i) => fits(i))
+  const at = found < 0 ? (kept.dirty.add(0), kept.sizes.push(0) - 1) : found
+  ;(kept.of.set(key, value), kept.home.set(key, at), kept.lens.set(key, len), (kept.sizes[at] = (kept.sizes[at] ?? 0) + len), kept.dirty.add(at))
+}
+async function shardsWrite<T, H>($: EngineInterface, kept: Shards<T, H>, epoch: string) {
+  for (const i of [...kept.dirty].sort((a, b) => a - b)) {
+    const of: Record<string, T> = {}
+    for (const [key, at] of kept.home) if (at === i) of[key] = kept.of.get(key) as T
+    await $.fs.write(partPath(kept.base, i), JSON.stringify(i ? { v: CACHE_V, e: epoch, of } : { v: CACHE_V, e: epoch, n: kept.sizes.length, head: kept.head, of }))
+  }
+  kept.dirty.clear()
+}
+
+type Head = { folder: string; sought?: number; cells: Record<string, TokenSums>; months: number[] }
+const headNew = (): Head => ({ folder: '', cells: {}, months: [] })
+type AllKept = { v: number; epoch: string; at: number; swept: number; cursor: string; counted: number; recent: Record<string, number>; days: Record<string, { rev: number; c: TokenSums }>; months: Record<string, { rev: number; part: Part }> }
+const allNew = (now: number): AllKept => ({ v: CACHE_V, epoch: `${now.toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`, at: 0, swept: 0, cursor: '', counted: 0, recent: {}, days: {}, months: {} })
+async function allRead($: EngineInterface, memory: string) {
+  const all = parsed<AllKept | undefined>(await statsText($, `${memory}/stats/all.json`), undefined)
+  return all && all.v === CACHE_V && typeof all.epoch === 'string' && all.days && all.months ? all : undefined
+}
+type MonthOpen = { rev: number; kept: Shards<MonthKept, null>; read?: { pieces: Piece[]; turns: [number, number][] } }
+const statsOpen = { epoch: '', days: new Map<number, { rev: number; rows: Shards<DayEntry, null> }>(), months: new Map<number, MonthOpen>() }
+const statsOpened = <T,>(open: Map<number, T>, at: number, one: T, most: number) => {
+  open.delete(at)
+  open.set(at, one)
+  for (const old of open.keys()) if (open.size > most) open.delete(old)
+  return one
+}
+const KEPT_BROKEN = 'kept files unreadable'
+async function dayRead($: EngineInterface, memory: string, all: AllKept, day: number) {
+  if (statsOpen.epoch !== all.epoch) ((statsOpen.epoch = all.epoch), statsOpen.days.clear(), statsOpen.months.clear())
+  const rev = all.days[day]?.rev ?? 0
+  const open = statsOpen.days.get(day)
+  if (open && open.rev === rev) return open.rows
+  const rows = await shardsRead<DayEntry, null>($, `${memory}/stats/days/${day}`, all.epoch, null)
+  if (rows.isBroken || (rev && !rows.of.size)) throw new Error(KEPT_BROKEN)
+  return statsOpened(statsOpen.days, day, { rev, rows }, 8).rows
+}
+async function monthRead($: EngineInterface, memory: string, all: AllKept, month: number) {
+  if (statsOpen.epoch !== all.epoch) ((statsOpen.epoch = all.epoch), statsOpen.days.clear(), statsOpen.months.clear())
+  const rev = all.months[month]?.rev ?? 0
+  const open = statsOpen.months.get(month)
+  if (open && open.rev === rev) return open
+  const kept = await shardsRead<MonthKept, null>($, `${memory}/stats/months/${monthName(month)}`, all.epoch, null)
+  if (kept.isBroken || (rev && !kept.of.size)) throw new Error(KEPT_BROKEN)
+  return statsOpened<MonthOpen>(statsOpen.months, month, { rev, kept }, 30)
+}
+const monthPieces = (open: MonthOpen) => (open.read ??= { pieces: [...open.kept.of].flatMap(([chat, one]) => one.p.map(row => rowPiece(chat, row))), turns: [...open.kept.of.values()].flatMap(one => one.t) })
+
+
+const LOCK_STALE = 90_000
+async function statsLock($: EngineInterface, memory: string, now: number) {
+  const lock = `${memory}/stats/lock`
+  const take = () =>
+    $.process.run(['/bin/sh', '-c', 'mkdir -p "$1/days" "$1/months" && mkdir "$2" 2>/dev/null && printf %s "$3" > "$2/at"', 'sh', `${memory}/stats`, lock, String(now)], { timeoutMs: 5000 }).then(r => r.exitCode === 0, () => false)
+  if (await take()) return true
+  if (now - Number(await statsText($, `${lock}/at`)) < LOCK_STALE) return false
+  await $.process.run(['rm', '-rf', lock], { timeoutMs: 5000 }).catch(() => undefined)
+  return take()
+}
+type Looked = { key: string; path: string; size: number; mtime: number; flow: string }
+async function whatOf($: EngineInterface, f: Looked, flowTitle: string): Promise<What> {
+  if (f.key === 'chat') return { kind: 'chat', parent: '', title: 'This chat', fin: false }
+  const meta = parsed<Meta>(await statsText($, f.path.replace(/\.jsonl$/, '.meta.json')), {})
+  if (f.flow) return { kind: 'flow', parent: f.flow, title: flowTitle, fin: Boolean(meta.finished), flow: f.flow }
+  return { kind: (meta.spawnDepth ?? 1) > 1 ? 'helper' : 'work', parent: meta.parentAgentId ?? '', title: meta.description ?? 'Background task', fin: Boolean(meta.finished) }
+}
+type Checked = { id: string; index: Shards<Kept, Head>; days: { day: number; key: string; entry: DayEntry | undefined }[]; isChanged: boolean; last: number; hadMain: boolean }
+const HOUR = 3_600_000
+async function chatCheck($: EngineInterface, home: string, memory: string, chatId: string, hint: string, epoch: string, now: number, isThorough: boolean): Promise<Checked> {
+  const index = await shardsRead<Kept, Head>($, `${memory}/stats/${chatId}`, epoch, headNew())
+  const old = (index.other as Cache | undefined)?.v === 5 ? (index.other as Cache) : undefined
+  const checked: Checked = { id: chatId, index, days: [], isChanged: false, last: 0, hadMain: index.of.has('chat') }
+  const head = index.head
+  const mainAt = (folder: string) => (folder ? $.fs.stat(`${folder}/${chatId}.jsonl`).catch(() => undefined) : Promise.resolve(undefined))
+  let folder = hint
+  let main = await mainAt(folder)
+  for (const known of [head.folder, old?.folder ?? '']) if (!main && known && known !== folder) main = await mainAt((folder = known))
+  if (!main && (isThorough || !head.sought) && !head.folder) main = await mainAt((folder = await chatFolderOf($, home, chatId)))
+  if (!main) folder = head.folder
+  if (!folder) {
+    if (!head.sought) ((head.sought = now), index.dirty.add(0))
+    return checked
+  }
+  if (head.folder !== folder || head.sought) ((index.head = { ...head, folder, sought: undefined }), index.dirty.add(0))
   const subs = `${folder}/${chatId}/subagents`
   const flowDirs = (await $.fs.list(`${subs}/workflows`).catch(() => [])).filter(e => e.kind === 'dir').map(e => e.name)
   const listed = [
     ...(await $.fs.list(subs).catch(() => [])).map(e => ({ ...e, dir: subs, flow: '' })),
     ...(await Promise.all(flowDirs.map(async name => (await $.fs.list(`${subs}/workflows/${name}`).catch(() => [])).map(e => ({ ...e, dir: `${subs}/workflows/${name}`, flow: name }))))).flat(),
   ].filter(e => /^agent-\w+\.jsonl$/.test(e.name))
-  const chatFile = (await $.fs.list(folder).catch(() => [])).find(e => e.name === `${chatId}.jsonl`)
-  const files = [...listed.map(e => ({ path: `${e.dir}/${e.name}`, size: e.size, mtime: e.mtimeMs, flow: e.flow, id: e.name.slice(6, -6) })), ...(chatFile ? [{ path: `${folder}/${chatFile.name}`, size: chatFile.size, mtime: chatFile.mtimeMs, flow: '', id: '' }] : [])]
-  const next: Cache = { v: CACHE_V, folder, files: {} }
-  let isChanged = folder !== cache.folder
-  for (let at = 0; at < files.length; at += 6)
-    await Promise.all(
-      files.slice(at, at + 6).map(async f => {
-        const was = cache.files[f.path]
-        if (was && was.size === f.size && was.mtime === f.mtime) next.files[f.path] = was
-        else {
-          next.files[f.path] = { size: f.size, mtime: f.mtime, sum: await sumOf($, f.path) }
-          isChanged = true
-        }
-      }),
-    )
-  if (isChanged || Object.keys(cache.files).length !== files.length) await $.fs.write(`${memory}/stats/${chatId}.json`, JSON.stringify(next)).catch(() => undefined)
+  const files: Looked[] = [
+    ...listed.map(e => ({ key: `${e.flow ? `${e.flow}/` : ''}${e.name.slice(0, -6)}`, path: `${e.dir}/${e.name}`, size: e.size, mtime: e.mtimeMs, flow: e.flow })),
+    ...(main ? [{ key: 'chat', path: `${folder}/${chatId}.jsonl`, size: main.size, mtime: main.mtimeMs, flow: '' }] : []),
+  ]
   const flowTitle = new Map<string, string>()
-  for (const name of flowDirs) flowTitle.set(name, parsed<{ title?: string; name?: string }>(await readOr($, `${memory}/flows/${name}.json`), {}).title || 'Workflow')
-  return Promise.all(
-    files.map(async (f): Promise<Run> => {
-      const sum = next.files[f.path]?.sum ?? { s: [], u: [], d: [] }
-      if (!f.id) return { id: chatId, kind: 'chat', parent: '', title: 'This chat', isFinished: false, sum }
-      const meta = parsed<Meta>(await readOr($, f.path.replace(/\.jsonl$/, '.meta.json')), {})
-      if (f.flow) return { id: f.id, kind: 'flow', parent: f.flow, title: flowTitle.get(f.flow) ?? 'Workflow', isFinished: Boolean(meta.finished) || (sum.s.at(-1)?.[1] ?? 0) < Date.now() - GAP, sum }
-      return { id: f.id, kind: (meta.spawnDepth ?? 1) > 1 ? 'helper' : 'work', parent: meta.parentAgentId ?? '', title: meta.description ?? 'Background task', isFinished: Boolean(meta.finished), sum }
-    }),
-  )
+  for (const name of flowDirs) flowTitle.set(name, parsed<{ title?: string }>(await statsText($, `${memory}/flows/${name}.json`), {}).title || 'Workflow')
+  const look = async (f: Looked) => {
+    const was = index.of.get(f.key)
+    const isSame = was !== undefined && was.size === f.size && was.mtime === f.mtime
+    const what: What =
+      was && isSame && f.key !== 'chat' && (was.fin || (!isThorough && now - f.mtime > HOUR))
+        ? { kind: was.kind, parent: was.parent, title: f.flow ? (flowTitle.get(f.flow) ?? 'Workflow') : was.title, fin: was.fin, ...(was.flow ? { flow: was.flow } : {}) }
+        : await whatOf($, f, flowTitle.get(f.flow) ?? 'Workflow')
+    if (was && isSame && was.kind === what.kind) {
+      if (was.parent !== what.parent || was.title !== what.title || was.fin !== what.fin) (shardSet(index, f.key, { ...was, ...what }), (checked.isChanged = true))
+      return
+    }
+    const kept5 = old?.files?.[f.path]
+    const sum = kept5 && kept5.size === f.size && kept5.mtime === f.mtime ? kept5.sum : await sumOf($, f.path)
+    const { kept, rows } = sumKept(sum, what, f.size, f.mtime)
+    for (const day of new Set([...Object.keys(was?.days ?? {}), ...Object.keys(kept.days)])) {
+      const [a, b] = [was?.days[day], kept.days[day]]
+      if (!a || !b || a[0] !== b[0] || a[1] !== b[1]) checked.days.push({ day: Number(day), key: `${chatId} ${f.key}`, entry: rows.get(Number(day)) })
+    }
+    shardSet(index, f.key, kept)
+    checked.isChanged = true
+  }
+  for (let at = 0; at < files.length; at += 12) await Promise.all(files.slice(at, at + 12).map(look))
+  checked.last = files.reduce((last, f) => Math.max(last, f.mtime), 0)
+  return checked
 }
-async function chatsKept($: EngineInterface, memory: string, chatId: string) {
-  const kept = (await $.fs.list(`${memory}/finished`).catch(() => [])).map(e => /^(.+)\.json$/.exec(e.name)?.[1] ?? '').filter(Boolean)
-  return [...new Set([chatId, ...kept])]
+async function statsApply($: EngineInterface, memory: string, all: AllKept, checked: Checked[], now: number) {
+  const byDay = new Map<number, Checked['days']>()
+  for (const one of checked) for (const change of one.days) byDay.set(change.day, [...(byDay.get(change.day) ?? []), change])
+  for (const [day, changes] of byDay) {
+    const rows = await dayRead($, memory, all, day)
+    for (const { key, entry } of changes) shardSet(rows, key, entry)
+    const whole = Object.fromEntries(rows.of)
+    if (rows.of.size) all.days[day] = { rev: now, c: dayCells(whole, day) }
+    else delete all.days[day]
+    for (const one of checked) {
+      if (!changes.some(change => change.key.startsWith(`${one.id} `))) continue
+      const own = dayCells(whole, day, -Infinity, one.id)
+      if (Object.keys(own).length) one.index.head.cells[day] = own
+      else delete one.index.head.cells[day]
+      one.index.dirty.add(0)
+    }
+    await shardsWrite($, rows, all.epoch)
+    statsOpened(statsOpen.days, day, { rev: all.days[day]?.rev ?? 0, rows }, 8)
+  }
+  const months = new Set<number>()
+  for (const one of checked) {
+    if (!one.isChanged || !one.index.of.size) continue
+    const { pieces, turns } = piecesKept(one.id, Object.fromEntries(one.index.of))
+    const next = monthsKept(pieces, turns)
+    for (const month of new Set([...one.index.head.months, ...next.keys()])) {
+      const open = await monthRead($, memory, all, month)
+      if (JSON.stringify(open.kept.of.get(one.id)) === JSON.stringify(next.get(month))) continue
+      shardSet(open.kept, one.id, next.get(month))
+      open.read = undefined
+      months.add(month)
+    }
+    one.index.head.months = [...next.keys()]
+    one.index.dirty.add(0)
+  }
+  for (const month of months) {
+    const open = await monthRead($, memory, all, month)
+    const { pieces, turns } = monthPieces(open)
+    if (open.kept.of.size) all.months[month] = { rev: now, part: partOf(piecesIn(pieces), turns, monthFrom(month), monthFrom(month + 1)) }
+    else delete all.months[month]
+    open.rev = all.months[month]?.rev ?? 0
+    await shardsWrite($, open.kept, all.epoch)
+  }
+  for (const one of checked) {
+    if (one.index.of.has('chat') !== one.hadMain) all.counted += one.hadMain ? -1 : 1
+    if (one.last > now - 2 * DAY) all.recent[one.id] = one.last
+  }
+  for (const [id, last] of Object.entries(all.recent)) if (last <= now - 2 * DAY) delete all.recent[id]
+  if (byDay.size || months.size || checked.some(one => one.isChanged)) await $.fs.write(`${memory}/stats/all.json`, JSON.stringify(all))
+  for (const one of checked) if (one.index.dirty.size) await shardsWrite($, one.index, all.epoch)
+}
+const STATS_BATCH = 4
+const SWEEP_EACH = 12
+const SWEEP_EVERY = 10 * 60_000
+async function chatsDue($: EngineInterface, memory: string, chatId: string, all: AllKept, now: number, isThorough: boolean) {
+  const ids = await chatsKept($, memory, chatId)
+  if (isThorough) return ids
+  const have = new Set((await $.fs.list(`${memory}/stats`).catch(() => [])).map(e => /^(.+?)(?:\.\d+)?\.json$/.exec(e.name)?.[1] ?? '').filter(Boolean))
+  const open = new Set((await $.fs.list(`${memory}/keep`).catch(() => [])).filter(e => e.name.endsWith('.beat') && e.mtimeMs > all.at - 5 * 60_000).map(e => e.name.slice(0, -5)))
+  const sorted = [...ids].sort()
+  const after = Math.max(0, sorted.findIndex(id => id > all.cursor))
+  const turn = new Set(Array.from({ length: Math.min(SWEEP_EACH, sorted.length) }, (_, i) => sorted[(after + i) % sorted.length] ?? ''))
+  all.cursor = [...turn].at(-1) ?? ''
+  return ids.filter(id => id === chatId || open.has(id) || !have.has(id) || (all.recent[id] ?? 0) > now - DAY || turn.has(id))
+}
+let statsLooking: Promise<unknown> = Promise.resolve()
+const statsRefresh = ($: EngineInterface, home: string, memory: string, chatId: string, hint: string, scope: Scope, now: number, isLooking = false): Promise<'done' | 'busy'> => {
+  const next = statsLooking.then(() => refreshNow($, home, memory, chatId, hint, scope, now, isLooking))
+  statsLooking = next.catch(() => undefined)
+  return next
+}
+async function refreshNow($: EngineInterface, home: string, memory: string, chatId: string, hint: string, scope: Scope, now: number, isLooking: boolean): Promise<'done' | 'busy'> {
+  if (!(await statsLock($, memory, now))) return 'busy'
+  const pass = async (all: AllKept, isNew: boolean) => {
+    const isThorough = scope === 'all' && (!all.swept || (isLooking && now - all.swept >= SWEEP_EVERY))
+    const ids = scope === 'all' ? await chatsDue($, memory, chatId, all, now, isThorough) : [chatId]
+    let saidAt = now
+    for (let at = 0; at < ids.length; at += STATS_BATCH) {
+      const checked = await Promise.all(ids.slice(at, at + STATS_BATCH).map(id => chatCheck($, home, memory, id, id === chatId ? hint : '', all.epoch, now, isThorough || scope === 'chat')))
+      await statsApply($, memory, all, checked, now)
+      const clock = await $.clock.now()
+      if (clock - saidAt >= LOCK_STALE / 4) ((saidAt = clock), await $.fs.write(`${memory}/stats/lock/at`, String(clock)).catch(() => undefined))
+    }
+    if (scope !== 'all') return void (isNew && (await $.fs.write(`${memory}/stats/all.json`, JSON.stringify(all))))
+    ;((all.at = now), isThorough && (all.swept = now))
+    await $.fs.write(`${memory}/stats/all.json`, JSON.stringify(all))
+  }
+  try {
+    const had = await allRead($, memory)
+    await pass(had ?? allNew(now), !had).catch(async err => {
+      if (!String(err).includes(KEPT_BROKEN)) throw err
+      await log($, 'stats: a kept file was gone or cut short, so the sums are made again')
+      ;(statsOpen.days.clear(), statsOpen.months.clear())
+      await pass(allNew(now), true)
+    })
+    return 'done'
+  } finally {
+    await $.process.run(['rm', '-rf', `${memory}/stats/lock`], { timeoutMs: 5000 }).catch(() => undefined)
+  }
 }
 
+
+type StatsRead = { kept: Loaded; chats: number; all: AllKept }
+async function statsFor($: EngineInterface, memory: string, chatId: string, scope: Scope, froms: number[], now: number, isWhole: boolean): Promise<StatsRead | undefined> {
+  const all = await allRead($, memory)
+  if (!all || (scope === 'all' && !all.swept)) return undefined
+  const edges = new Map<number, DayRows>()
+  const edgesOf = async (cells: Record<string, unknown>) => {
+    for (const from of froms) {
+      const day = dayNo(from)
+      if (cells[day] && from > day * DAY && !edges.has(day)) edges.set(day, Object.fromEntries((await dayRead($, memory, all, day)).of))
+    }
+  }
+  if (scope === 'chat') {
+    const index = await shardsRead<Kept, Head>($, `${memory}/stats/${chatId}`, all.epoch, headNew())
+    const { pieces, turns } = piecesKept(chatId, Object.fromEntries(index.of))
+    const months = new Map([...monthsKept(pieces, turns)].map(([month, one]) => [month, { pieces: one.p.map(row => rowPiece(chatId, row)), turns: one.t }]))
+    await edgesOf(index.head.cells)
+    return { kept: { cells: index.head.cells, edge: (day, from) => dayCells(edges.get(day) ?? {}, day, from, chatId), parts: {}, months, first: chatId }, chats: 1, all }
+  }
+  await edgesOf(all.days)
+  const begins = froms.map(from => monthNo(Math.max(0, from)))
+  const months = new Map<number, { pieces: Piece[]; turns: [number, number][] }>()
+  for (const month of Object.keys(all.months).map(Number)) if (isWhole ? month >= Math.min(...begins) : begins.includes(month) || month >= monthNo(now - GAP)) months.set(month, monthPieces(await monthRead($, memory, all, month)))
+  const cells = Object.fromEntries(Object.entries(all.days).map(([day, one]) => [day, one.c]))
+  const parts = Object.fromEntries(Object.entries(all.months).map(([month, one]) => [month, one.part]))
+  return { kept: { cells, edge: (day, from) => dayCells(edges.get(day) ?? {}, day, from), parts, months, first: chatId }, chats: all.counted, all }
+}
+async function statsShow($: EngineInterface, scope: Scope, memory: string, chatId: string, now: number) {
+  const was = held.get(scope)
+  const ranges = RANGES.filter(range => range !== 'all' || statsShown.range === 'all' || was?.shown.all)
+  const got = await statsFor($, memory, chatId, scope, ranges.map(range => rangeFrom(range, now)), now, true)
+  if (!got) return false
+  const shown: Held['shown'] = {}
+  for (const range of ranges) shown[range] = statsFrom(got.kept, rangeFrom(range, now), now)
+  held.set(scope, { shown, svgs: new Map(), chats: got.chats, at: held.get(scope)?.at ?? 0 })
+  return true
+}
+const MEMORY_EVERY = 5 * 60_000
+let memoryReadAt = 0
 async function loadStats($: EngineInterface, scope: Scope, home: string, memory: string, chatId: string, hint: string, now: number) {
   if (reading.has(scope) || !chatId) return
   const was = held.get(scope)
-  if (was && now - was.at < READ_EVERY) return
+  const isDue = !was || now - was.at >= READ_EVERY
+  if (!isDue && was.shown[statsShown.range]) return
   reading.add(scope)
   try {
-    await loadMemorySizes($, memory).catch(() => undefined)
-    const ids = scope === 'chat' ? [chatId] : await chatsKept($, memory, chatId)
-    const runs = (await Promise.all(ids.map(id => runsOf($, home, memory, id, id === chatId ? hint : '')))).flat()
-    held.set(scope, { runs, at: now })
+    if (now - memoryReadAt >= MEMORY_EVERY) ((memoryReadAt = now), void loadMemorySizes($, memory).then(() => drawAgain($), () => undefined))
+    if (!was?.shown[statsShown.range] && (await statsShow($, scope, memory, chatId, now))) drawAgain($)
+    if (!isDue) return
+    const looked = await statsRefresh($, home, memory, chatId, hint, scope, now, true)
+    await statsShow($, scope, memory, chatId, now)
+    held.set(scope, { ...(held.get(scope) ?? { shown: {}, svgs: new Map(), chats: 0 }), at: looked === 'busy' ? now - READ_EVERY + 5000 : now, error: undefined })
+    if (looked === 'busy') $.clock.after(5000, () => drawAgain($))
   } catch (err) {
-    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? `Claudopus couldn’t read Claude’s logs because jq isn’t installed on ${thisMac()}. Install jq, then open Stats again.` : `Claudopus couldn’t read Claude’s logs: ${String(err)}. Open Stats again to try once more.` })
+    held.set(scope, { ...(held.get(scope) ?? { shown: {}, svgs: new Map(), chats: 0 }), at: now, error: String(err).includes('jq') ? `Claudopus couldn’t read Claude’s logs because jq isn’t installed on ${thisMac()}. Install jq, then open Stats again.` : `Claudopus couldn’t read Claude’s logs: ${String(err)}. Open Stats again to try once more.` })
   } finally {
     reading.delete(scope)
     drawAgain($)
@@ -3187,10 +3452,11 @@ async function loadMemorySizes($: EngineInterface, memory: string) {
 
 const STATS_PANE = 'stats'
 const STATS_TITLE = 'Stats'
+const statsHint = (home: string) => `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}`
 const statsRead = async ($: EngineInterface, scope: 'chat' | 'all') => {
   const home = (await $.env.get('HOME')) ?? ''
   const { id } = await read($, me)
-  await loadStats($, scope, home, dir, id, `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}`, await $.clock.now())
+  await loadStats($, scope, home, dir, id, statsHint(home), await $.clock.now())
 }
 const openStats = async ($: EngineInterface) => {
   presses += 1
@@ -3224,11 +3490,25 @@ const boardCall = async ($: EngineInterface, fn: string, args: Record<string, un
   const status = Number(text.slice(cut + 1)) || 0
   return { ok: r.exitCode === 0 && status >= 200 && status < 300, status, body: parsed<unknown>(cut > 0 ? text.slice(0, cut) : '', undefined) }
 }
-const boardFigures = async ($: EngineInterface, isTimelinePublic: boolean, isHeld = false) => {
-  if (!isHeld) await statsRead($, 'all').catch(() => undefined)
-  const runs = held.get('all')?.runs ?? []
+const boardFigures = async ($: EngineInterface, isTimelinePublic: boolean, isHeld = false): Promise<BoardSent | undefined> => {
+  const home = (await $.env.get('HOME')) ?? ''
+  const { id } = await read($, me)
+  const now = await $.clock.now()
+  if (!isHeld) await statsRefresh($, home, dir, id, statsHint(home), 'all', now).catch(err => log($, `stats not read for the leaderboard: ${String(err)}`))
   const since = await installedAt($)
-  return { ...boardOf(runs, await $.clock.now(), since), ...(isTimelinePublic ? { timeline: timelineOf(runs, 40_000, since) } : {}) }
+  const got = await statsFor($, dir, id, 'all', RANGES.map(range => boardFrom(range, now, since)), now, false)
+  if (!got) return undefined
+  const figures: BoardSent = {}
+  for (const range of RANGES) figures[range] = boardRange(statsFrom(got.kept, boardFrom(range, now, since), now))
+  if (!isTimelinePublic) return figures
+  for (;;) {
+    const s = statsFrom(got.kept, boardFrom('all', now, since), now)
+    figures.timeline = timelineOf(s.pieces, s.time.first, s.starts)
+    const older = Object.keys(got.all.months).map(Number).filter(month => month >= monthNo(boardFrom('all', now, since)) && !got.kept.months.has(month)).sort((a, b) => b - a)[0]
+    const starts = s.pieces.map(p => p.spans[0]?.[0] ?? 0).sort((a, b) => b - a)
+    if (older === undefined || (figures.timeline.pieces.length < s.pieces.length && (starts[figures.timeline.pieces.length - 1] ?? 0) >= monthFrom(older + 1))) return figures
+    got.kept.months.set(older, monthPieces(await monthRead($, dir, got.all, older)))
+  }
 }
 const installedAt = async ($: EngineInterface) => {
   const kept = parsed<{ at?: number }>(await readOr($, `${dir}/installed.json`), {}).at
@@ -3264,10 +3544,11 @@ const joinBoard = ($: EngineInterface, name: string) => {
   if (!NAME_RULE.test(name)) return void ((boardNow.said = 'A username is 3 to 20 letters, digits, - or _, with no spaces.'), drawAgain($))
   return boardAct($, `Joining as ${name}…`, async () => {
     if (boardNow.file.token) return boardNow.said
-    const r = await boardCall($, 'lb_join', { p_name: name, p_public: false, p_stats: await boardFigures($, false, true) })
+    const r = await boardCall($, 'lb_join', { p_name: name, p_public: false, p_stats: (await boardFigures($, false, true)) ?? {} })
     if (r.status === 409) return `Someone already has the username ${name}. Choose another.`
     if (!r.ok || typeof r.body !== 'string') return UNREACHED
     await boardSave($, { name, token: r.body, isPublic: false, sentAt: await $.clock.now() })
+    await $.fs.write(boardSentPath(), '{}').catch(() => undefined)
     const joined = `✓ You joined as ${name}. Your stats are private until you make them public.`
     ;((boardNow.said = joined), drawAgain($))
     void readBoard($, true).catch(() => undefined)
@@ -3280,14 +3561,28 @@ const leaveBoard = ($: EngineInterface) =>
     const r = await boardCall($, 'lb_leave', { p_token: boardNow.file.token ?? '' })
     if (!r.ok) return 'Couldn’t reach the leaderboard, so you’re still on it. Press Leave again in a minute.'
     await boardSave($, {})
+    await $.fs.write(boardSentPath(), '{}').catch(() => undefined)
     return '✓ You left the leaderboard. Your figures are gone from it.'
   })
 const timelineShown = (file: BoardFile) => Boolean(file.isTimelinePublic ?? file.isPublic)
+const boardSentPath = () => `${dir}/leaderboard-sent.json`
 const pushBoard = async ($: EngineInterface, isPublic: boolean, isTimelinePublic: boolean) => {
   const file = boardNow.file
-  const r = await boardCall($, 'lb_push', { p_token: file.token ?? '', p_public: isPublic, p_timeline: isTimelinePublic, p_stats: await boardFigures($, isTimelinePublic) })
-  if (r.ok && r.body === false) return (await boardSave($, {}), 'gone' as const)
-  if (!r.ok) return 'failed' as const
+  const figures = await boardFigures($, isTimelinePublic)
+  if (!figures) return 'failed' as const
+  const sent = parsed<{ rev?: string; stats?: BoardSent }>(await statsText($, boardSentPath()), {})
+  const send = async (was: BoardSent | undefined) => {
+    const changed = boardDelta(was, figures)
+    if (was && !Object.keys(changed).length && Boolean(file.isPublic) === isPublic && timelineShown(file) === isTimelinePublic) return 'ok'
+    const rev = `${(await $.clock.now()).toString(36)}-${Math.floor(Math.random() * 1e9).toString(36)}`
+    const r = await boardCall($, 'lb_send', { p_token: file.token ?? '', p_public: isPublic, p_timeline: isTimelinePublic, p_was: was ? (sent.rev ?? '') : null, p_now: rev, p_stats: changed })
+    if (r.ok && r.body === 'ok') await $.fs.write(boardSentPath(), JSON.stringify({ rev, stats: figures })).catch(() => undefined)
+    return r.ok ? r.body : undefined
+  }
+  const first = await send(sent.rev && sent.stats ? sent.stats : undefined)
+  const said = first === 'full' ? await send(undefined) : first
+  if (said === 'gone') return (await boardSave($, {}), await $.fs.write(boardSentPath(), '{}').catch(() => undefined), 'gone' as const)
+  if (said !== 'ok') return 'failed' as const
   await boardSave($, { ...file, isPublic, isTimelinePublic, sentAt: await $.clock.now() })
   return 'sent' as const
 }
@@ -15050,7 +15345,7 @@ const tabHooks = (on: On) => {
     void statsRead($, statsShown.scope).catch(() => undefined)
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {statsView(() => drawAgain($), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
+        {statsView(() => drawAgain($), uiOf($, e), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
       </Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))

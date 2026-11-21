@@ -1,8 +1,9 @@
 // Stats: what the work added up to, read from Claude's own records of it. Each piece of work, helper, workflow agent and the chat
 // itself is a transcript (~/.claude/projects/<folder>/<chat id>.jsonl and its subagents/ folder); every response in one carries
 // its model and the tokens it used, by kind: input, cache writes (5-minute and 1-hour), cache reads, output. A transcript can run
-// to a hundred megabytes, more than the mod may read, so jq sums each one outside the mod, and the sums are kept by file size
-// and time in ~/.claude/claudopus/stats/<chat id>.json, so a file is read once until it changes
+// to a hundred megabytes, more than the mod may read, so jq sums each one outside the mod, once until it changes. What it found is
+// kept in ~/.claude/claudopus/stats in small files, by chat, by day and by month, with each whole day's and month's sums, so a
+// range is added up from sums already made and only the day and month it begins in are looked at again (What is kept, below)
 import type { ElementTable } from 'claude-code'
 
 export type Span = [from: number, to: number]
@@ -57,12 +58,17 @@ export const priceOf = (model: string, isLong = false): Price | undefined => {
   const row = PRICES.find(([name]) => id === name || new RegExp(`^${name}(-\\d{8}|\\[|@)`).test(id))
   return row ? (isLong && row[2] ? row[2] : row[1]) : undefined
 }
-// What one response would have cost on the API, in dollars; undefined for a model with no price
+// What some tokens would have cost on the API, in billionths of a dollar: whole numbers, so sums made in any order come out the
+// same. Undefined for a model with no price
+const nanoOf = (model: string, isFast: boolean, isLong: boolean, input: number, write5m: number, write1h: number, read: number, output: number) => {
+  const p = priceOf(model, isLong)
+  const milli = (dollars: number) => Math.round(dollars * 1000)
+  return p ? (input * milli(p[0]) + write5m * milli(p[1]) + write1h * milli(p[2]) + read * milli(p[3]) + output * milli(p[4])) * (isFast ? 2 : 1) : undefined
+}
+// What one response would have cost, in dollars
 export const costOf = (m: Msg) => {
-  const p = priceOf(m[1], m[4] === 1)
-  if (!p) return undefined
-  const fast = m[3] === 1 ? 2 : 1
-  return ((m[5] * p[0] + m[6] * p[1] + m[7] * p[2] + m[8] * p[3] + m[9] * p[4]) * fast) / 1_000_000
+  const nano = nanoOf(m[1], m[3] === 1, m[4] === 1, m[5], m[6], m[7], m[8], m[9])
+  return nano === undefined ? undefined : nano / 1e9
 }
 
 // ---- Time ----
@@ -108,43 +114,247 @@ export const todosOf = (calls: TodoCall[]) => {
 // ---- Pieces of work ----
 
 // A piece of work: one the chat started, or a workflow run. Its busy time is its own and that of the helpers it started (they are
-// part of its time); a workflow's is its agents'. Its bars on the timeline are that time, in its model; a workflow's in each agent's
+// part of its time); a workflow's is its agents'. Its bars on the timeline are that time, in its model; a workflow's in each agent's.
+// `done` is when each of its to-dos was last ticked done
 export type Bar = { from: number; to: number; model: string }
-export type Piece = { id: string; title: string; isFlow: boolean; isFinished: boolean; spans: Span[]; bars: Bar[]; calls: TodoCall[]; ended: number }
+export type Piece = { id: string; chat: string; title: string; isFlow: boolean; isFinished: boolean; spans: Span[]; bars: Bar[]; done: number[]; ended: number }
 // The model a transcript ran on: the one most of its output came from
 export const mainModel = (msgs: Msg[]) => {
   const out = new Map<string, number>()
   for (const m of msgs) if (m[1] && m[1] !== '<synthetic>') out.set(m[1], (out.get(m[1]) ?? 0) + m[9] + 1)
   return [...out.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? ''
 }
-export const piecesOf = (runs: Run[]): Piece[] => {
-  const kids = (id: string): Run[] => runs.filter(r => r.kind === 'helper' && r.parent === id).flatMap(r => [r, ...kids(r.id)])
-  const works = runs.filter(r => r.kind === 'work').map(r => {
-    const spans = union([...r.sum.s, ...kids(r.id).flatMap(k => k.sum.s)])
-    const model = mainModel(r.sum.u)
-    return { id: r.id, title: r.title, isFlow: false, isFinished: r.isFinished, spans, bars: spans.map(([from, to]) => ({ from, to, model })), calls: r.sum.d, ended: spans.at(-1)?.[1] ?? 0 }
-  })
-  const flows = [...new Set(runs.filter(r => r.kind === 'flow').map(r => r.parent))].map(id => {
-    const agents = runs.filter(r => r.kind === 'flow' && r.parent === id)
-    const spans = union(agents.flatMap(a => a.sum.s))
-    return {
-      id,
-      title: agents[0]?.title ?? 'Workflow',
-      isFlow: true,
-      isFinished: agents.every(a => a.isFinished),
-      spans,
-      bars: agents.flatMap(a => union(a.sum.s).map(([from, to]) => ({ from, to, model: mainModel(a.sum.u) }))),
-      calls: [],
-      ended: spans.at(-1)?.[1] ?? 0,
-    }
-  })
-  return [...works, ...flows].filter(p => p.spans.length)
+
+// ---- What is kept ----
+// Nothing is added up twice. A transcript is summed once until it changes; what it holds is then kept three ways, each in files
+// far smaller than the engine's 4 MB (on 16 Nov one chat's sums passed it, were never saved again, and every read summed its 600
+// transcripts from scratch):
+// - by chat (stats/<chat>.json): each transcript's size and time, what it was, when it was busy, its to-dos and turns;
+// - by day (stats/days/<day>.json): each transcript's responses of that day, so a response kept in two transcripts (a fork carries
+//   its chat's, a copied chat its source's, each with the time it was first given) is met in one day's file and counted once;
+// - by month (stats/months/<month>.json): each chat's pieces of work that ran in it.
+// stats/all.json holds every whole day's tokens and every whole month's sums. A range is those, added, and one look into the day
+// and the month it begins in. Days and months are UTC's, so they never move with the clock's zone
+export const DAY = 86_400_000
+export const dayNo = (at: number) => Math.floor(at / DAY)
+export const monthNo = (at: number) => {
+  const d = new Date(at)
+  return d.getUTCFullYear() * 12 + d.getUTCMonth()
 }
+export const monthFrom = (month: number) => Date.UTC(Math.floor(month / 12), month % 12, 1)
+export const monthName = (month: number) => `${Math.floor(month / 12)}-${String((month % 12) + 1).padStart(2, '0')}`
 
-// ---- What it all added up to, between two times ----
-
+// Tokens summed for one model, speed, prompt length and whose they were ("<model>|<fast + 2 × long>|<w, f, h or c>"), by kind: input,
+// 5-minute cache writes, 1-hour cache writes, cache reads, output
+export type TokenSums = Record<string, number[]>
+const KIND = { work: 'w', flow: 'f', helper: 'h', chat: 'c' } as const
+export const cellsAdd = (into: TokenSums, more: TokenSums) => {
+  for (const [key, v] of Object.entries(more)) {
+    const t = (into[key] ??= [0, 0, 0, 0, 0])
+    for (let i = 0; i < 5; i++) t[i] = (t[i] ?? 0) + (v[i] ?? 0)
+  }
+  return into
+}
 export type Tokens = { input: number; write: number; read: number; output: number; total: number; cost: number; unpriced: number }
 const none = (): Tokens => ({ input: 0, write: 0, read: 0, output: 0, total: 0, cost: 0, unpriced: 0 })
+// Tokens by model, the most first, and by whose they were
+export const tokensOf = (cells: TokenSums) => {
+  const models = new Map<string, { t: Tokens; nano: number }>()
+  const by = { work: 0, helpers: 0, flows: 0, chat: 0 }
+  for (const key of Object.keys(cells).sort()) {
+    const [model = '', flags = '0', kind = 'c'] = key.split('|')
+    const [input = 0, write5m = 0, write1h = 0, read = 0, output = 0] = cells[key] ?? []
+    const one = models.get(model) ?? { t: none(), nano: 0 }
+    const total = input + write5m + write1h + read + output
+    const nano = nanoOf(model, (Number(flags) & 1) === 1, (Number(flags) & 2) === 2, input, write5m, write1h, read, output)
+    one.t.input += input
+    one.t.write += write5m + write1h
+    one.t.read += read
+    one.t.output += output
+    one.t.total += total
+    if (nano === undefined) one.t.unpriced += total
+    else one.nano += nano
+    models.set(model, one)
+    by[kind === 'w' ? 'work' : kind === 'h' ? 'helpers' : kind === 'f' ? 'flows' : 'chat'] += total
+  }
+  const all = { t: none(), nano: 0 }
+  for (const one of models.values()) {
+    one.t.cost = one.nano / 1e9
+    for (const name of ['input', 'write', 'read', 'output', 'total', 'unpriced'] as const) all.t[name] += one.t[name]
+    all.nano += one.nano
+  }
+  all.t.cost = all.nano / 1e9
+  return { models: [...models.entries()].map(([model, one]): [string, Tokens] => [model, one.t]).sort((a, b) => b[1].total - a[1].total || (a[0] < b[0] ? -1 : 1)), all: all.t, by }
+}
+
+// One response as a day's file keeps it: its id, its model (by its place in the entry's list), how far into the day it was given,
+// fast + 2 × long, and its tokens by kind
+export type DayRow = [id: string, model: number, at: number, flags: number, input: number, write5m: number, write1h: number, read: number, output: number]
+// One transcript's responses of one day, with whose they were; a day's are named "<chat> <the transcript's name in its chat>"
+export type DayEntry = { k: string; m: string[]; r: DayRow[] }
+export type DayRows = Record<string, DayEntry>
+// A day's tokens, from `from` on, for every chat or one. A response kept in two transcripts counts where it is first met: in a
+// task's transcript, then a workflow's, a helper's, the chat's own thread, and by name among those
+const MET = 'wfhc'
+export const dayCells = (rows: DayRows, day: number, from = -Infinity, chat = ''): TokenSums => {
+  const keys = Object.keys(rows)
+    .filter(key => !chat || key.startsWith(`${chat} `))
+    .sort((a, b) => MET.indexOf(rows[a]?.k ?? 'c') - MET.indexOf(rows[b]?.k ?? 'c') || (a < b ? -1 : a > b ? 1 : 0))
+  const seen = new Set<string>()
+  const cells: TokenSums = {}
+  for (const key of keys) {
+    const e = rows[key]
+    for (const row of e?.r ?? []) {
+      if (seen.has(row[0]) || day * DAY + row[2] < from) continue
+      seen.add(row[0])
+      const t = (cells[`${e?.m[row[1]] ?? ''}|${row[3]}|${e?.k ?? 'c'}`] ??= [0, 0, 0, 0, 0])
+      for (let i = 0; i < 5; i++) t[i] = (t[i] ?? 0) + (row[4 + i] as number)
+    }
+  }
+  return cells
+}
+
+// One transcript as its chat's file keeps it: the size and time of the file it was read from, what it was (a task, a helper and
+// whose, a workflow's agent, the chat's own thread), its model, when it was busy, when its to-dos were ticked, the chat's turns,
+// and for each day it answered in, how many responses and a sum of them that changes when any of them does
+export type What = { kind: Run['kind']; parent: string; title: string; fin: boolean; flow?: string }
+export type Kept = What & { size: number; mtime: number; model: string; s?: Span[]; turns?: Span[]; done?: number[]; days: Record<string, [n: number, check: number]> }
+const hashOf = (text: string) => {
+  let h = 2166136261
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619)
+  return h >>> 0
+}
+export const sumKept = (sum: FileSum, what: What, size: number, mtime: number) => {
+  const rows = new Map<number, DayEntry>()
+  const days: Kept['days'] = {}
+  for (const m of sum.u) {
+    if (!m[1] || m[1] === '<synthetic>') continue
+    const day = dayNo(m[2])
+    const e = rows.get(day) ?? { k: KIND[what.kind], m: [], r: [] }
+    const at = e.m.indexOf(m[1])
+    e.r.push([m[0], at < 0 ? e.m.push(m[1]) - 1 : at, m[2] - day * DAY, m[3] + 2 * m[4], m[5], m[6], m[7], m[8], m[9]])
+    rows.set(day, e)
+    const mark = (days[day] ??= [0, hashOf(what.kind)])
+    mark[0] += 1
+    mark[1] = (mark[1] + hashOf(JSON.stringify(m))) % 4294967296
+  }
+  const own = what.kind === 'chat' ? { turns: sum.turns ?? [] } : { s: sum.s, ...(what.kind === 'flow' ? {} : { done: todosOf(sum.d).filter(item => item.state === 'done').map(item => item.at) }) }
+  return { kept: { ...what, size, mtime, model: mainModel(sum.u), ...own, days } as Kept, rows }
+}
+
+// A chat's pieces of work and turns, from its transcripts as kept: the tasks by name, then the workflows
+export const piecesKept = (chat: string, files: Record<string, Kept>) => {
+  const keys = Object.keys(files).sort()
+  const idOf = (key: string) => key.slice(key.lastIndexOf('agent-') + 6)
+  const helpers = new Map<string, string[]>()
+  for (const key of keys) if (files[key]?.kind === 'helper') helpers.set(files[key]?.parent ?? '', [...(helpers.get(files[key]?.parent ?? '') ?? []), key])
+  const kids = (id: string, met = new Set<string>()): Span[] => (helpers.get(id) ?? []).flatMap(key => (met.has(key) ? [] : (met.add(key), [...(files[key]?.s ?? []), ...kids(idOf(key), met)])))
+  const works = keys.flatMap((key): Piece[] => {
+    const f = files[key]
+    if (!f || f.kind !== 'work') return []
+    const spans = union([...(f.s ?? []), ...kids(idOf(key))])
+    return [{ id: idOf(key), chat, title: f.title, isFlow: false, isFinished: f.fin, spans, bars: spans.map(([from, to]) => ({ from, to, model: f.model })), done: f.done ?? [], ended: spans.at(-1)?.[1] ?? 0 }]
+  })
+  const flows = [...new Set(keys.map(key => (files[key]?.kind === 'flow' && files[key]?.flow) || '').filter(Boolean))].map((name): Piece => {
+    const agents = keys.flatMap(key => (files[key]?.kind === 'flow' && files[key]?.flow === name ? [files[key] as Kept] : []))
+    const spans = union(agents.flatMap(a => a.s ?? []))
+    return { id: name, chat, title: agents[0]?.title ?? 'Workflow', isFlow: true, isFinished: agents.every(a => a.fin), spans, bars: agents.flatMap(a => union(a.s ?? []).map(([from, to]) => ({ from, to, model: a.model }))), done: [], ended: spans.at(-1)?.[1] ?? 0 }
+  })
+  return { pieces: [...works, ...flows].filter(p => p.spans.length), turns: (files.chat?.turns ?? []).map(([a, b]): [number, number] => [a, b - a]) }
+}
+
+// A piece of work as a month's file keeps it: id, title, a workflow or not, finished or not, its busy stretches end to end, its
+// model (a workflow's bars, each with its agent's), when its to-dos were ticked. A month's file holds, by chat, the pieces that
+// ran in it and the turns that began in it (when, and how long)
+export type PieceRow = { i: string; t: string; f?: 1; d?: 1; s: number[]; m?: string; b?: [number, number, string][]; k?: number[] }
+export type MonthKept = { p: PieceRow[]; t: [number, number][] }
+export const pieceRow = (p: Piece): PieceRow => ({
+  i: p.id,
+  t: p.title,
+  ...(p.isFlow ? { f: 1 as const } : {}),
+  ...(p.isFinished ? { d: 1 as const } : {}),
+  s: p.spans.flat(),
+  ...(p.isFlow ? { b: p.bars.map((b): [number, number, string] => [b.from, b.to, b.model]) } : { m: p.bars[0]?.model ?? '' }),
+  ...(p.done.length ? { k: p.done } : {}),
+})
+export const rowPiece = (chat: string, r: PieceRow): Piece => {
+  const spans: Span[] = []
+  for (let i = 0; i + 1 < r.s.length; i += 2) spans.push([r.s[i] ?? 0, r.s[i + 1] ?? 0])
+  const bars = r.b ? r.b.map(([from, to, model]) => ({ from, to, model })) : spans.map(([from, to]) => ({ from, to, model: r.m ?? '' }))
+  return { id: r.i, chat, title: r.t, isFlow: r.f === 1, isFinished: r.d === 1, spans, bars, done: r.k ?? [], ended: spans.at(-1)?.[1] ?? 0 }
+}
+// A chat's pieces and turns by month: a piece under each month from the one it began in to the one it ended in
+export const monthsKept = (pieces: Piece[], turns: [number, number][]) => {
+  const months = new Map<number, MonthKept>()
+  const at = (month: number) => months.get(month) ?? (months.set(month, { p: [], t: [] }).get(month) as MonthKept)
+  for (const p of pieces) for (let month = monthNo(p.spans[0]?.[0] ?? 0); month <= monthNo(p.ended); month++) at(month).p.push(pieceRow(p))
+  for (const turn of turns) at(monthNo(turn[0])).t.push(turn)
+  return months
+}
+// Every chat's pieces of a month in one order: tasks before workflows, then by chat (the one asking first) and by name
+export const piecesIn = (pieces: Piece[], first = '') => {
+  const key = (p: Piece) => `${p.isFlow ? 1 : 0} ${p.chat === first ? '' : p.chat} ${p.id}`
+  return pieces.map((p): [string, Piece] => [key(p), p]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([, p]) => p)
+}
+
+// ---- What it all added up to, from a moment on ----
+
+// The sums of the pieces of work and turns between two moments: the work added up (each piece's busy time, summed), the time on
+// the clock while any of it ran, the most running at once, tasks finished and how long they took whole, workflows, to-dos ticked,
+// turns and their length, the first and last busy moment, and the models in the order the pieces that began here first used them.
+// Work that ran alone adds the same to the work and the clock, so only overlap saves time
+export type Part = { added: number; clock: number; most: number; finished: number; lasted: number; lastedN: number; flows: number; todos: number; turns: number; turnMs: number; first: number; last: number; models: string[] }
+const noPart = (): Part => ({ added: 0, clock: 0, most: 0, finished: 0, lasted: 0, lastedN: 0, flows: 0, todos: 0, turns: 0, turnMs: 0, first: 0, last: 0, models: [] })
+// `isEdge`: `lo` is where the range itself begins, so a piece that ended at that very moment is no part of it
+export const partOf = (pieces: Piece[], turns: [number, number][], lo: number, hi: number, isEdge = false): Part => {
+  const part = noPart()
+  const busy: Span[][] = []
+  const began: [number, Piece][] = []
+  for (const p of pieces) {
+    const spans = clip(p.spans, lo, hi)
+    if (spans.length) (busy.push(spans), (part.added += lengthOf(spans)))
+    const isHere = p.ended < hi && (isEdge ? p.ended > lo : p.ended >= lo)
+    if (isHere && p.isFlow) part.flows += 1
+    if (isHere && !p.isFlow && p.isFinished) part.finished += 1
+    if (!p.isFlow && p.isFinished && p.ended >= lo && p.ended < hi) ((part.lasted += lengthOf(p.spans)), (part.lastedN += 1))
+    if (!isEdge || p.ended > lo) part.todos += p.done.filter(at => at >= lo && at < hi).length
+    const start = isEdge ? (clip(p.spans, lo, Infinity)[0]?.[0] ?? -1) : (p.spans[0]?.[0] ?? -1)
+    if (start >= lo && start < hi) began.push([start, p])
+  }
+  const all = union(busy.flat())
+  part.clock = lengthOf(all)
+  part.most = mostAtOnce(busy)
+  part.first = all[0]?.[0] ?? 0
+  part.last = all.at(-1)?.[1] ?? 0
+  for (const [at, length] of turns) if (at >= lo && at < hi) ((part.turns += 1), (part.turnMs += length))
+  for (const [, p] of began.sort((a, b) => a[0] - b[0])) for (const b of p.bars) if (b.to > lo && b.to > b.from && !part.models.includes(b.model)) part.models.push(b.model)
+  return part
+}
+const partsAdd = (a: Part, b: Part): Part => ({
+  added: a.added + b.added,
+  clock: a.clock + b.clock,
+  most: Math.max(a.most, b.most),
+  finished: a.finished + b.finished,
+  lasted: a.lasted + b.lasted,
+  lastedN: a.lastedN + b.lastedN,
+  flows: a.flows + b.flows,
+  todos: a.todos + b.todos,
+  turns: a.turns + b.turns,
+  turnMs: a.turnMs + b.turnMs,
+  first: a.first && b.first ? Math.min(a.first, b.first) : a.first || b.first,
+  last: Math.max(a.last, b.last),
+  models: [...a.models, ...b.models.filter(model => !a.models.includes(model))],
+})
+
+// What is kept, as far as a range needs it read: every whole day's tokens, and the tokens of the day the range begins in from that
+// moment on; every whole month's sums, and the pieces and turns of the months read (the one the range begins in always is)
+export type Loaded = {
+  cells: Record<string, TokenSums>
+  edge: (day: number, from: number) => TokenSums
+  parts: Record<string, Part>
+  months: Map<number, { pieces: Piece[]; turns: [number, number][] }>
+  first?: string
+}
 export type Stats = {
   // Tokens by model, the most first, and by whose they were
   models: [string, Tokens][]
@@ -158,58 +368,46 @@ export type Stats = {
   messages: number
   turn: number
   perPiece: number
-  time: ReturnType<typeof timeOf>
+  time: { added: number; clock: number; saved: number; first: number; last: number }
+  // The most pieces of work busy at one moment, and the pieces of the months read, cut to the range
+  most: number
   pieces: Piece[]
+  // The models in the order the pieces first used them, as the leaderboard's timeline numbers them
+  starts: string[]
 }
 // `now` tells work still running (a row in the last GAP) from work stopped without saying so
-export const statsOf = (runs: Run[], from: number, to: number, now = to): Stats => {
-  const seen = new Set<string>()
-  const models = new Map<string, Tokens>()
-  const all = none()
-  const by = { work: 0, helpers: 0, flows: 0, chat: 0 }
-  // A response kept in two transcripts (a fork carries its chat's last one) counts once, where it was first met: the chat's own
-  // thread is read last
-  const order = { work: 0, flow: 1, helper: 2, chat: 3 }
-  for (const r of [...runs].sort((a, b) => order[a.kind] - order[b.kind]))
-    for (const m of r.sum.u) {
-      if (seen.has(m[0]) || m[2] < from || m[2] >= to || !m[1] || m[1] === '<synthetic>') continue
-      seen.add(m[0])
-      const t = models.get(m[1]) ?? none()
-      const total = m[5] + m[6] + m[7] + m[8] + m[9]
-      const cost = costOf(m)
-      for (const one of [t, all]) {
-        one.input += m[5]
-        one.write += m[6] + m[7]
-        one.read += m[8]
-        one.output += m[9]
-        one.total += total
-        if (cost === undefined) one.unpriced += total
-        else one.cost += cost
-      }
-      models.set(m[1], t)
-      by[r.kind === 'work' ? 'work' : r.kind === 'helper' ? 'helpers' : r.kind === 'flow' ? 'flows' : 'chat'] += total
-    }
-  const pieces = piecesOf(runs)
-    .map(p => ({ ...p, spans: clip(p.spans, from, to), bars: p.bars.flatMap(b => clip([[b.from, b.to]], from, to).map(([a, z]) => ({ ...b, from: a, to: z }))) }))
+export const statsFrom = (kept: Loaded, from: number, now: number): Stats => {
+  const day = dayNo(from)
+  const isWholeDay = from <= day * DAY
+  const cells: TokenSums = {}
+  for (const [d, one] of Object.entries(kept.cells)) if (Number(d) > day || (isWholeDay && Number(d) === day)) cellsAdd(cells, one)
+  if (!isWholeDay && kept.cells[day]) cellsAdd(cells, kept.edge(day, from))
+  const begins = monthNo(Math.max(0, from))
+  const months = [...new Set([...Object.keys(kept.parts).map(Number), ...kept.months.keys()])].filter(month => month >= begins).sort((a, b) => a - b)
+  const sum = months.reduce((all, month) => {
+    const read = kept.months.get(month)
+    const part = read ? partOf(piecesIn(read.pieces, kept.first), read.turns, Math.max(from, monthFrom(month)), monthFrom(month + 1), month === begins) : kept.parts[month]
+    return part ? partsAdd(all, part) : all
+  }, noPart())
+  // A piece kept under two months is the later month's
+  const read = new Map<string, Piece>()
+  for (const month of months) for (const p of kept.months.get(month)?.pieces ?? []) read.set(`${p.isFlow ? 1 : 0} ${p.chat} ${p.id}`, p)
+  const pieces = piecesIn([...read.values()], kept.first)
+    .map(p => ({ ...p, spans: clip(p.spans, from, Infinity), bars: p.bars.flatMap(b => clip([[b.from, b.to]], from, Infinity).map(([a, z]) => ({ ...b, from: a, to: z }))) }))
     .filter(p => p.spans.length)
-  const ended = pieces.filter(p => p.isFinished && p.ended >= from && p.ended < to)
-  const todosDone = pieces.reduce((sum, p) => sum + todosOf(p.calls).filter(item => item.state === 'done' && item.at >= from && item.at < to).length, 0)
-  const turns = runs.filter(r => r.kind === 'chat').flatMap(r => r.sum.turns ?? []).filter(([a]) => a >= from && a < to)
-  // How long a piece of work took, whole, even where it began before the range
-  const lasted = piecesOf(runs).filter(p => !p.isFlow && p.isFinished && p.ended >= from && p.ended < to).map(p => lengthOf(p.spans))
   return {
-    messages: turns.length,
-    turn: turns.length ? turns.reduce((sum, [a, b]) => sum + (b - a), 0) / turns.length : 0,
-    perPiece: lasted.length ? lasted.reduce((sum, n) => sum + n, 0) / lasted.length : 0,
-    models: [...models.entries()].sort((a, b) => b[1].total - a[1].total),
-    all,
-    by,
-    finished: ended.filter(p => !p.isFlow).length,
+    ...tokensOf(cells),
+    messages: sum.turns,
+    turn: sum.turns ? sum.turnMs / sum.turns : 0,
+    perPiece: sum.lastedN ? sum.lasted / sum.lastedN : 0,
+    finished: sum.finished,
     running: pieces.filter(p => !p.isFlow && !p.isFinished && p.ended > now - GAP).length,
-    flows: pieces.filter(p => p.isFlow).length,
-    todosDone,
-    time: timeOf(pieces.map(p => p.spans)),
+    flows: sum.flows,
+    todosDone: sum.todos,
+    time: { added: sum.added, clock: sum.clock, saved: sum.added - sum.clock, first: sum.first, last: sum.last },
+    most: sum.most,
     pieces,
+    starts: sum.models,
   }
 }
 
@@ -239,6 +437,7 @@ reduce (inputs | fromjson? | select(type == "object" and (.timestamp | type) == 
        | (if .cur then .out + [.cur] else .out end) | map(select(.[2]) | [.[0], .[1]])),
    u: [.u | to_entries[] | [.key] + .value], d: .d}`
 
+// The sums as they were kept until 0.2.264, a file a chat: read once more, so what they hold is carried over and not summed again
 export type Cache = { v?: number; folder?: string; files: Record<string, { size: number; mtime: number; sum: FileSum }> }
 export type Meta = { description?: string; agentType?: string; spawnDepth?: number; parentAgentId?: string; finished?: boolean }
 
@@ -249,7 +448,7 @@ export const parsed = <T,>(text: string, or: T): T => {
     return or
   }
 }
-export const CACHE_V = 5
+export const CACHE_V = 6
 
 // ---- Drawing ----
 
@@ -516,10 +715,11 @@ export type Scope = 'chat' | 'all'
 // What Stats and the leaderboard count over: today, the last 7 days, the last 30, all time
 export type Range = 'today' | 'd7' | 'd30' | 'all'
 export const RANGES: Range[] = ['today', 'd7', 'd30', 'all']
-const DAY = 86_400_000
 export const view = { scope: 'chat' as Scope, range: 'today' as Range, presses: 0 }
-// What was read for each scope, and when; a scope being read is drawn from what it held last
-export const held = new Map<Scope, { runs: Run[]; at: number; error?: string }>()
+// What was read for each scope: each range's figures as last added up, its timeline as last drawn at a width, how many chats it
+// counts, and when Claude's records were last looked at; a scope being read is drawn from what it held last
+export type Held = { shown: Partial<Record<Range, Stats>>; svgs: Map<string, string>; chats: number; at: number; error?: string }
+export const held = new Map<Scope, Held>()
 export const reading = new Set<Scope>()
 export const READ_EVERY = 60_000
 
@@ -548,39 +748,51 @@ export type BoardRange = {
   work: number; clock: number; tokens: number; input: number; write: number; read: number; output: number; cost: number
   tasks: number; messages: number; todos: number; flows: number; most: number; per_task: number; models: [string, number, number][]
 }
-// `since`: when Claudopus was first installed on this Mac; nothing before it counts on the board
-export const boardOf = (runs: Run[], now: number, since = 0): Record<Range, BoardRange> => {
-  const one = (range: Range): BoardRange => {
-    const s = statsOf(runs, Math.max(rangeFrom(range, now), since), Infinity, now)
-    const round = (n: number) => Math.round(n)
-    return {
-      work: round(s.time.added), clock: round(s.time.clock), tokens: s.all.total, input: s.all.input, write: s.all.write, read: s.all.read, output: s.all.output,
-      cost: Math.round(s.all.cost * 100) / 100, tasks: s.finished, messages: s.messages, todos: s.todosDone, flows: s.flows,
-      most: mostAtOnce(s.pieces.map(p => p.spans)), per_task: round(s.perPiece),
-      models: s.models.slice(0, 12).map(([model, t]): [string, number, number] => [model, t.total, Math.round(t.cost * 100) / 100]),
-    }
-  }
-  return { today: one('today'), d7: one('d7'), d30: one('d30'), all: one('all') }
-}
+export const boardRange = (s: Stats): BoardRange => ({
+  work: Math.round(s.time.added), clock: Math.round(s.time.clock), tokens: s.all.total, input: s.all.input, write: s.all.write, read: s.all.read, output: s.all.output,
+  cost: Math.round(s.all.cost * 100) / 100, tasks: s.finished, messages: s.messages, todos: s.todosDone, flows: s.flows,
+  most: s.most, per_task: Math.round(s.perPiece),
+  models: s.models.slice(0, 12).map(([model, t]): [string, number, number] => [model, t.total, Math.round(t.cost * 100) / 100]),
+})
+// Where a range begins for the board: `since` is when Claudopus was first installed on this Mac, and nothing before it counts
+export const boardFrom = (range: Range, now: number, since = 0) => Math.max(rangeFrom(range, now), since)
 // The timeline as the leaderboard draws it on a public page: each task's busy stretches, each with its model, and never its title.
-// Times are whole minutes from `base`; the newest tasks are kept while the whole stays under `most` characters
+// Times are whole minutes from `base`, the first busy moment; the newest tasks are kept while the whole stays under `most`
+// characters. `pieces` are those of the months read, cut to the range: the newest months, as far back as `most` reaches.
+// `starts`: the models in the order the pieces first used them, the older months' too, so a model keeps its number
 export type BoardTimeline = { base: number; models: string[]; pieces: [from: number, minutes: number, model: number][][] }
-export const timelineOf = (runs: Run[], most = 40_000, since = 0): BoardTimeline => {
-  const pieces = piecesOf(runs)
-    .map(p => ({ ...p, spans: clip(p.spans, since, Infinity), bars: p.bars.flatMap(b => clip([[b.from, b.to]], since, Infinity).map(([from, to]) => ({ ...b, from, to }))) }))
-    .filter(p => p.bars.length)
-    .sort((a, b) => (a.spans[0]?.[0] ?? 0) - (b.spans[0]?.[0] ?? 0))
-  const base = Math.floor((pieces[0]?.spans[0]?.[0] ?? 0) / 60_000) * 60_000
-  const models: string[] = []
+export const timelineOf = (pieces: Piece[], first: number, starts: string[], most = 40_000): BoardTimeline => {
+  const base = Math.floor(first / 60_000) * 60_000
+  const models = [...starts]
   const indexOf = (model: string) => (models.includes(model) ? models.indexOf(model) : models.push(model) - 1)
-  const all = pieces.map(p => p.bars.map((b): [number, number, number] => [Math.round((b.from - base) / 60_000), Math.max(1, Math.round((b.to - b.from) / 60_000)), indexOf(b.model)]))
   const kept: [number, number, number][][] = []
   let size = 0
-  for (const one of [...all].reverse()) {
+  for (const p of [...pieces].sort((a, b) => (a.spans[0]?.[0] ?? 0) - (b.spans[0]?.[0] ?? 0)).reverse()) {
+    const one = p.bars.map((b): [number, number, number] => [Math.round((b.from - base) / 60_000), Math.max(1, Math.round((b.to - b.from) / 60_000)), indexOf(b.model)])
     if ((size += JSON.stringify(one).length + 1) > most) break
     kept.unshift(one)
   }
   return { base, models, pieces: kept }
+}
+// What to send the board so that it holds `next` where it held `was`: only the ranges whose figures changed, and of the timeline
+// only its end, from the first task that changed (`line`: the board drops `drop` tasks from its start, keeps the `keep` after them
+// and adds `add`). Nothing at all when nothing changed; everything when the board holds nothing this Mac knows of
+export type BoardSent = Partial<Record<Range, BoardRange>> & { timeline?: BoardTimeline }
+export type BoardLine = { base: number; models: string[]; drop: number; keep: number; add: BoardTimeline['pieces'] }
+export const boardDelta = (was: BoardSent | undefined, next: BoardSent): BoardSent & { line?: BoardLine } => {
+  const out: BoardSent & { line?: BoardLine } = {}
+  for (const range of RANGES) if (next[range] && (!was || JSON.stringify(was[range]) !== JSON.stringify(next[range]))) out[range] = next[range]
+  const [a, b] = [was?.timeline, next.timeline]
+  if (!b || (a && JSON.stringify(a) === JSON.stringify(b))) return out
+  const [old, now] = [(a?.pieces ?? []).map(one => JSON.stringify(one)), b.pieces.map(one => JSON.stringify(one))]
+  // The board's tasks that the new timeline still begins with: the old ones from `drop` on, as far as they are the same
+  const drop = a && a.base === b.base && now.length ? old.indexOf(now[0] ?? '') : -1
+  let keep = 0
+  while (drop >= 0 && drop + keep < old.length && keep < now.length && old[drop + keep] === now[keep]) keep += 1
+  const add = b.pieces.slice(keep)
+  if (keep && JSON.stringify(add).length < JSON.stringify(b.pieces).length * 0.8) out.line = { base: b.base, models: b.models, drop, keep, add }
+  else out.timeline = b
+  return out
 }
 // What the Leaderboard part of Stats shows and does; the sending and the file are the hooks' (stats-tab)
 // One row of the board, as lb_board gives it
@@ -787,7 +999,7 @@ export function boardView(ui: Ui, b: BoardShown, surface: string) {
           <Box flexDirection="column" flexShrink={0}>
             {fact(ui, 'board-join-shown', 'Shown', BOARD_SHOWN)}
             {fact(ui, 'board-join-never', 'Never sent', 'Chat titles, your words or Claude’s, files and folders')}
-            {fact(ui, 'board-join-sent', 'Sent', 'As you join, then every 3 minutes while Claude Code is open')}
+            {fact(ui, 'board-join-sent', 'Sent', 'As you join, then every 3 minutes while Claude Code is open, and only what changed')}
             {fact(ui, 'board-join-public', 'Public', 'Your stats and your timeline stay private until you switch each on. The timeline never has task names')}
             {fact(ui, 'board-join-off', 'Off', BOARD_OFF)}
           </Box>
@@ -818,14 +1030,13 @@ export function boardView(ui: Ui, b: BoardShown, surface: string) {
   return [nav, top, you]
 }
 
-export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (scope: Scope) => void, surface: string, px: number) {
+export function statsView(invalidate: () => void, ui: Ui, reload: (scope: Scope) => void, surface: string, px: number) {
   const { Box, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number; isInteractive?: boolean }) => JSX.Element }
   const kept = held.get(view.scope)
-  const from = rangeFrom(view.range, now)
-  const s = kept ? statsOf(kept.runs, from, Infinity, now) : undefined
+  const s = kept?.shown[view.range]
   const press = (fn: () => void) => () => void ((view.presses += 1), fn(), invalidate())
-  const chats = new Set(kept?.runs.filter(r => r.kind === 'chat').map(r => r.id)).size
+  const chats = kept?.chats ?? 0
   // What is counted, chosen at the top: which chats, and over what time
   const nav = (
     <Box key="stats-nav" flexDirection="row" alignItems="center" gap={2} height={1} flexShrink={0}>
@@ -841,7 +1052,7 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
       {segments(
         ui,
         'range',
-        ([['today', 'Today'], ['d7', '7 days'], ['d30', '30 days'], ['all', 'All time']] as const).map(([range, label]) => ({ label, isOn: view.range === range, onPress: press(() => (view.range = range)) })),
+        ([['today', 'Today'], ['d7', '7 days'], ['d30', '30 days'], ['all', 'All time']] as const).map(([range, label]) => ({ label, isOn: view.range === range, onPress: press(() => ((view.range = range), reload(view.scope))) })),
         10,
       )}
       <Box flexGrow={1} />
@@ -865,14 +1076,16 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
     </Box>
   )
   const width = Math.max(200, Math.round(px))
-  const svg = timelineSvg(s.pieces, width)
+  // Drawn once for a range and a width, until the figures are read again
+  const svg = kept?.svgs.get(`${view.range} ${width}`) ?? timelineSvg(s.pieces, width)
+  kept?.svgs.set(`${view.range} ${width}`, svg)
   const drawn = new Set(s.pieces.flatMap(p => p.bars.map(b => b.model)))
   const legend = s.models.map(([model]) => model).filter(model => drawn.has(model))
   const timeline = band(
     ui,
     'stats-timeline',
     'Timeline',
-    `Up to ${mostAtOnce(s.pieces.map(p => p.spans))} tasks at once`,
+    `Up to ${s.most} tasks at once`,
     <Box flexDirection="column" gap={1}>
       {table.Svg && surface !== 'terminal' ? (
         svgFits(svg) ? (

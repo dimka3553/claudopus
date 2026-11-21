@@ -111,6 +111,8 @@ When a chat moves to a newer version, the octopus in the panel's header turns bl
   - your messages and, on average, how long the chat took over one, from when it took the message up to its last response or tool result before the next message (its own turn, without the background tasks it started);
   - the time saved by running tasks side by side, and a timeline;
   - what the tokens would cost at API prices, and what the memory holds.
+- Stats keeps what it has added up, by chat, by day and by month, so it opens at once and reads a record again only when it changes. All time keeps counting work whose records Claude Code has since cleared.
+- Once you have joined the leaderboard, Claudopus sends it only the figures that changed, and of your timeline only its newest tasks.
 - Memory, at the top of the panel, opens Finder at the folder where Claudopus saves what it remembers.
 - About, beside Memory, waves hello once. It says what Claudopus is and shows its version and Claude Code's, the website, the licence and the GitHub repo.
 - `/servers` shows the local servers running on your machine and which chat started each.
@@ -284,7 +286,7 @@ Everything Claudopus saves is in `~/.claude/claudopus`, as plain files:
 | `finished/` | The Finished list of each chat |
 | `flows/` | Each workflow the panel follows |
 | `pastes/` | A message over 12,000 characters, saved here while the chat gets its start, its end and this path |
-| `stats/`, `thumbs/` | Sums Stats made of Claude Code's records, and small copies of pictures shown in the panel |
+| `stats/`, `thumbs/` | What Stats added up from Claude Code's records, kept by chat, by day and by month, and small copies of pictures shown in the panel |
 | `servers.json` | The servers `/servers` last saw |
 | `config.json` | Your settings, written by the Config tab |
 | `admin-allowed.json` | The admin commands you chose Always allow for, by Mac, each locked to that command. Config lists them |

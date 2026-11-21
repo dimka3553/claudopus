@@ -931,7 +931,60 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(await value('Chat time per message, on average')).toBe('20s')
   expect(await stats.find({ type: 'Text', text: /^A message’s time runs from when the chat takes it to the chat’s last step/ })).toBeDefined()
   // The sums are kept, so the transcripts are read again only when they change
-  expect(JSON.parse(files.get(`${MEMORY}/stats/engine-id.json`) ?? '{}').folder).toBe(chat)
+  expect(JSON.parse(files.get(`${MEMORY}/stats/engine-id.json`) ?? '{}').head.folder).toBe(chat)
+})
+
+test('Stats keeps what it summed in files the engine reads whole, however much a chat did, and opened again adds nothing up twice: a transcript is summed again only once it changes', async ($, on) => {
+  const { files, clock, held: holding } = world(on)
+  const M = 60_000
+  const now = 1_700_000_000_000
+  const chat = `${HOME}/.claude/projects/-repo`
+  const subs = `${chat}/engine-id/subagents`
+  files.set(`${chat}/engine-id.jsonl`, '{}')
+  // 40 tasks of 1,800 responses each: over 4 MB of sums, more than the engine reads or writes as one file (on 0.2.264 a chat that
+  // passed it was never kept again, and every opening summed its 600 transcripts from scratch, for half a minute)
+  const sumOf = (i: number, more = 0) => JSON.stringify({ s: [[now - 30 * M, now - 10 * M]], u: Array.from({ length: 1800 + more }, (_, k) => [`m-${i}-${k}`, 'claude-opus-5-5', now - 30 * M + k * 500, 0, 0, 0, 0, 0, 0, 100]), d: [] })
+  for (let i = 0; i < 40; i++) {
+    files.set(`${subs}/agent-w${i}.jsonl`, '{}')
+    files.set(`${subs}/agent-w${i}.meta.json`, JSON.stringify({ description: `Work ${i}`, spawnDepth: 1, finished: true }))
+    files.set(`${subs}/agent-w${i}.jsonl.sum`, sumOf(i))
+  }
+  expect([...files].filter(([path]) => path.endsWith('.sum')).reduce((sum, [, text]) => sum + text.length, 0)).toBeGreaterThan(4_194_304)
+  await $.session.start(start)
+  const stats = await $.ui.mount({ ...LIST, requestId: 'stats', props: { ...LIST.props, title: 'Stats', bodyColumns: 80 }, surface: 'desktop' } as never)
+  const value = async (name: string) => {
+    const rows = (await stats.findAll({ type: 'Text' })).map(one => one.text)
+    return rows[rows.indexOf(name) + 1]
+  }
+  await pressed(stats, 'scope-All chats')
+  expect(await until(async () => ((await value('Tasks done')) === '40' ? true : undefined))).toBe(true)
+  expect(await value('Written by the models')).toBe('100% · 7.2M')
+  // Kept in several files, each far under the limit; the day's responses in more than one
+  const kept = () => [...files].filter(([path]) => path.startsWith(`${MEMORY}/stats/`) && path.endsWith('.json'))
+  expect(kept().length).toBeGreaterThan(4)
+  expect(kept().filter(([, text]) => text.length > 2_000_000)).toEqual([])
+  expect(kept().filter(([path]) => /\/stats\/days\/\d+\.1\.json$/.test(path)).length).toBe(1)
+  // Minutes later the records are looked at again: nothing changed, so no transcript is summed (a sum asked for now would be held)
+  files.set('hold:jq', '')
+  const looked = () => Number(JSON.parse(files.get(`${MEMORY}/stats/all.json`) ?? '{}').at)
+  const first = looked()
+  await clock.advance(2 * M)
+  await stats.press({ key: (await until(async () => (await stats.findAll({ type: 'Button' })).find(one => one.props.label === '7 days')))?.key ?? '' })
+  expect(await until(async () => (looked() > first ? true : undefined))).toBe(true)
+  expect([...holding.keys()].filter(id => id.startsWith('jq:'))).toEqual([])
+  expect(await value('Tasks done')).toBe('40')
+  // One transcript grew: it alone is summed again, and the figures follow
+  files.set(`${subs}/agent-w7.jsonl.sum`, sumOf(7, 1800))
+  files.set(`mtime:${subs}/agent-w7.jsonl`, '9')
+  const second = looked()
+  await clock.advance(2 * M)
+  await stats.press({ key: (await until(async () => (await stats.findAll({ type: 'Button' })).find(one => one.props.label === '30 days')))?.key ?? '' })
+  expect(await until(async () => (holding.has(`jq:${subs}/agent-w7.jsonl`) ? true : undefined))).toBe(true)
+  expect([...holding.keys()].filter(id => id.startsWith('jq:'))).toEqual([`jq:${subs}/agent-w7.jsonl`])
+  files.delete('hold:jq')
+  holding.get(`jq:${subs}/agent-w7.jsonl`)?.('')
+  expect(await until(async () => (looked() > second ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await value('Written by the models')) === '100% · 7.2M' ? undefined : value('Written by the models')))).toBe('100% · 7.4M')
 })
 
 test('the Leaderboard tab shows the board and is where you join with a username nobody has; nothing is sent before, then your sums go every few minutes, public or private, until you leave', async ($, on) => {
@@ -984,51 +1037,78 @@ test('the Leaderboard tab shows the board and is where you join with a username 
   expect(await said(/^Someone already has the username dima/)).toBeDefined()
   const joins = boarded.filter(one => one.fn === 'lb_join')
   expect(joins.length).toBe(1)
-  expect(Object.keys(joins[0]?.body.p_stats as object)).toEqual(['today', 'd7', 'd30', 'all'])
+  // With it go only the sums kept so far, if any: never a timeline
+  expect(Object.keys(joins[0]?.body.p_stats as object).filter(key => !['today', 'd7', 'd30', 'all'].includes(key))).toEqual([])
   // Joined: the secret is kept in the memory folder, then the figures follow
   files.set('board:lb_join', '"secret-1"\n200')
-  files.set('board:lb_push', 'true\n200')
+  files.set('board:lb_send', '"ok"\n200')
   await stats.input({ key: await field(), text: 'dima' })
   expect(await said(/^✓ You joined as dima/)).toBeDefined()
   expect(JSON.parse(files.get(`${MEMORY}/leaderboard.json`) ?? '{}')).toMatchObject({ name: 'dima', token: 'secret-1', isPublic: false })
   files.delete('hold:jq')
   for (const [id, go] of [...holding]) if (id.startsWith('jq:')) (holding.delete(id), go(''))
   // Only sums go, for each range: never a title, a path or anyone's words
-  const first = await until(async () => boarded.find(one => one.fn === 'lb_push' && one.body.p_token === 'secret-1'))
+  const sends = () => boarded.filter(one => one.fn === 'lb_send')
+  const first = await until(async () => sends().find(one => one.body.p_token === 'secret-1'))
   const sent = first?.body.p_stats as Record<string, Record<string, unknown>>
   expect(Object.keys(sent)).toEqual(['today', 'd7', 'd30', 'all'])
   expect([sent.all?.tokens, sent.all?.read, sent.all?.write, sent.all?.input]).toEqual([200, 70, 20, 10])
   expect(JSON.stringify(sent)).not.toContain('repo')
   // Your part of the tab is titled with your username, and says where you stand in the range chosen
   expect(await said(/^Not in the top 10 for this range$/)).toBeDefined()
-  // and every few minutes after
-  const firstPushes = boarded.filter(one => one.fn === 'lb_push').length
+  // The first time everything goes, as nothing of this Mac's is on the board; what the board then holds is kept beside the secret,
+  // with the mark it was sent under
+  expect([first?.body.p_was, first?.body.p_public, typeof first?.body.p_now]).toEqual([null, false, 'string'])
+  const mark = () => JSON.parse(files.get(`${MEMORY}/leaderboard-sent.json`) ?? '{}') as { rev?: string; stats?: Record<string, unknown> }
+  expect(await until(async () => (mark().rev === first?.body.p_now ? true : undefined))).toBe(true)
+  // Every few minutes after, the records are looked at again; nothing changed, so nothing is sent
+  const sentAt = () => Number(JSON.parse(files.get(`${MEMORY}/leaderboard.json`) ?? '{}').sentAt)
+  const joinedAt = sentAt()
   await clock.advance(4 * M)
-  expect(await until(async () => boarded.filter(one => one.fn === 'lb_push').length > firstPushes)).toBe(true)
-  expect(await until(async () => boarded.find(one => one.fn === 'lb_push' && one.body.p_token === 'secret-1' && one.body.p_public === false))).toBeDefined()
+  expect(await until(async () => (sentAt() > joinedAt ? true : undefined))).toBe(true)
+  // A response more: the figures that changed go, on top of what the board holds, and nothing else
+  files.set(`${chat}/engine-id.jsonl.sum`, JSON.stringify({ s: [[now - 30 * M, now]], u: [['m1', 'claude-opus-5-5', now - M, 0, 0, 10, 20, 0, 70, 100], ['m0', 'claude-opus-5-5', now - 3 * 60 * M, 0, 0, 1, 1, 1, 1, 1], ['m2', 'claude-opus-5-5', now, 0, 0, 0, 0, 0, 0, 100]], d: [] }))
+  files.set(`mtime:${chat}/engine-id.jsonl`, '5')
+  await clock.advance(4 * M)
+  const second = await until(async () => sends().find(one => one.body.p_was === first?.body.p_now))
+  expect(sends().length).toBe(2)
+  expect((second?.body.p_stats as typeof sent).all?.tokens).toBe(300)
+  expect(second?.body).toMatchObject({ p_token: 'secret-1', p_public: false, p_timeline: false })
+  expect(await until(async () => (mark().rev === second?.body.p_now ? true : undefined))).toBe(true)
+  // The board holds something else (an older Claudopus on another Mac sent since): it says so, and everything goes again
+  files.set('board:lb_send', '"full"\n200')
+  files.set(`${chat}/engine-id.jsonl.sum`, JSON.stringify({ s: [[now - 30 * M, now]], u: [['m1', 'claude-opus-5-5', now - M, 0, 0, 10, 20, 0, 70, 100], ['m2', 'claude-opus-5-5', now, 0, 0, 0, 0, 0, 0, 100], ['m3', 'claude-opus-5-5', now, 0, 0, 0, 0, 0, 0, 50]], d: [] }))
+  files.set(`mtime:${chat}/engine-id.jsonl`, '6')
+  await clock.advance(4 * M)
+  const again = await until(async () => (sends().length >= 4 ? sends().slice(2, 4) : undefined))
+  expect(again?.map(one => one.body.p_was)).toEqual([second?.body.p_now, null])
+  expect(Object.keys(again?.[1]?.body.p_stats as object)).toEqual(['today', 'd7', 'd30', 'all'])
+  expect((again?.[1]?.body.p_stats as typeof sent).all?.tokens).toBe(350)
+  files.set('board:lb_send', '"ok"\n200')
   // Stats public: the timeline stays private, and isn't sent
   await pressed(stats, 'board-stats-switch-Public')
   expect(await said(/^✓ Your stats are public/)).toBeDefined()
   expect(JSON.parse(files.get(`${MEMORY}/leaderboard.json`) ?? '{}')).toMatchObject({ isPublic: true, isTimelinePublic: false })
-  const pushed = boarded.filter(one => one.fn === 'lb_push')
-  expect(pushed.at(-1)?.body).toMatchObject({ p_public: true, p_timeline: false })
-  expect(Object.keys(pushed.at(-1)?.body.p_stats as object)).not.toContain('timeline')
+  expect(sends().at(-1)?.body).toMatchObject({ p_public: true, p_timeline: false, p_was: second?.body.p_now })
+  expect(Object.keys(sends().at(-1)?.body.p_stats as object)).toEqual(['today', 'd7', 'd30', 'all'])
   expect(await said(/and a breakdown by model$/)).toBeDefined()
   // The timeline, with no task names, goes only once it is switched to public, on a switch of its own
   await pressed(stats, 'board-timeline-switch-Public')
   expect(await said(/^✓ Your timeline is public/)).toBeDefined()
-  const last = boarded.filter(one => one.fn === 'lb_push').at(-1)
+  // The figures are as the board holds them, so only the timeline goes
+  const last = sends().at(-1)
   expect(last?.body).toMatchObject({ p_public: true, p_timeline: true })
-  expect(Object.keys(last?.body.p_stats as object)).toContain('timeline')
+  expect(Object.keys(last?.body.p_stats as object)).toEqual(['timeline'])
   expect(await said(/and a timeline with no task names$/)).toBeDefined()
   // Off takes you off the board at once
   files.set('board:lb_leave', 'true\n200')
   await pressed(stats, 'board-on-switch-Off')
   expect(await said(/^✓ You left the leaderboard/)).toBeDefined()
   expect(boarded.filter(one => one.fn === 'lb_leave')).toEqual([{ fn: 'lb_leave', body: { p_token: 'secret-1' } }])
-  const pushes = boarded.filter(one => one.fn === 'lb_push').length
+  expect(files.get(`${MEMORY}/leaderboard-sent.json`)).toBe('{}')
+  const pushes = sends().length
   await clock.advance(10 * M)
-  expect(boarded.filter(one => one.fn === 'lb_push').length).toBe(pushes)
+  expect(sends().length).toBe(pushes)
 })
 
 test('Stats draws whatever the history: the timeline of 240 pieces of work at once, each busy a minute in ten, in one drawing the app takes, and the rest of the tab as ever', async ($, on) => {

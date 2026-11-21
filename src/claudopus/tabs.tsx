@@ -55,13 +55,13 @@ const tabHooks = (on: On) => {
     return drawing
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
-  // Stats, in a pane of its own: drawn at once from what was read last, while the records are read again at most once a minute
+  // Stats, in a pane of its own: drawn at once from the figures last added up, while Claude's records are looked at again at most once a minute
   on('ui.render', { component: 'Pane', requestId: STATS_PANE }, async ($, e) => {
     const { Box } = uiOf($, e)
     void statsRead($, statsShown.scope).catch(() => undefined)
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {statsView(() => drawAgain($), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
+        {statsView(() => drawAgain($), uiOf($, e), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
       </Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
