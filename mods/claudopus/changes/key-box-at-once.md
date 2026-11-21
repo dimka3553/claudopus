@@ -1,0 +1,1 @@
+- When a task asks you for a key, the box to paste it into is on its card at once, with the task's question, where to get the key, and whether it replaces a saved key or is a second one beside it. Nothing to run or press first, and no more "Key is in" buttons with nowhere to paste.
