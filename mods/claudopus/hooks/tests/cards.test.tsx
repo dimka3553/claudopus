@@ -65,7 +65,7 @@ const prompts: string[] = []
 // the release
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; complete?: (e: { model: string; system?: string; prompt: string }) => string | null | undefined; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; live?: (file: string) => number | undefined; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; complete?: (e: { model: string; system?: string; prompt: string }) => string | null | undefined; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; live?: (file: string) => number | undefined; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release; stream?: (e: { agentId?: string }) => AsyncGenerator<unknown, void> } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -249,7 +249,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
   // One response of a model: its text, then what the API says it was answered over
   on('turn.step', async function* (_, e) {
     stepped.push(e.model)
-    yield { kind: 'text', index: 0, text: 'Looking at the nose.' } as never
+    // `stream`: the pieces of a response as a test hands them out, one at a time
+    if (options.stream) for await (const chunk of options.stream(e)) yield chunk as never
+    else yield { kind: 'text', index: 0, text: 'Looking at the nose.' } as never
     return {
       turnId: e.turnId,
       index: e.index,
@@ -1131,7 +1133,12 @@ test("a pressed card shows the work's own chat: what it was told, what it wrote,
     { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'u7', tool: 'mcp__claudopus__note', input: { text: 'Now  the left one.' } }] },
     { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'u5', tool: 'SubagentHandback', input: { message: 'The nostril is **closed**.' } }] },
   ]
-  const { logged } = world(on, { talk })
+  // What a response of each agent streams, piece by piece as the test takes them
+  const scripts: Record<string, unknown[]> = {}
+  const stream = async function* (e: { agentId?: string }) {
+    for (const chunk of scripts[e.agentId ?? ''] ?? [{ kind: 'text', index: 0, text: 'Looking at the nose.' }]) yield chunk
+  }
+  const { logged, held, keep, settle } = world(on, { talk, stream })
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
@@ -1181,6 +1188,69 @@ test("a pressed card shows the work's own chat: what it was told, what it wrote,
     await tab.unmount()
     await pane.unmount()
   }
+
+  // While it works, its Details shows what it does as it happens, last, in the order it happens, as the app's own chat does: its
+  // thinking, its words as they are written, a call as it is written and while it runs, and what its helpers do (21 Nov: between
+  // two notes the card stood still, with nothing of a task thinking or running a command)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(list, 'open-a1')
+  // Each look draws the tab afresh, as the panel does each second while what the task does moves
+  let tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  const fresh = async () => (await tab.unmount(), (tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)))
+  // (the conversation's lines: what stands above the Message part under it)
+  const texts = async () => {
+    const all = (await (await fresh()).findAll({ type: 'Text' })).map(one => String(one.text))
+    return all.slice(0, all.lastIndexOf('Message'))
+  }
+  const said = async () => (await (await fresh()).findAll({ type: 'Markdown' })).map(one => String(one.props.text))
+  const runs = async () => (await (await fresh()).findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(label => label.startsWith('▸ Ran'))
+  scripts.a1 = [
+    { kind: 'thinking', index: 0, text: 'Which nostril is open?' },
+    { kind: 'text', index: 1, text: 'The left side is ' },
+    { kind: 'tool', index: 2, id: 'u8', name: 'Bash' },
+    { kind: 'input', index: 2, json: '{"command":"hold fit","description":"Fit the left nos' },
+    { kind: 'input', index: 2, json: 'tril"}' },
+    { kind: 'stop', stopReason: 'tool_use', usage: null },
+  ]
+  const step = $.turn.step({ turnId: 'live', index: 3, model: 'm', messageCount: 2, agentId: 'a1' })[Symbol.asyncIterator]()
+  // Thinking: one quiet line, last, with no mark, as the app's chat says it
+  await step.next()
+  expect(await until(async () => ((await texts()).at(-1) === 'Thinking…' ? true : undefined))).toBe(true)
+  expect(await texts()).not.toContain('Which nostril is open?')
+  // Its words as they come, then the command it is writing, after them
+  await step.next()
+  await step.next()
+  await step.next()
+  expect(await until(async () => ((await texts()).includes('Fit the left nos') ? true : undefined))).toBe(true)
+  expect((await said()).at(-1)).toBe('The left side is')
+  expect((await texts()).slice(-2)).toEqual(['Running a command', 'Fit the left nos'])
+  // What it thought opens under "Thought for", on a press
+  await pressed(await fresh(), 'live-thought')
+  expect((await texts()).filter(text => text === 'Which nostril is open?')).toHaveLength(1)
+  for (let got = await step.next(); !got.done; got = await step.next()) void got
+  // The command runs: the conversation holds the response now, once, and the command stands last with what it does, out of the
+  // runs of steps that ended
+  talk.push({ role: 'assistant', text: 'The left side is open.', toolUses: [{ tool_use_id: 'u8', tool: 'Bash', input: { command: 'hold fit', description: 'Fit the left nostril' } }] } as never)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'u8', agentId: 'a1', command: 'hold fit', description: 'Fit the left nostril' } as never))
+  expect(await until(async () => ((await texts()).at(-1) === 'Fit the left nostril' && !(await texts()).some(text => text.startsWith('Thought')) ? true : undefined))).toBe(true)
+  expect((await said()).filter(text => text.startsWith('The left side'))).toEqual(['The left side is open.'])
+  expect(await runs()).toEqual(['▸ Ran 1 command, read 1 file, 1 failed'])
+  // A helper it started: what it does now, last, a press opening it
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Measure the nose', prompt: 'go', parentAgentId: 'a1' } as never)
+  scripts.a2 = [{ kind: 'thinking', index: 0, text: 'Measuring.' }]
+  const helperStep = $.turn.step({ turnId: 'live-2', index: 0, model: 'm', messageCount: 2, agentId: 'a2' })[Symbol.asyncIterator]()
+  await helperStep.next()
+  expect(await until(async () => keyed(await fresh(), 'live-kid-open-a2'))).toBeDefined()
+  expect((await keyed(tab, 'live-kid-open-a2'))?.props.label).toBe('Helper: Measure the nose')
+  expect((await texts()).at(-1)).toBe('Thinking…')
+  for (let got = await helperStep.next(); !got.done; got = await helperStep.next()) void got
+  // The command ends: it joins the conversation's runs of steps, and nothing of it stays live
+  held.get('fit')?.('')
+  await settle()
+  expect(await until(async () => ((await runs()).length === 2 ? true : undefined))).toBe(true)
+  expect(await texts()).not.toContain('Fit the left nostril')
+  await tab.unmount()
+  await list.unmount()
   expect(logged).toEqual([])
 })
 
@@ -2296,7 +2366,7 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   // The work's Details lists every helper, ended or not, as the same tree
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 80 }, surface: 'terminal' } as never)
   expect((await tab.find({ type: 'Text', text: / helpers? working$/ }))?.text).toBe('1 command running · 2 of 4 helpers working')
-  expect((await tab.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(text => /manual|appendix|Measure/.test(text))).toEqual(['Measure the nose', 'Read the manual', 'Read the appendix', 'Measure the ears'])
+  expect((await tab.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(text => /manual|appendix|Measure/.test(text) && !text.startsWith('Helper:'))).toEqual(['Measure the nose', 'Read the manual', 'Read the appendix', 'Measure the ears'])
   // One at work has a dot at the end of its line, a ring growing out of it (cells the terminal repaints), one that finished a tick
   expect((await tab.findAll({ type: 'Raster' })).filter(one => String(one.key).endsWith('-ring')).length).toBe(2)
   expect((await tab.findAll({ type: 'Text', text: '✓' })).length).toBe(2)

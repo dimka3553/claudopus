@@ -47,6 +47,7 @@ const ENTRIES_KEPT = 200
 const OPEN_ASK = -1_000_001
 const OPEN_DONE = -1_000_003
 const OPEN_RESULT = -1_000_004
+const OPEN_THOUGHT = -1_000_005
 const OUTPUT_FILL = '#0000003D'
 const RESULT_SHOWN = 600
 const DONE_FOLDED = 8
@@ -1850,6 +1851,7 @@ const holdDone = (before: Todo[], next: Todo[]) => {
 type Line = {
   kind: 'told' | 'steer' | 'said' | 'step' | 'model'
   text: string
+  id?: string
   isError?: boolean
   isUse?: boolean
   tool?: string
@@ -1900,6 +1902,7 @@ const stepOf = (use: ToolUseSummary): Line => {
   const { pictures, seen } = picturesOf(use)
   return {
     kind: 'step',
+    ...(use.tool_use_id ? { id: use.tool_use_id } : {}),
     text: text.length > STEP_CHARS ? `${text.slice(0, STEP_CHARS)} …` : text,
     isError: use.isError,
     isUse: true,
@@ -1992,6 +1995,129 @@ const newest = (lines: Line[], squeeze = 0) => {
   const from = lines.findLastIndex((line, i) => i < lines.length - kept || (room -= line.text.length) < 0)
   return lines.slice(from + 1)
 }
+
+
+type LiveBlock = { kind: 'thinking' | 'text' | 'tool'; index: number; text: string; at: number; id?: string; name?: string }
+type LiveStep = { from: number; blocks: LiveBlock[]; endedAt?: number; endedMark?: number }
+const liveSteps = new Map<string, LiveStep>()
+const liveCalls = new Map<string, Map<string, { tool: string; input: Record<string, unknown>; at: number }>>()
+const talkMarks = new Map<string, number>()
+const LIVE_KEPT = 60
+const LIVE_THINKING = 1_200
+const talkMoved = (id: string) => void talkMarks.set(id, (talkMarks.get(id) ?? 0) + 1)
+const liveBegun = (id: string, from: number) => {
+  liveSteps.delete(id)
+  liveSteps.set(id, { from, blocks: [] })
+  while (liveSteps.size > LIVE_KEPT) liveSteps.delete(liveSteps.keys().next().value ?? '')
+  talkMoved(id)
+}
+const liveChunk = (id: string, chunk: { kind: string; index?: number; text?: string; id?: string; name?: string; json?: string }, at: number) => {
+  const step = liveSteps.get(id)
+  if (!step || step.endedAt !== undefined || typeof chunk.index !== 'number') return
+  const kind = chunk.kind === 'input' ? 'tool' : chunk.kind
+  if (kind !== 'thinking' && kind !== 'text' && kind !== 'tool') return
+  let block = step.blocks.find(one => one.index === chunk.index && one.kind === kind)
+  if (!block) step.blocks.push((block = { kind, index: chunk.index, text: '', at }))
+  if (chunk.kind === 'tool') Object.assign(block, { id: chunk.id, name: chunk.name })
+  const more = chunk.kind === 'input' ? (chunk.json ?? '') : (chunk.text ?? '')
+  block.text = kind === 'thinking' ? (block.text + more).slice(-LIVE_THINKING) : (block.text + more).slice(0, SAID_CHARS * 2)
+}
+const liveEnded = (id: string, at: number) => {
+  const step = liveSteps.get(id)
+  if (step && step.endedAt === undefined) Object.assign(step, { endedAt: at, endedMark: talkMarks.get(id) ?? 0 })
+}
+const liveCaughtUp = (id: string, mark: number, from: number) => {
+  const step = liveSteps.get(id)
+  if (step?.endedMark !== undefined && (mark > step.endedMark || from >= (step.endedAt ?? Infinity))) liveSteps.delete(id)
+}
+const callBegins = (agent: string, id: string, tool: string, input: Record<string, unknown>, at: number) => {
+  const calls = liveCalls.get(agent) ?? new Map()
+  calls.set(id, { tool, input, at })
+  liveCalls.set(agent, calls)
+  talkMoved(agent)
+}
+const callEnds = (agent: string, id: string) => {
+  const calls = liveCalls.get(agent)
+  calls?.delete(id)
+  if (calls && !calls.size) liveCalls.delete(agent)
+  talkMoved(agent)
+}
+async function* followStream<C, R>($: EngineInterface, id: string, stream: AsyncIterator<C, R>): AsyncGenerator<C, R> {
+  liveBegun(id, await $.clock.now())
+  let isDone = false
+  try {
+    for (;;) {
+      const got = await stream.next()
+      if (got.done) return ((isDone = true), got.value)
+      liveChunk(id, got.value as never, await $.clock.now())
+      yield got.value
+    }
+  } finally {
+    liveEnded(id, await $.clock.now())
+    if (!isDone) await stream.return?.(undefined as never)
+  }
+}
+const partialInput = (json: string): Record<string, unknown> => {
+  try {
+    const whole = JSON.parse(json) as unknown
+    if (whole && typeof whole === 'object') return whole as Record<string, unknown>
+  } catch {
+  }
+  const found: Record<string, unknown> = {}
+  for (const [, key, value = ''] of json.matchAll(/"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)/g)) {
+    try {
+      found[key ?? ''] = JSON.parse(`"${value.replace(/\\(u[0-9a-fA-F]{0,3})?$/, '')}"`)
+    } catch {
+      found[key ?? ''] = value
+    }
+  }
+  return found
+}
+type LiveLine = { kind: 'thinking' | 'thought' | 'said' | 'call'; text: string; head?: string; detail?: string; since?: number; id?: string }
+const runningWords = (tool: string) =>
+  tool === 'Bash' ? 'Running a command' : tool === 'Read' ? 'Reading a file' : ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool) ? 'Editing a file' : tool === 'Grep' ? 'Searching files' : tool === 'Glob' ? 'Finding files' : tool === 'WebFetch' ? 'Reading a page' : tool === 'WebSearch' ? 'Searching the web' : tool === 'Agent' || tool === 'Task' ? 'Starting a helper' : tool === 'Skill' ? 'Running skill' : 'Using a tool'
+const liveLinesOf = (id: string, shown: Set<string>, at: number): LiveLine[] => {
+  const step = liveSteps.get(id)
+  const calls = liveCalls.get(id) ?? new Map<string, { tool: string; input: Record<string, unknown>; at: number }>()
+  const lines: LiveLine[] = []
+  if (step) {
+    const blocks = [...step.blocks].sort((a, b) => a.index - b.index)
+    blocks.forEach((block, n) => {
+      const after = blocks[n + 1]
+      if (block.kind === 'thinking') {
+        const isOn = !after && step.endedAt === undefined
+        lines.push(isOn ? { kind: 'thinking', text: 'Thinking…' } : { kind: 'thought', text: `Thought for ${took(Math.max(1000, (after?.at ?? step.endedAt ?? at) - block.at))}`, detail: block.text.trim() })
+        return
+      }
+      if (block.kind === 'text') {
+        if (block.text.trim()) lines.push({ kind: 'said', text: whole(block.text.trimEnd()) })
+        return
+      }
+      if (block.id && (calls.has(block.id) || shown.has(block.id))) return
+      const line = stepOf({ tool_use_id: block.id ?? '', tool: block.name ?? '', input: partialInput(block.text) } as ToolUseSummary)
+      if (line.kind === 'said') return void (line.text.trim() && lines.push({ kind: 'said', text: line.text }))
+      if (isTool(block.name, 'todo')) return
+      lines.push({ kind: 'call', head: runningWords(block.name ?? ''), text: line.text || toolName(block.name ?? ''), since: block.at, ...(block.id ? { id: block.id } : {}) })
+    })
+    if (!blocks.length && step.endedAt === undefined) lines.push({ kind: 'thinking', text: 'Thinking…' })
+  }
+  for (const [callId, call] of calls) {
+    const line = stepOf({ tool_use_id: callId, tool: call.tool, input: call.input } as ToolUseSummary)
+    if (line.kind !== 'step' || call.tool.startsWith(TOOLS) || call.tool.startsWith(OLD_TOOLS)) continue
+    lines.push({ kind: 'call', head: runningWords(call.tool), text: line.text, since: call.at, id: callId })
+  }
+  return lines
+}
+const LIVE_STEP_TICK = 5_000
+const liveSign = (ids: string[], at: number) =>
+  JSON.stringify(
+    ids.map(id => {
+      const step = liveSteps.get(id)
+      const isOn = (step && step.endedAt === undefined) || liveCalls.has(id)
+      return [talkMarks.get(id) ?? 0, step ? [step.endedAt ?? 0, step.blocks.map(one => [one.kind, one.text.length])] : 0, [...(liveCalls.get(id)?.keys() ?? [])], isOn ? Math.floor(at / LIVE_STEP_TICK) : 0]
+    }),
+  )
+const paneWork = new Map<string, string>()
 
 const WORK_PANE = 'work-'
 const workPaneOf = (id: string) => `${WORK_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)
@@ -3676,7 +3802,8 @@ const loadWork = async ($: EngineInterface, id: string) => {
   try {
     const one = (await read($, todos)).find(card => card.id === id)
     if (!one) return
-    const key = [one.id, one.steps, one.tokens, one.entries.length, one.entries.filter(entry => entry.readAt).length, one.status].join(':')
+    const mark = talkMarks.get(id) ?? 0
+    const key = [one.id, one.steps, one.tokens, one.entries.length, one.entries.filter(entry => entry.readAt).length, one.status, mark].join(':')
     const kept = await read($, reports)
     const shotsKey = `${key}:${kept.length}`
     const now = await $.clock.now()
@@ -3685,6 +3812,7 @@ const loadWork = async ($: EngineInterface, id: string) => {
       during('read a task for its Details')
       const rows = await $.session.messages({ agentId: id }).catch(() => undefined)
       talks.set(id, { key, lines: Array.isArray(rows) ? withSteers(talkOf(rows), one.entries) : undefined, at: now })
+      if (Array.isArray(rows)) liveCaughtUp(id, mark, now)
       isChanged = true
     }
     const lines = talks.get(id)?.lines
@@ -5892,6 +6020,7 @@ const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: num
   if (made) (madeAgain.set(key, { fresh, at: made.at }), void drawFresh($))
 }
 let calmAt = 0
+let liveDrawn = ''
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
 const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   const now = await $.clock.now()
@@ -5905,6 +6034,13 @@ const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   for (const [path, text] of isHeld ? [] : drawnFiles) {
     const now = await readOr($, path)
     if (now !== text) (drawnFiles.set(path, now), (isNew = true))
+  }
+  if (!isHeld && paneWork.size) {
+    const shownPanes = new Set((await $.ui.panes().catch(() => [])).filter(pane => pane.isShown !== false).map(pane => pane.id))
+    for (const pane of [...paneWork.keys()]) if (!shownPanes.has(pane)) paneWork.delete(pane)
+    const cards = paneWork.size ? await read($, todos) : []
+    const live = liveSign([...paneWork.values()].flatMap(id => [id, ...cards.filter(kid => kid.parentId === id).map(kid => kid.id)]), now)
+    if (live !== liveDrawn) ((liveDrawn = live), recordEvent($, 'redraw-live'), $.ui.invalidate('ui.render'))
   }
   if (isNew) return void ((list.side = side), (calmBumps += 1), drawAgain($), (list.side = sideSign()))
   if (!(isMoving || outputMoved) || isBoxHeld(now) || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
@@ -9870,6 +10006,7 @@ const chatHooks = (on: On) => {
     if (!dir) return done
     if (e.agentId !== undefined) {
       const id = e.agentId
+      talkMoved(id)
       turnEnding.add(id)
       try {
         return await agentTurnEnded($, e, id, done)
@@ -11556,6 +11693,7 @@ const workHooks = (on: On) => {
       const isWatched = e.agentId !== undefined && Boolean(dir)
       if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool, e as never).catch(err => log($, `call not followed: ${String(err)}`))
       if (isWatched) callStarted(e.tool_use_id, await $.clock.now())
+      if (isWatched) callBegins(e.agentId ?? '', e.tool_use_id, e.tool, e as never, await $.clock.now())
       let r: Awaited<ReturnType<typeof raw>> | undefined
       const isPersonWatched = e.tool === 'Bash' && Boolean(dir)
       const writes = FILE_TOOLS.includes(e.tool) ? personNamed(e) : ''
@@ -11575,6 +11713,7 @@ const workHooks = (on: On) => {
       } finally {
         if (writes) personWriting.delete(writes)
         if (isPersonWatched && !isPersonEnded) await personCheck($, e).catch(() => undefined)
+        if (isWatched) callEnds(e.agentId ?? '', e.tool_use_id)
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool, e as never)
@@ -11966,7 +12105,8 @@ const workHooks = (on: On) => {
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
     const pick = chosen ? (rightModel(chosen) ?? chosen) : undefined
     const to = pick && !isMovedByApp && modelName(pick) !== modelName(e.model) ? pick : instead
-    const r = yield* next(to ? { ...e, model: to } : e)
+    const stream = next(to ? { ...e, model: to } : e)
+    const r = yield* (id === undefined || !dir ? stream : followStream($, id, stream))
     const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0
     const model = (r.usage as { model?: string } | undefined)?.model
     if (model) seeModel(model)
@@ -12926,7 +13066,8 @@ const panelHooks = (on: On) => {
     const doneDrawn: Todo[] = []
     try {
     const shape = await paneShape($, paneId)
-    const content = await paneContent($)
+    const liveIds = paneId.startsWith(WORK_PANE) && paneWork.get(paneId) ? [paneWork.get(paneId) ?? '', ...(await read($, todos)).filter(kid => kid.parentId === paneWork.get(paneId)).map(kid => kid.id)] : []
+    const content = `${await paneContent($)}${liveIds.length ? liveSign(liveIds, heldAt) : ''}`
     const held = heldDrawings.get(heldKey)
     if (held && held.drawing === recent && held.shape === shape && (isTyping || (held.fresh === freshness && ((isBehind() && heldAt - held.at < BEHIND_HELD) || (held.content === content && heldAt - held.at < CALM))))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
     if (paneId === LIST) drawnFiles.clear()
@@ -13954,7 +14095,8 @@ const panelHooks = (on: On) => {
         )
       }
       let uses = 0
-      const shown = newest((lines ?? []).map(line => ({ ...line, at: line.isUse ? (uses += 1) : uses })), squeeze)
+      const running = liveCalls.get(one.id)
+      const shown = newest((lines ?? []).map(line => ({ ...line, at: line.isUse ? (uses += 1) : uses })), squeeze).filter(line => !(line.id && running?.has(line.id)))
       const blocks = shown.reduce<Line[][]>((all, line) => {
         const last = all.at(-1)
         return line.kind === 'step' && last?.[0]?.kind === 'step' ? [...all.slice(0, -1), [...last, line]] : [...all, [line]]
@@ -14013,8 +14155,61 @@ const panelHooks = (on: On) => {
           {!lines && one.answer ? (
 <Markdown text={one.answer} />
           ) : null}
+          {liveNow(one, lines ?? [])}
         </Box>
       )
+    }
+    const liveNow = (one: Todo, lines: Line[]) => {
+      if (one.status !== 'working' || one.chat) return null
+      const ids = new Set(lines.flatMap(line => (line.id ? [line.id] : [])))
+      const now = liveLinesOf(one.id, ids, at)
+      const kids = all.filter(kid => kid.parentId === one.id && kid.status === 'working' && !kid.chat)
+      if (!now.length && !kids.length) return null
+      const since = (from?: number) => (from !== undefined && at - from >= 3000 ? ` · ${took(at - from)}` : '')
+      const kidNow = (kid: Todo) => {
+        const last = liveLinesOf(kid.id, new Set(), at).at(-1)
+        if (!last) return helperNow(kid, at, jobsOf(kid).length, Math.max(16, room - 4)) || 'Thinking…'
+        return last.kind === 'said' ? `…${oneLine(last.text).slice(-160)}` : last.kind === 'call' ? `${last.text}${since(last.since)}` : last.text
+      }
+      return [
+        ...now.map((line, n) => {
+          if (line.kind === 'said') return <Markdown key={`live-${n}`} text={line.text} />
+          if (line.kind === 'call')
+            return (
+              <Box key={`live-${n}`} flexDirection="column" alignItems="flex-start">
+                <Text dimColor wrap="wrap">{`${line.head ?? 'Using a tool'}${since(line.since)}`}</Text>
+                <Box paddingLeft={2}>
+                  <Text wrap="wrap">{line.text}</Text>
+                </Box>
+              </Box>
+            )
+          const isOpen = open.includes(OPEN_THOUGHT)
+          if (line.kind === 'thought' && line.detail)
+            return (
+              <Box key={`live-${n}`} flexDirection="column" alignItems="flex-start">
+                <Button key={`live-thought-${presses}`} label={`${isOpen ? '▾' : '▸'} ${line.text}`} plain dimColor onPress={() => fold(OPEN_THOUGHT)} />
+                {isOpen ? (
+                  <Box paddingLeft={2}>
+                    <Text dimColor wrap="wrap">{line.detail}</Text>
+                  </Box>
+                ) : null}
+              </Box>
+            )
+          return (
+            <Box key={`live-${n}`}>
+              <Text dimColor wrap="wrap">{line.text}</Text>
+            </Box>
+          )
+        }),
+        ...kids.map(kid => (
+          <Box key={`live-kid-${kid.id}`} flexDirection="column" alignItems="flex-start">
+            <Button key={`live-kid-open-${kid.id}-${presses}`} label={`Helper: ${cut(titleOf(kid), Math.max(16, room - 12))}`} plain dimColor hover={{ scope: `live-kid-${kid.id}`, underline: true }} onPress={() => openWork($, kid.id)} />
+            <Box paddingLeft={2}>
+              <Text wrap="wrap">{kidNow(kid)}</Text>
+            </Box>
+          </Box>
+        )),
+      ]
     }
 
     const theirChat = (one: Todo, c: NonNullable<Todo['chat']>) => (
@@ -14297,6 +14492,7 @@ const panelHooks = (on: On) => {
 
     const alone = [...all, ...elsewhere, ...helpersThere].find(one => one.id === workId)
     if (paneId !== LIST && !alone) return <Text dimColor>{paneId.startsWith(`${WORK_PANE}r-`) ? 'This task is done, or its chat is closed. Open that chat to see it.' : 'This task is no longer available.'}</Text>
+    if (alone && !alone.chat) paneWork.set(paneId, alone.id)
     if (alone) void (alone.chat ? loadTheirs($, alone) : loadWork($, alone.id)).catch(() => undefined)
     const talked = alone ? talks.get(alone.id) : undefined
     const kept = await read($, reports)
