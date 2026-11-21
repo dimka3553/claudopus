@@ -1,0 +1,1 @@
+- A task's Details now shows what it does as it happens, at the end of its conversation: that it is thinking (with its thinking where the app gives it), its words as they are written, each command while it runs with how long, and what each of its helpers is doing, so the card no longer stands still between its notes.

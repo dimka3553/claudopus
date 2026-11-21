@@ -181,7 +181,9 @@ const panelHooks = (on: On) => {
     const doneDrawn: Todo[] = []
     try {
     const shape = await paneShape($, paneId)
-    const content = await paneContent($)
+    // (a Details tab's live part moves with what its task and helpers do now, which no value holds)
+    const liveIds = paneId.startsWith(WORK_PANE) && paneWork.get(paneId) ? [paneWork.get(paneId) ?? '', ...(await read($, todos)).filter(kid => kid.parentId === paneWork.get(paneId)).map(kid => kid.id)] : []
+    const content = `${await paneContent($)}${liveIds.length ? liveSign(liveIds, heldAt) : ''}`
     const held = heldDrawings.get(heldKey)
     // While the mod is behind (lookHold), the pane is given as it was, so the drawing adds nothing to what holds Claude's helper
     if (held && held.drawing === recent && held.shape === shape && (isTyping || (held.fresh === freshness && ((isBehind() && heldAt - held.at < BEHIND_HELD) || (held.content === content && heldAt - held.at < CALM))))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
@@ -1442,7 +1444,9 @@ const panelHooks = (on: On) => {
       }
       // Each line knows how many tool steps came before it: that names a run of steps whatever is drawn above it
       let uses = 0
-      const shown = newest((lines ?? []).map(line => ({ ...line, at: line.isUse ? (uses += 1) : uses })), squeeze)
+      // A call it runs now stands with what it does now, under the conversation, and leaves the run of steps it ended in
+      const running = liveCalls.get(one.id)
+      const shown = newest((lines ?? []).map(line => ({ ...line, at: line.isUse ? (uses += 1) : uses })), squeeze).filter(line => !(line.id && running?.has(line.id)))
       const blocks = shown.reduce<Line[][]>((all, line) => {
         const last = all.at(-1)
         return line.kind === 'step' && last?.[0]?.kind === 'step' ? [...all.slice(0, -1), [...last, line]] : [...all, [line]]
@@ -1503,8 +1507,52 @@ const panelHooks = (on: On) => {
           {!lines && one.answer ? (
 <Markdown text={one.answer} />
           ) : null}
+          {liveNow(one, lines ?? [])}
         </Box>
       )
+    }
+    // What it does right now, last, as the app's own chat shows it while it happens: thinking, its words as they are written, each
+    // call as it is written and while it runs with how long, then what each of its helpers at work is doing, a press opening it
+    const liveNow = (one: Todo, lines: Line[]) => {
+      if (one.status !== 'working' || one.chat) return null
+      const ids = new Set(lines.flatMap(line => (line.id ? [line.id] : [])))
+      const now = liveLinesOf(one.id, ids, at)
+      const kids = all.filter(kid => kid.parentId === one.id && kid.status === 'working' && !kid.chat)
+      if (!now.length && !kids.length) return null
+      const since = (from?: number) => (from !== undefined && at - from >= 3000 ? ` · ${took(at - from)}` : '')
+      // A helper's own line: what it does now as its conversation would show it, the end of its words while it writes them
+      const kidNow = (kid: Todo) => {
+        const last = liveLinesOf(kid.id, new Set(), at).at(-1)
+        if (!last) return helperNow(kid, at, jobsOf(kid).length, Math.max(16, room - 4)) || 'Thinking'
+        return last.kind === 'said' ? `…${oneLine(last.text).slice(-160)}` : `${last.text}${since(last.since)}`
+      }
+      return [
+        ...now.map((line, n) =>
+          line.kind === 'said' ? (
+            <Markdown key={`live-${n}`} text={line.text} />
+          ) : (
+            <Box key={`live-${n}`} flexDirection="column" alignItems="flex-start">
+              <Box flexDirection="row" gap={1}>
+                {line.kind === 'thought' ? null : <Text color={LIVE}>●</Text>}
+                <Text wrap="wrap" dimColor={line.kind !== 'call'}>{`${line.text}${since(line.since)}`}</Text>
+              </Box>
+              {line.detail ? (
+                <Box paddingLeft={2}>
+                  <Text dimColor wrap="wrap">{cut(line.detail.split('\n').slice(-6).join('\n'), 600)}</Text>
+                </Box>
+              ) : null}
+            </Box>
+          ),
+        ),
+        ...kids.map(kid => (
+          <Box key={`live-kid-${kid.id}`} flexDirection="column" alignItems="flex-start">
+            <Button key={`live-kid-open-${kid.id}-${presses}`} label={`● Helper: ${cut(titleOf(kid), Math.max(16, room - 12))}`} plain hover={{ scope: `live-kid-${kid.id}`, underline: true }} onPress={() => openWork($, kid.id)} />
+            <Box paddingLeft={2}>
+              <Text dimColor wrap="wrap">{kidNow(kid)}</Text>
+            </Box>
+          </Box>
+        )),
+      ]
     }
 
     // Another chat's work whose chat cannot be read here (a chat on another Mac, or one its file no longer holds): where it is. Its
@@ -1809,6 +1857,7 @@ const panelHooks = (on: On) => {
     // Its chat and pictures are read outside the drawing, which draws at once from what was read last: a long chat takes seconds to
     // read, and a drawing that waits on it is never shown
     // Another chat's is read from that chat's own file, on this Mac
+    if (alone && !alone.chat) paneWork.set(paneId, alone.id)
     if (alone) void (alone.chat ? loadTheirs($, alone) : loadWork($, alone.id)).catch(() => undefined)
     const talked = alone ? talks.get(alone.id) : undefined
     // The reports kept, in every chat: on this pane only the button that opens their own

@@ -7,6 +7,7 @@
 type Line = {
   kind: 'told' | 'steer' | 'said' | 'step' | 'model'
   text: string
+  id?: string
   isError?: boolean
   isUse?: boolean
   tool?: string
@@ -66,6 +67,7 @@ const stepOf = (use: ToolUseSummary): Line => {
   const { pictures, seen } = picturesOf(use)
   return {
     kind: 'step',
+    ...(use.tool_use_id ? { id: use.tool_use_id } : {}),
     text: text.length > STEP_CHARS ? `${text.slice(0, STEP_CHARS)} …` : text,
     isError: use.isError,
     isUse: true,
@@ -169,6 +171,155 @@ const newest = (lines: Line[], squeeze = 0) => {
   const from = lines.findLastIndex((line, i) => i < lines.length - kept || (room -= line.text.length) < 0)
   return lines.slice(from + 1)
 }
+
+// ---- What a task or helper is doing right now, as the app's own chat shows it while it happens ----
+
+// The rows the engine gives hold only what is whole: a response once it has ended, a tool call once it has begun. What comes
+// before that (thinking, words as they are written, a call whose arguments are still being written) and which calls run now are
+// followed here from the model's stream (workHooks' turn.step) and the calls themselves (workHooks' tool.call), so its Details
+// shows it as it happens, under what the rows already hold
+// One part of a response as it arrives, in the response's own order: its thinking, its words, or a call being written
+type LiveBlock = { kind: 'thinking' | 'text' | 'tool'; index: number; text: string; at: number; id?: string; name?: string }
+// The response under way of each agent: from when it was asked for, its parts, and the read count (talkMarks) when it ended. It is
+// shown until the conversation is read again after its end, which holds it whole
+type LiveStep = { from: number; blocks: LiveBlock[]; endedAt?: number; endedMark?: number }
+const liveSteps = new Map<string, LiveStep>()
+// The calls each agent runs now, by tool_use_id, with what they were given and since when
+const liveCalls = new Map<string, Map<string, { tool: string; input: Record<string, unknown>; at: number }>>()
+// How many times each agent's conversation moved in a way its rows show (a call began or ended, a step or turn ended): the reading
+// of its Details is keyed by it, so it is read again then
+const talkMarks = new Map<string, number>()
+// The most responses under way kept at once (an agent no tab looked at keeps its last until this many came after it)
+const LIVE_KEPT = 60
+// The most thinking and words one response keeps while it streams: the newest of it
+const LIVE_THINKING = 1_200
+const talkMoved = (id: string) => void talkMarks.set(id, (talkMarks.get(id) ?? 0) + 1)
+// A response begins: it is shown as thinking until its first part comes
+const liveBegun = (id: string, from: number) => {
+  liveSteps.delete(id)
+  liveSteps.set(id, { from, blocks: [] })
+  while (liveSteps.size > LIVE_KEPT) liveSteps.delete(liveSteps.keys().next().value ?? '')
+  talkMoved(id)
+}
+// One piece of the response arrives. Only what the person would see: thinking, words, the call's name and its arguments
+const liveChunk = (id: string, chunk: { kind: string; index?: number; text?: string; id?: string; name?: string; json?: string }, at: number) => {
+  const step = liveSteps.get(id)
+  if (!step || step.endedAt !== undefined || typeof chunk.index !== 'number') return
+  const kind = chunk.kind === 'input' ? 'tool' : chunk.kind
+  if (kind !== 'thinking' && kind !== 'text' && kind !== 'tool') return
+  let block = step.blocks.find(one => one.index === chunk.index && one.kind === kind)
+  if (!block) step.blocks.push((block = { kind, index: chunk.index, text: '', at }))
+  if (chunk.kind === 'tool') Object.assign(block, { id: chunk.id, name: chunk.name })
+  const more = chunk.kind === 'input' ? (chunk.json ?? '') : (chunk.text ?? '')
+  block.text = kind === 'thinking' ? (block.text + more).slice(-LIVE_THINKING) : (block.text + more).slice(0, SAID_CHARS * 2)
+}
+const liveEnded = (id: string, at: number) => {
+  const step = liveSteps.get(id)
+  if (step && step.endedAt === undefined) Object.assign(step, { endedAt: at, endedMark: talkMarks.get(id) ?? 0 })
+}
+// The conversation was read at `mark`, from `from`: a response that ended before that is in what was read, and leaves the live part
+const liveCaughtUp = (id: string, mark: number, from: number) => {
+  const step = liveSteps.get(id)
+  if (step?.endedMark !== undefined && (mark > step.endedMark || from >= (step.endedAt ?? Infinity))) liveSteps.delete(id)
+}
+const callBegins = (agent: string, id: string, tool: string, input: Record<string, unknown>, at: number) => {
+  const calls = liveCalls.get(agent) ?? new Map()
+  calls.set(id, { tool, input, at })
+  liveCalls.set(agent, calls)
+  talkMoved(agent)
+}
+const callEnds = (agent: string, id: string) => {
+  const calls = liveCalls.get(agent)
+  calls?.delete(id)
+  if (calls && !calls.size) liveCalls.delete(agent)
+  talkMoved(agent)
+}
+// A response passed on piece by piece as it came, each piece also kept for the live part
+async function* followStream<C, R>($: EngineInterface, id: string, stream: AsyncIterator<C, R>): AsyncGenerator<C, R> {
+  liveBegun(id, await $.clock.now())
+  let isDone = false
+  try {
+    for (;;) {
+      const got = await stream.next()
+      if (got.done) return ((isDone = true), got.value)
+      liveChunk(id, got.value as never, await $.clock.now())
+      yield got.value
+    }
+  } finally {
+    liveEnded(id, await $.clock.now())
+    // (a response the engine stopped taking, as on Stop, is let go beneath too)
+    if (!isDone) await stream.return?.(undefined as never)
+  }
+}
+// A call's arguments while they are still being written: whole where they already parse, else each text value written so far
+// (a note's words, a command's description), so what it says shows as it is written
+const partialInput = (json: string): Record<string, unknown> => {
+  try {
+    const whole = JSON.parse(json) as unknown
+    if (whole && typeof whole === 'object') return whole as Record<string, unknown>
+  } catch {
+    // still being written
+  }
+  const found: Record<string, unknown> = {}
+  for (const [, key, value = ''] of json.matchAll(/"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)/g)) {
+    try {
+      found[key ?? ''] = JSON.parse(`"${value.replace(/\\(u[0-9a-fA-F]{0,3})?$/, '')}"`)
+    } catch {
+      found[key ?? ''] = value
+    }
+  }
+  return found
+}
+// What one agent is doing now, as lines drawn under its conversation, oldest first: the response under way part by part (thinking
+// while it thinks, then how long it thought; its words; each call as it is written), then each call it runs now with how long it
+// has run. `shown` are the tool_use_ids the conversation already holds, which its response no longer repeats
+type LiveLine = { kind: 'thinking' | 'thought' | 'said' | 'call'; text: string; detail?: string; since?: number; id?: string }
+const liveLinesOf = (id: string, shown: Set<string>, at: number): LiveLine[] => {
+  const step = liveSteps.get(id)
+  const calls = liveCalls.get(id) ?? new Map<string, { tool: string; input: Record<string, unknown>; at: number }>()
+  const lines: LiveLine[] = []
+  if (step) {
+    const blocks = [...step.blocks].sort((a, b) => a.index - b.index)
+    blocks.forEach((block, n) => {
+      const after = blocks[n + 1]
+      if (block.kind === 'thinking') {
+        const isOn = !after && step.endedAt === undefined
+        lines.push(isOn ? { kind: 'thinking', text: 'Thinking', since: block.at, detail: block.text.trim() } : { kind: 'thought', text: `Thought for ${took(Math.max(1000, (after?.at ?? step.endedAt ?? at) - block.at))}` })
+        return
+      }
+      if (block.kind === 'text') {
+        if (block.text.trim()) lines.push({ kind: 'said', text: whole(block.text.trimEnd()) })
+        return
+      }
+      if (block.id && (calls.has(block.id) || shown.has(block.id))) return
+      const line = stepOf({ tool_use_id: block.id ?? '', tool: block.name ?? '', input: partialInput(block.text) } as ToolUseSummary)
+      if (line.kind === 'said') return void (line.text.trim() && lines.push({ kind: 'said', text: line.text }))
+      if (isTool(block.name, 'todo')) return
+      lines.push({ kind: 'call', text: line.text || toolName(block.name ?? ''), since: block.at, ...(block.id ? { id: block.id } : {}) })
+    })
+    // Asked for, and nothing back yet: it thinks
+    if (!blocks.length && step.endedAt === undefined) lines.push({ kind: 'thinking', text: 'Thinking', since: step.from })
+  }
+  for (const [callId, call] of calls) {
+    const line = stepOf({ tool_use_id: callId, tool: call.tool, input: call.input } as ToolUseSummary)
+    // (the mod's own tools say what they say in the conversation, and end at once)
+    if (line.kind !== 'step' || call.tool.startsWith(TOOLS) || call.tool.startsWith(OLD_TOOLS)) continue
+    lines.push({ kind: 'call', text: line.text, since: call.at, id: callId })
+  }
+  return lines
+}
+// What a Details tab's live part shows, in a few values: it is drawn again when this moves (calmLook), the times every LIVE_STEP_TICK
+const LIVE_STEP_TICK = 5_000
+const liveSign = (ids: string[], at: number) =>
+  JSON.stringify(
+    ids.map(id => {
+      const step = liveSteps.get(id)
+      const isOn = (step && step.endedAt === undefined) || liveCalls.has(id)
+      return [talkMarks.get(id) ?? 0, step ? [step.endedAt ?? 0, step.blocks.map(one => [one.kind, one.text.length])] : 0, [...(liveCalls.get(id)?.keys() ?? [])], isOn ? Math.floor(at / LIVE_STEP_TICK) : 0]
+    }),
+  )
+// The Details tabs drawn lately, by pane, with the task each shows: what calmLook watches for its live part
+const paneWork = new Map<string, string>()
 
 // A piece of work's Details is a tab of its own, named after the work, beside the list, as a result is: closing it leaves the
 // list as it was. A press on Details for work whose tab is open brings that tab to the front

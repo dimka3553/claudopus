@@ -301,6 +301,8 @@ const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: num
   if (made) (madeAgain.set(key, { fresh, at: made.at }), void drawFresh($))
 }
 let calmAt = 0
+// What the open Details tabs' live parts showed when last looked at
+let liveDrawn = ''
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
 // Each second: anything new the panel shows draws it again by itself, as the values it read are written; its running times alone
 // draw it again only every CALM while work moves, and not while the person uses it
@@ -317,6 +319,15 @@ const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   for (const [path, text] of isHeld ? [] : drawnFiles) {
     const now = await readOr($, path)
     if (now !== text) (drawnFiles.set(path, now), (isNew = true))
+  }
+  // A Details tab open on a task at work moves with what the task does now (liveSign): only the tabs are drawn again, as the panel
+  // and the bar give their drawing again when nothing of theirs moved
+  if (!isHeld && paneWork.size) {
+    const shownPanes = new Set((await $.ui.panes().catch(() => [])).filter(pane => pane.isShown !== false).map(pane => pane.id))
+    for (const pane of [...paneWork.keys()]) if (!shownPanes.has(pane)) paneWork.delete(pane)
+    const cards = paneWork.size ? await read($, todos) : []
+    const live = liveSign([...paneWork.values()].flatMap(id => [id, ...cards.filter(kid => kid.parentId === id).map(kid => kid.id)]), now)
+    if (live !== liveDrawn) ((liveDrawn = live), recordEvent($, 'redraw-live'), $.ui.invalidate('ui.render'))
   }
   // Asked for once: a panel the app does not draw just then is not asked for again each second
   if (isNew) return void ((list.side = side), (calmBumps += 1), drawAgain($), (list.side = sideSign()))
