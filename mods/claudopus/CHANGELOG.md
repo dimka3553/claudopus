@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.250 · 21 November 2026
+- The Claudopus tab always stays first in the panel's row of tabs; Stats, a task's Details and the others open after it, in the order you opened them.
+
 ## 0.2.249 · 21 November 2026
 - A task's Details now shows what it does as it happens, at the end of its conversation, in the words and look of the Claude chat itself: "Thinking…", then "Thought for 12s", which opens on its thinking, its words as they are written, "Running a command · 40s" over the command's name while it runs, and each helper at work over what it does now, so the card no longer stands still between its notes.
 
