@@ -26,9 +26,9 @@
       stage.classList.add('is-3d')
       // arms are numbered round the body; the first and the last face you at rest, so the question and the finish sit there
       const TASKS = [
-        ['Move the docs', 'Needs you', 'ask'], ['Run the tests', '1,240 tests'], ['Tidy the emails', 'Step 2 of 3'],
-        ['Find the leak', 'Step 1 of 3'], ['Review the code', 'Reading 14 files'], ['Update the docs', 'Step 3 of 5'],
-        ['Speed up export', 'Step 2 of 4'], ['Release notes', '✓ Finished', 'done'],
+        ['Move the docs', 'Waiting for you', 'ask'], ['Run the tests', '31 of 42 tests'], ['Tidy the emails', 'To-do 2 of 3'],
+        ['Find the leak', 'To-do 1 of 3'], ['Review the code', 'Reading files'], ['Update the docs', 'To-do 3 of 5'],
+        ['Speed up export', 'To-do 2 of 4'], ['Release notes', '✓ Done', 'done'],
       ]
       const tips = TASKS.map(([title, line, kind]) => {
         const el = document.createElement('div')
@@ -45,26 +45,32 @@
         yaw += ((-0.2 + px * 0.5 + Math.sin(t * 0.3) * 0.22) - yaw) * 0.06
         pitch += ((0.34 + py * 0.16) - pitch) * 0.06
         const mood = (t % 16) > 13.5 ? '#4EBA65' : '#8A63F0'
-        octo.draw({ t, yaw, pitch, zoom: 0.9, color: mood, look: [px, py] })
+        octo.draw({ t, yaw, pitch, zoom: 1.05, color: mood, look: [px, py] })
         const w = stage.clientWidth, h = stage.clientHeight
-        // each card sits at its arm's tip; the ones in front are then moved apart so none covers another
+        // each card sits at its arm's tip; the far ones are smaller and dimmer
         const spots = octo.tips.map((p, i) => {
           const el = tips[i], front = p.near >= 1, s = Math.max(0.6, Math.min(1.1, 1 + (p.near - 1) * 1.6))
-          const bw = el.offsetWidth * s, bh = el.offsetHeight * s
-          return { el, front, s, bw, bh, x: Math.max(bw / 2, Math.min(w - bw / 2, p.x * w)), y: p.y * h }
+          return { el, front, s, bw: el.offsetWidth * s, bh: el.offsetHeight * s, x: p.x * w, y: p.y * h }
         })
-        const fronts = spots.filter(a => a.front)
+        const fronts = spots.filter(a => a.front), backs = spots.filter(a => !a.front)
         // the head is the middle of the stage: a card over it is moved out to the nearer side
-        for (const a of fronts) { const off = a.x - w / 2, clear = w * 0.17 + a.bw / 2; if (Math.abs(off) < clear && Math.abs(a.y - h * 0.42) < h * 0.16) a.x = w / 2 + (off < 0 ? -clear : clear) }
-        for (let pass = 0; pass < 4; pass++) for (const a of fronts) for (const b of fronts) {
+        for (const a of fronts) { const off = a.x - w / 2, clear = w * 0.2 + a.bw / 2; if (Math.abs(off) < clear && Math.abs(a.y - h * 0.42) < h * 0.19) a.x = w / 2 + (off < 0 ? -clear : clear) }
+        // the cards of each kind are then moved apart, so none covers another
+        for (const group of [fronts, backs]) for (let pass = 0; pass < 4; pass++) for (const a of group) for (const b of group) {
           if (a === b || a.y > b.y) continue
           const dx = (a.bw + b.bw) / 2 + 6 - Math.abs(a.x - b.x), dy = (a.bh + b.bh) / 2 + 6 - (b.y - a.y)
           if (dx > 0 && dy > 0) { a.y -= dy / 2; b.y += dy / 2 }
         }
+        // no card leaves the stage, so none lies over the words beside it or is cut by the window
+        for (const a of spots) { a.x = Math.max(a.bw / 2, Math.min(w - a.bw / 2, a.x)); a.y = Math.max(a.bh / 2, Math.min(h - a.bh / 2, a.y)) }
+        // a far card shows only on a stage wide enough to read it, where it stands clear of the head and of the cards in front
+        const over = (a, b, gap) => Math.abs(a.x - b.x) < (a.bw + b.bw) / 2 + gap && Math.abs(a.y - b.y) < (a.bh + b.bh) / 2 + gap
+        const head = { x: w / 2, y: h * 0.44, bw: w * 0.42, bh: h * 0.46 }
         for (const a of spots) {
           a.el.style.transform = `translate(${a.x.toFixed(1)}px,${a.y.toFixed(1)}px) scale(${a.s.toFixed(3)})`
-          a.el.style.zIndex = a.front ? 3 : 0
-          a.el.style.opacity = a.front ? 1 : 0
+          a.el.style.zIndex = a.front ? 3 : 2
+          a.el.style.filter = a.front ? '' : 'brightness(.55)'
+          a.el.style.opacity = a.front || (w >= 520 && !over(a, head, 0) && !fronts.some(b => over(a, b, 4))) ? 1 : 0
         }
         if (on && !still.matches) raf = requestAnimationFrame(frame)
       }
@@ -99,47 +105,6 @@
     seen(race, go, 0.4)
     still.addEventListener?.('change', () => go(true))
     paint(100)
-  }
-
-  // ---- the first screen's example: what you type in the chat, then the real panel after it, one step at a time ----
-  const example = $('#stage')
-  if (example) {
-    const shots = $$('.stage-shots img', example), keys = $$('.stage-steps button', example)
-    const cap = $('.stage-cap', example), typed = $('.typed', example), tap = $('.tap', example)
-    let timers = [], auto = !still.matches, inView = false, held = false, due = -1
-    const later = (ms, fn) => timers.push(setTimeout(fn, ms))
-    const halt = () => { timers.forEach(clearTimeout); timers = []; due = -1 }
-    const mark = key => { keys.forEach(k => { k.classList.toggle('is-on', k === key); k.setAttribute('aria-pressed', k === key) }); cap.textContent = key.dataset.cap }
-    const show = key => shots.forEach(img => img.classList.toggle('is-on', img.dataset.shot === key.dataset.shot))
-    // a step shown at once, as a press on its number asks for, with its words typed out already
-    const jump = i => { halt(); typed.textContent = (keys[i].dataset.say || '').split('|').pop(); mark(keys[i]); show(keys[i]) }
-    // a step played: its words are typed first, the panel answers, and where you press shows a beat before the next step
-    const play = i => {
-      halt()
-      const key = keys[i], lines = (key.dataset.say || '').split('|').filter(Boolean)
-      let at = 0
-      mark(key); typed.textContent = ''
-      if (!lines.length) show(key)
-      lines.forEach((line, n) => {
-        for (let c = 1; c <= line.length; c++) later(at += 32, () => { typed.textContent = line.slice(0, c) })
-        later(at += 500, () => { typed.textContent = ''; if (n === lines.length - 1) show(key) })
-      })
-      const [x, y] = (key.dataset.tap || '').split(',').map(Number)
-      if (key.dataset.tap) later(at += 3200, () => { tap.style.left = x + '%'; tap.style.top = y + '%'; tap.classList.remove('is-on'); void tap.offsetWidth; tap.classList.add('is-on') })
-      later(at += key.dataset.tap ? 700 : 3400, () => { due = (i + 1) % keys.length; if (!held) play(due) })
-    }
-    // it starts from the step the page shows by itself, so the first thing to move is the panel, not a line typed over it
-    const shown = () => Math.max(0, keys.findIndex(k => k.classList.contains('is-on')))
-    const go = () => { if (!auto || !inView) halt(); else if (due < 0 && !timers.length) play(shown()) }
-    keys.forEach((key, i) => key.addEventListener('click', () => { auto = false; jump(i) }))
-    // it waits while the pointer rests on it or a key in it has the focus, then goes on from where it stood
-    const hold = on => { held = on; if (!on && auto && due >= 0) play(due) }
-    example.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') hold(true) })
-    example.addEventListener('pointerleave', () => hold(false))
-    example.addEventListener('focusin', () => hold(true))
-    example.addEventListener('focusout', () => hold(false))
-    seen(example, visible => { inView = visible; go() }, 0.3)
-    still.addEventListener?.('change', () => { auto = !still.matches; if (auto) go(); else jump(shown()) })
   }
 
   // ---- the film waits for a press and never starts by itself; chapters jump into it ----

@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.254 · 21 November 2026
+- The website's home page says the same things in about a third of the words. It opens with the 3D octopus holding a task on each arm, and each part is now a headline, one sentence and one picture
+- The example that stepped by itself on the first screen is gone, and the pictures of the panel show the task cards alone
+- The proof now says it plainly: 3 weeks of work, done in 1 week
+
 ## 0.2.253 · 21 November 2026
 - When a task hands you a part of its result, the task itself now tells the chat, so no message appears in the chat as if you had written it. Claudopus's own message is sent only if the task has not told the chat within a minute
 - A part the chat has already shown you no longer starts another empty turn, and parts from several tasks that wait together come in one message
