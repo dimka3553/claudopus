@@ -519,6 +519,12 @@ html,body{overflow-x:clip}
 .walk .feature.top{align-items:start}
 .walk .pic.under{margin-top:var(--s8)}
 
+/* a short window, as on a 13 inch laptop: the first screen is set tighter, so the two install lines are still on it */
+@media (min-width:1101px) and (max-height:800px){
+  .hero.now{padding-top:var(--s2);--t-display:56px;--t-lead:20px}
+  .hero.now .lead{margin-top:var(--s4)}
+  .hero .quick,.facts{margin-top:var(--s6)}
+}
 @media (max-width:1100px){
   .hero.now{grid-template-columns:1fr;gap:var(--s12);padding-top:var(--s4)}
   .stage{justify-self:center}
