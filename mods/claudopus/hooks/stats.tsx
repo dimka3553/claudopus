@@ -129,7 +129,7 @@ export const mainModel = (msgs: Msg[]) => {
 // Nothing is added up twice. A transcript is summed once until it changes; what it holds is then kept three ways, each in files
 // far smaller than the engine's 4 MB (on 16 Nov one chat's sums passed it, were never saved again, and every read summed its 600
 // transcripts from scratch):
-// - by chat (stats/<chat>.json): each transcript's size and time, what it was, when it was busy, its to-dos and turns;
+// - by chat (stats/chats/<chat>.json): each transcript's size and time, what it was, when it was busy, its to-dos and turns;
 // - by day (stats/days/<day>.json): each transcript's responses of that day, so a response kept in two transcripts (a fork carries
 //   its chat's, a copied chat its source's, each with the time it was first given) is met in one day's file and counted once;
 // - by month (stats/months/<month>.json): each chat's pieces of work that ran in it.

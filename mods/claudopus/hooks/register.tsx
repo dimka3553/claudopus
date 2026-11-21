@@ -3119,7 +3119,7 @@ const statsText = ($: EngineInterface, path: string) => $.fs.read(path).then(tex
 
 
 const PART_MOST = 1_500_000
-type Shards<T, H> = { base: string; head: H; of: Map<string, T>; home: Map<string, number>; lens: Map<string, number>; sizes: number[]; dirty: Set<number>; isBroken: boolean; other?: unknown }
+type Shards<T, H> = { base: string; head: H; of: Map<string, T>; home: Map<string, number>; lens: Map<string, number>; sizes: number[]; dirty: Set<number>; isBroken: boolean }
 type PartFile<T, H> = { v?: number; e?: string; n?: number; head?: H; of?: Record<string, T> }
 const partPath = (base: string, i: number) => (i ? `${base}.${i}.json` : `${base}.json`)
 async function shardsRead<T, H>($: EngineInterface, base: string, epoch: string, head: H): Promise<Shards<T, H>> {
@@ -3128,7 +3128,7 @@ async function shardsRead<T, H>($: EngineInterface, base: string, epoch: string,
   if (!text) return kept
   const first = parsed<PartFile<T, H> | undefined>(text, undefined)
   if (!first || typeof first !== 'object') return ((kept.isBroken = true), kept)
-  if (first.v !== CACHE_V || first.e !== epoch) return ((kept.other = first), kept)
+  if (first.v !== CACHE_V || first.e !== epoch) return kept
   const rest = await Promise.all(Array.from({ length: Math.max(0, (first.n ?? 1) - 1) }, (_, i) => statsText($, partPath(base, i + 1))))
   const parts = [first, ...rest.map(one => parsed<PartFile<T, H> | undefined>(one, undefined))]
   if (parts.some(one => !one || one.v !== CACHE_V || one.e !== epoch)) return ((kept.isBroken = true), kept)
@@ -3159,7 +3159,7 @@ async function shardsWrite<T, H>($: EngineInterface, kept: Shards<T, H>, epoch: 
   kept.dirty.clear()
 }
 
-type Head = { folder: string; sought?: number; cells: Record<string, TokenSums>; months: number[] }
+type Head = { folder: string; sought?: number; cells: Record<string, TokenSums>; months: number[]; old?: 1 }
 const headNew = (): Head => ({ folder: '', cells: {}, months: [] })
 type AllKept = { v: number; epoch: string; at: number; swept: number; cursor: string; counted: number; recent: Record<string, number>; days: Record<string, { rev: number; c: TokenSums }>; months: Record<string, { rev: number; part: Part }> }
 const allNew = (now: number): AllKept => ({ v: CACHE_V, epoch: `${now.toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`, at: 0, swept: 0, cursor: '', counted: 0, recent: {}, days: {}, months: {} })
@@ -3201,7 +3201,7 @@ const LOCK_STALE = 90_000
 async function statsLock($: EngineInterface, memory: string, now: number) {
   const lock = `${memory}/stats/lock`
   const take = () =>
-    $.process.run(['/bin/sh', '-c', 'mkdir -p "$1/days" "$1/months" && mkdir "$2" 2>/dev/null && printf %s "$3" > "$2/at"', 'sh', `${memory}/stats`, lock, String(now)], { timeoutMs: 5000 }).then(r => r.exitCode === 0, () => false)
+    $.process.run(['/bin/sh', '-c', 'mkdir -p "$1/chats" "$1/days" "$1/months" && mkdir "$2" 2>/dev/null && printf %s "$3" > "$2/at"', 'sh', `${memory}/stats`, lock, String(now)], { timeoutMs: 5000 }).then(r => r.exitCode === 0, () => false)
   if (await take()) return true
   if (now - Number(await statsText($, `${lock}/at`)) < LOCK_STALE) return false
   await $.process.run(['rm', '-rf', lock], { timeoutMs: 5000 }).catch(() => undefined)
@@ -3214,13 +3214,22 @@ async function whatOf($: EngineInterface, f: Looked, flowTitle: string): Promise
   if (f.flow) return { kind: 'flow', parent: f.flow, title: flowTitle, fin: Boolean(meta.finished), flow: f.flow }
   return { kind: (meta.spawnDepth ?? 1) > 1 ? 'helper' : 'work', parent: meta.parentAgentId ?? '', title: meta.description ?? 'Background task', fin: Boolean(meta.finished) }
 }
+const OLD_KEPT_FOR = 3 * 86_400_000
 type Checked = { id: string; index: Shards<Kept, Head>; days: { day: number; key: string; entry: DayEntry | undefined }[]; isChanged: boolean; last: number; hadMain: boolean }
 const HOUR = 3_600_000
 async function chatCheck($: EngineInterface, home: string, memory: string, chatId: string, hint: string, epoch: string, now: number, isThorough: boolean): Promise<Checked> {
-  const index = await shardsRead<Kept, Head>($, `${memory}/stats/${chatId}`, epoch, headNew())
-  const old = (index.other as Cache | undefined)?.v === 5 ? (index.other as Cache) : undefined
+  const index = await shardsRead<Kept, Head>($, `${memory}/stats/chats/${chatId}`, epoch, headNew())
+  const oldPath = `${memory}/stats/${chatId}.json`
+  const carried = index.of.size ? undefined : parsed<Cache | undefined>(await statsText($, oldPath), undefined)
+  const old = carried?.v === 5 ? carried : undefined
   const checked: Checked = { id: chatId, index, days: [], isChanged: false, last: 0, hadMain: index.of.has('chat') }
   const head = index.head
+  if (old && !head.old) ((head.old = 1), index.dirty.add(0))
+  if (isThorough && head.old && index.of.size) {
+    const left = await $.fs.stat(oldPath).catch(() => undefined)
+    if (left && now - left.mtimeMs > OLD_KEPT_FOR) await $.process.run(['rm', '-f', oldPath], { timeoutMs: 5000 }).catch(() => undefined)
+    if (!left || now - left.mtimeMs > OLD_KEPT_FOR) ((head.old = undefined), index.dirty.add(0))
+  }
   const mainAt = (folder: string) => (folder ? $.fs.stat(`${folder}/${chatId}.jsonl`).catch(() => undefined) : Promise.resolve(undefined))
   let folder = hint
   let main = await mainAt(folder)
@@ -3325,7 +3334,7 @@ const SWEEP_EVERY = 10 * 60_000
 async function chatsDue($: EngineInterface, memory: string, chatId: string, all: AllKept, now: number, isThorough: boolean) {
   const ids = await chatsKept($, memory, chatId)
   if (isThorough) return ids
-  const have = new Set((await $.fs.list(`${memory}/stats`).catch(() => [])).map(e => /^(.+?)(?:\.\d+)?\.json$/.exec(e.name)?.[1] ?? '').filter(Boolean))
+  const have = new Set((await $.fs.list(`${memory}/stats/chats`).catch(() => [])).map(e => /^(.+?)(?:\.\d+)?\.json$/.exec(e.name)?.[1] ?? '').filter(Boolean))
   const open = new Set((await $.fs.list(`${memory}/keep`).catch(() => [])).filter(e => e.name.endsWith('.beat') && e.mtimeMs > all.at - 5 * 60_000).map(e => e.name.slice(0, -5)))
   const sorted = [...ids].sort()
   const after = Math.max(0, sorted.findIndex(id => id > all.cursor))
@@ -3382,7 +3391,7 @@ async function statsFor($: EngineInterface, memory: string, chatId: string, scop
     }
   }
   if (scope === 'chat') {
-    const index = await shardsRead<Kept, Head>($, `${memory}/stats/${chatId}`, all.epoch, headNew())
+    const index = await shardsRead<Kept, Head>($, `${memory}/stats/chats/${chatId}`, all.epoch, headNew())
     const { pieces, turns } = piecesKept(chatId, Object.fromEntries(index.of))
     const months = new Map([...monthsKept(pieces, turns)].map(([month, one]) => [month, { pieces: one.p.map(row => rowPiece(chatId, row)), turns: one.t }]))
     await edgesOf(index.head.cells)

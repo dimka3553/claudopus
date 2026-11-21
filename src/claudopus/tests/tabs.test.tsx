@@ -55,7 +55,7 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(await value('Chat time per message, on average')).toBe('20s')
   expect(await stats.find({ type: 'Text', text: /^A message’s time runs from when the chat takes it to the chat’s last step/ })).toBeDefined()
   // The sums are kept, so the transcripts are read again only when they change
-  expect(JSON.parse(files.get(`${MEMORY}/stats/engine-id.json`) ?? '{}').head.folder).toBe(chat)
+  expect(JSON.parse(files.get(`${MEMORY}/stats/chats/engine-id.json`) ?? '{}').head.folder).toBe(chat)
 })
 
 test('Stats keeps what it summed in files the engine reads whole, however much a chat did, and opened again adds nothing up twice: a transcript is summed again only once it changes', async ($, on) => {
@@ -74,6 +74,11 @@ test('Stats keeps what it summed in files the engine reads whole, however much a
     files.set(`${subs}/agent-w${i}.jsonl.sum`, sumOf(i))
   }
   expect([...files].filter(([path]) => path.endsWith('.sum')).reduce((sum, [, text]) => sum + text.length, 0)).toBeGreaterThan(4_194_304)
+  // What an older Claudopus summed of one of them is carried over, not summed again: its sums count as that file holds them, here
+  // twice the tokens the transcript would give if it were read
+  const older = JSON.stringify({ v: 5, folder: chat, files: { [`${subs}/agent-w0.jsonl`]: { size: 1, mtime: 0, sum: JSON.parse(sumOf(0).replaceAll(',100]', ',200]')) as unknown } } })
+  files.set(`${MEMORY}/stats/engine-id.json`, older)
+  files.set(`mtime:${MEMORY}/stats/engine-id.json`, String(now))
   await $.session.start(start)
   const stats = await $.ui.mount({ ...LIST, requestId: 'stats', props: { ...LIST.props, title: 'Stats', bodyColumns: 80 }, surface: 'desktop' } as never)
   const value = async (name: string) => {
@@ -82,9 +87,11 @@ test('Stats keeps what it summed in files the engine reads whole, however much a
   }
   await pressed(stats, 'scope-All chats')
   expect(await until(async () => ((await value('Tasks done')) === '40' ? true : undefined))).toBe(true)
-  expect(await value('Written by the models')).toBe('100% · 7.2M')
+  expect(await value('Written by the models')).toBe('100% · 7.4M')
+  // A chat still on that older Claudopus goes on using its own file, which is left as it was
+  expect(files.get(`${MEMORY}/stats/engine-id.json`)).toBe(older)
   // Kept in several files, each far under the limit; the day's responses in more than one
-  const kept = () => [...files].filter(([path]) => path.startsWith(`${MEMORY}/stats/`) && path.endsWith('.json'))
+  const kept = () => [...files].filter(([path]) => path.startsWith(`${MEMORY}/stats/`) && path.endsWith('.json') && path !== `${MEMORY}/stats/engine-id.json`)
   expect(kept().length).toBeGreaterThan(4)
   expect(kept().filter(([, text]) => text.length > 2_000_000)).toEqual([])
   expect(kept().filter(([path]) => /\/stats\/days\/\d+\.1\.json$/.test(path)).length).toBe(1)
@@ -108,7 +115,12 @@ test('Stats keeps what it summed in files the engine reads whole, however much a
   files.delete('hold:jq')
   holding.get(`jq:${subs}/agent-w7.jsonl`)?.('')
   expect(await until(async () => (looked() > second ? true : undefined))).toBe(true)
-  expect(await until(async () => ((await value('Written by the models')) === '100% · 7.2M' ? undefined : value('Written by the models')))).toBe('100% · 7.4M')
+  expect(await until(async () => ((await value('Written by the models')) === '100% · 7.4M' ? undefined : value('Written by the models')))).toBe('100% · 7.6M')
+  // Days after the last chat on the older Claudopus wrote its file, it is cleared away
+  files.set(`mtime:${MEMORY}/stats/engine-id.json`, String(now - 4 * 1440 * M))
+  await clock.advance(2 * M)
+  await pressed(stats, 'scope-This chat')
+  expect(await until(async () => (files.has(`${MEMORY}/stats/engine-id.json`) ? undefined : true))).toBe(true)
 })
 
 test('the Leaderboard tab shows the board and is where you join with a username nobody has; nothing is sent before, then your sums go every few minutes, public or private, until you leave', async ($, on) => {
