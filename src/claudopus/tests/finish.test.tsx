@@ -787,15 +787,9 @@ test('a task hands in a finished part of its result while it works on: its card 
   const notice = 'The task "Beards and jawline" handed in a part of its result, and is still working on the rest.'
   expect(taken.result).toContain(`SendMessage (load it with ToolSearch if needed) with to "main" and this message, exactly:\n${notice}\n`)
   await clock.advance(1000)
-  const told = ((await $.prompt.submit({ text: `<agent-message from="a1">\n${notice}\n</agent-message>`, wait: false, origin: { kind: 'peer' } } as never)) as { context?: string[] }).context?.join('\n') ?? ''
+  const told = ((await $.prompt.submit({ text: `<agent-message from="a1">\n${notice}\n</agent-message>`, wait: false, origin: { kind: 'peer' }, isMeta: true } as never)) as { context?: string[] }).context?.join('\n') ?? ''
   expect(told).toContain(`is still working, and handed in this part of its result`)
   expect(told).toContain(`  ${part}`)
-  // The card still works, its to-do and helper with it, and the part is never given again, nor is Claudopus's own message sent
-  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
-  const texts = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
-  expect(texts).toContain('1 working')
-  const next = ((await $.prompt.submit({ text: 'how is it going?', wait: false, origin: composer } as never)) as { context?: string[] }).context?.join('\n') ?? ''
-  expect(next).not.toContain(part)
   // Parts whose task never told the chat go in Claudopus's own message once a minute has passed, one message for all that wait
   // together, and none for a part already given
   await $.agent.spawn({ ...spawn, description: 'Ears', prompt: 'look into them' } as never)
@@ -809,6 +803,12 @@ test('a task hands in a finished part of its result while it works on: its card 
   expect(own()[0]).toContain('  The chin research is done.')
   expect(own()[0]).toContain('  The ear research is done.')
   expect(own()[0]).not.toContain(part)
+  // The card still works, its to-do and helper with it, and the part is never given again, nor is Claudopus's own message sent
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
+  const texts = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  expect(texts).toContain('2 working')
+  const next = ((await $.prompt.submit({ text: 'how is it going?', wait: false, origin: composer } as never)) as { context?: string[] }).context?.join('\n') ?? ''
+  expect(next).not.toContain(part)
   await $.prompt.submit({ text: 'and the ears?', wait: false, origin: composer } as never)
   expect(own()).toHaveLength(1)
   // Its last report ends it, kept beside the part

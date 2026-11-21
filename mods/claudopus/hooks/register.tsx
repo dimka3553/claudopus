@@ -10015,13 +10015,13 @@ const chatHooks = (on: On) => {
         return next(e)
       }
     }
-    if (e.isMeta || e.command || !dir) return next(e)
     const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text)
     const isPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || isPressed
-    if (!isPerson && (e.origin.kind === 'plugin' || e.origin.kind === 'peer') && !isOff) {
+    if (dir && !isPerson && (e.origin.kind === 'plugin' || e.origin.kind === 'peer') && !isOff && !e.command) {
       const parts = await partsFor($)
       if (parts.length) e = { ...e, context: [...(e.context ?? []), ...parts] }
     }
+    if (e.isMeta || e.command || !dir) return next(e)
     if (!isPerson) {
       const from = programFrom(e.origin)
       if (from) await appendWords($, (await read($, me)).id, `## ${new Date().toISOString()} (${from})\n${e.text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
