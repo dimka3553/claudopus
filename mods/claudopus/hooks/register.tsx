@@ -2556,7 +2556,7 @@ const listFirst = async ($: EngineInterface, front?: string) => {
   if (panes.findIndex(pane => pane.id === LIST) <= 0) return
   for (const pane of panes.filter(one => one.id !== LIST)) {
     await $.ui.close({ id: pane.id }).catch(() => undefined)
-    await $.ui.open({ id: pane.id, title: pane.title, focus: pane.id === front }).catch(err => log($, `${pane.id} not opened again: ${String(err)}`))
+    await (pane.id === front ? $.ui.open({ id: pane.id, title: pane.title, focus: true }) : $.ui.open({ id: pane.id, title: pane.title })).catch(err => log($, `${pane.id} not opened again: ${String(err)}`))
   }
 }
 const frontAsked = async ($: EngineInterface, id: string, title: string) => {
