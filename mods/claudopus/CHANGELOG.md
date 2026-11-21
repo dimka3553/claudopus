@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.260 · 21 November 2026
+- A link to your own leaderboard page now always previews as your card, with your name, figures and picture, in Telegram and other apps; before, it could show the whole board instead. The picture updates in those apps when your figures change, and a link ending in a slash works too.
+
 ## 0.2.259 · 21 November 2026
 - Joining the leaderboard now says, one short line each, what the board shows, what is never sent, how often it sends, what public adds and what Leave does.
 - Your timeline goes to the leaderboard only while your stats are public; making them private deletes it there.
