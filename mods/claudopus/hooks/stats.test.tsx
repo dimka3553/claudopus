@@ -104,6 +104,9 @@ test('stats add up tokens by model once each, work and its helpers as one piece,
   expect(line.models).toEqual(['claude-opus-5-5', 'claude-sonnet-5-5', ''])
   expect(JSON.stringify(line)).not.toContain('w1')
   expect(timelineOf(runs, 30).pieces).toEqual([[[20, 5, 0], [25, 5, 2]]])
+  // Nothing from before Claudopus was installed counts on the board, in the figures or the timeline
+  expect(boardOf(runs, day + 86_400_000, day + 20 * M).all.work).toBe(10 * M)
+  expect(timelineOf(runs, 40_000, day + 20 * M).pieces).toEqual([[[0, 5, 0], [5, 5, 1]]])
 })
 
 test('the timeline is one drawing the app takes whatever the history: each bar its own words while they fit, then each piece, then the bars alone', async () => {
