@@ -27,3 +27,4 @@ import { LOG_SENT, NAMING_MODEL, NAMING_SYSTEM, namedHead, namingKey, namingOf, 
 import type { Naming, NamingAsk } from './naming'
 import { batteryShown, batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
 import type { UsageTop, UsageBattery, UsageFigures, UsageKept } from './usage'
+import { PACE_EVERY, PACE_LOOK, PACE_SET, paceLookOf, paceOf } from './pace'

@@ -1,0 +1,1 @@
+- However many tasks run, Claude's commands now leave two cores of your Mac free for you, so it stays responsive. Commands run at full speed while they fit in the other cores; newer ones past that wait in the Mac's background mode, using only what you leave idle, and go back to full speed as room comes.

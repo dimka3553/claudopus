@@ -371,6 +371,8 @@ const chatHooks = (on: On) => {
       if (!isBehind()) await calmLook($, isMoving).catch(err => log($, `panes not looked at: ${String(err)}`))
       // While this chat's work runs, the line above the prompt shows how Claude uses the computer: looked at every few seconds
       if (!isBehind() && (await read($, todos)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
+      // and Claude's commands take their turn on the processor, so the person keeps cores of their own (pace.tsx)
+      void paceWork($).catch(err => log($, `commands not paced: ${String(err)}`))
       // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
       const now = await $.clock.now()
       for (const one of [...(await read($, flows)), ...(await read($, todos))].filter(card => isLingering(card, now))) {

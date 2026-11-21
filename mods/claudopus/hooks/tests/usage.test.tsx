@@ -65,7 +65,7 @@ const prompts: string[] = []
 // the release
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; complete?: (e: { model: string; system?: string; prompt: string }) => string | null | undefined; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; live?: (file: string) => number | undefined; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release; stream?: (e: { agentId?: string }) => AsyncGenerator<unknown, void> } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; complete?: (e: { model: string; system?: string; prompt: string }) => string | null | undefined; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; live?: (file: string) => number | undefined; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; pace?: (argv: string[]) => string; startedOn?: Record<string, string>; release?: Release; stream?: (e: { agentId?: string }) => AsyncGenerator<unknown, void> } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -318,6 +318,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     }
     // How the computer is used, as the line above the prompt looks at it: what the test gives, else nothing to read
     if (tool === 'sh' && String(rest[1]).startsWith('echo "@@SELF@@')) return ok(options.usage?.(String(rest[1])) ?? '')
+    // Claude's commands taking their turn on the processor: the processes, their threads and the background mode, as the test gives them
+    if (tool === 'sh' && /^echo "@@PACE@@|^for p in \$1; do taskpolicy/.test(String(rest[1]))) return ok(options.pace?.(rest.map(String)) ?? '')
     // The jobs' outputs as the panel reads them in one go, where the test gives them: each output it asks for ends in what the test
     // says, last written when it says, and every detached process it names still runs
     // (and, where the test gives them, the processes and the file each held-open command's shell writes to)
@@ -1317,4 +1319,74 @@ test("a disk nearly full says so at the top of the panel with Free up space and 
   files.set('/w/own.mjs', "import { chromium } from 'playwright'\nconst b = await chromium.launch()")
   expect(await bash('c5', 'cd /w && node own.mjs', 'Take the shots')).toBeUndefined()
   expect(await bash('c6', 'open -a "Google Chrome" http://localhost:3000', 'Open the site')).toBeUndefined()
+})
+
+// Claude's commands as ps lists them beside the app, its engine and another app's, on a Mac of ten cores, with each process's threads
+// ready to run (other: the other apps' and the system's, at full speed)
+const paceList = (rows: { pid: number; ppid: number; age: string; pri: number; name: string }[], ready: Record<string, number>, other = 0) =>
+  [
+    '@@PACE@@ 1423',
+    '@@CORES@@',
+    '10',
+    '@@PS@@',
+    '  852     1   852 01:00:00  47 /Applications/Claude.app/Contents/MacOS/Claude',
+    ' 1422   852   852 01:00:00  31 /Applications/Claude.app/Contents/Helpers/disclaimer',
+    ' 1423  1422   852 01:00:00  31 /Users/sam/Library/Application Support/Claude/claude-code/2.1.328/x/claude.app/Contents/MacOS/claude',
+    '  700     1   700 01:00:00  31 /Applications/Safari.app/Contents/MacOS/Safari',
+    ...rows.map(r => `${r.pid} ${r.ppid} ${r.ppid} ${r.age} ${r.pri} ${r.name}`),
+    '@@THREADS@@',
+    'USER   PID   TT   %CPU STAT PRI     STIME     UTIME COMMAND',
+    `sam   700   ??  99.0 S    31T   0:00.00   1:00.00 Safari`,
+    ...Array.from({ length: other }, () => '      700         99.0 R    31T   0:00.00   1:00.00 '),
+    ...Object.entries(ready).flatMap(([pid, n]) => [`sam ${pid} ?? 99.0 S 31T 0:00.00 1:00.00 python`, ...Array.from({ length: n }, () => `     ${pid}        99.0 R    31T   0:00.00   1:00.00 `)]),
+    '',
+  ].join('\n')
+
+test("Claude's commands take their turn on the processor: the oldest run at full speed while their ready threads fit in the cores left after the other apps' and two more, the newest beyond wait in the Mac's background mode and come back as room comes, and nothing else is touched", async ($, on) => {
+  const shell = { pid: 5000, ppid: 1423, age: '10:00', pri: 31, name: '/bin/zsh' }
+  const a = { pid: 5001, ppid: 5000, age: '10:00', pri: 31, name: '/usr/bin/python3' }
+  const b = { pid: 5002, ppid: 5000, age: '01:00', pri: 31, name: '/usr/bin/python3' }
+  const c = { pid: 5003, ppid: 1423, age: '00:30', pri: 31, name: 'node' }
+  let rows = [shell, a, b, c]
+  let ready: Record<string, number> = { 5001: 5, 5002: 4, 5003: 1 }
+  const set: string[][] = []
+  const { clock } = world(on, { pace: argv => (argv[1]?.startsWith('echo "@@PACE@@') ? paceList(rows, ready, 2) : (set.push([argv[3] ?? '', argv[4] ?? '']), '')) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await until(async () => (set.length ? true : undefined))
+  // Ten cores, less two and Safari's two: 5 ready threads, then 4 more would pass the 6 left, so the second waits; the third's 1 fits.
+  // Never the app, an engine or Safari, and never a shell with nothing ready
+  expect(set[0]).toEqual(['5002', ''])
+  // The first leaves, and the one waiting in the background mode comes back to full speed
+  rows = [shell, { ...b, pri: 4 }, c]
+  ready = { 5002: 4, 5003: 1 }
+  for (let s = 0; s < 6; s++) await clock.advance(1000)
+  await until(async () => (set.length > 1 ? true : undefined))
+  expect(set[1]).toEqual(['', '5002'])
+  // Out of it, and nothing changes after, so nothing is set again
+  rows = [shell, b, c]
+  for (let s = 0; s < 6; s++) await clock.advance(1000)
+  expect(set.length).toBe(2)
+})
+
+test("with no work at work, the Mac is looked at only while commands are still waiting in the background mode, so none is left there once the work is over", async ($, on) => {
+  let looks = 0
+  const set: string[][] = []
+  const waiting = { pid: 5002, ppid: 1423, age: '01:00', pri: 4, name: '/usr/bin/python3' }
+  const { clock, files } = world(on, {
+    env: { TMPDIR: '/t' },
+    pace: argv => (argv[1]?.startsWith('echo "@@PACE@@') ? ((looks += 1), paceList([waiting], { 5002: 0 })) : (set.push([argv[3] ?? '', argv[4] ?? '']), '')),
+  })
+  await $.session.start(start)
+  for (let s = 0; s < 6; s++) await clock.advance(1000)
+  expect(looks).toBe(0)
+  files.set('/t/claudopus-pace.json', JSON.stringify({ at: 0, held: 1 }))
+  for (let s = 0; s < 6; s++) await clock.advance(1000)
+  await until(async () => (set.length ? true : undefined))
+  expect(set[0]).toEqual(['', '5002'])
+  // It is out, so the looks stop
+  const seen = looks
+  for (let s = 0; s < 12; s++) await clock.advance(1000)
+  expect(looks).toBe(seen)
 })
