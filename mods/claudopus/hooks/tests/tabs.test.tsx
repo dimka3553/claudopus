@@ -564,7 +564,14 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
       const fn = String(e.argv.at(-1)).split('/').at(-1) ?? ''
       boarded.push({ fn, body: JSON.parse(String(e.init?.stdin ?? '{}')) as Record<string, unknown> })
       const said = files.get(`board:${fn}`)
-      return said === undefined ? ok('', 7) : ok(said)
+      const answer = () => (said === undefined ? ok('', 7) : ok(said))
+      // hold:<fn> keeps the call on its way until the test lets it go: held.get(fn)?.('')
+      return files.has(`hold:${fn}`) ? (new Promise(done => held.set(fn, () => done(answer()))) as never) : answer()
+    }
+    // hold:jq keeps every chat's records being read, as they are for half a minute after a reload, until the test lets them go
+    if (tool?.endsWith('jq') && files.has('hold:jq')) {
+      const sum = files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}'
+      return new Promise(done => held.set(`jq:${String(e.argv.at(-1))}`, () => done(ok(sum)))) as never
     }
     // grep handed a .env file for the names before each =, as the list of keys reads one: only what -o matches comes back
     if (tool === '/usr/bin/grep' && rest[0] === '-ohE') return ok((files.get(String(rest[2])) ?? '').split('\n').flatMap(line => line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/)?.[0] ?? []).map(one => `${one}\n`).join(''))
@@ -928,7 +935,7 @@ test('Stats opens in front from its button beside Results, and adds up this chat
 })
 
 test('the Leaderboard tab shows the board and is where you join with a username nobody has; nothing is sent before, then your sums go every few minutes, public or private, until you leave', async ($, on) => {
-  const { files, boarded, clock, shown, opened, tabs } = world(on)
+  const { files, boarded, clock, shown, opened, tabs, held: holding } = world(on)
   const M = 60_000
   const now = 1_700_000_000_000
   const chat = `${HOME}/.claude/projects/-repo`
@@ -963,24 +970,38 @@ test('the Leaderboard tab shows the board and is where you join with a username 
   await stats.input({ key: await field(), text: 'my name' })
   expect(await said(/^A username is 3 to 20 letters/)).toBeDefined()
   expect(boarded.filter(one => one.fn !== 'lb_board')).toEqual([])
-  // Someone has it already
+  // Join answers at once, however long every chat's records take to read (half a minute after a reload, on 0.2.261 a Join that showed
+  // nothing at all for that long): what it is doing shows as it is pressed, and someone has the name already
+  files.set('hold:jq', '')
+  files.set('hold:lb_join', '')
   files.set('board:lb_join', '{"code":"23505","message":"taken"}\n409')
   await stats.input({ key: await field(), text: 'dima' })
+  expect(await said(/^Joining as dima…$/)).toBeDefined()
+  files.delete('hold:lb_join')
+  await until(async () => holding.has('lb_join'))
+  holding.get('lb_join')?.('')
   expect(await said(/^Someone already has the username dima/)).toBeDefined()
   const joins = boarded.filter(one => one.fn === 'lb_join')
   expect(joins.length).toBe(1)
-  // Only sums go, for each range: never a title, a path or anyone's words
-  const sent = joins[0]?.body.p_stats as Record<string, Record<string, unknown>>
-  expect(Object.keys(sent)).toEqual(['today', 'd7', 'd30', 'all'])
-  expect([sent.all?.tokens, sent.all?.read, sent.all?.write, sent.all?.input]).toEqual([200, 70, 20, 10])
-  expect(JSON.stringify(sent)).not.toContain('repo')
-  // Joined: the secret is kept in the memory folder, and the figures follow every few minutes
+  expect(Object.keys(joins[0]?.body.p_stats as object)).toEqual(['today', 'd7', 'd30', 'all'])
+  // Joined: the secret is kept in the memory folder, then the figures follow
   files.set('board:lb_join', '"secret-1"\n200')
+  files.set('board:lb_push', 'true\n200')
   await stats.input({ key: await field(), text: 'dima' })
   expect(await said(/^✓ You joined as dima/)).toBeDefined()
   expect(JSON.parse(files.get(`${MEMORY}/leaderboard.json`) ?? '{}')).toMatchObject({ name: 'dima', token: 'secret-1', isPublic: false })
-  files.set('board:lb_push', 'true\n200')
+  files.delete('hold:jq')
+  for (const [id, go] of [...holding]) if (id.startsWith('jq:')) (holding.delete(id), go(''))
+  // Only sums go, for each range: never a title, a path or anyone's words
+  const first = await until(async () => boarded.find(one => one.fn === 'lb_push' && one.body.p_token === 'secret-1'))
+  const sent = first?.body.p_stats as Record<string, Record<string, unknown>>
+  expect(Object.keys(sent)).toEqual(['today', 'd7', 'd30', 'all'])
+  expect([sent.all?.tokens, sent.all?.read, sent.all?.write, sent.all?.input]).toEqual([200, 70, 20, 10])
+  expect(JSON.stringify(sent)).not.toContain('repo')
+  // and every few minutes after
+  const firstPushes = boarded.filter(one => one.fn === 'lb_push').length
   await clock.advance(4 * M)
+  expect(await until(async () => boarded.filter(one => one.fn === 'lb_push').length > firstPushes)).toBe(true)
   expect(await until(async () => boarded.find(one => one.fn === 'lb_push' && one.body.p_token === 'secret-1' && one.body.p_public === false))).toBeDefined()
   // Stats public: the timeline stays private, and isn't sent
   await pressed(stats, 'board-stats-switch-Public')

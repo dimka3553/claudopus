@@ -744,7 +744,9 @@ export function boardView(ui: Ui, b: BoardShown, surface: string) {
       {note(ui, 'board-how', 'Time of work is how long Claude’s tasks worked, added up. Efficiency is how much work got done for each hour on the clock.')}
     </Box>,
   )
-  const said = b.said ? <Text key="board-said" color={b.said.startsWith('✓') ? undefined : '#D08A00'} dimColor={b.said.startsWith('✓')} wrap="wrap">{b.said}</Text> : null
+  // What a press came to; while it is on its way, what it is doing, dim
+  const isFine = b.said.startsWith('✓') || b.said.endsWith('…')
+  const said = b.said ? <Text key="board-said" color={isFine ? undefined : '#D08A00'} dimColor={isFine} wrap="wrap">{b.said}</Text> : null
   const you = !b.name
     ? band(
         ui,
