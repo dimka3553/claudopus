@@ -1,0 +1,1 @@
+- The Claudopus tab always stays first in the panel's row of tabs; Stats, a task's Details and the others open after it, in the order you opened them.
