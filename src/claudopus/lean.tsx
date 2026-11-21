@@ -292,6 +292,8 @@ const partsFor = async ($: EngineInterface) => {
   const given = (await read($, todos)).filter(one => one.partsForChat?.length)
   if (!given.length) return []
   await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, partsForChat: undefined } : one)))
+  // (what waited for Claudopus's own message has gone: the minute counts again from the next part)
+  heldPrompts.length = 0
   await log($, `gave the chat the parts of the results of ${given.map(one => one.id).join(', ')}`)
   return given.flatMap(one => (one.partsForChat ?? []).map(part => named(PART_FOR_CHAT(titleOf(one), one.id, part))))
 }

@@ -101,21 +101,45 @@
     paint(100)
   }
 
-  // ---- the panel drawing: two tasks move on a step, then it starts over ----
-  const live = $('#live')
-  if (live) {
-    const first = Object.fromEntries($$('[data-s]', live).map(el => [el.dataset.s, el.innerHTML]))
-    const set = (key, html) => { const el = $(`[data-s="${key}"]`, live); if (el) el.innerHTML = html }
-    const story = [
-      [2600, () => { set('b-now', '1,240 of 1,240 tests pass; I am reading the three slowest.'); set('b-count', '2 of 3 done'); set('b-step', 'Step 3 of 3 · <b>Report the slow ones</b>') }],
-      [2600, () => { set('a-now', 'Rows are streamed now: 6 s for 2 million rows. I am running the export tests.'); set('a-count', '2 of 4 done'); set('a-step', 'Step 3 of 4 · <b>Run the export tests</b>') }],
-      [3400, () => { set('a-count', '3 of 4 done'); set('a-step', 'Step 4 of 4 · <b>Have a second Claude check it</b>'); set('a-now', 'The tests pass. A second Claude is looking for what is wrong.') }],
-      [4200, () => Object.entries(first).forEach(([key, html]) => set(key, html))],
-    ]
-    let at = 0, next = 0
-    const step = () => { const [wait, act] = story[at]; next = setTimeout(() => { act(); at = (at + 1) % story.length; step() }, wait) }
-    const go = visible => { clearTimeout(next); if (visible && !still.matches) step() }
-    seen(live, go)
+  // ---- the first screen's example: what you type in the chat, then the real panel after it, one step at a time ----
+  const example = $('#stage')
+  if (example) {
+    const shots = $$('.stage-shots img', example), keys = $$('.stage-steps button', example)
+    const cap = $('.stage-cap', example), typed = $('.typed', example), tap = $('.tap', example)
+    let timers = [], auto = !still.matches, inView = false, held = false, due = -1
+    const later = (ms, fn) => timers.push(setTimeout(fn, ms))
+    const halt = () => { timers.forEach(clearTimeout); timers = []; due = -1 }
+    const mark = key => { keys.forEach(k => { k.classList.toggle('is-on', k === key); k.setAttribute('aria-pressed', k === key) }); cap.textContent = key.dataset.cap }
+    const show = key => shots.forEach(img => img.classList.toggle('is-on', img.dataset.shot === key.dataset.shot))
+    // a step shown at once, as a press on its number asks for, with its words typed out already
+    const jump = i => { halt(); typed.textContent = (keys[i].dataset.say || '').split('|').pop(); mark(keys[i]); show(keys[i]) }
+    // a step played: its words are typed first, the panel answers, and where you press shows a beat before the next step
+    const play = i => {
+      halt()
+      const key = keys[i], lines = (key.dataset.say || '').split('|').filter(Boolean)
+      let at = 0
+      mark(key); typed.textContent = ''
+      if (!lines.length) show(key)
+      lines.forEach((line, n) => {
+        for (let c = 1; c <= line.length; c++) later(at += 32, () => { typed.textContent = line.slice(0, c) })
+        later(at += 500, () => { typed.textContent = ''; if (n === lines.length - 1) show(key) })
+      })
+      const [x, y] = (key.dataset.tap || '').split(',').map(Number)
+      if (key.dataset.tap) later(at += 3200, () => { tap.style.left = x + '%'; tap.style.top = y + '%'; tap.classList.remove('is-on'); void tap.offsetWidth; tap.classList.add('is-on') })
+      later(at += key.dataset.tap ? 700 : 3400, () => { due = (i + 1) % keys.length; if (!held) play(due) })
+    }
+    // it starts from the step the page shows by itself, so the first thing to move is the panel, not a line typed over it
+    const shown = () => Math.max(0, keys.findIndex(k => k.classList.contains('is-on')))
+    const go = () => { if (!auto || !inView) halt(); else if (due < 0 && !timers.length) play(shown()) }
+    keys.forEach((key, i) => key.addEventListener('click', () => { auto = false; jump(i) }))
+    // it waits while the pointer rests on it or a key in it has the focus, then goes on from where it stood
+    const hold = on => { held = on; if (!on && auto && due >= 0) play(due) }
+    example.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') hold(true) })
+    example.addEventListener('pointerleave', () => hold(false))
+    example.addEventListener('focusin', () => hold(true))
+    example.addEventListener('focusout', () => hold(false))
+    seen(example, visible => { inView = visible; go() }, 0.3)
+    still.addEventListener?.('change', () => { auto = !still.matches; if (auto) go(); else jump(shown()) })
   }
 
   // ---- the film waits for a press and never starts by itself; chapters jump into it ----
