@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.253 · 21 November 2026
+- When a task hands you a part of its result, the task itself now tells the chat, so no message appears in the chat as if you had written it. Claudopus's own message is sent only if the task has not told the chat within a minute
+- A part the chat has already shown you no longer starts another empty turn, and parts from several tasks that wait together come in one message
+
 ## 0.2.252 · 21 November 2026
 - The website's home page now opens with what you get: about 3 times as much work going at once with Claude Code, measured over three weeks of real use. Its first screen has the two install lines, the figures, and the real panel stepping through one example
 - Every picture of the panel on the home page is drawn by the panel's own code, in place of the hand-made drawings, and the page says what the 3× does and doesn't mean
