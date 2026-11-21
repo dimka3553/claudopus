@@ -56,7 +56,7 @@ const toolHooks = (on: On) => {
 
   // Work that needs the person's hands now: its card stands out with the ask and its Copy, until they answer or the work clears it
   on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
-    const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown; release?: unknown }
+    const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown; release?: unknown; key?: unknown; from?: unknown }
     if (e.agentId === undefined) return { result: `Only a background task asks through the panel; the chat asks ${who()} in its reply.` }
     // The question is one line; what it is about goes with it, whole, so the person never answers an ask whose reason has not reached
     // them yet (a report reaches the chat only after the work ends). A question too long for one line is cut at a word on the card and
@@ -67,6 +67,26 @@ const toolHooks = (on: On) => {
     const whole = [text === asked ? '' : asked, given1].filter(Boolean).join('\n\n')
     const details = whole.length > ASK_DETAILS ? cut(whole, ASK_DETAILS) : whole
     // An ask that points at an explanation it does not carry is not shown: the person would see it before that explanation reaches them
+    // A question for a key is its key's box, with the question and where to get it, on the card at once: nothing to run or press first
+    // (21 Nov: the Sentry key was asked for three times, and the person never saw a place to paste it)
+    const keyName = typeof input.key === 'string' ? input.key.trim() : ''
+    if (keyName && asked) {
+      if (!isKeyName(keyName)) return { result: 'Not shown: `key` is the name the key is saved under: letters, digits and _, starting with a letter, such as SENTRY_READ_TOKEN.' }
+      const from = (typeof input.from === 'string' ? input.from : '').replace(/\r\n?/g, '\n').trim()
+      if (!from) return { result: named('Not shown: say in `from` where {name} gets the key: the full link of the page and what to press there, so the box can tell them.') }
+      const saved = (await refreshKeys($).catch(() => keys)).entries.filter(one => one.store === 'claudopus' && one.isPresent)
+      const same = saved.find(one => one.name === keyName)
+      const like = same ? undefined : saved.find(one => sameKey(one.name, keyName))
+      const about = cut(keyAskDetails([text === asked ? '' : asked, given1].filter(Boolean).join('\n\n'), from, keyName, same, like), ASK_DETAILS)
+      const keyAt = await $.clock.now()
+      await change($, e.agentId, one => ({ ...one, keyAsk: { name: keyName, text, details: about, from: e.agentId ?? '', at: keyAt } }))
+      const cards = await read($, todos)
+      const card = cards.find(one => one.id === topOf(cards, e.agentId ?? ''))
+      await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
+      if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
+      await log($, `key ${keyName} asked for with its box on ${card?.id ?? e.agentId}`)
+      return { result: named(KEY_ASK_SHOWN($.plugin.root, keyName, Boolean(same), like?.name)) }
+    }
     if (!given1 && POINTS_AWAY.test(asked)) return { result: `Not shown: the question points at an explanation it doesn't carry, and ${who()} sees a question before your report, which reaches them only after you finish. Ask it again with that explanation, in full, in \`details\`.` }
     const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
     const hasFolder = typeof input.cwd === 'string' && input.cwd.startsWith('/')
@@ -114,6 +134,7 @@ const toolHooks = (on: On) => {
     const list = await read($, todos)
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     if (!text) {
+      if (card?.keyAsk) await changeTodos($, all => all.map(one => (one.id === card.id ? { ...one, keyAsk: undefined } : one)))
       if (card && was) await askGone($, card)
       return { result: 'Cleared: your card no longer has a question.' }
     }

@@ -125,8 +125,8 @@ const DONT_GIVE = "Don't give it"
 const LEAVES_OPEN = /^(?:no,? )?(?:not (?:now|yet)|later|maybe later|skip|skip it|cancel|dismiss|close)$/
 const ANSWER_IN_WORDS = 'Answer in words'
 const isGateActing = (gate: { talk?: { by: string }[] }) => gate.talk?.at(-1)?.by === 'you'
-const needsPerson = (one: { id?: string; status: string; chat?: unknown; ask?: { at?: number; replied?: { isWaking?: boolean } }; admins?: { talk?: { by: string }[] }[] }) =>
-  Boolean(one.admins?.some(gate => !isGateActing(gate))) || (Boolean(one.ask) && !isActingOnReply(one)) || (!one.chat && Boolean(one.id) && (waiting.some(p => p.card === one.id) || boxes.some(box => box.card === one.id)))
+const needsPerson = (one: { id?: string; status: string; chat?: unknown; ask?: { at?: number; replied?: { isWaking?: boolean } }; keyAsk?: unknown; admins?: { talk?: { by: string }[] }[] }) =>
+  Boolean(one.admins?.some(gate => !isGateActing(gate))) || (Boolean(one.ask) && !isActingOnReply(one)) || Boolean(one.keyAsk) || (!one.chat && Boolean(one.id) && (waiting.some(p => p.card === one.id) || boxes.some(box => box.card === one.id)))
 const lingerSet = new Set<string>()
 const FOLLOW_EVERY = 20_000
 const WORKING = ['pending', 'running', 'waiting']
@@ -873,7 +873,7 @@ const NO_MEMORY =
 const NO_MEMORY_BASH = () =>
   named("Claude changes {name}'s own settings and texts (config.json, the rules and roles in the memory folder, a repo's release.local) only with the Edit or Write tool, never with a command, so the change shows on the task's card and waits for {name} to press. To read one, use the Read tool, or cat or jq.")
 const NO_BOXES =
-  'Only the password and key runners use their boxes: Claude never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner, and for a key only through the secret runner the task rules name.'
+  'Only the password and key runners use their boxes: Claude never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner, and for a key only through the secret runner the task rules name or the ask tool\'s `key`.'
 const NO_PUSH = 'Claude never pushes or merges to main itself, so two tasks never release at once: commit on your own branch and run the release runner the task rules name, from your worktree.'
 const SECRETS_MS = 60_000
 const workHead = () => `What follows is what Claudopus tells Claude in every task started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`
@@ -7397,7 +7397,7 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
 }
 
 
-type Asked = { id: string; kind: 'password' | 'key'; name?: string; host?: string; text: string; details: string; at: number; chat?: string; command?: string; key?: string; call?: string; agent?: string; card?: string }
+type Asked = { id: string; kind: 'password' | 'key'; name?: string; host?: string; text: string; details: string; at: number; chat?: string; command?: string; key?: string; call?: string; agent?: string; card?: string; isOwn?: boolean }
 const runnerCalls = new Map<string, { command: string; at: number; until: number; agent?: string }>()
 const runnerBegun = (id: string, command: string, at: number, agent?: string) => void runnerCalls.set(id, { command, at, until: Infinity, ...(agent ? { agent } : {}) })
 const runnerEnded = (id: string, isBackground: boolean, at: number) => {
@@ -7479,7 +7479,7 @@ const lookBoxes = async ($: EngineInterface) => {
   const now = await $.clock.now()
   const found: Asked[] = []
   const entries = await $.fs.list(boxesDir()).catch(() => [])
-  const cards = entries.length ? await read($, todos) : []
+  const cards = await read($, todos)
   for (const entry of entries) {
     const marked = entry.name.replace(/\.told$/, '')
     const answered = entry.name.replace(/\.reply$/, '')
@@ -7503,16 +7503,21 @@ const lookBoxes = async ($: EngineInterface) => {
     } catch {
     }
   }
+  for (const card of cards) {
+    const ask = card.keyAsk
+    const id = ask ? ownBoxId(card.id, ask.at) : ''
+    if (ask && !card.chat && !boxSent.has(id)) found.push({ id, kind: 'key', name: ask.name, text: ask.text, details: ask.details, at: ask.at, chat: boxChat, agent: ask.from, card: card.id, isOwn: true })
+  }
   found.sort((a, b) => a.at - b.at)
   for (const one of found) {
     if (boxTold.has(one.id)) continue
     if (one.chat !== undefined && one.chat !== boxChat && now - one.at < BOX_GRACE) continue
     boxTold.add(one.id)
-    const mark = await $.process.run(['sh', '-c', 'set -C; : > "$1"', 'sh', `${boxesDir()}/${one.id}.told`]).catch(() => ({ exitCode: 1 }))
+    const mark = one.isOwn ? { exitCode: 0 } : await $.process.run(['sh', '-c', 'set -C; : > "$1"', 'sh', `${boxesDir()}/${one.id}.told`]).catch(() => ({ exitCode: 1 }))
     if (mark.exitCode !== 0) continue
     const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, focus: true }).catch(err => (log($, `panel not opened for a box: ${String(err)}`), undefined))
     if (!opened?.isPlaced) {
-      await $.process.run(['rm', '-f', `${boxesDir()}/${one.id}.told`]).catch(() => undefined)
+      if (!one.isOwn) await $.process.run(['rm', '-f', `${boxesDir()}/${one.id}.told`]).catch(() => undefined)
       await log($, `box ${one.id} given back: the panel is not drawn here${opened && !opened.isPlaced ? ` (${opened.reason})` : ''}`)
       continue
     }
@@ -7544,6 +7549,8 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
     return void drawAgain($)
   }
+  const own = boxes.find(other => other.id === id && other.isOwn)
+  if (own) return void (await keepOwnKey($, own, value))
   const request = `${boxesDir()}/${id}.json`
   if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'the command had stopped waiting, so nothing was saved'))
   const asked = boxes.find(other => other.id === id)
@@ -7581,10 +7588,51 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   }
   drawAgain($)
 }
+const ownBoxId = (card: string, at: number) => `key-${card}-${at}`
+const SHORTEST_KEY = 4
+const keepOwnKey = async ($: EngineInterface, one: Asked, value: string) => {
+  const id = one.id
+  const name = one.name ?? ''
+  boxPresses += 1
+  boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
+  if (value.length < SHORTEST_KEY) return void (boxSaid.set(id, `That was shorter than ${SHORTEST_KEY} characters. Paste the whole key.`), drawAgain($))
+  const r = await $.process.run([`${$.plugin.root}/bin/keyring`, 'set', 'claudopus-secret', name, `Claudopus: ${name}`], { stdin: `${value}\n`, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
+  if (r.exitCode !== 0) {
+    boxSaid.set(id, `It couldn't be saved in ${keptWhere()}. Try again.`)
+    await log($, `key ${name} not kept from its box: the keychain ended ${r.exitCode}`)
+    return void drawAgain($)
+  }
+  boxSent.add(id)
+  boxSaid.delete(id)
+  boxHeldReply.delete(id)
+  closeBarOf(id)
+  boxes = boxes.filter(other => other.id !== id)
+  pressedLine($, one.card ?? '', '', '', `You gave ${name}`)
+  drawAgain($)
+  await log($, `key ${name} saved from the box on ${one.card}`)
+  await refreshKeys($).catch(err => log($, `keys not made again: ${String(err)}`))
+  await ownKeyDone($, one, named(KEY_GIVEN($.plugin.root, name)), `You gave ${name}`)
+}
+const ownKeyDone = async ($: EngineInterface, one: Asked, text: string, label: string) => {
+  const card = one.card ?? ''
+  await changeTodos($, list => list.map(other => (other.id === card && other.keyAsk && ownBoxId(card, other.keyAsk.at) === one.id ? { ...other, keyAsk: undefined } : other)))
+  await toTask($, card, one.agent ?? card, text, label, one.text).catch(err => log($, `task not told of its key: ${String(err)}`))
+}
+const KEY_GIVEN = (root: string, name: string) => `{Name} pasted ${name} in its box on your card, and it is saved in Claudopus's keychain. Use it now through \`${root}/bin/secret ${name} here '<command using $${name}>'\`.`
+const KEY_NOT_GIVEN = (name: string) => `{Name} pressed Don't give it on your question for ${name}, so it was not given.`
+const KEY_ANSWERED = (name: string, said: string) => `{Name} answered your question for ${name} in their own words instead of giving it: ${said}`
 const cancelBox = async ($: EngineInterface, id: string, said = '') => {
   boxSent.add(id)
   barKeyTyped.delete(id)
   const one = boxes.find(other => other.id === id)
+  if (one?.isOwn) {
+    boxes = boxes.filter(other => other.id !== id)
+    closeBarOf(id)
+    boxHeldReply.delete(id)
+    pressedLine($, one.card ?? '', DONT_GIVE, said)
+    drawAgain($)
+    return void (await ownKeyDone($, one, named(KEY_NOT_GIVEN(one.name ?? '')), DONT_GIVE))
+  }
   boxes = boxes.filter(other => other.id !== id)
   closeBarOf(id)
   boxHeldReply.delete(id)
@@ -7629,6 +7677,15 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
     return void drawAgain($)
   }
   boxHeldReply.delete(id)
+  if (one.isOwn) {
+    boxSent.add(id)
+    boxSaid.delete(id)
+    boxes = boxes.filter(other => other.id !== id)
+    closeBarOf(id)
+    pressedLine($, one.card ?? '', '', '', `You answered “${cut(oneLine(said), 60)}”`)
+    drawAgain($)
+    return void (await ownKeyDone($, one, named(KEY_ANSWERED(one.name ?? '', said)), `You answered “${cut(oneLine(said), 60)}”`))
+  }
   const request = `${boxesDir()}/${id}.json`
   if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, "the command had stopped waiting, so your answer wasn't sent"))
   const name = boxNameOf(one)
@@ -9806,7 +9863,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'ask',
       description: named(
-        "For background tasks: when a step needs {name}'s own hands or go-ahead now (a code to paste, a box to fill, a key or button to press, an approval), puts your question at the top of the panel on your card and in the chat as a notice; {Name} answers with one of the buttons you give in `choices`, or in their own words. {Name} sees it before your report, so it must carry everything needed to decide and never point at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile continue with what does not depend on it, or end your step saying what you are waiting for. Ask again if the answer leaves something open; call it with empty `text` only once you have seen it done. Never open a terminal for a command yourself.",
+        "For background tasks: when a step needs {name}'s own hands or go-ahead now (a code to paste, a key to give, a button to press, an approval; for a key give `key` and `from`, and its box shows with the question), puts your question at the top of the panel on your card and in the chat as a notice; {Name} answers with one of the buttons you give in `choices`, or in their own words. {Name} sees it before your report, so it must carry everything needed to decide and never point at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile continue with what does not depend on it, or end your step saying what you are waiting for. Ask again if the answer leaves something open; call it with empty `text` only once you have seen it done. Never open a terminal for a command yourself.",
       ),
       inputSchema: {
         type: 'object',
@@ -9818,6 +9875,8 @@ const chatHooks = (on: On) => {
           command: { type: 'string', description: 'A command only they can run, never one you can run yourself: one line, whole, shown with a Copy button' },
           cwd: { type: 'string', description: 'The full path of the folder the command runs in, when it has relative paths' },
           pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the pictures the question is about, shown with it on the card and in the chat' },
+          key: { type: 'string', description: named("Only when you ask {name} for a key, token or password a command of yours needs: the name it is saved under, such as SENTRY_READ_TOKEN. The box to paste it into shows with your question on your card at once; a saved key of that name is replaced, one of another name stays. Give no `choices` with it") },
+          from: { type: 'string', description: named('With `key`: where {name} gets it, the full link of the page and what to press there, shown in the box') },
           release: { type: 'string', description: 'Only when you ask for the go-ahead to release, with the single choice Release it: the full path of your worktree. That press reaches you as the answer and allows your next run of the release runner from that folder, once, with no second question' },
         },
         required: ['text'],
@@ -11243,7 +11302,17 @@ const KEY_KEPT = (root: string, one: KeyEntry, asked: string, again: string) =>
     `Not asked: {name} gave this key already. ${asked === one.name ? one.name : `"${asked}" is ${one.name}`}, kept in ${STORE_NAMES[one.store]}${one.seen ? ` and last seen there ${dayOf(one.seen)}` : ''}. Use it through ${routeOf(root, one)}. ${again} The list of keys is ${dir}/${KEYS_FILE}.`,
   )
 const AGAIN_IN = (one: KeyEntry, field: string) => `If it no longer works, ask again with its name, ${one.name}, written as it is here, and why it does not do, in \`${field}\`.`
-const AGAIN_FORGET = (root: string, one: KeyEntry) => `If it no longer works, take it out first with \`${root}/bin/secret ${one.name} --forget\`; the next run asks for it.`
+const AGAIN_BOX = (one: KeyEntry, asked = one.name) =>
+  `If it does not do, ask {name} for the key with \`ask\`, \`key\` set to ${asked === one.name ? `${one.name} to replace it, or to a new name for a second key` : `${asked} for a second key beside it, or to ${one.name} to replace it`}, and \`from\` saying where {name} gets it: the box to paste it in shows on your card with your question at once.`
+const KEY_PASTE = /\b(?:paste|type|enter|put|copy|give|send|add|make|create|generate)\b/i
+const KEY_WORD = /\b(?:(?:api|access|secret|auth|personal) )?(?:key|token|secret|password|credentials?|pat)s?\b/i
+const ASK_KEY_FIELD =
+  'Not shown: a question that asks {name} for a key has no box to paste it in. Ask again with `key` set to the name the key is saved under (such as SENTRY_READ_TOKEN) and `from` saying where {name} gets it (the full link of the page and what to press there): the box shows with your question on your card at once, and replaces a saved key of that name. A password for an admin command is asked by the admin runner itself.'
+const KEY_ASK_SHOWN = (root: string, name: string, isSaved: boolean, beside?: string) =>
+  `Shown on your card as the box for ${name}: your question, what it is about, where to get it${isSaved ? `, that it replaces the ${name} saved now` : beside ? `, and that ${beside} stays saved beside it` : ''}, with Paste it, Don't give it and Answer in words. {Name} pastes it there; it never passes through you or the chat. Once it is saved you are told, and then you run your command through \`${root}/bin/secret ${name} here '<command using $${name}>'\`. Never wait for it with a command or a timer: with nothing else to do, end your step.`
+const isKeyName = (name: string) => /^[A-Za-z_][A-Za-z0-9_]{0,199}$/.test(name) && !/^(?:PATH|IFS|HOME|USER|SHELL|ENV|BASH_ENV|PS4|SHELLOPTS|BASHOPTS|CDPATH|TMPDIR|LD_.*|DYLD_.*|CLAUDOPUS_.*)$/.test(name)
+const keyAskDetails = (why: string, from: string, name: string, same?: KeyEntry, like?: KeyEntry) =>
+  [why, `Where to get it:\n${from}`, same ? `It replaces the ${name} saved now.` : like ? `${like.name} stays saved as it is: this is a second key.` : '', `It goes only into ${keptWhere()}.`].filter(Boolean).join('\n\n')
 const namesWhole = (text: string, name: string) => new RegExp(`(?:^|[^A-Za-z0-9_-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^A-Za-z0-9_-])`).test(text)
 const askedIn = (text: string, listed: KeyEntry[]) => {
   const flat = ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `
@@ -11265,12 +11334,14 @@ const keyAsked = async ($: EngineInterface, e: { tool: string }): Promise<string
     return one && !namesWhole(String(input.for ?? ''), one.name) ? KEY_KEPT(root, one, name, AGAIN_IN(one, 'for')) : ''
   }
   if (e.tool === `${TOOLS}ask`) {
+    if (typeof (input as { key?: unknown }).key === 'string' && String((input as { key?: unknown }).key).trim()) return ''
     const said = `${String(input.text ?? '')} ${String(input.copy ?? '')}`
     const about = String(input.details ?? '')
     if (!/\b(?:key|token|password|secret|credentials?|login)s?\b/i.test(said) && !/[A-Z0-9]_[A-Z0-9]/.test(said)) return ''
     const fresh = await listed()
     const one = askedIn(said, fresh) ?? (/\b(?:paste|type|enter|give|send|add|put)\b/i.test(said) ? askedIn(about, fresh) : undefined)
-    return one && !namesWhole(about, one.name) ? KEY_KEPT(root, one, one.name, AGAIN_IN(one, 'details')) : ''
+    if (one && !namesWhole(about, one.name)) return KEY_KEPT(root, one, one.name, AGAIN_BOX(one))
+    return KEY_PASTE.test(said) && (KEY_WORD.test(said) || /[A-Z0-9]_[A-Z0-9]/.test(said)) && !input.copy && !(input as { command?: unknown }).command ? named(ASK_KEY_FIELD) : ''
   }
   if (e.tool !== 'Bash') return ''
   const command = String(input.command ?? '')
@@ -11282,10 +11353,10 @@ const keyAsked = async ($: EngineInterface, e: { tool: string }): Promise<string
       if (run[2] === '--forget') continue
       for (const name of (run[1] ?? '').split(',').filter(Boolean)) {
         const kept = mine.find(entry => entry.name === name)
-        if (kept && run[2] === '--add') return KEY_KEPT(root, kept, name, AGAIN_FORGET(root, kept))
+        if (kept && run[2] === '--add') return KEY_KEPT(root, kept, name, AGAIN_BOX(kept))
         if (kept) continue
         const one = mine.find(entry => sameKey(entry.name, name))
-        if (one) return KEY_KEPT(root, one, name, AGAIN_FORGET(root, one))
+        if (one) return KEY_KEPT(root, one, name, AGAIN_BOX(one, name))
       }
     }
   }
@@ -12303,13 +12374,31 @@ const toolHooks = (on: On) => {
   })
 
   on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
-    const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown; release?: unknown }
+    const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown; release?: unknown; key?: unknown; from?: unknown }
     if (e.agentId === undefined) return { result: `Only a background task asks through the panel; the chat asks ${who()} in its reply.` }
     const asked = oneLine(typeof input.text === 'string' ? input.text : '')
     const text = asked.length > ASK_TEXT ? cut(asked, ASK_TEXT) : asked
     const given1 = (typeof input.details === 'string' ? input.details : '').replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
     const whole = [text === asked ? '' : asked, given1].filter(Boolean).join('\n\n')
     const details = whole.length > ASK_DETAILS ? cut(whole, ASK_DETAILS) : whole
+    const keyName = typeof input.key === 'string' ? input.key.trim() : ''
+    if (keyName && asked) {
+      if (!isKeyName(keyName)) return { result: 'Not shown: `key` is the name the key is saved under: letters, digits and _, starting with a letter, such as SENTRY_READ_TOKEN.' }
+      const from = (typeof input.from === 'string' ? input.from : '').replace(/\r\n?/g, '\n').trim()
+      if (!from) return { result: named('Not shown: say in `from` where {name} gets the key: the full link of the page and what to press there, so the box can tell them.') }
+      const saved = (await refreshKeys($).catch(() => keys)).entries.filter(one => one.store === 'claudopus' && one.isPresent)
+      const same = saved.find(one => one.name === keyName)
+      const like = same ? undefined : saved.find(one => sameKey(one.name, keyName))
+      const about = cut(keyAskDetails([text === asked ? '' : asked, given1].filter(Boolean).join('\n\n'), from, keyName, same, like), ASK_DETAILS)
+      const keyAt = await $.clock.now()
+      await change($, e.agentId, one => ({ ...one, keyAsk: { name: keyName, text, details: about, from: e.agentId ?? '', at: keyAt } }))
+      const cards = await read($, todos)
+      const card = cards.find(one => one.id === topOf(cards, e.agentId ?? ''))
+      await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
+      if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
+      await log($, `key ${keyName} asked for with its box on ${card?.id ?? e.agentId}`)
+      return { result: named(KEY_ASK_SHOWN($.plugin.root, keyName, Boolean(same), like?.name)) }
+    }
     if (!given1 && POINTS_AWAY.test(asked)) return { result: `Not shown: the question points at an explanation it doesn't carry, and ${who()} sees a question before your report, which reaches them only after you finish. Ask it again with that explanation, in full, in \`details\`.` }
     const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
     const hasFolder = typeof input.cwd === 'string' && input.cwd.startsWith('/')
@@ -12346,6 +12435,7 @@ const toolHooks = (on: On) => {
     const list = await read($, todos)
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     if (!text) {
+      if (card?.keyAsk) await changeTodos($, all => all.map(one => (one.id === card.id ? { ...one, keyAsk: undefined } : one)))
       if (card && was) await askGone($, card)
       return { result: 'Cleared: your card no longer has a question.' }
     }
