@@ -88,7 +88,7 @@ test('the leaderboard sends nothing until you join with a username nobody has; t
   expect(boarded[0]?.fn).toBe('lb_join')
   // Only sums go, for each range: never a title, a path or anyone's words
   const sent = boarded[0]?.body.p_stats as Record<string, Record<string, unknown>>
-  expect(Object.keys(sent)).toEqual(['today', 'd7', 'd30', 'all'])
+  expect(Object.keys(sent)).toEqual(['today', 'd7', 'd30', 'all', 'timeline'])
   expect([sent.all?.tokens, sent.all?.read, sent.all?.write, sent.all?.input]).toEqual([200, 70, 20, 10])
   expect(JSON.stringify(sent)).not.toContain('repo')
   // Joined: the secret is kept in the memory folder, and the figures follow every few minutes

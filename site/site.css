@@ -544,3 +544,14 @@ html,body{overflow-x:clip}
 }
 /* the header's GitHub link stays in the footer on the narrowest phones, so the nav fits */
 @media (max-width:480px){.top nav>a.ext{display:none}}
+
+/* Leaderboard: a person's timeline */
+.lb-line{margin-top:var(--s2)}
+.lb-line-head{display:flex;justify-content:space-between;align-items:baseline;gap:var(--s4);flex-wrap:wrap}
+.lb-line-head h2{margin-bottom:var(--s4)}
+.lb-timeline{display:block;width:100%;height:130px;color:var(--soft)}
+.lb-timeline rect:hover{opacity:.6}
+.lb-line-axis{display:flex;justify-content:space-between;font:400 var(--t-note)/1.3 var(--mono);margin-top:var(--s2)}
+.lb-line-legend{display:flex;flex-wrap:wrap;gap:var(--s4);margin-top:var(--s4);padding:0;list-style:none;font-size:var(--t-small)}
+.lb-line-legend li{display:flex;align-items:center;gap:var(--s2)}
+.lb-line-legend i{width:10px;height:10px;display:inline-block}

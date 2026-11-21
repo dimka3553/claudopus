@@ -3,3 +3,4 @@
 - The panel has a Leaderboard button beside Stats that opens the board.
 - The board leads with hours of work done, hours on the clock and efficiency, then each person's favourite model (the one that used the most tokens), tokens, API cost and tasks done.
 - Stats counts over today, the last 7 days, the last 30 days or all time, and shows hours of work done, hours on the clock, your efficiency (hours of work done for each hour on the clock), your favourite model, what share of your tokens were cache reads and cache writes, and what the same use would cost on the API.
+- A public person's page shows their timeline as Stats draws it, every task running at once in its model's colour, with no task names.

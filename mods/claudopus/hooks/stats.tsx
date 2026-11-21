@@ -561,6 +561,23 @@ export const boardOf = (runs: Run[], now: number): Record<Range, BoardRange> => 
   }
   return { today: one('today'), d7: one('d7'), d30: one('d30'), all: one('all') }
 }
+// The timeline as the leaderboard draws it on a public page: each task's busy stretches, each with its model, and never its title.
+// Times are whole minutes from `base`; the newest tasks are kept while the whole stays under `most` characters
+export type BoardTimeline = { base: number; models: string[]; pieces: [from: number, minutes: number, model: number][][] }
+export const timelineOf = (runs: Run[], most = 40_000): BoardTimeline => {
+  const pieces = piecesOf(runs).sort((a, b) => (a.spans[0]?.[0] ?? 0) - (b.spans[0]?.[0] ?? 0))
+  const base = Math.floor((pieces[0]?.spans[0]?.[0] ?? 0) / 60_000) * 60_000
+  const models: string[] = []
+  const indexOf = (model: string) => (models.includes(model) ? models.indexOf(model) : models.push(model) - 1)
+  const all = pieces.map(p => p.bars.map((b): [number, number, number] => [Math.round((b.from - base) / 60_000), Math.max(1, Math.round((b.to - b.from) / 60_000)), indexOf(b.model)]))
+  const kept: [number, number, number][][] = []
+  let size = 0
+  for (const one of [...all].reverse()) {
+    if ((size += JSON.stringify(one).length + 1) > most) break
+    kept.unshift(one)
+  }
+  return { base, models, pieces: kept }
+}
 // What the Leaderboard part of Stats shows and does; the sending and the file are the hooks' (stats-tab)
 export type BoardShown = {
   name: string

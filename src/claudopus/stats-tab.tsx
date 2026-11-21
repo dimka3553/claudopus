@@ -159,7 +159,8 @@ const boardCall = async ($: EngineInterface, fn: string, args: Record<string, un
 // The person's sums over every range, from every chat's records
 const boardFigures = async ($: EngineInterface) => {
   await statsRead($, 'all').catch(() => undefined)
-  return boardOf(held.get('all')?.runs ?? [], await $.clock.now())
+  const runs = held.get('all')?.runs ?? []
+  return { ...boardOf(runs, await $.clock.now()), timeline: timelineOf(runs) }
 }
 const UNREACHED = 'Couldn’t reach the leaderboard. Try again in a minute.'
 const boardAct = async ($: EngineInterface, act: () => Promise<string>) => {

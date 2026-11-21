@@ -71,6 +71,7 @@ declare global {
   export import withJournal = M2.withJournal
   export import Round = M2.Round
   export import boardOf = M3.boardOf
+  export import timelineOf = M3.timelineOf
   export import CACHE_V = M3.CACHE_V
   export import GAP = M3.GAP
   export import held = M3.held

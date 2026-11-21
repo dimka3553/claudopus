@@ -64,7 +64,7 @@ begin
   if jsonb_typeof(stats) is distinct from 'object' or pg_column_size(stats) > 65536 then
     raise exception 'bad stats' using errcode = '22023';
   end if;
-  return jsonb_strip_nulls(jsonb_build_object('today', stats->'today', 'd7', stats->'d7', 'd30', stats->'d30', 'all', stats->'all'));
+  return jsonb_strip_nulls(jsonb_build_object('today', stats->'today', 'd7', stats->'d7', 'd30', stats->'d30', 'all', stats->'all', 'timeline', stats->'timeline'));
 end $$;
 
 -- Join with a username nobody has in any letter case; returns the secret
@@ -127,7 +127,8 @@ begin
       'most', leaderboard.num(s->'most'), 'per_task', leaderboard.num(s->'per_task')) else leaderboard.f(s) end);
   end loop;
   return jsonb_build_object('name', p.name, 'is_public', p.is_public, 'joined_at', p.joined_at, 'updated_at', p.updated_at,
-    'total', (select count(*) from leaderboard.people), 'ranks', ranks, 'stats', stats, 'model', models);
+    'total', (select count(*) from leaderboard.people), 'ranks', ranks, 'stats', stats, 'model', models,
+    'timeline', case when p.is_public and jsonb_typeof(p.stats->'timeline') = 'object' then p.stats->'timeline' end);
 end $$;
 
 revoke all on function public.lb_join(text, boolean, jsonb), public.lb_push(text, boolean, jsonb), public.lb_leave(text), public.lb_board(text, text), public.lb_person(text) from public;

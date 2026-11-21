@@ -52,6 +52,50 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
     return m ? m[1][0].toUpperCase() + m[1].slice(1) + (m[2] ? ' ' + m[2] + (m[3] ? '.' + m[3] : '') : '') : String(id)
   }
 
+  // ---- the timeline, as Stats draws it in Claudopus: a row for each task running at once, each stretch in its model's colour, quiet
+  // gaps over half an hour squeezed to a narrow break. It never names a task: the board is sent stretches and models only ----
+  const COLORS = [[/opus/, '#8A63F0'], [/sonnet/, '#2FA39A'], [/fable|mythos/, '#D0479A'], [/haiku/, '#7F8C9E']]
+  const colorOf = id => (COLORS.find(([re]) => re.test(String(id))) || [0, '#9A9A9A'])[1]
+  const MIN = 60000, BREAK = 30 * MIN
+  const rangeFrom = (rg, now) => rg === 'today' ? new Date(new Date(now).setHours(0, 0, 0, 0)).getTime() : rg === 'd7' ? now - 7 * 864e5 : rg === 'd30' ? now - 30 * 864e5 : 0
+  const when = t => new Date(t).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  const timelineHtml = (line, rg) => {
+    if (!line || !Array.isArray(line.pieces)) return ''
+    const base = Number(line.base) || 0, models = Array.isArray(line.models) ? line.models : [], from = rangeFrom(rg, Date.now())
+    // Each task's stretches in this range, as times
+    const pieces = line.pieces.map(bars => (Array.isArray(bars) ? bars : []).map(b => {
+      const a = base + (Number(b[0]) || 0) * MIN
+      return { a: Math.max(a, from), z: a + Math.max(1, Number(b[1]) || 1) * MIN, m: String(models[Number(b[2])] ?? '') }
+    }).filter(b => b.z > b.a)).filter(bars => bars.length)
+    if (!pieces.length) return `<section class="lb-block lb-line"><h2>Timeline</h2><p class="soft">No tasks in this range.</p></section>`
+    // Rows: each task in the first row free by its start, so the rows count the tasks running at once
+    const ends = [], lane = pieces.map(bars => {
+      const a = bars[0].a, i = ends.findIndex(end => end <= a), at = i < 0 ? ends.length : i
+      ends[at] = bars[bars.length - 1].z
+      return at
+    })
+    // The axis: busy stretches joined across gaps under half an hour, each gap over it a narrow break
+    const spans = pieces.flat().map(b => [b.a, b.z]).sort((x, y) => x[0] - y[0])
+    const busy = []
+    for (const [a, z] of spans) { const last = busy[busy.length - 1]; if (last && a <= last[1] + BREAK) last[1] = Math.max(last[1], z); else busy.push([a, z]) }
+    const W = 1000, gap = busy.length > 1 ? Math.min(14, (W * 0.25) / (busy.length - 1)) : 0, room = W - gap * (busy.length - 1)
+    const total = busy.reduce((n, [a, z]) => n + (z - a), 0) || 1
+    let x = 0
+    const parts = busy.map(([a, z]) => { const p = { a, z, x, w: (z - a) / total * room }; x += p.w + gap; return p })
+    const at = t => { const p = parts.find(p => p.z >= t) || parts[parts.length - 1]; return p.x + (Math.min(Math.max(t, p.a), p.z) - p.a) * (p.w / Math.max(1, p.z - p.a)) }
+    const rows = ends.length, step = Math.min(11, 120 / rows), tall = step * 0.73
+    const bars = pieces.flatMap((bs, i) => bs.map(b => {
+      const bx = at(b.a), bw = Math.max(1.5, at(b.z) - bx)
+      return `<rect x="${bx.toFixed(1)}" y="${(lane[i] * step).toFixed(1)}" width="${bw.toFixed(1)}" height="${tall.toFixed(1)}" fill="${colorOf(b.m)}"><title>${esc(modelName(b.m) || 'Task')} · ${when(b.a)} to ${when(b.z)} · ${hours(b.z - b.a)}</title></rect>`
+    })).join('')
+    const ticks = gap >= 3 ? parts.slice(1).map(p => `<path d="M${(p.x - gap / 2).toFixed(1)} 122v6" stroke="currentColor" stroke-dasharray="2 2"/>`).join('') : ''
+    const used = [...new Set(pieces.flat().map(b => b.m).filter(Boolean))]
+    return `<section class="lb-block lb-line"><div class="lb-line-head"><h2>Timeline</h2><span class="soft">Up to ${rows} tasks at once</span></div>
+<svg class="lb-timeline" viewBox="0 0 ${W} 130" preserveAspectRatio="none" role="img" aria-label="${pieces.length} tasks on a timeline">${bars}${ticks}</svg>
+<div class="lb-line-axis soft"><span>${when(parts[0].a)}</span><span>${when(parts[parts.length - 1].z)}</span></div>
+<ul class="lb-line-legend">${used.map(m => `<li><i style="background:${colorOf(m)}"></i>${esc(modelName(m))}</li>`).join('')}</ul></section>`
+  }
+
   // ---- the data: Supabase, or a small fake set on this computer with ?mock=1 ----
   const local = ['localhost', '127.0.0.1'].includes(location.hostname)
   const mock = local && q.get('mock') ? q.get('mock') : ''
@@ -129,7 +173,7 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
       ['Messages', count(s.messages)], ['To-dos done', count(s.todos)], ['Workflows', count(s.flows)],
       ['Most tasks at once', count(s.most)], ['Average time per task', s.tasks ? span(s.per_task) : '–'],
     ].map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`
-    return rank + tiles + `<div class="lb-blocks">
+    return rank + tiles + timelineHtml(p.timeline, range) + `<div class="lb-blocks">
 <section class="lb-block"><h2>Tokens</h2>${bar}${legend}</section>
 <section class="lb-block"><h2>Models</h2>${modelRows}</section>
 <section class="lb-block"><h2>Work</h2>${work}</section>
@@ -196,6 +240,11 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
       if (full) Object.assign(s, { models: [['claude-opus-5-5', t * 0.78, s.cost * 0.86], ['claude-sonnet-5-5', t * 0.2, s.cost * 0.12], ['claude-fable-5-2', t * 0.02, s.cost * 0.02]], todos: Math.round(s.tasks * 3.1), flows: Math.round(s.tasks * 0.08), most: 9, per_task: s.work / Math.max(1, s.tasks) })
       return s
     }
+    const fakeLine = () => {
+      const base = Math.floor((now - 23 * 864e5) / 6e4) * 6e4, pieces = []
+      for (let i = 0; i < 260; i++) { const a = Math.floor(i / 260 * 23 * 1440) + (i % 7) * 9; pieces.push([[a, 5 + (i * 37) % 70, i % 5 ? 0 : i % 2 ? 1 : 2]].concat(i % 3 ? [] : [[a + 90, 10 + i % 30, 0]])) }
+      return { base, models: ['claude-opus-5-5', 'claude-fable-5-2', 'claude-sonnet-5-5'], pieces }
+    }
     const key = { work: s => s.work, clock: s => s.clock, efficiency: s => s.clock ? s.work / s.clock : 0, tokens: s => s.tokens, cost: s => s.cost }
     const ranked = (rg, by) => people.map(p => ({ p, s: stats(p, rg) })).sort((a, b) => key[by](b.s) - key[by](a.s))
     if (fn === 'lb_board') return Promise.resolve(ranked(args.p_range, args.p_sort).slice(0, 10).map(({ p, s }, i) => ({ rank: i + 1, name: p.name, is_public: p.pub, updated_at: p.at, total: people.length, model: i % 3 ? 'claude-opus-5-5' : 'claude-fable-5-2', f: s })))
@@ -203,6 +252,6 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
     if (!p) return Promise.resolve(null)
     const ranks = {}, st = {}
     for (const rg of Object.keys(scale)) { ranks[rg] = ranked(rg, 'work').findIndex(x => x.p === p) + 1; st[rg] = stats(p, rg, p.pub) }
-    return Promise.resolve({ name: p.name, is_public: p.pub, joined_at: new Date(now - 40 * 864e5).toISOString(), updated_at: p.at, total: people.length, ranks, stats: st, model: { today: 'claude-opus-5-5', d7: 'claude-opus-5-5', d30: 'claude-opus-5-5', all: 'claude-opus-5-5' } })
+    return Promise.resolve({ name: p.name, is_public: p.pub, joined_at: new Date(now - 40 * 864e5).toISOString(), updated_at: p.at, total: people.length, ranks, stats: st, timeline: p.pub ? fakeLine() : undefined, model: { today: 'claude-opus-5-5', d7: 'claude-opus-5-5', d30: 'claude-opus-5-5', all: 'claude-opus-5-5' } })
   }
 })()
