@@ -1,0 +1,2 @@
+- The panel's Leaderboard button now opens a Leaderboard tab: the board's top 10 for today, 7 days, 30 days or all time, and right under it, joining with a username, or your place with Open my page, public or private, and Leave. Stats no longer holds it.
+- Time of work and time on the clock read in days, hours and minutes, such as 9d 0h 18m, in Stats, on the board, on each person's page and in link previews.

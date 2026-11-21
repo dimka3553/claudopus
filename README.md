@@ -108,7 +108,7 @@ The panel's header has these buttons (Results once there is a result):
 | --- | --- |
 | **Results** | What finished tasks found, newest first, Each one opens with a tile for each file its task made, then its finding. |
 | **Stats** | Tokens, cost at API prices, tasks done and time saved, from Claude Code's own records. |
-| **Leaderboard** | Opens the leaderboard on claudopus.ai. Join it from Stats with a username of your own, choose whether your stats are public, and leave whenever you like; nothing is sent before you join. |
+| **Leaderboard** | The board's top 10 for today, 7 days, 30 days or all time. Join it there with a username of your own, choose whether your stats are public, and leave whenever you like; nothing is sent before you join. |
 | **Memory** | Opens the memory folder `~/.claude/claudopus`: your messages word for word, results, notes on each topic, and a list of the keys you've given by name and where each is saved (never a value). |
 | **Config** | Every setting, and the rules (below). Each shows what is in force, and **Reset** puts it back to what shipped. |
 | **About** | What Claudopus is, the version this chat runs, what changed in each version, and links. |

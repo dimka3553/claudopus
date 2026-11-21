@@ -71,6 +71,7 @@ declare global {
   export import withJournal = M2.withJournal
   export import Round = M2.Round
   export import boardOf = M3.boardOf
+  export import boardView = M3.boardView
   export import timelineOf = M3.timelineOf
   export import CACHE_V = M3.CACHE_V
   export import GAP = M3.GAP
@@ -84,7 +85,9 @@ declare global {
   export import SUM_JQ = M3.SUM_JQ
   export import svgFits = M3.svgFits
   export import statsShown = M3.view
+  export import BoardRow = M3.BoardRow
   export import BoardShown = M3.BoardShown
+  export import Range = M3.Range
   export import Cache = M3.Cache
   export import FileSum = M3.FileSum
   export import Meta = M3.Meta

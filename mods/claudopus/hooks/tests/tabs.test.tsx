@@ -907,8 +907,8 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(await value('10m')).toBe('time saved')
   expect(await value('Tasks done')).toBe('2')
   expect(await value('To-dos done')).toBe('2')
-  expect(await value('Hours of work done')).toBe('30m')
-  expect(await value('Hours on the clock')).toBe('20m')
+  expect(await value('Time of work')).toBe('30m')
+  expect(await value('Time on the clock')).toBe('20m')
   expect(await value('Saved by running at once')).toBe('10m')
   // 30 minutes of work in 20 of real time: 1.5 hours of work for each hour, and the tokens by kind, each a share of all
   expect(await value('Efficiency')).toBe('1.50×')
@@ -927,8 +927,8 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(JSON.parse(files.get(`${MEMORY}/stats/engine-id.json`) ?? '{}').folder).toBe(chat)
 })
 
-test('the leaderboard sends nothing until you join with a username nobody has; then your sums go every few minutes, public or private, until you leave', async ($, on) => {
-  const { files, boarded, clock, shown } = world(on)
+test('the Leaderboard tab shows the board and is where you join with a username nobody has; nothing is sent before, then your sums go every few minutes, public or private, until you leave', async ($, on) => {
+  const { files, boarded, clock, shown, opened, tabs } = world(on)
   const M = 60_000
   const now = 1_700_000_000_000
   const chat = `${HOME}/.claude/projects/-repo`
@@ -938,27 +938,38 @@ test('the leaderboard sends nothing until you join with a username nobody has; t
   files.set(`${MEMORY}/installed.json`, JSON.stringify({ at: now - 60 * M }))
   await $.session.start(start)
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
-  // The panel's Leaderboard opens the board on claudopus.ai
+  // The board's top 10, read as the tab opens; nobody's own row is sent to read it
+  files.set('board:lb_board', `${JSON.stringify([{ rank: 1, name: 'mira_k', is_public: true, total: 2, model: 'claude-opus-5-5', f: { work: 2 * 1440 * M + 3 * 60 * M, clock: 30 * 60 * M } }, { rank: 2, name: 'octavia', is_public: false, total: 2, model: '', f: { work: 45 * M, clock: 30 * M } }])}\n200`)
   await pressed(pane, 'board-open')
-  expect(await until(async () => shown.find(one => one.includes('https://claudopus.ai/leaderboard')))).toBeDefined()
-  const stats = await $.ui.mount({ ...LIST, requestId: 'stats', props: { ...LIST.props, title: 'Stats', bodyColumns: 80 }, surface: 'desktop' } as never)
+  expect(opened).toContain('leaderboard')
+  expect(tabs).toContain('leaderboard: Leaderboard')
+  const stats = await $.ui.mount({ ...LIST, requestId: 'leaderboard', props: { ...LIST.props, title: 'Leaderboard', bodyColumns: 80 }, surface: 'desktop' } as never)
   const said = (text: RegExp) => until(async () => stats.find({ type: 'Text', text }))
   const field = async () => (await stats.findAll({ type: 'Input' }))[0]?.key ?? ''
-  expect(await said(/^Put your hours of work, tokens and API cost on the leaderboard/)).toBeDefined()
-  // Minutes pass with Stats open: nothing is sent
+  // Time of work in days, hours and minutes, efficiency and favourite model; a public name opens their page on claudopus.ai
+  expect(await said(/^2d 3h 00m · 1\.70× · Opus 5\.5$/)).toBeDefined()
+  expect(await said(/^45m · 1\.50×$/)).toBeDefined()
+  expect(await said(/^2 people on the board$/)).toBeDefined()
+  await pressed(stats, 'board-person-mira_k')
+  expect(await until(async () => shown.find(one => one.includes('https://claudopus.ai/leaderboard/mira_k')))).toBeDefined()
+  await pressed(stats, 'board-site')
+  expect(await until(async () => shown.find(one => one.includes('https://claudopus.ai/leaderboard')))).toBeDefined()
+  expect(await said(/^Choose a username to put your time of work, tokens and API cost on the board/)).toBeDefined()
+  // Minutes pass with the tab open: the board is read again, and nothing of yours is sent
   await clock.advance(10 * M)
-  expect(boarded).toEqual([])
+  expect(boarded.filter(one => one.fn !== 'lb_board')).toEqual([])
   // A username with a space is refused here, before anything is sent
   await stats.input({ key: await field(), text: 'my name' })
   expect(await said(/^A username is 3 to 20 letters/)).toBeDefined()
-  expect(boarded).toEqual([])
+  expect(boarded.filter(one => one.fn !== 'lb_board')).toEqual([])
   // Someone has it already
   files.set('board:lb_join', '{"code":"23505","message":"taken"}\n409')
   await stats.input({ key: await field(), text: 'dima' })
   expect(await said(/^Someone already has the username dima/)).toBeDefined()
-  expect(boarded[0]?.fn).toBe('lb_join')
+  const joins = boarded.filter(one => one.fn === 'lb_join')
+  expect(joins.length).toBe(1)
   // Only sums go, for each range: never a title, a path or anyone's words
-  const sent = boarded[0]?.body.p_stats as Record<string, Record<string, unknown>>
+  const sent = joins[0]?.body.p_stats as Record<string, Record<string, unknown>>
   expect(Object.keys(sent)).toEqual(['today', 'd7', 'd30', 'all', 'timeline'])
   expect([sent.all?.tokens, sent.all?.read, sent.all?.write, sent.all?.input]).toEqual([200, 70, 20, 10])
   expect(JSON.stringify(sent)).not.toContain('repo')
@@ -977,10 +988,10 @@ test('the leaderboard sends nothing until you join with a username nobody has; t
   files.set('board:lb_leave', 'true\n200')
   await pressed(stats, 'board-leave')
   expect(await said(/^✓ You left the leaderboard/)).toBeDefined()
-  expect(boarded.at(-1)).toEqual({ fn: 'lb_leave', body: { p_token: 'secret-1' } })
-  const calls = boarded.length
+  expect(boarded.filter(one => one.fn === 'lb_leave')).toEqual([{ fn: 'lb_leave', body: { p_token: 'secret-1' } }])
+  const pushes = boarded.filter(one => one.fn === 'lb_push').length
   await clock.advance(10 * M)
-  expect(boarded.length).toBe(calls)
+  expect(boarded.filter(one => one.fn === 'lb_push').length).toBe(pushes)
 })
 
 test('Stats draws whatever the history: the timeline of 240 pieces of work at once, each busy a minute in ten, in one drawing the app takes, and the rest of the tab as ever', async ($, on) => {

@@ -583,7 +583,16 @@ export const timelineOf = (runs: Run[], most = 40_000, since = 0): BoardTimeline
   return { base, models, pieces: kept }
 }
 // What the Leaderboard part of Stats shows and does; the sending and the file are the hooks' (stats-tab)
+// One row of the board, as lb_board gives it
+export type BoardRow = { rank: number; name: string; isPublic: boolean; work: number; clock: number; model: string }
 export type BoardShown = {
+  // The top 10 of the range chosen, how many are on the board, and why it couldn't be read
+  rows?: BoardRow[]
+  total: number
+  error: string
+  range: Range
+  setRange: (range: Range) => void
+  openPerson: (name: string) => void
   name: string
   isPublic: boolean
   // What the last press or send came to, said in one line; '' when nothing needs saying
@@ -664,50 +673,92 @@ const tile = (ui: Ui, key: string, value: string, label: string, wraps = false) 
   </ui.Box>
 )
 
-// Join, leave, public or private: the same in every view
-const boardBand = (ui: Ui, b: BoardShown) => {
+// The Leaderboard tab: the board's top 10 for the range chosen, then joining, or your place and how you show
+export function boardView(ui: Ui, b: BoardShown, surface: string) {
   const { Box, Text } = ui
-  const said = b.said ? <Text key="board-said" color={b.said.startsWith('✓') ? undefined : '#D08A00'} dimColor={b.said.startsWith('✓')} wrap="wrap">{b.said}</Text> : null
-  const open = <ui.Button key={`board-open-${view.presses}`} label="Open the leaderboard" plain onPress={b.open} />
-  if (!b.name)
-    return band(
-      ui,
-      'stats-board',
-      'Leaderboard',
-      '',
-      <Box flexDirection="column" gap={1}>
-        {note(ui, 'board-how', 'Put your hours of work, tokens and API cost on the leaderboard at claudopus.ai. Nothing about you is sent until you join, and Leave takes you off at once.')}
-        {'Input' in ui ? (
-          <Box key="board-field" width="100%" flexDirection="column">
-            <ui.Input key={`board-name-${view.presses}`} placeholder="Choose a username: 3 to 20 letters, digits, - or _" submitLabel="Join" onSubmit={value => b.join(value.trim())} />
-          </Box>
-        ) : null}
-        {said}
-        <Box flexDirection="row" gap={2} flexShrink={0}>{open}</Box>
-      </Box>,
-    )
-  return band(
+  const press = (fn: () => void) => () => void ((view.presses += 1), fn())
+  const nav = (
+    <Box key="board-nav" flexDirection="row" alignItems="center" gap={2} height={1} flexShrink={0}>
+      {segments(ui, 'board-range', ([['today', 'Today'], ['d7', '7 days'], ['d30', '30 days'], ['all', 'All time']] as const).map(([range, label]) => ({ label, isOn: b.range === range, onPress: press(() => b.setRange(range)) })), 10)}
+      <Box flexGrow={1} />
+      <ui.Button key={`board-site-${view.presses}`} label="Open on claudopus.ai" plain dimColor onPress={b.open} />
+    </Box>
+  )
+  const top = band(
     ui,
-    'stats-board',
-    'Leaderboard',
-    b.isBusy ? 'Sending…' : '',
+    'board-top',
+    'Top 10',
+    b.rows ? `${b.total.toLocaleString('en-US')} ${b.total === 1 ? 'person' : 'people'} on the board` : '',
     <Box flexDirection="column" gap={1}>
-      <Box flexDirection="column" flexShrink={0}>
-        {line(ui, 'board-name', 'Your username', b.name, true)}
-        {line(ui, 'board-public', 'Your stats', b.isPublic ? 'Public' : 'Private')}
-      </Box>
-      {note(ui, 'board-what', b.isPublic ? 'Everyone can open your stats from the leaderboard. Claudopus sends your figures every few minutes while Claude Code is open.' : 'The leaderboard shows your hours of work, tokens and API cost, and keeps the rest private. Claudopus sends your figures every few minutes while Claude Code is open.')}
-      {said}
-      <Box flexDirection="row" flexWrap="wrap" gap={2} flexShrink={0}>
-        {open}
-        <ui.Button key={`board-public-${view.presses}`} label={b.isPublic ? 'Make my stats private' : 'Make my stats public'} plain onPress={() => b.setPublic(!b.isPublic)} />
-        <ui.Button key={`board-leave-${view.presses}`} label="Leave" plain dimColor onPress={b.leave} />
-      </Box>
+      {b.rows === undefined ? (
+        note(ui, 'board-wait', b.error || 'Reading the leaderboard…')
+      ) : b.rows.length ? (
+        <Box flexDirection="column" flexShrink={0}>
+          {b.rows.map(r => (
+            <Box key={`board-row-${r.rank}`} flexDirection="row" gap={2} height={1} overflow="hidden" flexShrink={0}>
+              <Box width={3} flexShrink={0}>
+                <Text dimColor>{String(r.rank)}</Text>
+              </Box>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                {r.isPublic ? (
+                  <ui.Button key={`board-person-${r.name}-${view.presses}`} label={r.name} plain onPress={() => b.openPerson(r.name)} />
+                ) : (
+                  <Text bold={r.name === b.name} wrap="truncate-end">{r.name}</Text>
+                )}
+              </Box>
+              <Box flexShrink={0}>
+                <Text bold={r.name === b.name}>{`${hours(r.work)} · ${timesText(efficiencyOf(r.work, r.clock))}${surface === 'terminal' || !r.model ? '' : ` · ${nameOf(r.model)}`}`}</Text>
+              </Box>
+            </Box>
+          ))}
+        </Box>
+      ) : (
+        note(ui, 'board-empty', 'Nobody has joined yet. Be the first.')
+      )}
+      {b.rows && b.error ? note(ui, 'board-error', b.error) : null}
+      {note(ui, 'board-how', 'Time of work is how long Claude’s tasks worked, added up. Efficiency is how much work got done for each hour on the clock.')}
     </Box>,
   )
+  const said = b.said ? <Text key="board-said" color={b.said.startsWith('✓') ? undefined : '#D08A00'} dimColor={b.said.startsWith('✓')} wrap="wrap">{b.said}</Text> : null
+  const you = !b.name
+    ? band(
+        ui,
+        'board-join',
+        'Join the leaderboard',
+        '',
+        <Box flexDirection="column" gap={1}>
+          {note(ui, 'board-join-how', 'Choose a username to put your time of work, tokens and API cost on the board. Nothing about you is sent until you join, and Leave takes you off at once.')}
+          {'Input' in ui ? (
+            <Box key="board-field" width="100%" flexDirection="column">
+              <ui.Input key={`board-name-${view.presses}`} placeholder="Choose a username: 3 to 20 letters, digits, - or _" submitLabel="Join" onSubmit={value => b.join(value.trim())} />
+            </Box>
+          ) : null}
+          {said}
+        </Box>,
+      )
+    : band(
+        ui,
+        'board-you',
+        'You',
+        b.isBusy ? 'Sending…' : '',
+        <Box flexDirection="column" gap={1}>
+          <Box flexDirection="column" flexShrink={0}>
+            {line(ui, 'board-name', 'Your username', b.name, true)}
+            {line(ui, 'board-public', 'Your stats', b.isPublic ? 'Public' : 'Private')}
+          </Box>
+          {note(ui, 'board-what', b.isPublic ? 'Everyone can open your stats and timeline from the board. Claudopus sends your figures every few minutes while Claude Code is open.' : 'The board shows your time of work, tokens and API cost, and keeps the rest private. Claudopus sends your figures every few minutes while Claude Code is open.')}
+          {said}
+          <Box flexDirection="row" flexWrap="wrap" gap={2} flexShrink={0}>
+            <ui.Button key={`board-mine-${view.presses}`} label="Open my page" plain onPress={() => b.openPerson(b.name)} />
+            <ui.Button key={`board-public-${view.presses}`} label={b.isPublic ? 'Make my stats private' : 'Make my stats public'} plain onPress={() => b.setPublic(!b.isPublic)} />
+            <ui.Button key={`board-leave-${view.presses}`} label="Leave" plain dimColor onPress={b.leave} />
+          </Box>
+        </Box>,
+      )
+  return [nav, top, you]
 }
 
-export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (scope: Scope) => void, surface: string, px: number, board?: BoardShown) {
+export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (scope: Scope) => void, surface: string, px: number) {
   const { Box, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number; isInteractive?: boolean }) => JSX.Element }
   const kept = held.get(view.scope)
@@ -737,9 +788,8 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
       {reading.has(view.scope) ? <Text dimColor>Reading…</Text> : null}
     </Box>
   )
-  const boardShown = board ? [boardBand(ui, board)] : []
-  if (!s) return [nav, note(ui, 'stats-wait', kept?.error ?? 'Reading Claude’s logs of your tasks…'), ...boardShown]
-  if (!s.all.total && !s.pieces.length) return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), note(ui, 'stats-none', view.range === 'today' ? 'No tasks today yet.' : view.range === 'all' ? 'No tasks yet.' : `No tasks in the last ${view.range === 'd7' ? 7 : 30} days.`), ...boardShown]
+  if (!s) return [nav, note(ui, 'stats-wait', kept?.error ?? 'Reading Claude’s logs of your tasks…')]
+  if (!s.all.total && !s.pieces.length) return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), note(ui, 'stats-none', view.range === 'today' ? 'No tasks today yet.' : view.range === 'all' ? 'No tasks yet.' : `No tasks in the last ${view.range === 'd7' ? 7 : 30} days.`)]
   const top = s.models[0]?.[1].total || 1
   const count = (n: number) => n.toLocaleString('en-US')
   // Whole dollars from a hundred up, cents below
@@ -799,13 +849,13 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
     '',
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="column" flexShrink={0}>
-        {line(ui, 'time-added', 'Hours of work done', hours(s.time.added))}
-        {line(ui, 'time-clock', 'Hours on the clock', hours(s.time.clock))}
+        {line(ui, 'time-added', 'Time of work', hours(s.time.added))}
+        {line(ui, 'time-clock', 'Time on the clock', hours(s.time.clock))}
         {line(ui, 'time-saved', 'Saved by running at once', hours(saved), true)}
         {line(ui, 'time-efficiency', 'Efficiency', timesText(efficiencyOf(s.time.added, s.time.clock)), true)}
         {s.models[0] ? line(ui, 'time-model', 'Favourite model', nameOf(s.models[0][0])) : null}
       </Box>
-      {note(ui, 'time-how', 'Efficiency is the hours of work done for each hour on the clock: 3 weeks of work in 1 week is 3×. Only tasks running at the same time save time. Claudopus leaves out quiet gaps over 15 minutes.')}
+      {note(ui, 'time-how', 'Efficiency is how much work got done for each hour on the clock: 3 weeks of work in 1 week is 3×. Only tasks running at the same time save time. Claudopus leaves out quiet gaps over 15 minutes.')}
     </Box>,
   )
   const work = band(
@@ -882,5 +932,5 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
       ? `Claudopus counts this from Claude’s own logs of ${chats} chats, their tasks, helpers and workflows.`
       : 'Claudopus counts this from Claude’s own logs of this chat, its tasks, helpers and workflows.',
   )
-  return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), hero, timeline, time, work, tokens, cost, ...boardShown, ...(mem ? [mem] : []), off]
+  return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), hero, timeline, time, work, tokens, cost, ...(mem ? [mem] : []), off]
 }

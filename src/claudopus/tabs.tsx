@@ -59,11 +59,22 @@ const tabHooks = (on: On) => {
   on('ui.render', { component: 'Pane', requestId: STATS_PANE }, async ($, e) => {
     const { Box } = uiOf($, e)
     void statsRead($, statsShown.scope).catch(() => undefined)
-    if (!boardNow.isBusy) await boardLoad($).catch(() => undefined)
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {statsView(() => drawAgain($), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32, boardShown($))}
+        {statsView(() => drawAgain($), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
       </Box>
+    )
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
+
+  // The leaderboard, in a pane of its own: the board's top 10, and joining it, or your place on it
+  on('ui.render', { component: 'Pane', requestId: BOARD_PANE }, async ($, e) => {
+    const ui = uiOf($, e)
+    if (!boardNow.isBusy) await boardLoad($).catch(() => undefined)
+    void readBoard($).catch(() => undefined)
+    return (
+      <ui.Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
+        {boardView(ui, boardShown($), e.surface)}
+      </ui.Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
