@@ -1,2 +1,0 @@
-- Join on the leaderboard answers at once: it says "Joining as …" as you press it and you are on the board in a moment, where it showed nothing for half a minute after an update. Your full figures follow straight after.
-- A press on the leaderboard made while another is on its way now waits its turn, where it did nothing.
