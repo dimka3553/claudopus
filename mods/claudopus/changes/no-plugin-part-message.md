@@ -1,0 +1,1 @@
+- Claudopus no longer sends the chat a message of its own when a task hands in a part of its result, so no part's notice shows in the chat as your message, even when the chat is busy. The task's own message brings the part, or your next message does

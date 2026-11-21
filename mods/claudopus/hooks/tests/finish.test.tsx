@@ -1666,27 +1666,24 @@ test('a task hands in a finished part of its result while it works on: its card 
   const told = ((await $.prompt.submit({ text: `<agent-message from="a1">\n${notice}\n</agent-message>`, wait: false, origin: { kind: 'peer' }, isMeta: true } as never)) as { context?: string[] }).context?.join('\n') ?? ''
   expect(told).toContain(`is still working, and handed in this part of its result`)
   expect(told).toContain(`  ${part}`)
-  // Parts whose task never told the chat go in Claudopus's own message once a minute has passed, one message for all that wait
-  // together, and none for a part already given
+  // Claudopus sends the chat nothing of its own for a part, however long it waits (Claude Code draws such a message as the
+  // person's): parts whose task never told the chat go with the next message, all at once
   await $.agent.spawn({ ...spawn, description: 'Ears', prompt: 'look into them' } as never)
   ;((agents.a3 = 'running'), (kinds.a3 = 'general-purpose'))
   await $.tool.call({ tool: 'mcp__claudopus__report', tool_use_id: 'r3', agentId: 'a1', message: 'The chin research is done.' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__report', tool_use_id: 'r4', agentId: 'a3', message: 'The ear research is done.' } as never)
-  await clock.advance(61_000)
-  const own = () => submitted.flatMap((text, i) => (text.startsWith('From Claudopus: the task') ? [submittedContext[i] ?? ''] : []))
-  expect(await until(async () => (own().length ? own() : undefined))).toHaveLength(1)
-  expect(submitted.filter(text => text.startsWith('From Claudopus: the task'))).toEqual(['From Claudopus: the tasks "Beards and jawline" and "Ears" handed in parts of their results, and are still working on the rest.'])
-  expect(own()[0]).toContain('  The chin research is done.')
-  expect(own()[0]).toContain('  The ear research is done.')
-  expect(own()[0]).not.toContain(part)
+  await clock.advance(10 * 60_000)
+  const both = ((await $.prompt.submit({ text: 'and the chin and ears?', wait: false, origin: composer } as never)) as { context?: string[] }).context?.join('\n') ?? ''
+  expect(both).toContain('  The chin research is done.')
+  expect(both).toContain('  The ear research is done.')
+  expect(both).not.toContain(part)
+  expect(submitted.filter(text => text.includes('handed in a part') && !text.startsWith('<agent-message'))).toEqual([])
   // The card still works, its to-do and helper with it, and the part is never given again, nor is Claudopus's own message sent
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
   const texts = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
   expect(texts).toContain('2 working')
   const next = ((await $.prompt.submit({ text: 'how is it going?', wait: false, origin: composer } as never)) as { context?: string[] }).context?.join('\n') ?? ''
   expect(next).not.toContain(part)
-  await $.prompt.submit({ text: 'and the ears?', wait: false, origin: composer } as never)
-  expect(own()).toHaveLength(1)
   // Its last report ends it, kept beside the parts
   const kept = await until(async () => (reportsOf().length === 3 ? reportsOf().length : undefined))
   agents.a2 = 'completed'

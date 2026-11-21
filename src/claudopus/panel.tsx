@@ -137,7 +137,7 @@ const panelHooks = (on: On) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
     // A message that waits for a hook to start a task again goes from this drawing (sendHeld)
-    if (heldSends.length || heldPrompts.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
+    if (heldSends.length) await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`))
     if (paneId === LIST) ((listDrawing += 1), (listSurface = e.surface))
     if (paneId === LIST) await holdTest($)
     try {
