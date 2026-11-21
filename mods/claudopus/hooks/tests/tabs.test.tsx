@@ -933,7 +933,9 @@ test('the leaderboard sends nothing until you join with a username nobody has; t
   const now = 1_700_000_000_000
   const chat = `${HOME}/.claude/projects/-repo`
   files.set(`${chat}/engine-id.jsonl`, '{}')
-  files.set(`${chat}/engine-id.jsonl.sum`, JSON.stringify({ s: [[now - 30 * M, now]], u: [['m1', 'claude-opus-5-5', now - M, 0, 0, 10, 20, 0, 70, 100]], d: [] }))
+  files.set(`${chat}/engine-id.jsonl.sum`, JSON.stringify({ s: [[now - 30 * M, now]], u: [['m1', 'claude-opus-5-5', now - M, 0, 0, 10, 20, 0, 70, 100], ['m0', 'claude-opus-5-5', now - 3 * 60 * M, 0, 0, 1, 1, 1, 1, 1]], d: [] }))
+  // Claudopus was installed an hour ago: the response before it never counts
+  files.set(`${MEMORY}/installed.json`, JSON.stringify({ at: now - 60 * M }))
   await $.session.start(start)
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
   // The panel's Leaderboard opens the board on claudopus.ai
