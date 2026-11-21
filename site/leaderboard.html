@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Claudopus leaderboard: hours of work done by Claude tasks</title>
+<meta name="description" content="People who use Claudopus, by hours of work their Claude tasks did, with efficiency, tokens and API cost.">
+<link rel="canonical" href="https://www.claudopus.ai/leaderboard">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#111112" media="(prefers-color-scheme:dark)">
+<meta name="theme-color" content="#FAF9F5" media="(prefers-color-scheme:light)">
+<meta property="og:type" content="website">
+<meta property="og:title" content="The Claudopus leaderboard">
+<meta property="og:description" content="People who use Claudopus, by hours of work their Claude tasks did.">
+<meta property="og:url" content="https://www.claudopus.ai/leaderboard">
+<meta property="og:image" content="https://www.claudopus.ai/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <a class="brand" href="/" id="top"><svg class="octo mark" viewBox="0 0 16 16" width="32" height="32" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg>Claudopus</a>
+  <nav aria-label="Pages">
+    <a class="opt" href="/#why">Why</a>
+    <a class="opt" href="/#proof">Proof</a>
+    <a class="opt" href="/#panel">What changes</a>
+    <a href="/tour.html">Tour</a>
+    <a href="/leaderboard" aria-current="page">Leaderboard</a>
+    <a href="/#install">Install</a>
+    <a class="ext" href="https://github.com/dimka3553/claudopus">GitHub <svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="1" y="0" width="4" height="1"/><rect x="3" y="1" width="2" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="4" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/></svg></a>
+  </nav>
+</header>
+
+<main id="lb" class="lb">
+  <div class="lb-head">
+    <h1 id="lb-title">Leaderboard</h1>
+    <p class="lead" id="lb-lead">People who use Claudopus, by hours of work their Claude tasks did.</p>
+  </div>
+  <div class="lb-bar">
+    <div class="lb-switch" id="lb-range" role="group" aria-label="Range">
+      <button type="button" data-range="today">Today</button><button type="button" data-range="d7">7 days</button><button type="button" data-range="d30">30 days</button><button type="button" data-range="all">All time</button>
+    </div>
+    <p class="note" id="lb-status" role="status" aria-live="polite"></p>
+  </div>
+  <div id="lb-view"><noscript><p class="lead">The leaderboard needs JavaScript to show.</p></noscript></div>
+  <section class="lb-join" id="join">
+    <h2>How to join</h2>
+    <ul class="cells">
+      <li>In Claudopus, open Stats, choose a username under Leaderboard and press Join.</li>
+      <li>Nothing about you is sent until you do.</li>
+      <li>Leave takes you off the board at once.</li>
+    </ul>
+  </section>
+</main>
+
+<footer class="foot">
+  <a class="brand" href="/"><svg class="octo mark" viewBox="0 0 16 16" width="32" height="32" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg>Claudopus</a>
+  <span>Claudopus is an independent mod for Claude Code. It is not affiliated with or endorsed by Anthropic.</span>
+  <a href="/changelog.html">Changelog</a>
+  <a href="/privacy.html">Privacy</a>
+  <a href="#cookies" data-cookies>Cookies</a>
+  <a class="ext" href="https://github.com/dimka3553/claudopus">GitHub <svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="1" y="0" width="4" height="1"/><rect x="3" y="1" width="2" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="4" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/></svg></a>
+</footer>
+</div>
+<script src="/leaderboard.js"></script>
+<script src="/consent.js"></script>
+<script>window.va=window.va||function(){(window.vaq=window.vaq||[]).push(arguments)}</script>
+<script defer src="/_vercel/insights/script.js"></script>
+</body>
+</html>

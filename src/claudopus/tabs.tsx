@@ -59,9 +59,10 @@ const tabHooks = (on: On) => {
   on('ui.render', { component: 'Pane', requestId: STATS_PANE }, async ($, e) => {
     const { Box } = uiOf($, e)
     void statsRead($, statsShown.scope).catch(() => undefined)
+    if (!boardNow.isBusy) await boardLoad($).catch(() => undefined)
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {statsView(() => drawAgain($), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
+        {statsView(() => drawAgain($), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32, boardShown($))}
       </Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))

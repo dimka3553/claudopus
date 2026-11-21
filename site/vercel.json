@@ -6,6 +6,10 @@
       "main": true
     }
   },
+  "rewrites": [
+    { "source": "/leaderboard", "destination": "/leaderboard.html" },
+    { "source": "/leaderboard/:name", "destination": "/leaderboard.html" }
+  ],
   "redirects": [
     {
       "source": "/claudopus.mp4",

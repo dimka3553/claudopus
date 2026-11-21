@@ -41,11 +41,73 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(await value('All task time')).toBe('30m')
   expect(await value('Real time')).toBe('20m')
   expect(await value('Saved by running at once')).toBe('10m')
+  // 30 minutes of work in 20 of real time: 1.5 hours of work for each hour, and the tokens by kind, each a share of all
+  expect(await value('Efficiency')).toBe('1.50×')
+  expect(await value('Cache reads')).toBe('0% · 0')
+  expect(await value('Written by the models')).toBe('100% · 1.5M')
+  expect(await value('$30.00')).toBe('API cost')
+  // Four ranges to count over, today chosen
+  expect((await keyed(stats, 'range-7 days'))?.props.label).toBe('7 days')
+  expect((await keyed(stats, 'range-30 days'))?.props.label).toBe('30 days')
   // From the person's message to the chat's last response or tool result before the next message: 20 seconds here
   expect(await value('Chat time per message, on average')).toBe('20s')
   expect(await stats.find({ type: 'Text', text: /^A message’s time runs from when the chat takes it to the chat’s last step/ })).toBeDefined()
   // The sums are kept, so the transcripts are read again only when they change
   expect(JSON.parse(files.get(`${MEMORY}/stats/engine-id.json`) ?? '{}').folder).toBe(chat)
+})
+
+test('the leaderboard sends nothing until you join with a username nobody has; then your sums go every few minutes, public or private, until you leave', async ($, on) => {
+  const { files, boarded, clock, shown } = world(on)
+  const M = 60_000
+  const now = 1_700_000_000_000
+  const chat = `${HOME}/.claude/projects/-repo`
+  files.set(`${chat}/engine-id.jsonl`, '{}')
+  files.set(`${chat}/engine-id.jsonl.sum`, JSON.stringify({ s: [[now - 30 * M, now]], u: [['m1', 'claude-opus-5-5', now - M, 0, 0, 10, 20, 0, 70, 100]], d: [] }))
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  // The panel's Leaderboard opens the board on claudopus.ai
+  await pressed(pane, 'board-open')
+  expect(await until(async () => shown.find(one => one.includes('https://claudopus.ai/leaderboard')))).toBeDefined()
+  const stats = await $.ui.mount({ ...LIST, requestId: 'stats', props: { ...LIST.props, title: 'Stats', bodyColumns: 80 }, surface: 'desktop' } as never)
+  const said = (text: RegExp) => until(async () => stats.find({ type: 'Text', text }))
+  const field = async () => (await stats.findAll({ type: 'Input' }))[0]?.key ?? ''
+  expect(await said(/^Put your hours of work, tokens and API cost on the leaderboard/)).toBeDefined()
+  // Minutes pass with Stats open: nothing is sent
+  await clock.advance(10 * M)
+  expect(boarded).toEqual([])
+  // A username with a space is refused here, before anything is sent
+  await stats.input({ key: await field(), text: 'my name' })
+  expect(await said(/^A username is 3 to 20 letters/)).toBeDefined()
+  expect(boarded).toEqual([])
+  // Someone has it already
+  files.set('board:lb_join', '{"code":"23505","message":"taken"}\n409')
+  await stats.input({ key: await field(), text: 'dima' })
+  expect(await said(/^Someone already has the username dima/)).toBeDefined()
+  expect(boarded[0]?.fn).toBe('lb_join')
+  // Only sums go, for each range: never a title, a path or anyone's words
+  const sent = boarded[0]?.body.p_stats as Record<string, Record<string, unknown>>
+  expect(Object.keys(sent)).toEqual(['today', 'd7', 'd30', 'all'])
+  expect([sent.all?.tokens, sent.all?.read, sent.all?.write, sent.all?.input]).toEqual([200, 70, 20, 10])
+  expect(JSON.stringify(sent)).not.toContain('repo')
+  // Joined: the secret is kept in the memory folder, and the figures follow every few minutes
+  files.set('board:lb_join', '"secret-1"\n200')
+  await stats.input({ key: await field(), text: 'dima' })
+  expect(await said(/^✓ You joined as dima/)).toBeDefined()
+  expect(JSON.parse(files.get(`${MEMORY}/leaderboard.json`) ?? '{}')).toMatchObject({ name: 'dima', token: 'secret-1', isPublic: false })
+  files.set('board:lb_push', 'true\n200')
+  await clock.advance(4 * M)
+  expect(await until(async () => boarded.find(one => one.fn === 'lb_push' && one.body.p_token === 'secret-1' && one.body.p_public === false))).toBeDefined()
+  // Public, then off the board at once
+  await pressed(stats, 'board-public')
+  expect(await said(/^✓ Your stats are public/)).toBeDefined()
+  expect(JSON.parse(files.get(`${MEMORY}/leaderboard.json`) ?? '{}').isPublic).toBe(true)
+  files.set('board:lb_leave', 'true\n200')
+  await pressed(stats, 'board-leave')
+  expect(await said(/^✓ You left the leaderboard/)).toBeDefined()
+  expect(boarded.at(-1)).toEqual({ fn: 'lb_leave', body: { p_token: 'secret-1' } })
+  const calls = boarded.length
+  await clock.advance(10 * M)
+  expect(boarded.length).toBe(calls)
 })
 
 test('Stats draws whatever the history: the timeline of 240 pieces of work at once, each busy a minute in ten, in one drawing the app takes, and the rest of the tab as ever', async ($, on) => {
@@ -88,7 +150,7 @@ test('the bar keeps its buttons whole on a row of their own under the header, wr
   // A terminal's gap would be a whole blank line between the rows, so it has none
   const term = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 30 }, surface: 'terminal' } as never)
   expect((await term.findAll({ type: 'Box' })).find(one => one.key === 'head-buttons')?.props.rowGap).toBe(0)
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Leaderboard', 'Memory', 'Config', 'About'])
   // The chat's size is no longer squeezed beside the buttons
   expect(await pane.find({ type: 'Text', text: /^This chat /})).toBeDefined()
 })

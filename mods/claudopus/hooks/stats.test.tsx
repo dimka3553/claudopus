@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { colorOf, costOf, lengthOf, mostAtOnce, priceOf, statsOf, SVG_MOST, svgFits, timelineSvg, timeOf, todosOf, union } from './stats'
+import { boardOf, colorOf, costOf, efficiencyOf, lengthOf, mostAtOnce, priceOf, statsOf, SVG_MOST, svgFits, timelineSvg, timeOf, todosOf, union } from './stats'
 import type { Msg, Piece, Run, Span } from './stats'
 
 const M = 60_000
@@ -91,6 +91,13 @@ test('stats add up tokens by model once each, work and its helpers as one piece,
   const later = statsOf(runs, day + 20 * M, Infinity)
   expect([later.finished, later.flows, later.messages, later.all.total]).toEqual([0, 1, 1, 5])
   expect([later.time.added, later.time.saved]).toEqual([10 * M, 0])
+  // The leaderboard's ranges: today from midnight, the last 7 and 30 days back from now, all time; work against real time
+  const board = boardOf(runs, day + 3 * 86_400_000)
+  expect([board.all.work, board.all.clock, board.all.tasks, board.all.tokens]).toEqual([35 * M, 25 * M, 2, 1186])
+  expect([board.d7.work, board.d30.work, board.today.work]).toEqual([35 * M, 35 * M, 0])
+  expect(board.all.models.map(([model, tokens]) => [model, tokens])).toEqual([['claude-opus-5-5', 1116], ['claude-sonnet-5-5', 70]])
+  expect(efficiencyOf(board.all.work, board.all.clock)).toBe(1.4)
+  expect(boardOf(runs, day + 10 * 86_400_000).d7.work).toBe(0)
 })
 
 test('the timeline is one drawing the app takes whatever the history: each bar its own words while they fit, then each piece, then the bars alone', async () => {

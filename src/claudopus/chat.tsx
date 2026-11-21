@@ -404,6 +404,8 @@ const chatHooks = (on: On) => {
     everyLoad($, TIDY_EVERY, () => startTidy($).catch(err => log($, `leftovers not tidied: ${String(err)}`)))
     afterLoad($, 5000, () => lookDisk($).catch(err => log($, `disk not looked at: ${String(err)}`)))
     everyLoad($, DISK_EVERY, () => lookDisk($).catch(err => log($, `disk not looked at: ${String(err)}`)))
+    // The person's figures to the leaderboard, only once they joined it (stats-tab)
+    everyLoad($, 60_000, () => sendBoard($).catch(err => log($, `leaderboard not sent: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
     await readAnswers($).catch(() => undefined)
     await readOthers($).catch(() => undefined)

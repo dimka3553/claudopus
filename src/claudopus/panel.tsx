@@ -2049,6 +2049,7 @@ const panelHooks = (on: On) => {
             <Box key="head-buttons" flexDirection="row" flexWrap="wrap" columnGap={isKeyed ? 2 : 1} rowGap={e.surface === 'terminal' ? 0 : 1}>
               {reportsButton($, ui, kept, isKeyed)}
               {statsButton($, ui, isKeyed)}
+              {boardButton($, ui, isKeyed)}
               {memoryButton($, ui, isKeyed)}
               {configButton($, ui, isKeyed)}
               {aboutButton($, ui, isKeyed)}

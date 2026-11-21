@@ -70,10 +70,12 @@ declare global {
   export import titleOfFlow = M2.titleOfFlow
   export import withJournal = M2.withJournal
   export import Round = M2.Round
+  export import boardOf = M3.boardOf
   export import CACHE_V = M3.CACHE_V
   export import GAP = M3.GAP
   export import held = M3.held
   export import memoryHeld = M3.memoryHeld
+  export import NAME_RULE = M3.NAME_RULE
   export import parsed = M3.parsed
   export import READ_EVERY = M3.READ_EVERY
   export import reading = M3.reading
@@ -81,6 +83,7 @@ declare global {
   export import SUM_JQ = M3.SUM_JQ
   export import svgFits = M3.svgFits
   export import statsShown = M3.view
+  export import BoardShown = M3.BoardShown
   export import Cache = M3.Cache
   export import FileSum = M3.FileSum
   export import Meta = M3.Meta
