@@ -151,7 +151,7 @@ const toolHooks = (on: On) => {
     if (card.status !== 'working') return { result: 'Not handed in: your task has ended. Hand in your result with SubagentHandback.' }
     await changeTodos($, list => list.map(one => (one.id === card.id ? { ...one, partsForChat: [...(one.partsForChat ?? []), text].slice(-PARTS_KEPT) } : one)))
     await saveReport($, card, text, true).catch(err => log($, `part of ${card.id}'s result not kept: ${String(err)}`))
-    submitLater($, named(PART_NOTICE(titleOf(card))), await $.clock.now())
+    submitLater($, await $.clock.now())
     await log($, `part of ${card.id}'s result taken, for the chat to give now`)
     return { result: named(PART_TAKEN(PART_SENT(titleOf(card)))) }
   })

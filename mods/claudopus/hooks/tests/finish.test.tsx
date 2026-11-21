@@ -1658,6 +1658,7 @@ test('a task hands in a finished part of its result while it works on: its card 
   await clock.advance(61_000)
   const own = () => submitted.flatMap((text, i) => (text.startsWith('From Claudopus: the task') ? [submittedContext[i] ?? ''] : []))
   expect(await until(async () => (own().length ? own() : undefined))).toHaveLength(1)
+  expect(submitted.filter(text => text.startsWith('From Claudopus: the task'))).toEqual(['From Claudopus: the tasks "Beards and jawline" and "Ears" handed in parts of their results, and are still working on the rest.'])
   expect(own()[0]).toContain('  The chin research is done.')
   expect(own()[0]).toContain('  The ear research is done.')
   expect(own()[0]).not.toContain(part)

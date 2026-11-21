@@ -127,9 +127,10 @@ const heldSends: HeldSend[] = []
 // person's own, so it is the last way in: the task itself tells the chat first (PART_TAKEN), as a message of its own, which
 // Claude Code shows as no one's words, and this goes only when PART_WAIT has passed and the part still waits
 const PART_WAIT = 60_000
-const heldPrompts: { text: string; at: number }[] = []
-const submitLater = ($: EngineInterface, text: string, at: number) => {
-  if (!heldPrompts.some(one => one.text === text)) heldPrompts.push({ text, at })
+// (the times parts were handed in that wait for it)
+const heldPrompts: number[] = []
+const submitLater = ($: EngineInterface, at: number) => {
+  heldPrompts.push(at)
   redraw($)
 }
 const sendOwnNow = async ($: EngineInterface, message: OwnMessage) => {
@@ -170,18 +171,15 @@ const sendHeld = async ($: EngineInterface) => {
   isSendingHeld = true
   try {
     if (!(await isInHook($)) || (await isReplaced($))) return
-    const now = await $.clock.now()
-    for (const one of heldPrompts.filter(held => now - held.at >= PART_WAIT)) {
-      heldPrompts.splice(heldPrompts.indexOf(one), 1)
-      // (a part another message carried first, the task's own above all, or one message's for several parts, starts no turn of its
-      // own with nothing in it)
-      if (!(await read($, todos)).some(card => card.partsForChat?.length)) {
-        await log($, 'a message for the chat that waited was left out: what it was for was given already')
-        continue
-      }
-      const text = one.text
-      await $.prompt.submit({ text }).catch(err => log($, `message for the chat not sent: ${String(err)}`))
-      await log($, 'a message for the chat that waited went from a hook')
+    // One message for every part that waits, once the first has waited PART_WAIT; none when another message, the task's own above
+    // all, carried them first
+    if (heldPrompts.length && (await $.clock.now()) - Math.min(...heldPrompts) >= PART_WAIT) {
+      heldPrompts.length = 0
+      const titles = (await read($, todos)).filter(card => card.partsForChat?.length).map(titleOf)
+      if (titles.length) {
+        await $.prompt.submit({ text: named(PART_NOTICE(titles)) }).catch(err => log($, `message for the chat not sent: ${String(err)}`))
+        await log($, 'a message for the chat that waited went from a hook')
+      } else await log($, 'a message for the chat that waited was left out: what it was for was given already')
     }
     // (a sender told how its message went may send its next, as a row of tasks started again one after another: that goes from
     // this hook too, so the hook stays a moment for it)
