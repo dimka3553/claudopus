@@ -1,4 +1,5 @@
 - A leaderboard on claudopus.ai: join it from Stats with a username nobody else has, and Claudopus sends your hours of work, tokens and API cost every few minutes; nothing is sent before you join, and Leave takes you off at once.
 - You choose whether your stats are public: then anyone can open your page from the board and see your models, tokens and work.
 - The panel has a Leaderboard button beside Stats that opens the board.
-- Stats counts over today, the last 7 days, the last 30 days or all time, and shows your efficiency (hours of work done for each hour of real time), what share of your tokens were cache reads and cache writes, and what the same use would cost on the API.
+- The board leads with hours of work done, hours on the clock and efficiency, then each person's favourite model (the one that used the most tokens), tokens, API cost and tasks done.
+- Stats counts over today, the last 7 days, the last 30 days or all time, and shows hours of work done, hours on the clock, your efficiency (hours of work done for each hour on the clock), your favourite model, what share of your tokens were cache reads and cache writes, and what the same use would cost on the API.

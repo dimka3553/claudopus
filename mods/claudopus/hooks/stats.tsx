@@ -778,12 +778,13 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
     '',
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="column" flexShrink={0}>
-        {line(ui, 'time-added', 'All task time', hours(s.time.added))}
-        {line(ui, 'time-clock', 'Real time', hours(s.time.clock))}
+        {line(ui, 'time-added', 'Hours of work done', hours(s.time.added))}
+        {line(ui, 'time-clock', 'Hours on the clock', hours(s.time.clock))}
         {line(ui, 'time-saved', 'Saved by running at once', hours(saved), true)}
         {line(ui, 'time-efficiency', 'Efficiency', timesText(efficiencyOf(s.time.added, s.time.clock)), true)}
+        {s.models[0] ? line(ui, 'time-model', 'Favourite model', nameOf(s.models[0][0])) : null}
       </Box>
-      {note(ui, 'time-how', 'Efficiency is the hours of work done for each hour of real time: 3 weeks of work in 1 week is 3×. Only tasks running at the same time save time. Claudopus leaves out quiet gaps over 15 minutes.')}
+      {note(ui, 'time-how', 'Efficiency is the hours of work done for each hour on the clock: 3 weeks of work in 1 week is 3×. Only tasks running at the same time save time. Claudopus leaves out quiet gaps over 15 minutes.')}
     </Box>,
   )
   const work = band(

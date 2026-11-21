@@ -38,11 +38,13 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(await value('10m')).toBe('time saved')
   expect(await value('Tasks done')).toBe('2')
   expect(await value('To-dos done')).toBe('2')
-  expect(await value('All task time')).toBe('30m')
-  expect(await value('Real time')).toBe('20m')
+  expect(await value('Hours of work done')).toBe('30m')
+  expect(await value('Hours on the clock')).toBe('20m')
   expect(await value('Saved by running at once')).toBe('10m')
   // 30 minutes of work in 20 of real time: 1.5 hours of work for each hour, and the tokens by kind, each a share of all
   expect(await value('Efficiency')).toBe('1.50×')
+  // The model that used the most tokens
+  expect(await value('Favourite model')).toBe('Opus 5.5')
   expect(await value('Cache reads')).toBe('0% · 0')
   expect(await value('Written by the models')).toBe('100% · 1.5M')
   expect(await value('$30.00')).toBe('API cost')

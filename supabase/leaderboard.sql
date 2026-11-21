@@ -43,9 +43,16 @@ create or replace function leaderboard.range_of(p leaderboard.people, r text) re
     else coalesce(p.stats->r, '{}'::jsonb) end
 $$;
 
+-- The model that used the most tokens in a range, by its id
+create or replace function leaderboard.top_model(s jsonb) returns text language sql immutable set search_path = '' as $$
+  select left(m->>0, 60) from jsonb_array_elements(case when jsonb_typeof(s->'models') = 'array' then s->'models' else '[]'::jsonb end) as e(m)
+  where jsonb_typeof(m) = 'array' and jsonb_typeof(m->0) = 'string' order by leaderboard.num(m->1) desc limit 1
+$$;
+
 create or replace function leaderboard.score(s jsonb, sort text) returns numeric language sql immutable set search_path = '' as $$
   select case sort
     when 'tokens' then leaderboard.num(s->'tokens')
+    when 'clock' then leaderboard.num(s->'clock')
     when 'cost' then leaderboard.num(s->'cost')
     when 'efficiency' then case when leaderboard.num(s->'clock') > 0 then leaderboard.num(s->'work') / (s->>'clock')::numeric else 0 end
     else leaderboard.num(s->'work') end
@@ -98,14 +105,14 @@ language sql stable security definer set search_path = '' as $$
   ranked as (
     select *, row_number() over (order by leaderboard.score(s, p_sort) desc, leaderboard.score(s, 'work') desc, name) as rank, count(*) over () as total from rows
   )
-  select coalesce(jsonb_agg(jsonb_build_object('rank', rank, 'name', name, 'is_public', is_public, 'updated_at', updated_at, 'total', total, 'f', leaderboard.f(s)) order by rank), '[]'::jsonb)
+  select coalesce(jsonb_agg(jsonb_build_object('rank', rank, 'name', name, 'is_public', is_public, 'updated_at', updated_at, 'total', total, 'model', leaderboard.top_model(s), 'f', leaderboard.f(s)) order by rank), '[]'::jsonb)
   from ranked where rank <= 10
 $$;
 
 -- One person: their rank by hours of work in each range, their headline figures, and the rest only when they made it public
 create or replace function public.lb_person(p_name text) returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
-declare p leaderboard.people; ranks jsonb := '{}'; stats jsonb := '{}'; r text; s jsonb; n bigint;
+declare p leaderboard.people; ranks jsonb := '{}'; stats jsonb := '{}'; models jsonb := '{}'; r text; s jsonb; n bigint;
 begin
   select * into p from leaderboard.people where key = lower(coalesce(p_name, ''));
   if not found then return null; end if;
@@ -113,13 +120,14 @@ begin
     s := leaderboard.range_of(p, r);
     select 1 + count(*) into n from leaderboard.people o where leaderboard.score(leaderboard.range_of(o, r), 'work') > leaderboard.score(s, 'work');
     ranks := ranks || jsonb_build_object(r, n);
+    models := models || jsonb_build_object(r, leaderboard.top_model(s));
     stats := stats || jsonb_build_object(r, case when p.is_public then leaderboard.f(s) || jsonb_build_object(
       'models', (select coalesce(jsonb_agg(jsonb_build_array(left(coalesce(m->>0, ''), 60), leaderboard.num(m->1), leaderboard.num(m->2))), '[]'::jsonb)
         from jsonb_array_elements(case when jsonb_typeof(s->'models') = 'array' then s->'models' else '[]'::jsonb end) with ordinality as e(m, i) where i <= 12), 'todos', leaderboard.num(s->'todos'), 'flows', leaderboard.num(s->'flows'),
       'most', leaderboard.num(s->'most'), 'per_task', leaderboard.num(s->'per_task')) else leaderboard.f(s) end);
   end loop;
   return jsonb_build_object('name', p.name, 'is_public', p.is_public, 'joined_at', p.joined_at, 'updated_at', p.updated_at,
-    'total', (select count(*) from leaderboard.people), 'ranks', ranks, 'stats', stats);
+    'total', (select count(*) from leaderboard.people), 'ranks', ranks, 'stats', stats, 'model', models);
 end $$;
 
 revoke all on function public.lb_join(text, boolean, jsonb), public.lb_push(text, boolean, jsonb), public.lb_leave(text), public.lb_board(text, text), public.lb_person(text) from public;

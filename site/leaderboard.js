@@ -6,7 +6,7 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
   const $ = s => document.querySelector(s)
   const q = new URLSearchParams(location.search)
   const RANGES = { today: 'Today', d7: '7 days', d30: '30 days', all: 'All time' }
-  const SORTS = { work: 'Hours of work', efficiency: 'Efficiency', tokens: 'Tokens', cost: 'API cost' }
+  const SORTS = { work: 'Hours of work done', clock: 'Hours on the clock', efficiency: 'Efficiency', tokens: 'Tokens', cost: 'API cost' }
   const EVERY = 30000
 
   // the name comes from the path (/leaderboard/dima), or from ?u= where the page is opened as leaderboard.html
@@ -89,11 +89,11 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
       const name = r.is_public
         ? `<a href="${esc(personLink(r.name))}">${esc(r.name)}</a>`
         : `${esc(r.name)} <span class="lb-private">private</span>`
-      return `<tr><td class="lb-rank">${r.rank}</td><td class="lb-who">${name}</td><td class="num">${hours(f.work)}</td><td class="num">${eff(f)}</td><td class="num">${tokens(f.tokens)}</td><td class="num">${pct(f.read, f.tokens)}</td><td class="num">${money(f.cost)}</td><td class="num">${count(f.tasks)}</td></tr>`
+      return `<tr><td class="lb-rank">${r.rank}</td><td class="lb-who">${name}</td><td class="num">${hours(f.work)}</td><td class="num">${hours(f.clock)}</td><td class="num">${eff(f)}</td><td>${r.model ? esc(modelName(r.model)) : '–'}</td><td class="num">${tokens(f.tokens)}</td><td class="num">${money(f.cost)}</td><td class="num">${count(f.tasks)}</td></tr>`
     }).join('')
-    return `<div class="lb-scroll"><table class="lb-table"><thead><tr><th>#</th><th>Username</th>${head('work', 'Hours of work')}${head('efficiency', 'Efficiency')}${head('tokens', 'Tokens')}<th class="num">Cache reads</th>${head('cost', 'API cost')}<th class="num">Tasks done</th></tr></thead><tbody>${body}</tbody></table></div>
+    return `<div class="lb-scroll"><table class="lb-table"><thead><tr><th>#</th><th>Username</th>${head('work', 'Hours of work done')}${head('clock', 'Hours on the clock')}${head('efficiency', 'Efficiency')}<th>Favourite model</th>${head('tokens', 'Tokens')}${head('cost', 'API cost')}<th class="num">Tasks done</th></tr></thead><tbody>${body}</tbody></table></div>
 <p class="lb-count">${total === 1 ? '1 person' : count(total) + ' people'} on the board</p>
-<ul class="lb-notes note"><li>Efficiency: hours of work done for each hour of real time.</li><li>API cost: what the same use would cost at Anthropic's list prices.</li></ul>`
+<ul class="lb-notes note"><li>Efficiency: hours of work done for each hour on the clock.</li><li>Favourite model: the model that used the most tokens.</li><li>API cost: what the same use would cost at Anthropic's list prices.</li></ul>`
   }
 
   const person = p => {
@@ -108,11 +108,11 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
     const s = (p.stats || {})[range] || {}, r = (p.ranks || {})[range]
     const rank = `<p class="lb-rankline">${r ? '#' + r + ' of ' + count(p.total) : 'Not ranked'} · ${RANGES[range]}</p>`
     const tiles = `<ul class="lb-tiles">${[
-      tile('Hours of work', hours(s.work)),
-      tile('Real time', hours(s.clock)),
-      tile('Efficiency', eff(s), 'Hours of work done for each hour of real time.'),
+      tile('Hours of work done', hours(s.work)),
+      tile('Hours on the clock', hours(s.clock)),
+      tile('Efficiency', eff(s), 'Hours of work done for each hour on the clock.'),
+      tile('Favourite model', p.model && p.model[range] ? esc(modelName(p.model[range])) : '–', 'The model that used the most tokens.'),
       tile('API cost', money(s.cost), 'What the same use would cost at Anthropic\'s list prices.'),
-      tile('Tokens', tokens(s.tokens)),
       tile('Tasks done', count(s.tasks)),
     ].join('')}</ul>`
     const back = `<p class="lb-back"><a href="${esc(boardLink())}">Back to the leaderboard</a></p>`
@@ -196,13 +196,13 @@ const LB_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
       if (full) Object.assign(s, { models: [['claude-opus-5-5', t * 0.78, s.cost * 0.86], ['claude-sonnet-5-5', t * 0.2, s.cost * 0.12], ['claude-fable-5-2', t * 0.02, s.cost * 0.02]], todos: Math.round(s.tasks * 3.1), flows: Math.round(s.tasks * 0.08), most: 9, per_task: s.work / Math.max(1, s.tasks) })
       return s
     }
-    const key = { work: s => s.work, efficiency: s => s.clock ? s.work / s.clock : 0, tokens: s => s.tokens, cost: s => s.cost }
+    const key = { work: s => s.work, clock: s => s.clock, efficiency: s => s.clock ? s.work / s.clock : 0, tokens: s => s.tokens, cost: s => s.cost }
     const ranked = (rg, by) => people.map(p => ({ p, s: stats(p, rg) })).sort((a, b) => key[by](b.s) - key[by](a.s))
-    if (fn === 'lb_board') return Promise.resolve(ranked(args.p_range, args.p_sort).slice(0, 10).map(({ p, s }, i) => ({ rank: i + 1, name: p.name, is_public: p.pub, updated_at: p.at, total: people.length, f: s })))
+    if (fn === 'lb_board') return Promise.resolve(ranked(args.p_range, args.p_sort).slice(0, 10).map(({ p, s }, i) => ({ rank: i + 1, name: p.name, is_public: p.pub, updated_at: p.at, total: people.length, model: i % 3 ? 'claude-opus-5-5' : 'claude-fable-5-2', f: s })))
     const p = people.find(p => p.name === args.p_name)
     if (!p) return Promise.resolve(null)
     const ranks = {}, st = {}
     for (const rg of Object.keys(scale)) { ranks[rg] = ranked(rg, 'work').findIndex(x => x.p === p) + 1; st[rg] = stats(p, rg, p.pub) }
-    return Promise.resolve({ name: p.name, is_public: p.pub, joined_at: new Date(now - 40 * 864e5).toISOString(), updated_at: p.at, total: people.length, ranks, stats: st })
+    return Promise.resolve({ name: p.name, is_public: p.pub, joined_at: new Date(now - 40 * 864e5).toISOString(), updated_at: p.at, total: people.length, ranks, stats: st, model: { today: 'claude-opus-5-5', d7: 'claude-opus-5-5', d30: 'claude-opus-5-5', all: 'claude-opus-5-5' } })
   }
 })()
