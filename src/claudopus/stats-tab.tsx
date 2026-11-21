@@ -128,3 +128,111 @@ const statsButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
     <ui.Button key={`stats-open-${presses}`} label="Stats" hotkey={isKeyed ? 's' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
   </ui.Box>
 )
+
+// ---- The leaderboard on claudopus.ai ----
+// Opt in: nothing about the person leaves this Mac until they join from Stats with a username nobody has. Joining returns a secret
+// kept in leaderboard.json in the memory folder; with it Claudopus sends the person's sums (never a title, a path or a word anyone
+// wrote: boardOf) every few minutes, from one chat at a time, and Leave takes the row off the board at once. The board is a Supabase
+// project's lb_* functions (supabase/leaderboard.sql), reached with its publishable key, which is public by design
+const BOARD_SITE = 'https://claudopus.ai/leaderboard'
+const BOARD_API = 'https://wezffxcyofkyhoowwjwi.supabase.co/rest/v1/rpc'
+const BOARD_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
+const BOARD_EVERY = 3 * 60_000
+type BoardFile = { name?: string; token?: string; isPublic?: boolean; sentAt?: number }
+const boardNow: { file: BoardFile; said: string; isBusy: boolean } = { file: {}, said: '', isBusy: false }
+const boardPath = () => `${dir}/leaderboard.json`
+const boardLoad = async ($: EngineInterface) => (boardNow.file = parsed<BoardFile>(await readOr($, boardPath()), {}))
+const boardSave = async ($: EngineInterface, file: BoardFile) => {
+  boardNow.file = file
+  await $.fs.write(boardPath(), JSON.stringify(file))
+}
+// One call of the board's functions: curl with the body on its standard input, the status on the last line
+const boardCall = async ($: EngineInterface, fn: string, args: Record<string, unknown>) => {
+  const r = await $.process
+    .run(['curl', '-q', '-sS', '-m', '20', '-X', 'POST', '-H', `apikey: ${BOARD_KEY}`, '-H', 'Content-Type: application/json', '--data-binary', '@-', '-w', '\n%{http_code}', `${BOARD_API}/${fn}`], { stdin: JSON.stringify(args), timeoutMs: 25_000 })
+    .catch(() => ({ exitCode: 1, stdout: '' }))
+  const text = r.stdout ?? ''
+  const cut = text.lastIndexOf('\n')
+  const status = Number(text.slice(cut + 1)) || 0
+  return { ok: r.exitCode === 0 && status >= 200 && status < 300, status, body: parsed<unknown>(cut > 0 ? text.slice(0, cut) : '', undefined) }
+}
+// The person's sums over every range, from every chat's records
+const boardFigures = async ($: EngineInterface) => {
+  await statsRead($, 'all').catch(() => undefined)
+  const runs = held.get('all')?.runs ?? []
+  return { ...boardOf(runs, await $.clock.now()), timeline: timelineOf(runs) }
+}
+const UNREACHED = 'Couldn’t reach the leaderboard. Try again in a minute.'
+const boardAct = async ($: EngineInterface, act: () => Promise<string>) => {
+  if (boardNow.isBusy) return
+  ;((boardNow.isBusy = true), (boardNow.said = ''), drawAgain($))
+  try {
+    boardNow.said = await act()
+  } catch (err) {
+    ;((boardNow.said = UNREACHED), log($, `leaderboard: ${String(err)}`))
+  } finally {
+    ;((boardNow.isBusy = false), drawAgain($))
+  }
+}
+const joinBoard = ($: EngineInterface, name: string) =>
+  boardAct($, async () => {
+    if (!NAME_RULE.test(name)) return 'A username is 3 to 20 letters, digits, - or _, with no spaces.'
+    const r = await boardCall($, 'lb_join', { p_name: name, p_public: false, p_stats: await boardFigures($) })
+    if (r.status === 409) return `Someone already has the username ${name}. Choose another.`
+    if (!r.ok || typeof r.body !== 'string') return UNREACHED
+    await boardSave($, { name, token: r.body, isPublic: false, sentAt: await $.clock.now() })
+    return `✓ You joined as ${name}. Your stats are private until you make them public.`
+  })
+const leaveBoard = ($: EngineInterface) =>
+  boardAct($, async () => {
+    const r = await boardCall($, 'lb_leave', { p_token: boardNow.file.token ?? '' })
+    if (!r.ok) return 'Couldn’t reach the leaderboard, so you’re still on it. Press Leave again in a minute.'
+    await boardSave($, {})
+    return '✓ You left the leaderboard. Your figures are gone from it.'
+  })
+// Sends the figures, and public or private; a secret the board no longer knows (left from another Mac) clears this one too
+const pushBoard = async ($: EngineInterface, isPublic: boolean) => {
+  const file = boardNow.file
+  const r = await boardCall($, 'lb_push', { p_token: file.token ?? '', p_public: isPublic, p_stats: await boardFigures($) })
+  if (r.ok && r.body === false) return (await boardSave($, {}), 'gone' as const)
+  if (!r.ok) return 'failed' as const
+  await boardSave($, { ...file, isPublic, sentAt: await $.clock.now() })
+  return 'sent' as const
+}
+const publicBoard = ($: EngineInterface, isPublic: boolean) =>
+  boardAct($, async () => {
+    const r = await pushBoard($, isPublic)
+    return r === 'gone' ? 'You’re no longer on the leaderboard. Choose a username to join again.' : r === 'failed' ? UNREACHED : isPublic ? '✓ Your stats are public.' : '✓ Your stats are private.'
+  })
+// Every few minutes, from whichever chat comes first: the time sent is written before sending, so the other chats leave it
+const sendBoard = async ($: EngineInterface) => {
+  const file = await boardLoad($)
+  const now = await $.clock.now()
+  if (!file.token || boardNow.isBusy || now - (file.sentAt ?? 0) < BOARD_EVERY) return
+  await boardSave($, { ...file, sentAt: now })
+  boardNow.isBusy = true
+  try {
+    await pushBoard($, Boolean(file.isPublic))
+  } finally {
+    boardNow.isBusy = false
+  }
+}
+const openBoard = async ($: EngineInterface) => {
+  const r = await openOn($, BOARD_SITE)
+  if (r.exitCode !== 0) log($, `leaderboard not opened: ${'stderr' in r ? String(r.stderr) : ''}`)
+}
+const boardShown = ($: EngineInterface): BoardShown => ({
+  name: boardNow.file.name ?? '',
+  isPublic: Boolean(boardNow.file.isPublic),
+  said: boardNow.said,
+  isBusy: boardNow.isBusy,
+  join: name => void joinBoard($, name),
+  leave: () => void leaveBoard($),
+  setPublic: isPublic => void publicBoard($, isPublic),
+  open: () => void openBoard($).catch(err => log($, `leaderboard not opened: ${String(err)}`)),
+})
+const boardButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
+  <ui.Box key="board-button" flexShrink={0}>
+    <ui.Button key={`board-open-${presses}`} label="Leaderboard" hotkey={isKeyed ? 'l' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openBoard($).catch(err => log($, `leaderboard not opened: ${String(err)}`))} />
+  </ui.Box>
+)

@@ -513,7 +513,10 @@ const timelineText = (ui: Ui, pieces: Piece[], cols: number) => {
   )
 }
 export type Scope = 'chat' | 'all'
-type Range = 'today' | 'all'
+// What Stats and the leaderboard count over: today, the last 7 days, the last 30, all time
+export type Range = 'today' | 'd7' | 'd30' | 'all'
+export const RANGES: Range[] = ['today', 'd7', 'd30', 'all']
+const DAY = 86_400_000
 export const view = { scope: 'chat' as Scope, range: 'today' as Range, presses: 0 }
 // What was read for each scope, and when; a scope being read is drawn from what it held last
 export const held = new Map<Scope, { runs: Run[]; at: number; error?: string }>()
@@ -530,6 +533,64 @@ export const dayStart = (now: number) => {
   d.setHours(0, 0, 0, 0)
   return d.getTime()
 }
+// Where a range begins: today from local midnight, the others that many days back from now
+export const rangeFrom = (range: Range, now: number) => (range === 'today' ? dayStart(now) : range === 'd7' ? now - 7 * DAY : range === 'd30' ? now - 30 * DAY : 0)
+// Hours of work done for each hour of real time: 3 weeks of task time in 1 week on the clock is 3×
+export const efficiencyOf = (added: number, clock: number) => (clock > 0 ? added / clock : 0)
+export const timesText = (n: number) => (n > 0 ? `${n.toFixed(2)}×` : '–')
+// What share of all tokens one kind was, in whole percent
+export const shareOf = (part: number, total: number) => Math.round((part / Math.max(1, total)) * 100)
+
+// ---- The leaderboard ----
+
+// One range's figures as the leaderboard on claudopus.ai keeps them: never a title, a path or a word anyone wrote, only sums
+export type BoardRange = {
+  work: number; clock: number; tokens: number; input: number; write: number; read: number; output: number; cost: number
+  tasks: number; messages: number; todos: number; flows: number; most: number; per_task: number; models: [string, number, number][]
+}
+export const boardOf = (runs: Run[], now: number): Record<Range, BoardRange> => {
+  const one = (range: Range): BoardRange => {
+    const s = statsOf(runs, rangeFrom(range, now), Infinity, now)
+    const round = (n: number) => Math.round(n)
+    return {
+      work: round(s.time.added), clock: round(s.time.clock), tokens: s.all.total, input: s.all.input, write: s.all.write, read: s.all.read, output: s.all.output,
+      cost: Math.round(s.all.cost * 100) / 100, tasks: s.finished, messages: s.messages, todos: s.todosDone, flows: s.flows,
+      most: mostAtOnce(s.pieces.map(p => p.spans)), per_task: round(s.perPiece),
+      models: s.models.slice(0, 12).map(([model, t]): [string, number, number] => [model, t.total, Math.round(t.cost * 100) / 100]),
+    }
+  }
+  return { today: one('today'), d7: one('d7'), d30: one('d30'), all: one('all') }
+}
+// The timeline as the leaderboard draws it on a public page: each task's busy stretches, each with its model, and never its title.
+// Times are whole minutes from `base`; the newest tasks are kept while the whole stays under `most` characters
+export type BoardTimeline = { base: number; models: string[]; pieces: [from: number, minutes: number, model: number][][] }
+export const timelineOf = (runs: Run[], most = 40_000): BoardTimeline => {
+  const pieces = piecesOf(runs).sort((a, b) => (a.spans[0]?.[0] ?? 0) - (b.spans[0]?.[0] ?? 0))
+  const base = Math.floor((pieces[0]?.spans[0]?.[0] ?? 0) / 60_000) * 60_000
+  const models: string[] = []
+  const indexOf = (model: string) => (models.includes(model) ? models.indexOf(model) : models.push(model) - 1)
+  const all = pieces.map(p => p.bars.map((b): [number, number, number] => [Math.round((b.from - base) / 60_000), Math.max(1, Math.round((b.to - b.from) / 60_000)), indexOf(b.model)]))
+  const kept: [number, number, number][][] = []
+  let size = 0
+  for (const one of [...all].reverse()) {
+    if ((size += JSON.stringify(one).length + 1) > most) break
+    kept.unshift(one)
+  }
+  return { base, models, pieces: kept }
+}
+// What the Leaderboard part of Stats shows and does; the sending and the file are the hooks' (stats-tab)
+export type BoardShown = {
+  name: string
+  isPublic: boolean
+  // What the last press or send came to, said in one line; '' when nothing needs saying
+  said: string
+  isBusy: boolean
+  join: (name: string) => void
+  leave: () => void
+  setPublic: (isPublic: boolean) => void
+  open: () => void
+}
+export const NAME_RULE = /^[A-Za-z0-9_-]{3,20}$/
 
 const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element) => (
   <ui.Box key={key} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
@@ -599,11 +660,54 @@ const tile = (ui: Ui, key: string, value: string, label: string, wraps = false) 
   </ui.Box>
 )
 
-export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (scope: Scope) => void, surface: string, px: number) {
+// Join, leave, public or private: the same in every view
+const boardBand = (ui: Ui, b: BoardShown) => {
+  const { Box, Text } = ui
+  const said = b.said ? <Text key="board-said" color={b.said.startsWith('✓') ? undefined : '#D08A00'} dimColor={b.said.startsWith('✓')} wrap="wrap">{b.said}</Text> : null
+  const open = <ui.Button key={`board-open-${view.presses}`} label="Open the leaderboard" plain onPress={b.open} />
+  if (!b.name)
+    return band(
+      ui,
+      'stats-board',
+      'Leaderboard',
+      '',
+      <Box flexDirection="column" gap={1}>
+        {note(ui, 'board-how', 'Put your hours of work, tokens and API cost on the leaderboard at claudopus.ai. Nothing about you is sent until you join, and Leave takes you off at once.')}
+        {'Input' in ui ? (
+          <Box key="board-field" width="100%" flexDirection="column">
+            <ui.Input key={`board-name-${view.presses}`} placeholder="Choose a username: 3 to 20 letters, digits, - or _" submitLabel="Join" onSubmit={value => b.join(value.trim())} />
+          </Box>
+        ) : null}
+        {said}
+        <Box flexDirection="row" gap={2} flexShrink={0}>{open}</Box>
+      </Box>,
+    )
+  return band(
+    ui,
+    'stats-board',
+    'Leaderboard',
+    b.isBusy ? 'Sending…' : '',
+    <Box flexDirection="column" gap={1}>
+      <Box flexDirection="column" flexShrink={0}>
+        {line(ui, 'board-name', 'Your username', b.name, true)}
+        {line(ui, 'board-public', 'Your stats', b.isPublic ? 'Public' : 'Private')}
+      </Box>
+      {note(ui, 'board-what', b.isPublic ? 'Everyone can open your stats from the leaderboard. Claudopus sends your figures every few minutes while Claude Code is open.' : 'The leaderboard shows your hours of work, tokens and API cost, and keeps the rest private. Claudopus sends your figures every few minutes while Claude Code is open.')}
+      {said}
+      <Box flexDirection="row" flexWrap="wrap" gap={2} flexShrink={0}>
+        {open}
+        <ui.Button key={`board-public-${view.presses}`} label={b.isPublic ? 'Make my stats private' : 'Make my stats public'} plain onPress={() => b.setPublic(!b.isPublic)} />
+        <ui.Button key={`board-leave-${view.presses}`} label="Leave" plain dimColor onPress={b.leave} />
+      </Box>
+    </Box>,
+  )
+}
+
+export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (scope: Scope) => void, surface: string, px: number, board?: BoardShown) {
   const { Box, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number; isInteractive?: boolean }) => JSX.Element }
   const kept = held.get(view.scope)
-  const from = view.range === 'today' ? dayStart(now) : 0
+  const from = rangeFrom(view.range, now)
   const s = kept ? statsOf(kept.runs, from, Infinity, now) : undefined
   const press = (fn: () => void) => () => void ((view.presses += 1), fn(), invalidate())
   const chats = new Set(kept?.runs.filter(r => r.kind === 'chat').map(r => r.id)).size
@@ -622,18 +726,16 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
       {segments(
         ui,
         'range',
-        [
-          { label: 'Today', isOn: view.range === 'today', onPress: press(() => (view.range = 'today')) },
-          { label: 'All time', isOn: view.range === 'all', onPress: press(() => (view.range = 'all')) },
-        ],
+        ([['today', 'Today'], ['d7', '7 days'], ['d30', '30 days'], ['all', 'All time']] as const).map(([range, label]) => ({ label, isOn: view.range === range, onPress: press(() => (view.range = range)) })),
         10,
       )}
       <Box flexGrow={1} />
       {reading.has(view.scope) ? <Text dimColor>Reading…</Text> : null}
     </Box>
   )
-  if (!s) return [nav, note(ui, 'stats-wait', kept?.error ?? 'Reading Claude’s logs of your tasks…')]
-  if (!s.all.total && !s.pieces.length) return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), note(ui, 'stats-none', view.range === 'today' ? 'No tasks today yet.' : 'No tasks yet.')]
+  const boardShown = board ? [boardBand(ui, board)] : []
+  if (!s) return [nav, note(ui, 'stats-wait', kept?.error ?? 'Reading Claude’s logs of your tasks…'), ...boardShown]
+  if (!s.all.total && !s.pieces.length) return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), note(ui, 'stats-none', view.range === 'today' ? 'No tasks today yet.' : view.range === 'all' ? 'No tasks yet.' : `No tasks in the last ${view.range === 'd7' ? 7 : 30} days.`), ...boardShown]
   const top = s.models[0]?.[1].total || 1
   const count = (n: number) => n.toLocaleString('en-US')
   // Whole dollars from a hundred up, cents below
@@ -644,7 +746,7 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
   const hero = (
     <Box key="stats-hero" flexDirection="row" gap={1} flexShrink={0}>
       {tile(ui, 'hero-saved', hours(saved), 'time saved', surface === 'terminal')}
-      {tile(ui, 'hero-cost', money(s.all.cost), 'at list prices', surface === 'terminal')}
+      {tile(ui, 'hero-cost', money(s.all.cost), 'API cost', surface === 'terminal')}
       {tile(ui, 'hero-work', count(s.finished), 'tasks done', surface === 'terminal')}
     </Box>
   )
@@ -693,11 +795,13 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
     '',
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="column" flexShrink={0}>
-        {line(ui, 'time-added', 'All task time', hours(s.time.added))}
-        {line(ui, 'time-clock', 'Real time', hours(s.time.clock))}
+        {line(ui, 'time-added', 'Hours of work done', hours(s.time.added))}
+        {line(ui, 'time-clock', 'Hours on the clock', hours(s.time.clock))}
         {line(ui, 'time-saved', 'Saved by running at once', hours(saved), true)}
+        {line(ui, 'time-efficiency', 'Efficiency', timesText(efficiencyOf(s.time.added, s.time.clock)), true)}
+        {s.models[0] ? line(ui, 'time-model', 'Favourite model', nameOf(s.models[0][0])) : null}
       </Box>
-      {note(ui, 'time-how', 'Only tasks running at the same time save time. Claudopus leaves out quiet gaps over 15 minutes.')}
+      {note(ui, 'time-how', 'Efficiency is the hours of work done for each hour on the clock: 3 weeks of work in 1 week is 3×. Only tasks running at the same time save time. Claudopus leaves out quiet gaps over 15 minutes.')}
     </Box>,
   )
   const work = band(
@@ -717,7 +821,6 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
       {note(ui, 'talk-how', 'A message’s time runs from when the chat takes it to the chat’s last step. The tasks it started aren’t counted.')}
     </Box>,
   )
-  const share = Math.round((s.all.read / Math.max(1, s.all.total)) * 100)
   const tokens = band(
     ui,
     'stats-tokens',
@@ -732,13 +835,19 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
           </Box>
         </Box>
       ))}
-      {note(ui, 'tokens-read', `Tokens are the bits of text a model reads and writes. ${share}% were read again at a lower price. The models wrote ${tokensText(s.all.output)}.`)}
+      <Box flexDirection="column" flexShrink={0}>
+        {line(ui, 'tokens-share-read', 'Cache reads', `${shareOf(s.all.read, s.all.total)}% · ${tokensText(s.all.read)}`)}
+        {line(ui, 'tokens-share-write', 'Cache writes', `${shareOf(s.all.write, s.all.total)}% · ${tokensText(s.all.write)}`)}
+        {line(ui, 'tokens-share-input', 'Input not cached', `${shareOf(s.all.input, s.all.total)}% · ${tokensText(s.all.input)}`)}
+        {line(ui, 'tokens-share-output', 'Written by the models', `${shareOf(s.all.output, s.all.total)}% · ${tokensText(s.all.output)}`)}
+      </Box>
+      {note(ui, 'tokens-read', 'Tokens are the bits of text a model reads and writes. A cache read is text read again at a tenth of the price, a cache write is text kept for that.')}
     </Box>,
   )
   const cost = band(
     ui,
     'stats-money',
-    'Cost at list prices',
+    'API cost',
     money(s.all.cost),
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="column" flexShrink={0}>
@@ -769,5 +878,5 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
       ? `Claudopus counts this from Claude’s own logs of ${chats} chats, their tasks, helpers and workflows.`
       : 'Claudopus counts this from Claude’s own logs of this chat, its tasks, helpers and workflows.',
   )
-  return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), hero, timeline, time, work, tokens, cost, ...(mem ? [mem] : []), off]
+  return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), hero, timeline, time, work, tokens, cost, ...boardShown, ...(mem ? [mem] : []), off]
 }

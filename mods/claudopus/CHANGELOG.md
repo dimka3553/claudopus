@@ -2,6 +2,14 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.256 · 21 November 2026
+- A leaderboard on claudopus.ai: join it from Stats with a username nobody else has, and Claudopus sends your hours of work, tokens and API cost every few minutes; nothing is sent before you join, and Leave takes you off at once.
+- You choose whether your stats are public: then anyone can open your page from the board and see your models, tokens and work.
+- The panel has a Leaderboard button beside Stats that opens the board.
+- The board leads with hours of work done, hours on the clock and efficiency, then each person's favourite model (the one that used the most tokens), tokens, API cost and tasks done.
+- Stats counts over today, the last 7 days, the last 30 days or all time, and shows hours of work done, hours on the clock, your efficiency (hours of work done for each hour on the clock), your favourite model, what share of your tokens were cache reads and cache writes, and what the same use would cost on the API.
+- A public person's page shows their timeline as Stats draws it, every task running at once in its model's colour, with no task names.
+
 ## 0.2.255 · 21 November 2026
 - Release it is the only press a release needs: when a release has to run again because main changed or a check failed, it no longer asks you for a second Allow.
 - When Claude Code blocks a task from using a connector, such as confirming a Supabase cost, the card now says so and gives you the one way through: Open in Terminal, press Return to let your tasks do it from now on, then Try again. Before, nothing showed, and your yes on the card or in the chat could never let it through.

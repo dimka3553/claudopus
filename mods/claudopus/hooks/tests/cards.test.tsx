@@ -124,6 +124,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
   const dropped: string[][] = []
   // What was run over ssh, with what it was handed
   const sshed: string[][] = []
+  // Each call of the leaderboard's functions, by name, with what it was sent
+  const boarded: { fn: string; body: Record<string, unknown> }[] = []
   prompts.length = 0
   let spawned = 0
   let gateKeys = 0
@@ -557,6 +559,13 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
       const said = rest[0] === '--list' ? `${kept ? 'API_KEY\n' : ''}${more.map(([name]) => `${name}\n`).join('')}` : hidden
       return { value: { exitCode: 0, stdout: said, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    // The leaderboard's functions through curl, answered as the test lays board:<fn> ("<body>\n<status>"); none laid, curl couldn't connect
+    if (tool === 'curl' && String(e.argv.at(-1)).includes('/rest/v1/rpc/')) {
+      const fn = String(e.argv.at(-1)).split('/').at(-1) ?? ''
+      boarded.push({ fn, body: JSON.parse(String(e.init?.stdin ?? '{}')) as Record<string, unknown> })
+      const said = files.get(`board:${fn}`)
+      return said === undefined ? ok('', 7) : ok(said)
+    }
     // grep handed a .env file for the names before each =, as the list of keys reads one: only what -o matches comes back
     if (tool === '/usr/bin/grep' && rest[0] === '-ohE') return ok((files.get(String(rest[2])) ?? '').split('\n').flatMap(line => line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/)?.[0] ?? []).map(one => `${one}\n`).join(''))
     const stdout = tool?.endsWith('jq')
@@ -727,7 +736,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     return { messages: e.messages }
   })
 
-  return { files, completed, pressRuns, titles, compacts, opened, tabs, viewed, stopped, killed, closed, logged, sent, appended, submitted, submittedContext, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, completed, pressRuns, titles, compacts, opened, tabs, viewed, stopped, killed, closed, logged, sent, appended, submitted, submittedContext, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, boarded, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -1054,7 +1063,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.props.color).toBe('#4C9AFF')
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.text).toBe('1 delivered')
   // Its helper, ended in the same moment, stays in its card for the same pause
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', 'Search the docs', 'Mark as done'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Leaderboard', 'Memory', 'Config', 'About', 'Fix the nose', 'Search the docs', 'Mark as done'])
   await clock.advance(1_000)
   expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeDefined()
   await clock.advance(1_100)
@@ -1064,12 +1073,12 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect((await pane.find({ type: 'Text', text: /^ · I am reading/ }))?.text).toBe(' · I am reading how the other model draws outlines.')
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.text).toBe('1 delivered')
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', '1 helper ended', 'Mark as done'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Leaderboard', 'Memory', 'Config', 'About', 'Fix the nose', '1 helper ended', 'Mark as done'])
   await pressed(pane, 'dismiss-a1')
   await clock.advance(2_100)
   // Dismissed, it is one folded row, "Finished", under the running cards; unfolded, a card as running work has, with Details and no Stop
   const buttons = (await until(async () => ((await pane.findAll({ type: 'Button' })).some(b => b.props.label === '▸ Finished 1') ? pane.findAll({ type: 'Button' }) : undefined))) ?? []
-  expect(buttons.map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', '▸ Finished 1'])
+  expect(buttons.map(b => b.props.label)).toEqual(['Stats', 'Leaderboard', 'Memory', 'Config', 'About', '▸ Finished 1'])
   await pane.press({ key: String(buttons.find(b => b.props.label === '▸ Finished 1')?.key) })
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.wrap).toBe('truncate-end')
   // its top row only its facts, the line under it how it ended

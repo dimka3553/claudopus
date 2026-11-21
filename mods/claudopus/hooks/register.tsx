@@ -3,8 +3,8 @@ import type { ElementTable, EngineInterface, McpToolResult, On, RasterProps, Reg
 import type { CodeFile, CodeMade, Entry, FilesMade, Flow, FlowAgent, Item, Link, Made, MadeKind, Me, PressRun, Prompt, Report, Server, Shared, Stream, Todo } from '../types'
 import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresBefore, squaresKept, squaresOf, squaresSvg, squaresWidth, stageOf as flowStageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'
-import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, svgFits, view as statsShown } from './stats'
-import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
+import { boardOf, timelineOf, CACHE_V, GAP, held, memoryHeld, NAME_RULE, parsed, READ_EVERY, reading, statsView, SUM_JQ, svgFits, view as statsShown } from './stats'
+import type { BoardShown, Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
 import { broughtBackBy, isResultId, marksOf, merged, markThere, parsedMeta, PLACE, PULL, pullThere, PUSH, PUSH_THERE, rehome, RESULTS_A_TRIP, RESULTS_EVERY, RESULTS_LOOK, resultsOf } from './results'
 import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, helpersOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, deliveredSaid, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, shareableHelpers, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
 import type { Answer, Off } from './shared'
@@ -3204,6 +3204,105 @@ const openStats = async ($: EngineInterface) => {
 const statsButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="stats-button" flexShrink={0}>
     <ui.Button key={`stats-open-${presses}`} label="Stats" hotkey={isKeyed ? 's' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
+  </ui.Box>
+)
+
+const BOARD_SITE = 'https://claudopus.ai/leaderboard'
+const BOARD_API = 'https://wezffxcyofkyhoowwjwi.supabase.co/rest/v1/rpc'
+const BOARD_KEY = 'sb_publishable_uUNtBu-IkFqW09L45yy4ig_Ap9KqT-U'
+const BOARD_EVERY = 3 * 60_000
+type BoardFile = { name?: string; token?: string; isPublic?: boolean; sentAt?: number }
+const boardNow: { file: BoardFile; said: string; isBusy: boolean } = { file: {}, said: '', isBusy: false }
+const boardPath = () => `${dir}/leaderboard.json`
+const boardLoad = async ($: EngineInterface) => (boardNow.file = parsed<BoardFile>(await readOr($, boardPath()), {}))
+const boardSave = async ($: EngineInterface, file: BoardFile) => {
+  boardNow.file = file
+  await $.fs.write(boardPath(), JSON.stringify(file))
+}
+const boardCall = async ($: EngineInterface, fn: string, args: Record<string, unknown>) => {
+  const r = await $.process
+    .run(['curl', '-q', '-sS', '-m', '20', '-X', 'POST', '-H', `apikey: ${BOARD_KEY}`, '-H', 'Content-Type: application/json', '--data-binary', '@-', '-w', '\n%{http_code}', `${BOARD_API}/${fn}`], { stdin: JSON.stringify(args), timeoutMs: 25_000 })
+    .catch(() => ({ exitCode: 1, stdout: '' }))
+  const text = r.stdout ?? ''
+  const cut = text.lastIndexOf('\n')
+  const status = Number(text.slice(cut + 1)) || 0
+  return { ok: r.exitCode === 0 && status >= 200 && status < 300, status, body: parsed<unknown>(cut > 0 ? text.slice(0, cut) : '', undefined) }
+}
+const boardFigures = async ($: EngineInterface) => {
+  await statsRead($, 'all').catch(() => undefined)
+  const runs = held.get('all')?.runs ?? []
+  return { ...boardOf(runs, await $.clock.now()), timeline: timelineOf(runs) }
+}
+const UNREACHED = 'Couldn’t reach the leaderboard. Try again in a minute.'
+const boardAct = async ($: EngineInterface, act: () => Promise<string>) => {
+  if (boardNow.isBusy) return
+  ;((boardNow.isBusy = true), (boardNow.said = ''), drawAgain($))
+  try {
+    boardNow.said = await act()
+  } catch (err) {
+    ;((boardNow.said = UNREACHED), log($, `leaderboard: ${String(err)}`))
+  } finally {
+    ;((boardNow.isBusy = false), drawAgain($))
+  }
+}
+const joinBoard = ($: EngineInterface, name: string) =>
+  boardAct($, async () => {
+    if (!NAME_RULE.test(name)) return 'A username is 3 to 20 letters, digits, - or _, with no spaces.'
+    const r = await boardCall($, 'lb_join', { p_name: name, p_public: false, p_stats: await boardFigures($) })
+    if (r.status === 409) return `Someone already has the username ${name}. Choose another.`
+    if (!r.ok || typeof r.body !== 'string') return UNREACHED
+    await boardSave($, { name, token: r.body, isPublic: false, sentAt: await $.clock.now() })
+    return `✓ You joined as ${name}. Your stats are private until you make them public.`
+  })
+const leaveBoard = ($: EngineInterface) =>
+  boardAct($, async () => {
+    const r = await boardCall($, 'lb_leave', { p_token: boardNow.file.token ?? '' })
+    if (!r.ok) return 'Couldn’t reach the leaderboard, so you’re still on it. Press Leave again in a minute.'
+    await boardSave($, {})
+    return '✓ You left the leaderboard. Your figures are gone from it.'
+  })
+const pushBoard = async ($: EngineInterface, isPublic: boolean) => {
+  const file = boardNow.file
+  const r = await boardCall($, 'lb_push', { p_token: file.token ?? '', p_public: isPublic, p_stats: await boardFigures($) })
+  if (r.ok && r.body === false) return (await boardSave($, {}), 'gone' as const)
+  if (!r.ok) return 'failed' as const
+  await boardSave($, { ...file, isPublic, sentAt: await $.clock.now() })
+  return 'sent' as const
+}
+const publicBoard = ($: EngineInterface, isPublic: boolean) =>
+  boardAct($, async () => {
+    const r = await pushBoard($, isPublic)
+    return r === 'gone' ? 'You’re no longer on the leaderboard. Choose a username to join again.' : r === 'failed' ? UNREACHED : isPublic ? '✓ Your stats are public.' : '✓ Your stats are private.'
+  })
+const sendBoard = async ($: EngineInterface) => {
+  const file = await boardLoad($)
+  const now = await $.clock.now()
+  if (!file.token || boardNow.isBusy || now - (file.sentAt ?? 0) < BOARD_EVERY) return
+  await boardSave($, { ...file, sentAt: now })
+  boardNow.isBusy = true
+  try {
+    await pushBoard($, Boolean(file.isPublic))
+  } finally {
+    boardNow.isBusy = false
+  }
+}
+const openBoard = async ($: EngineInterface) => {
+  const r = await openOn($, BOARD_SITE)
+  if (r.exitCode !== 0) log($, `leaderboard not opened: ${'stderr' in r ? String(r.stderr) : ''}`)
+}
+const boardShown = ($: EngineInterface): BoardShown => ({
+  name: boardNow.file.name ?? '',
+  isPublic: Boolean(boardNow.file.isPublic),
+  said: boardNow.said,
+  isBusy: boardNow.isBusy,
+  join: name => void joinBoard($, name),
+  leave: () => void leaveBoard($),
+  setPublic: isPublic => void publicBoard($, isPublic),
+  open: () => void openBoard($).catch(err => log($, `leaderboard not opened: ${String(err)}`)),
+})
+const boardButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
+  <ui.Box key="board-button" flexShrink={0}>
+    <ui.Button key={`board-open-${presses}`} label="Leaderboard" hotkey={isKeyed ? 'l' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openBoard($).catch(err => log($, `leaderboard not opened: ${String(err)}`))} />
   </ui.Box>
 )
 
@@ -10016,6 +10115,7 @@ const chatHooks = (on: On) => {
     everyLoad($, TIDY_EVERY, () => startTidy($).catch(err => log($, `leftovers not tidied: ${String(err)}`)))
     afterLoad($, 5000, () => lookDisk($).catch(err => log($, `disk not looked at: ${String(err)}`)))
     everyLoad($, DISK_EVERY, () => lookDisk($).catch(err => log($, `disk not looked at: ${String(err)}`)))
+    everyLoad($, 60_000, () => sendBoard($).catch(err => log($, `leaderboard not sent: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
     await readAnswers($).catch(() => undefined)
     await readOthers($).catch(() => undefined)
@@ -14789,6 +14889,7 @@ const panelHooks = (on: On) => {
             <Box key="head-buttons" flexDirection="row" flexWrap="wrap" columnGap={isKeyed ? 2 : 1} rowGap={e.surface === 'terminal' ? 0 : 1}>
               {reportsButton($, ui, kept, isKeyed)}
               {statsButton($, ui, isKeyed)}
+              {boardButton($, ui, isKeyed)}
               {memoryButton($, ui, isKeyed)}
               {configButton($, ui, isKeyed)}
               {aboutButton($, ui, isKeyed)}
@@ -14909,9 +15010,10 @@ const tabHooks = (on: On) => {
   on('ui.render', { component: 'Pane', requestId: STATS_PANE }, async ($, e) => {
     const { Box } = uiOf($, e)
     void statsRead($, statsShown.scope).catch(() => undefined)
+    if (!boardNow.isBusy) await boardLoad($).catch(() => undefined)
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {statsView(() => drawAgain($), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
+        {statsView(() => drawAgain($), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32, boardShown($))}
       </Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
