@@ -7,8 +7,22 @@
     }
   },
   "rewrites": [
-    { "source": "/leaderboard", "destination": "/leaderboard.html" },
-    { "source": "/leaderboard/:name", "destination": "/leaderboard.html" }
+    {
+      "source": "/og/leaderboard.png",
+      "destination": "https://wezffxcyofkyhoowwjwi.supabase.co/functions/v1/lb-card"
+    },
+    {
+      "source": "/og/leaderboard/:name",
+      "destination": "https://wezffxcyofkyhoowwjwi.supabase.co/functions/v1/lb-card?name=:name"
+    },
+    {
+      "source": "/leaderboard",
+      "destination": "/leaderboard.html"
+    },
+    {
+      "source": "/leaderboard/:name",
+      "destination": "/api/person?name=:name"
+    }
   ],
   "redirects": [
     {
@@ -21,5 +35,10 @@
       "destination": "/tour.html",
       "permanent": false
     }
-  ]
+  ],
+  "functions": {
+    "api/person.js": {
+      "includeFiles": "leaderboard.html"
+    }
+  }
 }

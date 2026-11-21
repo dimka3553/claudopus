@@ -3231,7 +3231,17 @@ const boardCall = async ($: EngineInterface, fn: string, args: Record<string, un
 const boardFigures = async ($: EngineInterface) => {
   await statsRead($, 'all').catch(() => undefined)
   const runs = held.get('all')?.runs ?? []
-  return { ...boardOf(runs, await $.clock.now()), timeline: timelineOf(runs) }
+  const since = await installedAt($)
+  return { ...boardOf(runs, await $.clock.now(), since), timeline: timelineOf(runs, 40_000, since) }
+}
+const installedAt = async ($: EngineInterface) => {
+  const kept = parsed<{ at?: number }>(await readOr($, `${dir}/installed.json`), {}).at
+  if (typeof kept === 'number' && kept > 0) return kept
+  const born = await $.process.run(isLinux ? ['stat', '-c', '%W', dir] : ['stat', '-f', '%B', dir], { timeoutMs: 5000 }).catch(() => undefined)
+  const seconds = Number(born?.stdout.trim())
+  const at = seconds > 0 ? seconds * 1000 : await $.clock.now()
+  await $.fs.write(`${dir}/installed.json`, JSON.stringify({ at })).catch(() => undefined)
+  return at
 }
 const UNREACHED = 'Couldn’t reach the leaderboard. Try again in a minute.'
 const boardAct = async ($: EngineInterface, act: () => Promise<string>) => {

@@ -9,6 +9,19 @@
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#111112" media="(prefers-color-scheme:dark)">
 <meta name="theme-color" content="#FAF9F5" media="(prefers-color-scheme:light)">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Claudopus changelog">
+<meta property="og:description" content="What changed in each version of Claudopus, the mod for Claude Code.">
+<meta property="og:url" content="https://www.claudopus.ai/changelog.html">
+<meta property="og:image" content="https://www.claudopus.ai/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Claudopus octopus in 3D, a task on each of its eight arms, beside the words: Do 3× more with Claude Code, at the same time.">
+<meta property="og:site_name" content="Claudopus">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Claudopus changelog">
+<meta name="twitter:description" content="What changed in each version of Claudopus, the mod for Claude Code.">
+<meta name="twitter:image" content="https://www.claudopus.ai/og.png">
 <!-- Made by src/claudopus/build.mjs from mods/claudopus/CHANGELOG.md and src/claudopus/changelog-page.html: change those, never this file -->
 <style>
 /* ---- Claudopus design system: tokens and base, as on the home page ---- */
@@ -97,6 +110,7 @@ section li::before{content:"";position:absolute;left:0;top:.6em;width:var(--s2);
   <h1>Changelog</h1>
   <p class="lead">What changed in each version of Claudopus, newest first. Claudopus never updates itself. When a new version is out, its panel shows what is new, and you press Download and then Install.</p>
 </div>
+<section id="v0.2.257"><h2>v0.2.257</h2><p class="note">21 November 2026</p><ul><li>A link to someone's leaderboard page now shows a picture of their stats wherever you paste it: hours of work done, hours on the clock, efficiency, favourite model, API cost and tasks, with their timeline when their stats are public. A link to the board shows the top five.</li><li>claudopus.ai's own link picture now shows the 3D octopus with a task on each arm.</li><li>The leaderboard counts only from when you first installed Claudopus.</li></ul></section>
 <section id="v0.2.256"><h2>v0.2.256</h2><p class="note">21 November 2026</p><ul><li>A leaderboard on claudopus.ai: join it from Stats with a username nobody else has, and Claudopus sends your hours of work, tokens and API cost every few minutes; nothing is sent before you join, and Leave takes you off at once.</li><li>You choose whether your stats are public: then anyone can open your page from the board and see your models, tokens and work.</li><li>The panel has a Leaderboard button beside Stats that opens the board.</li><li>The board leads with hours of work done, hours on the clock and efficiency, then each person's favourite model (the one that used the most tokens), tokens, API cost and tasks done.</li><li>Stats counts over today, the last 7 days, the last 30 days or all time, and shows hours of work done, hours on the clock, your efficiency (hours of work done for each hour on the clock), your favourite model, what share of your tokens were cache reads and cache writes, and what the same use would cost on the API.</li><li>A public person's page shows their timeline as Stats draws it, every task running at once in its model's colour, with no task names.</li></ul></section>
 <section id="v0.2.255"><h2>v0.2.255</h2><p class="note">21 November 2026</p><ul><li>Release it is the only press a release needs: when a release has to run again because main changed or a check failed, it no longer asks you for a second Allow.</li><li>When Claude Code blocks a task from using a connector, such as confirming a Supabase cost, the card now says so and gives you the one way through: Open in Terminal, press Return to let your tasks do it from now on, then Try again. Before, nothing showed, and your yes on the card or in the chat could never let it through.</li></ul></section>
 <section id="v0.2.254"><h2>v0.2.254</h2><p class="note">21 November 2026</p><ul><li>The website's home page says the same things in about a third of the words. It opens with the 3D octopus holding a task on each arm, and each part is now a headline, one sentence and one picture</li><li>The example that stepped by itself on the first screen is gone, and the pictures of the panel show the task cards alone</li><li>The proof now says it plainly: 3 weeks of work, done in 1 week</li></ul></section>

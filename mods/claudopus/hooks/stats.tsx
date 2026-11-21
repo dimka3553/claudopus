@@ -548,9 +548,10 @@ export type BoardRange = {
   work: number; clock: number; tokens: number; input: number; write: number; read: number; output: number; cost: number
   tasks: number; messages: number; todos: number; flows: number; most: number; per_task: number; models: [string, number, number][]
 }
-export const boardOf = (runs: Run[], now: number): Record<Range, BoardRange> => {
+// `since`: when Claudopus was first installed on this Mac; nothing before it counts on the board
+export const boardOf = (runs: Run[], now: number, since = 0): Record<Range, BoardRange> => {
   const one = (range: Range): BoardRange => {
-    const s = statsOf(runs, rangeFrom(range, now), Infinity, now)
+    const s = statsOf(runs, Math.max(rangeFrom(range, now), since), Infinity, now)
     const round = (n: number) => Math.round(n)
     return {
       work: round(s.time.added), clock: round(s.time.clock), tokens: s.all.total, input: s.all.input, write: s.all.write, read: s.all.read, output: s.all.output,
@@ -564,8 +565,11 @@ export const boardOf = (runs: Run[], now: number): Record<Range, BoardRange> => 
 // The timeline as the leaderboard draws it on a public page: each task's busy stretches, each with its model, and never its title.
 // Times are whole minutes from `base`; the newest tasks are kept while the whole stays under `most` characters
 export type BoardTimeline = { base: number; models: string[]; pieces: [from: number, minutes: number, model: number][][] }
-export const timelineOf = (runs: Run[], most = 40_000): BoardTimeline => {
-  const pieces = piecesOf(runs).sort((a, b) => (a.spans[0]?.[0] ?? 0) - (b.spans[0]?.[0] ?? 0))
+export const timelineOf = (runs: Run[], most = 40_000, since = 0): BoardTimeline => {
+  const pieces = piecesOf(runs)
+    .map(p => ({ ...p, spans: clip(p.spans, since, Infinity), bars: p.bars.flatMap(b => clip([[b.from, b.to]], since, Infinity).map(([from, to]) => ({ ...b, from, to }))) }))
+    .filter(p => p.bars.length)
+    .sort((a, b) => (a.spans[0]?.[0] ?? 0) - (b.spans[0]?.[0] ?? 0))
   const base = Math.floor((pieces[0]?.spans[0]?.[0] ?? 0) / 60_000) * 60_000
   const models: string[] = []
   const indexOf = (model: string) => (models.includes(model) ? models.indexOf(model) : models.push(model) - 1)

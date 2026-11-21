@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.257 · 21 November 2026
+- A link to someone's leaderboard page now shows a picture of their stats wherever you paste it: hours of work done, hours on the clock, efficiency, favourite model, API cost and tasks, with their timeline when their stats are public. A link to the board shows the top five.
+- claudopus.ai's own link picture now shows the 3D octopus with a task on each arm.
+- The leaderboard counts only from when you first installed Claudopus.
+
 ## 0.2.256 · 21 November 2026
 - A leaderboard on claudopus.ai: join it from Stats with a username nobody else has, and Claudopus sends your hours of work, tokens and API cost every few minutes; nothing is sent before you join, and Leave takes you off at once.
 - You choose whether your stats are public: then anyone can open your page from the board and see your models, tokens and work.
