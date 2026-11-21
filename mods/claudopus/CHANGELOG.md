@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.263 · 21 November 2026
+- The Leaderboard tab shows the board as a table with headings, the first three places in gold, silver and bronze, and your own row shaded and marked "you".
+- Once you have joined, your part of the tab is titled with your username and shows your place, such as "2nd of 4", and before you join the username box comes first.
+
 ## 0.2.262 · 21 November 2026
 - Join on the leaderboard answers at once: it says "Joining as …" as you press it and you are on the board in a moment, where it showed nothing for half a minute after an update. Your full figures follow straight after.
 - A press on the leaderboard made while another is on its way now waits its turn, where it did nothing.

@@ -699,8 +699,29 @@ const tile = (ui: Ui, key: string, value: string, label: string, wraps = false) 
 // What everyone sees of a person on the board, and what Leave does, in the words of the joining and the You bands
 const BOARD_SHOWN = 'Your username, time of work, time on the clock, efficiency, favourite model, tokens and API cost'
 const BOARD_OFF = 'Off deletes your username and stats from the board at once'
+// The first three places in gold, silver and bronze
+const MEDALS = ['#E3B341', '#B9BCC2', '#C98A55']
+const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th')}`
+// One row of the board's table: the place, the name, then its figures in columns of their own, right-aligned so the numbers line up;
+// the model only where there is room for it. Your own row is filled
+const boardLine = (ui: Ui, key: string, isWide: boolean, rank: JSX.Element, name: JSX.Element, cells: JSX.Element[], isMine = false) => (
+  <ui.Box key={key} flexDirection="row" gap={2} height={1} overflow="hidden" flexShrink={0} paddingX={1} backgroundColor={isMine ? SEGMENT : undefined}>
+    <ui.Box width={3} flexShrink={0}>
+      {rank}
+    </ui.Box>
+    <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
+      {name}
+    </ui.Box>
+    {cells.slice(0, isWide ? 3 : 2).map((cell, i) => (
+      <ui.Box key={`${key}-${i}`} width={i === 2 ? 12 : i === 0 ? 13 : 10} flexShrink={0} flexDirection="row" justifyContent={i === 2 ? 'flex-start' : 'flex-end'}>
+        {cell}
+      </ui.Box>
+    ))}
+  </ui.Box>
+)
 export function boardView(ui: Ui, b: BoardShown, surface: string) {
   const { Box, Text } = ui
+  const isWide = surface !== 'terminal'
   const press = (fn: () => void) => () => void ((view.presses += 1), fn())
   const nav = (
     <Box key="board-nav" flexDirection="row" alignItems="center" gap={2} height={1} flexShrink={0}>
@@ -719,34 +740,37 @@ export function boardView(ui: Ui, b: BoardShown, surface: string) {
         note(ui, 'board-wait', b.error || 'Reading the leaderboard…')
       ) : b.rows.length ? (
         <Box flexDirection="column" flexShrink={0}>
-          {b.rows.map(r => (
-            <Box key={`board-row-${r.rank}`} flexDirection="row" gap={2} height={1} overflow="hidden" flexShrink={0}>
-              <Box width={3} flexShrink={0}>
-                <Text dimColor>{String(r.rank)}</Text>
-              </Box>
-              <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                {r.isPublic ? (
-                  <ui.Button key={`board-person-${r.name}-${view.presses}`} label={r.name} plain onPress={() => b.openPerson(r.name)} />
-                ) : (
-                  <Text bold={r.name === b.name} wrap="truncate-end">{r.name}</Text>
-                )}
-              </Box>
-              <Box flexShrink={0}>
-                <Text bold={r.name === b.name}>{`${hours(r.work)} · ${timesText(efficiencyOf(r.work, r.clock))}${surface === 'terminal' || !r.model ? '' : ` · ${nameOf(r.model)}`}`}</Text>
-              </Box>
-            </Box>
-          ))}
+          {boardLine(ui, 'board-head', isWide, <Text dimColor>#</Text>, <Text dimColor>Name</Text>, ['Time of work', 'Efficiency', 'Model'].map(one => <Text key={one} dimColor wrap="truncate-end">{one}</Text>))}
+          {b.rows.map(r => {
+            const isMe = r.name === b.name
+            const name = r.isPublic ? <ui.Button key={`board-person-${r.name}-${view.presses}`} label={r.name} plain onPress={() => b.openPerson(r.name)} /> : <Text bold={isMe} wrap="truncate-end">{r.name}</Text>
+            return boardLine(
+              ui,
+              `board-row-${r.rank}`,
+              isWide,
+              <Text bold color={MEDALS[r.rank - 1]} dimColor={r.rank > MEDALS.length}>{String(r.rank)}</Text>,
+              <Box flexDirection="row" gap={1} minWidth={0}>
+                {name}
+                {isMe ? <Text dimColor>you</Text> : null}
+              </Box>,
+              [hours(r.work), timesText(efficiencyOf(r.work, r.clock)), r.model ? nameOf(r.model) : '–'].map((one, i) => <Text key={String(i)} bold={isMe && i === 0} wrap="truncate-end">{one}</Text>),
+              isMe,
+            )
+          })}
         </Box>
       ) : (
         note(ui, 'board-empty', 'Nobody has joined yet. Be the first.')
       )}
       {b.rows && b.error ? note(ui, 'board-error', b.error) : null}
-      {note(ui, 'board-how', 'Time of work is how long Claude’s tasks worked, added up. Efficiency is how much work got done for each hour on the clock.')}
+      {b.rows?.length ? note(ui, 'board-how', 'Time of work is how long Claude’s tasks worked, added up. Efficiency is how much work got done for each hour on the clock.') : null}
     </Box>,
   )
   // What a press came to; while it is on its way, what it is doing, dim
   const isFine = b.said.startsWith('✓') || b.said.endsWith('…')
   const said = b.said ? <Text key="board-said" color={isFine ? undefined : '#D08A00'} dimColor={isFine} wrap="wrap">{b.said}</Text> : null
+  // Where you stand in the range chosen, when you are in its top 10
+  const mine = b.rows?.find(r => r.name === b.name)
+  const place = mine ? `${ordinal(mine.rank)} of ${b.total.toLocaleString('en-US')} · ${hours(mine.work)} of work` : b.rows ? 'Not in the top 10 for this range' : ''
   const you = !b.name
     ? band(
         ui,
@@ -754,6 +778,12 @@ export function boardView(ui: Ui, b: BoardShown, surface: string) {
         'Join the leaderboard',
         '',
         <Box flexDirection="column" gap={1}>
+          {'Input' in ui ? (
+            <Box key="board-field" width="100%" flexDirection="column">
+              <ui.Input key={`board-name-${view.presses}`} placeholder="Choose a username: 3 to 20 letters, digits, - or _" submitLabel="Join" onSubmit={value => b.join(value.trim())} />
+            </Box>
+          ) : null}
+          {said}
           <Box flexDirection="column" flexShrink={0}>
             {fact(ui, 'board-join-shown', 'Shown', BOARD_SHOWN)}
             {fact(ui, 'board-join-never', 'Never sent', 'Chat titles, your words or Claude’s, files and folders')}
@@ -761,22 +791,15 @@ export function boardView(ui: Ui, b: BoardShown, surface: string) {
             {fact(ui, 'board-join-public', 'Public', 'Your stats and your timeline stay private until you switch each on. The timeline never has task names')}
             {fact(ui, 'board-join-off', 'Off', BOARD_OFF)}
           </Box>
-          {'Input' in ui ? (
-            <Box key="board-field" width="100%" flexDirection="column">
-              <ui.Input key={`board-name-${view.presses}`} placeholder="Choose a username: 3 to 20 letters, digits, - or _" submitLabel="Join" onSubmit={value => b.join(value.trim())} />
-            </Box>
-          ) : null}
-          {said}
         </Box>,
       )
     : band(
         ui,
         'board-you',
-        'You',
-        b.isBusy ? 'Sending…' : '',
+        b.name,
+        b.isBusy ? 'Sending…' : place,
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="column" flexShrink={0} gap={1}>
-            {line(ui, 'board-name', 'Your username', b.name, true)}
             {toggle(ui, 'board-on', 'On the leaderboard', ['Off', 'On'], true, isOn => void (isOn || b.leave()))}
             {toggle(ui, 'board-stats', 'Your stats', ['Private', 'Public'], b.isPublic, b.setPublic)}
             {toggle(ui, 'board-timeline', 'Your timeline', ['Private', 'Public'], b.isTimelinePublic, b.setTimelinePublic)}
