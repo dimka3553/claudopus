@@ -811,7 +811,8 @@ test('a task hands in a finished part of its result while it works on: its card 
   expect(next).not.toContain(part)
   await $.prompt.submit({ text: 'and the ears?', wait: false, origin: composer } as never)
   expect(own()).toHaveLength(1)
-  // Its last report ends it, kept beside the part
+  // Its last report ends it, kept beside the parts
+  const kept = await until(async () => (reportsOf().length === 3 ? reportsOf().length : undefined))
   agents.a2 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'a2', message: 'The jaw is built.' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 'd2', agentId: 'a1', item: 'Build the jawline', state: 'done' } as never)
@@ -819,7 +820,7 @@ test('a task hands in a finished part of its result while it works on: its card 
   const handed = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb1', agentId: 'a1', message: last } as never)) as { deny?: string; result?: { message?: string } }
   expect([handed.deny, handed.result?.message]).toEqual([undefined, expect.stringContaining('Report delivered to your caller')])
   await clock.advance(1000)
-  expect(await until(async () => (reportsOf().length === 2 ? reportsOf() : undefined))).toHaveLength(2)
+  expect(await until(async () => (reportsOf().length === (kept ?? 0) + 1 ? reportsOf() : undefined))).toHaveLength(4)
 })
 
 test("a task's report whose notice of its end never comes goes to the chat with the person's next message, once; a message to the task after its hand-back is a step of its own", async ($, on) => {
