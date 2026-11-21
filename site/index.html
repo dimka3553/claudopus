@@ -3,21 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Claudopus: Claude Code, with eight arms</title>
-<meta name="description" content="Claudopus is a free mod for Claude Code. Each message becomes a task that runs in the background, a panel beside the chat shows every task, and what each task found is kept.">
+<title>Claudopus: do 3× more with Claude Code, at the same time</title>
+<meta name="description" content="Claude Code does one thing at a time. Claudopus is a free mod that runs every request as its own task in the background, all at the same time: in three weeks of real use, 19 days of task time fit into under 7. One panel shows every task. Two lines to install.">
 <link rel="canonical" href="https://www.claudopus.ai/">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#111112" media="(prefers-color-scheme:dark)">
 <meta name="theme-color" content="#FAF9F5" media="(prefers-color-scheme:light)">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Claudopus: Claude Code, with eight arms">
-<meta property="og:description" content="A free mod for Claude Code. Ask for the next thing without waiting: each one runs in the background, a panel shows them all, and what each one found is kept.">
+<meta property="og:title" content="Claudopus: do 3× more with Claude Code, at the same time">
+<meta property="og:description" content="Claude Code does one thing at a time. Claudopus, a free mod, runs every request as its own task, side by side, and one panel shows them all. Two lines to install.">
 <meta property="og:url" content="https://www.claudopus.ai/">
 <meta property="og:image" content="https://www.claudopus.ai/og.png">
 <meta property="og:site_name" content="Claudopus">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Claudopus: Claude Code, with eight arms">
-<meta name="twitter:description" content="A free mod for Claude Code. Ask for the next thing without waiting: each one runs in the background, a panel shows them all, and what each one found is kept.">
+<meta name="twitter:title" content="Claudopus: do 3× more with Claude Code, at the same time">
+<meta name="twitter:description" content="Claude Code does one thing at a time. Claudopus, a free mod, runs every request as its own task, side by side, and one panel shows them all. Two lines to install.">
 <meta name="twitter:image" content="https://www.claudopus.ai/og.png">
 <link rel="alternate" type="text/plain" href="/llms.txt" title="Claudopus for language models">
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Claudopus","alternateName":"Claudopus for Claude Code","description":"A free, open-source mod for Claude Code. Each message becomes a task that runs in the background, a panel beside the chat shows every task, and what each task found is kept. Not made by Anthropic.","url":"https://www.claudopus.ai/","applicationCategory":"DeveloperApplication","operatingSystem":"macOS, Linux","license":"https://opensource.org/licenses/MIT","isAccessibleForFree":true,"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"codeRepository":"https://github.com/dimka3553/claudopus","downloadUrl":"https://github.com/dimka3553/claudopus/releases/latest","sameAs":["https://github.com/dimka3553/claudopus","https://www.youtube.com/@claudopusai"],"author":{"@type":"Person","name":"dimka3553","url":"https://github.com/dimka3553"}}</script>
@@ -29,8 +29,8 @@
   <a class="brand" href="#top" id="top"><svg class="octo mark" viewBox="0 0 16 16" width="32" height="32" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg>Claudopus</a>
   <nav aria-label="Pages">
     <a class="opt" href="#why">Why</a>
-    <a class="opt" href="#panel">The panel</a>
-    <a class="opt" href="#results">Results</a>
+    <a class="opt" href="#proof">Proof</a>
+    <a class="opt" href="#panel">What changes</a>
     <a href="tour.html">Tour</a>
     <a href="#install">Install</a>
     <a class="ext" href="https://github.com/dimka3553/claudopus">GitHub <svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="1" y="0" width="4" height="1"/><rect x="3" y="1" width="2" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="4" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/></svg></a>
@@ -38,10 +38,11 @@
 </header>
 
 <main>
-<section class="hero h3d">
-  <div>
-    <h1>Claude Code, <span class="name">with eight arms.</span></h1>
-    <p class="lead">Ask Claude Code for three things, and they wait in line. <b>Claudopus</b> turns each message into a task that runs in the background, shows every task in a panel beside the chat, and keeps what each one found.</p>
+<section class="hero now">
+  <div class="pitch">
+    <p class="eyebrow">Claude Code, with eight arms</p>
+    <h1>Do 3× more with Claude Code, <span class="name">at the same time.</span></h1>
+    <p class="lead">Claude Code does one thing at a time, so you ask and then you wait. With <b>Claudopus</b> you keep asking. Every request starts working straight away, side by side, and one panel shows them all and brings you the one that needs you.</p>
     <div class="quick">
       <div class="term screen notch">
         <div class="cmd"><span class="pr" aria-hidden="true">&gt;</span><code>/plugin marketplace add <b>dimka3553/claudopus</b></code><button class="copy notch" type="button" data-copy="/plugin marketplace add dimka3553/claudopus" aria-label="Copy: /plugin marketplace add dimka3553/claudopus"><span class="say">Copy</span><span class="said"><svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>Copied</span><span class="fail">Selected</span></button></div>
@@ -49,15 +50,37 @@
       </div>
       <p class="note under">Two lines at the Claude Code prompt. Free, MIT, macOS and Linux.</p>
     </div>
-    <div class="acts">
-      <a class="btn" href="#install"><span>How to install <svg class="px" viewBox="0 0 5 5" width="15" height="15" aria-hidden="true"><rect x="2" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="3" height="1"/><rect x="2" y="4" width="1" height="1"/></svg></span></a>
-      <a class="btn quiet" href="tour.html"><span><svg class="px" viewBox="0 0 4 7" width="8" height="14" aria-hidden="true"><rect x="0" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="4" height="1"/><rect x="0" y="4" width="3" height="1"/><rect x="0" y="5" width="2" height="1"/><rect x="0" y="6" width="1" height="1"/></svg> Watch the tour</span></a>
+    <ul class="facts" aria-label="Three weeks of the author's own use">
+      <li><b>2.99×</b><span>as much work at once, measured</span></li>
+      <li><b>19½ days</b><span>of Claude's work in 6½ days</span></li>
+      <li><b>825</b><span>tasks done in three weeks</span></li>
+    </ul>
+    <p class="note under"><a href="#proof">Three weeks of real use, and what the figures don't show</a></p>
+  </div>
+  <figure class="stage" id="stage">
+    <div class="stage-win notch big">
+      <p class="stage-say" aria-hidden="true"><span class="tag">The chat</span><span class="pr">&gt;</span><span class="typed"></span><i class="caret"></i><span class="ghost">ask for the next thing</span></p>
+      <div class="stage-shots" role="img" aria-label="The Claudopus panel beside a chat. Three requests become three tasks that work side by side. One asks before it releases its fix. Once Release it is pressed, the task is delivered, and Mark as done turns its card green.">
+        <img data-shot="1" src="shots/story-1.webp" width="924" height="1280" alt="" decoding="async">
+        <img data-shot="2" src="shots/story-2.webp" width="924" height="1280" alt="" decoding="async">
+        <img data-shot="3" class="is-on" src="shots/story-3.webp" width="924" height="1280" alt="" decoding="async">
+        <img data-shot="4" src="shots/story-4.webp" width="924" height="1280" alt="" decoding="async">
+        <img data-shot="5" src="shots/story-5.webp" width="924" height="1280" alt="" decoding="async">
+        <i class="tap" aria-hidden="true"></i>
+      </div>
     </div>
-  </div>
-  <div class="stage3d" id="hero3d" role="img" aria-label="The Claudopus octopus in 3D. Its arms hold tasks: two are running, one asks a question, one has just finished.">
-    <img class="flat" src="favicon.svg" alt="" width="300" height="300">
-    <canvas width="1200" height="1200" aria-hidden="true"></canvas>
-  </div>
+    <div class="stage-ctl">
+      <p class="stage-cap">One task needs you. Its question comes to the top of the panel.</p>
+      <div class="stage-steps" role="group" aria-label="The example, step by step">
+        <button type="button" data-shot="1" data-say="people get logged out on refresh, fix it" data-cap="You ask. A task starts, and the chat is free again." aria-label="Step 1: you ask">1</button>
+        <button type="button" data-shot="2" data-say="write tests for the CSV export|update the API docs for version 3" data-cap="You ask twice more. All three work side by side." aria-label="Step 2: you ask twice more">2</button>
+        <button type="button" class="is-on" data-shot="3" data-tap="23.2,79.4" data-cap="One task needs you. Its question comes to the top of the panel." aria-label="Step 3: a task asks you">3</button>
+        <button type="button" data-shot="4" data-tap="50.9,62.2" data-cap="You press Release it. The fix goes out, and its result is yours to look at." aria-label="Step 4: it is delivered">4</button>
+        <button type="button" data-shot="5" data-cap="You press Mark as done. The other two never stopped." aria-label="Step 5: you mark it done">5</button>
+      </div>
+    </div>
+    <figcaption class="note">The real panel, drawn by the code of Claudopus 0.2.251. The tasks are made up.</figcaption>
+  </figure>
 </section>
 
 <hr class="rule">
@@ -95,139 +118,125 @@
 
 <hr class="rule">
 
-<section class="sec" id="six">
+<section class="sec" id="proof">
   <div class="body">
-    <p class="eyebrow">What changes</p>
-    <h2>Six ways Claude Code alone gets in your way, and what Claudopus does about each.</h2>
-    <div class="six block">
-      <div class="heads" aria-hidden="true"><span></span><p class="was">Claude Code alone</p><p class="now">With Claudopus</p></div>
-      <div class="duo">
-        <div class="was"><h3>You wait</h3><p>One chat works on one request at a time. You can type your next idea, but it waits until Claude finishes the last one.</p></div>
-        <div class="now"><h3>You keep talking</h3><p>Each request becomes its own task in the background. The chat is free for your next message right away.</p></div>
+    <p class="eyebrow">Proof from real use</p>
+    <h2>The 3× is measured: 19 days of task time fit into under 7.</h2>
+    <p class="lead">These are the author's own figures from the Stats tab, for every chat from 29 Oct to 21 Nov 2026. Task time over real time comes to 2.99, so about three tasks were running whenever any ran.</p>
+    <div class="proof block">
+      <div>
+        <ul class="nums">
+          <li><b>2.99×</b><span>task time over real time</span></li>
+          <li><b>825</b><span>tasks done</span></li>
+          <li><b>19d 14h 49m</b><span>of task time, added up</span></li>
+          <li><b>6d 13h 39m</b><span>of real time while any task ran</span></li>
+          <li><b>18</b><span>tasks at once, at most</span></li>
+          <li><b>1m 18s</b><span>the chat's time per message, on average</span></li>
+        </ul>
+        <h3>What the 3× means, and what it doesn't</h3>
+        <ul class="cells">
+          <li>It is task time divided by real time. Quiet gaps of more than 15 minutes, with nothing running, are left out.</li>
+          <li class="is-plain">It isn't three times the output. A task in the background can take longer than one you sit and watch, and some tasks redo what another got wrong.</li>
+          <li class="is-plain">It isn't less typing. Those weeks still took 3,387 messages. What goes is the waiting.</li>
+          <li class="is-plain">It isn't cheaper. Tasks side by side use tokens side by side: those weeks used 20.44 billion tokens, $11,715 at API list prices. On a subscription, you reach your limits sooner.</li>
+          <li class="is-plain">It is one person's use, counted by Claudopus itself from Claude Code's own records.</li>
+        </ul>
       </div>
-      <div class="duo">
-        <div class="was"><h3>You lose track</h3><p>To do more at once you open more chats, then forget which one is doing what.</p></div>
-        <div class="now"><h3>One place for everything</h3><p>A panel beside the chat shows every task as a card, with its to-dos and a line on how far it has got.</p></div>
-      </div>
-      <div class="duo">
-        <div class="was"><h3>Questions are scattered</h3><p>Each chat asks in its own window. With several open, nothing gathers what is waiting for you.</p></div>
-        <div class="now"><h3>They come to you</h3><p>Questions from every chat go to the top of the panel with answer buttons, a short sound and a notification.</p></div>
-      </div>
-      <div class="duo">
-        <div class="was"><h3>It forgets</h3><p>A long chat fills up, and Claude starts to lose what you told it at the start. So you say it again.</p></div>
-        <div class="now"><h3>It remembers</h3><p>The tasks do the work, so your chat stays small. Your messages are saved word for word, and Claude can look them up.</p></div>
-      </div>
-      <div class="duo">
-        <div class="was"><h3>Results get buried</h3><p>The result you asked for ends up far up the chat, under everything that came after.</p></div>
-        <div class="now"><h3>Results are kept</h3><p>What a finished task found is saved in a list, with its pictures. Open it any time, from any chat on that machine.</p></div>
-      </div>
-      <div class="duo">
-        <div class="was"><h3>No second check</h3><p>Nobody else looks over Claude's work before it says “done”.</p></div>
-        <div class="now"><h3>Checked first</h3><p>Claudopus's rules have a second Claude, one that did not do the work, look for what is wrong before you see it.</p></div>
-      </div>
+      <figure class="pic">
+        <a href="shots/stats.webp" aria-label="Open the Stats picture at its full size"><img class="shot notch big" src="shots/stats.webp" width="924" height="1332" loading="lazy" alt="The Stats tab of the Claudopus panel, All chats, All time: 825 tasks done and up to 18 at once between 29 Oct and 21 Nov; all task time 19 days 14 hours 49 minutes, real time 6 days 13 hours 39 minutes; 3,387 messages; 20.44 billion tokens, $11,715 at list prices."></a>
+        <figcaption class="note">The Stats tab on 21 Nov 2026: all chats, all time. A real screen of real use. Press it to see it larger.</figcaption>
+      </figure>
     </div>
-    <p class="punch">You keep the ideas. <span class="name">Claudopus keeps track of the rest.</span></p>
   </div>
 </section>
 
 <hr class="rule">
 
 <section class="sec" id="panel">
-  <div class="body feature">
-    <div class="gets">
-      <div><p class="eyebrow">The panel</p><h2>One panel beside the chat shows every task.</h2></div>
-      <div><h3>See how far each task has got.</h3><p>Every task is a card with its to-dos, the step it is on, and a line saying what Claude is doing now.</p></div>
-      <div><h3>What needs you is on top.</h3><p>A question turns its card amber and brings it to the top, with buttons to answer. It stays until you answer.</p></div>
-      <div><h3>Change a task while it runs.</h3><p>Send a message about a running task, and the chat passes it to that task. Stop on a card ends it.</p></div>
-      <div><h3>Know when a task is done.</h3><p>The card turns green, a chime plays and a notification names the task, so you can be somewhere else.</p></div>
-    </div>
-    <figure class="space">
-      <div class="cp tilt" id="live" role="img" aria-label="A drawing of the Claudopus panel with made-up tasks: one asks a question, one has just finished and two are running.">
-        <div class="cp-head">
-          <span class="octo-spot"><svg class="octo mark" viewBox="0 0 16 16" width="44" height="44" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg></span>
-          <span><b>Claudopus</b></span>
-          <span class="state">1 thing needs you, 2 running</span>
-          <span class="dim">This chat: 37% · 184k of 500k</span>
-          <div class="cp-tabs"><span class="cp-key">Results 3</span><span class="cp-key">Stats</span><span class="cp-key">Memory</span><span class="cp-key">Config</span><span class="cp-key">About</span></div>
-        </div>
-        <div class="cp-card ask lift">
-          <div class="t">Move the docs to the new site <span>Stop</span></div>
-          <div class="dim">Opus 5.5 · 2 of 3 done · 6m 10s</div>
-          <div class="q">May I point docs.example.com at the new site? The old one stops showing then.</div>
-          <div class="keys"><span class="cp-key">Point it</span><span class="cp-key">Not yet</span><span class="cp-key">Reply in your own words</span></div>
-        </div>
-        <div class="cp-card done lift2">
-          <div class="t">Write the release notes</div>
-          <div class="dim">Finished · Opus 5.5 · 2 of 2 done · 3m 02s</div>
-          <div class="ok">✓ Finished</div>
-        </div>
-        <div class="cp-card">
-          <div class="t">Speed up the CSV export <span>Stop</span></div>
-          <div class="dim">Opus 5.5 · <span data-s="a-count">1 of 4 done</span> · 2m 32s</div>
-          <div class="step" data-s="a-step">Step 2 of 4 · <b>Stream rows instead of building one string</b></div>
-          <div class="now"><span class="cp-dots"><i></i><i></i><i></i></span><span data-s="a-now">The export took 41 s on 2 million rows; I am streaming the rows so it never holds them all.</span></div>
-          <div class="cp-help"><b>Read the export code</b><span>Sonnet 5.5 · 1m 40s</span></div>
-        </div>
-        <div class="cp-card">
-          <div class="t">Run the full test suite <span>Stop</span></div>
-          <div class="dim">Opus 5.5 · <span data-s="b-count">1 of 3 done</span> · 1m 12s</div>
-          <div class="step" data-s="b-step">Step 2 of 3 · <b>Run every test</b></div>
-          <div class="now"><span class="cp-dots"><i></i><i></i><i></i></span><span data-s="b-now">The app built cleanly; the tests are running, 1,240 of them.</span></div>
-        </div>
-        <div class="cp-fold"><b>▸ Finished 4</b><span>this chat</span></div>
-      </div>
-      <figcaption class="note" style="margin-top:var(--s12)">A drawing of the panel with made-up tasks. <a href="tour.html">The tour</a> shows it moving.</figcaption>
-    </figure>
-  </div>
-</section>
-
-<hr class="rule">
-
-<section class="sec" id="results">
-  <div class="body feature flip">
-    <figure class="space">
-      <div class="cp tilt left" role="img" aria-label="A drawing of the Results tab with made-up tasks: one result waits on you, then the five newest, then the earlier and archived ones folded away.">
-            <div class="cp-band bare"><b>Results</b> <span class="dim">21</span></div>
-            <div class="cp-band wait lift"><h4>Waiting on you <span>1</span></h4>
-              <div class="cp-row"><b>Speed up the CSV export</b><span>14:32</span><span>Archive</span></div>
-            </div>
-            <div class="cp-band"><h4>Recent</h4>
-              <div class="cp-row"><b>Move the docs to the new site</b><span>13:05</span><span>Archive</span></div>
-              <div class="cp-row"><b>Find the memory leak</b><span>11:48</span><span>Archive</span></div>
-              <div class="cp-row"><b>Write the release notes</b><span>10:20</span><span>Archive</span></div>
-              <div class="cp-row"><b>Review the pull request</b><span>12 Nov</span><span>Archive</span></div>
-              <div class="cp-row"><b>Tidy the onboarding emails</b><span>11 Nov</span><span>Archive</span></div>
-            </div>
-            <div class="cp-fold"><b>▸ Earlier 15</b></div>
-            <div class="cp-fold"><b>▸ Archived 4</b></div>
-      </div>
-    </figure>
-    <div class="gets">
-      <div><p class="eyebrow">Results</p><h2>Nothing you asked for gets buried.</h2></div>
-      <div><h3>Every finding, in one list.</h3><p>What a finished task found is saved with its pictures, the newest at the top. It is a plain file on your machine, so it is still there after the chat is gone.</p></div>
-      <div><h3>Your decisions wait at the top.</h3><p>When a task ends with something only you can decide, its result is listed first, under “Waiting on you”. Open it and press Yes or No: your answer goes to the chat, which acts on it.</p></div>
-      <div><h3>Pick up where a task stopped.</h3><p>Open a result and press Continue from this. Claudopus names that result in the chat's box, and you finish the sentence.</p></div>
-      <p><a class="more" href="tour.html#results">How Results works, step by step</a></p>
-    </div>
-  </div>
-</section>
-
-<section class="sec tour-sec" id="tour">
   <div class="body">
-    <figure>
-      <a class="teaser film notch big" href="tour.html" aria-label="Watch the tour">
-        <img src="tour-poster.jpg" alt="A still from the tour: the Claudopus panel beside a chat, with the 3D octopus" width="1920" height="1080" loading="lazy">
-        <span class="play"><span class="btn"><span><svg class="px" viewBox="0 0 4 7" width="12" height="21" aria-hidden="true"><rect x="0" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="4" height="1"/><rect x="0" y="4" width="3" height="1"/><rect x="0" y="5" width="2" height="1"/><rect x="0" y="6" width="1" height="1"/></svg> Watch the tour</span></span></span>
-      </a>
-      <figcaption class="note">1 minute 36 on its own page: the problem, the panel, a question, and Results. It has music, and it starts only when you press play.</figcaption>
-    </figure>
+    <div class="arms">
+      <div>
+        <p class="eyebrow">What changes</p>
+        <h2>Claude Code, <span class="name">with eight arms.</span></h2>
+        <p class="lead">Claudopus adds to Claude Code. It doesn't replace it. You type the same messages in the same chat, and five things change about what happens next.</p>
+      </div>
+      <div class="stage3d" id="hero3d" role="img" aria-label="The Claudopus octopus in 3D. Its arms hold tasks: two are running, one asks a question, one has just finished.">
+        <img class="flat" src="favicon.svg" alt="" width="300" height="300">
+        <canvas width="1200" height="1200" aria-hidden="true"></canvas>
+      </div>
+    </div>
+    <div class="walk block">
+      <div class="feature top">
+        <div>
+          <p class="n">1 · While Claude works</p>
+          <h3>Ask for the next thing now.</h3>
+          <p>Each message starts a task of its own. The chat answers in a line and is free for your next message, so three requests work side by side instead of waiting in line.</p>
+          <p>Every task is a card: its to-dos, the one it is on, and a line on what it is doing now. Its helpers and long commands hang under it, and <b>Stop</b> ends a command or the whole task.</p>
+          <p>The tasks do the work, so the chat stays small. Here it is 9% full with three tasks at work.</p>
+        </div>
+        <figure class="pic">
+          <img class="shot notch big" src="shots/working.webp" width="924" height="1736" loading="lazy" alt="The Claudopus panel with three tasks working. The first shows its to-do, a line on what it is doing, a test command at 31 of 42 tests and a helper reading code.">
+        </figure>
+      </div>
+      <div class="feature flip">
+        <figure class="pic">
+          <img class="shot notch big" src="shots/question.webp" width="924" height="794" loading="lazy" alt="A task's card, amber, with a question: Publish the new docs now? Under it are a box to answer in words and two buttons, Publish them and Keep them as a draft.">
+        </figure>
+        <div>
+          <p class="n">2 · When a task needs you</p>
+          <h3>What needs you comes to you.</h3>
+          <p>A question turns its card amber and brings it to the top of the panel, from every chat, with buttons to answer and a box for your own words. A short sound plays, and a notification names the task.</p>
+          <p>A question never times out. It stays until you answer, and the other tasks keep working.</p>
+        </div>
+      </div>
+      <div class="feature">
+        <div>
+          <p class="n">3 · Before it ships</p>
+          <h3>Nothing reaches main until you press.</h3>
+          <p>Claudopus has each task change code in a worktree and a branch of its own, so tasks working side by side don't touch each other's files.</p>
+          <p>A task reaches main only through one release command, and only after you press <b>Release it</b>. Claudopus refuses a task's own push to main.</p>
+        </div>
+        <figure class="pic">
+          <img class="shot notch big" src="shots/release.webp" width="924" height="826" loading="lazy" alt="A task's card with 3 changed files and a question: Release the logout fix? Its only button is Release it.">
+        </figure>
+      </div>
+      <div class="feature flip">
+        <figure class="pic">
+          <img class="shot notch big" src="shots/delivered.webp" width="924" height="504" loading="lazy" alt="A finished task's card, blue, saying Delivered, Released as 2.4.1, with two buttons: Give feedback and Mark as done.">
+        </figure>
+        <div>
+          <p class="n">4 · When a task finishes</p>
+          <h3>You decide when it's done.</h3>
+          <p>A finished task says <b>Delivered</b> and stays at the top of the panel until you press <b>Mark as done</b>. <b>Give feedback</b> puts the same task back to work on the same card.</p>
+          <p>A chime plays and a notification names the task, so you can be somewhere else while it works.</p>
+        </div>
+      </div>
+      <div class="feature top" id="results">
+        <div>
+          <p class="n">5 · Next week</p>
+          <h3>Nothing you asked for gets buried.</h3>
+          <p>What every finished task found is kept in <b>Results</b>, the newest first. Open one and it begins with the files its task changed, then what it found. They are plain files on your machine, so they are still there after the chat is gone.</p>
+          <p><a class="more" href="tour.html#results">How Results works, step by step</a></p>
+          <figure class="pic under">
+            <img class="shot notch big" src="shots/results.webp" width="924" height="664" loading="lazy" alt="The Results tab: nine results, the five newest listed with their times and dates, the rest folded under Earlier 4.">
+            <figcaption class="note">Results: every result, the newest first.</figcaption>
+          </figure>
+        </div>
+        <figure class="pic">
+          <div class="cutoff notch big"><img class="shot" src="shots/result.webp" width="924" height="1560" loading="lazy" alt="One result opened, Fix the logout on refresh: the three files its task changed with the lines added and removed, a summary, then the start of the result in full."></div>
+          <figcaption class="note">One result opened: the files its task changed, then what it found.</figcaption>
+        </figure>
+      </div>
+    </div>
+    <p class="punch">You keep the ideas. <span class="name">Claudopus keeps track of the rest.</span></p>
+    <p class="note shots-note">Every picture of the panel on this page is drawn by the code of Claudopus 0.2.251, with made-up tasks. <a href="tour.html">The tour</a> is a 1 minute 36 film of an earlier version.</p>
   </div>
 </section>
 
 <section class="sec install notch big" id="install">
   <div class="body">
-    <h2>Install it with two lines, open it with a third.</h2>
-    <p class="lead">Type them at the Claude Code prompt, in a terminal.</p>
+    <h2>Two lines to try it. One line to turn it off.</h2>
+    <p class="lead">Type them at the Claude Code prompt, in a terminal. Nothing else about how you work has to change.</p>
     <p class="before-line soft">It needs <a href="#know">a recent Claude Code</a>, and it <a href="#before">adds its author's working principles</a> to every chat.</p>
     <div class="block perch">
       <span class="octo-spot" id="copy-octo" aria-hidden="true"><svg class="octo working" viewBox="0 0 16 16" width="48" height="48" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;hidden;visible" dur="1.2s" calcMode="discrete" repeatCount="indefinite"/><rect x="15" y="8" width="1" height="1"/><rect x="14" y="9" width="2" height="1"/><rect x="3" y="12" width="2" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;hidden" dur="1.2s" calcMode="discrete" repeatCount="indefinite"/><rect x="0" y="8" width="1" height="1"/><rect x="0" y="9" width="2" height="1"/><rect x="11" y="12" width="2" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;visible" dur="1.2s" calcMode="discrete" repeatCount="indefinite"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="9" y="14" width="4" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;visible;hidden" dur="1.2s" calcMode="discrete" repeatCount="indefinite"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="3" y="14" width="4" height="1"/></g></g></svg><svg class="octo happy" viewBox="0 0 16 16" width="48" height="48" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden;visible;hidden;visible;visible" dur="2s" calcMode="discrete" fill="freeze"/><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="3" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="11" y="4" width="3" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="1" height="1"/><rect x="7" y="5" width="2" height="1"/><rect x="10" y="5" width="1" height="1"/><rect x="12" y="5" width="2" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="4" height="1"/><rect x="7" y="7" width="2" height="1"/><rect x="10" y="7" width="4" height="1"/><rect x="2" y="8" width="5" height="1"/><rect x="9" y="8" width="5" height="1"/><rect x="2" y="9" width="12" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="0" y="11" width="1" height="1"/><rect x="2" y="11" width="2" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="2" height="1"/><rect x="15" y="11" width="1" height="1"/><rect x="0" y="12" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="12" y="12" width="4" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;hidden" dur="2s" calcMode="discrete" fill="freeze"/><rect x="5" y="0" width="6" height="1"/><rect x="3" y="1" width="10" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="2" y="2" width="12" height="1"/><rect x="15" y="2" width="1" height="1"/><rect x="0" y="3" width="1" height="1"/><rect x="2" y="3" width="3" height="1"/><rect x="6" y="3" width="4" height="1"/><rect x="11" y="3" width="3" height="1"/><rect x="15" y="3" width="1" height="1"/><rect x="0" y="4" width="4" height="1"/><rect x="5" y="4" width="1" height="1"/><rect x="7" y="4" width="2" height="1"/><rect x="10" y="4" width="1" height="1"/><rect x="12" y="4" width="4" height="1"/><rect x="1" y="5" width="14" height="1"/><rect x="2" y="6" width="4" height="1"/><rect x="7" y="6" width="2" height="1"/><rect x="10" y="6" width="4" height="1"/><rect x="2" y="7" width="5" height="1"/><rect x="9" y="7" width="5" height="1"/><rect x="2" y="8" width="12" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="3" y="12" width="1" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="12" y="12" width="1" height="1"/><rect x="3" y="13" width="4" height="1"/><rect x="9" y="13" width="4" height="1"/></g></g></svg></span>
@@ -241,7 +250,7 @@
 
     <div class="two block">
     <div>
-    <p class="after-term">Answer <code>y</code> to add the marketplace, then press Enter to pick the first choice, the user scope. Then <code>/claudopus</code> opens the panel. Nothing has to be typed in each chat.</p>
+    <p class="after-term">Answer <code>y</code> to add the marketplace, then press Enter to pick the first choice, the user scope. Then <code>/claudopus</code> opens the panel. Nothing has to be typed in each chat. To turn it off, type <code class="long">/plugin disable claudopus@claudopus</code>.</p>
     <div class="ways">
       <details open>
         <summary><svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="2" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="5" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="0" y="2" width="5" height="1"/></svg>In the Claude desktop app</summary>
@@ -266,11 +275,11 @@
     <div>
       <h3>What you see afterwards</h3>
       <ol class="steps">
-        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="1"><rect x="1" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="1" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>Claudopus is on in every chat you open from then on, in every folder.</span></li>
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="1"><rect x="1" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="1" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>Claudopus is on in every chat you open from then on, in every folder. The first time, the panel opens with a welcome, and <b>Bring in old chats</b> reads your past chats into its memory.</span></li>
         <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="2"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>You send a message. The chat answers in one line, starts a task in the background, and is free for your next message.</span></li>
-        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="3"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>The panel opens beside the chat by itself the first time a task starts in that chat. If you close it, it closes in every chat. Type <code>/claudopus</code> to open it again.</span></li>
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="3"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>The panel opens beside the chat by itself when a task starts. If you close it, it closes in every chat. Type <code>/claudopus</code> to open it again.</span></li>
         <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="4"><rect x="0" y="0" width="1" height="1"/><rect x="2" y="0" width="1" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><span>While tasks run, a bar above the prompt shows memory, processor, graphics, battery, disk and network, with Claude's own share in purple.</span></li>
-        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="5"><rect x="0" y="0" width="3" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>When a task finishes, the chat passes on its result, and the panel lists it under Finished.</span></li>
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="5"><rect x="0" y="0" width="3" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>When a task finishes, its card says Delivered, and the chat passes on its result. Press <b>Mark as done</b>, and the panel lists it under Finished.</span></li>
       </ol>
     </div>
     </div>
@@ -280,7 +289,11 @@
 <section class="sec ref" id="know">
   <div class="body">
     <h2>Good to know before you install.</h2>
-    <div class="needs block">
+    <div class="needs six-up block">
+      <div class="notch big" id="tokens">
+        <h3>It uses tokens faster</h3>
+        <p>Each task uses its own tokens, so five tasks at once use tokens about five times as fast as one. On a subscription, that uses up your limits sooner. With an API key or other pay-per-use billing, it multiplies what you pay in that time.</p>
+      </div>
       <div class="notch big" id="before">
         <h3>It adds its author's principles</h3>
         <p>Claudopus adds its author's working principles to every chat, and they shape how Claude answers. They are short rules, such as giving short replies and bringing solutions before questions. <a href="https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/rules/CLAUDE.md">Read the principles</a> before you install.</p>
@@ -348,6 +361,7 @@
   </div>
 </section>
 </main>
+
 
 <hr class="rule">
 

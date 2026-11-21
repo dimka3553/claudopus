@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.252 · 21 November 2026
+- The website's home page now opens with what you get: about 3 times as much work going at once with Claude Code, measured over three weeks of real use. Its first screen has the two install lines, the figures, and the real panel stepping through one example
+- Every picture of the panel on the home page is drawn by the panel's own code, in place of the hand-made drawings, and the page says what the 3× does and doesn't mean
+
 ## 0.2.251 · 21 November 2026
 - When a task asks you for a key, the box to paste it into is on its card at once, with the task's question, where to get the key, and whether it replaces a saved key or is a second one beside it. Nothing to run or press first, and no more "Key is in" buttons with nowhere to paste.
 
