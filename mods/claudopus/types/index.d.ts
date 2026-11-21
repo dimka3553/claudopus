@@ -90,6 +90,8 @@ export type Todo = {
   // stands out with the ask in view until the work clears it or ends
   // `replied`: the person's reply in their own words that did not settle it; the ask stays while the work acts on it, with nothing to press or type, until the work clears it or asks again, or ends with it open, when every answer is back. `isWaking`: the work had ended and is being started again with the reply
   // `isCommand`: `copy` is a command the person types in a terminal opened in `cwd`. `choices` are buttons the person answers with, sent back to `from`, the agent that asked (a helper's ask shows on its work's card). `pictures` are the picture files the ask is about, shown with it in the chat. `details` is what the ask is about, in full, shown with it on the card and in the chat. `release`: the worktree folder a press on its first choice allows one release run for. `refused`: Claudopus's notice of a call Claude Code refused, whose answer tells the work to carry on without it and never starts ended work again
+  // A task's question for a key: drawn as the key's box, with its question, on the card at once (boxes.tsx)
+  keyAsk?: { name: string; text: string; details: string; from: string; at: number }
   ask?: { text: string; details?: string; release?: string; copy?: string; isCommand?: boolean; cwd?: string; choices?: string[]; pictures?: string[]; from?: string; at: number; isResult?: boolean; refused?: boolean; replied?: { text: string; at: number; isWaking?: boolean }; talk?: Talk[] }
   // Admin commands it, or a helper of it, wants to run, each held until the person presses Allow or Deny on this card: the Mac
   // (`here` or an ssh host), the exact command, the agent that runs it, and whether Allow covers the whole piece of work
