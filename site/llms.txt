@@ -31,11 +31,11 @@ Then `/claudopus` opens the panel. In the Claude desktop app: + next to the prom
 
 ## Figures from real use
 
-The author's own use over three weeks (29 Oct to 21 Nov 2026), from Claudopus's Stats tab: 825 tasks done, up to 18 at once, and 19 days 14 hours of task time in 6 days 13 hours of real time, so about three tasks ran whenever any ran. That is not three times the output, and it is not cheaper: those weeks used 20.44 billion tokens.
+The author's own use (29 Oct to 21 Nov 2026), from Claudopus's Stats tab: about three weeks of work done in one week, which is 19 days 14 hours of task time in 6 days 13 hours of real time, so about three tasks ran whenever any ran. 825 tasks were done, up to 18 at once. That is not three times the output, and it is not cheaper: it used 20.44 billion tokens.
 
 ## Pages
 
-- [Home](https://www.claudopus.ai/): one short page: the problem, three weeks of real figures, the five things that change with a picture of the task cards for each, and how to install it
+- [Home](https://www.claudopus.ai/): one short page: the problem, the measured figures (three weeks of work done in one week), the five things that change with a picture of the task cards for each, and how to install it
 - [Tour](https://www.claudopus.ai/tour.html): a video of one chat running many tasks
 - [Changelog](https://www.claudopus.ai/changelog.html): what changed in each version
 - [Privacy](https://www.claudopus.ai/privacy.html): what the website collects about a visit
