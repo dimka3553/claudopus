@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.248 · 21 November 2026
+- A task can now hand you a report on a part that is finished while it goes on with the rest, as many times as it has one: each reaches you in the chat and is kept as a result of its own, and its card keeps working with its to-dos, helpers and commands. Its last report still ends it
+- Tasks are told to hand in finished work as soon as you can look at it or act on it, instead of keeping it until the end and filling their card with notes that they wait
+
 ## 0.2.247 · 20 November 2026
 - When a task's result asks you something, your answer in words, or a message you send the task, now counts as the answer: the card stops being yellow while the task works on it, and the question doesn't come back when it finishes
 

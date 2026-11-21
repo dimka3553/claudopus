@@ -264,6 +264,14 @@ const chatHooks = (on: On) => {
       isDeferred: false,
     })
     await $.tool.register({
+      name: 'report',
+      description: named(
+        "For background tasks: hands {name} a report on a part that is finished, which they can look at or act on now, while you go on with the rest. It reaches {name} in the chat and is kept as a result of its own; your task, its helpers and commands carry on, and its card stays at work. Use it each time such a part is finished; SubagentHandback still hands in the last report, which ends the task. Write it as you write your report: the result first, with full paths, then what is still being done.",
+      ),
+      inputSchema: { type: 'object', properties: { message: { type: 'string', description: named('The report on what is finished, as {name} reads it in the chat') } }, required: ['message'] },
+      isDeferred: false,
+    })
+    await $.tool.register({
       name: 'ask',
       description: named(
         "For background tasks: when a step needs {name}'s own hands or go-ahead now (a code to paste, a box to fill, a key or button to press, an approval), puts your question at the top of the panel on your card and in the chat as a notice; {Name} answers with one of the buttons you give in `choices`, or in their own words. {Name} sees it before your report, so it must carry everything needed to decide and never point at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile continue with what does not depend on it, or end your step saying what you are waiting for. Ask again if the answer leaves something open; call it with empty `text` only once you have seen it done. Never open a terminal for a command yourself.",
@@ -442,7 +450,8 @@ const chatHooks = (on: On) => {
       const ids = [...e.text.matchAll(/<task-id>([^<]+)<\/task-id>/g)].map(m => m[1] ?? '')
       // A task's report Claudopus took at its hand-back comes to the chat's model with this notice that the task ended, for the chat
       // to give as its own reply (REPORT_FOR_CHAT); a later notice of the same end repeats nothing
-      const reports = await reportsFor($, ids)
+      // (with the parts of results handed in while at work that the chat has not had yet, before them)
+      const reports = [...(await partsFor($)), ...(await reportsFor($, ids))]
       if (reports.length) e = { ...e, context: [...(e.context ?? []), ...reports] }
       // A task that paused is still working: Claude Code's notice that it ended its step without a report is nothing new
       const cards = await read($, todos)
@@ -468,6 +477,11 @@ const chatHooks = (on: On) => {
     // A message the mod sent from a press or reply in the panel starts work as a message of the person's does
     const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text)
     const isPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || isPressed
+    // The message Claudopus sent for a part of a task's result carries that part, as does any other of its own that comes first
+    if (!isPerson && e.origin.kind === 'plugin' && !isOff) {
+      const parts = await partsFor($)
+      if (parts.length) e = { ...e, context: [...(e.context ?? []), ...parts] }
+    }
     if (!isPerson) {
       // A message a program, a schedule or a channel sent is saved too, marked with where it came from, so recall finds every chat;
       // notices and the mod's own messages are no one's words
@@ -476,7 +490,7 @@ const chatHooks = (on: On) => {
       return next(e)
     }
     // A report Claudopus took whose notice never came goes with their message, so it is never left unsaid
-    const context = [...(e.context ?? []), ...(await reportsFor($))]
+    const context = [...(e.context ?? []), ...(await partsFor($)), ...(await reportsFor($))]
     // Their message lifts the hold on work they stopped: the chat is reminded it was stopped, and starts it again only if asked
     const stillHeld = (await read($, todos)).filter(one => isHeld(one) && !one.parentId)
     if ((await read($, todos)).some(isHeld)) {

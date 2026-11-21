@@ -921,7 +921,7 @@ test('a result is handed in only with every to-do ticked or dropped, no helper o
     [TODOS('2 to-dos are still open: "Fit the nostril"; "Compare the head with the scan"'), () => call('mcp__claudopus__todo', 't3', { item: 'Fit the nostril', state: 'done' })],
     [TODOS('a to-do is still open: "Compare the head with the scan"'), () => call('mcp__claudopus__todo', 't4', { item: 'Compare the head with the scan', state: 'dropped' })],
     [
-      'Not handed in: a helper of yours is still at work: "Measure the nose". Its result comes to you as it ends: carry on with what needs nothing from it, or end your step until then. One you no longer need: tell it with SendMessage to hand in what it has now.',
+      'Not handed in: a helper of yours is still at work: "Measure the nose". Its result comes to you as it ends: carry on with what needs nothing from it, or end your step until then. What is finished already, the person can have now: hand it in with the `report` tool, which does not end your task. One you no longer need: tell it with SendMessage to hand in what it has now.',
       () => ((agents.a2 = 'completed'), $.turn.complete({ answer: 'It is 41 mm.', durationMs: 1, isAborted: false, turnId: 'th', reason: 'answer', agentId: 'a2' } as never)),
     ],
     [

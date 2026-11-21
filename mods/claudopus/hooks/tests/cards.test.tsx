@@ -93,6 +93,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
   const sent: string[] = []
   const appended: string[] = []
   const submitted: string[] = []
+  // (and what each of those carried for the chat's model to read with it)
+  const submittedContext: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
   const pressRuns: string[][] = []
@@ -690,7 +692,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
   on('agent.list', () => ({ value: Object.entries(options.agents ?? {}).map(([id, status]) => ({ id, description: 'Listed by the engine', type: options.kinds?.[id] ?? 'fork', status, ...(options.parents?.[id] ? { parentId: options.parents[id] } : {}) })) as never }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('prompt.submit', (_, e) => {
-    if (e.origin.kind !== 'composer') submitted.push(e.text)
+    if (e.origin.kind !== 'composer') (submitted.push(e.text), submittedContext.push((e.context ?? []).join('\n')))
     return { text: e.text, context: e.context }
   })
   on('turn.complete', (_, e) => ({ text: e.answer }))
@@ -716,7 +718,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     return { messages: e.messages }
   })
 
-  return { files, completed, pressRuns, titles, compacts, opened, tabs, viewed, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, completed, pressRuns, titles, compacts, opened, tabs, viewed, stopped, killed, closed, logged, sent, appended, submitted, submittedContext, resumed, atHandback, resumedAtHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -1770,7 +1772,7 @@ test('a result is handed in only with every to-do ticked or dropped, no helper o
     [TODOS('2 to-dos are still open: "Fit the nostril"; "Compare the head with the scan"'), () => call('mcp__claudopus__todo', 't3', { item: 'Fit the nostril', state: 'done' })],
     [TODOS('a to-do is still open: "Compare the head with the scan"'), () => call('mcp__claudopus__todo', 't4', { item: 'Compare the head with the scan', state: 'dropped' })],
     [
-      'Not handed in: a helper of yours is still at work: "Measure the nose". Its result comes to you as it ends: carry on with what needs nothing from it, or end your step until then. One you no longer need: tell it with SendMessage to hand in what it has now.',
+      'Not handed in: a helper of yours is still at work: "Measure the nose". Its result comes to you as it ends: carry on with what needs nothing from it, or end your step until then. What is finished already, the person can have now: hand it in with the `report` tool, which does not end your task. One you no longer need: tell it with SendMessage to hand in what it has now.',
       () => ((agents.a2 = 'completed'), $.turn.complete({ answer: 'It is 41 mm.', durationMs: 1, isAborted: false, turnId: 'th', reason: 'answer', agentId: 'a2' } as never)),
     ],
     [

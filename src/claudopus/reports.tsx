@@ -127,9 +127,10 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
 const WAITS_KINDS = new Set(['claudopus:task', 'claudopus:quick', 'general-purpose', 'fork'])
 
 // Keeps what a finished piece of work reported, once
-const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
+// (`isPart`: a part a task handed in while at work, kept however short, as the task chose to hand it in)
+const saveReport = async ($: EngineInterface, card: Todo, text: string, isPart = false) => {
   const one = (await read($, todos)).find(todo => todo.id === card.id) ?? card
-  const isKept = text.trim().length >= REPORT_LEAST || namedPaths(text).some(path => PICTURE.test(path))
+  const isKept = isPart || text.trim().length >= REPORT_LEAST || namedPaths(text).some(path => PICTURE.test(path))
   const kept = await loadReports($)
   const marked = mark(text)
   // The same report again is no newer result
