@@ -19,14 +19,19 @@ create table if not exists leaderboard.people (
 alter table leaderboard.people enable row level security;
 revoke all on leaderboard.people from public, anon, authenticated;
 
+-- A number someone sent, or 0: what a client sends is never trusted to be one, so a bad value can't break the board for everyone
+create or replace function leaderboard.num(v jsonb) returns numeric language sql immutable set search_path = '' as $$
+  select case when jsonb_typeof(v) = 'number' and (v #>> '{}')::numeric between 0 and 1e18 then (v #>> '{}')::numeric else 0 end
+$$;
+
 -- One range's headline figures, as the board shows them
 create or replace function leaderboard.f(s jsonb) returns jsonb language sql immutable set search_path = '' as $$
   select jsonb_build_object(
-    'work', coalesce((s->>'work')::numeric, 0), 'clock', coalesce((s->>'clock')::numeric, 0),
-    'tokens', coalesce((s->>'tokens')::numeric, 0), 'input', coalesce((s->>'input')::numeric, 0),
-    'write', coalesce((s->>'write')::numeric, 0), 'read', coalesce((s->>'read')::numeric, 0),
-    'output', coalesce((s->>'output')::numeric, 0), 'cost', coalesce((s->>'cost')::numeric, 0),
-    'tasks', coalesce((s->>'tasks')::numeric, 0), 'messages', coalesce((s->>'messages')::numeric, 0))
+    'work', leaderboard.num(s->'work'), 'clock', leaderboard.num(s->'clock'),
+    'tokens', leaderboard.num(s->'tokens'), 'input', leaderboard.num(s->'input'),
+    'write', leaderboard.num(s->'write'), 'read', leaderboard.num(s->'read'),
+    'output', leaderboard.num(s->'output'), 'cost', leaderboard.num(s->'cost'),
+    'tasks', leaderboard.num(s->'tasks'), 'messages', leaderboard.num(s->'messages'))
 $$;
 
 -- A range's figures for one person, empty once out of date: a today not sent within 26 hours is no longer today's
@@ -40,10 +45,10 @@ $$;
 
 create or replace function leaderboard.score(s jsonb, sort text) returns numeric language sql immutable set search_path = '' as $$
   select case sort
-    when 'tokens' then coalesce((s->>'tokens')::numeric, 0)
-    when 'cost' then coalesce((s->>'cost')::numeric, 0)
-    when 'efficiency' then case when coalesce((s->>'clock')::numeric, 0) > 0 then coalesce((s->>'work')::numeric, 0) / (s->>'clock')::numeric else 0 end
-    else coalesce((s->>'work')::numeric, 0) end
+    when 'tokens' then leaderboard.num(s->'tokens')
+    when 'cost' then leaderboard.num(s->'cost')
+    when 'efficiency' then case when leaderboard.num(s->'clock') > 0 then leaderboard.num(s->'work') / (s->>'clock')::numeric else 0 end
+    else leaderboard.num(s->'work') end
 $$;
 
 -- Only the four ranges are kept, and no more than 64 KB of them
@@ -109,8 +114,9 @@ begin
     select 1 + count(*) into n from leaderboard.people o where leaderboard.score(leaderboard.range_of(o, r), 'work') > leaderboard.score(s, 'work');
     ranks := ranks || jsonb_build_object(r, n);
     stats := stats || jsonb_build_object(r, case when p.is_public then leaderboard.f(s) || jsonb_build_object(
-      'models', coalesce(s->'models', '[]'::jsonb), 'todos', coalesce((s->>'todos')::numeric, 0), 'flows', coalesce((s->>'flows')::numeric, 0),
-      'most', coalesce((s->>'most')::numeric, 0), 'per_task', coalesce((s->>'per_task')::numeric, 0)) else leaderboard.f(s) end);
+      'models', (select coalesce(jsonb_agg(jsonb_build_array(left(coalesce(m->>0, ''), 60), leaderboard.num(m->1), leaderboard.num(m->2))), '[]'::jsonb)
+        from jsonb_array_elements(case when jsonb_typeof(s->'models') = 'array' then s->'models' else '[]'::jsonb end) with ordinality as e(m, i) where i <= 12), 'todos', leaderboard.num(s->'todos'), 'flows', leaderboard.num(s->'flows'),
+      'most', leaderboard.num(s->'most'), 'per_task', leaderboard.num(s->'per_task')) else leaderboard.f(s) end);
   end loop;
   return jsonb_build_object('name', p.name, 'is_public', p.is_public, 'joined_at', p.joined_at, 'updated_at', p.updated_at,
     'total', (select count(*) from leaderboard.people), 'ranks', ranks, 'stats', stats);
