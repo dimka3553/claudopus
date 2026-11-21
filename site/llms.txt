@@ -35,7 +35,7 @@ The author's own use over three weeks (29 Oct to 21 Nov 2026), from Claudopus's 
 
 ## Pages
 
-- [Home](https://www.claudopus.ai/): what changes for you, three weeks of real figures, pictures of the panel and how to install it
+- [Home](https://www.claudopus.ai/): one short page: the problem, three weeks of real figures, the five things that change with a picture of the task cards for each, and how to install it
 - [Tour](https://www.claudopus.ai/tour.html): a video of one chat running many tasks
 - [Changelog](https://www.claudopus.ai/changelog.html): what changed in each version
 - [Privacy](https://www.claudopus.ai/privacy.html): what the website collects about a visit

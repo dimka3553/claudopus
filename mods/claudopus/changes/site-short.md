@@ -1,0 +1,2 @@
+- The website's home page says the same things in about a third of the words. It opens with the 3D octopus holding a task on each arm, and each part is now a headline, one sentence and one picture
+- The example that stepped by itself on the first screen is gone, and the pictures of the panel show the task cards alone
