@@ -60,10 +60,15 @@ create or replace function leaderboard.score(s jsonb, sort text) returns numeric
     else leaderboard.num(s->'work') end
 $$;
 
--- Only the four ranges are kept, and no more than 64 KB of them
+-- Only the four ranges and the timeline are kept, and no more than 100,000 characters of them: the timeline Claudopus sends is
+-- at most 40,000, which the database writes out as up to 60,000. (Until 21 Nov the limit was 64 KB as the database holds numbers
+-- in memory, four times their size as text, so a timeline of some 850 tasks was refused, and that person's figures with it)
+create or replace function leaderboard.fits(stats jsonb) returns boolean language sql immutable set search_path = '' as $$
+  select jsonb_typeof(stats) = 'object' and length(stats::text) <= 100000
+$$;
 create or replace function leaderboard.clean(stats jsonb) returns jsonb language plpgsql immutable set search_path = '' as $$
 begin
-  if jsonb_typeof(stats) is distinct from 'object' or pg_column_size(stats) > 65536 then
+  if leaderboard.fits(stats) is not true then
     raise exception 'bad stats' using errcode = '22023';
   end if;
   return jsonb_strip_nulls(jsonb_build_object('today', stats->'today', 'd7', stats->'d7', 'd30', stats->'d30', 'all', stats->'all', 'timeline', stats->'timeline'));
@@ -93,6 +98,35 @@ begin
     stats = case when shows then leaderboard.clean(p_stats) else leaderboard.clean(p_stats) - 'timeline' end, updated_at = now()
     where token_hash = encode(extensions.digest(coalesce(p_token, ''), 'sha256'), 'hex');
   return found;
+end $$;
+
+-- What changed since this person's figures were last sent (Claudopus 0.2.265 on): only the ranges whose figures did, and of the
+-- timeline only its end (`line`: of the tasks kept here, `drop` from the start go, the `keep` after them stay, and `add` follow).
+-- p_was is the mark the sender believes the board holds for them, p_now the mark it holds once this is taken; null p_was replaces
+-- everything. 'ok': taken. 'full': the board holds something else (an older Claudopus sent since, or an answer was lost), so the
+-- sender sends everything. 'gone': the secret is no one's. A private timeline is never kept
+create or replace function public.lb_send(p_token text, p_public boolean, p_timeline boolean, p_was text, p_now text, p_stats jsonb) returns text
+language plpgsql security definer set search_path = '' as $$
+declare p leaderboard.people; s jsonb; line jsonb := p_stats->'line'; kept jsonb; n bigint;
+begin
+  select * into p from leaderboard.people where token_hash = encode(extensions.digest(coalesce(p_token, ''), 'sha256'), 'hex') for update;
+  if not found then return 'gone'; end if;
+  if leaderboard.fits(p_stats) is not true then raise exception 'bad stats' using errcode = '22023'; end if;
+  if p_was is not null and (p.stats->>'rev') is distinct from p_was then return 'full'; end if;
+  s := (case when p_was is null then '{}'::jsonb else p.stats end)
+    || jsonb_strip_nulls(jsonb_build_object('today', p_stats->'today', 'd7', p_stats->'d7', 'd30', p_stats->'d30', 'all', p_stats->'all', 'timeline', p_stats->'timeline'));
+  if jsonb_typeof(line) = 'object' then
+    select coalesce(jsonb_agg(e order by i), '[]'::jsonb), count(*) into kept, n
+      from jsonb_array_elements(case when jsonb_typeof(s#>'{timeline,pieces}') = 'array' then s#>'{timeline,pieces}' else '[]'::jsonb end) with ordinality as t(e, i)
+      where i > leaderboard.num(line->'drop') and i <= leaderboard.num(line->'drop') + leaderboard.num(line->'keep');
+    if n <> leaderboard.num(line->'keep') or jsonb_typeof(line->'add') is distinct from 'array' then return 'full'; end if;
+    s := s || jsonb_build_object('timeline', jsonb_build_object('base', line->'base', 'models', line->'models', 'pieces', kept || (line->'add')));
+  end if;
+  if not coalesce(p_timeline, false) then s := s - 'timeline'; end if;
+  if leaderboard.fits(s) is not true then raise exception 'bad stats' using errcode = '22023'; end if;
+  update leaderboard.people set is_public = coalesce(p_public, is_public), timeline_public = coalesce(p_timeline, false),
+    stats = s || jsonb_build_object('rev', left(coalesce(p_now, ''), 40)), updated_at = now() where name = p.name;
+  return 'ok';
 end $$;
 
 -- Leave: the row goes, figures and all
@@ -138,5 +172,5 @@ begin
     'timeline', case when p.timeline_public and jsonb_typeof(p.stats->'timeline') = 'object' then p.stats->'timeline' end);
 end $$;
 
-revoke all on function public.lb_join(text, boolean, jsonb), public.lb_push(text, boolean, jsonb, boolean), public.lb_leave(text), public.lb_board(text, text), public.lb_person(text) from public;
-grant execute on function public.lb_join(text, boolean, jsonb), public.lb_push(text, boolean, jsonb, boolean), public.lb_leave(text), public.lb_board(text, text), public.lb_person(text) to anon, authenticated;
+revoke all on function public.lb_join(text, boolean, jsonb), public.lb_push(text, boolean, jsonb, boolean), public.lb_send(text, boolean, boolean, text, text, jsonb), public.lb_leave(text), public.lb_board(text, text), public.lb_person(text) from public;
+grant execute on function public.lb_join(text, boolean, jsonb), public.lb_push(text, boolean, jsonb, boolean), public.lb_send(text, boolean, boolean, text, text, jsonb), public.lb_leave(text), public.lb_board(text, text), public.lb_person(text) to anon, authenticated;

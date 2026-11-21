@@ -2,6 +2,13 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.265 · 21 November 2026
+- Stats opens at once. It keeps what it has added up, by chat, by day and by month, and reads one of Claude Code's records again only when that record changes. Before, every opening added every response and task up again, and a chat with more than about 600 tasks was never kept at all, so All chats took half a minute each time.
+- The figures are the same as before, to the cent and the second.
+- All time keeps counting work whose records Claude Code has since cleared.
+- The leaderboard is sent only what changed since it was last sent: the figures of the ranges that changed, and of your timeline only its newest tasks. Nothing is sent when nothing changed. Before, everything went every 3 minutes.
+- The leaderboard no longer refuses a timeline of more than about 850 tasks, which would have stopped that person's figures from updating.
+
 ## 0.2.264 · 21 November 2026
 - Claudopus no longer sends the chat a message of its own when a task hands in a part of its result, so no part's notice shows in the chat as your message, even when the chat is busy. The task's own message brings the part, or your next message does
 
