@@ -1,0 +1,1 @@
+- A link to your own leaderboard page now always previews as your card, with your name, figures and picture, in Telegram and other apps; before, it could show the whole board instead. The picture updates in those apps when your figures change, and a link ending in a slash works too.
