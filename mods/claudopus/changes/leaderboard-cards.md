@@ -1,0 +1,3 @@
+- A link to someone's leaderboard page now shows a picture of their stats wherever you paste it: hours of work done, hours on the clock, efficiency, favourite model, API cost and tasks, with their timeline when their stats are public. A link to the board shows the top five.
+- claudopus.ai's own link picture now shows the 3D octopus with a task on each arm.
+- The leaderboard counts only from when you first installed Claudopus.

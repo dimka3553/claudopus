@@ -24,12 +24,16 @@ const loadFonts = async () =>
       data: await (await fetch(`https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.18/files/inter-latin-${file === 'regular' ? 400 : 700}-normal.woff`)).arrayBuffer(),
     })),
   ))
+// The 3D octopus, as the site keeps it; else as the repo has it (main, or the branch that added it, before its release)
+const OCTOPUS = ['https://www.claudopus.ai/og-octopus.png', 'https://raw.githubusercontent.com/dimka3553/claudopus/main/site/og-octopus.png', 'https://raw.githubusercontent.com/dimka3553/claudopus/leaderboard-cards/site/og-octopus.png']
 let octopus: string | null | undefined
 const loadOctopus = async () => {
   if (octopus !== undefined) return octopus
-  const r = await fetch('https://www.claudopus.ai/og-octopus.png').catch(() => null)
-  octopus = r && r.ok && (r.headers.get('content-type') ?? '').startsWith('image/') ? 'https://www.claudopus.ai/og-octopus.png' : null
-  return octopus
+  for (const url of OCTOPUS) {
+    const r = await fetch(url).catch(() => null)
+    if (r && r.ok && (r.headers.get('content-type') ?? '').startsWith('image/')) return (octopus = url)
+  }
+  return (octopus = null)
 }
 
 const num = (v: unknown) => (typeof v === 'number' && isFinite(v) ? v : 0)
@@ -81,7 +85,7 @@ const timelineBars = (line: any, rg: string, W: number, H: number) => {
 
 const frame = (children: unknown[], octo: string | null) =>
   h('div', { style: { width: 1200, height: 630, display: 'flex', flexDirection: 'column', background: BG, color: INK, fontFamily: 'Inter', padding: '56px 64px', position: 'relative' } },
-    octo ? h('img', { src: octo, width: 300, height: 300, style: { position: 'absolute', right: 30, top: 10, opacity: 0.95 } }) : null,
+    octo ? h('img', { src: octo, width: 230, height: 230, style: { position: 'absolute', right: 44, top: 22 } }) : null,
     h('div', { style: { display: 'flex', alignItems: 'center', fontSize: 26, color: SOFT } }, h('span', { style: { color: PURPLE, fontWeight: 700, marginRight: 12 } }, 'Claudopus'), 'leaderboard · claudopus.ai'),
     ...children)
 
