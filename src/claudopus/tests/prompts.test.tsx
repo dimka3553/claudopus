@@ -417,6 +417,49 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
   await list.unmount()
 })
 
+// 21 Nov: Supabase's confirm_cost, refused six times after Dima's yes on the card, and the card asked nothing of it
+test("a connector's tool Claude Code refuses a task is asked on its card once, with the one command that lets it through (a rule in the person's own settings, run in their Terminal), Open in Terminal, Try again and Don't allow; Try again tells the task to call it once more, Don't allow to carry on without it; Claudopus never calls the tool, nor lets the call through itself", async ($, on) => {
+  const agents: Record<string, string> = { a1: 'running' }
+  const { files, clock, appended, pressRuns } = world(on, { agents })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'make the leaderboard', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Make the leaderboard', prompt: 'make the leaderboard' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const TOOL = 'mcp__5a3e9d85-c502-4788-adea-8783a1c00ccc__confirm_cost'
+  const ASK = 'Claude Code blocked this action. Let your tasks do it?'
+  const refuse = async (id: string) => {
+    files.set('auto-refuse', TOOL)
+    const r = (await $.tool.call({ tool: TOOL, agentId: 'a1', tool_use_id: id, type: 'project', recurrence: 'monthly', amount: 10 } as never)) as { isError?: boolean }
+    files.delete('auto-refuse')
+    await clock.advance(1000)
+    return r
+  }
+  // The call stays refused: Claude Code's refusal is what the task gets
+  expect((await refuse('c1')).isError).toBe(true)
+  expect(await until(async () => list.find({ type: 'Text', text: ASK }))).toBeDefined()
+  const said = (await list.findAll({ type: 'Markdown' } as never)).map(one => String(one.props.text ?? '')).join('\n')
+  expect(said).toContain('It wanted to confirm cost: {"type":"project","recurrence":"monthly","amount":10}')
+  expect(said).toContain('Claude Code never counts a yes on this card or in the chat as yours for this')
+  expect(said).toContain(`it adds ${TOOL} to your Claude Code settings`)
+  const labels = (await list.findAll({ type: 'Button' })).filter(b => String(b.key ?? '').startsWith('ask-a1')).map(b => String(b.props.label))
+  expect(labels.filter(one => ['Try again', "Don't allow", 'Copy', 'Open in Terminal'].includes(one)).sort()).toEqual(['Copy', "Don't allow", 'Open in Terminal', 'Try again'])
+  // The command on it is the runner of the mod, at the person's terminal, with that one rule
+  expect([...(await textsOf(list)), said].join('\n')).toContain(`/bin/allow-tool' ${TOOL}\nIt wanted to confirm cost`)
+  expect((files.get(`${MEMORY}/log.md`) ?? '')).toContain(`refusal of ${TOOL} for a1 put to the person on its card, with the rule that lets it through`)
+  // Try again: the task calls it once more, and is told not to ask in words
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Try again')?.key ?? '' })
+  const told = await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('pressed "Try again"')))
+  expect(told).toContain(`after being shown the command that adds ${TOOL} to their Claude Code settings. Call it once more now, exactly as before.`)
+  // Refused again (the rule is not in yet): asked again; Don't allow tells it to carry on without it
+  await refuse('c2')
+  expect(await until(async () => list.find({ type: 'Text', text: ASK }))).toBeDefined()
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => String(b.key ?? '').startsWith('ask-a1-choice-1-'))?.key ?? '' })
+  expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes(`pressed "Don't allow" when asked to let your tasks use ${TOOL}`)))).toContain('Carry on without it')
+  // Nothing ran in the person's place
+  expect(pressRuns).toEqual([])
+  await list.unmount()
+})
+
 test("a command Claude Code blocked a task from running is asked on its card as a Permission block, the command whole with why and where it would run, Allow and Don't allow; nothing runs but on that Allow (not Don't allow, not a task's own question with a button of that name, not waiting), and the press changes no permission; the press runs exactly that command once, as the person's, shows one grey line of the press and one quiet line while it runs, never the command again nor a drawing of the whole panel at each look at it (17 Nov, the box that flashed); its output is told to a task at a step, and kept for the next step of one that ended, with a grey line and nothing to press, never sent from a timer; a long one is stopped at its limit, and Stop stops it", async ($, on) => {
   const agents: Record<string, string> = { a1: 'running' }
   // (its clock moves bare, with no hook of the mod after each move: nothing here may go from a timer)

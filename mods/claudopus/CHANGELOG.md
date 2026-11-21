@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.255 · 21 November 2026
+- Release it is the only press a release needs: when a release has to run again because main changed or a check failed, it no longer asks you for a second Allow.
+- When Claude Code blocks a task from using a connector, such as confirming a Supabase cost, the card now says so and gives you the one way through: Open in Terminal, press Return to let your tasks do it from now on, then Try again. Before, nothing showed, and your yes on the card or in the chat could never let it through.
+
 ## 0.2.254 · 21 November 2026
 - The website's home page says the same things in about a third of the words. It opens with the 3D octopus holding a task on each arm, and each part is now a headline, one sentence and one picture
 - The example that stepped by itself on the first screen is gone, and the pictures of the panel show the task cards alone

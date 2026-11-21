@@ -953,8 +953,8 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   answeredAt.set(one.id, ask.at)
   dropDrafts($, one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
-  // The first choice of a go-ahead for a release: the press is the permission, so it also allows that card's next run of the
-  // release runner for that folder, once (gate.tsx, allowRelease), before the task hears of it. It has no way back
+  // The first choice of a go-ahead for a release: the press is the permission, so it also allows that card's runs of the release
+  // runner for that folder until one goes out (gate.tsx, allowRelease), before the task hears of it. It has no way back
   const isRelease = !isReply && !ask.refused && Boolean(ask.release) && ask.choices?.[0] === said && (await allowRelease($, one.id, ask.release ?? '').catch(err => (void log($, `release not allowed by the press: ${String(err)}`), false)))
   // A command Claude Code blocked: Allow, pressed on this card in this chat's own panel, runs it now, once, as the person's
   // (runit.tsx); anything else leaves it not run. Words never run it
@@ -970,6 +970,8 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
     ? isRun && run
       ? await startRun($, one, run)
       : `${REFUSAL_ANSWERED(ask.copy ?? ask.text, said, isReply)}${note}`
+    : ask.rule
+      ? `${CONNECTOR_ANSWERED(ask.rule, said, isReply)}${note}`
     : isReply
       ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}`
       : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
@@ -996,7 +998,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
 }
 // What a task is told with the press on its go-ahead for a release: the press allows its release run, which it does itself
 const RELEASE_PRESSED = (folder: string) =>
-  `That press is the permission for the release: your next run of the release runner for ${folder} goes through once, within the hour, with nothing more asked. Run it now as your rules say, in your background, say on your card what you are releasing, and hand in your result once it has finished.`
+  `That press is the permission for the release: your runs of the release runner for ${folder} go through with nothing more asked, within the hour, until one has gone out: a run again after it stopped (exit 2 or 3) needs no second press. Run it now as your rules say, in your background, say on your card what you are releasing, and hand in your result once it has finished.`
 // A button's answer can be taken back while the card says it (heldAnswer, ANSWER_SHOWN), unless the work has asked again since: a press
 // meant for something else lands on an answer (16 Nov: "Not now" pressed while reaching for the picture above it, as the panel
 // jumped). The ask is put back on the card with its buttons, to be answered again, and the work is told not to act on the answer:
