@@ -1,0 +1,1 @@
+- The Leaderboard tab has three switches once you've joined: On the leaderboard (off deletes you from it), Your stats (private or public) and Your timeline (private or public, never with task names).
