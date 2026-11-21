@@ -953,9 +953,10 @@ test('the Leaderboard tab shows the board and is where you join with a username 
   const stats = await $.ui.mount({ ...LIST, requestId: 'leaderboard', props: { ...LIST.props, title: 'Leaderboard', bodyColumns: 80 }, surface: 'desktop' } as never)
   const said = (text: RegExp) => until(async () => stats.find({ type: 'Text', text }))
   const field = async () => (await stats.findAll({ type: 'Input' }))[0]?.key ?? ''
-  // Time of work in days, hours and minutes, efficiency and favourite model; a public name opens their page on claudopus.ai
-  expect(await said(/^2d 3h 00m · 1\.70× · Opus 5\.5$/)).toBeDefined()
-  expect(await said(/^45m · 1\.50×$/)).toBeDefined()
+  // A table with headings: time of work in days, hours and minutes, efficiency and favourite model, each a column of its own, the
+  // first place in gold; a public name opens their page on claudopus.ai
+  for (const text of ['Time of work', 'Efficiency', 'Model', '2d 3h 00m', '1.70×', 'Opus 5.5', '45m', '1.50×']) expect(await said(new RegExp(`^${text.replace('.', '\\.')}$`))).toBeDefined()
+  expect((await said(/^1$/))?.props.color).toBe('#E3B341')
   expect(await said(/^2 people on the board$/)).toBeDefined()
   await pressed(stats, 'board-person-mira_k')
   expect(await until(async () => shown.find(one => one.includes('https://claudopus.ai/leaderboard/mira_k')))).toBeDefined()
@@ -998,6 +999,8 @@ test('the Leaderboard tab shows the board and is where you join with a username 
   expect(Object.keys(sent)).toEqual(['today', 'd7', 'd30', 'all'])
   expect([sent.all?.tokens, sent.all?.read, sent.all?.write, sent.all?.input]).toEqual([200, 70, 20, 10])
   expect(JSON.stringify(sent)).not.toContain('repo')
+  // Your part of the tab is titled with your username, and says where you stand in the range chosen
+  expect(await said(/^Not in the top 10 for this range$/)).toBeDefined()
   // and every few minutes after
   const firstPushes = boarded.filter(one => one.fn === 'lb_push').length
   await clock.advance(4 * M)
