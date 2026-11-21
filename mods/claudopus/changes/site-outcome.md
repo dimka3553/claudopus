@@ -1,0 +1,2 @@
+- The website's home page now opens with what changes for you: you stop waiting on Claude Code. Its first screen has the two install lines, three weeks of real figures, and the real panel stepping through one example
+- Every picture of the panel on the home page is drawn by this version's own code, in place of the hand-made drawings, and the page says what the figures do and don't show

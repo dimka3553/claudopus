@@ -25,12 +25,17 @@ Then `/claudopus` opens the panel. In the Claude desktop app: + next to the prom
 - Questions, permission prompts and releases from every chat wait at the top of the panel with answer buttons, a sound and a notification.
 - Results keeps what each finished task found, with its pictures, as plain files on your machine.
 - Memory keeps your messages word for word and notes on each topic, so later chats can look them up.
-- A second agent that did not do the work can check it before you see it.
+- Each task changes code in a worktree and branch of its own, and reaches main only after you press Release it.
+- A second agent that did not do the work can check it before you see it, when you ask for one or turn it on in Config.
 - Tasks that run side by side use tokens side by side: five at once use them about five times as fast as one.
+
+## Figures from real use
+
+The author's own use over three weeks (29 Oct to 21 Nov 2026), from Claudopus's Stats tab: 825 tasks done, up to 18 at once, and 19 days 14 hours of task time in 6 days 13 hours of real time, so about three tasks ran whenever any ran. That is not three times the output, and it is not cheaper: those weeks used 20.44 billion tokens.
 
 ## Pages
 
-- [Home](https://www.claudopus.ai/): what Claudopus is, the panel, Results and how to install it
+- [Home](https://www.claudopus.ai/): what changes for you, three weeks of real figures, pictures of the panel and how to install it
 - [Tour](https://www.claudopus.ai/tour.html): a video of one chat running many tasks
 - [Changelog](https://www.claudopus.ai/changelog.html): what changed in each version
 - [Privacy](https://www.claudopus.ai/privacy.html): what the website collects about a visit
