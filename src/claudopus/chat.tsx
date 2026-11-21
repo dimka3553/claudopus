@@ -475,15 +475,16 @@ const chatHooks = (on: On) => {
         return next(e)
       }
     }
-    if (e.isMeta || e.command || !dir) return next(e)
     // A message the mod sent from a press or reply in the panel starts work as a message of the person's does
     const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text)
     const isPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || isPressed
-    // The message Claudopus sent for a part of a task's result carries that part, as does any other of its own that comes first
-    if (!isPerson && e.origin.kind === 'plugin' && !isOff) {
+    // The message a task sends the chat for a part of its result carries that part, as does Claudopus's own, and any other of
+    // either that comes first (a task's comes marked as no one's words, isMeta)
+    if (dir && !isPerson && (e.origin.kind === 'plugin' || e.origin.kind === 'peer') && !isOff && !e.command) {
       const parts = await partsFor($)
       if (parts.length) e = { ...e, context: [...(e.context ?? []), ...parts] }
     }
+    if (e.isMeta || e.command || !dir) return next(e)
     if (!isPerson) {
       // A message a program, a schedule or a channel sent is saved too, marked with where it came from, so recall finds every chat;
       // notices and the mod's own messages are no one's words
