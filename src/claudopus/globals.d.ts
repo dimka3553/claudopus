@@ -12,6 +12,7 @@ import * as M9 from '../../mods/claudopus/hooks/tabmoves'
 import * as M10 from '../../mods/claudopus/hooks/jobs'
 import * as M11 from '../../mods/claudopus/hooks/naming'
 import * as M12 from '../../mods/claudopus/hooks/usage'
+import * as M13 from '../../mods/claudopus/hooks/pace'
 
 declare global {
   export import atom = M0.atom
@@ -327,4 +328,9 @@ declare global {
   export import UsageBattery = M12.UsageBattery
   export import UsageFigures = M12.UsageFigures
   export import UsageKept = M12.UsageKept
+  export import PACE_EVERY = M13.PACE_EVERY
+  export import PACE_LOOK = M13.PACE_LOOK
+  export import PACE_SET = M13.PACE_SET
+  export import paceLookOf = M13.paceLookOf
+  export import paceOf = M13.paceOf
 }

@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.266 · 21 November 2026
+- However many tasks run, Claude's commands now leave two cores of your Mac free for you, so it stays responsive. Commands run at full speed while they fit in the other cores; newer ones past that wait in the Mac's background mode, using only what you leave idle, and go back to full speed as room comes.
+
 ## 0.2.265 · 21 November 2026
 - Stats opens at once. It keeps what it has added up, by chat, by day and by month, and reads one of Claude Code's records again only when that record changes. Before, every opening added every response and task up again, and a chat with more than about 600 tasks was never kept at all, so All chats took half a minute each time.
 - The figures are the same as before, to the cent and the second.

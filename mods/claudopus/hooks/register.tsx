@@ -25,6 +25,7 @@ import { LOG_SENT, NAMING_MODEL, NAMING_SYSTEM, namedHead, namingKey, namingOf, 
 import type { Naming, NamingAsk } from './naming'
 import { batteryShown, batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
 import type { UsageTop, UsageBattery, UsageFigures, UsageKept } from './usage'
+import { PACE_EVERY, PACE_LOOK, PACE_SET, paceLookOf, paceOf } from './pace'
 
 
 const LIST = 'claudopus'
@@ -10432,6 +10433,7 @@ const chatHooks = (on: On) => {
       if (!isTyping) for (const [key, held] of heldDrawings) if (calmNow - held.at >= 60_000) heldDrawings.delete(key)
       if (!isBehind()) await calmLook($, isMoving).catch(err => log($, `panes not looked at: ${String(err)}`))
       if (!isBehind() && (await read($, todos)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
+      void paceWork($).catch(err => log($, `commands not paced: ${String(err)}`))
       const now = await $.clock.now()
       for (const one of [...(await read($, flows)), ...(await read($, todos))].filter(card => isLingering(card, now))) {
         const key = `${one.id}:${one.endedAt}`
@@ -13231,6 +13233,50 @@ const hashOf = (text: string) => {
   let h = 0
   for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0
   return (h >>> 0).toString(36)
+}
+
+
+let pacedAt = 0
+let isPacing = false
+let paceFile = ''
+const pacePathOf = async ($: EngineInterface) => {
+  if (paceFile) return paceFile
+  const tmp = ((await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
+  paceFile = `${tmp || (await $.env.get('HOME')) || ''}/claudopus-pace.json`
+  return paceFile
+}
+const pacedOf = (text: string): { at: number; held: number; others?: number } => {
+  try {
+    const v = JSON.parse(text || '{}') as { at?: unknown; held?: unknown; others?: unknown }
+    return { at: Number(v.at) || 0, held: Number(v.held) || 0, ...(typeof v.others === 'number' ? { others: v.others } : {}) }
+  } catch {
+    return { at: 0, held: 0 }
+  }
+}
+
+const paceWork = async ($: EngineInterface) => {
+  if (isLinux || isPacing) return
+  const now = await $.clock.now()
+  if (now >= pacedAt && now - pacedAt < PACE_EVERY - 500) return
+  const path = await pacePathOf($)
+  const last = pacedOf(await $.fs.read(path).catch(() => ''))
+  const isWorking = (await read($, todos)).some(one => !one.parentId && one.status === 'working')
+  if ((!isWorking && !last.held) || (now >= last.at && now - last.at < PACE_EVERY - 500)) return
+  isPacing = true
+  pacedAt = now
+  try {
+    await $.fs.write(path, JSON.stringify({ ...last, at: now })).catch(() => undefined)
+    const looked = await $.process.run(['sh', '-c', PACE_LOOK], { timeoutMs: 5000 }).catch(() => undefined)
+    const look = paceLookOf(looked?.stdout ?? '')
+    if (!look.procs.length || !look.cores) return
+    const paced = paceOf(look, now - last.at < 30_000 ? last.others : undefined)
+    if (paced.lower.length || paced.lift.length) await $.process.run(['sh', '-c', PACE_SET, 'pace', paced.lower.join(' '), paced.lift.join(' ')], { timeoutMs: 10_000 })
+    await $.fs.write(path, JSON.stringify({ at: now, held: paced.held, others: paced.others })).catch(() => undefined)
+    if (paced.held && !last.held) await log($, `${paced.held} of Claude's commands wait their turn in the background, so ${look.cores - paced.room} cores stay free for everything else`)
+    if (!paced.held && last.held) await log($, "every one of Claude's commands runs at full speed again")
+  } finally {
+    isPacing = false
+  }
 }
 
 
