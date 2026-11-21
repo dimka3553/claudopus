@@ -1523,35 +1523,46 @@ const panelHooks = (on: On) => {
       // A helper's own line: what it does now as its conversation would show it, the end of its words while it writes them
       const kidNow = (kid: Todo) => {
         const last = liveLinesOf(kid.id, new Set(), at).at(-1)
-        if (!last) return helperNow(kid, at, jobsOf(kid).length, Math.max(16, room - 4)) || 'Thinking'
-        return last.kind === 'said' ? `…${oneLine(last.text).slice(-160)}` : `${last.text}${since(last.since)}`
+        if (!last) return helperNow(kid, at, jobsOf(kid).length, Math.max(16, room - 4)) || 'Thinking…'
+        return last.kind === 'said' ? `…${oneLine(last.text).slice(-160)}` : last.kind === 'call' ? `${last.text}${since(last.since)}` : last.text
       }
+      // Drawn as the app's own chat draws them: no marks, quiet words for what goes on, and what it runs under them
       return [
-        ...now.map((line, n) =>
-          line.kind === 'said' ? (
-            <Markdown key={`live-${n}`} text={line.text} />
-          ) : (
-            <Box key={`live-${n}`} flexDirection="column" alignItems="flex-start">
-              <Box flexDirection="row" gap={1}>
-                {line.kind === 'call' ? <Text color={LIVE}>●</Text> : null}
-                <Text wrap="wrap" dimColor={line.kind !== 'call'}>{`${line.text}${since(line.since)}`}</Text>
-              </Box>
-              {line.detail ? (
+        ...now.map((line, n) => {
+          if (line.kind === 'said') return <Markdown key={`live-${n}`} text={line.text} />
+          if (line.kind === 'call')
+            return (
+              <Box key={`live-${n}`} flexDirection="column" alignItems="flex-start">
+                <Text dimColor wrap="wrap">{`${line.head ?? 'Using a tool'}${since(line.since)}`}</Text>
                 <Box paddingLeft={2}>
-                  <Text dimColor wrap="wrap">{cut(line.detail.split('\n').slice(-6).join('\n'), 600)}</Text>
+                  <Text wrap="wrap">{line.text}</Text>
                 </Box>
-              ) : null}
+              </Box>
+            )
+          // Its thinking opens on a press once it has thought, as in the app's chat
+          const isOpen = open.includes(OPEN_THOUGHT)
+          if (line.kind === 'thought' && line.detail)
+            return (
+              <Box key={`live-${n}`} flexDirection="column" alignItems="flex-start">
+                <Button key={`live-thought-${presses}`} label={`${isOpen ? '▾' : '▸'} ${line.text}`} plain dimColor onPress={() => fold(OPEN_THOUGHT)} />
+                {isOpen ? (
+                  <Box paddingLeft={2}>
+                    <Text dimColor wrap="wrap">{line.detail}</Text>
+                  </Box>
+                ) : null}
+              </Box>
+            )
+          return (
+            <Box key={`live-${n}`}>
+              <Text dimColor wrap="wrap">{line.text}</Text>
             </Box>
-          ),
-        ),
+          )
+        }),
         ...kids.map(kid => (
           <Box key={`live-kid-${kid.id}`} flexDirection="column" alignItems="flex-start">
-            <Box flexDirection="row" gap={1}>
-              <Text color={LIVE}>●</Text>
-              <Button key={`live-kid-open-${kid.id}-${presses}`} label={`Helper: ${cut(titleOf(kid), Math.max(16, room - 12))}`} plain hover={{ scope: `live-kid-${kid.id}`, underline: true }} onPress={() => openWork($, kid.id)} />
-            </Box>
+            <Button key={`live-kid-open-${kid.id}-${presses}`} label={`Helper: ${cut(titleOf(kid), Math.max(16, room - 12))}`} plain dimColor hover={{ scope: `live-kid-${kid.id}`, underline: true }} onPress={() => openWork($, kid.id)} />
             <Box paddingLeft={2}>
-              <Text dimColor wrap="wrap">{kidNow(kid)}</Text>
+              <Text wrap="wrap">{kidNow(kid)}</Text>
             </Box>
           </Box>
         )),

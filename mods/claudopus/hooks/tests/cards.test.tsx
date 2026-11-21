@@ -1213,17 +1213,20 @@ test("a pressed card shows the work's own chat: what it was told, what it wrote,
     { kind: 'stop', stopReason: 'tool_use', usage: null },
   ]
   const step = $.turn.step({ turnId: 'live', index: 3, model: 'm', messageCount: 2, agentId: 'a1' })[Symbol.asyncIterator]()
-  // Thinking: what it thinks, under the line that says so, last
+  // Thinking: one quiet line, last, with no mark, as the app's chat says it
   await step.next()
-  expect(await until(async () => ((await texts()).includes('Thinking') ? true : undefined))).toBe(true)
-  expect((await texts()).slice(-2)).toEqual(['Thinking', 'Which nostril is open?'])
+  expect(await until(async () => ((await texts()).at(-1) === 'Thinking…' ? true : undefined))).toBe(true)
+  expect(await texts()).not.toContain('Which nostril is open?')
   // Its words as they come, then the command it is writing, after them
   await step.next()
   await step.next()
   await step.next()
   expect(await until(async () => ((await texts()).includes('Fit the left nos') ? true : undefined))).toBe(true)
   expect((await said()).at(-1)).toBe('The left side is')
-  expect((await texts()).slice(-3)).toEqual(['Thought for 1s', '●', 'Fit the left nos'])
+  expect((await texts()).slice(-2)).toEqual(['Running a command', 'Fit the left nos'])
+  // What it thought opens under "Thought for", on a press
+  await pressed(await fresh(), 'live-thought')
+  expect((await texts()).filter(text => text === 'Which nostril is open?')).toHaveLength(1)
   for (let got = await step.next(); !got.done; got = await step.next()) void got
   // The command runs: the conversation holds the response now, once, and the command stands last with what it does, out of the
   // runs of steps that ended
@@ -1239,7 +1242,7 @@ test("a pressed card shows the work's own chat: what it was told, what it wrote,
   await helperStep.next()
   expect(await until(async () => keyed(await fresh(), 'live-kid-open-a2'))).toBeDefined()
   expect((await keyed(tab, 'live-kid-open-a2'))?.props.label).toBe('Helper: Measure the nose')
-  expect((await texts()).at(-1)).toBe('Thinking')
+  expect((await texts()).at(-1)).toBe('Thinking…')
   for (let got = await helperStep.next(); !got.done; got = await helperStep.next()) void got
   // The command ends: it joins the conversation's runs of steps, and nothing of it stays live
   held.get('fit')?.('')

@@ -47,6 +47,7 @@ const ENTRIES_KEPT = 200
 const OPEN_ASK = -1_000_001
 const OPEN_DONE = -1_000_003
 const OPEN_RESULT = -1_000_004
+const OPEN_THOUGHT = -1_000_005
 const OUTPUT_FILL = '#0000003D'
 const RESULT_SHOWN = 600
 const DONE_FOLDED = 8
@@ -2072,7 +2073,9 @@ const partialInput = (json: string): Record<string, unknown> => {
   }
   return found
 }
-type LiveLine = { kind: 'thinking' | 'thought' | 'said' | 'call'; text: string; detail?: string; since?: number; id?: string }
+type LiveLine = { kind: 'thinking' | 'thought' | 'said' | 'call'; text: string; head?: string; detail?: string; since?: number; id?: string }
+const runningWords = (tool: string) =>
+  tool === 'Bash' ? 'Running a command' : tool === 'Read' ? 'Reading a file' : ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool) ? 'Editing a file' : tool === 'Grep' ? 'Searching files' : tool === 'Glob' ? 'Finding files' : tool === 'WebFetch' ? 'Reading a page' : tool === 'WebSearch' ? 'Searching the web' : tool === 'Agent' || tool === 'Task' ? 'Starting a helper' : tool === 'Skill' ? 'Running skill' : 'Using a tool'
 const liveLinesOf = (id: string, shown: Set<string>, at: number): LiveLine[] => {
   const step = liveSteps.get(id)
   const calls = liveCalls.get(id) ?? new Map<string, { tool: string; input: Record<string, unknown>; at: number }>()
@@ -2083,7 +2086,7 @@ const liveLinesOf = (id: string, shown: Set<string>, at: number): LiveLine[] => 
       const after = blocks[n + 1]
       if (block.kind === 'thinking') {
         const isOn = !after && step.endedAt === undefined
-        lines.push(isOn ? { kind: 'thinking', text: 'Thinking', since: block.at, detail: block.text.trim() } : { kind: 'thought', text: `Thought for ${took(Math.max(1000, (after?.at ?? step.endedAt ?? at) - block.at))}` })
+        lines.push(isOn ? { kind: 'thinking', text: 'Thinking…' } : { kind: 'thought', text: `Thought for ${took(Math.max(1000, (after?.at ?? step.endedAt ?? at) - block.at))}`, detail: block.text.trim() })
         return
       }
       if (block.kind === 'text') {
@@ -2094,14 +2097,14 @@ const liveLinesOf = (id: string, shown: Set<string>, at: number): LiveLine[] => 
       const line = stepOf({ tool_use_id: block.id ?? '', tool: block.name ?? '', input: partialInput(block.text) } as ToolUseSummary)
       if (line.kind === 'said') return void (line.text.trim() && lines.push({ kind: 'said', text: line.text }))
       if (isTool(block.name, 'todo')) return
-      lines.push({ kind: 'call', text: line.text || toolName(block.name ?? ''), since: block.at, ...(block.id ? { id: block.id } : {}) })
+      lines.push({ kind: 'call', head: runningWords(block.name ?? ''), text: line.text || toolName(block.name ?? ''), since: block.at, ...(block.id ? { id: block.id } : {}) })
     })
-    if (!blocks.length && step.endedAt === undefined) lines.push({ kind: 'thinking', text: 'Thinking', since: step.from })
+    if (!blocks.length && step.endedAt === undefined) lines.push({ kind: 'thinking', text: 'Thinking…' })
   }
   for (const [callId, call] of calls) {
     const line = stepOf({ tool_use_id: callId, tool: call.tool, input: call.input } as ToolUseSummary)
     if (line.kind !== 'step' || call.tool.startsWith(TOOLS) || call.tool.startsWith(OLD_TOOLS)) continue
-    lines.push({ kind: 'call', text: line.text, since: call.at, id: callId })
+    lines.push({ kind: 'call', head: runningWords(call.tool), text: line.text, since: call.at, id: callId })
   }
   return lines
 }
@@ -14165,35 +14168,44 @@ const panelHooks = (on: On) => {
       const since = (from?: number) => (from !== undefined && at - from >= 3000 ? ` · ${took(at - from)}` : '')
       const kidNow = (kid: Todo) => {
         const last = liveLinesOf(kid.id, new Set(), at).at(-1)
-        if (!last) return helperNow(kid, at, jobsOf(kid).length, Math.max(16, room - 4)) || 'Thinking'
-        return last.kind === 'said' ? `…${oneLine(last.text).slice(-160)}` : `${last.text}${since(last.since)}`
+        if (!last) return helperNow(kid, at, jobsOf(kid).length, Math.max(16, room - 4)) || 'Thinking…'
+        return last.kind === 'said' ? `…${oneLine(last.text).slice(-160)}` : last.kind === 'call' ? `${last.text}${since(last.since)}` : last.text
       }
       return [
-        ...now.map((line, n) =>
-          line.kind === 'said' ? (
-            <Markdown key={`live-${n}`} text={line.text} />
-          ) : (
-            <Box key={`live-${n}`} flexDirection="column" alignItems="flex-start">
-              <Box flexDirection="row" gap={1}>
-                {line.kind === 'call' ? <Text color={LIVE}>●</Text> : null}
-                <Text wrap="wrap" dimColor={line.kind !== 'call'}>{`${line.text}${since(line.since)}`}</Text>
-              </Box>
-              {line.detail ? (
+        ...now.map((line, n) => {
+          if (line.kind === 'said') return <Markdown key={`live-${n}`} text={line.text} />
+          if (line.kind === 'call')
+            return (
+              <Box key={`live-${n}`} flexDirection="column" alignItems="flex-start">
+                <Text dimColor wrap="wrap">{`${line.head ?? 'Using a tool'}${since(line.since)}`}</Text>
                 <Box paddingLeft={2}>
-                  <Text dimColor wrap="wrap">{cut(line.detail.split('\n').slice(-6).join('\n'), 600)}</Text>
+                  <Text wrap="wrap">{line.text}</Text>
                 </Box>
-              ) : null}
+              </Box>
+            )
+          const isOpen = open.includes(OPEN_THOUGHT)
+          if (line.kind === 'thought' && line.detail)
+            return (
+              <Box key={`live-${n}`} flexDirection="column" alignItems="flex-start">
+                <Button key={`live-thought-${presses}`} label={`${isOpen ? '▾' : '▸'} ${line.text}`} plain dimColor onPress={() => fold(OPEN_THOUGHT)} />
+                {isOpen ? (
+                  <Box paddingLeft={2}>
+                    <Text dimColor wrap="wrap">{line.detail}</Text>
+                  </Box>
+                ) : null}
+              </Box>
+            )
+          return (
+            <Box key={`live-${n}`}>
+              <Text dimColor wrap="wrap">{line.text}</Text>
             </Box>
-          ),
-        ),
+          )
+        }),
         ...kids.map(kid => (
           <Box key={`live-kid-${kid.id}`} flexDirection="column" alignItems="flex-start">
-            <Box flexDirection="row" gap={1}>
-              <Text color={LIVE}>●</Text>
-              <Button key={`live-kid-open-${kid.id}-${presses}`} label={`Helper: ${cut(titleOf(kid), Math.max(16, room - 12))}`} plain hover={{ scope: `live-kid-${kid.id}`, underline: true }} onPress={() => openWork($, kid.id)} />
-            </Box>
+            <Button key={`live-kid-open-${kid.id}-${presses}`} label={`Helper: ${cut(titleOf(kid), Math.max(16, room - 12))}`} plain dimColor hover={{ scope: `live-kid-${kid.id}`, underline: true }} onPress={() => openWork($, kid.id)} />
             <Box paddingLeft={2}>
-              <Text dimColor wrap="wrap">{kidNow(kid)}</Text>
+              <Text wrap="wrap">{kidNow(kid)}</Text>
             </Box>
           </Box>
         )),

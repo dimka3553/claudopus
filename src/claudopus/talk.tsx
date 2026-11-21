@@ -273,7 +273,10 @@ const partialInput = (json: string): Record<string, unknown> => {
 // What one agent is doing now, as lines drawn under its conversation, oldest first: the response under way part by part (thinking
 // while it thinks, then how long it thought; its words; each call as it is written), then each call it runs now with how long it
 // has run. `shown` are the tool_use_ids the conversation already holds, which its response no longer repeats
-type LiveLine = { kind: 'thinking' | 'thought' | 'said' | 'call'; text: string; detail?: string; since?: number; id?: string }
+type LiveLine = { kind: 'thinking' | 'thought' | 'said' | 'call'; text: string; head?: string; detail?: string; since?: number; id?: string }
+// What a call is doing, in the app's own chat's words for it while it runs
+const runningWords = (tool: string) =>
+  tool === 'Bash' ? 'Running a command' : tool === 'Read' ? 'Reading a file' : ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool) ? 'Editing a file' : tool === 'Grep' ? 'Searching files' : tool === 'Glob' ? 'Finding files' : tool === 'WebFetch' ? 'Reading a page' : tool === 'WebSearch' ? 'Searching the web' : tool === 'Agent' || tool === 'Task' ? 'Starting a helper' : tool === 'Skill' ? 'Running skill' : 'Using a tool'
 const liveLinesOf = (id: string, shown: Set<string>, at: number): LiveLine[] => {
   const step = liveSteps.get(id)
   const calls = liveCalls.get(id) ?? new Map<string, { tool: string; input: Record<string, unknown>; at: number }>()
@@ -284,7 +287,7 @@ const liveLinesOf = (id: string, shown: Set<string>, at: number): LiveLine[] => 
       const after = blocks[n + 1]
       if (block.kind === 'thinking') {
         const isOn = !after && step.endedAt === undefined
-        lines.push(isOn ? { kind: 'thinking', text: 'Thinking', since: block.at, detail: block.text.trim() } : { kind: 'thought', text: `Thought for ${took(Math.max(1000, (after?.at ?? step.endedAt ?? at) - block.at))}` })
+        lines.push(isOn ? { kind: 'thinking', text: 'Thinking…' } : { kind: 'thought', text: `Thought for ${took(Math.max(1000, (after?.at ?? step.endedAt ?? at) - block.at))}`, detail: block.text.trim() })
         return
       }
       if (block.kind === 'text') {
@@ -295,16 +298,16 @@ const liveLinesOf = (id: string, shown: Set<string>, at: number): LiveLine[] => 
       const line = stepOf({ tool_use_id: block.id ?? '', tool: block.name ?? '', input: partialInput(block.text) } as ToolUseSummary)
       if (line.kind === 'said') return void (line.text.trim() && lines.push({ kind: 'said', text: line.text }))
       if (isTool(block.name, 'todo')) return
-      lines.push({ kind: 'call', text: line.text || toolName(block.name ?? ''), since: block.at, ...(block.id ? { id: block.id } : {}) })
+      lines.push({ kind: 'call', head: runningWords(block.name ?? ''), text: line.text || toolName(block.name ?? ''), since: block.at, ...(block.id ? { id: block.id } : {}) })
     })
     // Asked for, and nothing back yet: it thinks
-    if (!blocks.length && step.endedAt === undefined) lines.push({ kind: 'thinking', text: 'Thinking', since: step.from })
+    if (!blocks.length && step.endedAt === undefined) lines.push({ kind: 'thinking', text: 'Thinking…' })
   }
   for (const [callId, call] of calls) {
     const line = stepOf({ tool_use_id: callId, tool: call.tool, input: call.input } as ToolUseSummary)
     // (the mod's own tools say what they say in the conversation, and end at once)
     if (line.kind !== 'step' || call.tool.startsWith(TOOLS) || call.tool.startsWith(OLD_TOOLS)) continue
-    lines.push({ kind: 'call', text: line.text, since: call.at, id: callId })
+    lines.push({ kind: 'call', head: runningWords(call.tool), text: line.text, since: call.at, id: callId })
   }
   return lines
 }
