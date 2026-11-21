@@ -202,6 +202,7 @@ const workHooks = (on: On) => {
       const isWatched = e.agentId !== undefined && Boolean(dir)
       if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool, e as never).catch(err => log($, `call not followed: ${String(err)}`))
       if (isWatched) callStarted(e.tool_use_id, await $.clock.now())
+      if (isWatched) callBegins(e.agentId ?? '', e.tool_use_id, e.tool, e as never, await $.clock.now())
       let r: Awaited<ReturnType<typeof raw>> | undefined
       // The person's own files are compared with what they are known to hold as every call begins, and as a command ends: a change
       // is put back, and the work is told of what its command changed
@@ -223,6 +224,7 @@ const workHooks = (on: On) => {
       } finally {
         if (writes) personWriting.delete(writes)
         if (isPersonWatched && !isPersonEnded) await personCheck($, e).catch(() => undefined)
+        if (isWatched) callEnds(e.agentId ?? '', e.tool_use_id)
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool, e as never)
@@ -712,7 +714,9 @@ const workHooks = (on: On) => {
     // A pick the engine has since passed is its family's newest
     const pick = chosen ? (rightModel(chosen) ?? chosen) : undefined
     const to = pick && !isMovedByApp && modelName(pick) !== modelName(e.model) ? pick : instead
-    const r = yield* next(to ? { ...e, model: to } : e)
+    // A task's or helper's response is followed as it streams, for its Details (liveChunk): each piece passes on as it came
+    const stream = next(to ? { ...e, model: to } : e)
+    const r = yield* (id === undefined || !dir ? stream : followStream($, id, stream))
     const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0
     const model = (r.usage as { model?: string } | undefined)?.model
     if (model) seeModel(model)

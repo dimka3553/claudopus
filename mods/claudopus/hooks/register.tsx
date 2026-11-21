@@ -47,6 +47,7 @@ const ENTRIES_KEPT = 200
 const OPEN_ASK = -1_000_001
 const OPEN_DONE = -1_000_003
 const OPEN_RESULT = -1_000_004
+const OPEN_THOUGHT = -1_000_005
 const OUTPUT_FILL = '#0000003D'
 const RESULT_SHOWN = 600
 const DONE_FOLDED = 8
@@ -124,8 +125,8 @@ const DONT_GIVE = "Don't give it"
 const LEAVES_OPEN = /^(?:no,? )?(?:not (?:now|yet)|later|maybe later|skip|skip it|cancel|dismiss|close)$/
 const ANSWER_IN_WORDS = 'Answer in words'
 const isGateActing = (gate: { talk?: { by: string }[] }) => gate.talk?.at(-1)?.by === 'you'
-const needsPerson = (one: { id?: string; status: string; chat?: unknown; ask?: { at?: number; replied?: { isWaking?: boolean } }; admins?: { talk?: { by: string }[] }[] }) =>
-  Boolean(one.admins?.some(gate => !isGateActing(gate))) || (Boolean(one.ask) && !isActingOnReply(one)) || (!one.chat && Boolean(one.id) && (waiting.some(p => p.card === one.id) || boxes.some(box => box.card === one.id)))
+const needsPerson = (one: { id?: string; status: string; chat?: unknown; ask?: { at?: number; replied?: { isWaking?: boolean } }; keyAsk?: unknown; admins?: { talk?: { by: string }[] }[] }) =>
+  Boolean(one.admins?.some(gate => !isGateActing(gate))) || (Boolean(one.ask) && !isActingOnReply(one)) || Boolean(one.keyAsk) || (!one.chat && Boolean(one.id) && (waiting.some(p => p.card === one.id) || boxes.some(box => box.card === one.id)))
 const lingerSet = new Set<string>()
 const FOLLOW_EVERY = 20_000
 const WORKING = ['pending', 'running', 'waiting']
@@ -872,7 +873,7 @@ const NO_MEMORY =
 const NO_MEMORY_BASH = () =>
   named("Claude changes {name}'s own settings and texts (config.json, the rules and roles in the memory folder, a repo's release.local) only with the Edit or Write tool, never with a command, so the change shows on the task's card and waits for {name} to press. To read one, use the Read tool, or cat or jq.")
 const NO_BOXES =
-  'Only the password and key runners use their boxes: Claude never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner, and for a key only through the secret runner the task rules name.'
+  'Only the password and key runners use their boxes: Claude never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner, and for a key only through the secret runner the task rules name or the ask tool\'s `key`.'
 const NO_PUSH = 'Claude never pushes or merges to main itself, so two tasks never release at once: commit on your own branch and run the release runner the task rules name, from your worktree.'
 const SECRETS_MS = 60_000
 const workHead = () => `What follows is what Claudopus tells Claude in every task started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`
@@ -1850,6 +1851,7 @@ const holdDone = (before: Todo[], next: Todo[]) => {
 type Line = {
   kind: 'told' | 'steer' | 'said' | 'step' | 'model'
   text: string
+  id?: string
   isError?: boolean
   isUse?: boolean
   tool?: string
@@ -1900,6 +1902,7 @@ const stepOf = (use: ToolUseSummary): Line => {
   const { pictures, seen } = picturesOf(use)
   return {
     kind: 'step',
+    ...(use.tool_use_id ? { id: use.tool_use_id } : {}),
     text: text.length > STEP_CHARS ? `${text.slice(0, STEP_CHARS)} …` : text,
     isError: use.isError,
     isUse: true,
@@ -1992,6 +1995,129 @@ const newest = (lines: Line[], squeeze = 0) => {
   const from = lines.findLastIndex((line, i) => i < lines.length - kept || (room -= line.text.length) < 0)
   return lines.slice(from + 1)
 }
+
+
+type LiveBlock = { kind: 'thinking' | 'text' | 'tool'; index: number; text: string; at: number; id?: string; name?: string }
+type LiveStep = { from: number; blocks: LiveBlock[]; endedAt?: number; endedMark?: number }
+const liveSteps = new Map<string, LiveStep>()
+const liveCalls = new Map<string, Map<string, { tool: string; input: Record<string, unknown>; at: number }>>()
+const talkMarks = new Map<string, number>()
+const LIVE_KEPT = 60
+const LIVE_THINKING = 1_200
+const talkMoved = (id: string) => void talkMarks.set(id, (talkMarks.get(id) ?? 0) + 1)
+const liveBegun = (id: string, from: number) => {
+  liveSteps.delete(id)
+  liveSteps.set(id, { from, blocks: [] })
+  while (liveSteps.size > LIVE_KEPT) liveSteps.delete(liveSteps.keys().next().value ?? '')
+  talkMoved(id)
+}
+const liveChunk = (id: string, chunk: { kind: string; index?: number; text?: string; id?: string; name?: string; json?: string }, at: number) => {
+  const step = liveSteps.get(id)
+  if (!step || step.endedAt !== undefined || typeof chunk.index !== 'number') return
+  const kind = chunk.kind === 'input' ? 'tool' : chunk.kind
+  if (kind !== 'thinking' && kind !== 'text' && kind !== 'tool') return
+  let block = step.blocks.find(one => one.index === chunk.index && one.kind === kind)
+  if (!block) step.blocks.push((block = { kind, index: chunk.index, text: '', at }))
+  if (chunk.kind === 'tool') Object.assign(block, { id: chunk.id, name: chunk.name })
+  const more = chunk.kind === 'input' ? (chunk.json ?? '') : (chunk.text ?? '')
+  block.text = kind === 'thinking' ? (block.text + more).slice(-LIVE_THINKING) : (block.text + more).slice(0, SAID_CHARS * 2)
+}
+const liveEnded = (id: string, at: number) => {
+  const step = liveSteps.get(id)
+  if (step && step.endedAt === undefined) Object.assign(step, { endedAt: at, endedMark: talkMarks.get(id) ?? 0 })
+}
+const liveCaughtUp = (id: string, mark: number, from: number) => {
+  const step = liveSteps.get(id)
+  if (step?.endedMark !== undefined && (mark > step.endedMark || from >= (step.endedAt ?? Infinity))) liveSteps.delete(id)
+}
+const callBegins = (agent: string, id: string, tool: string, input: Record<string, unknown>, at: number) => {
+  const calls = liveCalls.get(agent) ?? new Map()
+  calls.set(id, { tool, input, at })
+  liveCalls.set(agent, calls)
+  talkMoved(agent)
+}
+const callEnds = (agent: string, id: string) => {
+  const calls = liveCalls.get(agent)
+  calls?.delete(id)
+  if (calls && !calls.size) liveCalls.delete(agent)
+  talkMoved(agent)
+}
+async function* followStream<C, R>($: EngineInterface, id: string, stream: AsyncIterator<C, R>): AsyncGenerator<C, R> {
+  liveBegun(id, await $.clock.now())
+  let isDone = false
+  try {
+    for (;;) {
+      const got = await stream.next()
+      if (got.done) return ((isDone = true), got.value)
+      liveChunk(id, got.value as never, await $.clock.now())
+      yield got.value
+    }
+  } finally {
+    liveEnded(id, await $.clock.now())
+    if (!isDone) await stream.return?.(undefined as never)
+  }
+}
+const partialInput = (json: string): Record<string, unknown> => {
+  try {
+    const whole = JSON.parse(json) as unknown
+    if (whole && typeof whole === 'object') return whole as Record<string, unknown>
+  } catch {
+  }
+  const found: Record<string, unknown> = {}
+  for (const [, key, value = ''] of json.matchAll(/"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)/g)) {
+    try {
+      found[key ?? ''] = JSON.parse(`"${value.replace(/\\(u[0-9a-fA-F]{0,3})?$/, '')}"`)
+    } catch {
+      found[key ?? ''] = value
+    }
+  }
+  return found
+}
+type LiveLine = { kind: 'thinking' | 'thought' | 'said' | 'call'; text: string; head?: string; detail?: string; since?: number; id?: string }
+const runningWords = (tool: string) =>
+  tool === 'Bash' ? 'Running a command' : tool === 'Read' ? 'Reading a file' : ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool) ? 'Editing a file' : tool === 'Grep' ? 'Searching files' : tool === 'Glob' ? 'Finding files' : tool === 'WebFetch' ? 'Reading a page' : tool === 'WebSearch' ? 'Searching the web' : tool === 'Agent' || tool === 'Task' ? 'Starting a helper' : tool === 'Skill' ? 'Running skill' : 'Using a tool'
+const liveLinesOf = (id: string, shown: Set<string>, at: number): LiveLine[] => {
+  const step = liveSteps.get(id)
+  const calls = liveCalls.get(id) ?? new Map<string, { tool: string; input: Record<string, unknown>; at: number }>()
+  const lines: LiveLine[] = []
+  if (step) {
+    const blocks = [...step.blocks].sort((a, b) => a.index - b.index)
+    blocks.forEach((block, n) => {
+      const after = blocks[n + 1]
+      if (block.kind === 'thinking') {
+        const isOn = !after && step.endedAt === undefined
+        lines.push(isOn ? { kind: 'thinking', text: 'Thinking…' } : { kind: 'thought', text: `Thought for ${took(Math.max(1000, (after?.at ?? step.endedAt ?? at) - block.at))}`, detail: block.text.trim() })
+        return
+      }
+      if (block.kind === 'text') {
+        if (block.text.trim()) lines.push({ kind: 'said', text: whole(block.text.trimEnd()) })
+        return
+      }
+      if (block.id && (calls.has(block.id) || shown.has(block.id))) return
+      const line = stepOf({ tool_use_id: block.id ?? '', tool: block.name ?? '', input: partialInput(block.text) } as ToolUseSummary)
+      if (line.kind === 'said') return void (line.text.trim() && lines.push({ kind: 'said', text: line.text }))
+      if (isTool(block.name, 'todo')) return
+      lines.push({ kind: 'call', head: runningWords(block.name ?? ''), text: line.text || toolName(block.name ?? ''), since: block.at, ...(block.id ? { id: block.id } : {}) })
+    })
+    if (!blocks.length && step.endedAt === undefined) lines.push({ kind: 'thinking', text: 'Thinking…' })
+  }
+  for (const [callId, call] of calls) {
+    const line = stepOf({ tool_use_id: callId, tool: call.tool, input: call.input } as ToolUseSummary)
+    if (line.kind !== 'step' || call.tool.startsWith(TOOLS) || call.tool.startsWith(OLD_TOOLS)) continue
+    lines.push({ kind: 'call', head: runningWords(call.tool), text: line.text, since: call.at, id: callId })
+  }
+  return lines
+}
+const LIVE_STEP_TICK = 5_000
+const liveSign = (ids: string[], at: number) =>
+  JSON.stringify(
+    ids.map(id => {
+      const step = liveSteps.get(id)
+      const isOn = (step && step.endedAt === undefined) || liveCalls.has(id)
+      return [talkMarks.get(id) ?? 0, step ? [step.endedAt ?? 0, step.blocks.map(one => [one.kind, one.text.length])] : 0, [...(liveCalls.get(id)?.keys() ?? [])], isOn ? Math.floor(at / LIVE_STEP_TICK) : 0]
+    }),
+  )
+const paneWork = new Map<string, string>()
 
 const WORK_PANE = 'work-'
 const workPaneOf = (id: string) => `${WORK_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)
@@ -2425,6 +2551,14 @@ const front = async ($: EngineInterface, id: string, title: string) => {
   await frontAsked($, id, title)
 }
 const runTabMove = ($: EngineInterface, move: TabMove) => (move.kind === 'front' ? frontAsked($, move.id, move.title) : backAsked($, move.id))
+const listFirst = async ($: EngineInterface, front?: string) => {
+  const panes = await $.ui.panes().catch(() => [])
+  if (panes.findIndex(pane => pane.id === LIST) <= 0) return
+  for (const pane of panes.filter(one => one.id !== LIST)) {
+    await $.ui.close({ id: pane.id }).catch(() => undefined)
+    await (pane.id === front ? $.ui.open({ id: pane.id, title: pane.title, focus: true }) : $.ui.open({ id: pane.id, title: pane.title })).catch(err => log($, `${pane.id} not opened again: ${String(err)}`))
+  }
+}
 const frontAsked = async ($: EngineInterface, id: string, title: string) => {
   const shown = async () => Boolean((await $.ui.panes()).find(pane => pane.id === id)?.isShown)
   const before = await $.ui.panes()
@@ -2454,6 +2588,7 @@ const frontAsked = async ($: EngineInterface, id: string, title: string) => {
   const was = (await $.ui.panes()).find(pane => pane.id === id)
   if (was && !was.isShown) await $.ui.close({ id }).catch(() => undefined)
   const opened = await $.ui.open({ id, title, focus: true })
+  await listFirst($, id)
   void watchTabs($, [id], 'it opened').catch(() => undefined)
   if (isRunFromAfar) await log($, `front ${id}: ${holding.length} let go first; opened ${opened.isPlaced ? 'drawn' : `undrawn (${opened.reason})`}; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
   if (!(await shown()))
@@ -3676,7 +3811,8 @@ const loadWork = async ($: EngineInterface, id: string) => {
   try {
     const one = (await read($, todos)).find(card => card.id === id)
     if (!one) return
-    const key = [one.id, one.steps, one.tokens, one.entries.length, one.entries.filter(entry => entry.readAt).length, one.status].join(':')
+    const mark = talkMarks.get(id) ?? 0
+    const key = [one.id, one.steps, one.tokens, one.entries.length, one.entries.filter(entry => entry.readAt).length, one.status, mark].join(':')
     const kept = await read($, reports)
     const shotsKey = `${key}:${kept.length}`
     const now = await $.clock.now()
@@ -3685,6 +3821,7 @@ const loadWork = async ($: EngineInterface, id: string) => {
       during('read a task for its Details')
       const rows = await $.session.messages({ agentId: id }).catch(() => undefined)
       talks.set(id, { key, lines: Array.isArray(rows) ? withSteers(talkOf(rows), one.entries) : undefined, at: now })
+      if (Array.isArray(rows)) liveCaughtUp(id, mark, now)
       isChanged = true
     }
     const lines = talks.get(id)?.lines
@@ -5892,6 +6029,7 @@ const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: num
   if (made) (madeAgain.set(key, { fresh, at: made.at }), void drawFresh($))
 }
 let calmAt = 0
+let liveDrawn = ''
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
 const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   const now = await $.clock.now()
@@ -5905,6 +6043,13 @@ const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   for (const [path, text] of isHeld ? [] : drawnFiles) {
     const now = await readOr($, path)
     if (now !== text) (drawnFiles.set(path, now), (isNew = true))
+  }
+  if (!isHeld && paneWork.size) {
+    const shownPanes = new Set((await $.ui.panes().catch(() => [])).filter(pane => pane.isShown !== false).map(pane => pane.id))
+    for (const pane of [...paneWork.keys()]) if (!shownPanes.has(pane)) paneWork.delete(pane)
+    const cards = paneWork.size ? await read($, todos) : []
+    const live = liveSign([...paneWork.values()].flatMap(id => [id, ...cards.filter(kid => kid.parentId === id).map(kid => kid.id)]), now)
+    if (live !== liveDrawn) ((liveDrawn = live), recordEvent($, 'redraw-live'), $.ui.invalidate('ui.render'))
   }
   if (isNew) return void ((list.side = side), (calmBumps += 1), drawAgain($), (list.side = sideSign()))
   if (!(isMoving || outputMoved) || isBoxHeld(now) || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
@@ -7248,7 +7393,7 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
 }
 
 
-type Asked = { id: string; kind: 'password' | 'key'; name?: string; host?: string; text: string; details: string; at: number; chat?: string; command?: string; key?: string; call?: string; agent?: string; card?: string }
+type Asked = { id: string; kind: 'password' | 'key'; name?: string; host?: string; text: string; details: string; at: number; chat?: string; command?: string; key?: string; call?: string; agent?: string; card?: string; isOwn?: boolean }
 const runnerCalls = new Map<string, { command: string; at: number; until: number; agent?: string }>()
 const runnerBegun = (id: string, command: string, at: number, agent?: string) => void runnerCalls.set(id, { command, at, until: Infinity, ...(agent ? { agent } : {}) })
 const runnerEnded = (id: string, isBackground: boolean, at: number) => {
@@ -7330,7 +7475,7 @@ const lookBoxes = async ($: EngineInterface) => {
   const now = await $.clock.now()
   const found: Asked[] = []
   const entries = await $.fs.list(boxesDir()).catch(() => [])
-  const cards = entries.length ? await read($, todos) : []
+  const cards = await read($, todos)
   for (const entry of entries) {
     const marked = entry.name.replace(/\.told$/, '')
     const answered = entry.name.replace(/\.reply$/, '')
@@ -7354,16 +7499,21 @@ const lookBoxes = async ($: EngineInterface) => {
     } catch {
     }
   }
+  for (const card of cards) {
+    const ask = card.keyAsk
+    const id = ask ? ownBoxId(card.id, ask.at) : ''
+    if (ask && !card.chat && !boxSent.has(id)) found.push({ id, kind: 'key', name: ask.name, text: ask.text, details: ask.details, at: ask.at, chat: boxChat, agent: ask.from, card: card.id, isOwn: true })
+  }
   found.sort((a, b) => a.at - b.at)
   for (const one of found) {
     if (boxTold.has(one.id)) continue
     if (one.chat !== undefined && one.chat !== boxChat && now - one.at < BOX_GRACE) continue
     boxTold.add(one.id)
-    const mark = await $.process.run(['sh', '-c', 'set -C; : > "$1"', 'sh', `${boxesDir()}/${one.id}.told`]).catch(() => ({ exitCode: 1 }))
+    const mark = one.isOwn ? { exitCode: 0 } : await $.process.run(['sh', '-c', 'set -C; : > "$1"', 'sh', `${boxesDir()}/${one.id}.told`]).catch(() => ({ exitCode: 1 }))
     if (mark.exitCode !== 0) continue
     const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, focus: true }).catch(err => (log($, `panel not opened for a box: ${String(err)}`), undefined))
     if (!opened?.isPlaced) {
-      await $.process.run(['rm', '-f', `${boxesDir()}/${one.id}.told`]).catch(() => undefined)
+      if (!one.isOwn) await $.process.run(['rm', '-f', `${boxesDir()}/${one.id}.told`]).catch(() => undefined)
       await log($, `box ${one.id} given back: the panel is not drawn here${opened && !opened.isPlaced ? ` (${opened.reason})` : ''}`)
       continue
     }
@@ -7395,6 +7545,8 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
     return void drawAgain($)
   }
+  const own = boxes.find(other => other.id === id && other.isOwn)
+  if (own) return void (await keepOwnKey($, own, value))
   const request = `${boxesDir()}/${id}.json`
   if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'the command had stopped waiting, so nothing was saved'))
   const asked = boxes.find(other => other.id === id)
@@ -7432,10 +7584,51 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   }
   drawAgain($)
 }
+const ownBoxId = (card: string, at: number) => `key-${card}-${at}`
+const SHORTEST_KEY = 4
+const keepOwnKey = async ($: EngineInterface, one: Asked, value: string) => {
+  const id = one.id
+  const name = one.name ?? ''
+  boxPresses += 1
+  boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
+  if (value.length < SHORTEST_KEY) return void (boxSaid.set(id, `That was shorter than ${SHORTEST_KEY} characters. Paste the whole key.`), drawAgain($))
+  const r = await $.process.run([`${$.plugin.root}/bin/keyring`, 'set', 'claudopus-secret', name, `Claudopus: ${name}`], { stdin: `${value}\n`, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
+  if (r.exitCode !== 0) {
+    boxSaid.set(id, `It couldn't be saved in ${keptWhere()}. Try again.`)
+    await log($, `key ${name} not kept from its box: the keychain ended ${r.exitCode}`)
+    return void drawAgain($)
+  }
+  boxSent.add(id)
+  boxSaid.delete(id)
+  boxHeldReply.delete(id)
+  closeBarOf(id)
+  boxes = boxes.filter(other => other.id !== id)
+  pressedLine($, one.card ?? '', '', '', `You gave ${name}`)
+  drawAgain($)
+  await log($, `key ${name} saved from the box on ${one.card}`)
+  await refreshKeys($).catch(err => log($, `keys not made again: ${String(err)}`))
+  await ownKeyDone($, one, named(KEY_GIVEN($.plugin.root, name)), `You gave ${name}`)
+}
+const ownKeyDone = async ($: EngineInterface, one: Asked, text: string, label: string) => {
+  const card = one.card ?? ''
+  await changeTodos($, list => list.map(other => (other.id === card && other.keyAsk && ownBoxId(card, other.keyAsk.at) === one.id ? { ...other, keyAsk: undefined } : other)))
+  await toTask($, card, one.agent ?? card, text, label, one.text).catch(err => log($, `task not told of its key: ${String(err)}`))
+}
+const KEY_GIVEN = (root: string, name: string) => `{Name} pasted ${name} in its box on your card, and it is saved in Claudopus's keychain. Use it now through \`${root}/bin/secret ${name} here '<command using $${name}>'\`.`
+const KEY_NOT_GIVEN = (name: string) => `{Name} pressed Don't give it on your question for ${name}, so it was not given.`
+const KEY_ANSWERED = (name: string, said: string) => `{Name} answered your question for ${name} in their own words instead of giving it: ${said}`
 const cancelBox = async ($: EngineInterface, id: string, said = '') => {
   boxSent.add(id)
   barKeyTyped.delete(id)
   const one = boxes.find(other => other.id === id)
+  if (one?.isOwn) {
+    boxes = boxes.filter(other => other.id !== id)
+    closeBarOf(id)
+    boxHeldReply.delete(id)
+    pressedLine($, one.card ?? '', DONT_GIVE, said)
+    drawAgain($)
+    return void (await ownKeyDone($, one, named(KEY_NOT_GIVEN(one.name ?? '')), DONT_GIVE))
+  }
   boxes = boxes.filter(other => other.id !== id)
   closeBarOf(id)
   boxHeldReply.delete(id)
@@ -7480,6 +7673,15 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
     return void drawAgain($)
   }
   boxHeldReply.delete(id)
+  if (one.isOwn) {
+    boxSent.add(id)
+    boxSaid.delete(id)
+    boxes = boxes.filter(other => other.id !== id)
+    closeBarOf(id)
+    pressedLine($, one.card ?? '', '', '', `You answered “${cut(oneLine(said), 60)}”`)
+    drawAgain($)
+    return void (await ownKeyDone($, one, named(KEY_ANSWERED(one.name ?? '', said)), `You answered “${cut(oneLine(said), 60)}”`))
+  }
   const request = `${boxesDir()}/${id}.json`
   if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, "the command had stopped waiting, so your answer wasn't sent"))
   const name = boxNameOf(one)
@@ -9652,7 +9854,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'ask',
       description: named(
-        "For background tasks: when a step needs {name}'s own hands or go-ahead now (a code to paste, a box to fill, a key or button to press, an approval), puts your question at the top of the panel on your card and in the chat as a notice; {Name} answers with one of the buttons you give in `choices`, or in their own words. {Name} sees it before your report, so it must carry everything needed to decide and never point at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile continue with what does not depend on it, or end your step saying what you are waiting for. Ask again if the answer leaves something open; call it with empty `text` only once you have seen it done. Never open a terminal for a command yourself.",
+        "For background tasks: when a step needs {name}'s own hands or go-ahead now (a code to paste, a key to give, a button to press, an approval; for a key give `key` and `from`, and its box shows with the question), puts your question at the top of the panel on your card and in the chat as a notice; {Name} answers with one of the buttons you give in `choices`, or in their own words. {Name} sees it before your report, so it must carry everything needed to decide and never point at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile continue with what does not depend on it, or end your step saying what you are waiting for. Ask again if the answer leaves something open; call it with empty `text` only once you have seen it done. Never open a terminal for a command yourself.",
       ),
       inputSchema: {
         type: 'object',
@@ -9664,6 +9866,8 @@ const chatHooks = (on: On) => {
           command: { type: 'string', description: 'A command only they can run, never one you can run yourself: one line, whole, shown with a Copy button' },
           cwd: { type: 'string', description: 'The full path of the folder the command runs in, when it has relative paths' },
           pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the pictures the question is about, shown with it on the card and in the chat' },
+          key: { type: 'string', description: named("Only when you ask {name} for a key, token or password a command of yours needs: the name it is saved under, such as SENTRY_READ_TOKEN. The box to paste it into shows with your question on your card at once; a saved key of that name is replaced, one of another name stays. Give no `choices` with it") },
+          from: { type: 'string', description: named('With `key`: where {name} gets it, the full link of the page and what to press there, shown in the box') },
           release: { type: 'string', description: 'Only when you ask for the go-ahead to release, with the single choice Release it: the full path of your worktree. That press reaches you as the answer and allows your next run of the release runner from that folder, once, with no second question' },
         },
         required: ['text'],
@@ -9870,6 +10074,7 @@ const chatHooks = (on: On) => {
     if (!dir) return done
     if (e.agentId !== undefined) {
       const id = e.agentId
+      talkMoved(id)
       turnEnding.add(id)
       try {
         return await agentTurnEnded($, e, id, done)
@@ -11088,7 +11293,17 @@ const KEY_KEPT = (root: string, one: KeyEntry, asked: string, again: string) =>
     `Not asked: {name} gave this key already. ${asked === one.name ? one.name : `"${asked}" is ${one.name}`}, kept in ${STORE_NAMES[one.store]}${one.seen ? ` and last seen there ${dayOf(one.seen)}` : ''}. Use it through ${routeOf(root, one)}. ${again} The list of keys is ${dir}/${KEYS_FILE}.`,
   )
 const AGAIN_IN = (one: KeyEntry, field: string) => `If it no longer works, ask again with its name, ${one.name}, written as it is here, and why it does not do, in \`${field}\`.`
-const AGAIN_FORGET = (root: string, one: KeyEntry) => `If it no longer works, take it out first with \`${root}/bin/secret ${one.name} --forget\`; the next run asks for it.`
+const AGAIN_BOX = (one: KeyEntry, asked = one.name) =>
+  `If it does not do, ask {name} for the key with \`ask\`, \`key\` set to ${asked === one.name ? `${one.name} to replace it, or to a new name for a second key` : `${asked} for a second key beside it, or to ${one.name} to replace it`}, and \`from\` saying where {name} gets it: the box to paste it in shows on your card with your question at once.`
+const KEY_PASTE = /\b(?:paste|type|enter|put|copy|give|send|add|make|create|generate)\b/i
+const KEY_WORD = /\b(?:(?:api|access|secret|auth|personal) )?(?:key|token|secret|password|credentials?|pat)s?\b/i
+const ASK_KEY_FIELD =
+  'Not shown: a question that asks {name} for a key has no box to paste it in. Ask again with `key` set to the name the key is saved under (such as SENTRY_READ_TOKEN) and `from` saying where {name} gets it (the full link of the page and what to press there): the box shows with your question on your card at once, and replaces a saved key of that name. A password for an admin command is asked by the admin runner itself.'
+const KEY_ASK_SHOWN = (root: string, name: string, isSaved: boolean, beside?: string) =>
+  `Shown on your card as the box for ${name}: your question, what it is about, where to get it${isSaved ? `, that it replaces the ${name} saved now` : beside ? `, and that ${beside} stays saved beside it` : ''}, with Paste it, Don't give it and Answer in words. {Name} pastes it there; it never passes through you or the chat. Once it is saved you are told, and then you run your command through \`${root}/bin/secret ${name} here '<command using $${name}>'\`. Never wait for it with a command or a timer: with nothing else to do, end your step.`
+const isKeyName = (name: string) => /^[A-Za-z_][A-Za-z0-9_]{0,199}$/.test(name) && !/^(?:PATH|IFS|HOME|USER|SHELL|ENV|BASH_ENV|PS4|SHELLOPTS|BASHOPTS|CDPATH|TMPDIR|LD_.*|DYLD_.*|CLAUDOPUS_.*)$/.test(name)
+const keyAskDetails = (why: string, from: string, name: string, same?: KeyEntry, like?: KeyEntry) =>
+  [why, `Where to get it:\n${from}`, same ? `It replaces the ${name} saved now.` : like ? `${like.name} stays saved as it is: this is a second key.` : '', `It goes only into ${keptWhere()}.`].filter(Boolean).join('\n\n')
 const namesWhole = (text: string, name: string) => new RegExp(`(?:^|[^A-Za-z0-9_-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^A-Za-z0-9_-])`).test(text)
 const askedIn = (text: string, listed: KeyEntry[]) => {
   const flat = ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `
@@ -11110,12 +11325,14 @@ const keyAsked = async ($: EngineInterface, e: { tool: string }): Promise<string
     return one && !namesWhole(String(input.for ?? ''), one.name) ? KEY_KEPT(root, one, name, AGAIN_IN(one, 'for')) : ''
   }
   if (e.tool === `${TOOLS}ask`) {
+    if (typeof (input as { key?: unknown }).key === 'string' && String((input as { key?: unknown }).key).trim()) return ''
     const said = `${String(input.text ?? '')} ${String(input.copy ?? '')}`
     const about = String(input.details ?? '')
     if (!/\b(?:key|token|password|secret|credentials?|login)s?\b/i.test(said) && !/[A-Z0-9]_[A-Z0-9]/.test(said)) return ''
     const fresh = await listed()
     const one = askedIn(said, fresh) ?? (/\b(?:paste|type|enter|give|send|add|put)\b/i.test(said) ? askedIn(about, fresh) : undefined)
-    return one && !namesWhole(about, one.name) ? KEY_KEPT(root, one, one.name, AGAIN_IN(one, 'details')) : ''
+    if (one && !namesWhole(about, one.name)) return KEY_KEPT(root, one, one.name, AGAIN_BOX(one))
+    return KEY_PASTE.test(said) && (KEY_WORD.test(said) || /[A-Z0-9]_[A-Z0-9]/.test(said)) && !input.copy && !(input as { command?: unknown }).command ? named(ASK_KEY_FIELD) : ''
   }
   if (e.tool !== 'Bash') return ''
   const command = String(input.command ?? '')
@@ -11127,10 +11344,10 @@ const keyAsked = async ($: EngineInterface, e: { tool: string }): Promise<string
       if (run[2] === '--forget') continue
       for (const name of (run[1] ?? '').split(',').filter(Boolean)) {
         const kept = mine.find(entry => entry.name === name)
-        if (kept && run[2] === '--add') return KEY_KEPT(root, kept, name, AGAIN_FORGET(root, kept))
+        if (kept && run[2] === '--add') return KEY_KEPT(root, kept, name, AGAIN_BOX(kept))
         if (kept) continue
         const one = mine.find(entry => sameKey(entry.name, name))
-        if (one) return KEY_KEPT(root, one, name, AGAIN_FORGET(root, one))
+        if (one) return KEY_KEPT(root, one, name, AGAIN_BOX(one, name))
       }
     }
   }
@@ -11556,6 +11773,7 @@ const workHooks = (on: On) => {
       const isWatched = e.agentId !== undefined && Boolean(dir)
       if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool, e as never).catch(err => log($, `call not followed: ${String(err)}`))
       if (isWatched) callStarted(e.tool_use_id, await $.clock.now())
+      if (isWatched) callBegins(e.agentId ?? '', e.tool_use_id, e.tool, e as never, await $.clock.now())
       let r: Awaited<ReturnType<typeof raw>> | undefined
       const isPersonWatched = e.tool === 'Bash' && Boolean(dir)
       const writes = FILE_TOOLS.includes(e.tool) ? personNamed(e) : ''
@@ -11575,6 +11793,7 @@ const workHooks = (on: On) => {
       } finally {
         if (writes) personWriting.delete(writes)
         if (isPersonWatched && !isPersonEnded) await personCheck($, e).catch(() => undefined)
+        if (isWatched) callEnds(e.agentId ?? '', e.tool_use_id)
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool, e as never)
@@ -11966,7 +12185,8 @@ const workHooks = (on: On) => {
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
     const pick = chosen ? (rightModel(chosen) ?? chosen) : undefined
     const to = pick && !isMovedByApp && modelName(pick) !== modelName(e.model) ? pick : instead
-    const r = yield* next(to ? { ...e, model: to } : e)
+    const stream = next(to ? { ...e, model: to } : e)
+    const r = yield* (id === undefined || !dir ? stream : followStream($, id, stream))
     const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0
     const model = (r.usage as { model?: string } | undefined)?.model
     if (model) seeModel(model)
@@ -12145,13 +12365,31 @@ const toolHooks = (on: On) => {
   })
 
   on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
-    const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown; release?: unknown }
+    const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown; release?: unknown; key?: unknown; from?: unknown }
     if (e.agentId === undefined) return { result: `Only a background task asks through the panel; the chat asks ${who()} in its reply.` }
     const asked = oneLine(typeof input.text === 'string' ? input.text : '')
     const text = asked.length > ASK_TEXT ? cut(asked, ASK_TEXT) : asked
     const given1 = (typeof input.details === 'string' ? input.details : '').replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
     const whole = [text === asked ? '' : asked, given1].filter(Boolean).join('\n\n')
     const details = whole.length > ASK_DETAILS ? cut(whole, ASK_DETAILS) : whole
+    const keyName = typeof input.key === 'string' ? input.key.trim() : ''
+    if (keyName && asked) {
+      if (!isKeyName(keyName)) return { result: 'Not shown: `key` is the name the key is saved under: letters, digits and _, starting with a letter, such as SENTRY_READ_TOKEN.' }
+      const from = (typeof input.from === 'string' ? input.from : '').replace(/\r\n?/g, '\n').trim()
+      if (!from) return { result: named('Not shown: say in `from` where {name} gets the key: the full link of the page and what to press there, so the box can tell them.') }
+      const saved = (await refreshKeys($).catch(() => keys)).entries.filter(one => one.store === 'claudopus' && one.isPresent)
+      const same = saved.find(one => one.name === keyName)
+      const like = same ? undefined : saved.find(one => sameKey(one.name, keyName))
+      const about = cut(keyAskDetails([text === asked ? '' : asked, given1].filter(Boolean).join('\n\n'), from, keyName, same, like), ASK_DETAILS)
+      const keyAt = await $.clock.now()
+      await change($, e.agentId, one => ({ ...one, keyAsk: { name: keyName, text, details: about, from: e.agentId ?? '', at: keyAt } }))
+      const cards = await read($, todos)
+      const card = cards.find(one => one.id === topOf(cards, e.agentId ?? ''))
+      await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
+      if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
+      await log($, `key ${keyName} asked for with its box on ${card?.id ?? e.agentId}`)
+      return { result: named(KEY_ASK_SHOWN($.plugin.root, keyName, Boolean(same), like?.name)) }
+    }
     if (!given1 && POINTS_AWAY.test(asked)) return { result: `Not shown: the question points at an explanation it doesn't carry, and ${who()} sees a question before your report, which reaches them only after you finish. Ask it again with that explanation, in full, in \`details\`.` }
     const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
     const hasFolder = typeof input.cwd === 'string' && input.cwd.startsWith('/')
@@ -12188,6 +12426,7 @@ const toolHooks = (on: On) => {
     const list = await read($, todos)
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     if (!text) {
+      if (card?.keyAsk) await changeTodos($, all => all.map(one => (one.id === card.id ? { ...one, keyAsk: undefined } : one)))
       if (card && was) await askGone($, card)
       return { result: 'Cleared: your card no longer has a question.' }
     }
@@ -12926,7 +13165,8 @@ const panelHooks = (on: On) => {
     const doneDrawn: Todo[] = []
     try {
     const shape = await paneShape($, paneId)
-    const content = await paneContent($)
+    const liveIds = paneId.startsWith(WORK_PANE) && paneWork.get(paneId) ? [paneWork.get(paneId) ?? '', ...(await read($, todos)).filter(kid => kid.parentId === paneWork.get(paneId)).map(kid => kid.id)] : []
+    const content = `${await paneContent($)}${liveIds.length ? liveSign(liveIds, heldAt) : ''}`
     const held = heldDrawings.get(heldKey)
     if (held && held.drawing === recent && held.shape === shape && (isTyping || (held.fresh === freshness && ((isBehind() && heldAt - held.at < BEHIND_HELD) || (held.content === content && heldAt - held.at < CALM))))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
     if (paneId === LIST) drawnFiles.clear()
@@ -13954,7 +14194,8 @@ const panelHooks = (on: On) => {
         )
       }
       let uses = 0
-      const shown = newest((lines ?? []).map(line => ({ ...line, at: line.isUse ? (uses += 1) : uses })), squeeze)
+      const running = liveCalls.get(one.id)
+      const shown = newest((lines ?? []).map(line => ({ ...line, at: line.isUse ? (uses += 1) : uses })), squeeze).filter(line => !(line.id && running?.has(line.id)))
       const blocks = shown.reduce<Line[][]>((all, line) => {
         const last = all.at(-1)
         return line.kind === 'step' && last?.[0]?.kind === 'step' ? [...all.slice(0, -1), [...last, line]] : [...all, [line]]
@@ -14013,8 +14254,61 @@ const panelHooks = (on: On) => {
           {!lines && one.answer ? (
 <Markdown text={one.answer} />
           ) : null}
+          {liveNow(one, lines ?? [])}
         </Box>
       )
+    }
+    const liveNow = (one: Todo, lines: Line[]) => {
+      if (one.status !== 'working' || one.chat) return null
+      const ids = new Set(lines.flatMap(line => (line.id ? [line.id] : [])))
+      const now = liveLinesOf(one.id, ids, at)
+      const kids = all.filter(kid => kid.parentId === one.id && kid.status === 'working' && !kid.chat)
+      if (!now.length && !kids.length) return null
+      const since = (from?: number) => (from !== undefined && at - from >= 3000 ? ` · ${took(at - from)}` : '')
+      const kidNow = (kid: Todo) => {
+        const last = liveLinesOf(kid.id, new Set(), at).at(-1)
+        if (!last) return helperNow(kid, at, jobsOf(kid).length, Math.max(16, room - 4)) || 'Thinking…'
+        return last.kind === 'said' ? `…${oneLine(last.text).slice(-160)}` : last.kind === 'call' ? `${last.text}${since(last.since)}` : last.text
+      }
+      return [
+        ...now.map((line, n) => {
+          if (line.kind === 'said') return <Markdown key={`live-${n}`} text={line.text} />
+          if (line.kind === 'call')
+            return (
+              <Box key={`live-${n}`} flexDirection="column" alignItems="flex-start">
+                <Text dimColor wrap="wrap">{`${line.head ?? 'Using a tool'}${since(line.since)}`}</Text>
+                <Box paddingLeft={2}>
+                  <Text wrap="wrap">{line.text}</Text>
+                </Box>
+              </Box>
+            )
+          const isOpen = open.includes(OPEN_THOUGHT)
+          if (line.kind === 'thought' && line.detail)
+            return (
+              <Box key={`live-${n}`} flexDirection="column" alignItems="flex-start">
+                <Button key={`live-thought-${presses}`} label={`${isOpen ? '▾' : '▸'} ${line.text}`} plain dimColor onPress={() => fold(OPEN_THOUGHT)} />
+                {isOpen ? (
+                  <Box paddingLeft={2}>
+                    <Text dimColor wrap="wrap">{line.detail}</Text>
+                  </Box>
+                ) : null}
+              </Box>
+            )
+          return (
+            <Box key={`live-${n}`}>
+              <Text dimColor wrap="wrap">{line.text}</Text>
+            </Box>
+          )
+        }),
+        ...kids.map(kid => (
+          <Box key={`live-kid-${kid.id}`} flexDirection="column" alignItems="flex-start">
+            <Button key={`live-kid-open-${kid.id}-${presses}`} label={`Helper: ${cut(titleOf(kid), Math.max(16, room - 12))}`} plain dimColor hover={{ scope: `live-kid-${kid.id}`, underline: true }} onPress={() => openWork($, kid.id)} />
+            <Box paddingLeft={2}>
+              <Text wrap="wrap">{kidNow(kid)}</Text>
+            </Box>
+          </Box>
+        )),
+      ]
     }
 
     const theirChat = (one: Todo, c: NonNullable<Todo['chat']>) => (
@@ -14297,6 +14591,7 @@ const panelHooks = (on: On) => {
 
     const alone = [...all, ...elsewhere, ...helpersThere].find(one => one.id === workId)
     if (paneId !== LIST && !alone) return <Text dimColor>{paneId.startsWith(`${WORK_PANE}r-`) ? 'This task is done, or its chat is closed. Open that chat to see it.' : 'This task is no longer available.'}</Text>
+    if (alone && !alone.chat) paneWork.set(paneId, alone.id)
     if (alone) void (alone.chat ? loadTheirs($, alone) : loadWork($, alone.id)).catch(() => undefined)
     const talked = alone ? talks.get(alone.id) : undefined
     const kept = await read($, reports)

@@ -35,6 +35,8 @@ const ENTRIES_KEPT = 200
 const OPEN_ASK = -1_000_001
 const OPEN_DONE = -1_000_003
 const OPEN_RESULT = -1_000_004
+// (and what a task at work thought, under "Thought for")
+const OPEN_THOUGHT = -1_000_005
 // Under a command's row in Details, its last lines sit on a darker ground, as a terminal's
 const OUTPUT_FILL = '#0000003D'
 // How much of what work reported at its end its Details shows before Show all
@@ -152,8 +154,8 @@ const ANSWER_IN_WORDS = 'Answer in words'
 // call of its own, and the password or key box of a command of its own (needs.tsx). Another chat's card is read from its file
 // A permission the person answered in words, whose task is answering them: nothing to press until it has (gate.tsx, wordsOnGate)
 const isGateActing = (gate: { talk?: { by: string }[] }) => gate.talk?.at(-1)?.by === 'you'
-const needsPerson = (one: { id?: string; status: string; chat?: unknown; ask?: { at?: number; replied?: { isWaking?: boolean } }; admins?: { talk?: { by: string }[] }[] }) =>
-  Boolean(one.admins?.some(gate => !isGateActing(gate))) || (Boolean(one.ask) && !isActingOnReply(one)) || (!one.chat && Boolean(one.id) && (waiting.some(p => p.card === one.id) || boxes.some(box => box.card === one.id)))
+const needsPerson = (one: { id?: string; status: string; chat?: unknown; ask?: { at?: number; replied?: { isWaking?: boolean } }; keyAsk?: unknown; admins?: { talk?: { by: string }[] }[] }) =>
+  Boolean(one.admins?.some(gate => !isGateActing(gate))) || (Boolean(one.ask) && !isActingOnReply(one)) || Boolean(one.keyAsk) || (!one.chat && Boolean(one.id) && (waiting.some(p => p.card === one.id) || boxes.some(box => box.card === one.id)))
 // The moments a pause ends that a redraw is already set for, so each pause gets one
 const lingerSet = new Set<string>()
 // The engine's list of agents is read again this often, and the minutes move on

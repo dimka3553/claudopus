@@ -65,7 +65,7 @@ const prompts: string[] = []
 // the release
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean; detached?: boolean; midWay?: boolean; mainAhead?: boolean; mainPast?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; complete?: (e: { model: string; system?: string; prompt: string }) => string | null | undefined; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; live?: (file: string) => number | undefined; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; complete?: (e: { model: string; system?: string; prompt: string }) => string | null | undefined; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unseen?: string[]; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; shells?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; live?: (file: string) => number | undefined; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release; stream?: (e: { agentId?: string }) => AsyncGenerator<unknown, void> } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -249,7 +249,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
   // One response of a model: its text, then what the API says it was answered over
   on('turn.step', async function* (_, e) {
     stepped.push(e.model)
-    yield { kind: 'text', index: 0, text: 'Looking at the nose.' } as never
+    // `stream`: the pieces of a response as a test hands them out, one at a time
+    if (options.stream) for await (const chunk of options.stream(e)) yield chunk as never
+    else yield { kind: 'text', index: 0, text: 'Looking at the nose.' } as never
     return {
       turnId: e.turnId,
       index: e.index,
@@ -933,7 +935,7 @@ test('a key taken out of a store goes from the list, and nothing is written when
   expect(files.get(`${MEMORY}/keys.md`)).toBe(before)
 })
 
-test('an ask for a key the list has is refused with where it is; a key not kept is asked for', async ($, on) => {
+test('an ask for a key the list has is refused with where it is; a key not kept is asked for with its box; an ask to paste a key with no box is refused', async ($, on) => {
   const { files } = world(on)
   keysLaid(files)
   await $.session.start(start)
@@ -950,18 +952,27 @@ test('an ask for a key the list has is refused with where it is; a key not kept 
   expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'a4', agentId: 'w1', text: 'Paste KAGGLE_KEY in the box' } as never)).deny).toContain('KAGGLE_KEY')
   // The secret runner under a name it does not keep, or asked to take a kept one in again
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'a5', agentId: 'w1', command: "/plug/bin/secret ELEVENLABS_KEY here 'curl x'" } as never)).deny).toContain('ELEVENLABS_API_KEY')
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'a6', agentId: 'w1', command: '/plug/bin/secret ELEVENLABS_API_KEY --add' } as never)).deny).toMatch(/--forget/)
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'a6', agentId: 'w1', command: '/plug/bin/secret ELEVENLABS_API_KEY --add' } as never)).deny).toMatch(/`key` set to ELEVENLABS_API_KEY to replace it/)
+  // A second key for the same service is asked with its box, never by taking the saved one out first (21 Nov, the Sentry key)
+  const second = (await $.tool.call({ tool: 'Bash', tool_use_id: 'a7', agentId: 'w1', command: "/plug/bin/secret ELEVENLABS_KEY here 'curl x'" } as never)).deny
+  expect(second).toMatch(/`key` set to ELEVENLABS_KEY for a second key beside it/)
+  expect(second).not.toMatch(/--forget/)
   // What is fine: the kept name used, a key not kept, an ask that is not for a key, and SBOS's own agents' keys
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'f1', agentId: 'w1', command: "/plug/bin/secret ELEVENLABS_API_KEY here 'curl x'" } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'f2', agentId: 'w1', name: 'stripe-customers-key', label: 'Stripe' } as never)).deny).toBeUndefined()
-  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'f3', agentId: 'w1', text: 'Paste your Stripe key', details: 'x' } as never)).deny).toBeUndefined()
+  // An ask to paste a key that is not kept, with no box: refused with how to ask for one; with `key`, never refused
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'f3', agentId: 'w1', text: 'Paste your Stripe key', details: 'x' } as never)).deny).toMatch(/has no box to paste it in[^\n]*`key`[^\n]*`from`/)
+  for (const key of ['STRIPE_KEY', 'ELEVENLABS_API_KEY', 'ELEVENLABS_READ_KEY'])
+    expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${key}`, agentId: 'w1', text: 'Paste your ElevenLabs API key', key, from: 'https://example.com/keys' } as never)).deny).toBeUndefined()
+  // A key put somewhere else, given with a Copy or a command, is no key given here
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'f6', agentId: 'w1', text: 'Paste the Stripe key into Vercel', copy: 'STRIPE_KEY' } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'f4', agentId: 'w1', text: 'Release the list of keys?', details: 'It lists ElevenLabs and Kaggle.', choices: ['Release it'] } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'f5', agentId: 'w1', name: 'elevenlabs-key', label: 'x', agent: 'bot' } as never)).deny).toBeUndefined()
   // An ask made leaves its name in the list as asked, not given
   expect(files.get(`${MEMORY}/keys.md`)).toMatch(/\| stripe-customers-key \|[^\n]*asked, not given/)
   // No false refusals: a name inside another word, a database of SBOS's, a key with other words in its name
   for (const text of ['Paste the Replicate API token for the FaceIQ Labs app', 'Paste the Clipify webhook secret', 'Paste your Labs login key'])
-    expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `n-${text.length}`, agentId: 'w1', text } as never)).deny).toBeUndefined()
+    expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `n-${text.length}`, agentId: 'w1', text } as never)).deny).toMatch(/^Not shown: a question that asks/)
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'n1', agentId: 'w1', command: "/plug/bin/secret GITHUB_PAT here 'gh x'" } as never)).deny).toBeUndefined()
   // The most specific kept key is the one named
   files.set('secret:KAGGLE_USERNAME', 'kgu-made-up')
@@ -969,13 +980,13 @@ test('an ask for a key the list has is refused with where it is; a key not kept 
   expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'n3', agentId: 'w1', text: 'Type your Kaggle username for the login' } as never)).deny).toContain('KAGGLE_USERNAME')
   // What it is about counts when the ask is to paste something; asked again on purpose, naming the kept key as it is, it is shown
   expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'd1', agentId: 'w1', text: 'Paste the key in the box', details: 'It is your ElevenLabs API key.' } as never)).deny).toContain('ELEVENLABS_API_KEY')
-  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'd2', agentId: 'w1', text: 'Paste your ElevenLabs API key', details: 'The kept ELEVENLABS_API_KEY is refused by ElevenLabs: 401.' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'd2', agentId: 'w1', text: 'Paste your ElevenLabs API key', details: 'The kept ELEVENLABS_API_KEY is refused by ElevenLabs: 401.' } as never)).deny).toMatch(/^Not shown: a question that asks/)
   expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'd3', agentId: 'w1', name: 'elevenlabs-key', label: 'x', for: 'ELEVENLABS_API_KEY in the keychain answers 401' } as never)).deny).toBeUndefined()
   // A word for a key after other words is another key; the word secret in a command that runs no runner is no ask
   files.set('secret:STRIPE_SECRET_KEY', 'st-made-up-value-0011')
   await $.tool.call({ tool: 'Bash', tool_use_id: 'n4', agentId: 'w1', command: '/plug/bin/secret STRIPE_SECRET_KEY here true' } as never)
   for (const text of ['Paste the Stripe webhook signing secret', 'Paste the Stripe publishable key', 'Type your GitHub login email'])
-    expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `s-${text.length}`, agentId: 'w1', text } as never)).deny).toBeUndefined()
+    expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `s-${text.length}`, agentId: 'w1', text } as never)).deny ?? '').not.toContain('STRIPE_SECRET_KEY')
   for (const command of ['git commit -m "keep the secret STRIPE_KEY here for now"', 'kubectl get secret STRIPE_KEY default'])
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `k-${command.length}`, agentId: 'w1', command } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 's1', agentId: 'w1', text: 'Paste your Stripe secret key' } as never)).deny).toContain('STRIPE_SECRET_KEY')
@@ -995,7 +1006,7 @@ test('work never writes the list of keys itself, by any tool', async ($, on) => 
 })
 
 test("a password and a key a command waits for are each one block (its label, the question in amber, its buttons); typed in the box above the chat on the desktop and in the block's one field in the terminal; given or refused, one grey line says so and the value is nowhere on screen", async ($, on) => {
-  const { files, clock, keep, settle, keychain, logged } = world(on)
+  const { files, clock, keep, settle, keychain, logged, appended } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Deploy the site', prompt: 'deploy it' } as never)
@@ -1074,9 +1085,49 @@ test("a password and a key a command waits for are each one block (its label, th
   expect(await until(async () => files.get(`${MEMORY}/boxes/${worded}.reply`))).toContain('in their own words: It is in the vault under Stripe')
   await gone(list, worded, '✓ You answered “It is in the vault under Stripe”')
   expect(keychain.some(entry => entry.includes(worded))).toBe(false)
+  // A task's own question for a key is its key's box on the card at once, with no command running: its question, what it is about,
+  // where to get it and the saved key it replaces; pasted, the key is saved under its name and the task is told (21 Nov, the Sentry
+  // key: asked three times with "Token is in" and nowhere to paste)
+  files.set('secret:STRIPE_KEY', 'sk_old_made_up_0001')
+  for (const one of [
+    { key: 'STRIPE_KEY', asks: 'You paste a new Stripe key for the deploy', saved: 'It replaces the STRIPE_KEY saved now.', typed: 'sk_live_made_up_0044' },
+    { key: 'STRIPE_READ_TOKEN', asks: 'You paste a Stripe read token', saved: '', typed: '' },
+    { key: 'STRIPE_API_KEY', asks: 'You paste a second Stripe key', saved: 'STRIPE_KEY stays saved as it is: this is a second key.', typed: 'words' },
+  ]) {
+    const shown = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `own-${one.key}`, agentId: 'a1', text: one.asks, details: 'The saved one is refused.', from: 'https://dashboard.stripe.com/apikeys, then press Create secret key', key: one.key } as never)
+    expect(shown.deny).toBeUndefined()
+    expect(String(shown.result)).toContain(`Shown on your card as the box for ${one.key}`)
+    const question = await until(async () => list.find({ type: 'Text', text: one.asks }))
+    expect([question?.props.color, question?.props.bold]).toEqual(['#E5A50A', true])
+    const id = String((await list.findAll({ type: 'Button' })).find(b => /^box-key-.+-paste-\d+$/.test(b.key ?? ''))?.key ?? '').replace(/^box-/, '').replace(/-paste-\d+$/, '')
+    expect((await buttons(list, id)).map(b => b.props.label)).toEqual(['Paste it', "Don't give it", 'Answer in words'])
+    const drawn = [...(await all(list)), ...(await list.findAll({ type: 'Markdown' } as never)).map(one => String(one.props.text ?? ''))].join('\n')
+    for (const line of ['The saved one is refused.', 'https://dashboard.stripe.com/apikeys, then press Create secret key', "It goes only into this Mac's keychain.", one.saved].filter(Boolean)) expect(drawn).toContain(line)
+    if (!one.saved) expect(drawn).not.toMatch(/It replaces|stays saved as it is/)
+    expect(drawn).not.toContain('Token is in')
+    if (one.typed === 'words') {
+      await press(list, id, 'Answer in words')
+      await bar.input({ key: (await until(async () => (await fields(bar, id))[0]))?.key ?? '', text: 'Use the saved one' })
+      await gone(list, id, '✓ You answered “Use the saved one”')
+      expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('STRIPE_API_KEY in their own words instead of giving it: Use the saved one')))).toBeDefined()
+    } else if (one.typed) {
+      await press(list, id, 'Paste it')
+      await bar.input({ key: (await until(async () => (await fields(bar, id))[0]))?.key ?? '', text: one.typed })
+      expect(await until(async () => files.get(`keyring:claudopus-secret/${one.key}`))).toBe(one.typed)
+      await gone(list, id, `✓ You gave ${one.key}`)
+      expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes(`pasted ${one.key} in its box on your card`)))).toBeDefined()
+    } else {
+      await press(list, id, "Don't give it")
+      await gone(list, id, "✓ You pressed “Don't give it”")
+      expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes(`Don't give it on your question for ${one.key}`)))).toBeDefined()
+    }
+    // and it does not come back
+    await clock.advance(2000)
+    expect(await buttons(list, id)).toEqual([])
+  }
   // The chat was told only what is asked and where to type it
   expect(logged).toEqual(expect.arrayContaining([`${PASSWORD_ASKS} Press Type it on it in the Claudopus panel (/claudopus opens it) and type it in the box above the chat, never in the chat itself.`]))
-  for (const value of ['hunter-22', 'sk_live_made_up_0042']) expect([...logged, ...(await all(list)), ...(await all(bar))].some(line => line.includes(value))).toBe(false)
+  for (const value of ['hunter-22', 'sk_live_made_up_0042', 'sk_live_made_up_0044']) expect([...logged, ...(await all(list)), ...(await all(bar))].some(line => line.includes(value))).toBe(false)
   await bar.unmount()
   await list.unmount()
   // In the terminal the bar draws no field: the block has the one field itself, and no button to open one

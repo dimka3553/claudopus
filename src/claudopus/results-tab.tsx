@@ -61,6 +61,17 @@ const front = async ($: EngineInterface, id: string, title: string) => {
 }
 // What a press's hook does with a move handed over, by its own handle
 const runTabMove = ($: EngineInterface, move: TabMove) => (move.kind === 'front' ? frontAsked($, move.id, move.title) : backAsked($, move.id))
+// Closing and opening a tab again to let go of the keys or bring it forward puts it last, so the panel could end up on the right of
+// Stats or a Details tab. The panel is always the first tab: if another stands before it, every tab but the panel is closed and opened
+// again in the order they stood, after it, the one asked for in front
+const listFirst = async ($: EngineInterface, front?: string) => {
+  const panes = await $.ui.panes().catch(() => [])
+  if (panes.findIndex(pane => pane.id === LIST) <= 0) return
+  for (const pane of panes.filter(one => one.id !== LIST)) {
+    await $.ui.close({ id: pane.id }).catch(() => undefined)
+    await (pane.id === front ? $.ui.open({ id: pane.id, title: pane.title, focus: true }) : $.ui.open({ id: pane.id, title: pane.title })).catch(err => log($, `${pane.id} not opened again: ${String(err)}`))
+  }
+}
 const frontAsked = async ($: EngineInterface, id: string, title: string) => {
   const shown = async () => Boolean((await $.ui.panes()).find(pane => pane.id === id)?.isShown)
   // A press inside a tab gives that tab the keyboard, and the engine never shows a new tab over the one holding it: it waits on
@@ -102,6 +113,7 @@ const frontAsked = async ($: EngineInterface, id: string, title: string) => {
   const was = (await $.ui.panes()).find(pane => pane.id === id)
   if (was && !was.isShown) await $.ui.close({ id }).catch(() => undefined)
   const opened = await $.ui.open({ id, title, focus: true })
+  await listFirst($, id)
   void watchTabs($, [id], 'it opened').catch(() => undefined)
   if (isRunFromAfar) await log($, `front ${id}: ${holding.length} let go first; opened ${opened.isPlaced ? 'drawn' : `undrawn (${opened.reason})`}; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
   // The pane pressed in stays in front while its press runs: once it has run, the new pane is opened again, which brings it forward
