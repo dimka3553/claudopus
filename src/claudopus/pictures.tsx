@@ -330,7 +330,8 @@ const loadWork = async ($: EngineInterface, id: string) => {
   try {
     const one = (await read($, todos)).find(card => card.id === id)
     if (!one) return
-    const key = [one.id, one.steps, one.tokens, one.entries.length, one.entries.filter(entry => entry.readAt).length, one.status].join(':')
+    const mark = talkMarks.get(id) ?? 0
+    const key = [one.id, one.steps, one.tokens, one.entries.length, one.entries.filter(entry => entry.readAt).length, one.status, mark].join(':')
     const kept = await read($, reports)
     const shotsKey = `${key}:${kept.length}`
     const now = await $.clock.now()
@@ -339,6 +340,7 @@ const loadWork = async ($: EngineInterface, id: string) => {
       during('read a task for its Details')
       const rows = await $.session.messages({ agentId: id }).catch(() => undefined)
       talks.set(id, { key, lines: Array.isArray(rows) ? withSteers(talkOf(rows), one.entries) : undefined, at: now })
+      if (Array.isArray(rows)) liveCaughtUp(id, mark, now)
       isChanged = true
     }
     const lines = talks.get(id)?.lines

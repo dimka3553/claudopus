@@ -556,6 +556,8 @@ const chatHooks = (on: On) => {
     if (!dir) return done
     if (e.agentId !== undefined) {
       const id = e.agentId
+      // Its last words are in its conversation now: its Details reads it again
+      talkMoved(id)
       turnEnding.add(id)
       try {
         return await agentTurnEnded($, e, id, done)

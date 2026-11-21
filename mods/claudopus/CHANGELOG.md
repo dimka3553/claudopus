@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.249 · 21 November 2026
+- A task's Details now shows what it does as it happens, at the end of its conversation, in the words and look of the Claude chat itself: "Thinking…", then "Thought for 12s", which opens on its thinking, its words as they are written, "Running a command · 40s" over the command's name while it runs, and each helper at work over what it does now, so the card no longer stands still between its notes.
+
 ## 0.2.248 · 21 November 2026
 - A task can now hand you a report on a part that is finished while it goes on with the rest, as many times as it has one: each reaches you in the chat and is kept as a result of its own, and its card keeps working with its to-dos, helpers and commands. Its last report still ends it
 - Tasks are told to hand in finished work as soon as you can look at it or act on it, instead of keeping it until the end and filling their card with notes that they wait
