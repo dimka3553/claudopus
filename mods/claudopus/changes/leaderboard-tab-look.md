@@ -1,0 +1,2 @@
+- The Leaderboard tab shows the board as a table with headings, the first three places in gold, silver and bronze, and your own row shaded and marked "you".
+- Once you have joined, your part of the tab is titled with your username and shows your place, such as "2nd of 4", and before you join the username box comes first.
