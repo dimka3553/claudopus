@@ -2551,6 +2551,14 @@ const front = async ($: EngineInterface, id: string, title: string) => {
   await frontAsked($, id, title)
 }
 const runTabMove = ($: EngineInterface, move: TabMove) => (move.kind === 'front' ? frontAsked($, move.id, move.title) : backAsked($, move.id))
+const listFirst = async ($: EngineInterface, front?: string) => {
+  const panes = await $.ui.panes().catch(() => [])
+  if (panes.findIndex(pane => pane.id === LIST) <= 0) return
+  for (const pane of panes.filter(one => one.id !== LIST)) {
+    await $.ui.close({ id: pane.id }).catch(() => undefined)
+    await $.ui.open({ id: pane.id, title: pane.title, focus: pane.id === front }).catch(err => log($, `${pane.id} not opened again: ${String(err)}`))
+  }
+}
 const frontAsked = async ($: EngineInterface, id: string, title: string) => {
   const shown = async () => Boolean((await $.ui.panes()).find(pane => pane.id === id)?.isShown)
   const before = await $.ui.panes()
@@ -2580,6 +2588,7 @@ const frontAsked = async ($: EngineInterface, id: string, title: string) => {
   const was = (await $.ui.panes()).find(pane => pane.id === id)
   if (was && !was.isShown) await $.ui.close({ id }).catch(() => undefined)
   const opened = await $.ui.open({ id, title, focus: true })
+  await listFirst($, id)
   void watchTabs($, [id], 'it opened').catch(() => undefined)
   if (isRunFromAfar) await log($, `front ${id}: ${holding.length} let go first; opened ${opened.isPlaced ? 'drawn' : `undrawn (${opened.reason})`}; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
   if (!(await shown()))

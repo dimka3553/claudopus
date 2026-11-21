@@ -1151,3 +1151,25 @@ test("a Details tab too big for the app is drawn with less in it, its ended comm
   await tab.unmount()
   await list.unmount()
 })
+
+// Pressing in the panel closes and opens it again to let go of the keys, which puts it last: it ended on the right of Stats
+test('the Claudopus tab stays first whichever tabs are opened, closed and opened again after it', async ($, on) => {
+  const live = [{ id: 'claudopus', isShown: true, isPlaced: true, isFocused: true }]
+  const { clock } = world(on, { live })
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  const order = async () => live.map(one => one.id)
+  await pressed(pane, 'stats-open')
+  await clock.advance(500)
+  expect((await order())[0]).toBe('claudopus')
+  await pressed(pane, 'about-open')
+  await clock.advance(500)
+  expect(await order()).toEqual(['claudopus', 'stats', 'about'])
+  // Closed, and the panel pressed in again, whichever way round
+  live.splice(0, live.length, ...live.filter(one => one.id !== 'stats'))
+  live[0]!.isFocused = true
+  await pressed(pane, 'stats-open')
+  await clock.advance(500)
+  expect((await order())[0]).toBe('claudopus')
+  expect(await order()).toContain('stats')
+})
