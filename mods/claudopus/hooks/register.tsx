@@ -14188,7 +14188,10 @@ const panelHooks = (on: On) => {
         ),
         ...kids.map(kid => (
           <Box key={`live-kid-${kid.id}`} flexDirection="column" alignItems="flex-start">
-            <Button key={`live-kid-open-${kid.id}-${presses}`} label={`● Helper: ${cut(titleOf(kid), Math.max(16, room - 12))}`} plain hover={{ scope: `live-kid-${kid.id}`, underline: true }} onPress={() => openWork($, kid.id)} />
+            <Box flexDirection="row" gap={1}>
+              <Text color={LIVE}>●</Text>
+              <Button key={`live-kid-open-${kid.id}-${presses}`} label={`Helper: ${cut(titleOf(kid), Math.max(16, room - 12))}`} plain hover={{ scope: `live-kid-${kid.id}`, underline: true }} onPress={() => openWork($, kid.id)} />
+            </Box>
             <Box paddingLeft={2}>
               <Text dimColor wrap="wrap">{kidNow(kid)}</Text>
             </Box>

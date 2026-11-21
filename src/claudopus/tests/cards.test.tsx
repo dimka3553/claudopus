@@ -385,7 +385,7 @@ test("a pressed card shows the work's own chat: what it was told, what it wrote,
   const helperStep = $.turn.step({ turnId: 'live-2', index: 0, model: 'm', messageCount: 2, agentId: 'a2' })[Symbol.asyncIterator]()
   await helperStep.next()
   expect(await until(async () => keyed(await fresh(), 'live-kid-open-a2'))).toBeDefined()
-  expect((await keyed(tab, 'live-kid-open-a2'))?.props.label).toBe('● Helper: Measure the nose')
+  expect((await keyed(tab, 'live-kid-open-a2'))?.props.label).toBe('Helper: Measure the nose')
   expect((await texts()).at(-1)).toBe('Thinking')
   for (let got = await helperStep.next(); !got.done; got = await helperStep.next()) void got
   // The command ends: it joins the conversation's runs of steps, and nothing of it stays live
@@ -1510,7 +1510,7 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   // The work's Details lists every helper, ended or not, as the same tree
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 80 }, surface: 'terminal' } as never)
   expect((await tab.find({ type: 'Text', text: / helpers? working$/ }))?.text).toBe('1 command running · 2 of 4 helpers working')
-  expect((await tab.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(text => /manual|appendix|Measure/.test(text) && !text.startsWith('● Helper'))).toEqual(['Measure the nose', 'Read the manual', 'Read the appendix', 'Measure the ears'])
+  expect((await tab.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(text => /manual|appendix|Measure/.test(text) && !text.startsWith('Helper:'))).toEqual(['Measure the nose', 'Read the manual', 'Read the appendix', 'Measure the ears'])
   // One at work has a dot at the end of its line, a ring growing out of it (cells the terminal repaints), one that finished a tick
   expect((await tab.findAll({ type: 'Raster' })).filter(one => String(one.key).endsWith('-ring')).length).toBe(2)
   expect((await tab.findAll({ type: 'Text', text: '✓' })).length).toBe(2)
