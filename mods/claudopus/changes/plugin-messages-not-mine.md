@@ -1,0 +1,2 @@
+- When a task hands you a part of its result, the task itself now tells the chat, so no message appears in the chat as if you had written it. Claudopus's own message is sent only if the task has not told the chat within a minute
+- A part the chat has already shown you no longer starts another empty turn, and parts from several tasks that wait together come in one message

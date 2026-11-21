@@ -777,25 +777,39 @@ test('a task hands in a finished part of its result while it works on: its card 
   const reportsOf = () => [...files.keys()].filter(path => path.startsWith(`${MEMORY}/reports/`) && path.endsWith('/report.md'))
   const part = 'The beard research is done: short beards fit the films best.'
   const taken = (await $.tool.call({ tool: 'mcp__claudopus__report', tool_use_id: 'r1', agentId: 'a1', message: part } as never)) as { result?: string }
-  expect(taken.result).toContain('Your task goes on')
+  expect(taken.result).toContain('your task goes on')
   // A helper's result goes to its task, never to the chat
   expect(((await $.tool.call({ tool: 'mcp__claudopus__report', tool_use_id: 'r2', agentId: 'a2', message: 'Half a jaw.' } as never)) as { result?: string }).result).toContain('you are a helper')
-  // Kept at once as a result of its own, however short; the chat's message waits for a hook that may send it, as the turn it
-  // starts would lose the tool call's
+  // Kept at once as a result of its own, however short. The task tells the chat itself, as Claude Code draws a message Claudopus
+  // submits as the person's own, and its message carries the part
   expect(await until(async () => (reportsOf().length === 1 ? reportsOf() : undefined))).toHaveLength(1)
   expect(files.get(reportsOf()[0] ?? '')).toBe(`${part}\n`)
-  expect(submitted.filter(text => text.includes('handed in a part'))).toEqual([])
+  const notice = 'The task "Beards and jawline" handed in a part of its result, and is still working on the rest.'
+  expect(taken.result).toContain(`SendMessage (load it with ToolSearch if needed) with to "main" and this message, exactly:\n${notice}\n`)
   await clock.advance(1000)
-  expect(await until(async () => submitted.find(text => text.includes('handed in a part')))).toBe('From Claudopus: the task "Beards and jawline" handed in a part of its result, and is still working on the rest.')
-  const carried = submittedContext[submitted.findIndex(text => text.includes('handed in a part'))] ?? ''
-  expect(carried).toContain(`is still working, and handed in this part of its result`)
-  expect(carried).toContain(`  ${part}`)
-  // The card still works, its to-do and helper with it, and the part is never given again
+  const told = ((await $.prompt.submit({ text: `<agent-message from="a1">\n${notice}\n</agent-message>`, wait: false, origin: { kind: 'peer' } } as never)) as { context?: string[] }).context?.join('\n') ?? ''
+  expect(told).toContain(`is still working, and handed in this part of its result`)
+  expect(told).toContain(`  ${part}`)
+  // The card still works, its to-do and helper with it, and the part is never given again, nor is Claudopus's own message sent
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
   const texts = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
   expect(texts).toContain('1 working')
   const next = ((await $.prompt.submit({ text: 'how is it going?', wait: false, origin: composer } as never)) as { context?: string[] }).context?.join('\n') ?? ''
   expect(next).not.toContain(part)
+  // Parts whose task never told the chat go in Claudopus's own message once a minute has passed, one message for all that wait
+  // together, and none for a part already given
+  await $.agent.spawn({ ...spawn, description: 'Ears', prompt: 'look into them' } as never)
+  ;((agents.a3 = 'running'), (kinds.a3 = 'general-purpose'))
+  await $.tool.call({ tool: 'mcp__claudopus__report', tool_use_id: 'r3', agentId: 'a1', message: 'The chin research is done.' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__report', tool_use_id: 'r4', agentId: 'a3', message: 'The ear research is done.' } as never)
+  await clock.advance(61_000)
+  const own = () => submitted.flatMap((text, i) => (text.startsWith('From Claudopus: the task') ? [submittedContext[i] ?? ''] : []))
+  expect(await until(async () => (own().length ? own() : undefined))).toHaveLength(1)
+  expect(own()[0]).toContain('  The chin research is done.')
+  expect(own()[0]).toContain('  The ear research is done.')
+  expect(own()[0]).not.toContain(part)
+  await $.prompt.submit({ text: 'and the ears?', wait: false, origin: composer } as never)
+  expect(own()).toHaveLength(1)
   // Its last report ends it, kept beside the part
   agents.a2 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'a2', message: 'The jaw is built.' } as never)

@@ -477,8 +477,9 @@ const chatHooks = (on: On) => {
     // A message the mod sent from a press or reply in the panel starts work as a message of the person's does
     const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text)
     const isPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || isPressed
-    // The message Claudopus sent for a part of a task's result carries that part, as does any other of its own that comes first
-    if (!isPerson && e.origin.kind === 'plugin' && !isOff) {
+    // The message a task sends the chat for a part of its result carries that part, as does Claudopus's own, and any other of
+    // either that comes first
+    if (!isPerson && (e.origin.kind === 'plugin' || e.origin.kind === 'peer') && !isOff) {
       const parts = await partsFor($)
       if (parts.length) e = { ...e, context: [...(e.context ?? []), ...parts] }
     }
