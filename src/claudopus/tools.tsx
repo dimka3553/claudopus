@@ -160,8 +160,9 @@ const toolHooks = (on: On) => {
   })
 
   // A task hands the person a part of its result that is finished while it goes on with the rest (20 Nov: "allow subagents to have
-  // multiple reports and then also to report without finishing a task"): kept as a result of its own, and given to the chat to show
-  // as its reply, from the next hook that may send it. Nothing on the card ends: its to-dos, helpers and commands go on
+  // multiple reports and then also to report without finishing a task"): kept as a result of its own, and given to the chat with the
+  // message the task sends it (PART_TAKEN), or with any message or notice that comes first. Claudopus submits nothing for it, as
+  // Claude Code draws a plugin's message as the person's own (21 Nov: "This still gets sent as me"). Nothing on the card ends
   on('tool.call', { tool: 'mcp__claudopus__report' }, async ($, e) => {
     const text = String((e as unknown as { message?: unknown }).message ?? '').trim()
     if (e.agentId === undefined) return { result: `Only a background task hands in a part of its result; the chat tells ${who()} in its reply.` }
@@ -172,7 +173,6 @@ const toolHooks = (on: On) => {
     if (card.status !== 'working') return { result: 'Not handed in: your task has ended. Hand in your result with SubagentHandback.' }
     await changeTodos($, list => list.map(one => (one.id === card.id ? { ...one, partsForChat: [...(one.partsForChat ?? []), text].slice(-PARTS_KEPT) } : one)))
     await saveReport($, card, text, true).catch(err => log($, `part of ${card.id}'s result not kept: ${String(err)}`))
-    submitLater($, await $.clock.now())
     await log($, `part of ${card.id}'s result taken, for the chat to give now`)
     return { result: named(PART_TAKEN(PART_SENT(titleOf(card)))) }
   })

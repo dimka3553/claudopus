@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.264 · 21 November 2026
+- Claudopus no longer sends the chat a message of its own when a task hands in a part of its result, so no part's notice shows in the chat as your message, even when the chat is busy. The task's own message brings the part, or your next message does
+
 ## 0.2.263 · 21 November 2026
 - The Leaderboard tab shows the board as a table with headings, the first three places in gold, silver and bronze, and your own row shaded and marked "you".
 - Once you have joined, your part of the tab is titled with your username and shows your place, such as "2nd of 4", and before you join the username box comes first.
