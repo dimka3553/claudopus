@@ -58,10 +58,10 @@ jobs:
       - name: The shell tests and the mod's tests pass
         run: |
           o=$(mktemp -d); r=0
-          for t in admin revive linux run-it pane-file catch-up tidy; do { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc" & done
+          for t in admin revive linux run-it pane-file catch-up tidy allow-tool; do { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc" & done
           npx --yes @anthropic-ai/claude-code@2.1.325 plugin test mods/claudopus || r=1
           wait
-          for t in admin revive linux run-it pane-file catch-up tidy; do
+          for t in admin revive linux run-it pane-file catch-up tidy allow-tool; do
             echo "::group::$t.test.sh"; cat "$o/$t"; echo "::endgroup::"
             [ "$(cat "$o/$t.rc")" = 0 ] || { echo "::error::$t.test.sh failed"; r=1; }
           done

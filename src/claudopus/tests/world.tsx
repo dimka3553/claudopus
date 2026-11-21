@@ -533,6 +533,13 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     // and what a branch adds to main: its commits' subjects as git:log lays them, the files it changes as git:diff does
     if (tool === 'git' && rest.includes('log') && rest.includes('--format=%s')) return ok(files.get('git:log') ?? '')
     if (tool === 'git' && rest.includes('diff') && rest.includes('--name-only')) return ok(files.get('git:diff') ?? '')
+    // and a branch's tip as git:tip lays it, and main as the remote has it as git:main lays its commits, newest first: a commit's
+    // merge base with main is the commit itself only when main holds it
+    if (tool === 'git' && rest.includes('rev-parse') && rest.some(arg => String(arg).startsWith('refs/heads/'))) return ok(files.has('git:tip') ? `${files.get('git:tip')}\n` : '', files.has('git:tip') ? 0 : 1)
+    if (tool === 'git' && rest.includes('merge-base')) {
+      const commit = String(rest[rest.indexOf('merge-base') + 1])
+      return (files.get('git:main') ?? '').split(' ').includes(commit) ? ok(`${commit}\n`) : ok('base0\n')
+    }
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
     if (tool?.endsWith('bin/secret')) {

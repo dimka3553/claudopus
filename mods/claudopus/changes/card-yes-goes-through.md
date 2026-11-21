@@ -1,0 +1,2 @@
+- Release it is the only press a release needs: when a release has to run again because main changed or a check failed, it no longer asks you for a second Allow.
+- When Claude Code blocks a task from using a connector, such as confirming a Supabase cost, the card now says so and gives you the one way through: Open in Terminal, press Return to let your tasks do it from now on, then Try again. Before, nothing showed, and your yes on the card or in the chat could never let it through.

@@ -1,0 +1,51 @@
+#!/bin/bash
+# Lets the person's tasks use one connector tool that Claude Code's auto mode refused them: adds `mcp__<server>__<tool>` to the
+# allow list in the person's own Claude Code settings (~/.claude/settings.json), which Claude Code reads before its classifier.
+#   allow-tool mcp__<server>__<tool>
+# A card puts it to the person when Claude Code refuses such a call (prompts.tsx), as a command they run themselves in Terminal: a
+# yes on a card is never counted by Claude Code as theirs, and only their own settings let the call through. So it runs only at a
+# terminal, outside Claude Code, and changes nothing else in the file. Exit 0 added or already there, 1 not run, 2 a wrong name
+set -u
+rule=${1:-}
+say() { printf '%s\n' "$*"; }
+case $rule in
+  mcp__*__*) ;;
+  *) say "allow-tool: give one connector tool, as mcp__<server>__<tool>"; exit 2 ;;
+esac
+printf %s "$rule" | LC_ALL=C grep -Eq '^mcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+$' || { say "allow-tool: \"$rule\" is not one connector tool"; exit 2; }
+# Only the person's own hand: never from inside Claude Code, never with no terminal to type at
+if [ -n "${CLAUDECODE:-}" ] || ! [ -t 0 ] || ! [ -t 1 ]; then
+  say "allow-tool: only you can run this, in Terminal: it changes your own Claude Code settings. Nothing was changed."
+  exit 1
+fi
+file=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json
+mkdir -p "$(dirname "$file")" || exit 1
+python3 -I - "$file" "$rule" <<'PY' || exit 1
+import json, os, sys
+path, rule = os.path.realpath(sys.argv[1]), sys.argv[2]
+try:
+    with open(path) as f:
+        text = f.read()
+except FileNotFoundError:
+    text = ''
+try:
+    data = json.loads(text) if text.strip() else {}
+except ValueError as err:
+    print(f'allow-tool: your settings file is not valid JSON ({err}), so nothing was changed: {path}')
+    sys.exit(1)
+if not isinstance(data, dict):
+    print(f'allow-tool: your settings file is not a JSON object, so nothing was changed: {path}')
+    sys.exit(1)
+perms = data.setdefault('permissions', {})
+allow = perms.setdefault('allow', [])
+if rule in allow:
+    print(f'{rule} is already allowed in your Claude Code settings. Press Try again on the card.')
+    sys.exit(0)
+allow.append(rule)
+tmp = f'{path}.allow-tool.{os.getpid()}'
+with open(tmp, 'w') as f:
+    f.write(json.dumps(data, indent=2) + '\n')
+os.replace(tmp, path)
+print(f'Added {rule} to your Claude Code settings: your tasks may use it from now on. Press Try again on the card.')
+print(f'To take it back, remove that line from {path}.')
+PY
