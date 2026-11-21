@@ -1533,7 +1533,7 @@ const panelHooks = (on: On) => {
           ) : (
             <Box key={`live-${n}`} flexDirection="column" alignItems="flex-start">
               <Box flexDirection="row" gap={1}>
-                {line.kind === 'thought' ? null : <Text color={LIVE}>●</Text>}
+                {line.kind === 'call' ? <Text color={LIVE}>●</Text> : null}
                 <Text wrap="wrap" dimColor={line.kind !== 'call'}>{`${line.text}${since(line.since)}`}</Text>
               </Box>
               {line.detail ? (
