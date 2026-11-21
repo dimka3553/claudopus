@@ -156,12 +156,12 @@ const boardCall = async ($: EngineInterface, fn: string, args: Record<string, un
   const status = Number(text.slice(cut + 1)) || 0
   return { ok: r.exitCode === 0 && status >= 200 && status < 300, status, body: parsed<unknown>(cut > 0 ? text.slice(0, cut) : '', undefined) }
 }
-// The person's sums over every range, from every chat's records
-const boardFigures = async ($: EngineInterface) => {
+// The person's sums over every range, from every chat's records; the timeline only while their stats are public
+const boardFigures = async ($: EngineInterface, isPublic: boolean) => {
   await statsRead($, 'all').catch(() => undefined)
   const runs = held.get('all')?.runs ?? []
   const since = await installedAt($)
-  return { ...boardOf(runs, await $.clock.now(), since), timeline: timelineOf(runs, 40_000, since) }
+  return { ...boardOf(runs, await $.clock.now(), since), ...(isPublic ? { timeline: timelineOf(runs, 40_000, since) } : {}) }
 }
 // When Claudopus was first installed on this Mac, kept in installed.json: the first time asked, the memory folder's own birth (it is
 // made by the first load), else now. The board counts nothing from before it
@@ -190,7 +190,7 @@ const boardAct = async ($: EngineInterface, act: () => Promise<string>) => {
 const joinBoard = ($: EngineInterface, name: string) =>
   boardAct($, async () => {
     if (!NAME_RULE.test(name)) return 'A username is 3 to 20 letters, digits, - or _, with no spaces.'
-    const r = await boardCall($, 'lb_join', { p_name: name, p_public: false, p_stats: await boardFigures($) })
+    const r = await boardCall($, 'lb_join', { p_name: name, p_public: false, p_stats: await boardFigures($, false) })
     if (r.status === 409) return `Someone already has the username ${name}. Choose another.`
     if (!r.ok || typeof r.body !== 'string') return UNREACHED
     await boardSave($, { name, token: r.body, isPublic: false, sentAt: await $.clock.now() })
@@ -206,7 +206,7 @@ const leaveBoard = ($: EngineInterface) =>
 // Sends the figures, and public or private; a secret the board no longer knows (left from another Mac) clears this one too
 const pushBoard = async ($: EngineInterface, isPublic: boolean) => {
   const file = boardNow.file
-  const r = await boardCall($, 'lb_push', { p_token: file.token ?? '', p_public: isPublic, p_stats: await boardFigures($) })
+  const r = await boardCall($, 'lb_push', { p_token: file.token ?? '', p_public: isPublic, p_stats: await boardFigures($, isPublic) })
   if (r.ok && r.body === false) return (await boardSave($, {}), 'gone' as const)
   if (!r.ok) return 'failed' as const
   await boardSave($, { ...file, isPublic, sentAt: await $.clock.now() })

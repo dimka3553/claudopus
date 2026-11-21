@@ -1,0 +1,2 @@
+- Joining the leaderboard now says, one short line each, what the board shows, what is never sent, how often it sends, what public adds and what Leave does.
+- Your timeline goes to the leaderboard only while your stats are public; making them private deletes it there.

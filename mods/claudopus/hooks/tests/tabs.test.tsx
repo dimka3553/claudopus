@@ -954,7 +954,8 @@ test('the Leaderboard tab shows the board and is where you join with a username 
   expect(await until(async () => shown.find(one => one.includes('https://claudopus.ai/leaderboard/mira_k')))).toBeDefined()
   await pressed(stats, 'board-site')
   expect(await until(async () => shown.find(one => one.includes('https://claudopus.ai/leaderboard')))).toBeDefined()
-  expect(await said(/^Choose a username to put your time of work, tokens and API cost on the board/)).toBeDefined()
+  // Before joining: what is shown, what is never sent, how often, what public adds and what Leave does, each on a line of its own
+  for (const text of [/^Your username, time of work/, /^Chat titles, your words/, /^As you join, then every 3 minutes/, /^Only if you turn it on/, /^Deletes your username and stats/]) expect(await said(text)).toBeDefined()
   // Minutes pass with the tab open: the board is read again, and nothing of yours is sent
   await clock.advance(10 * M)
   expect(boarded.filter(one => one.fn !== 'lb_board')).toEqual([])
@@ -970,7 +971,7 @@ test('the Leaderboard tab shows the board and is where you join with a username 
   expect(joins.length).toBe(1)
   // Only sums go, for each range: never a title, a path or anyone's words
   const sent = joins[0]?.body.p_stats as Record<string, Record<string, unknown>>
-  expect(Object.keys(sent)).toEqual(['today', 'd7', 'd30', 'all', 'timeline'])
+  expect(Object.keys(sent)).toEqual(['today', 'd7', 'd30', 'all'])
   expect([sent.all?.tokens, sent.all?.read, sent.all?.write, sent.all?.input]).toEqual([200, 70, 20, 10])
   expect(JSON.stringify(sent)).not.toContain('repo')
   // Joined: the secret is kept in the memory folder, and the figures follow every few minutes
@@ -985,6 +986,11 @@ test('the Leaderboard tab shows the board and is where you join with a username 
   await pressed(stats, 'board-public')
   expect(await said(/^✓ Your stats are public/)).toBeDefined()
   expect(JSON.parse(files.get(`${MEMORY}/leaderboard.json`) ?? '{}').isPublic).toBe(true)
+  // The timeline, with no task names, goes only once the stats are public
+  const pushed = boarded.filter(one => one.fn === 'lb_push')
+  expect(Object.keys(pushed[0]?.body.p_stats as object)).not.toContain('timeline')
+  expect(Object.keys(pushed.at(-1)?.body.p_stats as object)).toContain('timeline')
+  expect(await said(/plus a breakdown by model and a timeline/)).toBeDefined()
   files.set('board:lb_leave', 'true\n200')
   await pressed(stats, 'board-leave')
   expect(await said(/^✓ You left the leaderboard/)).toBeDefined()
