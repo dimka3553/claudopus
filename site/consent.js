@@ -1,5 +1,7 @@
-// claudopus.ai: the cookie choice, and Microsoft Clarity only after Accept. Its own styles come with it, so any page that has the
-// design system's tokens can load it with one script line. Decline, or no choice yet, loads nothing from Clarity.
+// claudopus.ai: the cookie choice, and Microsoft Clarity. Its own styles come with it, so any page that has the design system's
+// tokens can load it with one script line. Where the visitor's country asks for a yes first (api/consent.js says), the banner
+// shows and only Accept loads Clarity; Decline, or no choice yet, loads nothing from it. Elsewhere no banner shows and Clarity
+// loads, until the footer's Cookies link is used to decline.
 (() => {
   const CLARITY = 'zf37u6fd0e'
   const KEY = 'claudopus-cookies'
@@ -15,6 +17,10 @@
   const load = () => { try { return localStorage.getItem(KEY) } catch { return null } }
   const save = value => { try { localStorage.setItem(KEY, value) } catch {} }
   let choice = load()
+  // whether this visitor must say yes first: null until api/consent answers, kept for the visit
+  let ask = null
+  try { const kept = sessionStorage.getItem(KEY + '-ask'); if (kept) ask = kept === 'yes' } catch {}
+  const allowed = () => choice === 'accept' || (choice === null && ask === false)
 
   const start = () => {
     if (!window.clarity) {
@@ -33,7 +39,7 @@
     clarity('consent', false)
     location.reload()
   }
-  const count = name => { if (choice === 'accept' && window.clarity) clarity('event', name) }
+  const count = name => { if (allowed() && window.clarity) clarity('event', name) }
 
   const pressed = e => {
     const copy = e.type === 'click' && e.target.closest?.('[data-copy]')
@@ -68,7 +74,7 @@
   box.className = 'cookies'
   box.setAttribute('role', 'region')
   box.setAttribute('aria-label', 'Cookies')
-  box.innerHTML = '<p><b>May we record your visit?</b> If you accept, Microsoft Clarity records your clicks and scrolling as a replay of the visit, counts which commands you copy, and sets cookies. <a href="privacy.html">Privacy</a></p>'
+  box.innerHTML = '<p><b>Accept cookies?</b> They let Microsoft Clarity show us how the site is used. <a href="privacy.html">Privacy</a></p>'
     + '<div class="row"><button type="button" class="yes">Accept</button><button type="button" class="no">Decline</button></div>'
   box.hidden = true
   // while it shows, the page gets room below its end, so the banner never covers the footer
@@ -77,18 +83,29 @@
   let opener = null
   const show = from => { opener = from || null; box.hidden = false; room(); box.querySelector('.yes').focus({ preventScroll: true }) }
   const decide = value => {
-    const was = choice
     choice = value; save(value); box.hidden = true; room()
     opener?.focus({ preventScroll: true }); opener = null
-    if (value === 'accept') start(); else if (was === 'accept') stop()
+    if (value === 'accept') start(); else stop()
     document.dispatchEvent(new CustomEvent('cookies', { detail: value }))
   }
   box.querySelector('.yes').addEventListener('click', () => decide('accept'))
   box.querySelector('.no').addEventListener('click', () => decide('decline'))
   document.addEventListener('click', e => { const link = e.target.closest?.('[data-cookies]'); if (link) { e.preventDefault(); show(link) } })
-  box.addEventListener('keydown', e => { if (e.key === 'Escape' && choice) { box.hidden = true; room(); opener?.focus({ preventScroll: true }); opener = null } })
-  window.claudopusCookies = { get: () => choice, set: decide, show: () => show() }
+  box.addEventListener('keydown', e => { if (e.key === 'Escape' && (choice || ask === false)) { box.hidden = true; room(); opener?.focus({ preventScroll: true }); opener = null } })
+  window.claudopusCookies = { get: () => choice, asks: () => ask, set: decide, show: () => show() }
 
-  const ready = () => { document.body.append(box); if (choice === 'accept') start(); else if (choice !== 'decline') { box.hidden = false; room() } }
+  const where = async () => {
+    if (ask === null) {
+      try {
+        const r = await fetch('/api/consent', { cache: 'no-store' })
+        ask = r.ok ? (await r.json()).ask !== false : true
+      } catch { ask = true }
+      try { sessionStorage.setItem(KEY + '-ask', ask ? 'yes' : 'no') } catch {}
+    }
+    if (choice !== null) return
+    if (ask) { box.hidden = false; room() } else start()
+    document.dispatchEvent(new CustomEvent('cookies', { detail: null }))
+  }
+  const ready = () => { document.body.append(box); if (choice === 'accept') start(); else if (choice !== 'decline') where() }
   if (document.body) ready(); else document.addEventListener('DOMContentLoaded', ready)
 })()

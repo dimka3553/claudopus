@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.267 · 22 November 2026
+- claudopus.ai's cookie banner now just asks "Accept cookies?", and shows only in the EU and the EEA, the UK, Switzerland and Turkey, where the law asks first. Elsewhere the site counts visits with Microsoft Clarity without a banner, and the Cookies link at the bottom of each page still turns it off.
+
 ## 0.2.266 · 21 November 2026
 - However many tasks run, Claude's commands now leave two cores of your Mac free for you, so it stays responsive. Commands run at full speed while they fit in the other cores; newer ones past that wait in the Mac's background mode, using only what you leave idle, and go back to full speed as room comes.
 
