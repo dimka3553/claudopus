@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.268 · 22 November 2026
+- The update message in the panel header is shorter, "v0.2.267 ready: /reload-plugins", and stays on one line instead of wrapping.
+
 ## 0.2.267 · 22 November 2026
 - claudopus.ai's cookie banner now just asks "Accept cookies?", and shows only in the EU and the EEA, the UK, Switzerland and Turkey, where the law asks first. Elsewhere the site counts visits with Microsoft Clarity without a banner, and the Cookies link at the bottom of each page still turns it off.
 
