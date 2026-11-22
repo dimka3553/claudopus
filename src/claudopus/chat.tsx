@@ -215,7 +215,7 @@ const chatHooks = (on: On) => {
 
     await $.tool.register({
       name: 'update',
-      description: 'Records a topic in the memory index: creates it, or changes the fields given. `brief` replaces the whole page of notes on it: read it first and keep what other tasks wrote.',
+      description: "Records a topic in the memory index: creates it, or changes the fields given. Each topic has a short page a fresh task reads first, and a history that is only added to: `add` puts what this task found, decided, built and left open at the end of the history, dated, with nothing to read first; `brief` replaces the whole page, so read it first and keep what still holds.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -223,7 +223,8 @@ const chatHooks = (on: On) => {
           repo: { type: 'string', description: 'The folder the task happens in' },
           state: { type: 'string', description: 'How far it has got, in at most six words; start with "done" once it is pushed or deployed. Put detail in `brief`' },
           summary: { type: 'string', description: 'One line on what the topic is for' },
-          brief: { type: 'string' },
+          add: { type: 'string', description: "What this task found, decided, built and left open, with the paths that matter: added to the end of the topic's history" },
+          brief: { type: 'string', description: 'The whole short page a fresh task reads first, at most 8000 characters: where things are, where each line of work stands, what is decided, what is open. Leave it out when none of that changed' },
         },
         required: ['name'],
       },
@@ -314,6 +315,8 @@ const chatHooks = (on: On) => {
     await sync($).catch(() => undefined)
     during('load: read the results')
     await loadReports($).catch(() => undefined)
+    // A topic page grown past what a fresh task reads whole is made short in the background, the whole of it kept in its history
+    afterLoad($, CATCH_UP_AFTER, () => void shortenPages($).catch(err => log($, `pages not made short: ${String(err)}`)))
     // What the person had typed into a reply box before a reload of the mod is in its box again
     await readDrafts($).catch(() => undefined)
     // Work that is running when the chat loads brings the panel up, if it has never opened
@@ -519,7 +522,7 @@ const chatHooks = (on: On) => {
       const role = await keptRule($, 'role', async () => named(fillModels((await inForce($, $.plugin.root, dir, 'roles/chat.md')).text, models, lean)))
       if (!m.isChat || m.needsContext) {
         // Each subject with the path of its brief, so a brief for work on it can name that path without a search
-        const subjects = (await readIndex($)).map(s => `- ${[s.name, s.repo, s.session, s.state, s.summary, `streams/${slug(s.name)}.md`].join(' | ')}`).join('\n')
+        const subjects = (await readIndex($)).filter(s => !isScratchTopic(s.repo)).map(s => `- ${[s.name, s.repo, s.session, s.state, s.summary, `streams/${slug(s.name)}.md`].join(' | ')}`).join('\n')
         context.push(`${role}\nThis chat's saved words: ${dir}/words/${m.id}.md\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${subjects || '(none yet)'}`)
       }
       const told = reportsTold(await read($, reports), await $.clock.now())

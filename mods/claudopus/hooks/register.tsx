@@ -1259,6 +1259,74 @@ const saveStream = async ($: EngineInterface, name: string, patch: Partial<Strea
   return next
 }
 
+
+const PAGE_CHARS = 8_000
+const PAGE_READ = 400_000
+const pageOf = (name: string) => `${dir}/streams/${slug(name)}.md`
+const historyOf = (name: string) => `${dir}/streams/${slug(name)}.log.md`
+const isScratchTopic = (repo: string) => /^\/(?:private\/)?(?:tmp|var\/folders)\//.test(repo) || (Boolean(dir) && repo.startsWith(`${dir}/`))
+const historyEntry = (at: number, by: string, text: string) => `## ${new Date(at).toISOString().slice(0, 16).replace('T', ' ')} ${oneLine(by) || 'A task'}\n\n${hideKeys(text.trim())}\n\n`
+const PAGE_SYSTEM = `You keep the notes page of one topic of a person's work, which a fresh AI agent reads before it starts work on that topic. The page has grown too long; the whole of it is kept in the topic's history file, which agents search when they need the past. Write the new short page from it: plain markdown, at most 6000 characters, in this order:
+1. "# <topic name>" and one line on what the topic is for.
+2. Where things are: repos, branches that matter now, key folders and files, by full path or name.
+3. Now: the current state of each line of work, newest facts winning over older ones.
+4. Decided: standing decisions and the person's preferences an agent must not undo, with short quotes of their own words where they set a rule.
+5. Open: what is waiting, on whom, and the next step for each.
+6. Last line: "History: everything before <date> is in <history file>; search it with recall or grep."
+Keep only what a fresh agent needs to start correctly. Never invent anything; where the page contradicts itself, the newest entry wins. Reply with the page and nothing else.`
+const shortening = new Set<string>()
+const shortenPage = async ($: EngineInterface, name: string) => {
+  const path = pageOf(name)
+  const text = await readOr($, path)
+  if (text.length <= PAGE_CHARS || shortening.has(path)) return false
+  shortening.add(path)
+  try {
+    const at = await $.clock.now()
+    const day = new Date(at).toISOString().slice(0, 10)
+    const r = await $.model.complete({
+      model: 'sonnet',
+      system: PAGE_SYSTEM,
+      prompt: `Topic: ${name}\nToday: ${day}\nHistory file: streams/${slug(name)}.log.md\n\nThe page${text.length > PAGE_READ ? ' (its newest part)' : ''}:\n"""\n${text.slice(-PAGE_READ)}\n"""`,
+      maxTokens: 4000,
+      timeoutMs: 180_000,
+    })
+    const short = r.isAnswered ? r.text.trim().replace(/^```(?:markdown|md)?\n([\s\S]*)\n```$/, '$1').trim() : ''
+    if (!short || short.length > PAGE_CHARS) {
+      await log($, `page of ${name} not made short: ${r.isAnswered ? `${short.length} characters back` : 'no answer'}`)
+      return false
+    }
+    if ((await readOr($, path)) !== text) return false
+    const marked = mark(text)
+    if (!(await readOr($, historyOf(name))).includes(`(${marked})`)) {
+      await appendTo($, historyOf(name), historyEntry(at, `The page as it was, set aside whole when it passed ${PAGE_CHARS} characters (${marked})`, text))
+    }
+    await $.fs.write(path, `${short}\n`)
+    await log($, `page of ${name} made short: ${text.length} to ${short.length} characters, the whole page kept in its history`)
+    return true
+  } finally {
+    shortening.delete(path)
+  }
+}
+const SHORTEN_STALE = 10 * 60_000
+const shortenPages = async ($: EngineInterface) => {
+  const grown: Stream[] = []
+  for (const one of await readIndex($)) if (((await $.fs.stat(pageOf(one.name)).catch(() => undefined))?.size ?? 0) > PAGE_CHARS) grown.push(one)
+  if (!grown.length) return
+  const lock = `${dir}/locks/pages`
+  const now = await $.clock.now()
+  const take = () => $.process.run(['/bin/sh', '-c', 'mkdir -p "$(dirname "$1")" && mkdir "$1" 2>/dev/null && printf %s "$2" > "$1/at"', 'sh', lock, String(now)]).then(r => r.exitCode === 0, () => false)
+  if (!(await take())) {
+    if (now - Number((await readOr($, `${lock}/at`)) || now) < SHORTEN_STALE) return
+    await $.process.run(['rm', '-rf', lock]).catch(() => undefined)
+    if (!(await take())) return
+  }
+  try {
+    for (const one of grown) await shortenPage($, one.name).catch(err => log($, `page of ${one.name} not made short: ${String(err)}`))
+  } finally {
+    await $.process.run(['rm', '-rf', lock]).catch(() => undefined)
+  }
+}
+
 const appTitle = async ($: EngineInterface) => {
   try {
     return (JSON.parse(textOf(await $.mcp.call('ccd_session_mgmt', 'get_session', { session_id: 'self' }))) as { title?: string }).title
@@ -2355,7 +2423,7 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
     if (copies.length >= COPIES_KEPT || copies.includes(name)) return
     const to = `${into}/${name}`
     await $.process.run(['mkdir', '-p', to.slice(0, to.lastIndexOf('/'))])
-    if ((await $.process.run(['cp', '-p', from, to])).exitCode === 0) copies.push(name)
+    if ((await $.process.run(['cp', '-cp', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0 || (await $.process.run(['cp', '-p', from, to])).exitCode === 0) copies.push(name)
   }
   for (const path of namedPaths(text)) {
     const stat = await $.fs.stat(path).catch(() => undefined)
@@ -2456,7 +2524,11 @@ const markReport = ($: EngineInterface, r: Report, patch: Partial<Report> | ((st
   return run
 }
 
-const reportsTold = (all: Report[], now: number, list = all.filter(r => !r.archived)) =>
+const newestPerTask = (all: Report[]) => {
+  const told = new Set<string>()
+  return all.filter(r => !r.archived && !(r.agent && told.has(r.agent)) && (r.agent ? told.add(r.agent) : true))
+}
+const reportsTold = (all: Report[], now: number, list = newestPerTask(all)) =>
   list.length
     ? `Results saved (what finished tasks left for ${who()} to read or act on), newest first (title · topic · when · its file):\n${list
         .slice(0, REPORTS_TOLD)
@@ -10319,7 +10391,7 @@ const chatHooks = (on: On) => {
 
     await $.tool.register({
       name: 'update',
-      description: 'Records a topic in the memory index: creates it, or changes the fields given. `brief` replaces the whole page of notes on it: read it first and keep what other tasks wrote.',
+      description: "Records a topic in the memory index: creates it, or changes the fields given. Each topic has a short page a fresh task reads first, and a history that is only added to: `add` puts what this task found, decided, built and left open at the end of the history, dated, with nothing to read first; `brief` replaces the whole page, so read it first and keep what still holds.",
       inputSchema: {
         type: 'object',
         properties: {
@@ -10327,7 +10399,8 @@ const chatHooks = (on: On) => {
           repo: { type: 'string', description: 'The folder the task happens in' },
           state: { type: 'string', description: 'How far it has got, in at most six words; start with "done" once it is pushed or deployed. Put detail in `brief`' },
           summary: { type: 'string', description: 'One line on what the topic is for' },
-          brief: { type: 'string' },
+          add: { type: 'string', description: "What this task found, decided, built and left open, with the paths that matter: added to the end of the topic's history" },
+          brief: { type: 'string', description: 'The whole short page a fresh task reads first, at most 8000 characters: where things are, where each line of work stands, what is decided, what is open. Leave it out when none of that changed' },
         },
         required: ['name'],
       },
@@ -10417,6 +10490,7 @@ const chatHooks = (on: On) => {
     await sync($).catch(() => undefined)
     during('load: read the results')
     await loadReports($).catch(() => undefined)
+    afterLoad($, CATCH_UP_AFTER, () => void shortenPages($).catch(err => log($, `pages not made short: ${String(err)}`)))
     await readDrafts($).catch(() => undefined)
     const isRunning = (await read($, todos)).some(one => !one.parentId && one.status === 'working')
     panelSeen = ''
@@ -10563,7 +10637,7 @@ const chatHooks = (on: On) => {
     if (!isOff) {
       const role = await keptRule($, 'role', async () => named(fillModels((await inForce($, $.plugin.root, dir, 'roles/chat.md')).text, models, lean)))
       if (!m.isChat || m.needsContext) {
-        const subjects = (await readIndex($)).map(s => `- ${[s.name, s.repo, s.session, s.state, s.summary, `streams/${slug(s.name)}.md`].join(' | ')}`).join('\n')
+        const subjects = (await readIndex($)).filter(s => !isScratchTopic(s.repo)).map(s => `- ${[s.name, s.repo, s.session, s.state, s.summary, `streams/${slug(s.name)}.md`].join(' | ')}`).join('\n')
         context.push(`${role}\nThis chat's saved words: ${dir}/words/${m.id}.md\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${subjects || '(none yet)'}`)
       }
       const told = reportsTold(await read($, reports), await $.clock.now())
@@ -13050,34 +13124,73 @@ const commandHooks = (on: On) => {
 }
 
 
+const RECALL_LINES = 40
+const RECALL_PER_FILE = 6
+const recallRank = (file: string) =>
+  file.startsWith('streams/') ? (file.endsWith('.log.md') ? 1 : 0)
+  : file.startsWith('reports/') ? 2
+  : file.startsWith('words/') || file.startsWith('asks/') ? 3
+  : file.startsWith('work/') ? 5
+  : file.startsWith('notes/') ? 6
+  : 4
+
 const toolHooks = (on: On) => {
 
   on('tool.call', { tool: 'mcp__claudopus__update' }, async ($, e) => {
-    const input = e as unknown as { name?: string; repo?: string; state?: string; summary?: string; brief?: string }
+    const input = e as unknown as { name?: string; repo?: string; state?: string; summary?: string; brief?: string; add?: string }
     if (!input.name?.trim()) return { result: 'A topic needs a name.' }
+    const known = (await readIndex($)).find(one => slug(one.name) === slug(input.name ?? ''))
+    if (isScratchTopic(input.repo?.trim() || known?.repo || '')) return { result: named(`Not recorded: ${input.repo?.trim() || known?.repo} is a test or scratch folder, and topics are for {name}'s own work.`) }
+    const brief = input.brief?.trim() ?? ''
+    const added = input.add?.trim() ?? ''
+    const isLong = brief.length > PAGE_CHARS
     const saved = await saveStream($, input.name, { repo: input.repo, state: input.state?.slice(0, 60), summary: input.summary })
     if (e.agentId !== undefined) await change($, e.agentId, one => ({ ...one, subject: saved.name }))
-    const path = `${dir}/streams/${slug(saved.name)}.md`
-    if (input.brief?.trim()) await $.fs.write(`${dir}/streams/${slug(saved.name)}.md`, `${input.brief.trim()}\n`)
-
-    return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved.summary].join(' | ')}\nNotes: ${path}${input.brief?.trim() ? ' (rewritten)' : ''}` }
+    const page = pageOf(saved.name)
+    if (added) {
+      const card = e.agentId === undefined ? undefined : (await read($, todos)).find(one => one.id === e.agentId)
+      await appendTo($, historyOf(saved.name), historyEntry(await $.clock.now(), card ? titleOf(card) : 'The chat', added))
+    }
+    if (brief && !isLong) await $.fs.write(page, `${hideKeys(brief)}\n`)
+    void shortenPage($, saved.name).catch(err => log($, `page of ${saved.name} not made short: ${String(err)}`))
+    const said = [
+      added ? `History: ${historyOf(saved.name)} (added to)` : '',
+      `Page: ${page}${brief && !isLong ? ' (rewritten)' : ''}`,
+      isLong ? `The page was not rewritten: \`brief\` was ${brief.length} characters, over the ${PAGE_CHARS} a page holds. Keep the page to what a fresh task needs first (where things are, where each line of work stands, what is decided, what is open) and put the detail in \`add\`.` : '',
+    ].filter(Boolean)
+    return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved.summary].join(' | ')}\n${said.join('\n')}` }
   })
 
   on('tool.call', { tool: 'mcp__claudopus__recall' }, async ($, e) => {
     const query = (e as unknown as { query?: string }).query?.trim() ?? ''
     if (!query) return { result: 'Nothing to search for.' }
-    const r = await $.process.run(['grep', '-rniF', '--include=*.md', '-e', query, dir])
+    const grep = async (phrase: string) => (await $.process.run(['grep', '-rniF', '--include=*.md', '-e', phrase, dir])).stdout.split('\n').filter(Boolean)
+    const words = [...new Set(query.toLowerCase().split(/\s+/).filter(one => one.length > 1))]
+    let found = await grep(query)
+    const isLoose = !found.length && words.length > 1
+    if (isLoose) {
+      const longest = [...words].sort((a, b) => b.length - a.length)[0] ?? query
+      found = (await grep(longest)).filter(line => words.every(one => line.slice(line.indexOf(':', dir.length + 1)).toLowerCase().includes(one)))
+    }
     const archived = new Set((await loadReports($).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
-    const lines = r.stdout
-      .split('\n')
-      .filter(Boolean)
+    const seen = new Set<string>()
+    const perFile = new Map<string, number>()
+    const lines = found
       .map(line => line.replace(`${dir}/`, ''))
-      .map(line => (archived.has(line.match(/^reports\/([^/]+)\//)?.[1] ?? '') ? `[archived] ${line}` : line).slice(0, 240))
-      .sort((a, b) => Number(a.startsWith('work/')) - Number(b.startsWith('work/')))
-    if (!lines.length) return { result: `Nothing in ${dir} mentions "${query}".` }
-    const more = lines.length > 40 ? `\n(${lines.length - 40} more lines; narrow the phrase)` : ''
-
-    return { result: `Files are under ${dir}.\n${lines.slice(0, 40).join('\n')}${more}` }
+      .map(line => ({ line, file: line.slice(0, line.indexOf(':')) }))
+      .sort((a, b) => recallRank(a.file) - recallRank(b.file) || (a.file.startsWith('reports/') && b.file.startsWith('reports/') ? b.file.localeCompare(a.file) : 0))
+      .filter(({ line, file }) => {
+        const said = flat(line.slice(line.indexOf(':', file.length + 1) + 1))
+        if (seen.has(said)) return false
+        seen.add(said)
+        perFile.set(file, (perFile.get(file) ?? 0) + 1)
+        return (perFile.get(file) ?? 0) <= RECALL_PER_FILE
+      })
+      .map(({ line, file }) => (archived.has(file.match(/^reports\/([^/]+)\//)?.[1] ?? '') ? `[archived] ${line}` : line).slice(0, 240))
+    if (!lines.length) return { result: `Nothing in ${dir} mentions "${query}"${words.length > 1 ? ', nor holds all its words on one line' : ''}.` }
+    const more = lines.length > RECALL_LINES ? `\n(${lines.length - RECALL_LINES} more lines; narrow the phrase)` : ''
+    const loose = isLoose ? `No line holds "${query}" as written; these hold each of its words.\n` : ''
+    return { result: `${loose}Files are under ${dir}.\n${lines.slice(0, RECALL_LINES).join('\n')}${more}` }
   })
 
   on('tool.call', { tool: 'mcp__claudopus__todo' }, async ($, e) => {

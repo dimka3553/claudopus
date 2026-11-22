@@ -276,8 +276,8 @@ Everything Claudopus saves is in `~/.claude/claudopus`, as plain files:
 
 | Path | What it holds |
 | --- | --- |
-| `index.md` | The topics of your tasks, one line each |
-| `streams/` | One set of instructions per topic |
+| `index.md` | The topics of your tasks, one line each. A topic in a temporary folder or inside this folder is a test's, and stays out |
+| `streams/` | For each topic, a short page a task reads first (`<topic>.md`, at most 8,000 characters) and its history, which tasks only add to (`<topic>.log.md`). A page that grows past its limit is moved whole into the history, and Sonnet writes a short page from it in its place |
 | `words/` | Your messages, word for word, and Claude's answers, one file per chat. Messages a program, a schedule or Slack sent are saved too, marked. Chats Claudopus wasn't running in are saved 10 to 20 minutes after they go quiet, and the start of a chat it joined partway goes in `<chat>.before.md`. Keys and passwords are hidden here, in `work/`, `asks/` and `pastes/` |
 | `work/` | For each chat, what its helpers were asked and reported, what connected tools such as SBOS returned, the pages it fetched and the documents it wrote, keys hidden. `recall` lists these after everything else |
 | `caught/` | How far Claudopus has read each chat's record, and its log |

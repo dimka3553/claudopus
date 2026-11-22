@@ -1,36 +1,82 @@
 // The mod's own tools: update, recall, todo, ask and note
 
+// What recall gives: at most this many lines, and this many from any one file
+const RECALL_LINES = 40
+const RECALL_PER_FILE = 6
+const recallRank = (file: string) =>
+  file.startsWith('streams/') ? (file.endsWith('.log.md') ? 1 : 0)
+  : file.startsWith('reports/') ? 2
+  : file.startsWith('words/') || file.startsWith('asks/') ? 3
+  : file.startsWith('work/') ? 5
+  : file.startsWith('notes/') ? 6
+  : 4
+
 const toolHooks = (on: On) => {
 
   on('tool.call', { tool: 'mcp__claudopus__update' }, async ($, e) => {
-    const input = e as unknown as { name?: string; repo?: string; state?: string; summary?: string; brief?: string }
+    const input = e as unknown as { name?: string; repo?: string; state?: string; summary?: string; brief?: string; add?: string }
     if (!input.name?.trim()) return { result: 'A topic needs a name.' }
+    // A test's or a scratch folder's topic is kept out of the index every chat is given
+    const known = (await readIndex($)).find(one => slug(one.name) === slug(input.name ?? ''))
+    if (isScratchTopic(input.repo?.trim() || known?.repo || '')) return { result: named(`Not recorded: ${input.repo?.trim() || known?.repo} is a test or scratch folder, and topics are for {name}'s own work.`) }
+    const brief = input.brief?.trim() ?? ''
+    const added = input.add?.trim() ?? ''
+    const isLong = brief.length > PAGE_CHARS
     const saved = await saveStream($, input.name, { repo: input.repo, state: input.state?.slice(0, 60), summary: input.summary })
     // The subject a piece of work recorded names the subject of its report
     if (e.agentId !== undefined) await change($, e.agentId, one => ({ ...one, subject: saved.name }))
-    const path = `${dir}/streams/${slug(saved.name)}.md`
-    if (input.brief?.trim()) await $.fs.write(`${dir}/streams/${slug(saved.name)}.md`, `${input.brief.trim()}\n`)
-
-    return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved.summary].join(' | ')}\nNotes: ${path}${input.brief?.trim() ? ' (rewritten)' : ''}` }
+    const page = pageOf(saved.name)
+    if (added) {
+      const card = e.agentId === undefined ? undefined : (await read($, todos)).find(one => one.id === e.agentId)
+      await appendTo($, historyOf(saved.name), historyEntry(await $.clock.now(), card ? titleOf(card) : 'The chat', added))
+    }
+    if (brief && !isLong) await $.fs.write(page, `${hideKeys(brief)}\n`)
+    // A page grown past its limit by hand is made short in the background, the whole of it kept in the history
+    void shortenPage($, saved.name).catch(err => log($, `page of ${saved.name} not made short: ${String(err)}`))
+    const said = [
+      added ? `History: ${historyOf(saved.name)} (added to)` : '',
+      `Page: ${page}${brief && !isLong ? ' (rewritten)' : ''}`,
+      isLong ? `The page was not rewritten: \`brief\` was ${brief.length} characters, over the ${PAGE_CHARS} a page holds. Keep the page to what a fresh task needs first (where things are, where each line of work stands, what is decided, what is open) and put the detail in \`add\`.` : '',
+    ].filter(Boolean)
+    return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved.summary].join(' | ')}\n${said.join('\n')}` }
   })
 
   on('tool.call', { tool: 'mcp__claudopus__recall' }, async ($, e) => {
     const query = (e as unknown as { query?: string }).query?.trim() ?? ''
     if (!query) return { result: 'Nothing to search for.' }
-    const r = await $.process.run(['grep', '-rniF', '--include=*.md', '-e', query, dir])
+    const grep = async (phrase: string) => (await $.process.run(['grep', '-rniF', '--include=*.md', '-e', phrase, dir])).stdout.split('\n').filter(Boolean)
+    // The phrase as given; when nothing holds it whole, the lines that hold each of its words, in any order
+    const words = [...new Set(query.toLowerCase().split(/\s+/).filter(one => one.length > 1))]
+    let found = await grep(query)
+    const isLoose = !found.length && words.length > 1
+    if (isLoose) {
+      const longest = [...words].sort((a, b) => b.length - a.length)[0] ?? query
+      found = (await grep(longest)).filter(line => words.every(one => line.slice(line.indexOf(':', dir.length + 1)).toLowerCase().includes(one)))
+    }
     // A result the person put away is still found, marked, so it is answered from only when they name it
     const archived = new Set((await loadReports($).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
-    const lines = r.stdout
-      .split('\n')
-      .filter(Boolean)
+    const seen = new Set<string>()
+    const perFile = new Map<string, number>()
+    const lines = found
       .map(line => line.replace(`${dir}/`, ''))
-      .map(line => (archived.has(line.match(/^reports\/([^/]+)\//)?.[1] ?? '') ? `[archived] ${line}` : line).slice(0, 240))
-      // What a chat's helpers and tools brought comes after the chats' own words, notes and results, so it never crowds them out
-      .sort((a, b) => Number(a.startsWith('work/')) - Number(b.startsWith('work/')))
-    if (!lines.length) return { result: `Nothing in ${dir} mentions "${query}".` }
-    const more = lines.length > 40 ? `\n(${lines.length - 40} more lines; narrow the phrase)` : ''
-
-    return { result: `Files are under ${dir}.\n${lines.slice(0, 40).join('\n')}${more}` }
+      .map(line => ({ line, file: line.slice(0, line.indexOf(':')) }))
+      // Topic pages first, then their histories, the results newest first, the chats' words, the rest; what a chat's helpers and
+      // tools brought and the notes come last, so they never crowd out the rest
+      .sort((a, b) => recallRank(a.file) - recallRank(b.file) || (a.file.startsWith('reports/') && b.file.startsWith('reports/') ? b.file.localeCompare(a.file) : 0))
+      // The same line in several files (a result handed in again, a message quoted back) is given once, from where it ranks first;
+      // and no file gives more than RECALL_PER_FILE lines, so one long file never fills the answer
+      .filter(({ line, file }) => {
+        const said = flat(line.slice(line.indexOf(':', file.length + 1) + 1))
+        if (seen.has(said)) return false
+        seen.add(said)
+        perFile.set(file, (perFile.get(file) ?? 0) + 1)
+        return (perFile.get(file) ?? 0) <= RECALL_PER_FILE
+      })
+      .map(({ line, file }) => (archived.has(file.match(/^reports\/([^/]+)\//)?.[1] ?? '') ? `[archived] ${line}` : line).slice(0, 240))
+    if (!lines.length) return { result: `Nothing in ${dir} mentions "${query}"${words.length > 1 ? ', nor holds all its words on one line' : ''}.` }
+    const more = lines.length > RECALL_LINES ? `\n(${lines.length - RECALL_LINES} more lines; narrow the phrase)` : ''
+    const loose = isLoose ? `No line holds "${query}" as written; these hold each of its words.\n` : ''
+    return { result: `${loose}Files are under ${dir}.\n${lines.slice(0, RECALL_LINES).join('\n')}${more}` }
   })
 
   // The work lists what it sets out to do under its to-do, ticks it, rewords it or marks it dropped. A helper's list is its own,

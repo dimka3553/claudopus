@@ -2,6 +2,13 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.271 · 23 November 2026
+- Each topic now has a short page a task reads first and a history that tasks only add to, so a task no longer reads or resends a whole page of notes. A page that grows past 8,000 characters is moved whole into its history, and a short page is written from it in its place.
+- Topics from tests and scratch folders stay out of the topic list every chat is given.
+- The results each message lists show one result per task, its newest, instead of every result it handed in.
+- Recall gives topic pages first, then their histories, results newest first and your chats' words; the same line from several files once; and, when no line holds your phrase as written, the lines that hold each of its words.
+- The same picture in several results of one task now takes its disk space once.
+
 ## 0.2.270 · 23 November 2026
 - Claudopus keeps a ledger of every task on disk as it changes, so quitting or restarting the Claude app loses nothing: a task that was working is shown as Interrupted, never Done or gone, with Carry on to start it again from where it stopped.
 - Carry on starts a fresh task with the cut-off task's instructions, to-dos, last notes, worktree and saved transcript; a question it asked still waits for you, and your answer carries it on. Tasks you stopped stay stopped.

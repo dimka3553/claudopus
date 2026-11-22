@@ -861,23 +861,77 @@ test('without a name in config.json the work is told of the person', async ($, o
   expect(prompts[0]).toContain('The person follows this task in a panel')
 })
 
-test('the update tool records a subject and rewrites its brief', async ($, on) => {
+test('the update tool records a topic, adds to its history with nothing read, rewrites its short page only within its limit, and keeps a test folder\'s topic out of the index', async ($, on) => {
   const { files } = world(on)
+  files.set(`${MEMORY}/index.md`, `# Topics\n\nname | repo | session | state | summary\n\n- greet names | ${MEMORY}/notes/token-usage/runs/S0/work |  | done | A test run's topic\n`)
   await $.session.start(start)
 
   await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 't1', name: '3D heads', repo: '/sandbox', summary: 'Fix the nose' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 't2', name: '3d heads', state: 'done: pushed', brief: 'Nose fixed.' } as never)
-
+  await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 't2', name: '3d heads', state: 'done: pushed', brief: 'Nose fixed.', add: 'The nose was flipped; fixed in nose.py.' } as never)
   expect(files.get(`${MEMORY}/index.md`)).toContain('- 3D heads | /sandbox |  | done: pushed | Fix the nose')
   expect(files.get(`${MEMORY}/streams/3d-heads.md`)).toBe('Nose fixed.\n')
+  // The history is added to, dated and headed by who added it, and the page stays as it was
+  await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 't3', name: '3D heads', add: 'Checked on 15 heads.' } as never)
+  expect(files.get(`${MEMORY}/streams/3d-heads.log.md`)).toMatch(/^## \d{4}-\d\d-\d\d \d\d:\d\d The chat\n\nThe nose was flipped; fixed in nose.py.\n\n## \d{4}-\d\d-\d\d \d\d:\d\d The chat\n\nChecked on 15 heads.\n\n$/)
+  expect(files.get(`${MEMORY}/streams/3d-heads.md`)).toBe('Nose fixed.\n')
+  // A page past its limit is not written, and the task is told why
+  const long = await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 't4', name: '3D heads', brief: 'x'.repeat(8001) } as never)
+  expect(String(long.result)).toContain('The page was not rewritten')
+  expect(files.get(`${MEMORY}/streams/3d-heads.md`)).toBe('Nose fixed.\n')
+  // A topic in a test's or a scratch folder is not recorded, and one already in the index is not given to the chat
+  for (const repo of [`${MEMORY}/notes/token-usage/runs/S1/work`, '/private/tmp/try/work']) {
+    expect(String((await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 't5', name: 'hop chain', repo, state: 'done' } as never)).result)).toContain('Not recorded')
+  }
+  expect(files.get(`${MEMORY}/index.md`)).not.toContain('hop chain')
+  const told = (await $.prompt.submit({ text: 'what is on', wait: false, origin: composer })).context?.join('\n') ?? ''
+  expect(told).toContain('- 3D heads | /sandbox')
+  expect(told).not.toContain('greet names')
 })
 
-test('recall returns matching lines without the folder prefix, what helpers and tools found after the chats\' own words', async ($, on) => {
-  world(on)
+test('a topic page grown past its limit is set aside whole into its history and a short page made from it takes its place; with no answer it stays', async ($, on) => {
+  const grown = `# 3D heads\n${'Old detail line. '.repeat(600)}\nNewest: the nose is fixed.\n`
+  const asked: string[] = []
+  let answer: string | null = null
+  const { files } = world(on, { complete: e => (e.system?.includes('notes page of one topic') ? (asked.push(e.prompt), answer) : undefined) })
+  files.set(`${MEMORY}/streams/3d-heads.md`, grown)
+  await $.session.start(start)
+  // No answer from the model: the page is left whole, and nothing is set aside
+  await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 't1', name: '3D heads', state: 'nose fixed' } as never)
+  await until(async () => asked.length || undefined)
+  expect(files.get(`${MEMORY}/streams/3d-heads.md`)).toBe(grown)
+  expect(files.has(`${MEMORY}/streams/3d-heads.log.md`)).toBe(false)
+  answer = '# 3D heads\nNow: the nose is fixed.'
+  await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 't2', name: '3D heads', add: 'Nose checked.' } as never)
+  expect(await until(async () => (files.get(`${MEMORY}/streams/3d-heads.md`) === '# 3D heads\nNow: the nose is fixed.\n' ? true : undefined))).toBe(true)
+  expect(asked.at(-1)).toContain('Newest: the nose is fixed.')
+  const history = files.get(`${MEMORY}/streams/3d-heads.log.md`) ?? ''
+  expect(history).toContain('Nose checked.')
+  expect(history).toContain(grown.trim())
+  expect(history.split('The page as it was').length).toBe(2)
+})
+
+test('recall gives topic pages, then their histories, results newest first, the chats\' words, then what helpers found; a line once, a few from any one file, and each word of a phrase found nowhere whole', async ($, on) => {
+  const { files } = world(on)
+  files.set(`${MEMORY}/words/local_1.md`, 'hello\nthe nose is flawed\n')
+  files.set(`${MEMORY}/words/local_2.md`, Array.from({ length: 9 }, (_, n) => `nose note ${n}`).join('\n'))
+  files.set(`${MEMORY}/work/local_1.md`, `${'filler\n'.repeat(8)}the nose model returned\n`)
+  files.set(`${MEMORY}/streams/3d-heads.log.md`, '## 2026-11-01 A task\n\nnose moved up 2 mm\n')
+  files.set(`${MEMORY}/streams/3d-heads.md`, '# 3D heads\nNose: fixed\n')
+  files.set(`${MEMORY}/reports/20261101-0900-a/report.md`, 'older nose look\n')
+  files.set(`${MEMORY}/reports/20261102-0900-b/report.md`, 'the nose is flawed\n')
   await $.session.start(start)
 
-  const r = await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't1', query: 'nose' } as never)
-  expect(String(r.result)).toContain('words/local_1.md:2:the nose is flawed\nwork/local_1.md:9:the nose model returned')
+  const r = String((await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't1', query: 'nose' } as never)).result)
+  expect(r).toContain('streams/3d-heads.md:2:Nose: fixed\nstreams/3d-heads.log.md:3:nose moved up 2 mm\nreports/20261102-0900-b/report.md:1:the nose is flawed\nreports/20261101-0900-a/report.md:1:older nose look\n')
+  expect(r).not.toContain('words/local_1.md')
+  expect(r).toContain('words/local_2.md:6:nose note 5\n')
+  expect(r).not.toContain('nose note 6')
+  expect(r.trim().endsWith('work/local_1.md:9:the nose model returned')).toBe(true)
+  // A phrase no line holds whole: the lines that hold each of its words
+  const loose = String((await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't2', query: 'flawed nose' } as never)).result)
+  expect(loose).toContain('No line holds "flawed nose" as written')
+  expect(loose).toContain('reports/20261102-0900-b/report.md:1:the nose is flawed')
+  expect(String((await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't3', query: 'zebra nose' } as never)).result)).toContain('Nothing in')
 })
 
 test('rarely used tools wait behind tool search', async ($, on) => {
