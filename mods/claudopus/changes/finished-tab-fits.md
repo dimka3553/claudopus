@@ -1,0 +1,1 @@
+- Opening Finished no longer says Claudopus couldn't show this tab when many tasks have finished across your chats: it lists the newest 20 with Show 20 more under them, and shows fewer at once whenever more would not fit.

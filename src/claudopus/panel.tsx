@@ -53,6 +53,9 @@ let usedUntil = 0
 // How many times less a Details tab too big for the app may be drawn with (drawFor), and how much less each was last drawn with
 const SQUEEZE_MOST = 3
 const paneSqueezed = new Map<string, number>()
+// Finished unfolded lists this many cards at first, and a row that shows as many more: all of them in one drawing were past what
+// the app draws, and the panel said only that it couldn't show this tab (22 Nov). Pages are taken back while the panel would not fit
+const FINISHED_PAGE = 20
 // A drawing the app would throw away is never given: the tab says so in plain words instead, with the way back to the list, so it
 // never stays on "Nothing to show yet" (drawingFits). Said in the log once a minute at most for each tab
 const tooBigLogged = new Map<string, number>()
@@ -191,6 +194,10 @@ const panelHooks = (on: On) => {
     during(paneId === LIST ? 'draw the panel' : 'draw a Details tab')
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
     if (paneId === LIST) await read($, tick)
+    // How many pages of Finished this drawing leaves out so the list fits what the app draws (FINISHED_PAGE)
+    let finishedCut = 0
+    // (whether the drawing just made showed Finished past its first page)
+    let isFinishedPastPage = false
     // `squeeze`: how much less a Details tab too big for the app holds (drawingFits): 0 for all of it
     const drawFor = async (squeeze: number) => {
     const { Box, Button, Markdown, Text } = uiOf($, e)
@@ -216,7 +223,8 @@ const panelHooks = (on: On) => {
       for (const [key, value] of lateFrom) if (value === Infinity) from - Number(key.split(':').at(-1)) < RELOAD_GRACE * 2 ? lateFrom.set(key, from) : lateFrom.delete(key)
       $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
     }
-    const { isFinishedOpen = false } = await read($, view)
+    const { isFinishedOpen = false, finishedShown = FINISHED_PAGE } = await read($, view)
+    isFinishedPastPage = false
     // Work that ended while the list was held (an older drawing given again) was not seen ended: its moment at the top begins with
     // this drawing, the first to show it, never before
     if (paneId === LIST) {
@@ -1733,16 +1741,29 @@ const panelHooks = (on: On) => {
                 label={`${isOpen ? '▾' : '▸'} Finished ${finished.length + endedFlows.length}`}
                 plain
                 hotkey={keyed ? 'f' : undefined}
-                onPress={() => void ((presses += 1), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
+                onPress={() => void ((presses += 1), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen, finishedShown: FINISHED_PAGE })))}
               />
             </Box>
             <Text dimColor>{endedElsewhere.length ? 'all chats' : 'this chat'}</Text>
           </Box>
-          {isOpen
-            ? [...finished.map(one => ({ at: one.endedAt, card: () => small(one) })), ...endedFlows.map(f => ({ at: f.endedAt, card: () => flowSmall(f) }))].sort((a, b) => b.at - a.at).map(one => one.card())
-            : null}
+          {isOpen ? finishedCards() : null}
         </Box>
       ) : null
+    // Unfolded, the newest first, a page at a time, with a row under them that shows the next page
+    const finishedCards = () => {
+      const all = [...finished.map(one => ({ at: one.endedAt, card: () => small(one) })), ...endedFlows.map(f => ({ at: f.endedAt, card: () => flowSmall(f) }))].sort((a, b) => b.at - a.at)
+      const most = Math.max(FINISHED_PAGE, finishedShown - finishedCut * FINISHED_PAGE)
+      const left = all.length - most
+      isFinishedPastPage = most > FINISHED_PAGE && all.length > FINISHED_PAGE
+      return [
+        ...all.slice(0, most).map(one => one.card()),
+        left > 0 ? (
+          <Box key="finished-more" paddingX={2} alignItems="flex-start" flexShrink={0}>
+            <Button key={`finished-more-${presses}`} label={`Show ${Math.min(FINISHED_PAGE, left)} more`} plain dimColor onPress={() => void ((presses += 1), update($, view, v => ({ ...v, finishedShown: most + FINISHED_PAGE })))} />
+          </Box>
+        ) : null,
+      ]
+    }
 
     // A workflow's Details tab: what it is, with Stop; where it started; its stages in order; its rounds, each with its agents and
     // its outcome; one agent's chat at a time, picked from the rounds; and what it returned once it ended
@@ -2103,6 +2124,8 @@ const panelHooks = (on: On) => {
     let squeeze = Math.max(0, (paneSqueezed.get(paneId) ?? 0) - 1)
     let drawing = await drawFor(squeeze)
     while (paneId.startsWith(WORK_PANE) && !drawingFits(drawing) && squeeze < SQUEEZE_MOST) ((doneDrawn.length = 0), (drawing = await drawFor((squeeze += 1))))
+    // The list with Finished unfolded past what fits is drawn again with a page fewer, down to one page
+    while (paneId === LIST && isFinishedPastPage && !drawingFits(drawing)) ((doneDrawn.length = 0), (finishedCut += 1), (drawing = await drawFor(squeeze)))
     if ((paneSqueezed.get(paneId) ?? 0) !== squeeze) (paneSqueezed.set(paneId, squeeze), void log($, `tab ${paneId} drawn with less in it (${squeeze} of ${SQUEEZE_MOST}) to fit what the app draws`))
     // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
     // ones the engine holds, and this one is made again once the click is over (holdForPress)

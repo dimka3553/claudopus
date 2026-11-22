@@ -2145,6 +2145,35 @@ test("work that finishes comes to the top, outlined for two seconds, and stays t
 })
 
 // The world's `unresumable`: nothing sent to that agent is delivered, as for a run Claude Code no longer has
+// 22 Nov: Finished unfolded every chat's ended cards at once, past what the app draws, and the panel said only that it couldn't
+// show this tab
+test('Finished unfolds a page of cards at a time, with a row that shows more, and takes pages back while the panel would not fit, so it is always drawn', async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  const card = (c: number, k: number) => ({ id: `c${c}x${k}`, parentId: '', isFork: false, tokens: 0, model: 'claude-opus-5-5', title: `Old work ${c} ${k}`, words: 'do it', items: [{ text: 'Draft it', state: 'done' }, { text: 'Check it', state: 'done' }], entries: [{ at: NOW - 3_600_000, kind: 'note', text: 'Did it.' }], answer: 'Done.', startedAt: NOW - 7_200_000, endedAt: NOW - 3_600_000 - c * 100 - k, status: 'done' })
+  for (let c = 0; c < 8; c++) files.set(`${MEMORY}/live/chat-${c}.json`, JSON.stringify({ chat: `chat-${c}`, title: `Chat ${c}`, folder: '/repo', host: '', at: NOW, cards: Array.from({ length: 40 }, (_, k) => card(c, k)) }))
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const shown = async () => (await list.findAll({ type: 'Text' })).filter(one => /^Old work /.test(String(one.text))).length
+  expect((await until(async () => keyed(list, 'finished-fold')))?.props.label).toBe('▸ Finished 320')
+  await pressed(list, 'finished-fold')
+  expect(await until(async () => ((await shown()) === 20 ? true : undefined))).toBe(true)
+  expect((await keyed(list, 'finished-more'))?.props.label).toBe('Show 20 more')
+  await pressed(list, 'finished-more')
+  expect(await until(async () => ((await shown()) === 40 ? true : undefined))).toBe(true)
+  // Shown past what the app draws, it takes pages back until it fits, never the tab's message alone
+  for (let n = 0; n < 15; n++) await pressed(list, 'finished-more')
+  expect(await until(async () => ((await shown()) > 40 ? true : undefined))).toBe(true)
+  expect(appDraws(await list.drawn()).isDrawn).toBe(true)
+  expect(await list.find({ type: 'Text', text: "Claudopus couldn't show this tab" })).toBeUndefined()
+  expect(await shown()).toBeLessThan(320)
+  // Folded and unfolded again, it starts at one page
+  await pressed(list, 'finished-fold')
+  await pressed(list, 'finished-fold')
+  expect(await until(async () => ((await shown()) === 20 ? true : undefined))).toBe(true)
+  await list.unmount()
+})
+
 test('a message to a done task whose run is gone starts nothing and adds no card: once the list of what runs is read again its card is Done as before', async ($, on) => {
   const { clock, resumed } = world(on, { agents: { a1: 'completed' }, kinds: { a1: 'general-purpose' }, unresumable: new Set(['a1']) })
   await $.session.start(start)
