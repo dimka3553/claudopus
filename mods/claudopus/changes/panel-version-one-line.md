@@ -1,0 +1,1 @@
+- The update message in the panel header is shorter, "v0.2.267 ready: /reload-plugins", and stays on one line instead of wrapping.
