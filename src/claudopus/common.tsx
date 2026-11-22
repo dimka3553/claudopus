@@ -58,15 +58,14 @@ const FIT_PARTS = 1800
 const FIT_DEEP = 30
 const FIT_CHARS = 230_000
 const fitsSeen = new WeakMap<object, boolean>()
-const drawingFits = (drawing: unknown) => {
-  if (!drawing || typeof drawing !== 'object') return true
-  const known = fitsSeen.get(drawing)
-  if (known !== undefined) return known
+// How big a drawing is as the app counts it: its parts, characters and depth, counted until one is past its limit, or to the end
+// (`isWhole`) for the log to say by how much
+const drawingSize = (drawing: unknown, isWhole = false) => {
   let parts = 0
   let deepest = 0
   let chars = 0
   const walk = (node: unknown, depth: number) => {
-    if (parts > FIT_PARTS || chars > FIT_CHARS || deepest > FIT_DEEP) return
+    if (!isWhole && (parts > FIT_PARTS || chars > FIT_CHARS || deepest > FIT_DEEP)) return
     if (typeof node === 'string' || typeof node === 'number') return void ((parts += 1), (chars += String(node).length + 2))
     if (!node || typeof node !== 'object') return
     if (Array.isArray(node)) return void node.forEach(child => walk(child, depth))
@@ -80,6 +79,18 @@ const drawingFits = (drawing: unknown) => {
     walk(el.children ?? el.props?.children, depth + 1)
   }
   walk(drawing, 0)
+  return { parts, chars, deepest }
+}
+// What the log says of a drawing too big: each count beside its limit
+const sizeSaid = (drawing: unknown) => {
+  const { parts, chars, deepest } = drawingSize(drawing, true)
+  return `${parts} of ${FIT_PARTS} parts, ${chars} of ${FIT_CHARS} characters, ${deepest} of ${FIT_DEEP} deep`
+}
+const drawingFits = (drawing: unknown) => {
+  if (!drawing || typeof drawing !== 'object') return true
+  const known = fitsSeen.get(drawing)
+  if (known !== undefined) return known
+  const { parts, chars, deepest } = drawingSize(drawing)
   const fits = parts <= FIT_PARTS && chars <= FIT_CHARS && deepest <= FIT_DEEP
   fitsSeen.set(drawing, fits)
   return fits

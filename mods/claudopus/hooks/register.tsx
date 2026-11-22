@@ -59,15 +59,12 @@ const FIT_PARTS = 1800
 const FIT_DEEP = 30
 const FIT_CHARS = 230_000
 const fitsSeen = new WeakMap<object, boolean>()
-const drawingFits = (drawing: unknown) => {
-  if (!drawing || typeof drawing !== 'object') return true
-  const known = fitsSeen.get(drawing)
-  if (known !== undefined) return known
+const drawingSize = (drawing: unknown, isWhole = false) => {
   let parts = 0
   let deepest = 0
   let chars = 0
   const walk = (node: unknown, depth: number) => {
-    if (parts > FIT_PARTS || chars > FIT_CHARS || deepest > FIT_DEEP) return
+    if (!isWhole && (parts > FIT_PARTS || chars > FIT_CHARS || deepest > FIT_DEEP)) return
     if (typeof node === 'string' || typeof node === 'number') return void ((parts += 1), (chars += String(node).length + 2))
     if (!node || typeof node !== 'object') return
     if (Array.isArray(node)) return void node.forEach(child => walk(child, depth))
@@ -81,6 +78,17 @@ const drawingFits = (drawing: unknown) => {
     walk(el.children ?? el.props?.children, depth + 1)
   }
   walk(drawing, 0)
+  return { parts, chars, deepest }
+}
+const sizeSaid = (drawing: unknown) => {
+  const { parts, chars, deepest } = drawingSize(drawing, true)
+  return `${parts} of ${FIT_PARTS} parts, ${chars} of ${FIT_CHARS} characters, ${deepest} of ${FIT_DEEP} deep`
+}
+const drawingFits = (drawing: unknown) => {
+  if (!drawing || typeof drawing !== 'object') return true
+  const known = fitsSeen.get(drawing)
+  if (known !== undefined) return known
+  const { parts, chars, deepest } = drawingSize(drawing)
   const fits = parts <= FIT_PARTS && chars <= FIT_CHARS && deepest <= FIT_DEEP
   fitsSeen.set(drawing, fits)
   return fits
@@ -10806,6 +10814,10 @@ const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[], lost = 0) 
   })
   return [head, ...(lost ? [`${n(lost, 'helper')} failed`] : []), ...(bad.length ? [bad.join(', ')] : [])].join(' · ')
 }
+const workingSummary = (helpers: number, commands: number) => {
+  const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
+  return helpers && commands ? `${n(helpers, 'helper')} and ${n(commands, 'command')} working` : helpers ? `${n(helpers, 'helper')} working` : commands ? `${n(commands, 'command')} working` : ''
+}
 const keepEnded = (one: Todo, runs: EndedRun[]) => (runs.length ? { endedRuns: [...(one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id)), ...runs].slice(-BG_KEPT) } : {})
 type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string; at?: number; why?: string }
 const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Record<string, EndAs> = 'ended') => {
@@ -13617,12 +13629,15 @@ const heldTabs = new Set<string>()
 let usedUntil = 0
 const SQUEEZE_MOST = 3
 const paneSqueezed = new Map<string, number>()
+const LESS_COLUMNS = 80
+const LESS_RETRY = 60_000
+const lessTried = new Map<string, { columns: number; at: number }>
 const tooBigLogged = new Map<string, number>()
 const givenIfDrawn = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0] & { requestId?: string }, drawing: unknown) => {
   if (drawingFits(drawing)) return drawing
   const id = e.requestId ?? ''
   const now = await $.clock.now()
-  if (now - (tooBigLogged.get(id) ?? -Infinity) >= 60_000) (tooBigLogged.set(id, now), await log($, `tab ${id} not given: its drawing is past what the app draws`))
+  if (now - (tooBigLogged.get(id) ?? -Infinity) >= 60_000) (tooBigLogged.set(id, now), await log($, `tab ${id} not given: its drawing is past what the app draws (${sizeSaid(drawing)}, ${(e.props as { bodyColumns?: number }).bodyColumns ?? 'unknown'} columns wide)`))
   const { Box, Button, Text } = uiOf($, e)
   return (
     <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
@@ -13828,7 +13843,8 @@ const panelHooks = (on: On) => {
     }
 
     const table = uiOf($, e)
-    const room = Math.max(40, Math.floor((e.props.bodyColumns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)))
+    const columns = paneId === LIST && squeeze >= 1 ? Math.min(e.props.bodyColumns, LESS_COLUMNS) : e.props.bodyColumns
+    const room = Math.max(40, Math.floor((columns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)))
     const perRow = Math.max(24, Math.floor(room / 2))
     const live = (key: string) =>
       'Svg' in table && e.surface !== 'terminal' ? (
@@ -13938,10 +13954,11 @@ const panelHooks = (on: On) => {
       return (
         <Box key={key} flexDirection="column" paddingLeft={left}>
           <Text dimColor>{asked.length === 1 ? 'It asks' : `It asks ${asked.length} things`}</Text>
+          {/* (in the list drawn with less in it, one row each, cut: whole in Details) */}
           {asked.map((text, n) => (
             <Box key={`${key}-${n}`} flexDirection="row" gap={1} alignItems="flex-start">
               {asked.length > 1 ? <Box flexShrink={0}><Text dimColor>{`${n + 1}.`}</Text></Box> : null}
-              <Box flexGrow={1} flexShrink={1} minWidth={0}><Text wrap="wrap">{text}</Text></Box>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>{paneId === LIST && squeeze >= 2 ? <Text wrap="truncate-end">{cut(text, perRow)}</Text> : <Text wrap="wrap">{text}</Text>}</Box>
             </Box>
           ))}
         </Box>
@@ -13999,8 +14016,9 @@ const panelHooks = (on: On) => {
               </Box>
               {facts(one, false, kept.length > 0 ? `${done} of ${kept.length} to-dos done` : '')}
             </Box>
-            {/* What it made so far, right under its title: side by side, each a press that opens it */}
-            {madeNow($, one)?.made.length || madeNow($, one)?.code ? (
+            {/* What it made so far, right under its title: side by side, each a press that opens it (in Details alone, in the list
+                drawn with the least in it) */}
+            {(madeNow($, one)?.made.length || madeNow($, one)?.code) && !(paneId === LIST && squeeze >= 3) ? (
               <Box key={`made-lead-${one.id}`} paddingLeft={lead}>
                 {madeChips($, table, one, `made-${one.id}`, () => openWork($, one.id))}
               </Box>
@@ -14367,11 +14385,18 @@ const panelHooks = (on: On) => {
       const own = jobBranches(one)
       const runs = endedRunsOf(one, one.chat ? helpersThere : all)
       if (!under.length && !own.length && !runs.length) return []
+      const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
+      if (paneId === LIST && squeeze >= 2) {
+        const helpers = under.filter(kid => kid.status === 'working').length
+        const commands = [one, ...under].reduce((n, kid) => n + jobsOf(kid).reduce((m, job) => m + (job.count ?? 1), 0), 0)
+        const ended = under.length - helpers
+        const said = [workingSummary(helpers, commands), ended || runs.length ? endedSummary(ended, runs, under.filter(kid => kid.status === 'failed').length) : ''].filter(Boolean).join(' · ')
+        return [twigRowOf(closing, `rest-${one.id}`, said, true, '', () => openWork($, one.id))]
+      }
       const branches = [...own, ...withJobs(branchesOf(all, one.id, kid => kid.status === 'working' || isLingering(kid, at) || jobsOf(kid).length > 0))]
       const twigs = twigsOf(branches, true)
       const rest = under.length - twigs.filter(t => !t.job).length
       if (!rest && !runs.length) return twigsOf(branches).map(rowOf)
-      const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
       const onTree = new Set(twigs.flatMap(t => (!t.job && t.one ? [t.one.id] : [])))
       const lost = under.filter(kid => kid.status === 'failed' && !onTree.has(kid.id)).map(kid => titleOf(kid))
       return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs, lost.length), true, '', () => openWork($, one.id))]
@@ -15318,10 +15343,15 @@ const panelHooks = (on: On) => {
       </Box>
     )
     }
-    let squeeze = Math.max(0, (paneSqueezed.get(paneId) ?? 0) - 1)
+    const last = paneSqueezed.get(paneId) ?? 0
+    const tried = lessTried.get(paneId)
+    const isLessKept = paneId === LIST && last > 0 && tried?.columns === e.props.bodyColumns && heldAt - tried.at < LESS_RETRY
+    if (paneId === LIST && !isLessKept) lessTried.set(paneId, { columns: e.props.bodyColumns, at: heldAt })
+    let squeeze = isLessKept ? last : Math.max(0, last - 1)
     let drawing = await drawFor(squeeze)
-    while (paneId.startsWith(WORK_PANE) && !drawingFits(drawing) && squeeze < SQUEEZE_MOST) ((doneDrawn.length = 0), (drawing = await drawFor((squeeze += 1))))
-    if ((paneSqueezed.get(paneId) ?? 0) !== squeeze) (paneSqueezed.set(paneId, squeeze), void log($, `tab ${paneId} drawn with less in it (${squeeze} of ${SQUEEZE_MOST}) to fit what the app draws`))
+    const tooBig = drawingFits(drawing) ? undefined : drawing
+    while ((paneId === LIST || paneId.startsWith(WORK_PANE)) && !drawingFits(drawing) && squeeze < SQUEEZE_MOST) ((doneDrawn.length = 0), (drawing = await drawFor((squeeze += 1))))
+    if (last !== squeeze) (paneSqueezed.set(paneId, squeeze), void log($, `tab ${paneId} drawn with less in it (${squeeze} of ${SQUEEZE_MOST}) to fit what the app draws${tooBig ? ` (whole: ${sizeSaid(tooBig)}, ${e.props.bodyColumns} columns wide)` : ''}`))
     const newestMade = paneNewest.get(paneLine)
     if (newestMade?.key === place && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), newestMade.drawing as Awaited<ReturnType<typeof next>>)
     if ((shownKept.get(paneLine) ?? 0) > askedNo && newestMade) return newestMade.drawing as Awaited<ReturnType<typeof next>>

@@ -1,0 +1,1 @@
+- The panel's list no longer goes blank with "Claudopus couldn't show this tab" when you widen it with a lot of work open: it draws with less in it instead, its lines cut to a side panel's length, then each card's helpers and commands counted on one row that opens its Details.

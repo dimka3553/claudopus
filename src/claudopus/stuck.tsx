@@ -227,6 +227,11 @@ const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[], lost = 0) 
   })
   return [head, ...(lost ? [`${n(lost, 'helper')} failed`] : []), ...(bad.length ? [bad.join(', ')] : [])].join(' · ')
 }
+// What still works under a card, counted as endedSummary counts what ended: `2 helpers and 3 commands working`
+const workingSummary = (helpers: number, commands: number) => {
+  const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
+  return helpers && commands ? `${n(helpers, 'helper')} and ${n(commands, 'command')} working` : helpers ? `${n(helpers, 'helper')} working` : commands ? `${n(commands, 'command')} working` : ''
+}
 // The runs a card has had end, kept so its summary row and Details can say how each ended, the newest last
 const keepEnded = (one: Todo, runs: EndedRun[]) => (runs.length ? { endedRuns: [...(one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id)), ...runs].slice(-BG_KEPT) } : {})
 // Background work that has ended or was stopped leaves every card that kept it at once, and is kept as ended with how it ended

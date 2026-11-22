@@ -50,9 +50,17 @@ const withoutScroll = (key: string) => key.replace(/\|[01]$/, '')
 // The mod's tabs drawn on the desktop, whose buttons a click holds the drawing for (holdForPress)
 const heldTabs = new Set<string>()
 let usedUntil = 0
-// How many times less a Details tab too big for the app may be drawn with (drawFor), and how much less each was last drawn with
+// How many times less a Details tab or the list too big for the app may be drawn with (drawFor), and how much less each was last
+// drawn with
 const SQUEEZE_MOST = 3
 const paneSqueezed = new Map<string, number>()
+// The list drawn with less in it cuts its lines to what a panel beside the chat holds: a pane as wide as the window put a few
+// thousand more characters into the same cards, and a list near the app's limit then showed only that it couldn't show this tab
+// (21-22 Nov, 132 times, a chat with 10 open cards and 24 helpers)
+const LESS_COLUMNS = 80
+// The list is drawn often: drawn with less in it, it tries one step more only on a new width or once a minute, not at each drawing
+const LESS_RETRY = 60_000
+const lessTried = new Map<string, { columns: number; at: number }>
 // A drawing the app would throw away is never given: the tab says so in plain words instead, with the way back to the list, so it
 // never stays on "Nothing to show yet" (drawingFits). Said in the log once a minute at most for each tab
 const tooBigLogged = new Map<string, number>()
@@ -60,7 +68,8 @@ const givenIfDrawn = async ($: EngineInterface, e: Parameters<EngineInterface['u
   if (drawingFits(drawing)) return drawing
   const id = e.requestId ?? ''
   const now = await $.clock.now()
-  if (now - (tooBigLogged.get(id) ?? -Infinity) >= 60_000) (tooBigLogged.set(id, now), await log($, `tab ${id} not given: its drawing is past what the app draws`))
+  // (with each count beside its limit and the pane's width, so the log says which limit it passed)
+  if (now - (tooBigLogged.get(id) ?? -Infinity) >= 60_000) (tooBigLogged.set(id, now), await log($, `tab ${id} not given: its drawing is past what the app draws (${sizeSaid(drawing)}, ${(e.props as { bodyColumns?: number }).bodyColumns ?? 'unknown'} columns wide)`))
   const { Box, Button, Text } = uiOf($, e)
   return (
     <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
@@ -350,7 +359,9 @@ const panelHooks = (on: On) => {
     const table = uiOf($, e)
     // How much text two rows of a small card hold: the pane's cells less the card's bar, padding and dots. The app's letters are
     // narrower than a cell, the terminal's are one each
-    const room = Math.max(40, Math.floor((e.props.bodyColumns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)))
+    // (the list drawn with less in it, as much as a panel beside the chat holds, however wide the pane: LESS_COLUMNS)
+    const columns = paneId === LIST && squeeze >= 1 ? Math.min(e.props.bodyColumns, LESS_COLUMNS) : e.props.bodyColumns
+    const room = Math.max(40, Math.floor((columns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)))
     // How many letters one row of a small card holds, and a bold one: the card's two-row room halved
     const perRow = Math.max(24, Math.floor(room / 2))
     // Three moving dots: beside the line a small card gives, and beside the to-do being done on the big one
@@ -496,10 +507,11 @@ const panelHooks = (on: On) => {
       return (
         <Box key={key} flexDirection="column" paddingLeft={left}>
           <Text dimColor>{asked.length === 1 ? 'It asks' : `It asks ${asked.length} things`}</Text>
+          {/* (in the list drawn with less in it, one row each, cut: whole in Details) */}
           {asked.map((text, n) => (
             <Box key={`${key}-${n}`} flexDirection="row" gap={1} alignItems="flex-start">
               {asked.length > 1 ? <Box flexShrink={0}><Text dimColor>{`${n + 1}.`}</Text></Box> : null}
-              <Box flexGrow={1} flexShrink={1} minWidth={0}><Text wrap="wrap">{text}</Text></Box>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>{paneId === LIST && squeeze >= 2 ? <Text wrap="truncate-end">{cut(text, perRow)}</Text> : <Text wrap="wrap">{text}</Text>}</Box>
             </Box>
           ))}
         </Box>
@@ -565,8 +577,9 @@ const panelHooks = (on: On) => {
               </Box>
               {facts(one, false, kept.length > 0 ? `${done} of ${kept.length} to-dos done` : '')}
             </Box>
-            {/* What it made so far, right under its title: side by side, each a press that opens it */}
-            {madeNow($, one)?.made.length || madeNow($, one)?.code ? (
+            {/* What it made so far, right under its title: side by side, each a press that opens it (in Details alone, in the list
+                drawn with the least in it) */}
+            {(madeNow($, one)?.made.length || madeNow($, one)?.code) && !(paneId === LIST && squeeze >= 3) ? (
               <Box key={`made-lead-${one.id}`} paddingLeft={lead}>
                 {madeChips($, table, one, `made-${one.id}`, () => openWork($, one.id))}
               </Box>
@@ -1023,11 +1036,20 @@ const panelHooks = (on: On) => {
       const own = jobBranches(one)
       const runs = endedRunsOf(one, one.chat ? helpersThere : all)
       if (!under.length && !own.length && !runs.length) return []
+      const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
+      // In the list drawn with less in it, all of it is the one closing row: what works under the card and what ended, counted,
+      // and a press opens its Details, where each is a row
+      if (paneId === LIST && squeeze >= 2) {
+        const helpers = under.filter(kid => kid.status === 'working').length
+        const commands = [one, ...under].reduce((n, kid) => n + jobsOf(kid).reduce((m, job) => m + (job.count ?? 1), 0), 0)
+        const ended = under.length - helpers
+        const said = [workingSummary(helpers, commands), ended || runs.length ? endedSummary(ended, runs, under.filter(kid => kid.status === 'failed').length) : ''].filter(Boolean).join(' · ')
+        return [twigRowOf(closing, `rest-${one.id}`, said, true, '', () => openWork($, one.id))]
+      }
       const branches = [...own, ...withJobs(branchesOf(all, one.id, kid => kid.status === 'working' || isLingering(kid, at) || jobsOf(kid).length > 0))]
       const twigs = twigsOf(branches, true)
       const rest = under.length - twigs.filter(t => !t.job).length
       if (!rest && !runs.length) return twigsOf(branches).map(rowOf)
-      const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
       // A command that failed is counted on the closing row with the others that ended, never a row of its own (one stood among
       // what still ran long after it failed) and never by name: which one, how and why is in Details and its log (19 Nov)
       // (and the helpers that failed and have left the tree, counted too)
@@ -2100,10 +2122,17 @@ const panelHooks = (on: On) => {
     // The app throws away whole a drawing past its limits, and the tab then says "Nothing to show yet" (drawingFits): a Details
     // tab too big for it is drawn again with less in it, its ended commands folded and fewer lines of its conversation, until it fits
     // (from one step lighter than it last needed, so a tab that needs less is drawn with less at once and one that shrank gets more)
-    let squeeze = Math.max(0, (paneSqueezed.get(paneId) ?? 0) - 1)
+    // The list the same: its lines cut to what a panel beside the chat holds, then each card's helpers and commands one row, then
+    // what each card made left to its Details. The list, drawn often, keeps how much less it needed on the same width for a minute
+    const last = paneSqueezed.get(paneId) ?? 0
+    const tried = lessTried.get(paneId)
+    const isLessKept = paneId === LIST && last > 0 && tried?.columns === e.props.bodyColumns && heldAt - tried.at < LESS_RETRY
+    if (paneId === LIST && !isLessKept) lessTried.set(paneId, { columns: e.props.bodyColumns, at: heldAt })
+    let squeeze = isLessKept ? last : Math.max(0, last - 1)
     let drawing = await drawFor(squeeze)
-    while (paneId.startsWith(WORK_PANE) && !drawingFits(drawing) && squeeze < SQUEEZE_MOST) ((doneDrawn.length = 0), (drawing = await drawFor((squeeze += 1))))
-    if ((paneSqueezed.get(paneId) ?? 0) !== squeeze) (paneSqueezed.set(paneId, squeeze), void log($, `tab ${paneId} drawn with less in it (${squeeze} of ${SQUEEZE_MOST}) to fit what the app draws`))
+    const tooBig = drawingFits(drawing) ? undefined : drawing
+    while ((paneId === LIST || paneId.startsWith(WORK_PANE)) && !drawingFits(drawing) && squeeze < SQUEEZE_MOST) ((doneDrawn.length = 0), (drawing = await drawFor((squeeze += 1))))
+    if (last !== squeeze) (paneSqueezed.set(paneId, squeeze), void log($, `tab ${paneId} drawn with less in it (${squeeze} of ${SQUEEZE_MOST}) to fit what the app draws${tooBig ? ` (whole: ${sizeSaid(tooBig)}, ${e.props.bodyColumns} columns wide)` : ''}`))
     // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
     // ones the engine holds, and this one is made again once the click is over (holdForPress)
     const newestMade = paneNewest.get(paneLine)
