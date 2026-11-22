@@ -6,7 +6,7 @@ import type { Round } from './flows'
 import { boardDelta, boardFrom, boardRange, boardView, CACHE_V, DAY, dayCells, dayNo, GAP, held, memoryHeld, monthFrom, monthName, monthNo, monthsKept, NAME_RULE, parsed, partOf, piecesIn, piecesKept, rangeFrom, RANGES, READ_EVERY, reading, rowPiece, statsFrom, statsView, SUM_JQ, sumKept, svgFits, timelineOf, view as statsShown } from './stats'
 import type { BoardRow, BoardSent, BoardShown, Cache, TokenSums, DayEntry, DayRows, FileSum, Held, Kept, Loaded, Meta, MemoryPart, MonthKept, Part, Piece, Range, Scope, What } from './stats'
 import { broughtBackBy, isResultId, marksOf, merged, markThere, parsedMeta, PLACE, PULL, pullThere, PUSH, PUSH_THERE, rehome, RESULTS_A_TRIP, RESULTS_EVERY, RESULTS_LOOK, resultsOf } from './results'
-import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, helpersOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, deliveredSaid, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, shareableHelpers, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
+import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, helpersOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, deliveredSaid, interruptedSaid, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, shareableHelpers, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
 import type { Answer, Off } from './shared'
 import { ALERTS, clearModel, configMore, configView, editing, fillModels, heavyModeOf, leanOf, modelsIn, modelsOf, modelsShort, parse, ROLES, SAME, TEXTS } from './config'
 import type { Config, ConfigShown, HeavyMode, Lean, LeanKey, Models, Role } from './config'
@@ -158,7 +158,9 @@ const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => 
   const hold = (list: Todo[]) => saidKept(list, holdDone(list, fn(list)))
   const next = hold(now)
   if (JSON.stringify(next) === before) return now
-  return update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))
+  const written = await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))
+  saveLedgerSoon($)
+  return written
 }
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
 const draftsKept = atom({ plugin: 'claudopus', key: 'drafts' } as const, {}, { shape: 'drafts-1' })
@@ -857,7 +859,7 @@ const pathOf = (path: string, home: string, folder: string) => {
   return `/${parts.join('/')}`
 }
 const MEMORY_READERS = [...BOX_READERS, 'cat', 'jq', 'diff', 'cmp', 'shasum', 'sha256sum', 'md5', 'md5sum']
-const MEMORY_OWN = ['live', 'keys.md', 'keys.json', 'update.lock', 'update.json', 'update-folder.json', 'update-seen.json', 'reloads']
+const MEMORY_OWN = ['live', 'ledger', 'keys.md', 'keys.json', 'update.lock', 'update.json', 'update-folder.json', 'update-seen.json', 'reloads']
 const MEMORY_PERSON = ['config.json', 'rules', 'roles']
 const namesMemory = (text: string, names: readonly string[]) => {
   const words = BOX_WORDS(text)
@@ -1285,7 +1287,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 })
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => {
   const servers = status === 'done' ? (one.bg ?? []).filter(b => isServerRun(b.cmd, b.what)) : []
-  return resultAsk({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, up: true, why: undefined, bg: servers.length ? servers : undefined }, at)
+  return resultAsk({ ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, up: true, why: undefined, stoppedUnasked: undefined, bg: servers.length ? servers : undefined }, at)
 }
 const YES_NO = ['Yes', 'No']
 const isStaleResultAsk = (one: Todo) => one.status === 'working' && Boolean(one.ask?.isResult) && !one.ask?.replied
@@ -1299,7 +1301,7 @@ const resultAsk = (one: Todo, at: number): Todo => {
   const details = asked.length === 1 ? (text === first ? '' : first) : asked.map((line, n) => `${n + 1}. ${line}`).join('\n')
   return { ...one, questions: undefined, questionChoices: undefined, ask: { text, ...(details ? { details } : {}), ...(choices.length ? { choices } : {}), from: one.id, at, isResult: true } }
 }
-const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask?.isResult ? undefined : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, questions: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, stoppedUnasked: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask?.isResult ? undefined : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, why: undefined, reportAt: undefined, stuckAt: undefined, stuckTold: undefined, closedAt: undefined, questions: undefined, newAt: at })
 const stoppedAs = (one: Todo): Todo['status'] => (hasReport(one) ? 'done' : 'stopped')
 const handedBack = new Map<string, string>()
 const stoppedHere = new Set<string>()
@@ -1801,9 +1803,10 @@ const withLinks = (Link: ElementTable['Link'], text: string, key: string, whole 
 }
 
 
-type Stage = 'working' | 'waiting' | 'delivered' | 'done' | 'stopped' | 'failed'
-type Staged = Pick<Todo, 'status' | 'up' | 'closedAt'> & Parameters<typeof needsPerson>[0]
+type Stage = 'working' | 'waiting' | 'delivered' | 'done' | 'stopped' | 'failed' | 'interrupted'
+type Staged = Pick<Todo, 'status' | 'up' | 'closedAt' | 'why'> & Parameters<typeof needsPerson>[0]
 const stageOf = (_list: readonly Staged[], card: Staged): Stage => {
+  if (isInterrupted(card)) return needsPerson(card) ? 'waiting' : 'interrupted'
   if (card.status === 'failed' || card.status === 'stopped') return card.status
   if (needsPerson(card)) return 'waiting'
   return card.status === 'done' ? (card.up && !card.closedAt ? 'delivered' : 'done') : 'working'
@@ -1816,8 +1819,9 @@ const isDoneMoment = (one: Pick<Todo, 'id' | 'status' | 'closedAt'>, at: number)
   return at >= moment.pressedAt && (moment.shownAt ? at - moment.shownAt < LINGER : at - moment.pressedAt < DONE_UNSEEN)
 }
 const hasResult = (stage: Stage) => stage === 'delivered' || stage === 'done'
-const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', delivered: 'Delivered', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
-const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, delivered: DELIVERED, done: DONE, stopped: undefined, failed: 'error' })[stage]
+const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', delivered: 'Delivered', done: 'Done', stopped: 'Stopped', failed: 'Failed', interrupted: 'Interrupted' }
+const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, delivered: DELIVERED, done: DONE, stopped: undefined, failed: 'error', interrupted: CUT })[stage]
+const stageLine = (stage: Stage, why = '') => (stage === 'delivered' ? '◐ Delivered' : stage === 'done' ? '✓ Done' : stage === 'failed' ? `✕ Failed${why ? ` · ${why}` : ''}` : stage === 'interrupted' ? `⏸ Interrupted · ${WHY_APP_CLOSED}` : 'Stopped')
 const WHY_NO_RESULT = 'Ended without its result'
 const WHY_APP_CLOSED = 'The app closed while it worked'
 const WHY_ERROR = 'Ended with an error'
@@ -3774,6 +3778,7 @@ const NEEDS = '#E5A50A'
 const LIVE_DOTS = dots(LIVE, LINE)
 const DONE = 'success'
 const DELIVERED = '#4C9AFF'
+const CUT = '#F0703C'
 const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: '', wave: '', asking: '', updated: '' }
 const ART_FILES: Record<Exclude<keyof typeof ART, 'asking' | 'updated'>, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg', wave: 'wave.svg' }
 const isHappy = (cards: (Staged & { id: string; parentId?: string; endedAt: number })[], at: number) =>
@@ -7107,6 +7112,13 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
 }
 const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Sent, 'to'> }[] }[] = []
 const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>) => {
+  const list = await read($, todos)
+  const top = list.find(card => card.id === topOf(list, target))
+  if (top && !top.chat && isInterrupted(top)) {
+    sentReplies.set(one.id, { ...sent, to: 'work' })
+    redraw($)
+    return carryOn($, top.id, `${sent.ask ? `To "${sent.ask}": ` : ''}${sent.text}`)
+  }
   pending.set(target, one.id)
   await changeTodos($, list => list.map(card => (card.id === one.id && card.ask?.replied?.text === sent.text && !card.ask.replied.isWaking && card.status !== 'working' ? { ...card, ask: { ...card.ask, replied: { ...card.ask.replied, isWaking: true } } } : card)))
   sentReplies.set(one.id, { ...sent, to: 'work' })
@@ -7413,6 +7425,7 @@ const readOthers = async ($: EngineInterface) => {
   await tellAfar($, fromMacs, now).catch(err => log($, `other Macs' asks not told: ${String(err)}`))
   const isOffChanged = await lookAfar($, now).catch(() => false)
   for (const one of pushed) if (!here.has(one.chat)) (here.add(one.chat), found.push(one))
+  for (const one of await ledgerOthers($, id, open, now).catch(err => (void log($, `other chats' ledgers not read: ${String(err)}`), [] as Shared[]))) if (!here.has(one.chat)) (here.add(one.chat), found.push(one))
   const chatKey = (s: { host: string; chat: string }) => `${s.host}/${s.chat}`
   const present = new Map(found.map(s => [chatKey(s), s]))
   for (const [key, was] of [...lastRunning]) {
@@ -10196,6 +10209,7 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
     list.map(one => {
       if (one.id !== id || one.status !== 'working') return one
       if (how === 'stopped' && interrupting.has(id)) return one
+      if (how === 'stopped' && !one.parentId && !stoppedHere.has(id) && !pressed.has(id)) return { ...ended(one, stoppedAs(one), now), ...(hasReport(one) ? {} : { stoppedUnasked: true as const }) }
       if (how === 'stopped') return ended(one, stoppedAs(one), now)
       if (how === 'failed') return { ...ended(one, 'failed', now), answer: answer || one.answer, why: WHY_ERROR }
       if (isHanded && one.parentId) return { ...ended(one, 'done', now), answer: answer || one.answer }
@@ -11547,21 +11561,62 @@ const stopHelpers = async ($: EngineInterface, id: string) => {
 }
 
 
+
+const LEDGER_DIR = 'ledger'
+const ledgerFile = (chat: string) => `${dir}/${LEDGER_DIR}/${chat}.json`
+const ledgerPart = (chat: string, task: string, kind: 'brief' | 'carry') => `${dir}/${LEDGER_DIR}/${chat}/${task}.${kind}.md`
 const keepFile = (id: string, kind = 'json') => `${dir}/keep/${id}.${kind}`
-let keepSign = ''
+type LedgerTask = { id: string; title: string; state: Stage; note: string; transcript: string; card: Todo }
+type Ledger = { chat: string; title: string; folder: string; pid: string; savedAt: number; link?: Link; tasks: LedgerTask[] }
+const LEDGER_ENTRIES = 30
+const ledgerCard = (one: Todo): Todo => {
+  const { running: _running, bg: _bg, seenJobs: _seen, endedRuns: _runs, newAt: _new, stuckAt: _stuck, stuckTold: _told, quiet: _quiet, owes: _owes, steps: _steps, tokens: _tokens, made: _made, ...kept } = one
+  return { ...kept, tokens: 0, entries: one.entries.slice(-LEDGER_ENTRIES), answer: one.answer.slice(0, 4000) }
+}
+const ledgerTasks = (list: Todo[]) => {
+  const tops = list.filter(one => !one.chat && !one.parentId && (one.status === 'working' || !one.closedAt) && (one.status === 'working' || one.up))
+  const ids = new Set(tops.map(one => one.id))
+  return [...tops, ...list.filter(one => !one.chat && one.parentId && one.status === 'working' && ids.has(topOf(list, one.id)))]
+}
 let enginePid = ''
 const pidOfEngine = async ($: EngineInterface) => ((await $.process.run(['/bin/sh', '-c', 'echo $PPID']).catch(() => undefined))?.stdout ?? '').trim()
-const saveKeep = async ($: EngineInterface) => {
-  const { id } = await read($, me)
-  if (!id || !dir) return
+let isLedgerRead = false
+let ledgerSign = ''
+let ledgerMade = ''
+const saveLedger = async ($: EngineInterface) => {
+  const { id, title } = await read($, me)
+  if (!id || !dir || !isLedgerRead || !SAFE_CHAT.test(id)) return
   const list = await read($, todos)
-  const atWork = list.filter(one => !one.chat && one.status === 'working')
-  const titles = Object.fromEntries(atWork.filter(one => !one.parentId).map(one => [one.id, oneLine(one.title).slice(0, 200)]))
-  const sign = `${atWork.map(one => one.id).join(',')}|${Object.values(titles).join('|')}`
-  if (sign === keepSign) return
-  keepSign = sign
-  await $.fs.write(keepFile(id), JSON.stringify({ ids: atWork.map(one => one.id), titles, pid: enginePid, at: await $.clock.now() }))
+  const agents = await agentsFolder($, id)
+  const tasks = ledgerTasks(list).map(one => ({ id: one.id, title: titleOf(one), state: stageOf(list, one), note: ownNote(one)?.text ?? '', transcript: `${agents}/agent-${one.id}.jsonl`, card: ledgerCard(one) }))
+  const body = { chat: id, title, folder: cwd, pid: enginePid, ...(myLink ? { link: myLink } : {}), tasks }
+  const sign = JSON.stringify(body)
+  if (sign === ledgerSign) return
+  const path = ledgerFile(id)
+  const ledger: Ledger = { ...body, savedAt: await $.clock.now() }
+  if (ledgerMade !== id) (await $.process.run(['mkdir', '-p', `${dir}/${LEDGER_DIR}/${id}`]), (ledgerMade = id))
+  await $.fs.write(`${path}.part`, JSON.stringify(ledger, null, 1))
+  const r = await $.process.run(['mv', '-f', `${path}.part`, path])
+  if (r.exitCode !== 0) throw new Error(`ledger not moved into place: ${r.stderr.slice(0, 200)}`)
+  ledgerSign = sign
 }
+let isLedgerBusy = false
+let isLedgerDue = false
+const saveLedgerSoon = ($: EngineInterface) => {
+  if (isLedgerBusy) return void (isLedgerDue = true)
+  isLedgerBusy = true
+  void (async () => {
+    try {
+      do {
+        isLedgerDue = false
+        await saveLedger($).catch(err => log($, `ledger not written: ${String(err)}`))
+      } while (isLedgerDue)
+    } finally {
+      isLedgerBusy = false
+    }
+  })()
+}
+const saveKeep = async ($: EngineInterface) => saveLedger($)
 const parsedOr = <T,>(text: string, or: T): T => {
   try {
     return text ? (JSON.parse(text) as T) : or
@@ -11569,26 +11624,176 @@ const parsedOr = <T,>(text: string, or: T): T => {
     return or
   }
 }
+const isTaskId = (one: unknown): one is string => typeof one === 'string' && /^[\w-]{1,80}$/.test(one)
+const isKeptCard = (one: unknown): one is Todo => {
+  const card = one as Partial<Todo> | undefined
+  return Boolean(card) && isTaskId(card?.id) && typeof card?.title === 'string' && Array.isArray(card?.items) && Array.isArray(card?.entries) && typeof card?.status === 'string'
+}
+const keptCards = (text: string, now: number): { pid: string; cards: Todo[]; savedAt: number } => {
+  const was = parsedOr<Partial<Ledger> & { ids?: unknown; titles?: unknown; at?: unknown }>(text, {})
+  const pid = typeof was.pid === 'string' ? was.pid : ''
+  const savedAt = Number(was.savedAt ?? was.at) || 0
+  if (Array.isArray(was.tasks)) return { pid, savedAt, cards: was.tasks.map(one => (one as Partial<LedgerTask>)?.card).filter(isKeptCard) }
+  const titles = Object.entries(was.titles && typeof was.titles === 'object' ? (was.titles as Record<string, unknown>) : {}).filter((pair): pair is [string, string] => isTaskId(pair[0]) && typeof pair[1] === 'string')
+  return { pid, savedAt, cards: titles.map(([id, title]) => started(id, '', title, '', now)) }
+}
+const QUIT_WINDOW = 60_000
+const cutOff = (one: Todo, now: number): Todo => ({ ...ended(one, 'failed', now), why: WHY_APP_CLOSED, running: undefined })
+const isInterrupted = (one: Pick<Todo, 'status' | 'why'>) => one.status === 'failed' && one.why === WHY_APP_CLOSED
 const noteClosed = async ($: EngineInterface, id: string) => {
-  keepSign = ''
-  if (!dir) return
-  enginePid = await pidOfEngine($)
-  const was = parsedOr<{ ids?: unknown; titles?: unknown; pid?: unknown }>(await readOr($, keepFile(id)), {})
-  const wasPid = typeof was.pid === 'string' ? was.pid : ''
-  if (!/^\d+$/.test(wasPid) || !/^\d+$/.test(enginePid) || wasPid === enginePid) return
-  const isId = (one: unknown): one is string => typeof one === 'string' && /^[\w-]{1,80}$/.test(one)
-  const titles = Object.fromEntries(Object.entries(was.titles && typeof was.titles === 'object' ? (was.titles as Record<string, unknown>) : {}).filter((pair): pair is [string, string] => isId(pair[0]) && typeof pair[1] === 'string'))
-  const live = await $.agent.list().catch(() => [])
-  const isLive = (one: string) => live.some(agent => agent.id === one && WORKING.includes(agent.status))
-  const now = await $.clock.now()
-  const closed: string[] = []
+  ledgerSign = ''
+  if (!dir) return void (isLedgerRead = true)
+  try {
+    enginePid = await pidOfEngine($)
+    const now = await $.clock.now()
+    const ledger = SAFE_CHAT.test(id) ? await readOr($, ledgerFile(id)) : ''
+    const { pid: wasPid, cards: kept, savedAt } = keptCards(ledger || (await readOr($, keepFile(id))), now)
+    if (!/^\d+$/.test(wasPid) || !/^\d+$/.test(enginePid) || wasPid === enginePid) return
+    const endedThen = Number((await readOr($, keepFile(id, 'ended'))).split('\t')[1] ?? 0) * 1000
+    const lastAt = Math.max(savedAt, endedThen)
+    const isQuitStop = (one: Todo) => one.status === 'stopped' && Boolean(one.stoppedUnasked) && !one.byYou && !hasReport(one) && lastAt > 0 && one.endedAt >= lastAt - QUIT_WINDOW
+    const live = await $.agent.list().catch(() => [])
+    const isLive = (one: string) => live.some(agent => agent.id === one && WORKING.includes(agent.status))
+    const closed: string[] = []
+    await changeTodos($, list => {
+      closed.length = 0
+      const known = new Set(list.map(one => one.id))
+      const added = kept.filter(one => !known.has(one.id)).map(one => ({ ...one, bg: undefined, running: undefined, stuckAt: undefined }))
+      return capped([...list, ...added]).map(one => (one.chat || !(one.status === 'working' || isQuitStop(one)) || isLive(one.id) ? one : (closed.push(one.id), cutOff(one, now))))
+    })
+    if (closed.length) await log($, `the chat's process was replaced (${wasPid} to ${enginePid}) while work was at work: ${closed.join(', ')} ended with it`)
+  } finally {
+    isLedgerRead = true
+  }
+}
+
+
+const saveBrief = async ($: EngineInterface, task: string, prompt: string) => {
+  const { id } = await read($, me)
+  if (!dir || !SAFE_CHAT.test(id) || !isTaskId(task) || !prompt.trim()) return
+  await $.process.run(['mkdir', '-p', `${dir}/${LEDGER_DIR}/${id}`])
+  await $.fs.write(ledgerPart(id, task, 'brief'), prompt)
+}
+const worktreeOf = (command: string, folder: string) => {
+  const m = /(?:^|[;&|(\s])git((?:\s+-C\s+\S+)?)\s+worktree\s+add\s+([^;&|\n]+)/.exec(command)
+  if (!m) return undefined
+  const words = (m[2] ?? '').trim().split(/\s+/).map(word => word.replace(/^["']|["']$/g, ''))
+  let branch = ''
+  const plain: string[] = []
+  for (let at = 0; at < words.length; at += 1) {
+    const word = words[at] ?? ''
+    if (word === '-b' || word === '-B') branch = words[(at += 1)] ?? ''
+    else if (word === '--reason' || word === '--orphan') at += 1
+    else if (!word.startsWith('-')) plain.push(word)
+  }
+  const [path = ''] = plain
+  if (!path) return undefined
+  const base = /-C\s+(\S+)/.exec(m[1] ?? '')?.[1] ?? /(?:^|[;&|]\s*)cd\s+("[^"]+"|'[^']+'|\S+)\s*&&[^;]*$/.exec(command.slice(0, m.index + 1))?.[1]?.replace(/^["']|["']$/g, '') ?? folder
+  const whole = path.startsWith('/') ? path : path.startsWith('~/') ? path : `${base.replace(/\/$/, '')}/${path}`
+  const parts: string[] = []
+  for (const part of whole.split('/')) part === '..' ? parts.pop() : part === '.' || (part === '' && parts.length) ? undefined : parts.push(part)
+  return { worktree: parts.join('/') || whole, branch }
+}
+const noteWorktree = async ($: EngineInterface, agent: string, command: string) => {
+  const found = worktreeOf(command, cwd)
+  if (!found) return
   await changeTodos($, list => {
-    closed.length = 0
-    const known = new Set(list.map(one => one.id))
-    const added = Object.keys(titles).filter(one => !known.has(one) && !isLive(one)).map(one => started(one, '', titles[one] ?? '', '', now))
-    return [...list, ...added].map(one => (one.chat || one.status !== 'working' || isLive(one.id) ? one : (closed.push(one.id), { ...ended(one, 'failed', now), why: WHY_APP_CLOSED, bg: undefined })))
+    const top = topOf(list, agent)
+    return list.map(one => (one.id === top && !one.chat ? { ...one, worktree: found.worktree, ...(found.branch ? { branch: found.branch } : {}) } : one))
   })
-  if (closed.length) await log($, `the chat's process was replaced (${wasPid} to ${enginePid}) while work was at work: ${closed.join(', ')} ended with it`)
+}
+const carryText = async ($: EngineInterface, one: Todo, answer: string) => {
+  const { id: chat } = await read($, me)
+  const brief = (await readOr($, ledgerPart(chat, one.id, 'brief'))).trim()
+  const transcript = `${await agentsFolder($, chat)}/agent-${one.id}.jsonl`
+  const worktree = one.worktree || one.ask?.release || one.admins?.find(gate => gate.folder)?.folder || ''
+  const when = (at: number) => new Date(at).toISOString().slice(0, 16).replace('T', ' ')
+  const items = one.items.map(item => `- [${item.state}] ${item.text}`)
+  const notes = one.entries.slice(-12).map(entry => `- ${when(entry.at)} ${entry.kind === 'steer' ? `${who(true)} said: ` : ''}${entry.text}`)
+  return [
+    `# Carry on: ${titleOf(one)}`,
+    '',
+    named(`The Claude app closed while this task worked, at ${when(one.endedAt)} UTC, and its run ended with it. You are a fresh task carrying it on: read this, then go on from where it stopped. Do not do again what it finished; check what it left half done before you build on it.`),
+    '',
+    `- Task: ${titleOf(one)}, started ${when(one.begunAt ?? one.startedAt)} UTC${one.model ? ` on ${modelName(one.model) || one.model}` : ''} (its id was ${one.id})`,
+    `- The chat's folder: ${cwd}`,
+    worktree ? `- Its worktree, yours now: ${worktree}${one.branch ? ` on branch ${one.branch}` : ''}. Look at \`git -C ${worktree} status\` and its last commits first.` : '- No worktree was noted for it: its saved transcript names any it made.',
+    one.scratch ? `- Its scratch folder: ${one.scratch}` : '',
+    `- The saved transcript of the run that was cut off: ${transcript} (one JSON line per message, the newest last: read its end with tail, never the whole file)`,
+    one.words ? named(`- {Name}'s message it was started for: ${one.words}`) : '',
+    '',
+    '## Its instructions',
+    brief || 'Not kept: the first line of its saved transcript holds them.',
+    '',
+    '## Its to-dos when it stopped',
+    ...(items.length ? items : ['None were listed.']),
+    '',
+    '## Its last notes',
+    ...(notes.length ? notes : ['None.']),
+    ...(one.ask ? ['', named('## What it was asking {name}'), one.ask.text, ...(one.ask.details ? [one.ask.details] : [])] : []),
+    ...(answer ? ['', named("## {Name}'s answer"), answer] : []),
+    '',
+  ]
+    .filter(line => line !== undefined)
+    .join('\n')
+}
+const CARRY_PROMPT = (path: string) => `Carry on a task the Claude app's close cut off. Read ${path} first: it holds the task's instructions, its to-dos, its last notes, its worktree and its saved transcript. Then go on from where it stopped.`
+const carryOn = async ($: EngineInterface, id: string, answer = '') => {
+  const list = await read($, todos)
+  const one = list.find(card => card.id === topOf(list, id))
+  const { id: chat } = await read($, me)
+  if (!one || one.chat || !isInterrupted(one) || !dir || !SAFE_CHAT.test(chat)) return
+  const path = ledgerPart(chat, one.id, 'carry')
+  await $.process.run(['mkdir', '-p', `${dir}/${LEDGER_DIR}/${chat}`])
+  await $.fs.write(path, await carryText($, one, answer))
+  const model = modelName(one.model ?? '')
+  await log($, `carry on ${one.id}: the chat is asked to start a fresh task from ${path}`)
+  await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "Carry on" on "${titleOf(one)}" (${one.id}), which stopped when the Claude app closed${answer ? `, and answered what it asked` : ''}. Its run is gone, so start a fresh task for it now: the Agent tool with subagent_type "${one.kind === 'claudopus:quick' ? 'claudopus:quick' : 'claudopus:task'}"${model ? `, the model it ran on (${model})` : ''}, description "${titleOf(one)}", and as its prompt exactly: ${CARRY_PROMPT(path)}`)
+}
+const carriedFrom = (prompt: string) => /\/ledger\/[A-Za-z0-9-]+\/([\w-]+)\.carry\.md/.exec(prompt)?.[1] ?? ''
+
+
+const LEDGER_SHOWN = 3 * 24 * 3_600_000
+const ledgersRead = new Map<string, { key: string; ledger: Partial<Ledger> }>()
+const pidsSeen = { at: 0, alive: new Set<string>(), asked: '' }
+const ledgerOthers = async ($: EngineInterface, me: string, open: Set<string>, now: number): Promise<Shared[]> => {
+  if (!dir) return []
+  const files = (await $.fs.list(`${dir}/${LEDGER_DIR}`).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && entry.name !== `${me}.json`)
+  for (const name of [...ledgersRead.keys()]) if (!files.some(entry => entry.name === name)) ledgersRead.delete(name)
+  const found: { ledger: Partial<Ledger>; cards: Todo[] }[] = []
+  for (const entry of files) {
+    if (entry.mtimeMs && now - entry.mtimeMs > LEDGER_SHOWN) continue
+    const key = `${entry.mtimeMs}:${entry.size}`
+    const was = ledgersRead.get(entry.name)
+    const ledger = was?.key === key ? was.ledger : parsedOr<Partial<Ledger>>(await readOr($, `${dir}/${LEDGER_DIR}/${entry.name}`), {})
+    ledgersRead.set(entry.name, { key, ledger })
+    if (typeof ledger.chat !== 'string' || !SAFE_CHAT.test(ledger.chat) || open.has(`/${ledger.chat}`) || !Array.isArray(ledger.tasks)) continue
+    const savedAt = Number(ledger.savedAt) || 0
+    const cards = ledger.tasks
+      .map(one => (one as Partial<LedgerTask>)?.card)
+      .filter(isKeptCard)
+      .filter(one => !one.parentId && !one.closedAt && (one.status === 'working' || isInterrupted(one) || (one.status === 'stopped' && Boolean(one.stoppedUnasked) && !one.byYou && one.endedAt >= savedAt - QUIT_WINDOW)))
+    if (cards.length) found.push({ ledger, cards })
+  }
+  if (!found.length) return []
+  const pids = [...new Set(found.map(one => String(one.ledger.pid ?? '')).filter(pid => /^\d+$/.test(pid)))].sort()
+  if (pids.join(',') !== pidsSeen.asked || now - pidsSeen.at > FOLLOW_EVERY) {
+    const r = pids.length ? await $.process.run(['ps', '-o', 'pid=', '-p', pids.join(',')]).catch(() => undefined) : undefined
+    pidsSeen.alive = new Set((r?.stdout ?? '').split('\n').map(line => line.trim().split(/\s+/)[0] ?? '').filter(pid => pids.includes(pid)))
+    pidsSeen.at = now
+    pidsSeen.asked = pids.join(',')
+  }
+  return found
+    .filter(({ ledger }) => !pidsSeen.alive.has(String(ledger.pid ?? '')))
+    .map(({ ledger, cards }) => ({
+      chat: String(ledger.chat),
+      title: typeof ledger.title === 'string' ? ledger.title : '',
+      folder: typeof ledger.folder === 'string' ? ledger.folder : '',
+      host: '',
+      at: now,
+      cards: cards.map(one => (isInterrupted(one) ? one : cutOff(one, Math.min(now, Number(ledger.savedAt) || now)))).map(one => ({ ...one, bg: undefined, running: undefined })),
+      ...(linkOf(ledger.link) ? { link: linkOf(ledger.link) } : {}),
+    }))
 }
 
 
@@ -12302,6 +12507,7 @@ const workHooks = (on: On) => {
       let isPersonEnded = false
       try {
         r = await raw(call)
+        if (e.tool === 'Bash' && e.agentId && dir && !r.deny) await noteWorktree($, e.agentId, String((call as { command?: unknown }).command ?? '')).catch(err => log($, `worktree not noted: ${String(err)}`))
         if (isPersonWatched) {
           isPersonEnded = true
           const undone = await personCheck($, e).catch(() => [] as string[])
@@ -12772,11 +12978,20 @@ const workHooks = (on: On) => {
     const named1 = isOwn && !fromReport && !e.resume ? (await read($, reports)).filter(one => e.prompt.includes(`reports/${one.id}/`) || e.prompt.endsWith(`reports/${one.id}`)) : []
     const goesOn = named1.length === 1 && named1[0] && [...aboutWords(named1[0].title)].some(word => aboutWords(e.description ?? '').has(word)) ? named1[0].id : ''
     const from = fromReport || goesOn
-    await changeTodos($, list => {
-      const old = list.find(one => one.id === id)
-      const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}), kind: e.fork ? 'fork' : (e.subagentType ?? '') }
-      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(old?.scratch || scratch ? { scratch: old?.scratch || scratch } : {}) }])
+    const carried = isOwn && !e.resume ? carriedFrom(e.prompt ?? '') : ''
+    if (isOwn && !e.resume) await saveBrief($, id, e.prompt ?? '').catch(err => log($, `instructions of ${id} not kept: ${String(err)}`))
+    await changeTodos($, all => {
+      const old = all.find(one => one.id === id)
+      const was = carried ? all.find(one => one.id === carried && isInterrupted(one) && !one.closedAt) : undefined
+      const list = was ? all.map(one => (one.id === was.id ? { ...one, closedAt: now, carriedTo: id, ask: undefined } : one)) : all
+      const made = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}), kind: e.fork ? 'fork' : (e.subagentType ?? '') }
+      const fresh = was
+        ? { ...made, words: was.words || made.words, items: was.items, entries: [...was.entries, { at: now, kind: 'event' as const, text: 'Carried on after the app closed' }].slice(-ENTRIES_KEPT), begunAt: was.begunAt ?? was.startedAt, ...(was.worktree ? { worktree: was.worktree, ...(was.branch ? { branch: was.branch } : {}) } : {}), ...(was.scratch ? { scratch: was.scratch } : {}) }
+        : made
+      const folder = old?.scratch || fresh.scratch || scratch
+      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(folder ? { scratch: folder } : {}) }])
     })
+    if (carried) await log($, `task ${id} carries on ${carried}, which the app's close cut off`)
     if (isOwn) await openList($)
     await sync($).catch(() => undefined)
 
@@ -13791,7 +14006,7 @@ const panelHooks = (on: On) => {
     const stood: Record<Flow['status'], string> = { working: '', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
     const offModel = (one: Todo) => (one.flagged ? `a safety check stopped it, so it doesn't continue on ${one.flagged}` : one.moved ? `It was moved to ${one.moved}` : rightModel(one.model ?? '') ? "Tasks don't run on this model" : '')
     const glance = (one: Todo, count = '', isWhole = false) =>
-      [isWhole && stage(one) !== 'working' ? `${STAGE_WORD[stage(one)]}${stage(one) === 'failed' && one.why ? ` · ${one.why}` : ''}` : '', modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [isWhole && stage(one) !== 'working' ? `${STAGE_WORD[stage(one)]}${(stage(one) === 'failed' || stage(one) === 'interrupted') && one.why ? ` · ${one.why}` : ''}` : '', modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     const { picking = '' } = await read($, view)
     const lead = e.surface === 'terminal' ? 0 : 'xs'
     const facts = (one: Todo, isWhole: boolean, count = '') => {
@@ -14000,6 +14215,12 @@ const panelHooks = (on: On) => {
                     <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : 'Message'} plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
                   </Box>
                 ) : null}
+                {/* Cut off by the app's close: a press carries it on, as a fresh task told all the ledger holds of it */}
+                {!one.chat && !one.parentId && stage(one) === 'interrupted' ? (
+                  <Box flexShrink={0}>
+                    <Button key={`carry-small-${one.id}-${presses}`} label="Carry on" plain color={CUT} hover={{ scope: `carry-${one.id}`, underline: true }} onPress={() => ((presses += 1), void carryOn($, one.id))} />
+                  </Box>
+                ) : null}
                 {/* Failed, or stopped by the person: only their press starts it again */}
                 {!one.chat && (stage(one) === 'failed' || (stage(one) === 'stopped' && one.byYou)) ? (
                   <Box flexShrink={0}>
@@ -14049,12 +14270,12 @@ const panelHooks = (on: On) => {
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* Ended, the line begins with its stage, in its colour: green done, grey stopped, red failed with why; then what
                     it last said */}
-                {hasResult(stage(one)) || stage(one) === 'stopped' || stage(one) === 'failed' ? (
+                {hasResult(stage(one)) || stage(one) === 'stopped' || stage(one) === 'failed' || stage(one) === 'interrupted' ? (
                   <Box flexDirection="row" minWidth={0}>
                     {/* (the stage's own word is never the part cut short: on a narrow panel a long note beside it left "✓ …") */}
-                    <Box flexShrink={stage(one) === 'failed' ? 1 : 0} minWidth={0}>
+                    <Box flexShrink={stage(one) === 'failed' || stage(one) === 'interrupted' ? 1 : 0} minWidth={0}>
                       <Text wrap="truncate-end" color={stageColor(stage(one))} dimColor={stage(one) === 'stopped'}>
-                        {stage(one) === 'delivered' ? '◐ Delivered' : stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? `✕ Failed${one.why ? ` · ${one.why}` : ''}` : 'Stopped'}
+                        {stageLine(stage(one), one.why)}
                       </Text>
                     </Box>
                     {noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}
@@ -14936,8 +15157,10 @@ const panelHooks = (on: On) => {
               {(one.status === 'working' && !one.chat) || left(one) || ((one.status === 'failed' || (one.status === 'stopped' && one.byYou)) && !one.chat) ? (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
                   {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
+                  {/* Cut off by the app's close: carried on by a fresh task */}
+                  {isInterrupted(one) && !one.chat && !one.parentId ? <Button key={`carry-${one.id}-${presses}`} label="Carry on" onPress={() => ((presses += 1), void carryOn($, one.id))} /> : null}
                   {/* Work the person stopped, or that failed, stays so until they start it again from here or ask in a message */}
-                  {(one.status === 'failed' || (one.status === 'stopped' && one.byYou)) && !one.chat ? <Button key={`again-${one.id}-${presses}`} label="Start again" onPress={() => ((presses += 1), void startAgain($, one.id))} /> : null}
+                  {((one.status === 'failed' && !isInterrupted(one)) || (one.status === 'stopped' && one.byYou)) && !one.chat ? <Button key={`again-${one.id}-${presses}`} label="Start again" onPress={() => ((presses += 1), void startAgain($, one.id))} /> : null}
                   {left(one) ? <Button key={`artifact-${one.id}-${presses}`} label="Result" onPress={() => void openReport($, left(one)?.id ?? '')} /> : null}
                 </Box>
               ) : null}
@@ -15020,8 +15243,9 @@ const panelHooks = (on: On) => {
 
     const left = (one: Todo) => kept.filter(r => r.agent === one.id).sort((a, b) => b.at - a.at)[0]
 
-    const endedElsewhere = elsewhere.filter(one => stageOf(elsewhere, one) !== 'working' && stageOf(elsewhere, one) !== 'waiting' && !lingers(one, at) && !isVanished(one.id))
-    const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (stageOf(elsewhere, one) === 'working' || stageOf(elsewhere, one) === 'waiting' || lingers(one, at)))
+    const isUpThere = (one: Todo) => stageOf(elsewhere, one) === 'working' || stageOf(elsewhere, one) === 'waiting' || stageOf(elsewhere, one) === 'interrupted'
+    const endedElsewhere = elsewhere.filter(one => !isUpThere(one) && !lingers(one, at) && !isVanished(one.id))
+    const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (isUpThere(one) || lingers(one, at)))
     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
     const finished = [...own.filter(one => one.status !== 'working' && !shownWork.some(up => up.id === one.id)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
@@ -15239,6 +15463,7 @@ const panelHooks = (on: On) => {
     const head = {
       here: own.filter(one => stage(one) === 'working').length + runningFlows.length,
       delivered: shownWork.filter(one => stage(one) === 'delivered').length,
+      interrupted: shownWork.filter(one => stage(one) === 'interrupted').length + elsewhere.filter(one => stageOf(elsewhere, one) === 'interrupted').length,
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
       asks: waitsCount,
@@ -15287,12 +15512,13 @@ const panelHooks = (on: On) => {
                 )}
                 {/* (what waits is amber, what was delivered is its own blue, on the one line) */}
                 <Box flexDirection="row" minWidth={0}>
-                  {headLine(head).length > deliveredSaid(head).length ? (
+                  {headLine(head).length > deliveredSaid(head).length + interruptedSaid(head).length ? (
                     <Box flexShrink={1} minWidth={0}>
-                      <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head).slice(0, headLine(head).length - deliveredSaid(head).length)}</Text>
+                      <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head).slice(0, headLine(head).length - deliveredSaid(head).length - interruptedSaid(head).length)}</Text>
                     </Box>
                   ) : null}
                   {head.delivered ? <Box flexShrink={0}><Text color={DELIVERED} dimColor={false}>{deliveredSaid(head)}</Text></Box> : null}
+                  {head.interrupted ? <Box flexShrink={0}><Text color={CUT} dimColor={false}>{interruptedSaid(head)}</Text></Box> : null}
                 </Box>
                 {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 && chat.window ? `This chat is ${fill(chat.tokens, chat.window)}` : chat.tokens > 0 ? 'This chat has started' : 'This chat has just begun'}</Text>}
               </Box>

@@ -142,6 +142,14 @@ export type Todo = {
   seenJobs?: Record<string, { latest: string; pct?: string; done?: string; total?: string; wroteAt?: number; tail?: string[]; words?: string; isOwn?: boolean; isEarlier?: boolean; isEmpty?: boolean; target?: string; now?: string }>
   // Its own folder in the chat's scratchpad, by name, which its rules name
   scratch?: string
+  // The worktree its command made (`git worktree add`), and its branch: what a fresh task carrying it on is told is its own
+  worktree?: string
+  branch?: string
+  // Cut off by the app's close and carried on by a fresh task: that task's id. Its card is under Finished from then
+  carriedTo?: string
+  // Stopped with no Stop of the person's or the chat's, as when the app quits and stops every task: one that stopped so as its
+  // chat's process ended is taken for cut off by the next process, never for stopped
+  stoppedUnasked?: true
   // How many reminders Claudopus sent of what waits on the person on it (its question, or the Allow its commands wait for), waiting since `at`
   reminded?: { at: number; times: number }
   // When the person dismissed its card: it is under Finished, whatever it still asks, until the task works again

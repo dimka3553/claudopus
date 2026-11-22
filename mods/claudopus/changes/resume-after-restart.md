@@ -1,0 +1,3 @@
+- Claudopus keeps a ledger of every task on disk as it changes, so quitting or restarting the Claude app loses nothing: a task that was working is shown as Interrupted, never Done or gone, with Carry on to start it again from where it stopped.
+- Carry on starts a fresh task with the cut-off task's instructions, to-dos, last notes, worktree and saved transcript; a question it asked still waits for you, and your answer carries it on. Tasks you stopped stay stopped.
+- Tasks of other chats that the app's close cut off show under that chat's name until you open it.

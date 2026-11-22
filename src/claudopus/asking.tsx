@@ -1100,6 +1100,14 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
 // Each message carries every answer joined into it, so each card's line and the chat's notice are settled for every one
 const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Sent, 'to'> }[] }[] = []
 const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>) => {
+  // A task the app's close cut off has no run to start again: the answer carries it on, as a fresh task told it (keep.tsx)
+  const list = await read($, todos)
+  const top = list.find(card => card.id === topOf(list, target))
+  if (top && !top.chat && isInterrupted(top)) {
+    sentReplies.set(one.id, { ...sent, to: 'work' })
+    redraw($)
+    return carryOn($, top.id, `${sent.ask ? `To "${sent.ask}": ` : ''}${sent.text}`)
+  }
   // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
   pending.set(target, one.id)
   // A reply that holds its ask is acted on from now: no answers on the card while its work is started again with it

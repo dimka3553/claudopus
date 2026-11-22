@@ -155,6 +155,7 @@ declare global {
   export import fetchedOpen = M5.fetchedOpen
   export import openChatOf = M5.openChatOf
   export import deliveredSaid = M5.deliveredSaid
+  export import interruptedSaid = M5.interruptedSaid
   export import headLine = M5.headLine
   export import headMood = M5.headMood
   export import isKey = M5.isKey

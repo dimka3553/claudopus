@@ -286,7 +286,7 @@ const panelHooks = (on: On) => {
     // it say (18 Nov, the person: "This top row should never say 'waiting for its command'. It should only have context, model,
     // how many to-dos, and time"). Details, whose header is the whole card, still begins with how it ended
     const glance = (one: Todo, count = '', isWhole = false) =>
-      [isWhole && stage(one) !== 'working' ? `${STAGE_WORD[stage(one)]}${stage(one) === 'failed' && one.why ? ` · ${one.why}` : ''}` : '', modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [isWhole && stage(one) !== 'working' ? `${STAGE_WORD[stage(one)]}${(stage(one) === 'failed' || stage(one) === 'interrupted') && one.why ? ` · ${one.why}` : ''}` : '', modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
@@ -561,6 +561,12 @@ const panelHooks = (on: On) => {
                     <Button key={`change-${one.id}-${presses}`} label={isBarOpen('change', one.id) ? 'Close' : 'Message'} plain dimColor hover={{ scope: `change-${one.id}`, underline: true }} onPress={press => openBar($, isBarOpen('change', one.id) ? undefined : { kind: 'change', id: one.id }, press.surface)} />
                   </Box>
                 ) : null}
+                {/* Cut off by the app's close: a press carries it on, as a fresh task told all the ledger holds of it */}
+                {!one.chat && !one.parentId && stage(one) === 'interrupted' ? (
+                  <Box flexShrink={0}>
+                    <Button key={`carry-small-${one.id}-${presses}`} label="Carry on" plain color={CUT} hover={{ scope: `carry-${one.id}`, underline: true }} onPress={() => ((presses += 1), void carryOn($, one.id))} />
+                  </Box>
+                ) : null}
                 {/* Failed, or stopped by the person: only their press starts it again */}
                 {!one.chat && (stage(one) === 'failed' || (stage(one) === 'stopped' && one.byYou)) ? (
                   <Box flexShrink={0}>
@@ -610,12 +616,12 @@ const panelHooks = (on: On) => {
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* Ended, the line begins with its stage, in its colour: green done, grey stopped, red failed with why; then what
                     it last said */}
-                {hasResult(stage(one)) || stage(one) === 'stopped' || stage(one) === 'failed' ? (
+                {hasResult(stage(one)) || stage(one) === 'stopped' || stage(one) === 'failed' || stage(one) === 'interrupted' ? (
                   <Box flexDirection="row" minWidth={0}>
                     {/* (the stage's own word is never the part cut short: on a narrow panel a long note beside it left "✓ …") */}
-                    <Box flexShrink={stage(one) === 'failed' ? 1 : 0} minWidth={0}>
+                    <Box flexShrink={stage(one) === 'failed' || stage(one) === 'interrupted' ? 1 : 0} minWidth={0}>
                       <Text wrap="truncate-end" color={stageColor(stage(one))} dimColor={stage(one) === 'stopped'}>
-                        {stage(one) === 'delivered' ? '◐ Delivered' : stage(one) === 'done' ? '✓ Done' : stage(one) === 'failed' ? `✕ Failed${one.why ? ` · ${one.why}` : ''}` : 'Stopped'}
+                        {stageLine(stage(one), one.why)}
                       </Text>
                     </Box>
                     {noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}
@@ -1648,8 +1654,10 @@ const panelHooks = (on: On) => {
               {(one.status === 'working' && !one.chat) || left(one) || ((one.status === 'failed' || (one.status === 'stopped' && one.byYou)) && !one.chat) ? (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
                   {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
+                  {/* Cut off by the app's close: carried on by a fresh task */}
+                  {isInterrupted(one) && !one.chat && !one.parentId ? <Button key={`carry-${one.id}-${presses}`} label="Carry on" onPress={() => ((presses += 1), void carryOn($, one.id))} /> : null}
                   {/* Work the person stopped, or that failed, stays so until they start it again from here or ask in a message */}
-                  {(one.status === 'failed' || (one.status === 'stopped' && one.byYou)) && !one.chat ? <Button key={`again-${one.id}-${presses}`} label="Start again" onPress={() => ((presses += 1), void startAgain($, one.id))} /> : null}
+                  {((one.status === 'failed' && !isInterrupted(one)) || (one.status === 'stopped' && one.byYou)) && !one.chat ? <Button key={`again-${one.id}-${presses}`} label="Start again" onPress={() => ((presses += 1), void startAgain($, one.id))} /> : null}
                   {left(one) ? <Button key={`artifact-${one.id}-${presses}`} label="Result" onPress={() => void openReport($, left(one)?.id ?? '')} /> : null}
                 </Box>
               ) : null}
@@ -1739,10 +1747,12 @@ const panelHooks = (on: On) => {
     // steady row of two lines (what it was, how it ended, its model, how long it took, when) that opens its card as for running work
     // Other chats' ended work folds in here too, once its pause is over; the row then says it holds every chat's
     // Work shown finished only because it left its chat's file is not kept there: its chat said nothing of how it ended
-    const endedElsewhere = elsewhere.filter(one => stageOf(elsewhere, one) !== 'working' && stageOf(elsewhere, one) !== 'waiting' && !lingers(one, at) && !isVanished(one.id))
+    // (a task its chat's close cut off stays among that chat's cards until that chat carries it on or dismisses it)
+    const isUpThere = (one: Todo) => stageOf(elsewhere, one) === 'working' || stageOf(elsewhere, one) === 'waiting' || stageOf(elsewhere, one) === 'interrupted'
+    const endedElsewhere = elsewhere.filter(one => !isUpThere(one) && !lingers(one, at) && !isVanished(one.id))
     // Each other chat's cards under its name: running, asking, or in the pause after ending. A chat with none of these and no prompt
     // is not listed at all, however many are open: the app's own list of chats has them
-    const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (stageOf(elsewhere, one) === 'working' || stageOf(elsewhere, one) === 'waiting' || lingers(one, at)))
+    const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (isUpThere(one) || lingers(one, at)))
     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
     const finished = [...own.filter(one => one.status !== 'working' && !shownWork.some(up => up.id === one.id)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
@@ -1999,6 +2009,8 @@ const panelHooks = (on: On) => {
       here: own.filter(one => stage(one) === 'working').length + runningFlows.length,
       // (what was handed in and waits for the person's look, counted after what works)
       delivered: shownWork.filter(one => stage(one) === 'delivered').length,
+      // (what the app's close cut off, here and in other chats, until carried on or dismissed)
+      interrupted: shownWork.filter(one => stage(one) === 'interrupted').length + elsewhere.filter(one => stageOf(elsewhere, one) === 'interrupted').length,
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
       // Each thing at the top counts once, as the line above the prompt counts them
@@ -2056,12 +2068,13 @@ const panelHooks = (on: On) => {
                 )}
                 {/* (what waits is amber, what was delivered is its own blue, on the one line) */}
                 <Box flexDirection="row" minWidth={0}>
-                  {headLine(head).length > deliveredSaid(head).length ? (
+                  {headLine(head).length > deliveredSaid(head).length + interruptedSaid(head).length ? (
                     <Box flexShrink={1} minWidth={0}>
-                      <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head).slice(0, headLine(head).length - deliveredSaid(head).length)}</Text>
+                      <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head).slice(0, headLine(head).length - deliveredSaid(head).length - interruptedSaid(head).length)}</Text>
                     </Box>
                   ) : null}
                   {head.delivered ? <Box flexShrink={0}><Text color={DELIVERED} dimColor={false}>{deliveredSaid(head)}</Text></Box> : null}
+                  {head.interrupted ? <Box flexShrink={0}><Text color={CUT} dimColor={false}>{interruptedSaid(head)}</Text></Box> : null}
                 </Box>
                 {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 && chat.window ? `This chat is ${fill(chat.tokens, chat.window)}` : chat.tokens > 0 ? 'This chat has started' : 'This chat has just begun'}</Text>}
               </Box>

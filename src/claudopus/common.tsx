@@ -206,7 +206,10 @@ const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => 
   const hold = (list: Todo[]) => saidKept(list, holdDone(list, fn(list)))
   const next = hold(now)
   if (JSON.stringify(next) === before) return now
-  return update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))
+  const written = await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))
+  // (and the ledger on disk with it, so a quit or a crash loses nothing: keep.tsx)
+  saveLedgerSoon($)
+  return written
 }
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
 // What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as

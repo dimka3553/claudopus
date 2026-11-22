@@ -174,10 +174,12 @@ test("with work only in another chat the header and octopus are at work, amber w
     return [one?.props.color, Boolean(one?.props.dimColor)]
   }
   expect(await lineOf('✓ Done')).toEqual(['success', false])
-  expect(await lineOf('✕ Failed · The app closed while it worked')).toEqual(['error', false])
+  // (cut off by its chat's close, it says so in orange, and stays among that chat's cards)
+  expect(await lineOf('⏸ Interrupted · The app closed while it worked')).toEqual(['#F0703C', false])
   expect(await lineOf('Stopped')).toEqual([undefined, true])
   // The header counts one waiting and one working, and none of the three that ended; the octopus is happy for the one done
   expect((await list.find({ type: 'Text', text: '1 waiting for you · 1 working' }))?.props.color).toBe('#E5A50A')
+  expect((await list.find({ type: 'Text', text: ' · 1 interrupted' }))?.props.color).toBe('#F0703C')
   expect(await drawn(list)).toEqual(['happy'])
   // No "Not done", no row for a detached command, no line of a wait
   const said = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
@@ -186,7 +188,7 @@ test("with work only in another chat the header and octopus are at work, amber w
   // After their pause the three are under Finished, and the header and octopus say only what waits and works
   await clock.advance(3000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Done' })) ? undefined : true))).toBe(true)
-  expect((await list.findAll({ type: 'Button' })).some(b => /Finished 3/.test(String(b.props.label)))).toBe(true)
+  expect((await list.findAll({ type: 'Button' })).some(b => /Finished 2/.test(String(b.props.label)))).toBe(true)
   expect(await list.find({ type: 'Text', text: '1 waiting for you · 1 working' })).toBeDefined()
   expect(await drawn(list)).toEqual(['wave'])
   await list.unmount()
