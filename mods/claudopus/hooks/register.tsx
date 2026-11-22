@@ -13637,7 +13637,7 @@ const givenIfDrawn = async ($: EngineInterface, e: Parameters<EngineInterface['u
   if (drawingFits(drawing)) return drawing
   const id = e.requestId ?? ''
   const now = await $.clock.now()
-  if (now - (tooBigLogged.get(id) ?? -Infinity) >= 60_000) (tooBigLogged.set(id, now), await log($, `tab ${id} not given: its drawing is past what the app draws (${sizeSaid(drawing)}, ${(e.props as { bodyColumns?: number }).bodyColumns ?? 'unknown'} columns wide)`))
+  if (now - (tooBigLogged.get(id) ?? -Infinity) >= 60_000) (tooBigLogged.set(id, now), await log($, `tab ${id} not given: its drawing is past what the app draws (${sizeSaid(drawing)}, ${(e as { props?: { bodyColumns?: number } }).props?.bodyColumns ?? 'unknown'} columns wide)`))
   const { Box, Button, Text } = uiOf($, e)
   return (
     <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
