@@ -1,0 +1,5 @@
+- Each topic now has a short page a task reads first and a history that tasks only add to, so a task no longer reads or resends a whole page of notes. A page that grows past 8,000 characters is moved whole into its history, and a short page is written from it in its place.
+- Topics from tests and scratch folders stay out of the topic list every chat is given.
+- The results each message lists show one result per task, its newest, instead of every result it handed in.
+- Recall gives topic pages first, then their histories, results newest first and your chats' words; the same line from several files once; and, when no line holds your phrase as written, the lines that hold each of its words.
+- The same picture in several results of one task now takes its disk space once.

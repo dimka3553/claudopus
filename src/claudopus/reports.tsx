@@ -110,7 +110,9 @@ const copyNamed = async ($: EngineInterface, text: string, into: string) => {
     if (copies.length >= COPIES_KEPT || copies.includes(name)) return
     const to = `${into}/${name}`
     await $.process.run(['mkdir', '-p', to.slice(0, to.lastIndexOf('/'))])
-    if ((await $.process.run(['cp', '-p', from, to])).exitCode === 0) copies.push(name)
+    // A copy that shares the file's space until either changes, where the disk allows it (the Mac's), so the same picture in a task's
+    // several results takes its room once; elsewhere a plain copy
+    if ((await $.process.run(['cp', '-cp', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0 || (await $.process.run(['cp', '-p', from, to])).exitCode === 0) copies.push(name)
   }
   for (const path of namedPaths(text)) {
     const stat = await $.fs.stat(path).catch(() => undefined)
@@ -226,7 +228,12 @@ const markReport = ($: EngineInterface, r: Report, patch: Partial<Report> | ((st
 
 // What the chat is told of with each message: the newest results, so a question one answers is answered from it. One put away is
 // left out
-const reportsTold = (all: Report[], now: number, list = all.filter(r => !r.archived)) =>
+// One task's results handed in again (a part, then the whole; a second round) are told once, the newest (the list is newest first)
+const newestPerTask = (all: Report[]) => {
+  const told = new Set<string>()
+  return all.filter(r => !r.archived && !(r.agent && told.has(r.agent)) && (r.agent ? told.add(r.agent) : true))
+}
+const reportsTold = (all: Report[], now: number, list = newestPerTask(all)) =>
   list.length
     ? `Results saved (what finished tasks left for ${who()} to read or act on), newest first (title · topic · when · its file):\n${list
         .slice(0, REPORTS_TOLD)

@@ -486,6 +486,13 @@ test('the results list is one line a row, newest first with no group of what wai
   expect(['v1', 'v2', 'v3'].map(id => Boolean(JSON.parse(files.get(`${MEMORY}/reports/${id}/meta.json`) ?? '{}').archived))).toEqual([true, true, true])
   expect(await until(async () => keyed(list, 'archived-fold'))).toBeDefined()
   expect((await keyed(list, 'archived-fold'))?.props.label).toBe('▸ Archived 1')
+  // A task that handed in again is told once, its newest
+  files.set(`${MEMORY}/reports/p0b/meta.json`, JSON.stringify({ ...base, id: 'p0b', title: 'Panel change 0 again', subject: 'Claude workflow', at: at(1), agent: 'x0' }))
+  files.set(`${MEMORY}/reports/p0b/report.md`, 'Again.\n')
+  await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 'r9', query: 'again' } as never)
+  const again = (await $.prompt.submit({ text: 'and now', wait: false, origin: composer })).context?.join('\n') ?? ''
+  expect(again).toContain('reports/p0b/report.md')
+  expect(again).not.toContain('reports/p0/report.md')
 })
 
 // 20 Nov: with about a thousand results, Earlier unfolded every one of them, past what the app draws: the tab said only that it

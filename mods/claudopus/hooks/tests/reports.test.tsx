@@ -581,7 +581,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
       : tool === 'grep'
-        ? `${MEMORY}/work/local_1.md:9:the nose model returned\n${MEMORY}/words/local_1.md:2:the nose is flawed\n`
+        ? // grep -rniF --include=*.md -e <phrase> <folder>, as recall asks it, over the .md files the test laid there
+          [...files]
+            .filter(([path]) => path.startsWith(`${String(rest.at(-1))}/`) && path.endsWith('.md'))
+            .flatMap(([path, text]) => String(text).split('\n').flatMap((line, i) => (line.toLowerCase().includes(String(rest[rest.indexOf('-e') + 1]).toLowerCase()) ? [`${path}:${i + 1}:${line}\n`] : [])))
+            .join('')
         : tool === 'lsof' && rest.includes('-iTCP')
           ? `p635\nn*:7000\n${isGone ? '' : 'p700\nn127.0.0.1:3100\nn[::1]:3100\n'}`
           : tool === 'lsof'
@@ -1364,6 +1368,13 @@ test('the results list is one line a row, newest first with no group of what wai
   expect(['v1', 'v2', 'v3'].map(id => Boolean(JSON.parse(files.get(`${MEMORY}/reports/${id}/meta.json`) ?? '{}').archived))).toEqual([true, true, true])
   expect(await until(async () => keyed(list, 'archived-fold'))).toBeDefined()
   expect((await keyed(list, 'archived-fold'))?.props.label).toBe('▸ Archived 1')
+  // A task that handed in again is told once, its newest
+  files.set(`${MEMORY}/reports/p0b/meta.json`, JSON.stringify({ ...base, id: 'p0b', title: 'Panel change 0 again', subject: 'Claude workflow', at: at(1), agent: 'x0' }))
+  files.set(`${MEMORY}/reports/p0b/report.md`, 'Again.\n')
+  await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 'r9', query: 'again' } as never)
+  const again = (await $.prompt.submit({ text: 'and now', wait: false, origin: composer })).context?.join('\n') ?? ''
+  expect(again).toContain('reports/p0b/report.md')
+  expect(again).not.toContain('reports/p0/report.md')
 })
 
 // 20 Nov: with about a thousand results, Earlier unfolded every one of them, past what the app draws: the tab said only that it
