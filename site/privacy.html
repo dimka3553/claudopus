@@ -112,14 +112,15 @@ section li::before{content:"";position:absolute;left:0;top:.6em;width:var(--s2);
   <p class="lead">What claudopus.ai collects about your visit, and how to change your choice. What Claudopus itself does on your computer is on <a href="https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/docs/privacy.md">its own page</a>.</p>
 </div>
 <section>
-  <h2>Before you choose</h2>
-  <p>Until you press Accept on the cookie banner, this site sets no cookies and loads no tracking tool that uses them. Decline keeps it that way.</p>
+  <h2>Where the site asks first</h2>
+  <p>In the EU and the EEA, the UK, Switzerland and Turkey, a cookie banner asks first. Until you press Accept there, this site sets no cookies and loads no tracking tool that uses them. Decline keeps it that way.</p>
+  <p>Elsewhere no banner shows, and the site loads Microsoft Clarity as it opens. The Cookies link at the bottom of each page turns it off.</p>
   <p>The site always counts page visits with Vercel Web Analytics, which sets no cookies and stores nothing on your device. It records the page, the referring site, the country, and the browser and system type, and cannot follow you from one day or site to another.</p>
   <p>The site is hosted on Vercel, which sees each request, as any web host does, to send you the page.</p>
 </section>
 <section>
-  <h2>Microsoft Clarity, if you accept</h2>
-  <p>After you press Accept, the site loads Microsoft Clarity, Microsoft's analytics tool. It records:</p>
+  <h2>Microsoft Clarity</h2>
+  <p>Once you accept, or where the site doesn't ask, it loads Microsoft Clarity, Microsoft's analytics tool. It records:</p>
   <ul>
     <li>which pages you open and how you scroll, click and move the pointer, and replays of the visit made from those</li>
     <li>which command you copy and whether you open Claudopus on GitHub, counted as events</li>
@@ -130,7 +131,7 @@ section li::before{content:"";position:absolute;left:0;top:.6em;width:var(--s2);
 <section>
   <h2>Your choice</h2>
   <p>Your choice is kept in this browser only. Now: <b id="choice">no choice yet</b>. <a href="#cookies" data-cookies>Change it</a></p>
-  <p>If you decline after accepting, the site removes <code>_clck</code> and <code>_clsk</code> and loads the page again without Clarity. Microsoft's own cookies on clarity.ms and bing.com stay until you clear them in your browser.</p>
+  <p>If you decline once Clarity has loaded, the site removes <code>_clck</code> and <code>_clsk</code> and loads the page again without Clarity. Microsoft's own cookies on clarity.ms and bing.com stay until you clear them in your browser.</p>
 </section>
 <section>
   <h2>The leaderboard, if you join</h2>
@@ -147,7 +148,10 @@ section li::before{content:"";position:absolute;left:0;top:.6em;width:var(--s2);
 <script>
 (() => {
   const words = { accept: 'you accepted Clarity', decline: 'you declined Clarity' }
-  const paint = () => { document.getElementById('choice').textContent = words[window.claudopusCookies?.get()] || 'no choice yet' }
+  const paint = () => {
+    const c = window.claudopusCookies
+    document.getElementById('choice').textContent = words[c?.get()] || (c?.asks() === false ? 'Clarity is on, as your country doesn’t ask first' : 'no choice yet')
+  }
   paint(); document.addEventListener('cookies', paint)
 })()
 </script>
