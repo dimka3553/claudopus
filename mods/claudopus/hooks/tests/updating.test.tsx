@@ -984,7 +984,7 @@ test(`Update is one press for a chat run from ${one.name}: the fetch, its check,
   await until(() => panel.find({ type: 'Text', text: 'Claudopus v0.1.2 is out' }))
   expect(changing(gitRan)).toEqual([])
   await pressed(panel, 'update-download')
-  await shownIn(panel, 'v0.1.0 · v0.1.2 is ready: type /reload-plugins to use it')
+  await shownIn(panel, 'v0.1.0 · v0.1.2 ready: /reload-plugins')
   // One press: fetched, checked against the release's tree, and only then moved forward, fast-forward only
   const fetched = gitRan.findIndex(one => one.includes('fetch'))
   const checked = gitRan.findIndex(one => one.includes(`${COMMIT}:mods/claudopus`))
@@ -1027,7 +1027,7 @@ test('Update pressed while a look reads the version page waits for the look to e
   await pressed(panel, 'update-download')
   expect(isReading).toBe(true)
   await clock.advance(30_000)
-  await shownIn(panel, 'v0.1.0 · v0.1.2 is ready: type /reload-plugins to use it')
+  await shownIn(panel, 'v0.1.0 · v0.1.2 ready: /reload-plugins')
 })
 
 // What updating says speaks only of versions, Update and /reload-plugins: never of where the code sits or how git moves it
@@ -1089,7 +1089,7 @@ test('each step stands through a reload: a chat that loads finds the download wa
   files.set('manifest', JSON.stringify({ name: 'claudopus', version: '0.1.2' }))
   await stopped.unmount()
   const behind = await $.ui.mount(listAt())
-  await shownIn(behind, 'v0.1.0 · v0.1.2 is ready: type /reload-plugins to use it')
+  await shownIn(behind, 'v0.1.0 · v0.1.2 ready: /reload-plugins')
 })
 
 test('a steps file that says a download was checked, with no such download in the repo, is not believed: the panel offers the download again', SLOW, async ($, on) => {
@@ -1162,7 +1162,7 @@ test('F-019 · a chat run from another Mac moves at Install but is not sent a re
   await clock.advance(3 * 60_000)
   files.set('manifest', JSON.stringify({ name: 'claudopus', version: '0.1.2' }))
   const panel = await $.ui.mount(listAt())
-  await shownIn(panel, 'v0.1.0 · v0.1.2 is ready: type /reload-plugins to use it')
+  await shownIn(panel, 'v0.1.0 · v0.1.2 ready: /reload-plugins')
   expect(await keyed(panel, 'update-reload')).toBeUndefined()
   expect(reloads).toEqual([])
 })
