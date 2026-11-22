@@ -564,9 +564,20 @@ const panelHooks = (on: On) => {
                 {/* Cut off by the app's close: a press carries it on, as a fresh task told all the ledger holds of it */}
                 {!one.chat && !one.parentId && stage(one) === 'interrupted' ? (
                   <Box flexShrink={0}>
-                    <Button key={`carry-small-${one.id}-${presses}`} label="Carry on" plain color={CUT} hover={{ scope: `carry-${one.id}`, underline: true }} onPress={() => ((presses += 1), void carryOn($, one.id))} />
+                    <Button key={`carry-small-${one.id}-${presses}`} label="Carry on" plain hover={{ scope: `carry-${one.id}`, underline: true }} onPress={() => ((presses += 1), void carryOn($, one.id))} />
                   </Box>
                 ) : null}
+                {/* Another chat's task cut off by the app's close: a press opens that chat, where its card has Carry on */}
+                {one.chat && stage(one) === 'interrupted'
+                  ? (() => {
+                      const there = otherChats.find(c => c.chat === one.chat?.id && c.host === one.chat?.host)
+                      return there && pressOf(there) ? (
+                        <Box flexShrink={0}>
+                          <Button key={`carry-there-${one.id}-${presses}`} label="Open chat" plain hover={{ scope: `carry-there-${one.id}`, underline: true }} onPress={() => void ((presses += 1), openChat($, there))} />
+                        </Box>
+                      ) : null
+                    })()
+                  : null}
                 {/* Failed, or stopped by the person: only their press starts it again */}
                 {!one.chat && (stage(one) === 'failed' || (stage(one) === 'stopped' && one.byYou)) ? (
                   <Box flexShrink={0}>
@@ -619,9 +630,9 @@ const panelHooks = (on: On) => {
                 {hasResult(stage(one)) || stage(one) === 'stopped' || stage(one) === 'failed' || stage(one) === 'interrupted' ? (
                   <Box flexDirection="row" minWidth={0}>
                     {/* (the stage's own word is never the part cut short: on a narrow panel a long note beside it left "✓ …") */}
-                    <Box flexShrink={stage(one) === 'failed' || stage(one) === 'interrupted' ? 1 : 0} minWidth={0}>
+                    <Box flexShrink={stage(one) === 'failed' || (stage(one) === 'interrupted' && !noteOf(one)) ? 1 : 0} minWidth={0}>
                       <Text wrap="truncate-end" color={stageColor(stage(one))} dimColor={stage(one) === 'stopped'}>
-                        {stageLine(stage(one), one.why)}
+                        {stageLine(stage(one), one.why, Boolean(noteOf(one)))}
                       </Text>
                     </Box>
                     {noteOf(one) ? <Box flexShrink={1} minWidth={0}><Text dimColor wrap="truncate-end">{` · ${cut(noteOf(one), room)}`}</Text></Box> : null}

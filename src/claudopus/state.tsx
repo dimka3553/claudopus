@@ -46,7 +46,8 @@ const hasResult = (stage: Stage) => stage === 'delivered' || stage === 'done'
 const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', delivered: 'Delivered', done: 'Done', stopped: 'Stopped', failed: 'Failed', interrupted: 'Interrupted' }
 const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, delivered: DELIVERED, done: DONE, stopped: undefined, failed: 'error', interrupted: CUT })[stage]
 // How a card's line begins once it has ended, in its stage's colour
-const stageLine = (stage: Stage, why = '') => (stage === 'delivered' ? '◐ Delivered' : stage === 'done' ? '✓ Done' : stage === 'failed' ? `✕ Failed${why ? ` · ${why}` : ''}` : stage === 'interrupted' ? `⏸ Interrupted · ${WHY_APP_CLOSED}` : 'Stopped')
+// (a cut-off card with a note of its own after it says only Interrupted, so its note has the room: on a narrow panel the two cut each other short)
+const stageLine = (stage: Stage, why = '', hasNote = false) => (stage === 'delivered' ? '◐ Delivered' : stage === 'done' ? '✓ Done' : stage === 'failed' ? `✕ Failed${why ? ` · ${why}` : ''}` : stage === 'interrupted' ? (hasNote ? '⏸ Interrupted' : `⏸ Interrupted · ${WHY_APP_CLOSED}`) : 'Stopped')
 // Why a card failed, where it says so
 const WHY_NO_RESULT = 'Ended without its result'
 const WHY_APP_CLOSED = 'The app closed while it worked'
