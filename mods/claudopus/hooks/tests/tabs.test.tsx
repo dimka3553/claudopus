@@ -1368,6 +1368,8 @@ test("a Details tab too big for the app is drawn with less in it, its ended comm
   await share(Array.from({ length: 2500 }, (_, n) => ({ text: `Check finding ${n}`, state: 'open' })))()
   await clock.advance(6000)
   expect(await until(async () => (await tab.find({ type: 'Text', text: "Claudopus couldn't show this tab" })) ?? undefined)).toBeDefined()
+  // (the log says by how much, each count beside its limit, and how wide the pane was)
+  expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/tab work-\S+ not given: its drawing is past what the app draws \(\d+ of 1800 parts, \d+ of 230000 characters, \d+ of 30 deep, 74 columns wide\)/)?.[0])).toBeDefined()
   expect(appDraws(await tab.drawn()).isDrawn).toBe(true)
   const before = opened.length
   await pressed(tab, 'too-big-back')
@@ -1396,4 +1398,56 @@ test('the Claudopus tab stays first whichever tabs are opened, closed and opened
   await clock.advance(500)
   expect((await order())[0]).toBe('claudopus')
   expect(await order()).toContain('stats')
+})
+
+// The list near the app's limit: a pane as wide as the window put a few thousand more characters into the same cards, and the whole
+// list said only that it couldn't show this tab, then came back once narrowed (21-22 Nov, a chat with 10 open cards and 24 helpers).
+// Here 10 tasks, each with a question, 2 commands and 2 helpers with one each: beside the chat about 224,000 characters as the panel
+// counts them, as wide as the window about 234,000, past its 230,000 (22 Nov)
+test('the list too big for the app at a wide pane is drawn with less in it, every card still there, and the log says by how much', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = {}
+  const parents: Record<string, string> = {}
+  const { clock, files } = world(on, { agents, kinds, parents, jobs: { output: () => 'Rendering frame 12 of 400 for the long video of the head turning slowly from the left side\n', wroteAt: () => NOW } })
+  await $.session.start(start)
+  const more = (n: number) => 'and checks each measured point against the scan again '.repeat(n)
+  const said = (what: string, n: number) => `${what} ${n}: ${'I am comparing every measurement of the nose with the scan, writing down where each one differs, and fixing them one by one before the next check runs. '.repeat(6)}`
+  const titles: string[] = []
+  let id = 0
+  let use = 0
+  for (let t = 1; t <= 10; t += 1) {
+    const me = `a${(id += 1)}`
+    kinds[me] = 'general-purpose'
+    titles.push(`Task number ${t} with a fairly long title that says what it does in plain words ${more(23)}`.trim())
+    await $.prompt.submit({ text: `job ${t}`, wait: false, origin: composer })
+    await $.agent.spawn({ ...spawn, description: titles[t - 1], prompt: `job ${t}` } as never)
+    const call = (agentId: string, tool: string, input: Record<string, unknown>) => $.tool.call({ tool, tool_use_id: `u${(use += 1)}`, agentId, ...input } as never)
+    for (let i = 0; i < 8; i += 1) await call(me, 'mcp__claudopus__todo', { item: `Step ${i} of task ${t}, which does one part of the whole job carefully`, state: i < 3 ? 'done' : i === 3 ? 'doing' : 'open' })
+    await call(me, 'mcp__claudopus__note', { text: said('Note', t) })
+    for (let c = 0; c < 2; c += 1) await call(me, 'Bash', { command: `python3 render.py --part ${c}`, description: `Render part ${c} of the long video for task ${t} with every frame at full size, then compare each frame with the one before it and write down which ones changed ${more(5)}`, run_in_background: true })
+    for (let h = 0; h < 2; h += 1) {
+      const kid = `a${(id += 1)}`
+      kinds[kid] = 'general-purpose'
+      parents[kid] = me
+      await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: `Helper ${h} of task ${t} that measures a part of the head carefully, writes every number down and compares each one with the scan from last week ${more(5)}`, prompt: 'go', parentAgentId: me } as never)
+      await call(kid, 'mcp__claudopus__note', { text: said('Helper note', h) })
+      await call(kid, 'Bash', { command: 'python3 measure.py', description: `Measure part ${h} of the head for task ${t} at full detail, every point of it, against the scan from last week and the one before ${more(5)}`, run_in_background: true })
+    }
+    await call(me, 'mcp__claudopus__ask', { text: `${said('Question', t)} May I go on?`, details: more(30).slice(0, 1450), choices: ['Go on', 'Stop here'] })
+    await clock.advance(100)
+  }
+  await clock.advance(30_000)
+  const shown = async (columns: number) => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: columns }, surface: 'desktop' } as never)
+    const titled = async () => (await list.findAll({ type: 'Text' })).filter(one => titles.includes(String(one.text))).length
+    await until(async () => ((await titled()) === 10 || (await list.find({ type: 'Text', text: "Claudopus couldn't show this tab" })) ? true : undefined))
+    const seen = { titles: await titled(), isTooBig: Boolean(await list.find({ type: 'Text', text: "Claudopus couldn't show this tab" })), isDrawn: appDraws(await list.drawn()).isDrawn }
+    await list.unmount()
+    return seen
+  }
+  // Beside the chat, and as wide as the window: every card, within what the app draws, never the line that it couldn't
+  expect(await shown(79)).toEqual({ titles: 10, isTooBig: false, isDrawn: true })
+  expect(await shown(300)).toEqual({ titles: 10, isTooBig: false, isDrawn: true })
+  // The log says how much less, and how big it was whole beside each limit, and how wide the pane was
+  expect((files.get(`${MEMORY}/log.md`) ?? '').match(/tab claudopus drawn with less in it \(\d of 3\) to fit what the app draws \(whole: \d+ of 1800 parts, \d+ of 230000 characters, \d+ of 30 deep, 300 columns wide\)/)?.[0]).toBeDefined()
 })
