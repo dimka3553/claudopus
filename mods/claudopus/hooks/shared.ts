@@ -337,9 +337,11 @@ export const openUrl = (c: { host: string; link?: Link }, held = '') => {
 // The panel's header: one line for everything the panel shows, every chat's, so it never says less than the cards under it.
 // What waits for the person comes first; then what works, here, in other chats, or both; then what just finished; else that
 // nothing waits. Each count is of cards by their stage
-export type Head = { here: number; there: number; chats: number; asks: number; isDone: boolean; delivered?: number }
+export type Head = { here: number; there: number; chats: number; asks: number; isDone: boolean; delivered?: number; interrupted?: number }
 // (what was delivered and is not yet marked done comes last, and alone when nothing waits or works)
 export const deliveredSaid = ({ here, there, asks, delivered = 0 }: Head) => (delivered ? `${asks || here || there ? ' · ' : ''}${delivered} delivered` : '')
+// (and after it what the app's close cut off, until carried on or dismissed)
+export const interruptedSaid = ({ here, there, asks, delivered = 0, interrupted = 0 }: Head) => (interrupted ? `${asks || here || there || delivered ? ' · ' : ''}${interrupted} interrupted` : '')
 export const headLine = (head: Head) => {
   const { here, there, chats, asks, isDone } = head
   const running = here + there
@@ -353,7 +355,7 @@ export const headLine = (head: Head) => {
         : here
           ? `${here} working`
           : ''
-  return first || head.delivered ? `${first}${deliveredSaid(head)}` : isDone ? 'Just finished' : 'Nothing waits for you'
+  return first || head.delivered || head.interrupted ? `${first}${deliveredSaid(head)}${interruptedSaid(head)}` : isDone ? 'Just finished' : 'Nothing waits for you'
 }
 // The octopus beside it: happy for the moment work finishes, whatever else goes on, so no finish passes unseen; else amber while
 // anything needs the person, at work while anything runs, resting only when nothing goes on anywhere

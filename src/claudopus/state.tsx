@@ -12,9 +12,14 @@
 //   something that's in the intermediate state"). A card that finished before cards stayed up is done, as it was
 // - stopped (grey): only by the person's Stop, or the chat's on their word
 // - failed (red): it could not go on, and its card says why
-type Stage = 'working' | 'waiting' | 'delivered' | 'done' | 'stopped' | 'failed'
-type Staged = Pick<Todo, 'status' | 'up' | 'closedAt'> & Parameters<typeof needsPerson>[0]
+// - interrupted (orange): it was at work when the app closed (or the chat's process ended), and its run ended with it, with no
+//   result. Its card says so, with Carry on, which starts a fresh task told all the ledger holds of it (keep.tsx); a question it
+//   asked still waits for the person, amber, and their answer carries it on (23 Nov, the person: "a task that was working and
+//   didn't hand in is marked 'interrupted', never 'done'")
+type Stage = 'working' | 'waiting' | 'delivered' | 'done' | 'stopped' | 'failed' | 'interrupted'
+type Staged = Pick<Todo, 'status' | 'up' | 'closedAt' | 'why'> & Parameters<typeof needsPerson>[0]
 const stageOf = (_list: readonly Staged[], card: Staged): Stage => {
+  if (isInterrupted(card)) return needsPerson(card) ? 'waiting' : 'interrupted'
   if (card.status === 'failed' || card.status === 'stopped') return card.status
   if (needsPerson(card)) return 'waiting'
   return card.status === 'done' ? (card.up && !card.closedAt ? 'delivered' : 'done') : 'working'
@@ -38,8 +43,11 @@ const isDoneMoment = (one: Pick<Todo, 'id' | 'status' | 'closedAt'>, at: number)
 // Whether it handed in its result: delivered, or marked done by the person
 const hasResult = (stage: Stage) => stage === 'delivered' || stage === 'done'
 // Each stage in the words a card says it with, and its colour
-const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', delivered: 'Delivered', done: 'Done', stopped: 'Stopped', failed: 'Failed' }
-const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, delivered: DELIVERED, done: DONE, stopped: undefined, failed: 'error' })[stage]
+const STAGE_WORD: Record<Stage, string> = { working: 'Working', waiting: 'Waiting for you', delivered: 'Delivered', done: 'Done', stopped: 'Stopped', failed: 'Failed', interrupted: 'Interrupted' }
+const stageColor = (stage: Stage) => ({ working: LIVE, waiting: NEEDS, delivered: DELIVERED, done: DONE, stopped: undefined, failed: 'error', interrupted: CUT })[stage]
+// How a card's line begins once it has ended, in its stage's colour
+// (a cut-off card with a note of its own after it says only Interrupted, so its note has the room: on a narrow panel the two cut each other short)
+const stageLine = (stage: Stage, why = '', hasNote = false) => (stage === 'delivered' ? '◐ Delivered' : stage === 'done' ? '✓ Done' : stage === 'failed' ? `✕ Failed${why ? ` · ${why}` : ''}` : stage === 'interrupted' ? (hasNote ? '⏸ Interrupted' : `⏸ Interrupted · ${WHY_APP_CLOSED}`) : 'Stopped')
 // Why a card failed, where it says so
 const WHY_NO_RESULT = 'Ended without its result'
 const WHY_APP_CLOSED = 'The app closed while it worked'

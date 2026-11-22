@@ -68,6 +68,9 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
       if (one.id !== id || one.status !== 'working') return one
       // (stopped for a message the person sent with Stop and send, which starts it again: it stays at work)
       if (how === 'stopped' && interrupting.has(id)) return one
+      // (stopped by no one here, as when the app quits and stops every task, it says so: a load in the next process takes one that
+      // stopped so as the process ended for cut off, never for stopped: noteClosed)
+      if (how === 'stopped' && !one.parentId && !stoppedHere.has(id) && !pressed.has(id)) return { ...ended(one, stoppedAs(one), now), ...(hasReport(one) ? {} : { stoppedUnasked: true as const }) }
       if (how === 'stopped') return ended(one, stoppedAs(one), now)
       if (how === 'failed') return { ...ended(one, 'failed', now), answer: answer || one.answer, why: WHY_ERROR }
       // A helper's hand-back ends it: its result went to its task

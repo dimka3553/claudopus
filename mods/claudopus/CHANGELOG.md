@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.270 · 23 November 2026
+- Claudopus keeps a ledger of every task on disk as it changes, so quitting or restarting the Claude app loses nothing: a task that was working is shown as Interrupted, never Done or gone, with Carry on to start it again from where it stopped.
+- Carry on starts a fresh task with the cut-off task's instructions, to-dos, last notes, worktree and saved transcript; a question it asked still waits for you, and your answer carries it on. Tasks you stopped stay stopped.
+- Tasks of other chats that the app's close cut off show under that chat's name until you open it.
+
 ## 0.2.269 · 22 November 2026
 - The panel's list no longer goes blank with "Claudopus couldn't show this tab" when you widen it with a lot of work open: it draws with less in it instead, its lines cut to a side panel's length, then each card's helpers and commands counted on one row that opens its Details.
 

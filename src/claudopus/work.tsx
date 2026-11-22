@@ -214,6 +214,8 @@ const workHooks = (on: On) => {
       let isPersonEnded = false
       try {
         r = await raw(call)
+        // A worktree a task's command made is noted on its card, for a fresh task that carries it on (keep.tsx)
+        if (e.tool === 'Bash' && e.agentId && dir && !r.deny) await noteWorktree($, e.agentId, String((call as { command?: unknown }).command ?? '')).catch(err => log($, `worktree not noted: ${String(err)}`))
         if (isPersonWatched) {
           isPersonEnded = true
           const undone = await personCheck($, e).catch(() => [] as string[])
@@ -802,12 +804,25 @@ const workHooks = (on: On) => {
     const named1 = isOwn && !fromReport && !e.resume ? (await read($, reports)).filter(one => e.prompt.includes(`reports/${one.id}/`) || e.prompt.endsWith(`reports/${one.id}`)) : []
     const goesOn = named1.length === 1 && named1[0] && [...aboutWords(named1[0].title)].some(word => aboutWords(e.description ?? '').has(word)) ? named1[0].id : ''
     const from = fromReport || goesOn
-    await changeTodos($, list => {
-      const old = list.find(one => one.id === id)
+    // The instructions it was started with are kept in the ledger, for a fresh task that may carry it on; one that carries on a task
+    // the app's close cut off names that task's carry file, and takes its place
+    const carried = isOwn && !e.resume ? carriedFrom(e.prompt ?? '') : ''
+    if (isOwn && !e.resume) await saveBrief($, id, e.prompt ?? '').catch(err => log($, `instructions of ${id} not kept: ${String(err)}`))
+    await changeTodos($, all => {
+      const old = all.find(one => one.id === id)
+      const was = carried ? all.find(one => one.id === carried && isInterrupted(one) && !one.closedAt) : undefined
+      // (the cut-off card goes under Finished, saying which task took it on)
+      const list = was ? all.map(one => (one.id === was.id ? { ...one, closedAt: now, carriedTo: id, ask: undefined } : one)) : all
       // Its title is the few words the task was given; under it, the person's message as they wrote it
-      const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}), kind: e.fork ? 'fork' : (e.subagentType ?? '') }
-      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(old?.scratch || scratch ? { scratch: old?.scratch || scratch } : {}) }])
+      const made = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}), kind: e.fork ? 'fork' : (e.subagentType ?? '') }
+      // (carrying one on, it goes on with that task's words, to-dos, notes, worktree and folder, in its place among the cards)
+      const fresh = was
+        ? { ...made, words: was.words || made.words, items: was.items, entries: [...was.entries, { at: now, kind: 'event' as const, text: 'Carried on after the app closed' }].slice(-ENTRIES_KEPT), begunAt: was.begunAt ?? was.startedAt, ...(was.worktree ? { worktree: was.worktree, ...(was.branch ? { branch: was.branch } : {}) } : {}), ...(was.scratch ? { scratch: was.scratch } : {}) }
+        : made
+      const folder = old?.scratch || fresh.scratch || scratch
+      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(folder ? { scratch: folder } : {}) }])
     })
+    if (carried) await log($, `task ${id} carries on ${carried}, which the app's close cut off`)
     if (isOwn) await openList($)
     await sync($).catch(() => undefined)
 

@@ -188,6 +188,8 @@ const readOthers = async ($: EngineInterface) => {
   const isOffChanged = await lookAfar($, now).catch(() => false)
   // A chat both fetched and handed over, as when two Macs each name the other, is listed once, as fetched
   for (const one of pushed) if (!here.has(one.chat)) (here.add(one.chat), found.push(one))
+  // Chats of this Mac whose process ended with tasks at work, as when the app quit: those tasks, cut off, as their ledgers kept them
+  for (const one of await ledgerOthers($, id, open, now).catch(err => (void log($, `other chats' ledgers not read: ${String(err)}`), [] as Shared[]))) if (!here.has(one.chat)) (here.add(one.chat), found.push(one))
   // Work gone from a chat still open, with no word of its end: finished, for its pause. A chat with nothing left going on is not
   // among those found, so it is listed again for that pause from what was last read of it
   const chatKey = (s: { host: string; chat: string }) => `${s.host}/${s.chat}`
