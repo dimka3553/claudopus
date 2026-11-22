@@ -195,7 +195,7 @@ export type Prompt = {
 // Reports have panes of their own and are no part of this view
 // The card open on its own, what is unfolded in it, and whether the list of work that has ended is unfolded
 // `picking` names the running work whose model choice is open on its card
-export type View = { openId: string; open?: number[]; isFinishedOpen?: boolean; picking?: string }
+export type View = { openId: string; open?: number[]; isFinishedOpen?: boolean; finishedShown?: number; picking?: string }
 
 // A report a finished piece of work left, kept for good in ~/.claude/claudopus/reports/<id>/: its text as written in report.md,
 // this in meta.json, and copies of the pictures it named. A report is a dated snapshot, never rewritten: a later look at the same
