@@ -490,6 +490,8 @@ test("a Details tab too big for the app is drawn with less in it, its ended comm
   await share(Array.from({ length: 2500 }, (_, n) => ({ text: `Check finding ${n}`, state: 'open' })))()
   await clock.advance(6000)
   expect(await until(async () => (await tab.find({ type: 'Text', text: "Claudopus couldn't show this tab" })) ?? undefined)).toBeDefined()
+  // (the log says by how much, each count beside its limit, and how wide the pane was)
+  expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/tab work-\S+ not given: its drawing is past what the app draws \(\d+ of 1800 parts, \d+ of 230000 characters, \d+ of 30 deep, 74 columns wide\)/)?.[0])).toBeDefined()
   expect(appDraws(await tab.drawn()).isDrawn).toBe(true)
   const before = opened.length
   await pressed(tab, 'too-big-back')
