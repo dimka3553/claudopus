@@ -1028,8 +1028,11 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
   for (const pane of [desk, details]) await pane.unmount()
 })
 
-test('every ask also shows in the chat as the mod\'s notice, never as the person\'s message, with its answers and pictures; an answer typed there reaches the work and the card stops asking', async ($, on) => {
-  const { appended, submitted, logged, files, clock } = world(on)
+test('every ask also shows in the chat as the mod\'s notice, never as the person\'s message, with its answers and pictures; an answer typed there reaches the work and the card stops asking; a question with buttons and no picture is drawn as one, opened once, unless Config turns it off', async ($, on) => {
+  // (sips turns a drawn question into a PNG where it is asked to)
+  const made: string[] = []
+  const svgs: string[] = []
+  const { appended, submitted, logged, files, clock, shown } = world(on, { sips: argv => (argv[1] === '-s' && argv[3] === 'png' && String(argv[4]).endsWith('.svg') ? (made.push(String(argv.at(-1))), svgs.push(files.get(String(argv[4])) ?? ''), files.set(String(argv.at(-1)), 'png'), '') : undefined) })
   files.set('/w/shots/a.png', 'png')
   files.set('/w/shots/b.png', 'png')
   await $.session.start(start)
@@ -1068,16 +1071,37 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   // A press on the card no longer counts for that ask
   expect((await list.findAll({ type: 'Button' })).find(b => b.props.label === 'B')).toBeUndefined()
 
+  // A question with buttons and no picture of its own: Claudopus draws it, the question and each button, as one picture, opens it on
+  // the person's screen, and keeps it with the question, so the card and the chat show it (24 Nov). The given pictures above were
+  // the question's own: none was drawn for it
+  expect(made).toEqual([])
+  const pushed = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'May I push it?', details: 'What goes out: the bluer logo.\n- Push: it goes to main now\n- Wait: it stays on its branch', choices: ['Push', 'Wait'] } as never)
+  expect(made).toHaveLength(1)
+  expect(made[0]).toMatch(new RegExp(`^${MEMORY}/questions/a1-\\d+\\.png$`))
+  const drawn = svgs[0] ?? ''
+  for (const words of ['May I push it?', 'What goes out: the bluer logo.', 'Push', 'It goes to main now', 'Wait', 'It stays on its branch', 'Question · Redraw the logo']) expect(drawn).toContain(`>${words}<`)
+  expect(drawn).not.toContain('- Push:')
+  expect(shown.filter(argv => argv.includes(made[0] ?? ''))).toHaveLength(1)
+  expect(String(pushed.result)).toContain('Claudopus drew your question and its buttons as one picture')
   // An ask answered on the card, or withdrawn by the work, is told to the chat's model alone: the card shows it
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'May I push it?', choices: ['Push'] } as never)
   await clock.advance(10)
   expect(await until(async () => appended.some(line => line.includes('Claude asked the person') && line.includes('May I push it?')) || undefined)).toBe(true)
+  expect(appended.find(line => line.includes('Claude asked the person') && line.includes('May I push it?'))).toContain(`pictures: ${made[0]}`)
+  // Asked again the same, it keeps its one picture: none is drawn or opened again
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3b', agentId: 'a1', text: 'May I push it?', details: 'What goes out: the bluer logo.', choices: ['Push', 'Wait'] } as never)
+  expect(made).toHaveLength(1)
+  expect(shown.filter(argv => argv.includes(made[0] ?? ''))).toHaveLength(1)
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Push')?.key ?? '' })
   expect(await until(async () => appended.find(line => line.startsWith('undefined: ✓ The person answered "Redraw the logo" on its card: “Push”')))).toBeDefined()
   expect(logged.some(line => line.startsWith('✓'))).toBe(false)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a1', text: 'Sign in to Vercel.' } as never)
   await clock.advance(10)
   expect(await until(async () => appended.some(line => line.includes('Claude asked the person') && line.includes('Sign in to Vercel.')) || undefined)).toBe(true)
+  // A question with no buttons has no picture, nor does any once Config's Pictures of questions is off
+  expect(made).toHaveLength(1)
+  ownSet(files, 'config.json', JSON.stringify({ askPictures: false }))
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4b', agentId: 'a1', text: 'Keep the old logo too?', choices: ['Keep it', 'Delete it'] } as never)
+  expect(made).toHaveLength(1)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k5', agentId: 'a1', text: '' } as never)
   expect(appended.some(line => line === 'undefined: Claude took back its question in "Redraw the logo". You don\'t need to answer it.')).toBe(true)
   expect(logged.some(line => line.startsWith('Claude took back its question'))).toBe(false)
@@ -2286,7 +2310,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   // Under the box, while the task works: Attach, Stop and send, and Send (19 Nov, the person: "either send and interrupt, or just
   // send for the next turn. Have the ability to attach pictures, videos, files, whatever")
   const footOf = async (site: Site, from: string) => (await site.findAll({ type: 'Button' })).filter(b => String(b.key ?? '').startsWith(from)).map(b => String(b.props.label))
-  expect(await footOf(top, 'band-box-')).toEqual(['Attach', 'Paste', 'Stop and send', 'Send', 'Close'])
+  expect(await footOf(top, 'band-box-')).toEqual(['Attach', 'Paste', 'Stop', 'Stop and send', 'Send', 'Close'])
   await top.input({ key: atWork?.key ?? '', text: 'Keep the tuft' })
   expect(await until(async () => appended.find(line => line.startsWith('a3: ') && line.includes('wrote to you from your card, in their own words: Keep the tuft\n')))).toBeDefined()
   expect(submitted).toHaveLength(wasSubmitted)
@@ -2299,7 +2323,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   expect((await viewBox())?.props.rows).toBe(4)
   const heads = (await view3.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
   expect(heads.lastIndexOf('Message')).toBeGreaterThan(heads.indexOf('Conversation'))
-  expect(await footOf(view3, 'details-a3-')).toEqual(['Attach', 'Paste', 'Stop and send', 'Send'])
+  expect(await footOf(view3, 'details-a3-')).toEqual(['Attach', 'Paste', 'Stop', 'Stop and send', 'Send'])
   // What was sent is listed above the box, numbered, with whether the task has read it and what it waits behind; the small card says
   // it too for as long as it is not read, and Details does not say it again at its top (20 Nov: the person could not tell whether a
   // message had arrived, nor in what order the task would read them, and sent it again)
@@ -2372,6 +2396,19 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   expect(await until(async () => ((await footOf(view3, 'details-a3-')).join() === 'Attach,Paste,Send' ? true : undefined))).toBe(true)
   await view3.input({ key: (await viewBox())?.key ?? '', text: 'One more ear' })
   expect(await until(async () => changes().find(line => line.includes('in their own words: One more ear\n')))).toBeDefined()
+  // At work again, a plain Stop beside Stop and send stops it as the chat's own Stop does, with no message: its card is stopped by
+  // the person, and the box stays, so words sent from it carry it on from where it stopped (24 Nov, the person: "Sending another
+  // message is not a replacement for stopping")
+  expect(await until(async () => ((await footOf(view3, 'details-a3-')).join() === 'Attach,Paste,Stop,Stop and send,Send' ? true : undefined))).toBe(true)
+  const stopsBefore = stopped.length
+  await view3.press({ key: (await view3.findAll({ type: 'Button' })).find(b => /^details-a3-stop-/.test(String(b.key ?? '')))?.key ?? '' })
+  expect(await until(async () => (stopped.length > stopsBefore ? stopped.at(-1) : undefined))).toBe('a3')
+  expect(await until(async () => ((await view3.findAll({ type: 'Button' })).some(b => b.props.label === 'Start again') ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await footOf(view3, 'details-a3-')).join() === 'Attach,Paste,Send' ? true : undefined))).toBe(true)
+  const resumedBefore = resumed.length
+  await view3.input({ key: (await viewBox())?.key ?? '', text: 'Now the tail' })
+  expect(await until(async () => resumed.slice(resumedBefore).find(line => line.startsWith('a3: ') && line.includes('stopped you, then wrote to you from your card, in their own words: Now the tail\n')))).toBeDefined()
+  expect(await until(async () => (await list.find({ type: 'Button', key: 'stop-a3' })) ?? undefined)).toBeDefined()
   await view3.unmount()
   expect(filled).toEqual([])
   await Promise.all([list.unmount(), details.unmount(), top.unmount()])

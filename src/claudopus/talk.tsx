@@ -18,6 +18,8 @@ type Line = {
   readAt?: number
   pictures?: string[]
   seen?: string[]
+  // The whole of what the task wrote, where `text` is cut to what one drawing holds: what its Copy puts on the clipboard
+  full?: string
 }
 // A picture a step can make, by its name
 const IMAGE = /\.(png|jpe?g|gif|webp|svg)$/i
@@ -53,7 +55,7 @@ const stepOf = (use: ToolUseSummary): Line => {
   const input = use.input ?? {}
   const given = (key: string) => (typeof input[key] === 'string' ? String(input[key]) : '')
   if (isTool(use.tool, 'note')) return { kind: 'said', text: given('text'), isUse: true }
-  if (use.tool === 'SubagentHandback' || isTool(use.tool, 'report')) return { kind: 'said', text: whole(given('message')), isUse: true }
+  if (use.tool === 'SubagentHandback' || isTool(use.tool, 'report')) return { kind: 'said', text: whole(given('message')), full: given('message'), isUse: true }
   if (use.tool === 'Agent') return { kind: 'step', text: `Started a helper: ${given('description') || 'unnamed'}`, isError: use.isError, isUse: true, tool: use.tool, name: given('description') }
   const file = given('file_path') || given('notebook_path')
   const text =
@@ -92,12 +94,11 @@ const listed = (steps: Line[]) =>
 // A message as the chat draws it: whole, unless it is too long for one drawing
 const whole = (text: string) => (text.length > SAID_CHARS ? `${text.slice(0, SAID_CHARS)}\n\n…` : text)
 // What the app adds around a message for the model alone is no part of the chat
-const bare = (text: string) =>
-  whole(
-    (text.replace(/<system-reminder[^>]*>[\s\S]*?<\/system-reminder[^>]*>/g, '').split(workHead())[0] ?? '')
-      .replace(PANEL_RULE, '')
-      .trim(),
-  )
+const unwrapped = (text: string) =>
+  (text.replace(/<system-reminder[^>]*>[\s\S]*?<\/system-reminder[^>]*>/g, '').split(workHead())[0] ?? '')
+    .replace(PANEL_RULE, '')
+    .trim()
+const bare = (text: string) => whole(unwrapped(text))
 // The chat of a piece of work as lines. The rows the engine gives hold each message's text and its tool calls, and no thinking
 const talkOf = (rows: readonly SessionMessage[]): Line[] =>
   rows.flatMap((row): Line[] => {
@@ -105,7 +106,7 @@ const talkOf = (rows: readonly SessionMessage[]): Line[] =>
     const moved = row.role === 'user' ? MODEL_LINE.exec(text) : null
     if (moved) return [{ kind: 'model', text: `${MODEL_HEAD}${moved[1]} · ${moved[2]}` }]
     if (row.role === 'user') return text ? [{ kind: 'told', text }] : []
-    return [...(text ? [{ kind: 'said' as const, text }] : []), ...row.toolUses.map(stepOf)]
+    return [...(text ? [{ kind: 'said' as const, text, ...(text.length < unwrapped(row.text).length ? { full: unwrapped(row.text) } : {}) }] : []), ...row.toolUses.map(stepOf)]
   })
 // A run of tool steps in a few words, as the app's own chat folds one: "Ran 3 commands, read 2 files"
 const folded = (steps: Line[]) => {
@@ -324,6 +325,14 @@ const liveSign = (ids: string[], at: number) =>
 // The Details tabs drawn lately, by pane, with the task each shows: what calmLook watches for its live part
 const paneWork = new Map<string, string>()
 
+// Two drawings that show the same, press for press: each part, its words and its keys (a press's own handler is no part of it)
+const isSameDrawing = (a: unknown, b: unknown) => {
+  try {
+    return a === b || JSON.stringify(a) === JSON.stringify(b)
+  } catch {
+    return false
+  }
+}
 // A piece of work's Details is a tab of its own, named after the work, beside the list, as a result is: closing it leaves the
 // list as it was. A press on Details for work whose tab is open brings that tab to the front
 const WORK_PANE = 'work-'

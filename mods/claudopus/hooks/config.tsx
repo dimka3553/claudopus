@@ -29,7 +29,9 @@ export const MODEL_NAMES: Record<string, string> = { opus: 'Opus 5.5', sonnet: '
 // otherwise; `skipVersion` a version the person skipped, kept quiet with every older one. None of them installs anything: Download
 // and Install are presses in the panel, and nothing here can make them run by themselves
 // `adminPassword` is read no more: no admin password is kept
-export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; updateEvery?: number; skipVersion?: string; models?: Partial<Models>; lean?: Partial<Lean>; heavy?: string; admin?: string; adminSealed?: string; adminPassword?: string }
+// `askPictures`: false leaves a task's question with buttons as text alone; on as shipped, Claudopus draws it as one picture, opens it
+// on the screen and shows it with the question
+export type Config = { name?: string; agents?: boolean; askPictures?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; updateEvery?: number; skipVersion?: string; models?: Partial<Models>; lean?: Partial<Lean>; heavy?: string; admin?: string; adminSealed?: string; adminPassword?: string }
 
 // When Fable runs and when a second agent checks, each a choice in Config's Tasks band, the shipped one first. `lean` in config.json
 // holds only the ones changed; a key of a choice that was taken out (small, quick, start, checker, readers) is read as nothing. A job
@@ -264,7 +266,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
     </Box>
   )
   // On and Off side by side, the one in force filled; on as shipped, so Off is written as false and On takes the key out
-  const onOff = (key: 'agents') => {
+  const onOff = (key: 'agents' | 'askPictures') => {
     const isOn = config[key] !== false
     const setTo = (value: boolean) => (value ? undefined : false)
     return (
@@ -364,6 +366,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
             alerts.value !== ALERTS[0].value,
             () => acts.alerts(ALERTS[0].value),
           )}
+          {item('config-ask-pictures', 'Pictures of questions', "When a task asks you something with buttons, Claudopus draws the question and each button in one picture, opens it on your screen, and shows it with the question on the card and in the chat.", onOff('askPictures'), config.askPictures !== undefined, () => acts.set('askPictures', undefined))}
         </Box>,
       )}
       {band(

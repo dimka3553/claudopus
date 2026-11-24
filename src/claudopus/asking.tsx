@@ -539,7 +539,8 @@ const sendFromBar = ($: EngineInterface, id: string, value: string) => {
 // goes to that task as the person's own words, which carries it on from the submit's or the press's own hook (answersOnWay,
 // toEnded), never from a timer, and the chat is only told, with no turn of its own
 // (a finished one with to-dos left open too: the person may write to any task that works or has finished, 19 Nov)
-const canChange = (one: Todo) => !one.chat && !one.parentId && (one.status === 'working' || one.status === 'done' || one.status === 'failed') && !isHeld(one) && !needsPerson(one)
+// (and one the person stopped: their message carries it on from where it stopped, as the chat's own box does after its Stop, 24 Nov)
+const canChange = (one: Todo) => !one.chat && !one.parentId && (one.status === 'working' || one.status === 'done' || one.status === 'failed' || (one.status === 'stopped' && Boolean(one.byYou))) && !needsPerson(one)
 // A message goes the one way from both places the person writes to a task: the box above the chat that Message opens, and the box
 // at the bottom of the task's Details. Send hands it to the task, which reads it at its next step: Claude Code queues a message to a
 // task at work until its next tool round, and starts a paused or finished one with it at once. Stop and send, while it works, stops
@@ -712,8 +713,8 @@ const attachButtons = ($: EngineInterface, ui: Ui, id: string, key: string) =>
     : null
 const PASTE = 'Paste'
 // The row under a message box, the same in the box above the chat and at the bottom of Details: the files picked, each taken off
-// with a press on its name; Attach; then, while the task is in the middle of a step, Send now, and Send, the big one; `close`,
-// the box above the chat's own Close
+// with a press on its name; Attach; then, while the task is in the middle of a step, Stop (it stops, as the chat's own Stop does, and
+// the box stays for words that carry it on), Stop and send, and Send, the big one; `close`, the box above the chat's own Close
 const SEND_NOW = 'Stop and send'
 const messageFoot = ($: EngineInterface, ui: Ui, one: Todo, key: string, close: JSX.Element | null = null) => {
   const typed = () => drafts.get(messageDraft(one.id)) ?? ''
@@ -725,6 +726,7 @@ const messageFoot = ($: EngineInterface, ui: Ui, one: Todo, key: string, close: 
         {attachButtons($, ui, one.id, key)}
         {/* The sends keep together at the right, on the next line when the pane is narrow */}
         <ui.Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} justifyContent="flex-end">
+          {isMidStep ? <ui.Button key={`${key}-stop-${presses}-${boxPresses}`} label="Stop" onPress={() => void ((presses += 1), stop($, one.id).catch(err => log($, `task ${one.id} not stopped: ${String(err)}`)))} /> : null}
           {isMidStep ? <ui.Button key={`${key}-now-${presses}-${boxPresses}`} label={SEND_NOW} onPress={() => sendMessageFrom($, one.id, typed(), true)} /> : null}
           <ui.Button key={`${key}-send-${presses}-${boxPresses}`} label="Send" variant="primary" onPress={() => sendMessageFrom($, one.id, typed(), false)} />
           {close}
@@ -874,7 +876,10 @@ const filesNote = (files: string[]) =>
     : ''
 const changeTask = async ($: EngineInterface, id: string, said: string, picked: string[] = [], isNow = false) => {
   const card = (await read($, todos)).find(one => one.id === id)
-  if (!card || (!said && !picked.length) || card.chat || card.parentId || isHeld(card)) return
+  if (!card || (!said && !picked.length) || card.chat || card.parentId) return
+  // A task the person stopped is carried on by their own message to it: the hold their Stop put on it is lifted for it alone
+  const wasHeld = isHeld(card)
+  if (wasHeld) await changeTodos($, list => list.map(one => (one.id === id && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
   const at = await $.clock.now()
   const files = [...new Set([...picked, ...(await pathsIn($, said))])]
   const shown = [said, ...picked.map(path => `📎 ${path.split('/').pop() ?? path}`)].filter(Boolean).join('\n')
@@ -889,7 +894,7 @@ const changeTask = async ($: EngineInterface, id: string, said: string, picked: 
     await toEnded($, card, id, MESSAGE_NOW(words, earlier), { text: shown, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true })
     return void (await tellChat($, named(CHANGE_TOLD(titleOf(card), `“${cut(shown, 120)}”`))))
   }
-  const text = card.status === 'working' ? MESSAGE_SENT(words) : CHANGE_ASKED(words)
+  const text = card.status === 'working' ? MESSAGE_SENT(words) : wasHeld ? STOPPED_ASKED(words) : CHANGE_ASKED(words)
   const sent = { text: shown, ask: CHANGE_WHAT, at, line: lineOf(card), isCard: true }
   const told = (await read($, todos)).find(one => one.id === id)?.status === 'working' ? await tell($, id, text) : undefined
   if (told && !told.deny) (writtenIn($, id, id), sentReplies.set(id, { ...sent, to: 'work' }), redraw($))

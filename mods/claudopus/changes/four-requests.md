@@ -1,0 +1,4 @@
+- Each reply in a task's chat, and its result, has a Copy button that copies the whole text. A task's chat no longer draws itself again when nothing in it changed, which cleared what you had selected.
+- A task's chat has a plain Stop beside Stop and send. It stops the task, and the box stays: what you write next carries it on from where it stopped.
+- When a task asks you something with buttons, Claudopus draws the question and each button in one picture, opens it on your screen, and shows it with the question on the card and in the chat. Turn it off in Config under Pictures of questions.
+- When the chat passes on a task's result, it heads it "From the task" with its name, and its own words "From the chat", so you can tell who is talking. Your reply right after a task's part goes to that task unless you name another.
