@@ -2167,11 +2167,6 @@ const panelHooks = (on: On) => {
     const tooBig = drawingFits(drawing) ? undefined : drawing
     while ((paneId === LIST || paneId.startsWith(WORK_PANE)) && !drawingFits(drawing) && squeeze < SQUEEZE_MOST) ((doneDrawn.length = 0), (drawing = await drawFor((squeeze += 1))))
     if (last !== squeeze) (paneSqueezed.set(paneId, squeeze), void log($, `tab ${paneId} drawn with less in it (${squeeze} of ${SQUEEZE_MOST}) to fit what the app draws${tooBig ? ` (whole: ${sizeSaid(tooBig)}, ${e.props.bodyColumns} columns wide)` : ''}`))
-    // A Details tab drawn afresh the same as the drawing on screen gives that one again: the engine keeps its parts and their presses,
-    // so the app need not build the task's replies anew, which clears what the person selected in them (24 Nov, the person: the
-    // replies in a task's chat could not be selected)
-    const onScreen = paneNewest.get(paneLine)
-    if (paneId.startsWith(WORK_PANE) && onScreen?.key === place && isSameDrawing(onScreen.drawing, drawing)) drawing = onScreen.drawing as typeof drawing
     // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
     // ones the engine holds, and this one is made again once the click is over (holdForPress)
     const newestMade = paneNewest.get(paneLine)

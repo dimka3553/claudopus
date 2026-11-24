@@ -2213,13 +2213,6 @@ const liveSign = (ids: string[], at: number) =>
   )
 const paneWork = new Map<string, string>()
 
-const isSameDrawing = (a: unknown, b: unknown) => {
-  try {
-    return a === b || JSON.stringify(a) === JSON.stringify(b)
-  } catch {
-    return false
-  }
-}
 const WORK_PANE = 'work-'
 const workPaneOf = (id: string) => `${WORK_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)
 const titleOf = (one: Todo) => one.title || quoted(one.words, 60) || 'Background task'
@@ -15932,8 +15925,6 @@ const panelHooks = (on: On) => {
     const tooBig = drawingFits(drawing) ? undefined : drawing
     while ((paneId === LIST || paneId.startsWith(WORK_PANE)) && !drawingFits(drawing) && squeeze < SQUEEZE_MOST) ((doneDrawn.length = 0), (drawing = await drawFor((squeeze += 1))))
     if (last !== squeeze) (paneSqueezed.set(paneId, squeeze), void log($, `tab ${paneId} drawn with less in it (${squeeze} of ${SQUEEZE_MOST}) to fit what the app draws${tooBig ? ` (whole: ${sizeSaid(tooBig)}, ${e.props.bodyColumns} columns wide)` : ''}`))
-    const onScreen = paneNewest.get(paneLine)
-    if (paneId.startsWith(WORK_PANE) && onScreen?.key === place && isSameDrawing(onScreen.drawing, drawing)) drawing = onScreen.drawing as typeof drawing
     const newestMade = paneNewest.get(paneLine)
     if (newestMade?.key === place && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), newestMade.drawing as Awaited<ReturnType<typeof next>>)
     if ((shownKept.get(paneLine) ?? 0) > askedNo && newestMade) return newestMade.drawing as Awaited<ReturnType<typeof next>>

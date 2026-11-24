@@ -325,14 +325,6 @@ const liveSign = (ids: string[], at: number) =>
 // The Details tabs drawn lately, by pane, with the task each shows: what calmLook watches for its live part
 const paneWork = new Map<string, string>()
 
-// Two drawings that show the same, press for press: each part, its words and its keys (a press's own handler is no part of it)
-const isSameDrawing = (a: unknown, b: unknown) => {
-  try {
-    return a === b || JSON.stringify(a) === JSON.stringify(b)
-  } catch {
-    return false
-  }
-}
 // A piece of work's Details is a tab of its own, named after the work, beside the list, as a result is: closing it leaves the
 // list as it was. A press on Details for work whose tab is open brings that tab to the front
 const WORK_PANE = 'work-'
