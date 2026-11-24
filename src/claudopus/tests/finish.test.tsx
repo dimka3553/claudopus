@@ -530,12 +530,13 @@ test('the same words as a card answer still go when they answer a newer question
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Also merge it?', choices: ['Yes', 'No'] } as never)
   const sent = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Yes' } as never)
   expect((sent as { deny?: unknown }).deny).toBeUndefined()
-  // An answer typed in the chat and passed on, then passed on again in the same words: only a card's answer is refused as a repeat
+  // An answer typed in the chat in words of their own and passed on, then passed on again in the same words: only a card's answer
+  // is refused as a repeat (a bare "Yes" typed there is the card's answer itself: typed.tsx)
   await clock.advance(5_000)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'Tag it?', choices: ['Yes', 'No'] } as never)
-  await $.prompt.submit({ text: 'Yes', wait: false, origin: composer })
-  const first = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a1', message: 'Yes' } as never)
-  const second = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's3', to: 'a1', message: 'Yes' } as never)
+  await $.prompt.submit({ text: 'Yes, and name it v2', wait: false, origin: composer })
+  const first = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a1', message: 'Yes, and name it v2' } as never)
+  const second = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's3', to: 'a1', message: 'Yes, and name it v2' } as never)
   expect((first as { deny?: unknown }).deny).toBeUndefined()
   expect((second as { deny?: unknown }).deny).toBeUndefined()
   await list.unmount()
