@@ -512,7 +512,7 @@ const askPicturesOf = ($: EngineInterface, one: Todo): Pic[] | undefined => {
   return undefined
 }
 
-// ---- A picture of each question with buttons (Config's Pictures of questions, on as it comes) ----
+// ---- A picture of each question with buttons (Config's Pictures of questions, off as it comes) ----
 
 // A task's question with buttons is drawn by Claudopus as one picture: the question, what it is about, and each button as a box of
 // its own with what the task said of it. It is made once, as the question comes, opened on the person's screen, and kept with the
@@ -597,8 +597,8 @@ const questionSvg = (title: string, text: string, details: string, choices: stri
 }
 // Where the pictures of questions are kept: the person's own memory folder
 const questionsDir = () => `${dir}/questions`
-// Whether the person wants them: Config's Pictures of questions, on as it comes
-const wantsQuestionPictures = async ($: EngineInterface) => Boolean(dir) && (await readConfig($, dir)).askPictures !== false
+// Whether the person wants them: Config's Pictures of questions, off as it comes (25 Nov, the person: "off by default")
+const wantsQuestionPictures = async ($: EngineInterface) => Boolean(dir) && (await readConfig($, dir)).askPictures === true
 // Makes the picture of one question, as a PNG; nothing when it can't be made, and the question goes as text alone
 const questionPicture = async ($: EngineInterface, id: string, title: string, text: string, details: string, choices: string[], at: number) => {
   if (!dir || !choices.length) return ''

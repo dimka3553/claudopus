@@ -1910,7 +1910,7 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
   for (const pane of [desk, details]) await pane.unmount()
 })
 
-test('every ask also shows in the chat as the mod\'s notice, never as the person\'s message, with its answers and pictures; an answer typed there reaches the work and the card stops asking; a question with buttons and no picture is drawn as one, opened once, unless Config turns it off', async ($, on) => {
+test('every ask also shows in the chat as the mod\'s notice, never as the person\'s message, with its answers and pictures; an answer typed there reaches the work and the card stops asking; a question with buttons and no picture is drawn as one, opened once, once Config turns it on', async ($, on) => {
   // (sips turns a drawn question into a PNG where it is asked to)
   const made: string[] = []
   const svgs: string[] = []
@@ -1957,6 +1957,10 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   // the person's screen, and keeps it with the question, so the card and the chat show it (24 Nov). The given pictures above were
   // the question's own: none was drawn for it
   expect(made).toEqual([])
+  // (off as it comes: on once the person turns it on in Config)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2b', agentId: 'a1', text: 'May I push it now?', choices: ['Push', 'Wait'] } as never)
+  expect(made).toEqual([])
+  ownSet(files, 'config.json', JSON.stringify({ askPictures: true }))
   const pushed = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'May I push it?', details: 'What goes out: the bluer logo.\n- Push: it goes to main now\n- Wait: it stays on its branch', choices: ['Push', 'Wait'] } as never)
   expect(made).toHaveLength(1)
   expect(made[0]).toMatch(new RegExp(`^${MEMORY}/questions/a1-\\d+\\.png$`))
@@ -1979,9 +1983,9 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a1', text: 'Sign in to Vercel.' } as never)
   await clock.advance(10)
   expect(await until(async () => appended.some(line => line.includes('Claude asked the person') && line.includes('Sign in to Vercel.')) || undefined)).toBe(true)
-  // A question with no buttons has no picture, nor does any once Config's Pictures of questions is off
+  // A question with no buttons has no picture, nor does any once Config's Pictures of questions is off again
   expect(made).toHaveLength(1)
-  ownSet(files, 'config.json', JSON.stringify({ askPictures: false }))
+  ownSet(files, 'config.json', JSON.stringify({}))
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4b', agentId: 'a1', text: 'Keep the old logo too?', choices: ['Keep it', 'Delete it'] } as never)
   expect(made).toHaveLength(1)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k5', agentId: 'a1', text: '' } as never)

@@ -4607,7 +4607,7 @@ const questionSvg = (title: string, text: string, details: string, choices: stri
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${QUESTION_W}" height="${height}" viewBox="0 0 ${QUESTION_W} ${height}"><rect width="${QUESTION_W}" height="${height}" fill="#262624"/>${parts.join('')}</svg>`
 }
 const questionsDir = () => `${dir}/questions`
-const wantsQuestionPictures = async ($: EngineInterface) => Boolean(dir) && (await readConfig($, dir)).askPictures !== false
+const wantsQuestionPictures = async ($: EngineInterface) => Boolean(dir) && (await readConfig($, dir)).askPictures === true
 const questionPicture = async ($: EngineInterface, id: string, title: string, text: string, details: string, choices: string[], at: number) => {
   if (!dir || !choices.length) return ''
   const base = `${questionsDir()}/${id.replace(/[^A-Za-z0-9_-]/g, '-')}-${at}`

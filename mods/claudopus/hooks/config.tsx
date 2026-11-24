@@ -29,8 +29,8 @@ export const MODEL_NAMES: Record<string, string> = { opus: 'Opus 5.5', sonnet: '
 // otherwise; `skipVersion` a version the person skipped, kept quiet with every older one. None of them installs anything: Download
 // and Install are presses in the panel, and nothing here can make them run by themselves
 // `adminPassword` is read no more: no admin password is kept
-// `askPictures`: false leaves a task's question with buttons as text alone; on as shipped, Claudopus draws it as one picture, opens it
-// on the screen and shows it with the question
+// `askPictures`: true has Claudopus draw a task's question with buttons as one picture, open it on the screen and show it with the
+// question; off as shipped
 export type Config = { name?: string; agents?: boolean; askPictures?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; updateEvery?: number; skipVersion?: string; models?: Partial<Models>; lean?: Partial<Lean>; heavy?: string; admin?: string; adminSealed?: string; adminPassword?: string }
 
 // When Fable runs and when a second agent checks, each a choice in Config's Tasks band, the shipped one first. `lean` in config.json
@@ -265,10 +265,12 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
       {below}
     </Box>
   )
-  // On and Off side by side, the one in force filled; on as shipped, so Off is written as false and On takes the key out
+  // On and Off side by side, the one in force filled. `agents` is on as shipped, so Off is written as false and On takes the key out;
+  // `askPictures` is off as shipped, so On is written as true and Off takes the key out
   const onOff = (key: 'agents' | 'askPictures') => {
-    const isOn = config[key] !== false
-    const setTo = (value: boolean) => (value ? undefined : false)
+    const isShippedOn = key === 'agents'
+    const isOn = isShippedOn ? config[key] !== false : config[key] === true
+    const setTo = (value: boolean) => (value === isShippedOn ? undefined : value)
     return (
       // The terminal has no fill to mark the one in force: there it is a filled dot before it, an empty one before the other
       'isTerminal' in ui ? (
