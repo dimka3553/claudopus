@@ -510,6 +510,11 @@ const chatHooks = (on: On) => {
       await changeTodos($, list => list.map(one => (isHeld(one) && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
       if (stillHeld.length) context.push(named(STOPPED_EARLIER(stillHeld.map(one => `"${titleOf(one)}" (${one.id})`))))
     }
+    // A short answer typed by the person themselves, such as "allow" or "release it", is their press on the block it fits (typed.tsx)
+    if (!isOff && !isPressed) {
+      const typed = await typedAnswer($, e.text).catch(err => (void log($, `typed answer not taken: ${String(err)}`), undefined))
+      if (typed) context.push(typed)
+    }
     if (!isOff) {
       const board = await cardsNow($).catch(err => (void log($, `cards not told to the chat: ${String(err)}`), ''))
       if (board) context.push(named(board))

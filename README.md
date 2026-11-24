@@ -81,7 +81,7 @@ Claudopus never updates by itself. Every hour (or as often as Config says), it c
 ### When a task needs you
 
 - Everything that waits for you is at the top of the panel, newest first, from every chat: questions from Claude, admin commands, releases, password and key boxes, and Claude Code's own permission prompts. The card turns amber and shows what it's about right under the question.
-- Answer with the buttons on the card. In the desktop app, **Reply in your own words** opens a reply box in the bar just above the chat's prompt, named after the task it goes to. **Close** takes the box away and saves what you typed. In a terminal, the answers to the first question are numbered above the prompt: press a number twice in the empty prompt. You answer another chat's question in that chat. Other panels show it without buttons.
+- Answer with the buttons on the card, or type the answer in the chat: **allow**, **yes**, **release it** or a button's own words count as that press on the newest card waiting, and naming the task (**allow the nose fix**) picks its card. A command Claude Code blocked runs only on your press on its card. In the desktop app, **Reply in your own words** opens a reply box in the bar just above the chat's prompt, named after the task it goes to. **Close** takes the box away and saves what you typed. In a terminal, the answers to the first question are numbered above the prompt: press a number twice in the empty prompt. You answer another chat's question in that chat. Other panels show it without buttons.
 - You also get a notification with a short sound, and you can answer in your own words in the chat too.
 - Claude gets your reply right away, even while it's running something long. If it has to wait for a short command to finish, the card says which. A question never times out: it stays until you answer.
 - After you answer, the card stays where it was for a minute and shows what you answered.
@@ -131,7 +131,7 @@ The panel's header has these buttons (Results once there is a result):
 
 ### One release at a time
 
-Claudopus tells Claude to change a repo only in the task's own worktree and branch. A task reaches main only through one release command. The command waits its turn, numbers the version, builds, checks and pushes, and only after you press **Release it** on the task's question, or **Allow** on its card. Claudopus refuses a task's own push to main.
+Claudopus tells Claude to change a repo only in the task's own worktree and branch. A task reaches main only through one release command. The command waits its turn, numbers the version, builds, checks and pushes, and only after you press **Release it** on the task's question, or **Allow** on its card, or type either in the chat. Claudopus refuses a task's own push to main.
 
 Every detail is in the [full guide](mods/claudopus/docs/guide.md#what-you-see).
 

@@ -187,10 +187,9 @@ test('no way to the runner gets past the press: another spelling, a shell, a hel
     expect(await until(async () => list.find({ type: 'Text', text: REFUSED_LINE }))).toBeDefined()
     expect(await list.find({ type: 'Text', text: ALLOWED_LINE })).toBeUndefined()
   }
-  // Words typed in the chat and passed on by the chat allow nothing: only the press does
+  // The chat's own words to the task allow nothing: only the person's press, or their own typed answer, does
   const waiting = bash('w1', `${ADMIN} here 'id -u'`)
   expect(await held('w1')).toBeDefined()
-  await $.prompt.submit({ text: 'Allow', wait: false, origin: composer })
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm1', to: 'a1', message: 'Allow' } as never)
   expect(await keyed(list, 'gate-w1-0-once')).toBeDefined()
   expect(admins.length).toBe(0)
@@ -905,4 +904,70 @@ test('a gate allowed but not let through says so in its grey line, never a bare 
     expect((await gateTexts(w.list)).filter(one => one.startsWith('✓ '))).toEqual([said])
     expect(await gateGreens(w.list)).toBe(0)
   }
+})
+
+test("a short answer the person types in the chat is their press on the newest block it fits, or on the task it names: \"allow\" lets a held admin command run, \"release it\" is Release it on a go-ahead; a task's message, Claudopus's own, a long message and words that name no waiting task answer nothing; a command Claude Code blocked still runs only on the press, which its card and the chat say (24 Nov: \"it counts if I type allow\")", async ($, on) => {
+  const { list, bash, held, files, logged, clock } = await gated($, on)
+  const say = async (text: string, origin: unknown = composer) => ((await $.prompt.submit({ text, wait: false, origin } as never)) as { context?: string[] }).context?.join('\n') ?? ''
+  const typedLog = () => (files.get(`${MEMORY}/log.md`) ?? '').split('\n').filter(line => line.includes('typed answer'))
+  // An admin command waits on the task's card
+  let done = false
+  const first = bash('t1', `${ADMIN} here 'chmod 644 /etc/hosts'`).then(r => ((done = true), r))
+  expect(await held('t1')).toBeDefined()
+  // A task's message to the chat and Claudopus's own say "allow" too, and a long message holds it: none is an answer
+  await say('allow', { kind: 'peer' })
+  await say('allow', { kind: 'plugin' })
+  expect(await say('allow me to explain why the hosts file matters before we change anything in it at all')).not.toContain('is their answer')
+  expect(await say('allow the billing page')).not.toContain('is their answer')
+  expect([done, typedLog()]).toEqual([false, []])
+  expect(await keyed(list, 'gate-t1-0-once')).toBeDefined()
+  // Typed by the person, it is their Allow: the command runs, the card says it was typed, the chat's model is told which card it answered
+  const told = await say('Allow')
+  expect(told).toContain('From Claudopus: Sam\'s message "Allow" is their answer "Allow" to the task "Fix the hosts file"\'s question: Run this as admin on this Mac?')
+  expect((await first).result).toBe('ran')
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You typed “Allow” in the chat' }))).toBeDefined()
+  expect(logged).toEqual([])
+
+  // Two tasks wait: a bare yes answers the newest, a name answers that task's
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fix the nose', prompt: 'fix the nose' } as never)
+  const older = bash('t2', `${ADMIN} here 'id -u'`)
+  expect(await held('t2')).toBeDefined()
+  await clock.advance(1000)
+  const newer = bash('t3', `${ADMIN} here 'whoami'`, 'a2')
+  expect(await held('t3')).toBeDefined()
+  expect(await say('yes')).toContain('to the task "Fix the nose"\'s question')
+  expect((await newer).result).toBe('ran')
+  expect(await keyed(list, 'gate-t2-0-once')).toBeDefined()
+  const third = bash('t4', `${ADMIN} here 'date'`, 'a2')
+  expect(await held('t4')).toBeDefined()
+  // Words that fit both tasks answer neither, and the chat asks which
+  const unsure = await say('allow fix')
+  expect([unsure.includes('answered nothing, as it fits more than one waiting card'), unsure.includes('"Fix the nose"'), unsure.includes('"Fix the hosts file"')]).toEqual([true, true, true])
+  expect([await keyed(list, 'gate-t2-0-once'), await keyed(list, 'gate-t4-0-once')].every(Boolean)).toBe(true)
+  expect(await say('allow the hosts one please')).toContain('to the task "Fix the hosts file"\'s question')
+  expect((await older).result).toBe('ran')
+  expect(await keyed(list, 'gate-t4-0-once')).toBeDefined()
+  await pressed(list, 'gate-t4-0-deny')
+  await third
+
+  // "release it" on a go-ahead asked with its worktree is Release it: that card's release run goes through
+  files.set('/repo/wt/.release', 'mods/claudopus/bin/release')
+  files.set('git:top', '/repo/wt')
+  files.set('git:branch', 'fix-nose')
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release the nose fix?', choices: ['Release it', "Don't release"], release: '/repo/wt' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Release the nose fix?' }))).toBeDefined()
+  expect(await say('release it')).toContain('is their answer "Release it" to the task "Fix the hosts file"\'s question: Release the nose fix?')
+  expect(files.get(`${MEMORY}/log.md`)).toContain('release of fix-nose from /repo/wt allowed once for a1')
+
+  // A command Claude Code blocked is never run by a typed answer: its card says only the press runs it, and so does the chat
+  files.set('auto-refuse', 'Bash')
+  await bash('b1', 'wc -l notes.md', 'a1', { description: 'Count the lines' })
+  expect(await until(async () => list.find({ type: 'Text', text: 'Claude Code blocked this command. Run it anyway?' }))).toBeDefined()
+  expect(await until(async () => (await list.findAll({ type: 'Markdown' })).find(one => String(one.props.text ?? '').includes("Only your press on Allow runs it. Typing allow in the chat doesn't.")))).toBeDefined()
+  const refused = await say('allow')
+  expect(refused).toContain('answered nothing. The newest card waiting, the task "Fix the hosts file", is a command Claude Code blocked (wc -l notes.md)')
+  expect(files.get(`${MEMORY}/log.md`)).not.toContain('refused command for a1 run')
+  expect(await list.find({ type: 'Text', text: 'Claude Code blocked this command. Run it anyway?' })).toBeDefined()
+  await list.unmount()
 })

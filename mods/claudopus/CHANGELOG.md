@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.272 · 24 November 2026
+- Typing "allow", "yes", "release it" or a button's own words in the chat now answers the card that waits for you, as a press on it would: the newest one, or the one whose task you name, such as "allow the nose fix". Only your own typing counts, never a task's message, and a message that fits more than one named card answers nothing. A command Claude Code blocked still runs only on your press on its card, which the card and the chat now say.
+
 ## 0.2.271 · 23 November 2026
 - Each topic now has a short page a task reads first and a history that tasks only add to, so a task no longer reads or resends a whole page of notes. A page that grows past 8,000 characters is moved whole into its history, and a short page is written from it in its place.
 - Topics from tests and scratch folders stay out of the topic list every chat is given.
