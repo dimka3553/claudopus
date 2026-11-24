@@ -265,6 +265,8 @@ const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
 // A blocked call that is no command the person could run leaves nothing to decide, so nothing waits for them: the task was told
 // by Claude Code and carries on without it
 const BLOCKED_ASK = 'Claude Code blocked this command. Run it anyway?'
+// Said on its card: a typed allow in the chat answers other blocks, never this one (typed.tsx)
+const PRESS_ONLY = "Only your press on Allow runs it. Typing allow in the chat doesn't."
 // Claude Code's own refusals, as its result or its deny begins (its texts in 2.1.325), and who refused, for the card
 const CC_REFUSALS: [string, string][] = [
   ['Permission for this action was denied by the Claude Code auto mode classifier', "Claude Code's auto mode blocked it"],
@@ -300,7 +302,7 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   const runnable = runnableOf(tool, call)
   if (!runnable && connectorRuleOf(tool)) return void (await refusedConnector($, agent, top.id, own, tool, call, refusal.reason))
   if (!runnable) return void (await log($, `refusal of ${tool} for ${agent}: nothing the person could run, so nothing is asked`))
-  const details = [runDetails(runnable, refusal.reason), own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : ''].filter(Boolean).join('\n\n')
+  const details = [runDetails(runnable, refusal.reason), own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '', PRESS_ONLY].filter(Boolean).join('\n\n')
   const at = await $.clock.now()
   // A question waiting on the person, there already or put up meanwhile, is never replaced: the refusal is in the task's own result
   let isPut = false

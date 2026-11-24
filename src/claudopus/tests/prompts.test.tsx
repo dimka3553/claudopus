@@ -508,7 +508,7 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   expect(await list.find({ type: 'Text', text: 'Permission' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: command })).toBeDefined()
   expect(await list.find({ type: 'Text', text: /^1 waiting for you/ })).toBeDefined()
-  expect((await details()).filter(one => one.startsWith('Runs once in '))).toEqual([expect.stringMatching(/^Runs once in \S+, for at most 10 min · blocked as “Unauthorized Access”\.$/)])
+  expect((await details()).filter(one => one.startsWith('Runs once in '))).toEqual([expect.stringMatching(/^Runs once in \S+, for at most 10 min · blocked as “Unauthorized Access”\.\n\nOnly your press on Allow runs it\. Typing allow in the chat doesn't\.$/)])
   expect((await details()).filter(one => /If you have other tasks|settings|Do it another way|Leave it out|it was Permission|Why: /.test(one))).toEqual([])
   expect(await buttons()).toEqual(['Allow', "Don't allow"])
   expect((await labelsOf(list)).filter(one => /^(Run it|Carry on without it|Send now|Copy|Open in Terminal|Allow once|Deny)$/.test(one))).toEqual([])
