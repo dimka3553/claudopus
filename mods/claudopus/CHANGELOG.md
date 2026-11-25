@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.276 · 26 November 2026
+- The chat passes on a task's result as it did before 0.2.274, with no "From the task" or "From the chat" headings, and your next message is no longer sent to the task above it by itself.
+
 ## 0.2.275 · 25 November 2026
 - A task that ends its step while a command you allowed runs (such as a release Claude Code blocked) now stays Working, and starts again by itself with what the command printed when it ends, instead of showing Failed.
 - A task stopped by a passing network error (no connection, a timeout, a certificate for the wrong name) now tries again by itself, up to three times, with one grey line on its card, before it shows Failed.

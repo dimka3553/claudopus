@@ -506,11 +506,8 @@ const chatHooks = (on: On) => {
       if (from) await appendWords($, (await read($, me)).id, `## ${new Date().toISOString()} (${from})\n${e.text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
       return next(e)
     }
-    // A reply to the part the chat showed last goes to its task: the chat is told which that is, for this message alone
-    const shown = lastShown
-    lastShown = undefined
     // A report Claudopus took whose notice never came goes with their message, so it is never left unsaid
-    const context = [...(e.context ?? []), ...(shown ? [named(LAST_SHOWN(shown.title, shown.id))] : []), ...(await partsFor($)), ...(await reportsFor($))]
+    const context = [...(e.context ?? []), ...(await partsFor($)), ...(await reportsFor($))]
     // Their message lifts the hold on work they stopped: the chat is reminded it was stopped, and starts it again only if asked
     const stillHeld = (await read($, todos)).filter(one => isHeld(one) && !one.parentId)
     if ((await read($, todos)).some(isHeld)) {

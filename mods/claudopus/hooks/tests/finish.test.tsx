@@ -1673,9 +1673,6 @@ test('a task hands in a finished part of its result while it works on: its card 
   const told = ((await $.prompt.submit({ text: `<agent-message from="a1">\n${notice}\n</agent-message>`, wait: false, origin: { kind: 'peer' }, isMeta: true } as never)) as { context?: string[] }).context?.join('\n') ?? ''
   expect(told).toContain(`is still working, and handed in this part of its result`)
   expect(told).toContain(`  ${part}`)
-  // The chat heads what it passes on with who it is from, and keeps its own words apart under a heading of their own (24 Nov)
-  expect(told).toContain('begin with the line `### From the task “Beards and jawline” · part of its result` alone')
-  expect(told).toContain('after a line `---`, under the line `### From the chat`')
   // Claudopus sends the chat nothing of its own for a part, however long it waits (Claude Code draws such a message as the
   // person's): parts whose task never told the chat go with the next message, all at once
   await $.agent.spawn({ ...spawn, description: 'Ears', prompt: 'look into them' } as never)
@@ -1686,8 +1683,6 @@ test('a task hands in a finished part of its result while it works on: its card 
   const both = ((await $.prompt.submit({ text: 'and the chin and ears?', wait: false, origin: composer } as never)) as { context?: string[] }).context?.join('\n') ?? ''
   expect(both).toContain('  The chin research is done.')
   expect(both).toContain('  The ear research is done.')
-  // The person's message after a part is told to the chat as a reply to that part's task, which it goes to unless it names another
-  expect(both).toContain('the last part in this chat above the person\'s message is the one headed "From the task “Beards and jawline”" (a1)')
   expect(both).not.toContain(part)
   expect(submitted.filter(text => text.includes('handed in a part') && !text.startsWith('<agent-message'))).toEqual([])
   // The card still works, its to-do and helper with it, and the part is never given again, nor is Claudopus's own message sent
@@ -1696,10 +1691,6 @@ test('a task hands in a finished part of its result while it works on: its card 
   expect(texts).toContain('2 working')
   const next = ((await $.prompt.submit({ text: 'how is it going?', wait: false, origin: composer } as never)) as { context?: string[] }).context?.join('\n') ?? ''
   expect(next).not.toContain(part)
-  // (then the last parts shown were of the two tasks given with that message: the newer card's is last)
-  expect(next).toContain('headed "From the task “Ears”" (a3)')
-  // and it is said for that one message alone
-  expect(((await $.prompt.submit({ text: 'thanks', wait: false, origin: composer } as never)) as { context?: string[] }).context?.join('\n') ?? '').not.toContain('the last part in this chat')
   // Its last report ends it, kept beside the parts
   const kept = await until(async () => (reportsOf().length === 3 ? reportsOf().length : undefined))
   agents.a2 = 'completed'
