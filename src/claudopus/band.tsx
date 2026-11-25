@@ -195,6 +195,13 @@ const settleBar = ($: EngineInterface) => {
   // (the panes' own drawings are still good: they are given again as they were)
   void drawFresh($, true)
 }
+// The bar's figures as last made, by bar, and how to make them again with the other run of spacers: a drawing given again as it
+// was would show again a card the pointer had left. Its buttons keep their keys and look, so the engine keeps their numbers
+const barRemakes = new Map<string, { drawing: unknown; remake: () => unknown }>()
+const barAgain = (bar: string, recent: unknown) => {
+  const one = barRemakes.get(bar)
+  return one && one.drawing === recent ? one.remake() : recent
+}
 // When this surface's bar last asked for the cards to be drawn again as its box came or went: at most once a second, so two
 // windows of one chat that differ never ask in turn without end
 let barFlipAt = 0
@@ -217,7 +224,8 @@ const bandHooks = (on: On) => {
     const recent = newestFor(line, key) as Awaited<ReturnType<typeof next>> | undefined
     const isBarHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
     if (recent && !isBarHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
-    if (recent && !isBarHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
+    // Given again, the figures still move past the places they had, so the app shows again no card the pointer left (barAgain)
+    if (recent && !isBarHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return barAgain(line, recent) as typeof recent
     freshBegins(key, at)
     const madeFrom = Date.now()
     let made: { at: number; ms: number; fresh: number } | undefined
@@ -390,7 +398,12 @@ const bandHooks = (on: On) => {
       )
     }
     // Where the app lifts the figures' cards, each drawing moves them past the places they had in the last
-    return drawing(drawn ? usageSpacersDrawn(ui) : null)
+    const bar = `bar|${e.requestId ?? ''}|${e.surface}`
+    const remake = () => drawing(drawn ? usageSpacersDrawn(ui, bar) : null)
+    const made = remake()
+    if (drawn) barRemakes.set(bar, { drawing: made, remake })
+    else barRemakes.delete(bar)
+    return made
     }
   })
 

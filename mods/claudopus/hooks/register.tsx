@@ -23,8 +23,8 @@ import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
 import { LOG_SENT, NAMING_MODEL, NAMING_SYSTEM, namedHead, namingKey, namingOf, namingPrompt } from './naming'
 import type { Naming, NamingAsk } from './naming'
-import { batteryShown, batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
-import type { UsageTop, UsageBattery, UsageFigures, UsageKept } from './usage'
+import { batteryShown, batterySvg, chartSvg, FOOTPRINT_EVERY, HISTORY_SPAN, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
+import type { UsageTop, UsageBattery, UsageFigures, UsageKept, UsagePoint } from './usage'
 import { PACE_EVERY, PACE_LOOK, PACE_SET, paceLookOf, paceOf } from './pace'
 
 
@@ -13456,6 +13456,7 @@ const keepUsage = async ($: EngineInterface, kept: UsageKept) => {
   if (isNew) await update($, figuresAt, () => kept.at)
 }
 const usageNow = (now: number) => (usageKept && now - usageKept.at < USAGE_EVERY * 6 ? usageKept.figures : undefined)
+const usageHistory = () => ({ points: usageKept?.history ?? [], at: usageKept?.at ?? 0 })
 
 const CLAUDE_ALL = 'Claude and what it started'
 const usageWords = (f: UsageFigures) => ({
@@ -13478,21 +13479,46 @@ const batteryNote = (read: UsageBattery, b = batteryShown(read)) =>
       ? b.left ? `charging · about ${leftText(b.left)} to full` : b.pct >= 100 ? (b.finishing ? 'finishing the charge · the system calls it full and still tops it up' : 'charging · the system calls it full') : 'charging · the system is still working out the time to full'
       : b.state === 'unknown' ? "the system doesn't say if it's charging" : b.pct >= 100 ? 'full · on power' : 'on power · not charging'
 
-type UsageCard = { title: string; value: string; note?: string; rows: [string, string][]; most?: [string, string][] }
-const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
+type UsageChart = { source: string; width: number; height: number; alt: string; caption: [string, string] }
+type UsageCard = { title: string; value: string; note?: string; chart?: UsageChart; rows: [string, string][]; most?: [string, string][] }
+const usageCards = (f: UsageFigures, history: { points: UsagePoint[]; at: number } = { points: [], at: 0 }): Record<string, UsageCard | undefined> => {
   const most = (top: UsageTop | undefined, text: (n: number) => string) => (top?.length ? top.map(([name, n]): [string, string] => [name, text(n)]) : undefined)
   const b = f.battery
+  const chart = (title: string, pick: (p: UsagePoint) => [number, number] | undefined, text: (n: number) => string, room?: number): UsageChart | undefined => {
+    const points = history.points.flatMap(p => {
+      const v = pick(p)
+      return v ? [[p.at, v[0], v[1]] as [number, number, number]] : []
+    })
+    const peak = points.filter(p => history.at - p[0] <= HISTORY_SPAN).reduce((most, p) => Math.max(most, p[1]), 0)
+    const svg = chartSvg(points, history.at, room === undefined ? 1 : Math.max(room, peak * 1.15))
+    return svg ? { ...svg, alt: `${title}, last 10 minutes: up to ${text(peak)}`, caption: [title === 'Power use' || title === 'Charge' ? `${title}, last 10 minutes` : 'Last 10 minutes', `up to ${text(peak)}`] } : undefined
+  }
+  const pct = (n: number) => `${pctText(n)}%`
+  const isPowerShown = history.points.some(p => p.watts)
+  const isDraining = !!b && b.state === 'charging' && f.battIn !== undefined && f.battIn < -0.5
+  const charge: [string, string][] = !b || b.state === 'battery' || f.battIn === undefined
+    ? []
+    : f.battIn > 0.5 ? [['Into the battery', `${wattText(f.battIn)} W`]] : f.battIn < -0.5 ? [['Out of the battery', `${wattText(-f.battIn)} W`]] : []
+  const charger: [string, string][] = !b || b.state === 'battery' || f.powerIn === undefined ? [] : [['From the charger', f.adapter ? `${wattText(f.powerIn)} of ${wattText(f.adapter)} W` : `${wattText(f.powerIn)} W`]]
   return {
-    memory: { title: 'Memory', value: `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB`, rows: [[CLAUDE_ALL, `${gbText(f.memClaude)} GB`]], most: most(f.memTop, n => `${gbText(n)} GB`) },
+    memory: {
+      title: 'Memory',
+      value: `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB`,
+      chart: chart('Memory', p => p.mem, n => `${gbText(n * f.memTotal)} GB`),
+      rows: [[CLAUDE_ALL, `${gbText(f.memClaude)} GB`]],
+      most: most(f.memTop, n => `${gbText(n)} GB`),
+    },
     cpu: f.cpu === undefined ? undefined : {
       title: 'Processor',
       value: `${pctText(f.cpu)}% busy`,
+      chart: chart('Processor', p => p.cpu, pct),
       rows: [...(f.ncpu && f.ncpu > 1 ? [['Cores', `${f.ncpu}`] as [string, string]] : []), [CLAUDE_ALL, `${pctText(f.cpuClaude ?? 0)}%`]],
       most: most(f.cpuTop, n => `${pctText(n)}%`),
     },
     gpu: f.gpu === undefined ? undefined : {
       title: 'Graphics processor',
       value: `${pctText(f.gpu)}% busy`,
+      chart: chart('Graphics processor', p => p.gpu, pct),
       rows: [
         ...(f.gpuClaude !== undefined ? [[CLAUDE_ALL, `${pctText(f.gpuClaude)}%`] as [string, string]] : []),
         ...(f.wattsGpu !== undefined ? [['Power use', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
@@ -13503,8 +13529,11 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
     battery: !b ? undefined : {
       title: 'Battery',
       value: `${batteryShown(b).pct}%`,
-      note: upperFirst(batteryNote(b)),
+      note: isDraining ? 'Charging, but the battery drains · the Mac uses more than the charger gives' : upperFirst(batteryNote(b)),
+      chart: isPowerShown ? chart('Power use', p => p.watts, n => `${wattText(n)} W`, 10) : chart('Charge', p => (p.batt !== undefined ? [p.batt / 100, 0] : undefined), pct),
       rows: [
+        ...charge,
+        ...charger,
         ...(f.watts !== undefined ? [['Power use, whole Mac', `${wattText(f.watts)} W`] as [string, string]] : []),
         ...(f.wattsCpu !== undefined ? [['Power use, processors', `${wattText(f.wattsCpu)} W`] as [string, string]] : []),
         ...(f.wattsClaude !== undefined ? [['Claude, processors', `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
@@ -13515,11 +13544,13 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
     disk: f.disk === undefined ? undefined : {
       title: 'Disk, read and written',
       value: rateText(f.disk).join(' '),
+      chart: chart('Disk', p => p.disk, rateFine, 1024 * 1024),
       rows: f.diskClaude !== undefined ? [[CLAUDE_ALL, rateFine(Math.min(f.diskClaude, f.disk))]] : [],
     },
     net: f.net === undefined ? undefined : {
       title: 'Network',
       value: rateText(f.net).join(' '),
+      chart: chart('Network', p => p.net, rateFine, 100 * 1024),
       rows: [
         ...(f.netIn !== undefined && f.netOut !== undefined ? [['Download', rateFine(f.netIn)], ['Upload', rateFine(f.netOut)]] as [string, string][] : []),
         ...(f.netInClaude !== undefined && f.netOutClaude !== undefined ? [[CLAUDE_ALL, `${rateFine(f.netIn !== undefined ? Math.min(f.netInClaude, f.netIn) : f.netInClaude)} down · ${rateFine(f.netOut !== undefined ? Math.min(f.netOutClaude, f.netOut) : f.netOutClaude)} up`]] as [string, string][] : []),
@@ -13530,7 +13561,7 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
 const rateFine = (perSecond: number) => (perSecond < 1024 * 1024 ? `${Math.round(perSecond / 1024)} KB/s` : rateText(perSecond).join(' '))
 const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 const wattText = (w: number) => (w >= 10 ? `${Math.round(w)}` : `${Math.round(w * 10) / 10}`)
-const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
+const usageCardDrawn = (ui: Ui, key: string, card: UsageCard, Svg?: UsageSvgPart) => {
   const { Box, Text } = ui
   const row = (name: string, value: string, n: number, kind: string) => (
     <Box key={`${key}-${kind}-${n}`} flexDirection="row" justifyContent="space-between" gap={3}>
@@ -13540,12 +13571,18 @@ const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
   )
   return (
     <Box position="absolute" top={-1} left={0} display="none" hover={{ display: 'flex' }} flexDirection="column">
-      <Box key={`${key}-card`} display="none" hover={{ scope: key, display: 'flex' }} flexDirection="column" gap={1}>
+      <Box key={`${key}-card`} flexDirection="column" gap={1}>
         <Box key={`${key}-card-head`} flexDirection="row" justifyContent="space-between" gap={3}>
           <Text bold>{card.title}</Text>
           <Text bold>{card.value}</Text>
         </Box>
         {card.note ? <Text key={`${key}-card-note`} dimColor>{card.note}</Text> : null}
+        {card.chart && Svg ? (
+          <Box key={`${key}-card-chart`} flexDirection="column">
+            <Svg key={`${key}-chart-${hashOf(card.chart.source)}`} source={card.chart.source} alt={card.chart.alt} width={card.chart.width} height={card.chart.height} />
+            {row(card.chart.caption[0], card.chart.caption[1], 0, 'chart')}
+          </Box>
+        ) : null}
         {card.rows.length ? <Box key={`${key}-card-rows`} flexDirection="column">{card.rows.map(([name, value], n) => row(name, value, n, 'row'))}</Box> : null}
         {card.most?.length ? (
           <Box key={`${key}-card-most`} flexDirection="column">
@@ -13559,11 +13596,13 @@ const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
 }
 
 const USAGE_SPACERS = 120
-let usageSpaced = false
-const usageSpacersDrawn = (ui: Ui) => {
+const usageSpaced = new Map<string, boolean>()
+const usageSpacersDrawn = (ui: Ui, bar = '') => {
   const { Box, Text } = ui
-  usageSpaced = !usageSpaced
-  return usageSpaced ? (
+  if (usageSpaced.size > 50 && !usageSpaced.has(bar)) usageSpaced.clear()
+  const isSpaced = !usageSpaced.get(bar)
+  usageSpaced.set(bar, isSpaced)
+  return isSpaced ? (
     <Box display="none">
       {Array.from({ length: USAGE_SPACERS }, (_, n) => (
         <Box key={`usage-spacer-${n}`}>
@@ -13574,14 +13613,15 @@ const usageSpacersDrawn = (ui: Ui) => {
   ) : null
 }
 
-const usageDrawn = (ui: Ui, f: UsageFigures) => {
-  const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
+type UsageSvgPart = (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element
+const usageDrawn = (ui: Ui, f: UsageFigures, history = usageHistory()) => {
+  const table = ui as Ui & { Svg?: UsageSvgPart }
   const { Box, Text } = ui
   if (!table.Svg) return null
   const Svg = table.Svg
   const isHigh = isMemoryHigh(f)
   const words = usageWords(f)
-  const cards = usageCards(f)
+  const cards = usageCards(f, history)
   const one = (key: string, card: UsageCard | undefined, svg: { source: string; width: number; height: number }, alt: string, value: string, unit: string, color?: string) => (
     <Box key={`usage-${key}`} flexDirection="row" flexShrink={0} alignItems="center" hover={{ scope: `usage-${key}`, backgroundColor: FILL }}>
       <Svg key={`usage-${key}-${svg.source.length}-${hashOf(svg.source)}`} source={svg.source} alt={alt} width={svg.width} height={svg.height} />
@@ -13589,7 +13629,7 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
         {value}
         <Text dimColor={!color} color={color}>{unit}</Text>
       </Text>
-      {card ? usageCardDrawn(ui, `usage-${key}`, card) : null}
+      {card ? usageCardDrawn(ui, `usage-${key}`, card, Svg) : null}
     </Box>
   )
   return [
@@ -13851,6 +13891,11 @@ const settleBar = ($: EngineInterface) => {
   isBarSettling = true
   void drawFresh($, true)
 }
+const barRemakes = new Map<string, { drawing: unknown; remake: () => unknown }>()
+const barAgain = (bar: string, recent: unknown) => {
+  const one = barRemakes.get(bar)
+  return one && one.drawing === recent ? one.remake() : recent
+}
 let barFlipAt = 0
 const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
@@ -13865,7 +13910,7 @@ const bandHooks = (on: On) => {
     const recent = newestFor(line, key) as Awaited<ReturnType<typeof next>> | undefined
     const isBarHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
     if (recent && !isBarHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
-    if (recent && !isBarHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
+    if (recent && !isBarHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return barAgain(line, recent) as typeof recent
     freshBegins(key, at)
     const madeFrom = Date.now()
     let made: { at: number; ms: number; fresh: number } | undefined
@@ -14006,7 +14051,12 @@ const bandHooks = (on: On) => {
         row
       )
     }
-    return drawing(drawn ? usageSpacersDrawn(ui) : null)
+    const bar = `bar|${e.requestId ?? ''}|${e.surface}`
+    const remake = () => drawing(drawn ? usageSpacersDrawn(ui, bar) : null)
+    const made = remake()
+    if (drawn) barRemakes.set(bar, { drawing: made, remake })
+    else barRemakes.delete(bar)
+    return made
     }
   })
 
