@@ -1,0 +1,1 @@
+- The chat passes on a task's result as it did before 0.2.274, with no "From the task" or "From the chat" headings, and your next message is no longer sent to the task above it by itself.
