@@ -896,8 +896,11 @@ test("the pictures a work made are in its chat where it made them: drawn small w
       ],
     },
     { role: 'assistant', text: 'Here it is.', toolUses: [{ tool_use_id: 'u3', tool: 'SendUserFile', input: { files: ['/tmp/work/gone.png'], status: 'normal' } }] },
+    { role: 'assistant', text: `The whole log: ${'line of the log '.repeat(700)}end of the log.`, toolUses: [] },
   ]
   const { files, logged, shown } = world(on, { talk })
+  const clip: string[] = []
+  on('ui.copy', (_, e) => (clip.push(e.text), { value: { isCopied: true } }) as never)
   files.set(svg, '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>')
   files.set('/tmp/old/before.png', 'old')
   await $.session.start(start)
@@ -924,6 +927,15 @@ test("the pictures a work made are in its chat where it made them: drawn small w
     expect((await keyed(tab, 'pic-open-1-0'))?.key).not.toBe(was)
     await pressed(tab, 'pic-open-1-0')
     expect(shown).toEqual([['open', svg], ['open', svg]])
+    // Each reply has a Copy under it that puts the whole of it on the clipboard, a reply too long for one drawing too, and says so
+    // (24 Nov, the person: replies are passed on elsewhere, and were retyped)
+    const copies = async () => (await tab.findAll({ type: 'Button' })).filter(b => /^copy-said-a1-/.test(String(b.key ?? '')))
+    expect((await copies()).map(b => String(b.props.label).replace('✓ Copied', 'Copy'))).toEqual(['Copy', 'Copy', 'Copy'])
+    clip.length = 0
+    await tab.press({ key: (await copies())[0]?.key ?? '' })
+    await tab.press({ key: (await until(async () => (await copies())[2]))?.key ?? '' })
+    expect(clip).toEqual(['Drawing it.', `The whole log: ${'line of the log '.repeat(700)}end of the log.`])
+    expect(await until(async () => ((await copies()).some(b => b.props.label === '✓ Copied') ? true : undefined))).toBe(true)
     await tab.unmount()
     await pane.unmount()
   }

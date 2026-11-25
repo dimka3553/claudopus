@@ -1444,6 +1444,8 @@ const panelHooks = (on: On) => {
       )
     }
 
+    // A reply's Copy: the whole of it on the clipboard, the button saying so for two seconds
+    const copyButton = (key: string, text: string) => <Button key={`copy-${key}-${presses}`} label={copiedKey === key ? '✓ Copied' : 'Copy'} plain dimColor onPress={press => copyAsk($, key, text, press.surface)} />
     // The work's own chat, drawn as the app draws a chat, the oldest first: what it was told in a filled block, what it wrote as
     // text, and each run of tool steps folded into one quiet row that opens on a press. A long message to it is folded too
     const talk = (one: Todo, lines: Line[] | undefined, shots: Map<number, Pic[]>) => {
@@ -1514,9 +1516,14 @@ const panelHooks = (on: On) => {
                 </Box>
               )
             }
+            // Each reply has a Copy under it that puts the whole of it on the clipboard (24 Nov, the person: replies are passed on
+            // elsewhere, and were retyped)
             if (first?.kind === 'said')
               return (
-<Markdown key={`talk-${i}`} text={first.text} />
+                <Box key={`talk-${i}`} flexDirection="column" alignItems="flex-start" width="100%">
+                  <Markdown text={first.text} />
+                  {copyButton(`said-${one.id}-${at}-${i}`, first.full ?? first.text)}
+                </Box>
               )
             // A move to another model is one quiet line where it happened, with its time
             if (first?.kind === 'model')
@@ -1630,9 +1637,12 @@ const panelHooks = (on: On) => {
         'part-result',
         'Result',
         '',
-        <Box flexDirection="column">
+        <Box flexDirection="column" alignItems="flex-start">
           <Markdown text={isLong && !open.includes(OPEN_RESULT) ? short : whole} />
-          {isLong ? opener(OPEN_RESULT, open.includes(OPEN_RESULT) ? 'Show less' : 'Show all') : null}
+          <Box flexDirection="row" gap={2}>
+            {isLong ? opener(OPEN_RESULT, open.includes(OPEN_RESULT) ? 'Show less' : 'Show all') : null}
+            {copyButton(`result-${one.id}`, whole)}
+          </Box>
         </Box>,
       )
     }

@@ -157,6 +157,19 @@ const toolHooks = (on: On) => {
     const at = await $.clock.now()
     const before = await read($, todos)
     const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask
+    // A question with buttons is one picture, made once, when the person wants it and the task gave none: the question said again
+    // keeps the picture it had. One that can't be made leaves the question as text
+    const isSameAsk = Boolean(was && was.text === text && JSON.stringify(was.choices ?? []) === JSON.stringify(choices))
+    const wantsPicture = Boolean(text && choices.length) && (await wantsQuestionPictures($).catch(() => false))
+    let drawn = ''
+    if (wantsPicture && !pictures.length) {
+      if (isSameAsk && was?.pictures?.length) pictures.push(...was.pictures)
+      else {
+        const top = before.find(one => one.id === topOf(before, e.agentId ?? ''))
+        drawn = await questionPicture($, top?.id ?? e.agentId, top ? titleOf(top) : 'Background task', asked, given1, choices, at)
+        if (drawn) pictures.push(drawn)
+      }
+    }
     // A go-ahead for a release: the worktree a press on its first choice allows one release run for (gate.tsx, allowRelease).
     // Only a task's own question with buttons, for a folder that is there
     // An answer to the person's words on a permission of its card, given with no buttons: shown inside that permission, under their
@@ -186,6 +199,8 @@ const toolHooks = (on: On) => {
     }
     // The same ask said again is not told again
     if (card && was?.text !== text) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
+    // Its picture opens on the person's screen as the question comes, once
+    if (wantsPicture && !isSameAsk && pictures[0]) await openQuestionPicture($, pictures[0])
     if (card) await askInChat($, card)
     // A command for the person opens in a terminal only on their press of the card's button: nothing opens by itself
     const terminal = command ? (isRunFromAfar ? ` ${who(true)} is on another device: they type it in their own session to this Mac, and nothing opens a terminal here.` : isLinux ? ` Do not open a terminal for it: on Linux the card gives it with a Copy button, and ${who()} runs it in a terminal of their own.` : ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.`) : ''
@@ -200,7 +215,7 @@ const toolHooks = (on: On) => {
     const leftOut = (Array.isArray(input.choices) ? input.choices : []).some(one => typeof one === 'string' && LEAVES_OPEN.test(plainWords(one))) ? ' A choice that only leaves the question open (Not now, Later, Skip, Cancel) was left out: not pressing does that, and every button is an answer.' : ''
     const released = release ? ` A press on ${choices[0]} also allows your runs of the release runner for ${release} until one has gone out, with no second question: run it then, in your background.` : releaseGiven ? ' `release` was left out: it needs buttons, and the full path of a folder that is there.' : ''
     const bare = choices.length && !details && !copy ? ` It carries no details: if deciding it needs more than this one line (what goes out, what it changes), ask it again with that in \`details\`; ${who()} sees the ask before your report.` : ''
-    const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} drawn small on the card, each opening large on a press, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
+    const seen = drawn ? ` Claudopus drew your question and its buttons as one picture, opened it on ${who()}'s screen, and shows it with the question on your card and in the chat: make no picture of it yourself.` : pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} drawn small on the card, each opening large on a press, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
     const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : ''
     return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare}${plain}${leftOut}${released} It stays until ${who()} answers; the answer comes back to you as a message the moment it is given, at your next step or to you paused. Never wait for it with a command or a timer: with nothing else to do, end your step. Ask again if the answer leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
   })
