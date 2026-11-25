@@ -62,6 +62,9 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   const answer = ((said === PRESS_ANSWER ? '' : said) || handedBack.get(id) || '').slice(0, ANSWER_CHARS)
   const isHanded = handedBack.delete(id)
   const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
+  // A step stopped by a passing network error is tried again, its card at work meanwhile (retryLater)
+  const passing = how === 'failed' && e.reason === 'error' && dir && !isOff ? await passingError($, id, said).catch(() => '') : ''
+  const isRetried = Boolean(passing) && (await retryLater($, id, passing).catch(err => (void log($, `work ${id} not tried again: ${String(err)}`), false)))
   await changeTodos($, list =>
     list.map(one => {
       // (a task whose result went through is done already, and one ended meanwhile stays as it ended)
@@ -72,6 +75,7 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
       // stopped so as the process ended for cut off, never for stopped: noteClosed)
       if (how === 'stopped' && !one.parentId && !stoppedHere.has(id) && !pressed.has(id)) return { ...ended(one, stoppedAs(one), now), ...(hasReport(one) ? {} : { stoppedUnasked: true as const }) }
       if (how === 'stopped') return ended(one, stoppedAs(one), now)
+      if (how === 'failed' && isRetried) return one
       if (how === 'failed') return { ...ended(one, 'failed', now), answer: answer || one.answer, why: WHY_ERROR }
       // A helper's hand-back ends it: its result went to its task
       if (isHanded && one.parentId) return { ...ended(one, 'done', now), answer: answer || one.answer }

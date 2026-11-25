@@ -129,6 +129,9 @@ export type Todo = {
   // The chat was told it is stuck (Claudopus's word that it made no progress, or that it did not hand back what it has): when.
   // Once per time it is flagged stuck
   stuckTold?: number
+  // Its tries again after a step stopped by a passing network error, within the last half hour, and while one is due: when, and the
+  // error in a few words (retryLater)
+  retry?: { tries: number[]; at?: number; why?: string }
   // What it started in the background itself, as Claude Code tracks it (a command, a watch, a server): the engine's task id, what
   // it is in its own words, and since when, with the command itself. Dropped as it ends or is stopped; a server stays under a done card
   // `named`: its title and kind in plain words, as the small model said them (naming.tsx)
@@ -244,7 +247,7 @@ export type Report = {
 // it was (`from`), the command whole, the folder it runs in, what the task called it, and the longest it may run. Once pressed:
 // when it started, its output file and the process group it runs as; once ended: when, how, and its exit, and while what it
 // printed waits to start its ended task again, the task and the message (kept, so a reload sends it still)
-export type PressRun = { card: string; from: string; askAt: number; command: string; cwd: string; description: string; limitMs: number; startedAt?: number; log?: string; pid?: string; endedAt?: number; end?: 'exited' | 'limit' | 'stopped' | 'lost'; exit?: number; last?: string; waiting?: { target: string; text: string } }
+export type PressRun = { card: string; from: string; askAt: number; command: string; cwd: string; description: string; limitMs: number; startedAt?: number; log?: string; pid?: string; endedAt?: number; end?: 'exited' | 'limit' | 'stopped' | 'lost'; exit?: number; last?: string; waiting?: { target: string; text: string; isLost?: boolean } }
 
 // A process on this Mac that listens on a port, started from one of the person's folders
 export type Server = {

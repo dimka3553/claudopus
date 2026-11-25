@@ -235,6 +235,7 @@ const sync = async ($: EngineInterface) => {
   if (listed) await lookOver($, live, now).catch(err => log($, `runs that are over not looked at: ${String(err)}`))
   // A command run on the person's press that a reload left running is followed again by this load
   await followRuns($).catch(err => log($, `commands run on a press not followed: ${String(err)}`))
+  await followRetries($).catch(err => log($, `tries again not followed: ${String(err)}`))
   await lookEnds($)
   await saveKeep($).catch(err => log($, `work at work not kept: ${String(err)}`))
 }
@@ -268,7 +269,8 @@ const lastWordsOf = async ($: EngineInterface, folder: string, agent: string, no
 
 // A task pauses by ending its step, and Claude Code starts its next step when a command or a helper of its own ends, or when the
 // person's answer or words reach it: its card stays at work meanwhile. A run is over for good only when nothing of its own runs
-// and nothing on its card waits for the person. Then its card ends: done when its result was received (handed in while Claudopus
+// and nothing on its card waits for the person, nor a command the person allowed (holdsCard), nor a try again after a passing
+// network error (retryLater). Then its card ends: done when its result was received (handed in while Claudopus
 // was away, or its last words where Claude Code never pressed it for a hand-back, so took them as its result), and failed
 // otherwise, saying it ended without its result. A helper's card ends done either way: its words went to its task
 // A run only the list shows as over is given OVER_GRACE first, as Claude Code may be about to start its next step (a helper's
@@ -281,7 +283,7 @@ const lookOver = async ($: EngineInterface, live: { id: string; status: string }
   if (!dir || isOff) return
   const list = await read($, todos)
   const statusOf = (one: Todo) => live.find(agent => agent.id === one.id)?.status
-  const isOver = (one: Todo) => one.status === 'working' && !one.chat && (one.id === heard || !turnEnding.has(one.id)) && !WORKING.includes(String(statusOf(one))) && statusOf(one) !== 'killed' && !ownsWork(list, one) && !needsPerson(one) && !waiting.some(p => p.agent === one.id)
+  const isOver = (one: Todo) => one.status === 'working' && !one.chat && (one.id === heard || !turnEnding.has(one.id)) && !WORKING.includes(String(statusOf(one))) && statusOf(one) !== 'killed' && !ownsWork(list, one) && !needsPerson(one) && !waiting.some(p => p.agent === one.id) && !holdsCard(one.id) && !one.retry?.at
   for (const id of [...overSince.keys()]) if (!list.some(one => one.id === id && isOver(one))) overSince.delete(id)
   const folder = chat ? await agentsFolder($, chat) : ''
   // The deepest first, so a task whose last helper ends in this look is looked at with it ended
@@ -319,6 +321,82 @@ const lookOver = async ($: EngineInterface, live: { id: string; status: string }
   for (const id of endedNow) if (id !== heard) await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
   await log($, `runs that were over ended on their cards: ${endedNow.join(', ')}`)
   await lookEnds($)
+  redraw($)
+}
+
+// ---- A step stopped by a passing network error ----
+
+// A task's or helper's step that stops on an error of its connection to the model's servers (no address for the server's name, a
+// connection reset or refused, a certificate for another name, a request that timed out, the servers overloaded, the Mac asleep
+// mid-answer) is tried again by itself: its card stays at work with one grey line that says so, and a message from the next hook of
+// the mod's (sendOwn, never the timer's own) starts it again where it stopped. Past RETRY_MOST tries in RETRY_SPAN it fails as any
+// error does; so does an error of the request itself, as a usage limit or a refused key (25 Nov: Dima pressed Start again on tasks
+// that had only stopped on ENOTFOUND, a certificate for another host name and HTTP 408s)
+const PASSING_ERROR = /ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|ENETUNREACH|ENETDOWN|EHOSTUNREACH|EPIPE|socket hang up|fetch failed|reach the API server|connection(?: error|_failed| failed| reset| refused| closed| timed out)|host ?name|certificate|\bSSL\b|\bTLS\b|\b(?:408|500|502|503|504|529)\b|timed? ?out|overloaded|bad gateway|service unavailable|went to sleep|computer_slept|network/i
+const NOT_PASSING = /usage.?limit|rate.?limit|\b(?:400|401|403|404|413|429)\b|prompt is too long|credit balance|billing|api.?key/i
+const RETRY_MOST = 3
+const RETRY_SPAN = 30 * 60_000
+const RETRY_AFTER = [20_000, 60_000, 180_000]
+// The error a step stopped on, in a few words, when it is one that passes: from the turn's own last words, else the last line of
+// the task's record, where Claude Code writes the error as an answer of its own
+const passingError = async ($: EngineInterface, id: string, said: string) => {
+  const isPassing = (text: string) => /^API Error\b/.test(text.trim()) && PASSING_ERROR.test(text) && !NOT_PASSING.test(text)
+  const short = (text: string) => cut(oneLine(text.trim().replace(/^API Error:?\s*/, '')), 100)
+  if (isPassing(said)) return short(said)
+  const { id: chat } = await read($, me)
+  if (!chat || !dir) return ''
+  const rows = (await fileEnd($, `${await agentsFolder($, chat)}/agent-${id}.jsonl`, 64_000).catch(() => '')).trim().split('\n')
+  const last = parsedOr<{ type?: string; isApiErrorMessage?: boolean; apiError?: string; message?: { content?: { type?: string; text?: string }[] } }>(rows.at(-1) ?? '', {})
+  if (last.type !== 'assistant' || !last.isApiErrorMessage) return ''
+  const text = (Array.isArray(last.message?.content) ? last.message.content : []).map(b => (b.type === 'text' ? (b.text ?? '') : '')).join(' ')
+  return isPassing(`${text} ${last.apiError ?? ''}`) ? short(text) : ''
+}
+// Due again: true when a try is set for it, its card kept at work meanwhile
+const retryLater = async ($: EngineInterface, id: string, why: string) => {
+  const now = await $.clock.now()
+  let isDue = false
+  await changeTodos($, list =>
+    ((isDue = false), list).map(one => {
+      if (one.id !== id || one.status !== 'working' || isHeld(one)) return one
+      const tries = (one.retry?.tries ?? []).filter(at => now - at < RETRY_SPAN)
+      if (tries.length >= RETRY_MOST) return one
+      isDue = true
+      return { ...one, retry: { tries: [...tries, now], at: now + (RETRY_AFTER[tries.length] ?? 180_000), why } }
+    }),
+  )
+  if (!isDue) return false
+  await log($, `work ${id} stopped on a passing network error (${why}): tried again by itself`)
+  await followRetry($, id)
+  return true
+}
+// Each try due is set once by this load; a reload's load sets those it finds again (followRetries)
+const retrySet = new Set<string>()
+const followRetry = async ($: EngineInterface, id: string) => {
+  const due = (await read($, todos)).find(one => one.id === id)?.retry?.at
+  if (due === undefined || retrySet.has(`${id}:${due}`)) return
+  retrySet.add(`${id}:${due}`)
+  $.clock.after(Math.max(0, due - (await $.clock.now())), () => void sendRetry($, id, due).catch(err => log($, `work ${id} not tried again: ${String(err)}`)))
+}
+const followRetries = async ($: EngineInterface) => {
+  for (const one of await read($, todos)) if (one.retry?.at !== undefined && one.status === 'working') await followRetry($, one.id)
+}
+const RETRY_TEXT = (why: string) => `Your last step stopped on a network error (${why}). This message starts you again: carry on from where you were, then end with your report as before.`
+const sendRetry = async ($: EngineInterface, id: string, due: number) => {
+  const isStill = async () => (await read($, todos)).some(one => one.id === id && one.status === 'working' && one.retry?.at === due)
+  const why = (await read($, todos)).find(one => one.id === id)?.retry?.why ?? 'a passing error'
+  if (!(await isStill())) return
+  const r = await sendOwn($, { to: { agentId: id }, text: RETRY_TEXT(why) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  const now = await $.clock.now()
+  await changeTodos($, list =>
+    list.map(one => {
+      if (one.id !== id || one.retry?.at !== due) return one
+      const kept = { ...one, retry: { tries: one.retry.tries } }
+      // (one that could not be started again ends as the error left it)
+      return r.isDelivered || one.status !== 'working' ? kept : { ...ended(kept, 'failed', now), why: WHY_ERROR }
+    }),
+  )
+  await log($, r.isDelivered ? `work ${id} started again after a passing network error` : `work ${id} not started again after a passing network error: ${(r as { reason?: string }).reason ?? 'not sent'}`)
+  if (!r.isDelivered) await lookEnds($)
   redraw($)
 }
 

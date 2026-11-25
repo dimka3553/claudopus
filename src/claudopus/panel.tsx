@@ -611,7 +611,7 @@ const panelHooks = (on: On) => {
               </Box>
             ) : null}
             {/* A command the person allowed, while it runs or its output is kept for the task's next step */}
-            {runsShownOn(one, at).length && !one.chat ? (
+            {(runsShownOn(one, at).length || isRetrying(one)) && !one.chat ? (
               <Box key={`run-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
                 {runBlock($, table, one, `runs-${one.id}`, at)}
               </Box>
@@ -1684,7 +1684,7 @@ const panelHooks = (on: On) => {
               </Box>
             </Box>
           ) : null}
-          {runsShownOn(one, at).length && !one.chat ? (
+          {(runsShownOn(one, at).length || isRetrying(one)) && !one.chat ? (
             <Box key="part-runs" flexDirection="column" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
               {runBlock($, table, one, `runs-big-${one.id}`, at)}
             </Box>

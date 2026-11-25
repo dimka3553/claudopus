@@ -1519,6 +1519,7 @@ const sync = async ($: EngineInterface) => {
   })
   if (listed) await lookOver($, live, now).catch(err => log($, `runs that are over not looked at: ${String(err)}`))
   await followRuns($).catch(err => log($, `commands run on a press not followed: ${String(err)}`))
+  await followRetries($).catch(err => log($, `tries again not followed: ${String(err)}`))
   await lookEnds($)
   await saveKeep($).catch(err => log($, `work at work not kept: ${String(err)}`))
 }
@@ -1553,7 +1554,7 @@ const lookOver = async ($: EngineInterface, live: { id: string; status: string }
   if (!dir || isOff) return
   const list = await read($, todos)
   const statusOf = (one: Todo) => live.find(agent => agent.id === one.id)?.status
-  const isOver = (one: Todo) => one.status === 'working' && !one.chat && (one.id === heard || !turnEnding.has(one.id)) && !WORKING.includes(String(statusOf(one))) && statusOf(one) !== 'killed' && !ownsWork(list, one) && !needsPerson(one) && !waiting.some(p => p.agent === one.id)
+  const isOver = (one: Todo) => one.status === 'working' && !one.chat && (one.id === heard || !turnEnding.has(one.id)) && !WORKING.includes(String(statusOf(one))) && statusOf(one) !== 'killed' && !ownsWork(list, one) && !needsPerson(one) && !waiting.some(p => p.agent === one.id) && !holdsCard(one.id) && !one.retry?.at
   for (const id of [...overSince.keys()]) if (!list.some(one => one.id === id && isOver(one))) overSince.delete(id)
   const folder = chat ? await agentsFolder($, chat) : ''
   const depth = (one: Todo) => (one.parentId ? 1 : 0)
@@ -1587,6 +1588,70 @@ const lookOver = async ($: EngineInterface, live: { id: string; status: string }
   for (const id of endedNow) if (id !== heard) await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
   await log($, `runs that were over ended on their cards: ${endedNow.join(', ')}`)
   await lookEnds($)
+  redraw($)
+}
+
+
+const PASSING_ERROR = /ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|ENETUNREACH|ENETDOWN|EHOSTUNREACH|EPIPE|socket hang up|fetch failed|reach the API server|connection(?: error|_failed| failed| reset| refused| closed| timed out)|host ?name|certificate|\bSSL\b|\bTLS\b|\b(?:408|500|502|503|504|529)\b|timed? ?out|overloaded|bad gateway|service unavailable|went to sleep|computer_slept|network/i
+const NOT_PASSING = /usage.?limit|rate.?limit|\b(?:400|401|403|404|413|429)\b|prompt is too long|credit balance|billing|api.?key/i
+const RETRY_MOST = 3
+const RETRY_SPAN = 30 * 60_000
+const RETRY_AFTER = [20_000, 60_000, 180_000]
+const passingError = async ($: EngineInterface, id: string, said: string) => {
+  const isPassing = (text: string) => /^API Error\b/.test(text.trim()) && PASSING_ERROR.test(text) && !NOT_PASSING.test(text)
+  const short = (text: string) => cut(oneLine(text.trim().replace(/^API Error:?\s*/, '')), 100)
+  if (isPassing(said)) return short(said)
+  const { id: chat } = await read($, me)
+  if (!chat || !dir) return ''
+  const rows = (await fileEnd($, `${await agentsFolder($, chat)}/agent-${id}.jsonl`, 64_000).catch(() => '')).trim().split('\n')
+  const last = parsedOr<{ type?: string; isApiErrorMessage?: boolean; apiError?: string; message?: { content?: { type?: string; text?: string }[] } }>(rows.at(-1) ?? '', {})
+  if (last.type !== 'assistant' || !last.isApiErrorMessage) return ''
+  const text = (Array.isArray(last.message?.content) ? last.message.content : []).map(b => (b.type === 'text' ? (b.text ?? '') : '')).join(' ')
+  return isPassing(`${text} ${last.apiError ?? ''}`) ? short(text) : ''
+}
+const retryLater = async ($: EngineInterface, id: string, why: string) => {
+  const now = await $.clock.now()
+  let isDue = false
+  await changeTodos($, list =>
+    ((isDue = false), list).map(one => {
+      if (one.id !== id || one.status !== 'working' || isHeld(one)) return one
+      const tries = (one.retry?.tries ?? []).filter(at => now - at < RETRY_SPAN)
+      if (tries.length >= RETRY_MOST) return one
+      isDue = true
+      return { ...one, retry: { tries: [...tries, now], at: now + (RETRY_AFTER[tries.length] ?? 180_000), why } }
+    }),
+  )
+  if (!isDue) return false
+  await log($, `work ${id} stopped on a passing network error (${why}): tried again by itself`)
+  await followRetry($, id)
+  return true
+}
+const retrySet = new Set<string>()
+const followRetry = async ($: EngineInterface, id: string) => {
+  const due = (await read($, todos)).find(one => one.id === id)?.retry?.at
+  if (due === undefined || retrySet.has(`${id}:${due}`)) return
+  retrySet.add(`${id}:${due}`)
+  $.clock.after(Math.max(0, due - (await $.clock.now())), () => void sendRetry($, id, due).catch(err => log($, `work ${id} not tried again: ${String(err)}`)))
+}
+const followRetries = async ($: EngineInterface) => {
+  for (const one of await read($, todos)) if (one.retry?.at !== undefined && one.status === 'working') await followRetry($, one.id)
+}
+const RETRY_TEXT = (why: string) => `Your last step stopped on a network error (${why}). This message starts you again: carry on from where you were, then end with your report as before.`
+const sendRetry = async ($: EngineInterface, id: string, due: number) => {
+  const isStill = async () => (await read($, todos)).some(one => one.id === id && one.status === 'working' && one.retry?.at === due)
+  const why = (await read($, todos)).find(one => one.id === id)?.retry?.why ?? 'a passing error'
+  if (!(await isStill())) return
+  const r = await sendOwn($, { to: { agentId: id }, text: RETRY_TEXT(why) }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  const now = await $.clock.now()
+  await changeTodos($, list =>
+    list.map(one => {
+      if (one.id !== id || one.retry?.at !== due) return one
+      const kept = { ...one, retry: { tries: one.retry.tries } }
+      return r.isDelivered || one.status !== 'working' ? kept : { ...ended(kept, 'failed', now), why: WHY_ERROR }
+    }),
+  )
+  await log($, r.isDelivered ? `work ${id} started again after a passing network error` : `work ${id} not started again after a passing network error: ${(r as { reason?: string }).reason ?? 'not sent'}`)
+  if (!r.isDelivered) await lookEnds($)
   redraw($)
 }
 
@@ -9295,6 +9360,8 @@ const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
 }
 
 const BLOCKED_ASK = 'Claude Code blocked this command. Run it anyway?'
+const BLOCKED_RELEASE_ASK = 'Claude Code blocked the release you allowed. Run it anyway?'
+const RELEASE_SECOND_PRESS = "Your press allowed this release, then Claude Code's own safety check stopped it. Claude Code lets a command it blocked run only on a press on that command, so it needs this second press."
 const PRESS_ONLY = "Only your press on Allow runs it. Typing allow in the chat doesn't."
 const CC_REFUSALS: [string, string][] = [
   ['Permission for this action was denied by the Claude Code auto mode classifier', "Claude Code's auto mode blocked it"],
@@ -9326,15 +9393,17 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   const runnable = runnableOf(tool, call)
   if (!runnable && connectorRuleOf(tool)) return void (await refusedConnector($, agent, top.id, own, tool, call, refusal.reason))
   if (!runnable) return void (await log($, `refusal of ${tool} for ${agent}: nothing the person could run, so nothing is asked`))
-  const details = [runDetails(runnable, refusal.reason), own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '', PRESS_ONLY].filter(Boolean).join('\n\n')
+  const isRelease = releaseCalls(runnable.command, $.plugin.root, runnable.cwd).length > 0
+  const details = [runDetails(runnable, refusal.reason), isRelease ? RELEASE_SECOND_PRESS : '', own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '', PRESS_ONLY].filter(Boolean).join('\n\n')
+  const asked = isRelease ? BLOCKED_RELEASE_ASK : BLOCKED_ASK
   const at = await $.clock.now()
   let isPut = false
-  await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text: BLOCKED_ASK, details, copy: runnable.command, isCommand: true, cwd: runnable.cwd, from: agent, at, refused: true } }))
+  await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text: asked, details, copy: runnable.command, isCommand: true, cwd: runnable.cwd, from: agent, at, refused: true } }))
   if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: its card asks something already`))
   await offerRun($, top.id, agent, at, runnable)
   await log($, `refusal of ${tool} for ${agent} put to the person on its card`)
   const card = (await read($, todos)).find(one => one.id === top.id)
-  if (card) await askAloud($, card, BLOCKED_ASK).catch(err => log($, `ask not told: ${String(err)}`))
+  if (card) await askAloud($, card, asked).catch(err => log($, `ask not told: ${String(err)}`))
   if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
 }
 const CONNECTOR_ASK = 'Claude Code blocked this action. Let your tasks do it?'
@@ -9454,6 +9523,7 @@ const offeredRun = (one: Todo) => {
   return runList.find(run => isSameRun(run, { card: one.id, askAt: ask.at }) && run.command === ask.copy && !run.startedAt)
 }
 const runningOn = (card: string) => runList.filter(run => run.card === card && run.startedAt && (!run.endedAt || Boolean(run.waiting)))
+const holdsCard = (id: string) => runList.some(run => (run.card === id || run.from === id) && run.startedAt && (!run.endedAt || Boolean(run.waiting && !run.waiting.isLost)))
 const RUN_END_SHOWN = 60_000
 const runsShownOn = (one: Todo, at: number) => [...runningOn(one.id), ...runList.filter(run => run.card === one.id && run.startedAt && run.endedAt && !run.waiting && at - run.endedAt < RUN_END_SHOWN && (ownNote(one)?.at ?? 0) <= run.endedAt)]
 const endedSaid = (run: PressRun, what = 'your command') => {
@@ -9475,7 +9545,7 @@ const runKey = (run: Pick<PressRun, 'card' | 'askAt'>) => `${run.card}:${run.ask
 const runPressed = new Set<string>()
 const runAsked = new Map<string, PressRun>()
 const runsAtStep = async ($: EngineInterface, agent: string) => {
-  const due = runList.filter(run => run.waiting?.target === agent)
+  const due = runList.filter(run => run.waiting?.target === agent && !runSending.has(runKey(run)))
   for (const run of due) {
     const told = await tell($, agent, run.waiting?.text ?? '').catch(() => undefined)
     if (!told || told.deny) continue
@@ -9529,13 +9599,14 @@ const startRun = async ($: EngineInterface, one: Todo, run: PressRun): Promise<s
   await log($, `refused command for ${one.id} run on ${who()}'s press, in ${run.cwd}`)
   const stops = run.limitMs >= RUN_LIMIT_BACKGROUND ? `It is stopped after ${limitText(run.limitMs)} if it is still running then.` : `It is stopped after ${limitText(run.limitMs)} at most.`
   followRun($, { ...run, startedAt: at, log: logFile, pid })
-  return named(`{Name} pressed "${ALLOW}" on your card for the command Claude Code refused, and it is running for them now, exactly as shown, as their own, in ${run.cwd}. What it prints goes to ${logFile}, which you can read as it runs; when it ends, its last lines come to you as a message at your next step. ${stops} Do not run it yourself; carry on with what does not need it.`)
+  return named(`{Name} pressed "${ALLOW}" on your card for the command Claude Code refused, and it is running for them now, exactly as shown, as their own, in ${run.cwd}. What it prints goes to ${logFile}, which you can read as it runs; when it ends, its last lines come to you as a message: at your next step, or, once you have ended your step, as a message that starts you again. ${stops} Do not run it yourself; carry on with what does not need it, or end your step.`)
 }
 
 const followed = new Set<string>()
 const followRuns = async ($: EngineInterface) => {
   runList = await read($, runs)
   for (const run of runList) if (run.startedAt && !run.endedAt && run.log && run.pid) followRun($, run)
+  for (const run of runList) if (run.endedAt && run.waiting && !run.waiting.isLost && !runWaking.has(runKey(run))) void wakeForRun($, run, run.waiting.target)
 }
 const followRun = ($: EngineInterface, run: PressRun) => {
   const key = runKey(run)
@@ -9592,7 +9663,39 @@ const deliverRun = async ($: EngineInterface, cardId: string, target: string, ru
   if (told && !told.deny) return 'sent'
   if (isHeld(card)) return 'held'
   await saveRuns($, list => list.map(one => (isSameRun(one, run) ? { ...one, waiting: { target, text } } : one)))
+  if (isWorking) void wakeForRun($, run, target)
   return 'waits'
+}
+const RUN_RESUMED = 'You had ended your step while it ran: this message starts you again. Carry on from where you were with what it printed, then end with your report as before.'
+const runWaking = new Set<string>()
+const runSending = new Set<string>()
+const wakeForRun = async ($: EngineInterface, run: PressRun, target: string) => {
+  const key = runKey(run)
+  if (runWaking.has(key)) return
+  runWaking.add(key)
+  try {
+    const kept = () => runList.find(one => isSameRun(one, run))
+    const text = kept()?.waiting?.text
+    if (!text) return
+    const isStill = async () => {
+      const one = kept()
+      if (!one?.waiting || one.waiting.target !== target || (await read($, todos)).find(card => card.id === target)?.status !== 'working') return false
+      runSending.add(key)
+      return true
+    }
+    const r = await sendOwn($, { to: { agentId: target }, text: `${text}\n${RUN_RESUMED}` }, isStill).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    if (r.isDelivered) {
+      await saveRuns($, list => list.map(one => (isSameRun(one, run) ? { ...one, waiting: undefined } : one)))
+      runSending.delete(key)
+      await wakeCard($, target)
+      return void (await log($, `${target} started again with the end of the command run on ${who()}'s press`))
+    }
+    runSending.delete(key)
+    await saveRuns($, list => list.map(one => (isSameRun(one, run) && one.waiting ? { ...one, waiting: { ...one.waiting, isLost: true } } : one)))
+    await log($, `${target} not started again with the end of the command run on ${who()}'s press: ${(r as { reason?: string }).reason ?? 'not sent'}`)
+  } finally {
+    runWaking.delete(key)
+  }
 }
 const endRun = async ($: EngineInterface, run: PressRun, end: NonNullable<PressRun['end']>, exit: number | undefined, lines: string[]) => {
   const at = await $.clock.now()
@@ -9617,11 +9720,18 @@ const endRun = async ($: EngineInterface, run: PressRun, end: NonNullable<PressR
   await keepRunEnded($, run)
 }
 
+const isRetrying = (one: Todo) => !one.chat && one.status === 'working' && one.retry?.at !== undefined
 const runBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number) => {
   const list = one.chat ? [] : runsShownOn(one, at)
-  if (!list.length) return null
+  const retry = isRetrying(one) ? one.retry : undefined
+  if (!list.length && !retry) return null
   return (
     <ui.Box key={key} flexDirection="column">
+      {retry ? (
+        <ui.Box key={`${key}-retry`} height={1} overflow="hidden">
+          <ui.Text dimColor wrap="truncate-end">{`Network error · trying again · ${retry.tries.length} of ${RETRY_MOST} tries`}</ui.Text>
+        </ui.Box>
+      ) : null}
       {list.map(run => {
         const isStopping = runStopped.has(runKey(run))
         const isEnded = Boolean(run.endedAt)
@@ -10354,12 +10464,15 @@ const agentTurnEnded = async <T,>($: EngineInterface, e: { answer?: string; isAb
   const answer = ((said === PRESS_ANSWER ? '' : said) || handedBack.get(id) || '').slice(0, ANSWER_CHARS)
   const isHanded = handedBack.delete(id)
   const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
+  const passing = how === 'failed' && e.reason === 'error' && dir && !isOff ? await passingError($, id, said).catch(() => '') : ''
+  const isRetried = Boolean(passing) && (await retryLater($, id, passing).catch(err => (void log($, `work ${id} not tried again: ${String(err)}`), false)))
   await changeTodos($, list =>
     list.map(one => {
       if (one.id !== id || one.status !== 'working') return one
       if (how === 'stopped' && interrupting.has(id)) return one
       if (how === 'stopped' && !one.parentId && !stoppedHere.has(id) && !pressed.has(id)) return { ...ended(one, stoppedAs(one), now), ...(hasReport(one) ? {} : { stoppedUnasked: true as const }) }
       if (how === 'stopped') return ended(one, stoppedAs(one), now)
+      if (how === 'failed' && isRetried) return one
       if (how === 'failed') return { ...ended(one, 'failed', now), answer: answer || one.answer, why: WHY_ERROR }
       if (isHanded && one.parentId) return { ...ended(one, 'done', now), answer: answer || one.answer }
       return answer ? { ...one, answer } : one
@@ -10934,7 +11047,7 @@ const lookStuck = async ($: EngineInterface) => {
     const next = list.map(one => {
       if (one.parentId || one.chat) return one
       if (one.stuckTold !== undefined && movedAt(list, one) > one.stuckTold) ((isChanged = true), (one = { ...one, stuckTold: undefined, stuckAt: undefined }))
-      const isStuck = stageOf(list, one) === 'working' && !one.ask && !one.bg?.length && !runningKids(list, one.id).length && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
+      const isStuck = stageOf(list, one) === 'working' && !one.ask && !one.bg?.length && !runningKids(list, one.id).length && !isPrompted(one) && !holdsCard(one.id) && !one.retry?.at && now - movedAt(list, one) >= STUCK_AFTER
       if (isStuck && !one.stuckAt) return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) })
       if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined, stuckTold: undefined })
       return one
@@ -13025,7 +13138,7 @@ const workHooks = (on: On) => {
     }
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
-    if (id !== undefined && card && !isOff && card.status === 'working' && (needsPerson(card) || waiting.some(p => p.agent === id)) && (await isPressedForReport($, id, true))) {
+    if (id !== undefined && card && !isOff && card.status === 'working' && (needsPerson(card) || waiting.some(p => p.agent === id) || holdsCard(id)) && (await isPressedForReport($, id, true))) {
       await log($, `work ${id} pressed for its report while it waits for the person: let it end its step, saying nothing`)
       yield { kind: 'text', index: 0, text: PRESS_ANSWER }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
@@ -14509,7 +14622,7 @@ const panelHooks = (on: On) => {
               </Box>
             ) : null}
             {/* A command the person allowed, while it runs or its output is kept for the task's next step */}
-            {runsShownOn(one, at).length && !one.chat ? (
+            {(runsShownOn(one, at).length || isRetrying(one)) && !one.chat ? (
               <Box key={`run-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
                 {runBlock($, table, one, `runs-${one.id}`, at)}
               </Box>
@@ -15431,7 +15544,7 @@ const panelHooks = (on: On) => {
               </Box>
             </Box>
           ) : null}
-          {runsShownOn(one, at).length && !one.chat ? (
+          {(runsShownOn(one, at).length || isRetrying(one)) && !one.chat ? (
             <Box key="part-runs" flexDirection="column" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
               {runBlock($, table, one, `runs-big-${one.id}`, at)}
             </Box>

@@ -1,0 +1,3 @@
+- A task that ends its step while a command you allowed runs (such as a release Claude Code blocked) now stays Working, and starts again by itself with what the command printed when it ends, instead of showing Failed.
+- A task stopped by a passing network error (no connection, a timeout, a certificate for the wrong name) now tries again by itself, up to three times, with one grey line on its card, before it shows Failed.
+- A release Claude Code blocked after you allowed it now says so, and why it needs a second press.
