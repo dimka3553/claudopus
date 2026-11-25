@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.275 · 25 November 2026
+- A task that ends its step while a command you allowed runs (such as a release Claude Code blocked) now stays Working, and starts again by itself with what the command printed when it ends, instead of showing Failed.
+- A task stopped by a passing network error (no connection, a timeout, a certificate for the wrong name) now tries again by itself, up to three times, with one grey line on its card, before it shows Failed.
+- A release Claude Code blocked after you allowed it now says so, and why it needs a second press.
+
 ## 0.2.274 · 25 November 2026
 - Each reply in a task's chat, and its result, has a Copy button that copies the whole text.
 - A task's chat has a plain Stop beside Stop and send. It stops the task, and the box stays: what you write next carries it on from where it stopped.

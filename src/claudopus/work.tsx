@@ -681,9 +681,9 @@ const workHooks = (on: On) => {
     // where the app sent it, and its card says so
     // What it started on and whether it was flagged, kept in its card too so a reload of the mod forgets neither
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
-    // A task that ended its step with a question or a permission open for the person waits for them, and Claude Code presses it for
+    // A task that ended its step with a question or a permission open for the person waits for them (or for a command they allowed), and Claude Code presses it for
     // a report it cannot give: each press is answered here with no model, so it costs nothing and no unfinished report is handed in
-    if (id !== undefined && card && !isOff && card.status === 'working' && (needsPerson(card) || waiting.some(p => p.agent === id)) && (await isPressedForReport($, id, true))) {
+    if (id !== undefined && card && !isOff && card.status === 'working' && (needsPerson(card) || waiting.some(p => p.agent === id) || holdsCard(id)) && (await isPressedForReport($, id, true))) {
       await log($, `work ${id} pressed for its report while it waits for the person: let it end its step, saying nothing`)
       yield { kind: 'text', index: 0, text: PRESS_ANSWER }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }

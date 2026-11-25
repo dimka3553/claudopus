@@ -265,6 +265,12 @@ const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
 // A blocked call that is no command the person could run leaves nothing to decide, so nothing waits for them: the task was told
 // by Claude Code and carries on without it
 const BLOCKED_ASK = 'Claude Code blocked this command. Run it anyway?'
+// A release Claude Code blocked comes after the person's press that allowed it (the go-ahead's Release it, or the release's own
+// permission): Claude Code decides each command after that, and lets one it blocked run only on a press on that very command, so
+// the card says plainly why a second press is asked (25 Nov, Dima: "Why doesn't it just ask me to approve?"). The two are not made
+// one: a Release it press that ran the release itself would take every release out of Claude Code's own check
+const BLOCKED_RELEASE_ASK = 'Claude Code blocked the release you allowed. Run it anyway?'
+const RELEASE_SECOND_PRESS = "Your press allowed this release, then Claude Code's own safety check stopped it. Claude Code lets a command it blocked run only on a press on that command, so it needs this second press."
 // Said on its card: a typed allow in the chat answers other blocks, never this one (typed.tsx)
 const PRESS_ONLY = "Only your press on Allow runs it. Typing allow in the chat doesn't."
 // Claude Code's own refusals, as its result or its deny begins (its texts in 2.1.325), and who refused, for the card
@@ -302,16 +308,18 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   const runnable = runnableOf(tool, call)
   if (!runnable && connectorRuleOf(tool)) return void (await refusedConnector($, agent, top.id, own, tool, call, refusal.reason))
   if (!runnable) return void (await log($, `refusal of ${tool} for ${agent}: nothing the person could run, so nothing is asked`))
-  const details = [runDetails(runnable, refusal.reason), own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '', PRESS_ONLY].filter(Boolean).join('\n\n')
+  const isRelease = releaseCalls(runnable.command, $.plugin.root, runnable.cwd).length > 0
+  const details = [runDetails(runnable, refusal.reason), isRelease ? RELEASE_SECOND_PRESS : '', own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '', PRESS_ONLY].filter(Boolean).join('\n\n')
+  const asked = isRelease ? BLOCKED_RELEASE_ASK : BLOCKED_ASK
   const at = await $.clock.now()
   // A question waiting on the person, there already or put up meanwhile, is never replaced: the refusal is in the task's own result
   let isPut = false
-  await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text: BLOCKED_ASK, details, copy: runnable.command, isCommand: true, cwd: runnable.cwd, from: agent, at, refused: true } }))
+  await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text: asked, details, copy: runnable.command, isCommand: true, cwd: runnable.cwd, from: agent, at, refused: true } }))
   if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: its card asks something already`))
   await offerRun($, top.id, agent, at, runnable)
   await log($, `refusal of ${tool} for ${agent} put to the person on its card`)
   const card = (await read($, todos)).find(one => one.id === top.id)
-  if (card) await askAloud($, card, BLOCKED_ASK).catch(err => log($, `ask not told: ${String(err)}`))
+  if (card) await askAloud($, card, asked).catch(err => log($, `ask not told: ${String(err)}`))
   if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
 }
 // A connector's tool Claude Code refused, such as a cost to confirm (21 Nov: Supabase's confirm_cost, refused six times after Dima's

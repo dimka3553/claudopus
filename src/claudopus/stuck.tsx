@@ -161,7 +161,7 @@ const lookStuck = async ($: EngineInterface) => {
       if (one.parentId || one.chat) return one
       // A task that moved again since the chat was told is no longer what the chat was told: flagged and told afresh if it is stuck again
       if (one.stuckTold !== undefined && movedAt(list, one) > one.stuckTold) ((isChanged = true), (one = { ...one, stuckTold: undefined, stuckAt: undefined }))
-      const isStuck = stageOf(list, one) === 'working' && !one.ask && !one.bg?.length && !runningKids(list, one.id).length && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
+      const isStuck = stageOf(list, one) === 'working' && !one.ask && !one.bg?.length && !runningKids(list, one.id).length && !isPrompted(one) && !holdsCard(one.id) && !one.retry?.at && now - movedAt(list, one) >= STUCK_AFTER
       if (isStuck && !one.stuckAt) return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) })
       if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined, stuckTold: undefined })
       return one

@@ -1899,7 +1899,7 @@ test('a result is handed in only with every to-do ticked or dropped, no helper o
 test("a card's edge and the line it ends with say its stage: purple at work, through a turn's end while a command or a helper of its own runs; amber only while something of its own waits for the person; green and ◐ Delivered with its result; no colour and Stopped; red and ✕ Failed with why; ended, it stays so among the cards, stopped and failed with Start again and Dismiss, until it is dismissed", async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}
-  const { clock } = world(on, { agents, kinds })
+  const { clock, resumed } = world(on, { agents, kinds })
   await $.session.start(start)
   await $.prompt.submit({ text: 'four things', wait: false, origin: composer })
   const titles = ['Fit the nose', 'Check the ears', 'Draw the eyes', 'Draw the chin']
@@ -1946,8 +1946,22 @@ test("a card's edge and the line it ends with say its stage: purple at work, thr
   await pane.press({ key: 'stop-a2' })
   expect(await card('a2')).toEqual([undefined, 'Stopped', undefined, false])
   expect((await pane.find({ type: 'Text', text: 'Stopped' }))?.props.dimColor).toBe(true)
-  // Failed: red, saying why
-  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't-a4', reason: 'error', agentId: 'a4' } as never)
+  // A step stopped by a passing network error is no failure: at work, with one grey line that it tries again, and started again a
+  // while on by a message from the next hook of the mod's (here the panel's drawing), up to three tries in half an hour
+  const lost = "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)"
+  for (const [n, wait] of [[1, 20_000], [2, 60_000], [3, 180_000]] as const) {
+    await $.turn.complete({ answer: lost, durationMs: 1, isAborted: false, turnId: `t-a4-${n}`, reason: 'error', agentId: 'a4' } as never)
+    expect([n, ...(await card('a4'))]).toEqual([n, ...AT_WORK])
+    expect((await until(async () => pane.find({ type: 'Text', text: `Network error · trying again · ${n} of 3 tries` })))?.props.dimColor).toBe(true)
+    expect(resumed.filter(one => one.startsWith('a4: '))).toHaveLength(n - 1)
+    await clock.advance(wait)
+    // (each look draws the panel, the hook it goes from)
+    expect(await until(async () => ((await pane.find({ type: 'Text', text: /./ })), resumed.filter(one => one.startsWith('a4: ')).length === n ? true : undefined))).toBe(true)
+    expect(await until(async () => ((await pane.find({ type: 'Text', text: /^Network error/ })) ? undefined : true))).toBe(true)
+  }
+  expect(resumed.find(one => one.startsWith('a4: '))).toBe(`a4: Your last step stopped on a network error (Can't reach the API server — check your internet or DNS (ENOTFOUND)). This message starts you again: carry on from where you were, then end with your report as before.`)
+  // Failed: red, saying why (here a fourth network error in half an hour)
+  await $.turn.complete({ answer: lost, durationMs: 1, isAborted: false, turnId: 't-a4', reason: 'error', agentId: 'a4' } as never)
   expect(await card('a4')).toEqual(['error', '✕ Failed · Ended with an error', 'error', false])
   // Ended, each stays among the cards as it ended, an hour on and after another task's end (the done one's, above): stopped and
   // failed with Start again and Dismiss and nothing else

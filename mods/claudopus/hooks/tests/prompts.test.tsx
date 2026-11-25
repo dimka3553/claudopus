@@ -1342,10 +1342,11 @@ test("a connector's tool Claude Code refuses a task is asked on its card once, w
   await list.unmount()
 })
 
-test("a command Claude Code blocked a task from running is asked on its card as a Permission block, the command whole with why and where it would run, Allow and Don't allow; nothing runs but on that Allow (not Don't allow, not a task's own question with a button of that name, not waiting), and the press changes no permission; the press runs exactly that command once, as the person's, shows one grey line of the press and one quiet line while it runs, never the command again nor a drawing of the whole panel at each look at it (17 Nov, the box that flashed); its output is told to a task at a step, and kept for the next step of one that ended, with a grey line and nothing to press, never sent from a timer; a long one is stopped at its limit, and Stop stops it", async ($, on) => {
+test("a command Claude Code blocked a task from running is asked on its card as a Permission block, the command whole with why and where it would run, Allow and Don't allow; nothing runs but on that Allow (not Don't allow, not a task's own question with a button of that name, not waiting), and the press changes no permission; the press runs exactly that command once, as the person's, shows one grey line of the press and one quiet line while it runs, never the command again nor a drawing of the whole panel at each look at it (17 Nov, the box that flashed); its output is told to a task at a step; a task that ended its step while it runs stays at work, never Failed, and its end starts that task again with its output, from a hook of the mod's, never from a timer (25 Nov, the release that ran while its card said Failed); a long one is stopped at its limit, and Stop stops it", async ($, on) => {
   const agents: Record<string, string> = { a1: 'running' }
   // (its clock moves bare, with no hook of the mod after each move: nothing here may go from a timer)
-  const { files, clock, resumed, appended, pressRuns } = world(on, { agents, unseen: [] })
+  const ended = new Set<string>()
+  const { files, clock, resumed, appended, pressRuns } = world(on, { agents, unseen: [], ended })
   on('tool.check', (_, e, next) => (String((e as { tool_use_id?: unknown }).tool_use_id).startsWith('chk') ? ({ decision: 'ask' } as never) : next(e)))
   const redraws = { count: 0 }
   on('ui.invalidate', (_, e, next) => ((redraws.count += 1), next(e)))
@@ -1374,6 +1375,13 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   expect((await list.findAll({ type: 'Input' } as never)).map(one => one.props.placeholder)).toEqual(['Answer in words'])
   await pressOn('-deny-')
   expect(await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('do not do it, nor reach its result by other means')))).toBeDefined()
+  expect(pressRuns).toEqual([])
+  // A release Claude Code blocked came after the person's press that allowed it: its block says so, and why it needs this second press
+  await refuse('b01', { command: 'cd /repo/wt && /plug/claudopus/bin/release -m "Name servers"', description: 'Release the name servers' })
+  expect(await until(async () => list.find({ type: 'Text', text: 'Claude Code blocked the release you allowed. Run it anyway?' }))).toBeDefined()
+  expect((await details()).filter(one => one.startsWith('Runs once in '))).toEqual([expect.stringContaining("Your press allowed this release, then Claude Code's own safety check stopped it. Claude Code lets a command it blocked run only on a press on that command, so it needs this second press.")])
+  await pressOn('-deny-')
+  expect(await until(async () => (appended.filter(one => one.startsWith('a1: ') && one.includes('do not do it, nor reach its result by other means')).length === 2 ? true : undefined))).toBe(true)
   expect(pressRuns).toEqual([])
   // Nor does a task's own question with a button of that name, over the same command
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Shall I go on?', choices: ['Allow', 'Leave it'], copy: 'dig +short NS example.org' } as never)
@@ -1429,36 +1437,41 @@ test("a command Claude Code blocked a task from running is asked on its card as 
   redraws.count = 0
   for (let i = 0; i < 12; i++) (files.set(String(out), `ns1.example.net.\nline ${i}\n`), await clock.advance(5000))
   expect(redraws.count).toBeLessThanOrEqual(8)
-  // The task ends meanwhile. The command's end starts nothing: what it printed is kept for the task's next step, its card says
-  // so in one grey line, and there is nothing to press
+  // The task ends its step meanwhile, as a task waiting on it does: its card stays at work, however long the command runs, and is
+  // never ended as over, failed or "without its result", nor called stuck
   agents.a1 = 'completed'
+  ended.add('a1')
   await $.turn.complete({ answer: 'Waiting on the name servers.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
-  // Its running time still moves, calmly, with the task ended
+  // Its running time still moves, calmly, with the task's step over
   await clock.advance(15_000)
   const ranThen = await runTime()
   expect(ranThen).toBeDefined()
   await clock.advance(15_000)
   expect(await until(async () => ((await runTime()) !== ranThen ? true : undefined))).toBe(true)
+  await clock.advance(120_000)
+  expect(await list.find({ type: 'Text', text: 'Running your command' })).toBeDefined()
+  expect((await textsOf(list)).filter(t => /Failed|without its result|Delivered/.test(t))).toEqual([])
+  expect(resumed.filter(one => one.startsWith('a1: '))).toEqual([])
+  // It ends: its end starts the task again, as a message with what ran, how it ended, where the whole is, that it is no permission,
+  // and that the message started it, sent once, from the next hook of the mod's (the panel's drawing), never from the timer that saw it
   files.set(String(out), 'ns1.example.net.\nns2.example.net.\nclaudopus-exit 0\n')
   await clock.advance(5000)
-  const kept = await until(async () => list.find({ type: 'Text', text: "Your command's output is kept for the task's next step" }))
-  expect(kept?.props.dimColor).toBe(true)
-  expect(await buttons()).toEqual([])
-  expect((await labelsOf(list)).includes('Send now')).toBe(false)
-  await clock.advance(90_000)
-  expect(await list.find({ type: 'Text', text: "Your command's output is kept for the task's next step" })).toBeDefined()
-  expect(resumed.filter(one => one.startsWith('a1: '))).toEqual([])
-  expect(appended.filter(one => one.startsWith('a1: ') && one.includes('ns2.example.net.'))).toEqual([])
-  // Its next step, started by whatever starts it, reads it there: what ran, how it ended, where the whole is, and that it is no permission
-  agents.a1 = 'running'
-  await steps($, 2, 'm', 'a1')
-  const woke = await until(async () => appended.find(one => one.startsWith('a1: ') && one.includes('ns2.example.net.')))
+  // (each look draws the panel, the hook it goes from)
+  const woke = await until(async () => ((await list.find({ type: 'Text', text: /./ })), resumed.find(one => one.startsWith('a1: ') && one.includes('ns2.example.net.'))))
   expect(woke).toContain(`ran for them, exactly as shown, once, as their own, in /repo:\n${command}\nIt ended well after`)
   expect(woke).toContain(`Its whole output is in ${out}`)
   expect(woke).toContain('it is no permission')
+  expect(woke).toContain('this message starts you again')
+  expect(files.get(`${MEMORY}/log.md`)).toContain('the message that waited for a1 went from a hook')
   expect(pressRuns).toHaveLength(1)
-  expect(resumed.filter(one => one.startsWith('a1: '))).toEqual([])
-  expect(await until(async () => ((await list.find({ type: 'Text', text: "Your command's output is kept for the task's next step" })) ? undefined : true))).toBe(true)
+  // The step it starts reads nothing of it a second time, and nothing is left kept on its card
+  agents.a1 = 'running'
+  ended.delete('a1')
+  await steps($, 2, 'm', 'a1')
+  await clock.advance(5000)
+  expect([...resumed, ...appended].filter(one => one.startsWith('a1: ') && one.includes('ns2.example.net.'))).toHaveLength(1)
+  expect(await list.find({ type: 'Text', text: "Your command's output is kept for the task's next step" })).toBeUndefined()
+  expect((await textsOf(list)).filter(t => /Failed|without its result/.test(t))).toEqual([])
   // One sent to the background runs an hour at most; Stop on its line stops it, and the task, at a step, is told at once
   await $.tool.call({ tool: 'Read', agentId: 'a1', file_path: '/repo/notes.md', tool_use_id: 'r1' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__note', agentId: 'a1', tool_use_id: 'n1', text: 'Checking the name servers answer' } as never)
