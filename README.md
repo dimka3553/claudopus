@@ -95,7 +95,7 @@ Claudopus never updates by itself. Every hour (or as often as Config says), it c
 
 ### The bar above the prompt
 
-While tasks run, the bar shows memory in use, how busy the processor and graphics processor are, the battery and its time left, and the disk and network speed. Claude's own share is in purple. Memory turns amber past nine tenths, and the battery turns amber at a fifth when it's on its own power. In the desktop app, rest the pointer on a figure to see its card: who uses the most, the network in and out, and what the battery is drawing. In a terminal, they are short labels with small meters, and some drop off when the window is narrow.
+While tasks run, the bar shows memory in use, how busy the processor and graphics processor are, the battery and its time left, and the disk and network speed. Claude's own share is in purple. Memory turns amber past nine tenths, and the battery turns amber at a fifth when it's on its own power. In the desktop app, rest the pointer on a figure to see its card: a chart of its last 10 minutes with Claude's part in purple, who uses the most, the network in and out, and what the Mac draws. While charging, the battery's card says how many watts go into the battery and what the charger gives of what it can, and says plainly when the battery drains even though it's charging. In a terminal, they are short labels with small meters, and some drop off when the window is narrow.
 
 ### What tasks leave behind
 

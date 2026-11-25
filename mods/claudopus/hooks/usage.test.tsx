@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { appOf, batteryOfLinux, batteryOfMac, batteryShown, batterySvg, gpuOf, leftText, claudeOf, figuresOf, footprintOf, gbText, isMemoryHigh, keptOf, meterOf, nextKept, pctText, rateText, rawOfLinux, rawOfMac, secondsOfTime, usageMac, usageSvg, USAGE_AMBER, USAGE_PURPLE } from './usage'
+import { appOf, batteryOfLinux, batteryOfMac, batteryShown, batterySvg, CHART_W, chartSvg, gpuOf, HISTORY_SPAN, leftText, claudeOf, figuresOf, footprintOf, gbText, isMemoryHigh, keptOf, meterOf, nextKept, pctText, rateText, rawOfLinux, rawOfMac, secondsOfTime, usageMac, usageSvg, USAGE_AMBER, USAGE_PURPLE } from './usage'
 
 const GiB = 1024 ** 3
 // A figure to six places, as two sums of tenths rarely meet exactly
@@ -97,6 +97,21 @@ test('the figures come from two looks five seconds apart: the processor as a par
   // A file left by the version that kept one total for all disks is no state
   expect(keptOf(JSON.stringify({ ...second, raw: { ...second?.raw, disk: 5 } }))).toBeUndefined()
   expect(keptOf('not json')).toBeUndefined()
+  // Each look adds its figures to the last ten minutes the charts draw, so the charts take no look of their own: older ones go
+  expect(second?.history?.map(p => [p.at, p.cpu?.map(near)])).toEqual([[0, undefined], [5000, [0.6, 0.3]]])
+  expect(second?.history?.[1]?.mem?.[0]).toBe(Math.round((f!.memUsed / f!.memTotal) * 1000) / 1000)
+  const later = nextKept(second, macLook({ appCpu: '0:30.00', shellCpu: '0:05.00', otherCpu: '0:15.00', disk: '1050.00', inBytes: 6_000_000, outBytes: 5_000_000 }), 5000 + HISTORY_SPAN, false)
+  expect(later?.history?.map(p => p.at)).toEqual([5000, 5000 + HISTORY_SPAN])
+  expect(keptOf(JSON.stringify(second))?.history?.length).toBe(2)
+  expect(keptOf(JSON.stringify({ ...second, history: 'x' }))?.history).toBeUndefined()
+  // The chart: the newest look at its right edge, Claude's part in purple over the whole, a gap where no look was had, and nothing
+  // for a single look
+  const minute = 60_000
+  const svg = chartSvg([[0, 0.5, 0.25], [5000, 1, 0.5], [5 * minute, 0.2, 0], [5 * minute + 5000, 0.2, 0]], 5 * minute + 5000, 1)?.source ?? ''
+  expect(svg.match(/<path /g)?.length).toBe(4)
+  expect(svg).toContain(`fill="${USAGE_PURPLE}"`)
+  expect(svg).toContain(`L${CHART_W} `)
+  expect(chartSvg([[0, 1, 0]], 0, 1)).toBeUndefined()
 })
 
 test('Linux is read from /proc: the processor from its own counts, memory as available says, whole disks and real ports only', async () => {
@@ -275,23 +290,28 @@ test("Claude's own part, where the Mac tells each process's: of the graphics pro
   // 38 joules over five seconds is 7.6 W of the 98 W the Mac draws
   expect(near(f?.wattsClaude)).toBe(7.6)
   expect(near(f?.watts)).toBe(98.316)
-  // The gauge writes numbers below zero as unsigned 64-bit ones. On battery its system load is off (below zero, which once showed
-  // 18446744073709544 W, or 2 W of a 69 W draw), so the draw is the battery's voltage times its current; on the charger it is the
-  // system load; and a draw no Mac makes shows none
+  // The gauge writes numbers below zero as unsigned 64-bit ones. Its system load is off on battery (below zero, which once showed
+  // 18446744073709544 W, or 2 W of a 69 W draw) and counts the charging on the charger (82 W while the Mac drew 19 W and the battery
+  // took 69 W, 25 Nov), so the battery's voltage times its current is what goes in or out of it, and the Mac draws what the charger
+  // gives less that; a draw no Mac makes shows none. The charger's own watts are what it can give
   const u = (n: number) => (2n ** 64n + BigInt(n)).toString()
   const battery = (load: string, mv: number, ma: string) => `"Voltage"=20000\n"SystemLoad"=${load}\n"SystemPowerIn"=0\n"Voltage" = ${mv}\n"InstantAmperage" = ${ma}`
-  const charger = (load: string) => `"SystemLoad"=${load}\n"SystemPowerIn"=95000\n"Voltage" = 12500\n"InstantAmperage" = 1200`
-  for (const [load, watts] of [
-    [battery(u(-7552), 12203, u(-5552)), 67.751056],
-    [battery('2095', 12156, u(-5709)), 69.398604],
-    [battery('2095', 12156, '1200'), undefined],
-    [charger('80000'), 80],
-    [charger(u(-3000)), undefined],
-    [charger('5000000'), undefined],
-    ['"SystemLoad"=0', undefined],
-  ] as [string, number | undefined][]) {
-    const odd = nextKept(first, `${macLook(look)}${own({ gpu932: 2e9, gpu700: 4e9, in932: 0, out932: 0, in700: 0, disk1423: 0, disk700: 0, nj1423: 0, load })}`, 5000, false)
-    expect([load, odd?.figures?.watts === undefined ? undefined : near(odd?.figures?.watts)]).toEqual([load, watts])
+  const charger = (load: string, ma = '1200', powerIn = 95000) => `"Watts"=94\n"Watts"=60\n"SystemLoad"=${load}\n"SystemPowerIn"=${powerIn}\n"Voltage" = 12500\n"InstantAmperage" = ${ma}`
+  for (const [load, watts, battIn, powerIn, adapter] of [
+    [battery(u(-7552), 12203, u(-5552)), 67.751056, -67.751056, undefined, undefined],
+    [battery('2095', 12156, u(-5709)), 69.398604, -69.398604, undefined, undefined],
+    [battery('2095', 12156, '1200'), undefined, 14.5872, undefined, undefined],
+    [charger('80000'), 80, 15, 95, 94],
+    // Charging hard: the system load says 82 W
+    ['"Watts"=94\n"SystemLoad"=81580\n"SystemPowerIn"=87753\n"Voltage" = 11792\n"InstantAmperage" = 5842', 18.864136, 68.888864, 87.753, 94],
+    // On the charger and still draining: the Mac draws more than the charger gives
+    [charger(u(-3000), u(-2000)), 120, -25, 95, 94],
+    [charger('5000000', '1200', 5_000_000), undefined, 15, undefined, undefined],
+    ['"SystemLoad"=0', undefined, undefined, undefined, undefined],
+  ] as [string, ...(number | undefined)[]][]) {
+    const odd = nextKept(first, `${macLook(look)}${own({ gpu932: 2e9, gpu700: 4e9, in932: 0, out932: 0, in700: 0, disk1423: 0, disk700: 0, nj1423: 0, load })}`, 5000, false)?.figures
+    const n = (v: number | undefined) => (v === undefined ? undefined : near(v))
+    expect([load, n(odd?.watts), n(odd?.battIn), n(odd?.powerIn), odd?.adapter]).toEqual([load, watts, battIn, powerIn, adapter])
   }
   // A Mac that tells none of it shows none
   const bare = nextKept(nextKept(undefined, macLook(look), 0, false), macLook(look), 5000, false)?.figures

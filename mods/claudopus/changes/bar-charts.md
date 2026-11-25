@@ -1,0 +1,4 @@
+- Each card of the bar above the prompt now has a small chart of that figure's last 10 minutes, with Claude's part in purple and the highest it went. The charts use the looks the bar already takes, so they cost nothing extra.
+- While the Mac charges, the battery card says how many watts go into the battery and what the charger gives of what it can, such as 88 of 94 W. When the battery drains even though the Mac says it's charging, the card says so plainly.
+- The battery card's whole-Mac power on the charger no longer counts the charging: it read about 80 W while the Mac itself drew about 19 W.
+- A card no longer opens below its figure, over the figures and the prompt: it holds its words from the moment it shows, so the app measures it whole and puts it above.

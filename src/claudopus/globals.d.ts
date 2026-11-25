@@ -309,7 +309,9 @@ declare global {
   export import NamingAsk = M11.NamingAsk
   export import batteryShown = M12.batteryShown
   export import batterySvg = M12.batterySvg
+  export import chartSvg = M12.chartSvg
   export import FOOTPRINT_EVERY = M12.FOOTPRINT_EVERY
+  export import HISTORY_SPAN = M12.HISTORY_SPAN
   export import gbText = M12.gbText
   export import isBatteryLow = M12.isBatteryLow
   export import isMemoryHigh = M12.isMemoryHigh
@@ -329,6 +331,7 @@ declare global {
   export import UsageBattery = M12.UsageBattery
   export import UsageFigures = M12.UsageFigures
   export import UsageKept = M12.UsageKept
+  export import UsagePoint = M12.UsagePoint
   export import PACE_EVERY = M13.PACE_EVERY
   export import PACE_LOOK = M13.PACE_LOOK
   export import PACE_SET = M13.PACE_SET

@@ -163,13 +163,16 @@ test('a pointer resting on a figure shows its card: who uses the most, the parts
   await clock.advance(1000)
   await clock.advance(6000)
   await clock.advance(1000)
+  // A third look, so every figure has two to chart
+  await clock.advance(6000)
+  await clock.advance(1000)
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
-  await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
+  await until(async () => ((await desk.findAll({ type: 'Svg' })).some(d => /^Disk, last 10 minutes/.test(String(d.props.alt))) ? true : undefined))
   const cards: Record<string, string[]> = {
     memory: ['Memory', '29 of 64 GB', 'Claude and what it started', '3.3 GB', 'Using the most', 'Safari', '0.4 GB'],
     cpu: ['Processor', '50% busy', 'Cores', '10', 'Claude and what it started', '20%', 'Using the most', 'Safari', '30%'],
     gpu: ['Graphics processor', '37% busy', 'Graphics memory in use', '1.2 GB'],
-    battery: ['Battery', '85%', 'On battery · about 4h 12m left'],
+    battery: ['Battery', '85%', 'On battery · about 4h 12m left', 'Charge, last 10 minutes', 'up to 85%'],
     disk: ['Disk, read and written', '63 MB/s'],
     net: ['Network', '1 MB/s', 'Download', 'Upload'],
   }
@@ -196,12 +199,19 @@ test('a pointer resting on a figure shows its card: who uses the most, the parts
     // to the pointer by the desktop app
     expect(figure?.hover?.scope).toBe(`usage-${key}`)
     expect(Object.keys(figure?.hover ?? {}).sort()).toEqual(['backgroundColor', 'scope'])
-    // Its part of the card waits hidden and shows while the group is lit, so one figure's part shows at a time and goes as the
-    // pointer leaves
+    // The card holds its words from the start, never waiting for the group to light them: the app measures a card as it shows it,
+    // so one measured empty was placed low and grew down over the figures and the prompt
     const card = find(drawn, `usage-${key}-card`)
-    expect(card?.props?.display).toBe('none')
-    expect(card?.hover).toEqual({ scope: `usage-${key}`, display: 'flex' })
+    expect(card?.props?.display).toBeUndefined()
+    expect(card?.hover).toBeUndefined()
     for (const part of parts) expect(textOf(card)).toContain(part)
+    // Its chart of the last ten minutes, the whole and Claude's part, with the highest it went: drawn from the looks the bar had
+    // anyway
+    const chart = find(drawn, `usage-${key}-card-chart`)
+    const svg = kids(chart ?? {}).find(k => k.type === 'Svg')
+    expect([key, String(svg?.props?.alt)]).toEqual([key, expect.stringMatching(/, last 10 minutes: up to \d/)])
+    expect(svg?.props?.source).toMatch(/<path d="M[\d.]+ 30L/)
+    expect(textOf(chart)).toEqual(expect.arrayContaining([expect.stringMatching(/[Ll]ast 10 minutes$/), expect.stringMatching(/^up to \d/)]))
     // The card floats over the chat, taking no room, so nothing in the chat or the bar moves when it shows: an absolute Box drawn
     // hidden in the figure's keyed Box and shown by its hover, with no key or group of its own, which the desktop app lifts above
     // the figure as its own card, kept in the window
@@ -243,6 +253,16 @@ test('each drawing of the bar moves the figures past the places they had, so the
   const before = await spacers()
   await $.agent.spawn({ ...spawn, prompt: 'fix the ears' } as never)
   expect(await until(async () => ((await spacers()) !== before ? true : undefined))).toBe(true)
+  // Each bar takes turns of its own: another window's bar drawn in between, as the test kit's drawings came in pairs alike, leaves
+  // this one's next drawing moved past its last all the same
+  const other = await $.ui.mount({ ...BAND, requestId: 'another-window', surface: 'desktop' } as never)
+  for (const _ of [1, 2, 3]) {
+    const was = await spacers()
+    await other.redraw()
+    await desk.redraw()
+    expect([was, await spacers()].sort((a, b) => a - b)).toEqual([0, 120])
+  }
+  await other.unmount()
   await desk.unmount()
 })
 
@@ -286,8 +306,10 @@ test('in a phone-narrow terminal the word for a charge the system calls full whi
   await desk.unmount()
 })
 
-test('the battery card says what the Mac draws, the processors and graphics each, and Claude\'s part of each, with no paragraph under them', async ($, on) => {
+test('the battery card says what goes into the battery from what the charger gives, says so plainly when it drains while charging, and what the Mac draws, the processors and graphics each, and Claude\'s part of each, with no paragraph under them', async ($, on) => {
   let n = 0
+  // Charging, 5 A into the battery at 12 V of the 88 W the charger gives; then the Mac draws more and the battery gives 1 A
+  let draining = false
   // Each look: Claude's renderer a quarter of the graphics time, Safari the rest; Claude's chat 20 J a look, the
   // processors 40 J, the graphics processor 5 J
   const power = (k: number) =>
@@ -295,7 +317,11 @@ test('the battery card says what the Mac draws, the processors and graphics each
       gpuAt(60),
       ac('94%; charging; (no estimate)'),
       '@@POWER@@',
+      '"Watts"=94',
       '"SystemLoad"=80000',
+      '"SystemPowerIn"=88000',
+      '"Voltage" = 12000',
+      `"InstantAmperage" = ${draining ? (2n ** 64n - 1000n).toString() : '5000'}`,
       '@@GPUP@@',
       `      "AppUsage" = ({"API"="Metal","accumulatedGPUTime"=${k * 1e9}})`,
       '      "IOUserClientCreator" = "pid 852, Claude"',
@@ -311,10 +337,21 @@ test('the battery card says what the Mac draws, the processors and graphics each
   await clock.advance(1000)
   await clock.advance(6000)
   await clock.advance(1000)
+  // A third look, so the power has two to chart
+  await clock.advance(6000)
+  await clock.advance(1000)
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await until(async () => ((await desk.find({ type: 'Text', text: 'Power use, whole Mac' })) ? true : undefined))
-  for (const text of ['Power use, whole Mac', '80 W', 'Power use, processors', 'Claude, processors', 'Power use, graphics', 'Claude, graphics', /^about [\d.]+ W$/])
+  for (const text of ['Into the battery', '60 W', 'From the charger', '88 of 94 W', 'Power use, whole Mac', '28 W', 'Power use, processors', 'Claude, processors', 'Power use, graphics', 'Claude, graphics', /^about [\d.]+ W$/, 'Charging · the system is still working out the time to full'])
     expect(await desk.find({ type: 'Text', text })).toBeDefined()
+  // The chart is the power the Mac draws over the last ten minutes, Claude's part in purple
+  expect((await desk.findAll({ type: 'Svg' })).find(d => /^Power use, last 10 minutes: up to 28 W$/.test(String(d.props.alt)))?.props.source).toContain('#8A63F0')
+  draining = true
+  await clock.advance(6000)
+  await clock.advance(1000)
+  await until(async () => ((await desk.find({ type: 'Text', text: 'Out of the battery' })) ? true : undefined))
+  for (const text of ['Charging, but the battery drains · the Mac uses more than the charger gives', '12 W', '100 W']) expect(await desk.find({ type: 'Text', text })).toBeDefined()
+  expect(await desk.find({ type: 'Text', text: 'Into the battery' })).toBeUndefined()
   expect(await desk.find({ type: 'Text', text: "Claude's processors draw" })).toBeUndefined()
   // The cards are their rows alone: no paragraph under them on what the figures cover, and no line on what busy means
   expect(await desk.find({ type: 'Text', text: /^Claude: the app/ })).toBeUndefined()
