@@ -280,9 +280,13 @@ const NOTICE_HEADER = /\[SYSTEM NOTIFICATION - NOT USER INPUT\][^\n]*\n(?:(?:Thi
 type Quiet = { isQuiet: boolean; isRepeat: boolean }
 // The reports Claudopus took at a task's hand-back that the chat has not been given, for the tasks a notice names (or all), each
 // once: marked given, so a later notice of the same end repeats nothing (quietNotices)
+// The task whose report or part the chat was given last: the person's next message is told that a reply to it goes to that task
+let lastShown: { id: string; title: string } | undefined
 const reportsFor = async ($: EngineInterface, ids?: string[]) => {
   const given = (await read($, todos)).filter(one => one.reportForChat !== undefined && (!ids || ids.includes(one.id)))
   if (!given.length) return []
+  const last = given.at(-1)
+  if (last) lastShown = { id: last.id, title: titleOf(last) }
   await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, reportForChat: undefined, reportGiven: true } : one)))
   await log($, `gave the chat the report${given.length === 1 ? '' : 's'} of ${given.map(one => one.id).join(', ')}${ids ? ' with the notice of the end' : ' with the next message'}`)
   return given.map(one => named(REPORT_FOR_CHAT(titleOf(one), one.id, one.reportForChat ?? '')))
@@ -291,6 +295,8 @@ const reportsFor = async ($: EngineInterface, ids?: string[]) => {
 const partsFor = async ($: EngineInterface) => {
   const given = (await read($, todos)).filter(one => one.partsForChat?.length)
   if (!given.length) return []
+  const last = given.at(-1)
+  if (last) lastShown = { id: last.id, title: titleOf(last) }
   await changeTodos($, list => list.map(one => (given.some(g => g.id === one.id) ? { ...one, partsForChat: undefined } : one)))
   await log($, `gave the chat the parts of the results of ${given.map(one => one.id).join(', ')}`)
   return given.flatMap(one => (one.partsForChat ?? []).map(part => named(PART_FOR_CHAT(titleOf(one), one.id, part))))

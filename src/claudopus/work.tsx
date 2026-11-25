@@ -544,7 +544,18 @@ const workHooks = (on: On) => {
         const now = await $.clock.now()
         // (one a safety check ended hands in only word of that: it failed, and says so)
         await changeTodos($, list => list.map(one => (one.id !== agent ? one : { ...(one.flagged ? { ...ended(one, 'failed', now), why: WHY_FLAGGED } : { ...ended(one, 'done', now), reportAt: now }), answer: report.slice(0, ANSWER_CHARS) || one.answer, reportForChat: report, reportGiven: undefined, tookReport: String(e.tool_use_id) })))
-        const card = (await read($, todos)).find(one => one.id === agent)
+        let card = (await read($, todos)).find(one => one.id === agent)
+        // What its result still asks with buttons is drawn as one picture too, opened on the screen and shown with the question
+        const asked = card?.ask?.isResult && card.ask.choices?.length && !card.ask.pictures?.length ? card.ask : undefined
+        if (card && asked && (await wantsQuestionPictures($).catch(() => false))) {
+          const drawn = await questionPicture($, card.id, titleOf(card), asked.text, asked.details ?? '', asked.choices ?? [], asked.at)
+          if (drawn) {
+            await changeTodos($, list => list.map(one => (one.id === agent && one.ask?.at === asked.at && one.ask.text === asked.text ? { ...one, ask: { ...one.ask, pictures: [drawn] } } : one)))
+            card = (await read($, todos)).find(one => one.id === agent)
+            await openQuestionPicture($, drawn)
+            if (card) await askInChat($, card).catch(err => log($, `ask not shown in the chat: ${String(err)}`))
+          }
+        }
         if (card?.status === 'done' && report) $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${agent} not kept: ${String(err)}`)))
         await lookEnds($)
         await log($, `report of ${agent} taken at its hand-back, for the chat to give with the notice of its end`)

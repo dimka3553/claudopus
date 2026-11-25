@@ -145,6 +145,7 @@ You set everything below in the panel's **Config** tab, except `macs`. Claudopus
 | `agents` | `true` | `false` turns off background tasks; each chat does its own work again |
 | `sound` | `true` | `false` silences the chime and the "needs you" sound |
 | `notifications` | `true` | `false` stops the notifications when a task is done, stopped or failed |
+| `askPictures` | `false` | `true` has Claudopus draw each question with buttons as one picture, open it on your screen and show it with the question |
 | `admin` | `each` | When you are asked before an admin command runs: `each` time, once per task (`work`), or `never` |
 | `models` | `work` opus, `legwork` sonnet, `heavy` fable | The models for most tasks, clearly stated jobs with long searching and reading, and heavy tasks |
 | `lean` | `fable` heavy, `second` asked | When Fable runs (`heavy`, `all` or `named`) and when a second helper checks (`asked`, `beyond`: all but small tested fixes, `every`) |
