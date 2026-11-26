@@ -15,6 +15,8 @@ import * as M12 from '../../mods/claudopus/hooks/usage'
 import * as M13 from '../../mods/claudopus/hooks/pace'
 import * as M14 from '../../mods/claudopus/hooks/progress-page'
 import * as M15 from '../../mods/claudopus/hooks/progress'
+import * as M16 from '../../mods/claudopus/hooks/topics'
+import * as M17 from '../../mods/claudopus/hooks/reads'
 
 declare global {
   export import atom = M0.atom
@@ -371,8 +373,23 @@ declare global {
   export import progressThumb = M15.progressThumb
   export import SET_ASIDE = M15.SET_ASIDE
   export import setAsideTold = M15.setAsideTold
+  export import topicState = M15.topicState
   export import withSetAside = M15.withSetAside
   export import wordsIn = M15.wordsIn
+  export import HISTORY_MOST = M16.HISTORY_MOST
+  export import holdsStems = M16.holdsStems
+  export import latestBlock = M16.latestBlock
+  export import latestIn = M16.latestIn
+  export import listChanges = M16.listChanges
+  export import listKeys = M16.listKeys
+  export import recallStems = M16.recallStems
+  export import saidEntry = M16.saidEntry
+  export import splitHistory = M16.splitHistory
+  export import tidyTopics = M16.tidyTopics
+  export import topicsShown = M16.topicsShown
+  export import withLatest = M16.withLatest
+  export import withoutLatest = M16.withoutLatest
+  export import readsOnly = M17.readsOnly
   export import ProgressArea = M15.ProgressArea
   export import ProgressEntry = M15.ProgressEntry
   export import ProgressEvent = M15.ProgressEvent

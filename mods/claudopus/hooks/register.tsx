@@ -28,7 +28,9 @@ import type { UsageTop, UsageBattery, UsageFigures, UsageKept, UsagePoint } from
 import { PACE_EVERY, PACE_LOOK, PACE_SET, paceLookOf, paceOf } from './pace'
 import { daysOf, fewerProgress, goalsOf, progressArea, progressOverview, PROGRESS_PICTURES_MOST, progressView } from './progress-page'
 import type { ProgressActs, ProgressData, ProgressLook, ProgressPictureRef, ProgressThumb } from './progress-page'
-import { answerJson, applyProgress, areasFrom, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, withSetAside, wordsIn } from './progress'
+import { answerJson, applyProgress, areasFrom, asideLines, entriesFrom, ENTRIES_MOST, EVENT_CHARS, isAreaId, pickUpText, PICK_UP_AGAIN, PICTURE_SYSTEM, pictureFrom, pictureOf, picturePrompt, PROGRESS_SYSTEM, progressLine, progressPrompt, progressThumb, SET_ASIDE, setAsideTold, topicState, withSetAside, wordsIn } from './progress'
+import { HISTORY_MOST, holdsStems, latestBlock, latestIn, listChanges, listKeys, recallStems, saidEntry, splitHistory, tidyTopics, topicsShown, withLatest, withoutLatest } from './topics'
+import { readsOnly } from './reads'
 import type { ProgressArea, ProgressEntry, ProgressEvent, ProgressNext, ProgressPicture } from './progress'
 
 
@@ -176,6 +178,7 @@ const NO_PAGES = /^(postgres|redis-server|mysqld|mongod)\b/
 
 const me = atom({ plugin: 'claudopus', key: 'me' } as const, { id: '', title: '', tokens: 0, isChat: false, needsContext: false, isListOpened: false, window: 0 }, { shape: 'me-6' })
 const todos = atom({ plugin: 'claudopus', key: 'todos' } as const, [], { shape: 'todos-3' })
+const listSeen = atom({ plugin: 'claudopus', key: 'listSeen' } as const, [] as string[], { shape: 'list-seen-1' })
 const view = atom({ plugin: 'claudopus', key: 'view' } as const, { openId: '' }, { shape: 'view-5' })
 const servers = atom({ plugin: 'claudopus', key: 'servers' } as const, [], { shape: 'servers-2' })
 const tick = atom({ plugin: 'claudopus', key: 'tick' } as const, 0, { shape: 'tick-1' })
@@ -921,6 +924,7 @@ const NO_BOXES =
 const NO_PUSH = 'Claude never pushes or merges to main itself, so two tasks never release at once: commit on your own branch and run the release runner the task rules name, from your worktree.'
 const SECRETS_MS = 60_000
 const workHead = () => `What follows is what Claudopus tells Claude in every task started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`
+const WORDS_LINE = (id: string) => `${who(true)}'s own messages in the chat, word for word, the newest last: ${dir}/words/${id}.said.md. The chat's saved words, Claude's replies too, too long to read whole (search them): ${dir}/words/${id}.md`
 const PASTED = 'The middle of this message is in the file it names. Do not read that file into this chat: the agent that needs it reads it from that path.'
 const KEEP =
 "Keep every request the user made and every decision, in the user's own words where short. Keep the state of each file and what is not committed. Drop tool output."
@@ -1291,14 +1295,18 @@ const indexLines = (list: Stream[]) => list.map(s => `- ${[s.name, s.repo, s.ses
 
 const readIndex = async ($: EngineInterface) => parseIndex(await readOr($, `${dir}/index.md`))
 
-const saveStream = async ($: EngineInterface, name: string, patch: Partial<Stream>) => {
+const writeIndex = ($: EngineInterface, list: Stream[]) => $.fs.write(`${dir}/index.md`, `${INDEX_HEAD}${indexLines(list)}\n`)
+const withTopics = <T,>($: EngineInterface, fn: () => Promise<T>) => withLock($, 'topics', fn)
+const saveStream = ($: EngineInterface, name: string, patch: Partial<Stream>) =>
+withTopics($, async () => {
 const list = await readIndex($)
 const old = list.find(s => slug(s.name) === slug(name))
 const given = Object.fromEntries(Object.entries(patch).filter(([, value]) => typeof value === 'string').map(([key, value]) => [key, oneLine(String(value))]))
 const next: Stream = { name: oneLine(name), repo: '', session: '', state: '', summary: '', ...old, ...given }
-await $.fs.write(`${dir}/index.md`, `${INDEX_HEAD}${indexLines(old ? list.map(s => (s === old ? next : s)) : [...list, next])}\n`)
+await writeIndex($, old ? list.map(s => (s === old ? next : s)) : [...list, next])
 return next
-}
+})
+const topicNamed = async ($: EngineInterface, name: string) => ((answerJson(await readOr($, `${dir}/streams/aliases.json`)) ?? {}) as Record<string, string>)[slug(name)] ?? name
 
 
 const PAGE_CHARS = 8_000
@@ -1307,6 +1315,27 @@ const pageOf = (name: string) => `${dir}/streams/${slug(name)}.md`
 const historyOf = (name: string) => `${dir}/streams/${slug(name)}.log.md`
 const isScratchTopic = (repo: string) => /^\/(?:private\/)?(?:tmp|var\/folders)\//.test(repo) || (Boolean(dir) && repo.startsWith(`${dir}/`))
 const historyEntry = (at: number, by: string, text: string) => `## ${new Date(at).toISOString().slice(0, 16).replace('T', ' ')} ${oneLine(by) || 'A task'}\n\n${hideKeys(text.trim())}\n\n`
+const addHistory = ($: EngineInterface, name: string, entry: string) =>
+withTopics($, async () => {
+const path = historyOf(name)
+await appendTo($, path, entry)
+const text = await readOr($, path)
+if (text.length <= HISTORY_MOST) return
+let n = 1
+while (await $.fs.exists(path.replace(/\.md$/, `.${n}.md`))) n += 1
+const older = path.replace(/\.md$/, `.${n}.md`)
+const split = splitHistory(text, older)
+if (!split) return
+await $.fs.write(older, split.moved)
+await $.fs.write(path, split.kept)
+await log($, `history of ${name} split: its older half moved to ${older}`)
+})
+const writePage = ($: EngineInterface, name: string, text: string) =>
+withTopics($, async () => {
+const was = latestIn(await readOr($, pageOf(name)))
+const page = `${withoutLatest(text).trim()}\n`
+await $.fs.write(pageOf(name), was ? withLatest(page, was) : page)
+})
 const PAGE_SYSTEM = `You keep the notes page of one topic of a person's work, which a fresh AI agent reads before it starts work on that topic. The page has grown too long; the whole of it is kept in the topic's history file, which agents search when they need the past. Write the new short page from it: plain markdown, at most 6000 characters, in this order:
 1. "# <topic name>" and one line on what the topic is for.
 2. Where things are: repos, branches that matter now, key folders and files, by full path or name.
@@ -1318,7 +1347,8 @@ Keep only what a fresh agent needs to start correctly. Never invent anything; wh
 const shortening = new Set<string>()
 const shortenPage = async ($: EngineInterface, name: string) => {
 const path = pageOf(name)
-const text = await readOr($, path)
+const whole = await readOr($, path)
+const text = withoutLatest(whole)
 if (text.length <= PAGE_CHARS || shortening.has(path)) return false
 shortening.add(path)
 try {
@@ -1336,12 +1366,12 @@ if (!short || short.length > PAGE_CHARS) {
 await log($, `page of ${name} not made short: ${r.isAnswered ? `${short.length} characters back` : 'no answer'}`)
 return false
 }
-if ((await readOr($, path)) !== text) return false
+if (withoutLatest(await readOr($, path)) !== text) return false
 const marked = mark(text)
 if (!(await readOr($, historyOf(name))).includes(`(${marked})`)) {
-await appendTo($, historyOf(name), historyEntry(at, `The page as it was, set aside whole when it passed ${PAGE_CHARS} characters (${marked})`, text))
+await addHistory($, name, historyEntry(at, `The page as it was, set aside whole when it passed ${PAGE_CHARS} characters (${marked})`, text))
 }
-await $.fs.write(path, `${short}\n`)
+await writePage($, name, short)
 await log($, `page of ${name} made short: ${text.length} to ${short.length} characters, the whole page kept in its history`)
 return true
 } finally {
@@ -1351,7 +1381,7 @@ shortening.delete(path)
 const SHORTEN_STALE = 10 * 60_000
 const shortenPages = async ($: EngineInterface) => {
 const grown: Stream[] = []
-for (const one of await readIndex($)) if (((await $.fs.stat(pageOf(one.name)).catch(() => undefined))?.size ?? 0) > PAGE_CHARS) grown.push(one)
+for (const one of await readIndex($)) if (((await $.fs.stat(pageOf(one.name)).catch(() => undefined))?.size ?? 0) > PAGE_CHARS && withoutLatest(await readOr($, pageOf(one.name))).length > PAGE_CHARS) grown.push(one)
 if (!grown.length) return
 const lock = `${dir}/locks/pages`
 const now = await $.clock.now()
@@ -1366,6 +1396,40 @@ for (const one of grown) await shortenPage($, one.name).catch(err => log($, `pag
 } finally {
 await $.process.run(['rm', '-rf', lock]).catch(() => undefined)
 }
+}
+
+const tidyIndex = async ($: EngineInterface) => {
+const stamp = `${dir}/progress/tidied`
+const day = new Date(await $.clock.now()).toISOString().slice(0, 10)
+if ((await readOr($, stamp)).trim() === day) return
+await withTopics($, async () => {
+const list = await readIndex($)
+const pages = new Map<string, string>()
+for (const one of list) pages.set(one.name, await readOr($, pageOf(one.name)))
+const tidied = tidyTopics(list, pages)
+const aliases = (answerJson(await readOr($, `${dir}/streams/aliases.json`)) ?? {}) as Record<string, string>
+for (const { from, to } of tidied.renames) {
+for (const one of await $.fs.list(`${dir}/streams`).catch(() => [])) {
+if (one.name !== `${slug(from)}.md` && !one.name.startsWith(`${slug(from)}.log.`)) continue
+await $.fs.write(`${dir}/streams/${slug(to)}${one.name.slice(slug(from).length)}`, await readOr($, `${dir}/streams/${one.name}`))
+await $.process.run(['rm', '-f', `${dir}/streams/${one.name}`]).catch(() => undefined)
+}
+for (const [key, value] of Object.entries(aliases)) if (value === from) aliases[key] = to
+aliases[slug(from)] = to
+}
+if (tidied.renames.length) await $.fs.write(`${dir}/streams/aliases.json`, `${JSON.stringify(aliases, null, 2)}\n`)
+if (tidied.isChanged) await writeIndex($, tidied.list)
+if (tidied.isChanged) await log($, `topics tidied${tidied.renames.length ? `: ${tidied.renames.map(one => `${one.from} named ${one.to}`).join(', ')}` : ''}`)
+})
+await $.fs.write(stamp, `${day}\n`)
+}
+const topicsGiven = async ($: EngineInterface) => {
+const list = (await readIndex($)).filter(s => !isScratchTopic(s.repo))
+const changedAt = new Map<string, number>()
+for (const one of list.filter(s => /^done\b/i.test(s.state)))
+for (const path of [pageOf(one.name), historyOf(one.name)]) changedAt.set(one.name, Math.max(changedAt.get(one.name) ?? 0, (await $.fs.stat(path).catch(() => undefined))?.mtimeMs ?? 0))
+const { shown, done } = topicsShown(list, changedAt, await $.clock.now())
+return `${shown.map(s => `- ${[s.name, s.repo, s.session, s.state, s.summary, `streams/${slug(s.name)}.md`].join(' | ')}`).join('\n') || '(none yet)'}${done.length ? `\nDone topics: ${done.join(', ')}` : ''}`
 }
 
 const appTitle = async ($: EngineInterface) => {
@@ -1441,24 +1505,25 @@ await $.process.run(['rm', '-rf', lock]).catch(() => undefined)
 return (await take()) ? lock : ''
 }
 const freeLock = ($: EngineInterface, lock: string) => $.process.run(['rm', '-rf', lock]).then(() => undefined, () => undefined)
-let writing: Promise<unknown> = Promise.resolve()
-const withProgressFiles = <T,>($: EngineInterface, fn: () => Promise<T>): Promise<T> => {
-const run = writing.then(async () => {
+const writing = new Map<string, Promise<unknown>>()
+const withLock = <T,>($: EngineInterface, name: string, fn: () => Promise<T>): Promise<T> => {
+const run = (writing.get(name) ?? Promise.resolve()).then(async () => {
 let lock = ''
 for (let tries = 0; tries < 20 && !lock; tries += 1) {
-lock = await takeLock($, 'progress', FILES_STALE)
+lock = await takeLock($, name, FILES_STALE)
 if (!lock) await new Promise(done => $.clock.after(250, () => done(undefined)))
 }
-if (!lock) throw new Error('another chat is writing the progress files')
+if (!lock) throw new Error(`another chat is writing the files of ${name}`)
 try {
 return await fn()
 } finally {
 await freeLock($, lock)
 }
 })
-writing = run.catch(() => undefined)
+writing.set(name, run.catch(() => undefined))
 return run
 }
+const withProgressFiles = <T,>($: EngineInterface, fn: () => Promise<T>) => withLock($, 'progress', fn)
 const writeAreas = ($: EngineInterface, areas: ProgressArea[]) => $.fs.write(`${progressDir()}/areas.json`, `${JSON.stringify({ areas }, null, 2)}\n`)
 const writeEntries = ($: EngineInterface, areaId: string, entries: ProgressEntry[]) => $.fs.write(`${progressDir()}/areas/${areaId}.json`, `${JSON.stringify({ entries: entries.slice(0, ENTRIES_MOST) }, null, 2)}\n`)
 const progressMoved = ($: EngineInterface) => update($, progressChanged, n => n + 1).then(() => redraw($))
@@ -1520,6 +1585,22 @@ return one && typeof one.kind === 'string' && typeof one.text === 'string' && ty
 }
 const dropEvent = ($: EngineInterface, name: string) => $.process.run(['rm', '-f', `${queueDir()}/${name}`]).then(() => undefined, () => undefined)
 
+const keepUp = async ($: EngineInterface, event: ProgressEvent, answer: Record<string, unknown>, places: string[]) => {
+if (event.kind === 'said') for (const id of places) await appendTo($, `${progressDir()}/areas/${id}.said.md`, saidEntry(event.at, '', event.text))
+const topic = event.kind === 'result' && event.topic ? await topicNamed($, event.topic) : ''
+if (!topic || !places.length) return
+const areas = (await readAreas($)).filter(area => places.includes(area.id)).slice(0, 2)
+const block = latestBlock(await Promise.all(areas.map(async area => ({ area, entries: await readEntries($, area.id) }))), reportsDir(), await $.clock.now())
+const state = topicState(answer)
+await withTopics($, async () => {
+const list = await readIndex($)
+const known = list.find(one => slug(one.name) === slug(topic))
+if (!known) return
+if (state && state !== known.state) await writeIndex($, list.map(one => (one === known ? { ...one, state } : one)))
+await $.fs.write(pageOf(known.name), withLatest(await readOr($, pageOf(known.name)), block))
+})
+}
+
 const drainProgress = async ($: EngineInterface) => {
 if (!dir || draining) return
 draining = true
@@ -1528,6 +1609,7 @@ if (!lock) return void ((draining = false), drainSoon($, PROGRESS_RETRY))
 let isLate = false
 try {
 await refreshPicture($).catch(err => indexLog($, `picture not written: ${String(err)}`))
+await tidyIndex($).catch(err => indexLog($, `topics not tidied: ${String(err)}`))
 await backfillProgress($).catch(err => indexLog($, `history not queued: ${String(err)}`))
 while (!isLate) {
 const names = (await $.fs.list(queueDir()).catch(() => []))
@@ -1555,6 +1637,7 @@ const got = answers[n]
 const what = `${event.kind}${event.task ? ` of ${event.task}` : ''}${event.report ? ` (${event.report})` : ''}`
 if (got?.answer) {
 const done = await applyEvent($, event, got.answer, picture)
+await keepUp($, event, got.answer, done.places).catch(err => indexLog($, `${what}: topic not kept up: ${String(err)}`))
 await dropEvent($, name)
 await indexLog($, `${what} indexed: ${done.touched.size ? [...done.touched].join(', ') : 'nothing changed'}`)
 if (done.isChanged) await progressMoved($)
@@ -1582,7 +1665,7 @@ const all = (await loadReports($)).filter(r => r.at >= now - BACKFILL_DAYS * 86_
 for (const r of all) {
 const text = (await readOr($, `${reportPath(r)}/report.md`)).trim()
 if (!text) continue
-const one: ProgressEvent = { kind: 'result', at: r.at, chat: r.chatId ?? '', task: r.agent ?? '', report: r.id, title: r.title, files: r.files.filter(file => PICTURE.test(file)), text: hideKeys(clip(text, EVENT_CHARS.result / 2)), isBackfill: true }
+const one: ProgressEvent = { kind: 'result', at: r.at, chat: r.chatId ?? '', task: r.agent ?? '', report: r.id, title: r.title, topic: r.subject, files: r.files.filter(file => PICTURE.test(file)), text: hideKeys(clip(text, EVENT_CHARS.result / 2)), isBackfill: true }
 await $.fs.write(`${queueDir()}/${queueName(r.at)}`, `${JSON.stringify(one)}\n`)
 }
 await $.fs.write(`${progressDir()}/backfilled`, `${new Date(now).toISOString()}\n`)
@@ -1600,8 +1683,10 @@ const isKnown = Boolean(was.updated) && Number.isFinite(updated)
 if (isKnown && now - updated < PICTURE_EVERY) return
 const since = isKnown ? updated : now - BACKFILL_DAYS * 86_400_000
 const words: { at: string; text: string }[] = []
-for (const entry of await $.fs.list(`${dir}/words`).catch(() => []))
-if (entry.kind === 'file' && entry.name.endsWith('.md') && !(entry.mtimeMs && entry.mtimeMs < since)) words.push(...wordsIn(await fileEnd($, `${dir}/words/${entry.name}`), since))
+const listed = (await $.fs.list(`${dir}/words`).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.md'))
+const names = new Set(listed.map(entry => entry.name))
+for (const entry of listed)
+if (!(!entry.name.endsWith('.said.md') && names.has(entry.name.replace(/\.md$/, '.said.md'))) && !(entry.mtimeMs && entry.mtimeMs < since)) words.push(...wordsIn(await fileEnd($, `${dir}/words/${entry.name}`), since))
 if (!words.length) return
 words.sort((a, b) => (a.at < b.at ? -1 : 1))
 const r = await $.model.complete({ model: 'sonnet', system: PICTURE_SYSTEM, prompt: picturePrompt(was, words, now, PICTURE_READ), maxTokens: 1500, timeoutMs: 120_000 }).catch(() => undefined)
@@ -2820,7 +2905,7 @@ mark: marked,
 }
 await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
 await loadReports($)
-queueSoon($, { kind: 'result', task: one.id, report: id, title, files: files.filter(file => PICTURE.test(file)), text })
+queueSoon($, { kind: 'result', task: one.id, report: id, title, topic: one.subject ?? '', files: files.filter(file => PICTURE.test(file)), text })
 }
 
 const thumbPath = (r: Report, file: string) => `${reportPath(r)}/thumbs/${file.replaceAll('/', '--')}.jpg`
@@ -11015,7 +11100,7 @@ isDeferred: false,
 await $.tool.register({
 name: 'recall',
 description: named("Searches the memory for a phrase: {name}'s messages word for word, what they asked, topic notes, pastes, and the results finished tasks left for {name} (reports/<id>/report.md, each dated). Returns matching lines with their files."),
-inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
+inputSchema: { type: 'object', properties: { query: { type: 'string' }, area: { type: 'string', description: "Only this area of Progress or topic of the index, by its name: its topic page and history, its results and what the person said of it" } }, required: ['query'] },
 isDeferred: false,
 })
 await $.tool.register({
@@ -11243,21 +11328,26 @@ const board = await cardsNow($).catch(err => (void log($, `cards not told to the
 if (board) context.push(named(board))
 }
 let text = e.text
+let pasted = ''
 const m = await read($, me)
 
 if (!isOff) {
 const role = await keptRule($, 'role', async () => named(fillModels((await inForce($, $.plugin.root, dir, 'roles/chat.md')).text, models, lean)))
+const index = (await readIndex($)).filter(s => !isScratchTopic(s.repo))
+const areas = await readAreas($)
+let changed = ''
 if (!m.isChat || m.needsContext) {
-const subjects = (await readIndex($)).filter(s => !isScratchTopic(s.repo)).map(s => `- ${[s.name, s.repo, s.session, s.state, s.summary, `streams/${slug(s.name)}.md`].join(' | ')}`).join('\n')
-context.push(`${role}\nThis chat's saved words: ${dir}/words/${m.id}.md\n${PROGRESS_LINE()}\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${subjects || '(none yet)'}`)
-}
+context.push(`${role}\n${WORDS_LINE(m.id)}\n${PROGRESS_LINE()}\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${await topicsGiven($)}`)
+} else changed = listChanges(index, areas, await read($, listSeen))
+if (!m.isChat || m.needsContext || changed) await update($, listSeen, () => listKeys(index, areas))
 const told = reportsTold(await read($, reports), await $.clock.now())
-context.push(`${await keptRule($, 'each', async () => BRIEF)}${told ? `\n${told}` : ''}`)
+context.push(`${await keptRule($, 'each', async () => BRIEF)}${told ? `\n${told}` : ''}\nProgress: ${progressDir()}${changed ? `\nChanged since you were given the topic list: ${changed}` : ''}`)
 await update($, me, one => ({ ...one, isChat: true, needsContext: false }))
 
 if (text.length > PASTE_CHARS) {
 const stamp = new Date().toISOString().replaceAll(':', '-')
 const path = `${dir}/pastes/${stamp}.md`
+pasted = path
 await $.fs.write(`${dir}/pastes/${stamp}.md`, hideKeys(text))
 text = `${text.slice(0, 600)}\n\n[${text.length - 1200} characters pasted here were saved to ${path} and left out of this chat]\n\n${text.slice(-600)}`
 context.push(PASTED)
@@ -11269,6 +11359,7 @@ heard = [...heard, text]
 fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
 const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
 await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
+await appendTo($, `${dir}/words/${m.id}.said.md`, hideKeys(saidEntry(await $.clock.now(), how, pasted ? e.text : text, pasted))).catch(err => log($, `message not saved: ${String(err)}`))
 queueSoon($, { kind: 'said', text })
 
 return next(context.length ? { ...e, text, context } : { ...e, text })
@@ -13123,6 +13214,7 @@ if (!dir) return ''
 const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
 if (e.tool === 'Bash') {
 const command = String(input.command ?? '')
+if (readsOnly(command, { home: dir.replace(/\/\.claude\/claudopus$/, ''), folder: '', memory: dir }, shellWords, commandAt)) return ''
 const texts = [command, ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
 if (texts.some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
 if (texts.some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
@@ -13158,7 +13250,7 @@ return roots.some(root => path === root || path.startsWith(`${root}/`) || (isSea
 
 const workRules = async ($: EngineInterface) => {
 const work = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).replace(/\{pane-file\}/g, `${$.plugin.root}/bin/pane-file`).trim()
-const words = `- The chat's saved words, ${who()}'s messages word for word: ${dir}/words/${(await read($, me)).id}.md`
+const words = `- ${WORDS_LINE((await read($, me)).id)}. What ${who()} said of each area of Progress: ${dir}/progress/areas/<area id>.said.md`
 return `${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}`
 }
 const ownCheckoutChanged = async ($: EngineInterface, texts: string[], start: string) => {
@@ -13755,31 +13847,55 @@ return { text: opened.isPlaced ? 'Claudopus opened the Servers panel.'
 const RECALL_LINES = 40
 const RECALL_PER_FILE = 6
 const recallRank = (file: string) =>
-file.startsWith('streams/') ? (file.endsWith('.log.md') ? 1 : 0)
+file.startsWith('progress/') ? (file.endsWith('.json') ? -2 : 3)
+: file.startsWith('streams/') ? (/\.log(?:\.\d+)?\.md$/.test(file) ? 1 : 0)
 : file.startsWith('reports/') ? 2
 : file.startsWith('words/') || file.startsWith('asks/') ? 3
 : file.startsWith('work/') ? 5
 : file.startsWith('notes/') ? 6
 : 4
 
+const recallWithin = async ($: EngineInterface, named: string) => {
+const key = slug(await topicNamed($, named))
+const topic = (await readIndex($)).find(one => slug(one.name) === key)
+const areas = (await readAreas($)).filter(one => one.id === key || slug(one.name) === key || one.topics?.some(name => slug(name) === key))
+const topics = [...new Set([...(topic ? [topic.name] : []), ...areas.flatMap(one => one.topics ?? [])].map(slug))]
+const reports = new Set<string>()
+for (const area of areas) for (const entry of await readEntries($, area.id)) if (entry.report) reports.add(entry.report)
+return [...topics.flatMap(one => [`streams/${one}.md:`, `streams/${one}.log.`]), ...areas.flatMap(one => [`progress/areas/${one.id}.said.md:`, `progress/areas/${one.id}.json:`]), ...[...reports].map(id => `reports/${id}/`)]
+}
+const progressLines = async ($: EngineInterface, within: string[] | undefined, holds: (line: string) => boolean) => {
+const lines: string[] = []
+for (const area of await readAreas($)) {
+const file = `${dir}/progress/areas/${area.id}.json`
+if (within && !within.includes(`progress/areas/${area.id}.json:`)) continue
+for (const [n, e] of (await readEntries($, area.id)).entries()) {
+const line = `${file}:${n + 1}:${area.name} · ${e.at.slice(0, 10)} ${e.title}${e.outcome ? `: ${e.outcome}` : ''}${e.kind === 'aside' ? ` (set aside: ${e.reason})` : ''}${e.report ? ` · reports/${e.report}/report.md` : ''}`
+if (holds(line)) lines.push(line)
+}
+}
+return lines
+}
+
 const toolHooks = (on: On) => {
 
 on('tool.call', { tool: 'mcp__claudopus__update' }, async ($, e) => {
 const input = e as unknown as { name?: string; repo?: string; state?: string; summary?: string; brief?: string; add?: string }
 if (!input.name?.trim()) return { result: 'A topic needs a name.' }
-const known = (await readIndex($)).find(one => slug(one.name) === slug(input.name ?? ''))
+const name = await topicNamed($, input.name.trim())
+const known = (await readIndex($)).find(one => slug(one.name) === slug(name))
 if (isScratchTopic(input.repo?.trim() || known?.repo || '')) return { result: named(`Not recorded: ${input.repo?.trim() || known?.repo} is a test or scratch folder, and topics are for {name}'s own work.`) }
 const brief = input.brief?.trim() ?? ''
 const added = input.add?.trim() ?? ''
-const isLong = brief.length > PAGE_CHARS
-const saved = await saveStream($, input.name, { repo: input.repo, state: input.state?.slice(0, 60), summary: input.summary })
+const isLong = withoutLatest(brief).length > PAGE_CHARS
+const saved = await saveStream($, name, { repo: input.repo, state: input.state?.slice(0, 60), summary: input.summary })
 if (e.agentId !== undefined) await change($, e.agentId, one => ({ ...one, subject: saved.name }))
 const page = pageOf(saved.name)
 if (added) {
 const card = e.agentId === undefined ? undefined : (await read($, todos)).find(one => one.id === e.agentId)
-await appendTo($, historyOf(saved.name), historyEntry(await $.clock.now(), card ? titleOf(card) : 'The chat', added))
+await addHistory($, saved.name, historyEntry(await $.clock.now(), card ? titleOf(card) : 'The chat', added))
 }
-if (brief && !isLong) await $.fs.write(page, `${hideKeys(brief)}\n`)
+if (brief && !isLong) await writePage($, saved.name, hideKeys(brief))
 void shortenPage($, saved.name).catch(err => log($, `page of ${saved.name} not made short: ${String(err)}`))
 const said = [
 added ? `History: ${historyOf(saved.name)} (added to)` : '',
@@ -13790,23 +13906,35 @@ return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved
 })
 
 on('tool.call', { tool: 'mcp__claudopus__recall' }, async ($, e) => {
-const query = (e as unknown as { query?: string }).query?.trim() ?? ''
+const input = e as unknown as { query?: string; area?: string }
+const query = input.query?.trim() ?? ''
 if (!query) return { result: 'Nothing to search for.' }
-const grep = async (phrase: string) => (await $.process.run(['grep', '-rniF', '--include=*.md', '-e', phrase, dir])).stdout.split('\n').filter(Boolean)
-const words = [...new Set(query.toLowerCase().split(/\s+/).filter(one => one.length > 1))]
-let found = await grep(query)
-const isLoose = !found.length && words.length > 1
+const within = input.area?.trim() ? await recallWithin($, input.area.trim()) : undefined
+if (within && !within.length) return { result: `No area or topic is named "${input.area}". The areas: ${(await readAreas($)).map(one => one.name).join(', ') || 'none yet'}.` }
+const isWithin = (line: string) => !within || within.some(one => line.startsWith(`${dir}/${one}`))
+const grep = async (phrase: string) => (await $.process.run(['grep', '-rniF', '--include=*.md', '-e', phrase, dir])).stdout.split('\n').filter(line => line && isWithin(line))
+const words = recallStems(query)
+const said = (line: string) => line.slice(line.indexOf(':', dir.length + 1))
+let found = [...(await progressLines($, within, line => said(line).toLowerCase().includes(query.toLowerCase()))), ...(await grep(query))]
+const isLoose = !found.length && (words.length > 1 || words[0] !== query.toLowerCase())
 if (isLoose) {
 const longest = [...words].sort((a, b) => b.length - a.length)[0] ?? query
-found = (await grep(longest)).filter(line => words.every(one => line.slice(line.indexOf(':', dir.length + 1)).toLowerCase().includes(one)))
+found = [...(await progressLines($, within, line => holdsStems(said(line), words))), ...(await grep(longest)).filter(line => holdsStems(said(line), words))]
 }
+const latest = new Map<string, number>()
+for (const file of new Set(found.map(line => line.slice(dir.length + 1, line.indexOf(':', dir.length + 1))).filter(file => /^streams\/[^/]+\.md$/.test(file) && !file.includes('.log.')))) {
+const page = await readOr($, `${dir}/${file}`)
+const block = latestIn(page)
+if (block) latest.set(file, page.slice(0, page.indexOf(block) + block.length).split('\n').length)
+}
+const rank = (file: string, line: string) => ((latest.get(file) ?? 0) >= Number(line.slice(file.length + 1).split(':')[0]) ? -1 : recallRank(file))
 const archived = new Set((await loadReports($).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
 const seen = new Set<string>()
 const perFile = new Map<string, number>()
 const lines = found
 .map(line => line.replace(`${dir}/`, ''))
 .map(line => ({ line, file: line.slice(0, line.indexOf(':')) }))
-.sort((a, b) => recallRank(a.file) - recallRank(b.file) || (a.file.startsWith('reports/') && b.file.startsWith('reports/') ? b.file.localeCompare(a.file) : 0))
+.sort((a, b) => rank(a.file, a.line) - rank(b.file, b.line) || (a.file.startsWith('reports/') && b.file.startsWith('reports/') ? b.file.localeCompare(a.file) : 0))
 .filter(({ line, file }) => {
 const said = flat(line.slice(line.indexOf(':', file.length + 1) + 1))
 if (seen.has(said)) return false
@@ -13815,7 +13943,7 @@ perFile.set(file, (perFile.get(file) ?? 0) + 1)
 return (perFile.get(file) ?? 0) <= RECALL_PER_FILE
 })
 .map(({ line, file }) => (archived.has(file.match(/^reports\/([^/]+)\//)?.[1] ?? '') ? `[archived] ${line}` : line).slice(0, 240))
-if (!lines.length) return { result: `Nothing in ${dir} mentions "${query}"${words.length > 1 ? ', nor holds all its words on one line' : ''}.` }
+if (!lines.length) return { result: `Nothing in ${dir}${within ? ` about ${input.area}` : ''} mentions "${query}"${words.length > 1 ? ', nor holds all its words on one line' : ''}.` }
 const more = lines.length > RECALL_LINES ? `\n(${lines.length - RECALL_LINES} more lines; narrow the phrase)` : ''
 const loose = isLoose ? `No line holds "${query}" as written; these hold each of its words.\n` : ''
 return { result: `${loose}Files are under ${dir}.\n${lines.slice(0, RECALL_LINES).join('\n')}${more}` }

@@ -285,6 +285,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     if (tool === 'head' && rest[0] === '-n') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').split('\n').slice(0, Number(rest[1])).join('\n') + '\n') : ok('', 1)
     // The chat's own process, as the shell the mod starts names its parent
     if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
+    // A lock of the mod's, a folder only one chat makes (takeLock): held while its time is in it
+    if (tool === '/bin/sh' && String(rest[1]).startsWith('mkdir -p "$(dirname "$1")" && mkdir "$1"')) return files.has(`${rest[3]}/at`) ? ok('', 1) : (files.set(`${rest[3]}/at`, String(rest[4])), ok())
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
     // bin/run-it, as a command Claude Code refused is run on the person's press: started detached, it prints its process group's
     // number; it runs until the test lays run:gone; stopped, it is gone and its output says so
@@ -507,7 +509,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; complete?:
     }
     // This Mac's own name, as its Sharing settings give it
     if (tool === 'scutil') return { value: { exitCode: 0, stdout: 'Sams-MacBook-Air\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-    if (tool === 'rm') files.delete(String(rest.at(-1)))
+    if (tool === 'rm') (files.delete(String(rest.at(-1))), files.delete(`${String(rest.at(-1))}/at`))
     // A file moved aside
     if (tool === 'mv') (files.set(String(rest.at(-1)), files.get(String(rest.at(-2))) ?? ''), files.delete(String(rest.at(-2))))
     // A copy the mod makes of a file
@@ -889,7 +891,8 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   const first = await $.prompt.submit({ text: 'fix the upload page', wait: false, origin: composer })
   expect(first.context?.join('\n')).toContain('CHAT ROLE')
   expect(first.context?.join('\n')).toContain('Topics so far')
-  expect(first.context?.join('\n')).toContain(`This chat's saved words: ${MEMORY}/words/engine-id.md`)
+  // its words: the person's own messages on their own, the file a task reads, and the whole conversation, searched
+  expect(first.context?.join('\n')).toContain(`The person's own messages in the chat, word for word, the newest last: ${MEMORY}/words/engine-id.said.md. The chat's saved words, Claude's replies too, too long to read whole (search them): ${MEMORY}/words/engine-id.md`)
   // and where the progress of the work is, so a question of how some work stands is answered from it at once
   expect(first.context?.join('\n')).toContain(`Progress of the person's work, kept by Claudopus: ${MEMORY}/progress/areas.json`)
   expect(first.context?.join('\n')).toContain('start a fresh agent')
@@ -900,6 +903,14 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   const second = await $.prompt.submit({ text: 'and the nose', wait: false, origin: composer, turnId: 'turn-1' })
   expect(second.context?.length).toBe(1)
   expect(second.context?.[0]).toContain('start a fresh agent')
+  // Each message names the progress folder, and what changed in the topics and areas since the chat was given the list, once
+  expect(second.context?.[0]).toContain(`\nProgress: ${MEMORY}/progress`)
+  expect(second.context?.[0]).not.toContain('Changed since')
+  files.set(`${MEMORY}/index.md`, `# Topics\n\nname | repo | session | state | summary\n\n- 3D heads | /sandbox |  | nose fixed | The heads\n- greet names | /private/tmp/x |  | done | A test run's topic\n`)
+  files.set(`${MEMORY}/progress/areas.json`, JSON.stringify({ areas: [{ id: 'nose', name: 'Nose', next: [], updated: '2026-11-26' }] }))
+  const third = (await $.prompt.submit({ text: 'and the chin', wait: false, origin: composer })).context?.[0] ?? ''
+  expect(third).toContain('\nChanged since you were given the topic list: topics 3D heads (nose fixed) (new); areas Nose (new)')
+  expect((await $.prompt.submit({ text: 'and the ears', wait: false, origin: composer })).context?.[0]).not.toContain('Changed since')
 
   // A program's message is saved too, marked, a notice is not, and a key typed in is hidden
   await $.prompt.submit({ text: 'review this change', wait: false, origin: { kind: 'sdk' } })
@@ -913,6 +924,12 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   expect(words).toMatch(/\(from slack\)\npinged by slack/)
   expect(words).not.toContain('task-notification')
   expect(words).toContain('use [key hidden] and [key hidden] for it, KAGGLE_KEY=[hidden] at https://cdn.example.com/a.csv?Policy=[hidden]&Signature=[hidden], [key hidden] and npm-run-build-2024-11')
+  // and the person's own messages on their own, dated, with no program's and no reply
+  const own = files.get(`${MEMORY}/words/engine-id.said.md`) ?? ''
+  expect(own).toMatch(/^## \d{4}-\d\d-\d\dT[\d:.]+Z\nfix the upload page\n\n## [^\n]+ \(sent while Claude was working\)\nand the nose\n\n/)
+  expect(own).not.toContain('review this change')
+  expect(own).not.toContain('pinged by slack')
+  expect(own).toContain('use [key hidden] and [key hidden] for it')
 
   // Words of a long chat, over the 4 MB the engine gives whole, are added to, never written again as only the newest
   const long = `## 2026-11-12T07:00:00.000Z\nthe first message\n\n${'x'.repeat(4_300_000)}\n\n`
@@ -943,6 +960,8 @@ test('work starts as a fresh agent from written instructions, never as a copy of
   expect(prompts[0]?.startsWith('BRIEF')).toBe(true)
   expect(prompts[0]).toContain('WORK ROLE')
   expect(prompts[0]).toContain(`${MEMORY}/words/engine-id.md`)
+  expect(prompts[0]).toContain(`- The person's own messages in the chat, word for word, the newest last: ${MEMORY}/words/engine-id.said.md.`)
+  expect(prompts[0]).toContain(`What the person said of each area of Progress: ${MEMORY}/progress/areas/<area id>.said.md`)
 })
 
 test('no agent starts on an older model or on Haiku, by the chat or by a piece of work: its Agent call passes as written and its start runs on its family\'s newest; the aliases and their newest versions start as named', async ($, on) => {
@@ -1414,6 +1433,8 @@ test('a large paste is saved to a file and left out of the chat', async ($, on) 
   expect(r.text).toContain('were saved to')
   const saved = [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/pastes/`))
   expect(saved?.[1]).toBe(paste)
+  // The person's own words keep its start and where the whole of it is
+  expect(files.get(`${MEMORY}/words/engine-id.said.md`)).toContain(`\n${paste.slice(0, 600)}\n[the whole paste: ${saved?.[0]}]\n\n`)
   // and the chat does not read it back in: the agent that needs it reads it
   expect((await $.tool.call({ tool: 'Read', tool_use_id: 'p1', file_path: saved?.[0] } as never)).deny).toContain('Start a fresh agent')
   expect((await $.tool.call({ tool: 'Grep', tool_use_id: 'p2', pattern: 'end', path: `${MEMORY}/pastes` } as never)).deny).toContain('Start a fresh agent')
@@ -1732,7 +1753,7 @@ test('config.json names the person the work is for; without a name the texts say
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
   expect(prompts[0]).toContain('started from a chat for Sam, the person you work for.')
   expect(prompts[0]).toContain('Sam follows this task in a panel')
-  expect(prompts[0]).toContain("Sam's messages word for word")
+  expect(prompts[0]).toContain("Sam's own messages in the chat, word for word")
   expect(prompts[0]).not.toMatch(/the person(?! you work for)/i)
 })
 
@@ -1745,8 +1766,8 @@ test('without a name in config.json the work is told of the person', async ($, o
   expect(prompts[0]).toContain('The person follows this task in a panel')
 })
 
-test('the update tool records a topic, adds to its history with nothing read, rewrites its short page only within its limit, and keeps a test folder\'s topic out of the index', async ($, on) => {
-  const { files } = world(on)
+test('the update tool records a topic, adds to its history with nothing read, rewrites its short page only within its limit, and keeps a test folder\'s topic out of the index; the Latest block at its top stays, a history past its limit has its older half moved once, the list is tidied each day and a topic long done is only named', async ($, on) => {
+  const { files, clock } = world(on)
   files.set(`${MEMORY}/index.md`, `# Topics\n\nname | repo | session | state | summary\n\n- greet names | ${MEMORY}/notes/token-usage/runs/S0/work |  | done | A test run's topic\n`)
   await $.session.start(start)
 
@@ -1767,9 +1788,50 @@ test('the update tool records a topic, adds to its history with nothing read, re
     expect(String((await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 't5', name: 'hop chain', repo, state: 'done' } as never)).result)).toContain('Not recorded')
   }
   expect(files.get(`${MEMORY}/index.md`)).not.toContain('hop chain')
-  const told = (await $.prompt.submit({ text: 'what is on', wait: false, origin: composer })).context?.join('\n') ?? ''
+  // The index is written one at a time, across chats too: while another chat holds its lock an update waits, then lands
+  files.set(`${MEMORY}/locks/topics/at`, String(clock.now()))
+  const waiting = $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 's1', name: 'Garden', state: 'started' } as never)
+  await clock.advance(1_000)
+  expect(files.get(`${MEMORY}/index.md`)).not.toContain('- Garden |')
+  files.delete(`${MEMORY}/locks/topics/at`)
+  await clock.advance(500)
+  await waiting
+  expect(files.get(`${MEMORY}/index.md`)).toContain('- Garden |  |  | started |')
+  expect(files.has(`${MEMORY}/locks/topics/at`)).toBe(false)
+  // A page a task rewrites keeps the Latest block Claudopus keeps at its top
+  const LATEST = "<!-- Latest: kept by Claudopus from each result; the rest of the page is the tasks' -->\n## Latest (2026-11-26)\n- Nose\n<!-- End of Latest -->"
+  files.set(`${MEMORY}/streams/3d-heads.md`, `# 3D heads\n\n${LATEST}\n\nNose fixed.\n`)
+  files.set(`mtime:${MEMORY}/streams/3d-heads.md`, String(clock.now()))
+  await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 't6', name: '3D heads', brief: '# 3D heads\n\nNose and chin fixed.' } as never)
+  expect(files.get(`${MEMORY}/streams/3d-heads.md`)).toBe(`# 3D heads\n\n${LATEST}\n\nNose and chin fixed.\n`)
+  // A history past 200 KB has its older half, cut at an entry, moved to a file of its own, and a line at its top points there
+  const old = Array.from({ length: 30 }, (_, n) => `## 2026-10-${String(n + 1).padStart(2, '0')} 10:00 A task\n\n${'y'.repeat(7000)}\n\n`).join('')
+  files.set(`${MEMORY}/streams/3d-heads.log.md`, old)
+  await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 't7', name: '3D heads', add: 'Chin checked.' } as never)
+  const history = files.get(`${MEMORY}/streams/3d-heads.log.md`) ?? ''
+  expect(history).toMatch(new RegExp(`^Older entries: ${MEMORY}/streams/3d-heads\\.log\\.1\\.md \\(up to 2026-10-15\\)\\n\\n## 2026-10-16 10:00 A task\\n`))
+  expect(history.trim().endsWith('Chin checked.')).toBe(true)
+  expect(files.get(`${MEMORY}/streams/3d-heads.log.1.md`)).toBe(old.slice(0, old.indexOf('## 2026-10-16')))
+  // Once a day the list is tidied: a topic named by its slug takes its page's title, its files with it, and its old name still finds it;
+  // an empty summary is its page's first line
+  files.set(`${MEMORY}/index.md`, `${files.get(`${MEMORY}/index.md`)}- update-the-revenue-by-country | /sales |  | open | \n`)
+  files.set(`${MEMORY}/streams/update-the-revenue-by-country.md`, '# Revenue by country\n\nThe sales sheet by country.\n')
+  await $.prompt.submit({ text: 'what is on', wait: false, origin: composer })
+  await clock.advance(5_000)
+  expect(await until(async () => (files.get(`${MEMORY}/index.md`) ?? '').includes('- Revenue by country | /sales |  | open | The sales sheet by country.') || undefined)).toBe(true)
+  expect(files.get(`${MEMORY}/streams/revenue-by-country.md`)).toBe('# Revenue by country\n\nThe sales sheet by country.\n')
+  expect(files.has(`${MEMORY}/streams/update-the-revenue-by-country.md`)).toBe(false)
+  await $.tool.call({ tool: 'mcp__claudopus__update', tool_use_id: 't8', name: 'update-the-revenue-by-country', state: 'done: sent' } as never)
+  expect(files.get(`${MEMORY}/index.md`)).toContain('- Revenue by country | /sales |  | done: sent | The sales sheet by country.')
+  expect(files.get(`${MEMORY}/index.md`)).not.toContain('update-the-revenue')
+  // A topic done and quiet for two weeks is only named, on one line, in the list a chat is given
+  files.set(`mtime:${MEMORY}/streams/revenue-by-country.md`, String(clock.now() - 15 * 86_400_000))
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'one', toolUses: [] }] as never })
+  const told = (await $.prompt.submit({ text: 'what is on now', wait: false, origin: composer })).context?.join('\n') ?? ''
   expect(told).toContain('- 3D heads | /sandbox')
   expect(told).not.toContain('greet names')
+  expect(told).toContain('\nDone topics: Revenue by country')
+  expect(told).not.toContain('- Revenue by country')
 })
 
 test('a topic page grown past its limit is set aside whole into its history and a short page made from it takes its place; with no answer it stays', async ($, on) => {
@@ -1816,6 +1878,31 @@ test('recall gives topic pages, then their histories, results newest first, the 
   expect(loose).toContain('No line holds "flawed nose" as written')
   expect(loose).toContain('reports/20261102-0900-b/report.md:1:the nose is flawed')
   expect(String((await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't3', query: 'zebra nose' } as never)).result)).toContain('Nothing in')
+  // Within one area, or its topic: only its topic's page and histories, its results and what the person said of it, its entries
+  // and its page's Latest block first; a phrase found nowhere whole by its words' stems
+  files.set(`${MEMORY}/progress/areas.json`, JSON.stringify({ areas: [{ id: 'nose', name: 'Nose', next: [], topics: ['3D heads', 'Ears'] }, { id: 'site', name: 'Website', next: [] }] }))
+  files.set(`${MEMORY}/progress/areas/nose.json`, JSON.stringify({ entries: [{ task: 'a1', title: 'Nose for side faces', at: '2026-11-02T09:00:00.000Z', kind: 'milestone', outcome: 'The nose fits side faces', report: '20261102-0900-b' }] }))
+  files.set(`${MEMORY}/progress/areas/nose.said.md`, '## 2026-11-02T08:00:00.000Z\nmake the noses fit\n\n')
+  files.set(`${MEMORY}/progress/areas/site.json`, JSON.stringify({ entries: [{ task: 'a2', title: 'Nose of the hero picture', at: '2026-11-03T09:00:00.000Z' }] }))
+  files.set(`${MEMORY}/streams/ears.md`, "# Ears\n<!-- Latest: kept by Claudopus from each result; the rest of the page is the tasks' -->\n## Latest (2026-11-02)\n- 2026-11-02 nose fitted\n<!-- End of Latest -->\n")
+  files.set(`${MEMORY}/streams/3d-heads.log.1.md`, '## 2026-10-01 A task\n\nthe nose of October\n')
+  for (const area of ['Nose', '3D heads']) {
+    const within = String((await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't4', query: 'nose', area } as never)).result)
+    expect(within.split('\n').slice(1)).toEqual([
+      'progress/areas/nose.json:1:Nose · 2026-11-02 Nose for side faces: The nose fits side faces · reports/20261102-0900-b/report.md',
+      'streams/ears.md:4:- 2026-11-02 nose fitted',
+      'streams/3d-heads.md:2:Nose: fixed',
+      'streams/3d-heads.log.md:3:nose moved up 2 mm',
+      'streams/3d-heads.log.1.md:3:the nose of October',
+      'reports/20261102-0900-b/report.md:1:the nose is flawed',
+      'progress/areas/nose.said.md:2:make the noses fit',
+    ])
+  }
+  const stems = String((await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't5', query: 'Fitting noses', area: 'nose' } as never)).result)
+  expect(stems).toContain('No line holds "Fitting noses" as written')
+  expect(stems.split('\n').slice(2)).toEqual(['progress/areas/nose.json:1:Nose · 2026-11-02 Nose for side faces: The nose fits side faces · reports/20261102-0900-b/report.md', 'streams/ears.md:4:- 2026-11-02 nose fitted', 'progress/areas/nose.said.md:2:make the noses fit'])
+  expect(String((await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't7', query: 'fixing', area: 'nose' } as never)).result)).toContain('\nstreams/3d-heads.md:2:Nose: fixed')
+  expect(String((await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't6', query: 'nose', area: 'Kitchen' } as never)).result)).toBe('No area or topic is named "Kitchen". The areas: Nose, Website.')
 })
 
 test('rarely used tools wait behind tool search', async ($, on) => {
