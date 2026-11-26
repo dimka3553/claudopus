@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.278 · 26 November 2026
+- Claudopus installs with one line in Terminal: `curl -fsSL https://www.claudopus.ai/install.sh | sh`. It finds Claude Code (the desktop app's own copy, or `claude` in a terminal), installs Claudopus and switches it on, keeping the rest of your settings, and on a Mac without Apple's command line tools it opens their installer first and carries on once they are in. The README, claudopus.ai and the release notes lead with that line, as typing `/plugin` in the desktop app opens its plugin screen instead of installing.
+
 ## 0.2.277 · 26 November 2026
 - A task that asks you one question after another keeps every one on its card, each with its own buttons, box to paste a key into, or blocked command to allow, until you answer it. A new question no longer takes the place of the one before, and each answer goes to the question you gave it to.
 - A command Claude Code blocks while the card already asks you something now shows beside that question, with its Allow, instead of being left off the card.

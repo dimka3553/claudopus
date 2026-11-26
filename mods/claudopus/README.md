@@ -32,24 +32,22 @@ Each task uses its own tokens, so five tasks at once use tokens about five times
 
 ## Install
 
-At the Claude Code prompt:
+Paste one line into Terminal (on a Mac: Applications, Utilities, Terminal):
 
 ```
-/plugin marketplace add dimka3553/claudopus
-/plugin install claudopus@claudopus
+curl -fsSL https://www.claudopus.ai/install.sh | sh
 ```
 
-Answer `y` to add the marketplace, then pick the user scope (the first one, Enter).
+It finds Claude Code, the desktop app's own copy or `claude` in a terminal, installs Claudopus from this repo for you and switches it on. Everything else in your `~/.claude/settings.json` stays as it is. On a Mac without Apple's command line tools (Claude Code needs their git to fetch Claudopus), it opens their installer first and carries on once they are in. Then open a new chat in the desktop app's Code tab, or type `/reload-plugins` in a chat that's open. Running the line again brings Claudopus up to date.
 
-In the desktop app: **+** next to the prompt box, **Plugins**, **Add marketplace** `dimka3553/claudopus`, then add `claudopus`.
-
-It is on in every chat from then on. The first time, the panel opens with a welcome and an **Bring in old chats** button that reads your past chats into its memory. After that, it opens by itself when a task starts. If you close it, it closes in every chat. Type `/claudopus` to open it again.
+It is on in every chat from then on. The first time, the panel opens with a welcome and a **Bring in old chats** button that reads your past chats into its memory. After that, it opens by itself when a task starts. If you close it, it closes in every chat. Type `/claudopus` to open it again.
 
 <details>
-<summary>If that fails</summary>
+<summary>Other ways in</summary>
 
+- At the prompt of Claude Code in a terminal: `/plugin marketplace add dimka3553/claudopus`, then `/plugin install claudopus@claudopus`. Answer `y` to add the marketplace, then pick the user scope (the first one, Enter).
+- In the desktop app, typing `/plugin` opens the plugin screen instead of installing: there, **+** next to the prompt box, **Plugins**, **Add marketplace** `dimka3553/claudopus`, then add `claudopus`.
 - Over SSH, use `https://github.com/dimka3553/claudopus.git` in place of the short form.
-- From a shell: `claude plugin marketplace add dimka3553/claudopus`, then `claude plugin install claudopus@claudopus`.
 
 </details>
 
