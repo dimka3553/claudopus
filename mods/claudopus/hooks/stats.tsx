@@ -726,7 +726,7 @@ export const crowdOf = (pieces: Piece[]): Crowd[] => {
 // The tasks and helpers at work at once, under the timeline on the same time axis: in each column, the most at work in it, the
 // tasks below and their helpers above them, as tall as the most of the whole range. Two shapes in all, so a long history fits on
 // a coarser grid; '' when nothing was at work
-const CROWD_TALL = 28
+const CROWD_TALL = 40
 export const CROWD_HEIGHT = CROWD_TALL + 18
 const TASKS_FILL = '#9A9A9A'
 export const crowdSvg = (pieces: Piece[], width = 600) => {
@@ -757,8 +757,8 @@ export const crowdSvg = (pieces: Piece[], width = 600) => {
     const tall = (n: number) => (n / most) * CROWD_TALL
     const taskPath = shape(c => tall(tasks[c] ?? 0), () => CROWD_TALL)
     const helperPath = shape(c => tall((total[c] ?? 0) - (tasks[c] ?? 0)), c => CROWD_TALL - tall(tasks[c] ?? 0))
-    const key = `<rect x="0" y="${CROWD_TALL + 6}" width="8" height="8" rx="1" fill="${TASKS_FILL}"/><text x="12" y="${CROWD_TALL + 14}">Tasks</text><rect x="52" y="${CROWD_TALL + 6}" width="8" height="8" rx="1" fill="${TASKS_FILL}" fill-opacity=".4"/><text x="64" y="${CROWD_TALL + 14}">Helpers</text><text x="${width}" y="${CROWD_TALL + 14}" text-anchor="end">Up to ${most} at work at once</text>`
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${CROWD_HEIGHT}" viewBox="0 0 ${width} ${CROWD_HEIGHT}"><style>text{font:11px -apple-system,system-ui,sans-serif;fill:#8C8C8C}</style><path d="${taskPath}" fill="${TASKS_FILL}"/><path d="${helperPath}" fill="${TASKS_FILL}" fill-opacity=".4"/>${key}</svg>`
+    const key = `<rect x="0" y="${CROWD_TALL + 6}" width="8" height="8" rx="1" fill="${TASKS_FILL}"/><text x="12" y="${CROWD_TALL + 14}">Tasks</text><rect x="52" y="${CROWD_TALL + 6}" width="8" height="8" rx="1" fill="${TASKS_FILL}" fill-opacity=".5"/><text x="64" y="${CROWD_TALL + 14}">Helpers</text><text x="${width}" y="${CROWD_TALL + 14}" text-anchor="end">Up to ${most} at work at once</text>`
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${CROWD_HEIGHT}" viewBox="0 0 ${width} ${CROWD_HEIGHT}"><style>text{font:11px -apple-system,system-ui,sans-serif;fill:#8C8C8C}</style><path d="${taskPath}" fill="${TASKS_FILL}"/><path d="${helperPath}" fill="${TASKS_FILL}" fill-opacity=".5"/>${key}</svg>`
     if (svgFits(svg)) return svg
   }
   return ''
