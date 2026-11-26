@@ -170,6 +170,8 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string, isPart =
   }
   await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
   await loadReports($)
+  // and goes into the queue of progress/, which makes it its area's entry (progress.tsx)
+  queueSoon($, { kind: 'result', task: one.id, report: id, title, files: files.filter(file => PICTURE.test(file)), text })
 }
 
 // The small copy of a picture the panel draws, kept beside the report

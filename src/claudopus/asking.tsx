@@ -921,7 +921,8 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   const note = isReply ? filesNote(files) : ''
   if (!ask || !said) return
   const target = ask.from ?? one.id
-  if (!settles(ask, words, isReply)) return holdAsk($, one, ask, said, target, note)
+  // (a reply that leaves the question open is the person's words all the same, for progress/: progress.tsx)
+  if (!settles(ask, words, isReply)) return (queueSoon($, { kind: 'answer', task: one.id, title: titleOf(one), text: `Question: ${ask.text}\nAnswer: ${said}` }), holdAsk($, one, ask, said, target, note))
   // The amber goes and the box clears at once. Only the first answer to the ask it was made for counts: a second press, or a press
   // on an ask the work has since replaced, sends nothing. Marked before anything is awaited, so two presses at once count once
   const asked = `${one.id}:${ask.at}:${ask.text}`
@@ -976,6 +977,8 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   // (runit.tsx); anything else leaves it not run. Words never run it
   const run = ask.refused && !isReply && said === ALLOW ? runAsked.get(one.id) : undefined
   const isRun = Boolean(run && run.askAt === ask.at && run.command === ask.copy)
+  // Set aside, the press every question has beside the task's own choices (progress.tsx), unless the task gave that choice itself
+  const isAside = !isReply && !ask.refused && said === SET_ASIDE && !(ask.choices ?? []).includes(SET_ASIDE)
   const back = isReply || isRelease || ask.refused ? {} : { asked: ask, target }
   const sent = { text: said, ask: ask.text, ...(ask.details ? { details: ask.details } : {}), at, line, isCard: true, askAt: ask.at, ...(ask.refused && !isReply ? { isPress: true } : {}), ...back }
   sentReplies.set(one.id, { ...sent, to: 'sending' })
@@ -990,7 +993,15 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       ? `${CONNECTOR_ANSWERED(ask.rule, said, isReply)}${note}`
     : isReply
       ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}${note}`
-      : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
+      : isAside
+        ? SET_ASIDE_TOLD()
+        : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}${isRelease ? `\n${RELEASE_PRESSED(ask.release ?? '')}` : ''}`
+  // The answer goes into the queue of progress/: a press on Set aside marks the task's entries at once, and the indexer sets the
+  // steps it covers aside; any other answer may tick or add next steps (progress.tsx)
+  if (!ask.refused) {
+    if (isAside) await markAside($, one.id).catch(err => log($, `task ${one.id} not marked set aside: ${String(err)}`))
+    queueSoon($, { kind: isAside ? 'aside' : 'answer', task: one.id, title: titleOf(one), text: `Question: ${ask.text}${ask.details ? `\n${ask.details}` : ''}\nAnswer: ${said}` })
+  }
   // A task whose run ended a moment ago refuses the line: it is sent to it as a message instead, which starts it with it
   // Marked on its way once written, so a step that began before it never counts as reading it
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'

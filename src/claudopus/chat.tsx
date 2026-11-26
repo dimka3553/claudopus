@@ -321,6 +321,8 @@ const chatHooks = (on: On) => {
     await loadReports($).catch(() => undefined)
     // A topic page grown past what a fresh task reads whole is made short in the background, the whole of it kept in its history
     afterLoad($, CATCH_UP_AFTER, () => void shortenPages($).catch(err => log($, `pages not made short: ${String(err)}`)))
+    // and what waits in the queue of progress/ is indexed, the picture written when it is due, the history read in once (progress.tsx)
+    afterLoad($, CATCH_UP_AFTER, () => void drainProgress($).catch(err => log($, `progress not indexed: ${String(err)}`)))
     // What the person had typed into a reply box before a reload of the mod is in its box again
     await readDrafts($).catch(() => undefined)
     // Work that is running when the chat loads brings the panel up, if it has never opened
@@ -532,7 +534,7 @@ const chatHooks = (on: On) => {
       if (!m.isChat || m.needsContext) {
         // Each subject with the path of its brief, so a brief for work on it can name that path without a search
         const subjects = (await readIndex($)).filter(s => !isScratchTopic(s.repo)).map(s => `- ${[s.name, s.repo, s.session, s.state, s.summary, `streams/${slug(s.name)}.md`].join(' | ')}`).join('\n')
-        context.push(`${role}\nThis chat's saved words: ${dir}/words/${m.id}.md\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${subjects || '(none yet)'}`)
+        context.push(`${role}\nThis chat's saved words: ${dir}/words/${m.id}.md\n${PROGRESS_LINE()}\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${subjects || '(none yet)'}`)
       }
       const told = reportsTold(await read($, reports), await $.clock.now())
       context.push(`${await keptRule($, 'each', async () => BRIEF)}${told ? `\n${told}` : ''}`)
@@ -553,6 +555,8 @@ const chatHooks = (on: On) => {
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
     await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
+    // and goes into the queue of progress/, where their words may tick, add or set aside next steps (progress.tsx)
+    queueSoon($, { kind: 'said', text })
 
     return next(context.length ? { ...e, text, context } : { ...e, text })
   })

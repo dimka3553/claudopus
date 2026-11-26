@@ -806,7 +806,9 @@ const workHooks = (on: On) => {
     // and a scratch folder of its own in the chat's scratchpad, which every task of the chat shares
     const scratch = isTold ? scratchName(await read($, todos), e.description ?? '', await $.clock.now()) : ''
     const isBackground = isHelperSpawn(e)
-    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}\n${SCRATCH_LINE(scratch)}` } : isBackground ? { ...e, background: true } : e)
+    // and what was set aside before in the area its words are about, with why (progress.tsx)
+    const aside = isTold ? await asideTold($, e.description ?? '', e.prompt ?? '').catch(err => (void log($, `set-aside work not told: ${String(err)}`), '')) : ''
+    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}\n${SCRATCH_LINE(scratch)}${aside ? `\n\n${aside}` : ''}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
     if (r.model) seeModel(r.model)
     // A resumed agent keeps the model it first started on, or none: the model it resumes on may be one the app moved it to after a flag. A
@@ -825,6 +827,8 @@ const workHooks = (on: On) => {
     // the app's close cut off names that task's carry file, and takes its place
     const carried = isOwn && !e.resume ? carriedFrom(e.prompt ?? '') : ''
     if (isOwn && !e.resume) await saveBrief($, id, e.prompt ?? '').catch(err => log($, `instructions of ${id} not kept: ${String(err)}`))
+    // A task the chat starts goes into the queue of progress/, which sorts it into its area while it works (progress.tsx)
+    if (isOwn && !e.resume) queueSoon($, { kind: 'start', task: id, title: e.description ?? '', text: `${e.description ?? ''}\n\n${e.prompt ?? ''}` })
     await changeTodos($, all => {
       const old = all.find(one => one.id === id)
       const was = carried ? all.find(one => one.id === carried && isInterrupted(one) && !one.closedAt) : undefined
