@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.281 · 27 November 2026
+- Stats and the leaderboard now count your work when Claude Code keeps its files somewhere other than ~/.claude (set by CLAUDE_CONFIG_DIR). Before, such a Mac counted nothing, so its leaderboard row stayed at 0 hours. Its past hours, back to the day Claudopus was first installed, now show up too, within a day of updating.
+- Task cards, the Details tab, chat links and Bring in old chats read their files from that same place.
+
 ## 0.2.280 · 27 November 2026
 - Tasks and their helpers keep their prompt cache for an hour, as the chat does, instead of 5 minutes: a task that waited longer than that used to pay to read everything it had read again. The installer and Claudopus itself add this to your Claude Code settings, by either way of installing, and keep any value you set there yourself.
 

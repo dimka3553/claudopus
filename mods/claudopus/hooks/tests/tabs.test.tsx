@@ -1025,6 +1025,37 @@ test('Stats keeps what it summed in files the engine reads whole, however much a
   expect(await until(async () => (files.has(`${MEMORY}/stats/engine-id.json`) ? undefined : true))).toBe(true)
 })
 
+test('the leaderboard is sent the work in the records where Claude Code keeps them, CLAUDE_CONFIG_DIR when it is set, and a chat whose records were not found is looked for again a day later', async ($, on) => {
+  const { files, boarded, clock } = world(on, { env: { CLAUDE_CONFIG_DIR: `${HOME}/.claude-3` } })
+  const M = 60_000
+  const now = 1_700_000_000_000
+  const sum = (output: number) => JSON.stringify({ s: [[now - 30 * M, now]], u: [[`m${output}`, 'claude-opus-5-5', now - M, 0, 0, 0, 0, 0, 0, output]], d: [] })
+  // This chat's records, and another chat's in another project, and nothing in ~/.claude: until 0.2.281 only ~/.claude was read, so
+  // a Mac like this counted nothing and its row on the board stayed at 0
+  const at = (project: string, id: string, output: number) => (files.set(`${HOME}/.claude-3/projects/${project}/${id}.jsonl`, '{}'), files.set(`${HOME}/.claude-3/projects/${project}/${id}.jsonl.sum`, sum(output)))
+  at('-repo', 'engine-id', 100)
+  at('-elsewhere', 'other-chat', 200)
+  for (const id of ['other-chat', 'late-chat']) files.set(`${MEMORY}/finished/${id}.json`, '[]')
+  files.set(`${MEMORY}/installed.json`, JSON.stringify({ at: now - 60 * M }))
+  files.set(`${MEMORY}/leaderboard.json`, JSON.stringify({ name: 'valchy', token: 'secret-1', isPublic: true, sentAt: 0 }))
+  files.set('board:lb_send', '"ok"\n200')
+  await $.session.start(start)
+  const tokens = () => boarded.filter(one => one.fn === 'lb_send').map(one => (one.body.p_stats as Record<string, { tokens?: number }>).all?.tokens).filter(n => n !== undefined)
+  await clock.advance(4 * M)
+  expect(await until(async () => tokens().at(-1))).toBe(300)
+  // A chat whose records were nowhere when it was looked for comes to count once they are there, with no Stats tab open: a look the
+  // leaderboard makes every few minutes looks for them again once the last was a day ago
+  at('-elsewhere', 'late-chat', 400)
+  const late = `${MEMORY}/stats/chats/late-chat.json`
+  const kept = JSON.parse(files.get(late) ?? '{}') as { head: { folder: string; sought?: number } }
+  expect(kept.head).toMatchObject({ folder: '', sought: expect.any(Number) })
+  await clock.advance(4 * M)
+  expect(tokens().at(-1)).toBe(300)
+  files.set(late, JSON.stringify({ ...kept, head: { ...kept.head, sought: now - 1441 * M } }))
+  await clock.advance(4 * M)
+  expect(await until(async () => (tokens().at(-1) === 700 ? true : undefined))).toBe(true)
+})
+
 test('the Leaderboard tab shows the board and is where you join with a username nobody has; nothing is sent before, then your sums go every few minutes, public or private, until you leave', async ($, on) => {
   const { files, boarded, clock, shown, opened, tabs, held: holding } = world(on)
   const M = 60_000

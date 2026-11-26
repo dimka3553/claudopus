@@ -241,7 +241,7 @@ const sync = async ($: EngineInterface) => {
 }
 
 // The folder the engine keeps this chat's agents' records in
-const agentsFolder = async ($: EngineInterface, chat: string) => `${(await $.env.get('HOME')) ?? ''}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${chat}/subagents`
+const agentsFolder = async ($: EngineInterface, chat: string) => `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${chat}/subagents`
 // An agent's last words from the end of its record: what it handed in, or the text of its last reply, whether Claude Code pressed
 // it for a report after them, and when the record was last written
 const lastWordsOf = async ($: EngineInterface, folder: string, agent: string, now: number) => {
@@ -609,8 +609,7 @@ const recoverEnded = async ($: EngineInterface) => {
   if (!id) return
   // The engine lists only the work of its own process; the transcripts of the rest are in the chat's folder, one per agent
   const live = await $.agent.list().catch(() => [])
-  const home = (await $.env.get('HOME')) ?? ''
-  const folder = `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}/subagents`
+  const folder = `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}/subagents`
   type Meta = { description?: string; agentType?: string; finished?: boolean; spawnDepth?: number }
   const ids = (await $.fs.list(folder).catch(() => [])).map(entry => /^agent-(\w+)\.meta\.json$/.exec(entry.name)?.[1] ?? '').filter(Boolean)
   // Only the work this chat's own thread started (its helpers are a level deeper), the newest first
