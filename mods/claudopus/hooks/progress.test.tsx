@@ -77,6 +77,12 @@ test('a new area is made only once for a new direction, under a goal that exists
   const added = apply(event({ kind: 'said' }), { areas: ['nose'], next: { add: [...add, 'A nose that fits side faces'] } })
   expect(added.areas[0]?.next.map(n => n.text)).toEqual(['A nose that fits side faces', 'A nose that moves with the mouth', 'One finished picture', 'Two finished picture', 'Three finished picture'])
   expect(new Set(added.areas[0]?.next.map(n => n.id)).size).toBe(5)
+
+  // A step that says what an open one says is not added again, nor twice in one answer; a task's start adds or rewords none
+  const like = apply(event({ kind: 'result', task: 'a3', report: 'r3' }), { areas: ['nose'], next: { add: ['A nose that fits side faces on the Mac camera recordings', 'A chin for every face', 'A chin for each face'] } })
+  expect(like.areas[0]?.next.map(n => n.text)).toEqual(['A nose that fits side faces', 'A nose that moves with the mouth', 'A chin for every face'])
+  const start = apply(event({ kind: 'start', task: 'a4' }), { areas: ['nose'], next: { add: ['The nose fixed'], reword: [{ id: 'n1', text: 'Another nose' }] } })
+  expect(start.areas[0]?.next.map(n => n.text)).toEqual(['A nose that fits side faces', 'A nose that moves with the mouth'])
 })
 
 test('the files read back whole whatever was written, the model is shown each area with its steps and newest entries, and its answer is read out of the text around it', async () => {

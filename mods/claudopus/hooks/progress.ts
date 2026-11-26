@@ -6,8 +6,9 @@
 export type ProgressPicture = { star: { text: string; said: string }; goals: { id: string; name: string; words: string; said: string }[]; updated: string }
 // One step of an area: a plain sentence of what will exist when it is done, open, done, or set aside
 export type ProgressNext = { id: string; text: string; state: 'open' | 'done' | 'aside'; at: string }
-// An area of work: under a goal (its id, or '' for none), one plain line of what it is for, and its next steps
-export type ProgressArea = { id: string; name: string; goal: string; aim: string; next: ProgressNext[]; updated: string }
+// An area of work: under a goal (its id, or '' for none), one plain line of what it is for, and its next steps; `topics`, the
+// memory's topics its results were recorded under, newest first
+export type ProgressArea = { id: string; name: string; goal: string; aim: string; next: ProgressNext[]; updated: string; topics?: string[] }
 // One piece of work in an area: the task (its agent id), its result (reports/<report>/report.md, '' while the task is at work or
 // when it left none), what it was and came to, its pictures (copies in its result's folder, by full path), where it went live, and
 // why it was set aside
@@ -31,6 +32,8 @@ export type ProgressEvent = {
   report?: string
   title?: string
   files?: string[]
+  // A result's topic in the memory's index, the one its task recorded with update
+  topic?: string
   text: string
   tries?: number
   isBackfill?: boolean
@@ -66,7 +69,8 @@ const areaOf = (value: unknown): ProgressArea | undefined => {
   const one = value as Partial<ProgressArea> | undefined
   if (!one || !isText(one.id) || !isAreaId(one.id) || !isText(one.name) || !one.name.trim()) return undefined
   const next = (Array.isArray(one.next) ? one.next : []).map(nextOf).filter((n): n is ProgressNext => Boolean(n))
-  return { id: one.id, name: one.name, goal: textOr(one.goal), aim: textOr(one.aim), next, updated: textOr(one.updated) }
+  const topics = (Array.isArray(one.topics) ? one.topics : []).filter(isText)
+  return { id: one.id, name: one.name, goal: textOr(one.goal), aim: textOr(one.aim), next, updated: textOr(one.updated), ...(topics.length ? { topics } : {}) }
 }
 const entryOf = (value: unknown): ProgressEntry | undefined => {
   const one = value as Partial<ProgressEntry> | undefined
@@ -126,12 +130,13 @@ export const progressLine = (name: string, dir: string) =>
 // ---- What the indexer asks: one answer of the model's for each event, given the picture, the areas and their newest entries ----
 
 export const PROGRESS_SYSTEM = `You keep a map of one person's work for a page that shows, at a glance, what was done and what is next in each area of it. You are given the person's north star and goals, the areas so far, the newest entries of each, and one event: a task starting, a task's result, a message the person wrote, an answer the person gave to a task's question, or the person pressing Set aside on a question. Reply with one JSON object and nothing else:
-{"areas": ["<area id>", ...], "newArea": {"name": "...", "goal": "<goal id or empty>", "aim": "..."}, "entry": {"title": "...", "kind": "milestone" | "task", "outcome": "...", "live": "<web address where it went live, or empty>", "pictures": ["<path>", ...]}, "next": {"done": ["<step id>"], "add": ["..."], "aside": ["<step id>"], "reword": [{"id": "<step id>", "text": "..."}]}, "aside": {"task": "<task id>", "reason": "..."}, "rename": [{"id": "<area id>", "name": "...", "aim": "..."}], "merge": [{"from": "<area id>", "into": "<area id>"}]}
+{"areas": ["<area id>", ...], "newArea": {"name": "...", "goal": "<goal id or empty>", "aim": "..."}, "state": "...", "entry": {"title": "...", "kind": "milestone" | "task", "outcome": "...", "live": "<web address where it went live, or empty>", "pictures": ["<path>", ...]}, "next": {"done": ["<step id>"], "add": ["..."], "aside": ["<step id>"], "reword": [{"id": "<step id>", "text": "..."}]}, "aside": {"task": "<task id>", "reason": "..."}, "rename": [{"id": "<area id>", "name": "...", "aim": "..."}], "merge": [{"from": "<area id>", "into": "<area id>"}]}
 Leave out every key that does not apply.
 Rules:
 - "areas": the smallest existing area that covers the whole of the work; several only when it truly spans them. Make a "newArea" only for a new direction that no area covers; its name is 1 to 3 plain words, its aim one plain line, its goal the id of the goal it serves or empty.
-- "entry", for a task's start or result: "title" at most 8 plain words of what the task did; "outcome" at most 14 plain words of what came of it. No code, file names, paths, versions, ids or model names. "kind" is "milestone" only when something shipped, went live or a clear finding came out; otherwise "task". "pictures": only paths from the result's own pictures, the one or two that show it best.
-- "next": an area's next steps are 1 to 5 plain sentences, each saying what will exist when it is done (an outcome, never a chore), with no owner. Change them only when the event shows it: "done" when a result delivers one; "add" when the person asks for something or a result names a clear next step; "reword" to make one clearer. "aside" only when the person's own words or press set that step aside: never because nothing happened or nobody answered.
+- "entry", for a task's start or result: "title" at most 8 plain words of what came out of it (such as "Lawyer brief and evidence pack ready"), never the task's own title or instructions repeated; "outcome" at most 14 plain words of what came of it. No code, file names, paths, versions, ids or model names. "kind" is "milestone" only when something shipped, went live or a clear finding came out; otherwise "task". "pictures": only paths from the result's own pictures, the one or two that show it best.
+- "state", for a result: at most 6 plain words of where this line of work stands now, starting with "done" once it shipped or went live.
+- "next": an area's next steps are 1 to 5 plain sentences, each saying what will exist when it is done (an outcome, never a chore), with no owner. Change them only when the event shows it: "done" when a result delivers one; "add" when the person asks for something or a result names a clear next step; "reword" to make one clearer. Never add a step that repeats or overlaps an open one: reword that one instead. A task's start only places the task and makes its entry: it never adds, ticks or rewords a step. "aside" only when the person's own words or press set that step aside: never because nothing happened or nobody answered.
 - "aside" (a task set aside): only when the person's own words or press set that task aside; the reason in their words, short.
 - "rename" and "merge": only when the person's words ask for it.
 - Never write that anything waits on the person or is theirs to do. Plain everyday words throughout.`
@@ -160,6 +165,14 @@ const plainLine = (value: unknown, words: number, chars: number) =>
       )
     : ''
 const idsIn = (value: unknown) => (Array.isArray(value) ? value.filter(isText) : [])
+// A step whose words mostly match an open step's says the same: three quarters of the shorter one's words, a plural's s aside
+const stepWords = (text: string) => new Set(slug(text).split('-').filter(word => word.length >= 3).map(word => word.replace(/s$/, '')))
+export const isSameStep = (a: string, b: string) => {
+  const [one = new Set<string>(), two = new Set<string>()] = [stepWords(a), stepWords(b)].sort((x, y) => x.size - y.size)
+  return one.size >= 2 && [...one].filter(word => two.has(word)).length >= one.size * 0.75
+}
+// A result's line for its topic's state in the index
+export const topicState = (answer: Record<string, unknown>) => plainLine(answer.state, 6, 60)
 // The model's answer as JSON, whatever is around it; nothing for any other answer
 export const answerJson = (text: string): Record<string, unknown> | undefined => {
   const from = text.indexOf('{')
@@ -303,22 +316,28 @@ export const applyProgress = (event: ProgressEvent, answer: Record<string, unkno
   }
   if (event.kind !== 'start') set(idsIn(next.done), 'done')
   if (isPersons) set(idsIn(next.aside), 'aside')
-  for (const one of Array.isArray(next.reword) ? next.reword : []) {
+  for (const one of event.kind !== 'start' && Array.isArray(next.reword) ? next.reword : []) {
     const r = one as { id?: unknown; text?: unknown }
     const text = plainLine(r.text, 24, 160)
     if (text) areas = areas.map(area => (area.next.some(n => n.id === r.id && n.state === 'open') ? (touched.add(area.id), { ...area, next: area.next.map(n => (n.id === r.id ? { ...n, text } : n)) }) : area))
   }
   const into = areas.find(area => area.id === (picked[0] ?? places[0]))
-  if (into && event.kind !== 'aside') {
-    const added = idsIn(next.add).map(text => plainLine(text, 24, 160)).filter(text => text && !into.next.some(n => slug(n.text) === slug(text)))
+  if (into && event.kind !== 'aside' && event.kind !== 'start') {
+    const added = idsIn(next.add)
+      .map(text => plainLine(text, 24, 160))
+      .filter((text, n, all) => text && !into.next.some(o => slug(o.text) === slug(text) || (o.state === 'open' && isSameStep(o.text, text))) && !all.slice(0, n).some(o => isSameStep(o, text)))
     const room = Math.max(0, NEXT_OPEN_MOST - into.next.filter(n => n.state === 'open').length)
     if (added.length && room) {
       areas = areas.map(area => (area === into ? { ...area, next: [...area.next, ...added.slice(0, room).map(text => ({ id: stepId(now, stepIds), text, state: 'open' as const, at }))] } : area))
       touched.add(into.id)
     }
   }
+  if (event.kind === 'result' && event.topic) {
+    const topic = event.topic
+    areas = areas.map(area => (places.includes(area.id) && area.topics?.[0] !== topic ? (touched.add(area.id), { ...area, topics: [topic, ...(area.topics ?? []).filter(one => one !== topic)].slice(0, 5) }) : area))
+  }
   areas = areas.map(area => (touched.has(area.id) ? { ...area, updated: at } : area))
-  return { areas, changedEntries, touched, isChanged: touched.size > 0 || changedEntries.size > 0 }
+  return { areas, changedEntries, touched, places, isChanged: touched.size > 0 || changedEntries.size > 0 }
 }
 
 // ---- The bigger picture, from the person's own messages ----
