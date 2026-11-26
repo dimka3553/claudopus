@@ -1375,6 +1375,89 @@ const appTitle = async ($: EngineInterface) => {
 const mark = (text: string) => `${text.length}:${[...text].reduce((sum, ch) => (sum * 31 + ch.charCodeAt(0)) % 1_000_003, 7)}`
 
 
+type ProgressPicture = { star: { text: string; said: string }; goals: { id: string; name: string; words: string; said: string }[]; updated: string }
+type ProgressNext = { id: string; text: string; state: 'open' | 'done' | 'aside'; at: string }
+type ProgressArea = { id: string; name: string; goal: string; aim: string; next: ProgressNext[]; updated: string }
+type ProgressEntry = {
+  task: string
+  title: string
+  at: string
+  kind: 'milestone' | 'task' | 'aside'
+  outcome: string
+  report: string
+  pictures: string[]
+  live: string
+  reason: string
+}
+
+const progressDir = () => `${dir}/progress`
+const progressChanged = atom({ plugin: 'claudopus', key: 'progress' } as const, 0, { shape: 'progress-1' })
+
+const isText = (value: unknown): value is string => typeof value === 'string'
+const textOr = (value: unknown, or = '') => (isText(value) ? value : or)
+const readJson = async ($: EngineInterface, path: string): Promise<unknown> => {
+  const text = await readOr($, path)
+  if (!text.trim()) return undefined
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return undefined
+  }
+}
+const nextOf = (value: unknown): ProgressNext | undefined => {
+  const one = value as Partial<ProgressNext> | undefined
+  if (!one || !isText(one.id) || !isText(one.text) || !one.text.trim()) return undefined
+  const state = one.state === 'done' || one.state === 'aside' ? one.state : 'open'
+  return { id: one.id, text: one.text, state, at: textOr(one.at) }
+}
+const areaOf = (value: unknown): ProgressArea | undefined => {
+  const one = value as Partial<ProgressArea> | undefined
+  if (!one || !isText(one.id) || !one.id || !isText(one.name) || !one.name.trim()) return undefined
+  const next = (Array.isArray(one.next) ? one.next : []).map(nextOf).filter((n): n is ProgressNext => Boolean(n))
+  return { id: one.id, name: one.name, goal: textOr(one.goal), aim: textOr(one.aim), next, updated: textOr(one.updated) }
+}
+const entryOf = (value: unknown): ProgressEntry | undefined => {
+  const one = value as Partial<ProgressEntry> | undefined
+  if (!one || !isText(one.title) || !one.title.trim()) return undefined
+  const kind = one.kind === 'milestone' || one.kind === 'aside' ? one.kind : 'task'
+  const pictures = (Array.isArray(one.pictures) ? one.pictures : []).filter(isText)
+  return {
+    task: textOr(one.task),
+    title: one.title,
+    at: textOr(one.at),
+    kind,
+    outcome: textOr(one.outcome),
+    report: textOr(one.report),
+    pictures,
+    live: textOr(one.live),
+    reason: textOr(one.reason),
+  }
+}
+const EMPTY_PICTURE: ProgressPicture = { star: { text: '', said: '' }, goals: [], updated: '' }
+const readPicture = async ($: EngineInterface): Promise<ProgressPicture> => {
+  const raw = (await readJson($, `${progressDir()}/picture.json`)) as Partial<ProgressPicture> | undefined
+  if (!raw || typeof raw !== 'object') return EMPTY_PICTURE
+  const star = raw.star && typeof raw.star === 'object' ? { text: textOr(raw.star.text), said: textOr(raw.star.said) } : EMPTY_PICTURE.star
+  const goals = (Array.isArray(raw.goals) ? raw.goals : [])
+    .filter(goal => goal && isText(goal.id) && goal.id && isText(goal.name) && goal.name.trim())
+    .map(goal => ({ id: goal.id, name: goal.name, words: textOr(goal.words), said: textOr(goal.said) }))
+  return { star, goals, updated: textOr(raw.updated) }
+}
+const readAreas = async ($: EngineInterface): Promise<ProgressArea[]> => {
+  const raw = (await readJson($, `${progressDir()}/areas.json`)) as { areas?: unknown } | undefined
+  return (Array.isArray(raw?.areas) ? raw.areas : []).map(areaOf).filter((a): a is ProgressArea => Boolean(a))
+}
+const isAreaId = (id: string) => /^[a-z0-9][a-z0-9-]{0,63}$/.test(id)
+const readEntries = async ($: EngineInterface, areaId: string): Promise<ProgressEntry[]> => {
+  if (!isAreaId(areaId)) return []
+  const raw = (await readJson($, `${progressDir()}/areas/${areaId}.json`)) as { entries?: unknown } | undefined
+  return (Array.isArray(raw?.entries) ? raw.entries : [])
+    .map(entryOf)
+    .filter((e): e is ProgressEntry => Boolean(e))
+    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+}
+
+
 
 const started = (id: string, parentId: string, title: string, words: string, at: number, isFork = false): Todo => ({
   id,
