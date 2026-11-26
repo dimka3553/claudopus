@@ -555,7 +555,8 @@ let listDrawing = 0
 // keep files) and anything large is never watched, so it cannot draw the panel again each second
 const isWatched = (path: string, text: string) => text.length < 64_000 && !/\.jsonl$|\/log\.md$|\/live\/|\/words\/|\/asks\/|\/keep\/|\/helpers\//.test(path)
 const drawnFiles = new Map<string, string>()
-// Every file the mod writes is in its memory folder, ~/.claude/claudopus, each call naming its folder and kind of file
+// Every file the mod writes is in its memory folder, ~/.claude/claudopus, each call naming its folder and kind of file, but for the one
+// key it adds to the person's own Claude Code settings when they hold none (setTaskCache)
 // One line in ~/.claude/claudopus/log.md: each session's start, and anything that failed
 // Added to its end, never read and written back whole: every chat on this Mac writes here, and two rewriting it at once left runs of
 // empty bytes in it, which make grep take the log for binary and find nothing. Where the shell cannot add it, it is written whole
