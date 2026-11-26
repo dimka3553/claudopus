@@ -1,7 +1,7 @@
 - Claudopus now sorts each task into an area of your work in the background, as it starts and when its result comes. It keeps each area's next steps up to date from your messages and answers.
 - Every question a task asks has a Set aside button. It drops that work and keeps it in Progress as set aside, with why, and a later task in that area is told about it.
 - Ask the chat where some work stands or what's next, and it answers at once from Progress.
-- A Progress tab beside Results shows your north star and a ring for each of your goals with how much of it is done, then each area under its goal with what's done, set aside and next, and which have a task at work. Each area opens on its next steps, which you tick, and its timeline of results and pictures, newest first.
+- A Progress tab beside Results shows your north star and, for each of your goals, a small square for each task on the day it ran, with its steps done of all, then each area under its goal with what's done, set aside and next, and which have a task at work. Each area opens on its next steps, which you tick, and its timeline of results and pictures, newest first.
 - Each topic's notes now start with a Latest part that Claudopus keeps current from every result: the area's newest results with their dates and links, and what's next. Its line in the topic list says where it stands now.
 - Your own messages are kept on their own for each chat, apart from Claude's replies, and what you say about an area is kept with that area. A task reads these instead of the whole chat.
 - A topic's history that grows past 200 KB has its older half moved to a file of its own, which a search still finds.

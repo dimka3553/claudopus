@@ -1056,7 +1056,7 @@ const progressFiles = (files: Map<string, string>) => {
   }
 }
 
-test('the Progress tab opens from its button beside Results: a ring for each goal under the north star, each area a row under its goal, an area opened with its next steps and timeline, a step ticked, and nothing says anything waits', async ($, on) => {
+test('the Progress tab opens from its button beside Results: a square for each task by goal under the north star, each area a row under its goal, an area opened with its next steps and timeline, a step ticked, and nothing says anything waits', async ($, on) => {
   const sips = (argv: string[]) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 480\npixelHeight: 300' : '')
   const bytes = (path: string) => (path.includes('/thumbs/') ? 'B'.repeat(path.endsWith('.small.jpg') ? 4_000 : 30_000) : undefined)
   const { files, opened, tabs, submitted } = world(on, { sips, bytes })
@@ -1070,7 +1070,7 @@ test('the Progress tab opens from its button beside Results: a ring for each goa
   expect(tabs).toContain('progress: Progress')
   const tab = await $.ui.mount({ ...LIST, requestId: 'progress', props: { ...LIST.props, title: 'Progress', bodyColumns: 104 }, surface: 'desktop' } as never)
   const texts = async () => (await tab.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
-  // The chart: one Svg the app draws, the north star on top and a ring for each goal named under it, the goal at work in purple
+  // The chart: one Svg the app draws, the north star on top and each goal's tasks as squares, the goal at work in purple
   const chart = await until(async () => (await tab.findAll({ type: 'Svg' })).find(one => String(one.props.alt).includes('A shop that sells seeds')))
   const source = String(chart?.props.source)
   expect(source.length).toBeLessThanOrEqual(131_072)
