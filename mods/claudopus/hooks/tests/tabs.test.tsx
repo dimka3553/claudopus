@@ -883,7 +883,7 @@ const appDraws = (tree: unknown) => {
 // The Stats and About tabs, and the bar of buttons
 
 test('Stats opens in front from its button beside Results, and adds up this chat\'s work from its records: tokens, work, time saved, cost', async ($, on) => {
-  const { files, opened, tabs } = world(on)
+  const { files, opened, tabs, held: holding } = world(on)
   const M = 60_000
   const now = 1_700_000_000_000
   const chat = `${HOME}/.claude/projects/-repo`
@@ -896,6 +896,10 @@ test('Stats opens in front from its button beside Results, and adds up this chat
     files.set(`${subs}/agent-${id}.meta.json`, JSON.stringify({ description: `Work ${id}`, spawnDepth: 1, finished: true }))
     files.set(`${subs}/agent-${id}.jsonl.sum`, JSON.stringify({ s: [[from, to]], u: [[`m-${id}`, 'claude-opus-5-5', from + M, 0, 0, 0, 0, 0, 0, output]], d: [[from + M, 'Do it', 'done', '']] }))
   }
+  // and a helper the first started, at work beside both of them and on past them
+  files.set(`${subs}/agent-h1.jsonl`, '{}')
+  files.set(`${subs}/agent-h1.meta.json`, JSON.stringify({ description: 'Read the files', spawnDepth: 2, parentAgentId: 'w1', finished: true }))
+  files.set(`${subs}/agent-h1.jsonl.sum`, JSON.stringify({ s: [[now - 15 * M, now - 5 * M]], u: [], d: [] }))
   await $.session.start(start)
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
   expect((await keyed(pane, 'stats-open'))?.props.label).toBe('Stats')
@@ -907,7 +911,8 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect((await stats.find({ type: 'Text', text: /^This chat$/ }))?.props.bold).toBe(true)
   expect((await stats.find({ type: 'Text', text: 'Today' }))?.props.bold).toBe(true)
   expect((await keyed(stats, 'scope-All chats'))?.props.label).toBe('All chats')
-  // Once read: 1.5M output tokens on Opus 5.5 at $20 a million, two pieces finished, two to-dos, 30 minutes of work in 20
+  // Once read: 1.5M output tokens on Opus 5.5 at $20 a million, two pieces finished, two to-dos, 35 minutes of work (the first with
+  // its helper) in 25
   expect(await until(async () => stats.find({ type: 'Text', text: 'Saved by running at once' }))).toBeDefined()
   expect(await stats.find({ type: 'Text', text: 'Opus 5.5' })).toBeDefined()
   expect(await stats.find({ type: 'Text', text: '1.5M' })).toBeDefined()
@@ -920,11 +925,14 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(await value('10m')).toBe('time saved')
   expect(await value('Tasks done')).toBe('2')
   expect(await value('To-dos done')).toBe('2')
-  expect(await value('Time of work')).toBe('30m')
-  expect(await value('Time on the clock')).toBe('20m')
+  expect(await value('Time of work')).toBe('35m')
+  expect(await value('Time on the clock')).toBe('25m')
   expect(await value('Saved by running at once')).toBe('10m')
-  // 30 minutes of work in 20 of real time: 1.5 hours of work for each hour, and the tokens by kind, each a share of all
-  expect(await value('Efficiency')).toBe('1.50×')
+  // 35 minutes of work in 25 of real time: 1.4 hours of work for each hour, and the tokens by kind, each a share of all
+  expect(await value('Efficiency')).toBe('1.40×')
+  // The tasks and the helper each counted as itself: three at work at once, 30 minutes of the tasks' own and 10 of the helper's
+  const helpers = ['Helpers that worked', 'Tasks and helpers at work at once, at most', 'Time of tasks, on their own', 'Time of helpers', 'Tasks and helpers, added up']
+  expect(await Promise.all(helpers.map(value))).toEqual(['1', '3', '30m', '10m', '40m'])
   // The model that used the most tokens
   expect(await value('Favourite model')).toBe('Opus 5.5')
   expect(await value('Cache reads')).toBe('0% · 0')
@@ -938,6 +946,18 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(await stats.find({ type: 'Text', text: /^A message’s time runs from when the chat takes it to the chat’s last step/ })).toBeDefined()
   // The sums are kept, so the transcripts are read again only when they change
   expect(JSON.parse(files.get(`${MEMORY}/stats/chats/engine-id.json`) ?? '{}').head.folder).toBe(chat)
+  // Months kept before they held each helper's time are made again from what is kept, once, with no transcript summed again
+  const all = JSON.parse(files.get(`${MEMORY}/stats/all.json`) ?? '{}') as { mv?: number; months: Record<string, { part: Record<string, unknown> }> }
+  delete all.mv
+  for (const one of Object.values(all.months)) for (const name of ['crowd', 'ownMs', 'kidMs', 'kids']) delete one.part[name]
+  files.set(`${MEMORY}/stats/all.json`, JSON.stringify(all))
+  for (const [path, text] of [...files].filter(([path]) => path.startsWith(`${MEMORY}/stats/months/`))) files.set(path, text.replace(/,"o":\[[\d,]*\],"h":\[[\d,[\]]*\]\]/g, '').replace(/,"h":\[[\d,[\]]*\]\]/g, ''))
+  expect([...files].filter(([path]) => path.startsWith(`${MEMORY}/stats/months/`)).some(([, text]) => text.includes('"h"'))).toBe(false)
+  files.set('hold:jq', '')
+  await pressed(stats, 'scope-All chats')
+  expect(await until(async () => ((await value('Tasks and helpers at work at once, at most')) === '3' ? true : undefined))).toBe(true)
+  expect(JSON.parse(files.get(`${MEMORY}/stats/all.json`) ?? '{}').mv).toBe(1)
+  expect([...holding.keys()].filter(id => id.startsWith('jq:'))).toEqual([])
 })
 
 test('Stats keeps what it summed in files the engine reads whole, however much a chat did, and opened again adds nothing up twice: a transcript is summed again only once it changes', async ($, on) => {

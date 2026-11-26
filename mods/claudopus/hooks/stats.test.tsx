@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { boardDelta, boardFrom, boardRange, clip, colorOf, costOf, dayCells, efficiencyOf, GAP, lengthOf, mainModel, monthFrom, monthNo, monthsKept, mostAtOnce, partOf, piecesIn, piecesKept, priceOf, RANGES, rowPiece, statsFrom, sumKept, SVG_MOST, svgFits, timelineOf, timelineSvg, timeOf, todosOf, union } from './stats'
+import { boardDelta, boardFrom, boardRange, clip, colorOf, costOf, crowdOf, crowdSvg, dayCells, efficiencyOf, GAP, lengthOf, mainModel, monthFrom, monthNo, monthsKept, mostAtOnce, partOf, piecesIn, piecesKept, priceOf, RANGES, rowPiece, statsFrom, sumKept, SVG_MOST, svgFits, timelineOf, timelineSvg, timeOf, todosOf, union } from './stats'
 import type { BoardSent, BoardTimeline, DayRows, Kept, Loaded, Msg, Part, Piece, Range, Run, Span, Stats, TodoCall, TokenSums } from './stats'
 
 const M = 60_000
@@ -117,6 +117,12 @@ const plain = (runs: Run[], from: number, now: number) => {
     .map(p => ({ ...p, spans: clip(p.spans, from, Infinity), bars: p.bars.flatMap(b => clip([[b.from, b.to]], from, Infinity).map(([a, z]) => ({ ...b, from: a, to: z }))) }))
     .filter(p => p.spans.length)
   const turns = runs.filter(r => r.kind === 'chat').flatMap(r => r.sum.turns ?? []).filter(([a]) => a >= from)
+  // Each task and each helper under it, however deep, and each agent of a workflow, as itself
+  const under = (id: string): Run[] => runs.filter(r => r.kind === 'helper' && r.parent === id).flatMap(r => [r, ...under(r.id)])
+  const owns = runs.filter(r => r.kind === 'work').map(r => union(r.sum.s))
+  const kidsAll = [...runs.filter(r => r.kind === 'work').flatMap(r => under(r.id)), ...runs.filter(r => r.kind === 'flow')].map(r => union(r.sum.s)).filter(one => one.length)
+  const cut = (list: Span[][]) => list.map(one => clip(one, from, Infinity)).filter(one => one.length)
+  const helpers = { most: mostAtOnce([...cut(owns), ...cut(kidsAll)]), own: cut(owns).reduce((n, one) => n + lengthOf(one), 0), time: cut(kidsAll).reduce((n, one) => n + lengthOf(one), 0), count: kidsAll.filter(one => (one.at(-1)?.[1] ?? 0) > from).length }
   const lasted = plainPieces(runs).filter(p => !p.isFlow && p.isFinished && p.ended >= from).map(p => lengthOf(p.spans))
   return {
     models: [...models.entries()].sort((a, b) => b[1].total - a[1].total),
@@ -132,14 +138,16 @@ const plain = (runs: Run[], from: number, now: number) => {
     time: timeOf(pieces.map(p => p.spans)),
     most: mostAtOnce(pieces.map(p => p.spans)),
     pieces,
+    helpers,
   }
 }
 // The same figures, in one shape: the pieces by name, a timeline's bars with each model by its name
-const shape = (s: Pick<Stats, 'models' | 'all' | 'by' | 'finished' | 'running' | 'flows' | 'todosDone' | 'messages' | 'turn' | 'perPiece' | 'most'> & { time: Stats['time']; pieces: Pick<Piece, 'id' | 'isFlow' | 'isFinished' | 'spans' | 'bars'>[] }, isWhole = true) => ({
+const shape = (s: Pick<Stats, 'models' | 'all' | 'by' | 'finished' | 'running' | 'flows' | 'todosDone' | 'messages' | 'turn' | 'perPiece' | 'most' | 'helpers'> & { time: Stats['time']; pieces: Pick<Piece, 'id' | 'isFlow' | 'isFinished' | 'spans' | 'bars'>[] }, isWhole = true) => ({
   models: s.models,
   all: s.all,
   by: s.by,
   counts: [s.finished, s.running, s.flows, s.todosDone, s.messages, s.turn, s.perPiece, s.most],
+  helpers: s.helpers,
   time: [s.time.added, s.time.clock, s.time.saved, s.time.first, s.time.last],
   pieces: isWhole ? s.pieces.map(p => ({ id: p.id, isFlow: p.isFlow, isFinished: p.isFinished, spans: p.spans, bars: p.bars })).sort((a, b) => (a.id < b.id ? -1 : 1)) : [],
 })
@@ -232,10 +240,16 @@ test('stats add up tokens by model once each, work and its helpers as one piece,
   expect(s.turn).toBe(45_000)
   // w1 with its helper 15 minutes, w2 10, the workflow 10: 35 minutes of work in 25 on the clock
   expect([s.time.added, s.time.clock, s.time.saved]).toEqual([35 * M, 25 * M, 10 * M])
+  // Each task and helper counted as itself: w1, its helper and w2 at work together; the tasks' own 20 minutes, and 20 of their
+  // helpers', the workflow's agents among them
+  expect(s.helpers).toEqual({ most: 3, own: 20 * M, time: 20 * M, count: 3 })
+  expect(crowdOf(s.pieces).map(([a, z, tasks, helpers]) => [(a - day) / M, (z - day) / M, tasks, helpers])).toEqual([[0, 5, 2, 0], [5, 10, 2, 1], [10, 15, 0, 1], [20, 30, 0, 1]])
+  expect(crowdSvg(s.pieces, 400)).toContain('Up to 3 at work at once')
   // From the twentieth minute on: only the workflow, the chat's later message, and their tokens
   const later = kept.stats(day + 20 * M)
   expect([later.finished, later.flows, later.messages, later.all.total]).toEqual([0, 1, 1, 5])
   expect([later.time.added, later.time.saved]).toEqual([10 * M, 0])
+  expect(later.helpers).toEqual({ most: 1, own: 0, time: 10 * M, count: 2 })
   // The leaderboard's ranges: today from midnight, the last 7 and 30 days back from now, all time; work against real time
   const board = kept.board(day + 3 * 86_400_000)
   expect([board.all.work, board.all.clock, board.all.tasks, board.all.tokens]).toEqual([35 * M, 25 * M, 2, 1186])
@@ -263,7 +277,8 @@ test('the timeline is one drawing the app takes whatever the history: each bar i
       const from = day + Math.floor((i / n) * days * 1440) * M
       const spans: Span[] = Array.from({ length: 1 + (i % 3) }, (_, k): Span => [from + k * 40 * M, from + k * 40 * M + (5 + (i % 17)) * M])
       const model = models[i % 3] ?? ''
-      return { id: `p${i}`, title: `A piece of work with a title of a usual length, number ${i}`, isFlow: false, isFinished: true, spans, bars: spans.map(([a, z]) => ({ from: a, to: z, model })), chat: 'c1', done: [], ended: spans.at(-1)?.[1] ?? 0 }
+      const kids: Span[][] = i % 4 ? [] : [[[from + 2 * M, from + 4 * M]], [[from + 3 * M, from + 5 * M]]]
+      return { id: `p${i}`, title: `A piece of work with a title of a usual length, number ${i}`, isFlow: false, isFinished: true, spans, bars: spans.map(([a, z]) => ({ from: a, to: z, model })), chat: 'c1', done: [], ended: spans.at(-1)?.[1] ?? 0, own: spans, kids }
     })
   // About the history that made the tab fail (355 pieces, 449 bars over two months, 210,000 characters): every bar keeps its own words, as the 468 of the real one do
   const usual = many(230, 60)
@@ -276,6 +291,8 @@ test('the timeline is one drawing the app takes whatever the history: each bar i
     const pieces = many(n, days)
     const source = timelineSvg(pieces, width)
     expect(svgFits(source)).toBe(true)
+    // and the tasks and helpers at work at once under it, on the same axis
+    expect(svgFits(crowdSvg(pieces, width))).toBe(true)
     // Each model in its colour; drawn on a grid, each cell is the model that ran most in it
     if (groups !== 0) for (const model of models) expect(source).toContain(colorOf(model))
     if (typeof groups === 'number') expect(source.split('class="b"').length - 1).toBe(groups)
@@ -391,6 +408,8 @@ test('what is kept by chat, day and month comes to the very figures of adding ev
   // Something of every kind was there to count, and the copies were counted once
   const all = kept.stats(0, now)
   expect([all.finished > 20, all.running, all.flows, all.todosDone > 20, all.messages, all.all.unpriced > 0, all.by.helpers > 0, all.by.flows > 0, all.time.saved > 0]).toEqual([true, 1, 4, true, 96, true, true, true, true])
+  // with helpers at work beside their tasks, more at once than the tasks alone
+  expect([all.helpers.count, all.helpers.most > all.most]).toEqual([2 * (5 + 3 + 4), true])
   expect(all.all.total).toBeLessThan(everything.flatMap(r => r.sum.u).filter(m => m[1] !== '<synthetic>').reduce((sum, m) => sum + m[5] + m[6] + m[7] + m[8] + m[9], 0))
   // The leaderboard's timeline: the same tasks at the same minutes in the same models, whole and cut to its newest, with nothing
   // from before Claudopus was installed

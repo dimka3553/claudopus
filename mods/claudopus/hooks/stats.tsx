@@ -115,9 +115,10 @@ export const todosOf = (calls: TodoCall[]) => {
 
 // A piece of work: one the chat started, or a workflow run. Its busy time is its own and that of the helpers it started (they are
 // part of its time); a workflow's is its agents'. Its bars on the timeline are that time, in its model; a workflow's in each agent's.
-// `done` is when each of its to-dos was last ticked done
+// `done` is when each of its to-dos was last ticked done. `own` is the task's own busy time (none for a workflow) and `kids` each
+// helper's under it, at any depth (a workflow's: each of its agents'), so Stats can count every Claude at work at once
 export type Bar = { from: number; to: number; model: string }
-export type Piece = { id: string; chat: string; title: string; isFlow: boolean; isFinished: boolean; spans: Span[]; bars: Bar[]; done: number[]; ended: number }
+export type Piece = { id: string; chat: string; title: string; isFlow: boolean; isFinished: boolean; spans: Span[]; bars: Bar[]; done: number[]; ended: number; own: Span[]; kids: Span[][] }
 // The model a transcript ran on: the one most of its output came from
 export const mainModel = (msgs: Msg[]) => {
   const out = new Map<string, number>()
@@ -248,25 +249,29 @@ export const piecesKept = (chat: string, files: Record<string, Kept>) => {
   const idOf = (key: string) => key.slice(key.lastIndexOf('agent-') + 6)
   const helpers = new Map<string, string[]>()
   for (const key of keys) if (files[key]?.kind === 'helper') helpers.set(files[key]?.parent ?? '', [...(helpers.get(files[key]?.parent ?? '') ?? []), key])
-  const kids = (id: string, met = new Set<string>()): Span[] => (helpers.get(id) ?? []).flatMap(key => (met.has(key) ? [] : (met.add(key), [...(files[key]?.s ?? []), ...kids(idOf(key), met)])))
+  // Each helper under a task, however deep, with its own busy stretches
+  const kids = (id: string, met = new Set<string>()): Span[][] => (helpers.get(id) ?? []).flatMap(key => (met.has(key) ? [] : (met.add(key), [union(files[key]?.s ?? []), ...kids(idOf(key), met)])))
   const works = keys.flatMap((key): Piece[] => {
     const f = files[key]
     if (!f || f.kind !== 'work') return []
-    const spans = union([...(f.s ?? []), ...kids(idOf(key))])
-    return [{ id: idOf(key), chat, title: f.title, isFlow: false, isFinished: f.fin, spans, bars: spans.map(([from, to]) => ({ from, to, model: f.model })), done: f.done ?? [], ended: spans.at(-1)?.[1] ?? 0 }]
+    const own = union(f.s ?? [])
+    const under = kids(idOf(key)).filter(one => one.length)
+    const spans = union([...own, ...under.flat()])
+    return [{ id: idOf(key), chat, title: f.title, isFlow: false, isFinished: f.fin, spans, bars: spans.map(([from, to]) => ({ from, to, model: f.model })), done: f.done ?? [], ended: spans.at(-1)?.[1] ?? 0, own, kids: under }]
   })
   const flows = [...new Set(keys.map(key => (files[key]?.kind === 'flow' && files[key]?.flow) || '').filter(Boolean))].map((name): Piece => {
     const agents = keys.flatMap(key => (files[key]?.kind === 'flow' && files[key]?.flow === name ? [files[key] as Kept] : []))
     const spans = union(agents.flatMap(a => a.s ?? []))
-    return { id: name, chat, title: agents[0]?.title ?? 'Workflow', isFlow: true, isFinished: agents.every(a => a.fin), spans, bars: agents.flatMap(a => union(a.s ?? []).map(([from, to]) => ({ from, to, model: a.model }))), done: [], ended: spans.at(-1)?.[1] ?? 0 }
+    return { id: name, chat, title: agents[0]?.title ?? 'Workflow', isFlow: true, isFinished: agents.every(a => a.fin), spans, bars: agents.flatMap(a => union(a.s ?? []).map(([from, to]) => ({ from, to, model: a.model }))), done: [], ended: spans.at(-1)?.[1] ?? 0, own: [], kids: agents.map(a => union(a.s ?? [])).filter(one => one.length) }
   })
   return { pieces: [...works, ...flows].filter(p => p.spans.length), turns: (files.chat?.turns ?? []).map(([a, b]): [number, number] => [a, b - a]) }
 }
 
 // A piece of work as a month's file keeps it: id, title, a workflow or not, finished or not, its busy stretches end to end, its
 // model (a workflow's bars, each with its agent's), when its to-dos were ticked. A month's file holds, by chat, the pieces that
-// ran in it and the turns that began in it (when, and how long)
-export type PieceRow = { i: string; t: string; f?: 1; d?: 1; s: number[]; m?: string; b?: [number, number, string][]; k?: number[] }
+// ran in it and the turns that began in it (when, and how long). A task with helpers keeps its own stretches (`o`) and each helper's
+// (`h`), end to end; a workflow each agent's (`h`)
+export type PieceRow = { i: string; t: string; f?: 1; d?: 1; s: number[]; m?: string; b?: [number, number, string][]; k?: number[]; o?: number[]; h?: number[][] }
 export type MonthKept = { p: PieceRow[]; t: [number, number][] }
 export const pieceRow = (p: Piece): PieceRow => ({
   i: p.id,
@@ -276,12 +281,19 @@ export const pieceRow = (p: Piece): PieceRow => ({
   s: p.spans.flat(),
   ...(p.isFlow ? { b: p.bars.map((b): [number, number, string] => [b.from, b.to, b.model]) } : { m: p.bars[0]?.model ?? '' }),
   ...(p.done.length ? { k: p.done } : {}),
+  ...(p.kids.length ? { ...(p.isFlow ? {} : { o: p.own.flat() }), h: p.kids.map(one => one.flat()) } : {}),
 })
-export const rowPiece = (chat: string, r: PieceRow): Piece => {
+const spansOf = (flat: number[]) => {
   const spans: Span[] = []
-  for (let i = 0; i + 1 < r.s.length; i += 2) spans.push([r.s[i] ?? 0, r.s[i + 1] ?? 0])
+  for (let i = 0; i + 1 < flat.length; i += 2) spans.push([flat[i] ?? 0, flat[i + 1] ?? 0])
+  return spans
+}
+// (a row kept before helpers were: a task is its own time alone, and a workflow's bars, each an agent's stretch, its agents)
+export const rowPiece = (chat: string, r: PieceRow): Piece => {
+  const spans = spansOf(r.s)
   const bars = r.b ? r.b.map(([from, to, model]) => ({ from, to, model })) : spans.map(([from, to]) => ({ from, to, model: r.m ?? '' }))
-  return { id: r.i, chat, title: r.t, isFlow: r.f === 1, isFinished: r.d === 1, spans, bars, done: r.k ?? [], ended: spans.at(-1)?.[1] ?? 0 }
+  const kids = r.h ? r.h.map(spansOf) : r.f === 1 ? bars.map((b): Span[] => [[b.from, b.to]]) : []
+  return { id: r.i, chat, title: r.t, isFlow: r.f === 1, isFinished: r.d === 1, spans, bars, done: r.k ?? [], ended: spans.at(-1)?.[1] ?? 0, own: r.o ? spansOf(r.o) : r.f === 1 ? [] : spans, kids }
 }
 // A chat's pieces and turns by month: a piece under each month from the one it began in to the one it ended in
 export const monthsKept = (pieces: Piece[], turns: [number, number][]) => {
@@ -302,17 +314,29 @@ export const piecesIn = (pieces: Piece[], first = '') => {
 // The sums of the pieces of work and turns between two moments: the work added up (each piece's busy time, summed), the time on
 // the clock while any of it ran, the most running at once, tasks finished and how long they took whole, workflows, to-dos ticked,
 // turns and their length, the first and last busy moment, and the models in the order the pieces that began here first used them.
-// Work that ran alone adds the same to the work and the clock, so only overlap saves time
-export type Part = { added: number; clock: number; most: number; finished: number; lasted: number; lastedN: number; flows: number; todos: number; turns: number; turnMs: number; first: number; last: number; models: string[] }
-const noPart = (): Part => ({ added: 0, clock: 0, most: 0, finished: 0, lasted: 0, lastedN: 0, flows: 0, todos: 0, turns: 0, turnMs: 0, first: 0, last: 0, models: [] })
+// Work that ran alone adds the same to the work and the clock, so only overlap saves time. Of the tasks and their helpers, each
+// counted as itself: the most at work at once (`crowd`), the tasks' own time, the helpers' time, and the helpers that worked
+// (counted in the month their last stretch ended in). A month kept before these were has none (Helpers)
+export type Part = { added: number; clock: number; most: number; finished: number; lasted: number; lastedN: number; flows: number; todos: number; turns: number; turnMs: number; first: number; last: number; models: string[]; crowd?: number; ownMs?: number; kidMs?: number; kids?: number }
+const noPart = (): Part => ({ added: 0, clock: 0, most: 0, finished: 0, lasted: 0, lastedN: 0, flows: 0, todos: 0, turns: 0, turnMs: 0, first: 0, last: 0, models: [], crowd: 0, ownMs: 0, kidMs: 0, kids: 0 })
 // `isEdge`: `lo` is where the range itself begins, so a piece that ended at that very moment is no part of it
 export const partOf = (pieces: Piece[], turns: [number, number][], lo: number, hi: number, isEdge = false): Part => {
   const part = noPart()
   const busy: Span[][] = []
+  const each: Span[][] = []
   const began: [number, Piece][] = []
+  const [ownMs, kidMs, kids] = [{ n: 0 }, { n: 0 }, { n: 0 }]
   for (const p of pieces) {
     const spans = clip(p.spans, lo, hi)
     if (spans.length) (busy.push(spans), (part.added += lengthOf(spans)))
+    const own = clip(p.own, lo, hi)
+    if (own.length) (each.push(own), (ownMs.n += lengthOf(own)))
+    for (const kid of p.kids) {
+      const one = clip(kid, lo, hi)
+      if (one.length) (each.push(one), (kidMs.n += lengthOf(one)))
+      const end = kid.at(-1)?.[1] ?? 0
+      if (end < hi && (isEdge ? end > lo : end >= lo)) kids.n += 1
+    }
     const isHere = p.ended < hi && (isEdge ? p.ended > lo : p.ended >= lo)
     if (isHere && p.isFlow) part.flows += 1
     if (isHere && !p.isFlow && p.isFinished) part.finished += 1
@@ -324,6 +348,7 @@ export const partOf = (pieces: Piece[], turns: [number, number][], lo: number, h
   const all = union(busy.flat())
   part.clock = lengthOf(all)
   part.most = mostAtOnce(busy)
+  ;[part.crowd, part.ownMs, part.kidMs, part.kids] = [mostAtOnce(each), ownMs.n, kidMs.n, kids.n]
   part.first = all[0]?.[0] ?? 0
   part.last = all.at(-1)?.[1] ?? 0
   for (const [at, length] of turns) if (at >= lo && at < hi) ((part.turns += 1), (part.turnMs += length))
@@ -344,6 +369,10 @@ const partsAdd = (a: Part, b: Part): Part => ({
   first: a.first && b.first ? Math.min(a.first, b.first) : a.first || b.first,
   last: Math.max(a.last, b.last),
   models: [...a.models, ...b.models.filter(model => !a.models.includes(model))],
+  crowd: Math.max(a.crowd ?? 0, b.crowd ?? 0),
+  ownMs: (a.ownMs ?? 0) + (b.ownMs ?? 0),
+  kidMs: (a.kidMs ?? 0) + (b.kidMs ?? 0),
+  kids: (a.kids ?? 0) + (b.kids ?? 0),
 })
 
 // What is kept, as far as a range needs it read: every whole day's tokens, and the tokens of the day the range begins in from that
@@ -374,6 +403,9 @@ export type Stats = {
   pieces: Piece[]
   // The models in the order the pieces first used them, as the leaderboard's timeline numbers them
   starts: string[]
+  // The tasks and their helpers, each counted as itself: the most at work at once, the tasks' own time, the helpers' time, and the
+  // helpers that worked
+  helpers: { most: number; own: number; time: number; count: number }
 }
 // `now` tells work still running (a row in the last GAP) from work stopped without saying so
 export const statsFrom = (kept: Loaded, from: number, now: number): Stats => {
@@ -393,7 +425,7 @@ export const statsFrom = (kept: Loaded, from: number, now: number): Stats => {
   const read = new Map<string, Piece>()
   for (const month of months) for (const p of kept.months.get(month)?.pieces ?? []) read.set(`${p.isFlow ? 1 : 0} ${p.chat} ${p.id}`, p)
   const pieces = piecesIn([...read.values()], kept.first)
-    .map(p => ({ ...p, spans: clip(p.spans, from, Infinity), bars: p.bars.flatMap(b => clip([[b.from, b.to]], from, Infinity).map(([a, z]) => ({ ...b, from: a, to: z }))) }))
+    .map(p => ({ ...p, spans: clip(p.spans, from, Infinity), bars: p.bars.flatMap(b => clip([[b.from, b.to]], from, Infinity).map(([a, z]) => ({ ...b, from: a, to: z }))), own: clip(p.own, from, Infinity), kids: p.kids.map(kid => clip(kid, from, Infinity)).filter(kid => kid.length) }))
     .filter(p => p.spans.length)
   return {
     ...tokensOf(cells),
@@ -408,6 +440,7 @@ export const statsFrom = (kept: Loaded, from: number, now: number): Stats => {
     most: sum.most,
     pieces,
     starts: sum.models,
+    helpers: { most: sum.crowd ?? 0, own: sum.ownMs ?? 0, time: sum.kidMs ?? 0, count: sum.kids ?? 0 },
   }
 }
 
@@ -667,6 +700,81 @@ export const timelineSvg = (pieces: Piece[], width = 600) => {
   return ''
 }
 
+// How many tasks and how many helpers were at work, stretch by stretch: [from, to, tasks, helpers], in order, with nothing at work
+// left out. A workflow's agents count as helpers
+export type Crowd = [from: number, to: number, tasks: number, helpers: number]
+export const crowdOf = (pieces: Piece[]): Crowd[] => {
+  const edges: [at: number, tasks: number, helpers: number][] = []
+  for (const p of pieces) {
+    for (const [a, b] of union(p.own)) edges.push([a, 1, 0], [b, -1, 0])
+    for (const kid of p.kids) for (const [a, b] of union(kid)) edges.push([a, 0, 1], [b, 0, -1])
+  }
+  edges.sort((x, y) => x[0] - y[0])
+  const out: Crowd[] = []
+  let [tasks, helpers] = [0, 0]
+  for (let i = 0; i < edges.length; i++) {
+    const e = edges[i] as [number, number, number]
+    ;[tasks, helpers] = [tasks + e[1], helpers + e[2]]
+    const next = edges[i + 1]?.[0]
+    if (next === undefined || next === e[0] || tasks + helpers <= 0) continue
+    const last = out.at(-1)
+    if (last && last[1] === e[0] && last[2] === tasks && last[3] === helpers) last[1] = next
+    else out.push([e[0], next, tasks, helpers])
+  }
+  return out
+}
+// The tasks and helpers at work at once, under the timeline on the same time axis: in each column, the most at work in it, the
+// tasks below and their helpers above them, as tall as the most of the whole range. Two shapes in all, so a long history fits on
+// a coarser grid; '' when nothing was at work
+const CROWD_TALL = 28
+export const CROWD_HEIGHT = CROWD_TALL + 18
+const TASKS_FILL = '#9A9A9A'
+export const crowdSvg = (pieces: Piece[], width = 600) => {
+  const crowd = crowdOf(pieces)
+  const most = crowd.reduce((n, c) => Math.max(n, c[2] + c[3]), 0)
+  if (!most) return ''
+  const { at } = axisOf(pieces, width)
+  for (const q of [1, 2, 4, 8, 16]) {
+    const cols = Math.max(1, Math.ceil(width / q))
+    const total = new Array<number>(cols).fill(0)
+    const tasks = new Array<number>(cols).fill(0)
+    for (const [a, b, t, h] of crowd) {
+      const [from, to] = [Math.floor(at(a) / q), Math.max(Math.floor(at(a) / q) + 1, Math.ceil(at(b) / q))]
+      for (let c = Math.max(0, from); c < Math.min(cols, to); c++) if (t + h > (total[c] ?? 0) || (t + h === total[c] && t > (tasks[c] ?? 0))) ((total[c] = t + h), (tasks[c] = t))
+    }
+    // Columns of the same height side by side are one box
+    const shape = (heightOf: (c: number) => number, base: (c: number) => number) => {
+      const d: string[] = []
+      for (let c = 0; c < cols; ) {
+        const [h, y] = [heightOf(c), base(c)]
+        let n = 1
+        while (c + n < cols && heightOf(c + n) === h && base(c + n) === y) n += 1
+        if (h > 0) d.push(`M${px(c * q)} ${px(y - h)}h${px(Math.min(n * q, width - c * q))}v${px(h)}h-${px(Math.min(n * q, width - c * q))}z`)
+        c += n
+      }
+      return d.join('')
+    }
+    const tall = (n: number) => (n / most) * CROWD_TALL
+    const taskPath = shape(c => tall(tasks[c] ?? 0), () => CROWD_TALL)
+    const helperPath = shape(c => tall((total[c] ?? 0) - (tasks[c] ?? 0)), c => CROWD_TALL - tall(tasks[c] ?? 0))
+    const key = `<rect x="0" y="${CROWD_TALL + 6}" width="8" height="8" rx="1" fill="${TASKS_FILL}"/><text x="12" y="${CROWD_TALL + 14}">Tasks</text><rect x="52" y="${CROWD_TALL + 6}" width="8" height="8" rx="1" fill="${TASKS_FILL}" fill-opacity=".4"/><text x="64" y="${CROWD_TALL + 14}">Helpers</text><text x="${width}" y="${CROWD_TALL + 14}" text-anchor="end">Up to ${most} at work at once</text>`
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${CROWD_HEIGHT}" viewBox="0 0 ${width} ${CROWD_HEIGHT}"><style>text{font:11px -apple-system,system-ui,sans-serif;fill:#8C8C8C}</style><path d="${taskPath}" fill="${TASKS_FILL}"/><path d="${helperPath}" fill="${TASKS_FILL}" fill-opacity=".4"/>${key}</svg>`
+    if (svgFits(svg)) return svg
+  }
+  return ''
+}
+// The same in a terminal: one row of cells under the timeline, each as tall a block as the most at work in it
+const STEPS = ' ▁▂▃▄▅▆▇█'
+export const crowdRow = (pieces: Piece[], cols: number) => {
+  const crowd = crowdOf(pieces)
+  const most = crowd.reduce((n, c) => Math.max(n, c[2] + c[3]), 0)
+  const { at } = axisOf(pieces, cols)
+  const row = new Array<number>(cols).fill(0)
+  for (const [a, b, t, h] of crowd)
+    for (let x = Math.max(0, Math.floor(at(a))); x < Math.min(cols, Math.max(Math.floor(at(a)) + 1, Math.ceil(at(b)))); x++) row[x] = Math.max(row[x] ?? 0, t + h)
+  return { cells: most ? row.map(n => (n ? (STEPS[Math.max(1, Math.round((n / most) * 8))] ?? '█') : ' ')).join('') : '', most }
+}
+
 type Ui = ElementTable
 // The most rows the terminal's timeline takes; more work at once shares the last row
 const TEXT_LANES = 8
@@ -690,6 +798,7 @@ export const timelineRows = (pieces: Piece[], cols: number) => {
 const timelineText = (ui: Ui, pieces: Piece[], cols: number) => {
   const { Box, Text } = ui
   const { rows, from, to } = timelineRows(pieces, cols)
+  const crowd = crowdRow(pieces, cols)
   // Each row as runs of one model, so a row is a few Texts, not one per cell
   const runs = (row: string[]) => row.reduce<{ model: string; n: number }[]>((all, model) => {
     const tail = all.at(-1)
@@ -704,6 +813,11 @@ const timelineText = (ui: Ui, pieces: Piece[], cols: number) => {
           {runs(row).map((run, j) => (run.model ? <Text key={`run-${j}`} color={colorOf(run.model)}>{'█'.repeat(run.n)}</Text> : <Text key={`run-${j}`}>{' '.repeat(run.n)}</Text>))}
         </Box>
       ))}
+      {crowd.cells ? (
+        <Box key="crowd" flexDirection="row" height={1} flexShrink={0}>
+          <Text dimColor>{crowd.cells}</Text>
+        </Box>
+      ) : null}
       <Box key="axis" flexDirection="row" justifyContent="space-between" width={cols} height={1} flexShrink={0}>
         <Text dimColor>{from}</Text>
         <Text dimColor>{to}</Text>
@@ -1079,6 +1193,8 @@ export function statsView(invalidate: () => void, ui: Ui, reload: (scope: Scope)
   // Drawn once for a range and a width, until the figures are read again
   const svg = kept?.svgs.get(`${view.range} ${width}`) ?? timelineSvg(s.pieces, width)
   kept?.svgs.set(`${view.range} ${width}`, svg)
+  const crowd = kept?.svgs.get(`crowd ${view.range} ${width}`) ?? crowdSvg(s.pieces, width)
+  kept?.svgs.set(`crowd ${view.range} ${width}`, crowd)
   const drawn = new Set(s.pieces.flatMap(p => p.bars.map(b => b.model)))
   const legend = s.models.map(([model]) => model).filter(model => drawn.has(model))
   const timeline = band(
@@ -1089,8 +1205,15 @@ export function statsView(invalidate: () => void, ui: Ui, reload: (scope: Scope)
     <Box flexDirection="column" gap={1}>
       {table.Svg && surface !== 'terminal' ? (
         svgFits(svg) ? (
-          <Box flexShrink={0}>
-            <table.Svg key={`timeline-${view.scope}-${view.range}`} source={svg} alt={`${s.pieces.length} tasks on a timeline`} width={width} height={BARS + 18} isInteractive />
+          <Box flexDirection="column" gap={1} flexShrink={0}>
+            <Box flexShrink={0}>
+              <table.Svg key={`timeline-${view.scope}-${view.range}`} source={svg} alt={`${s.pieces.length} tasks on a timeline`} width={width} height={BARS + 18} isInteractive />
+            </Box>
+            {crowd ? (
+              <Box flexShrink={0}>
+                <table.Svg key={`crowd-${view.scope}-${view.range}`} source={crowd} alt={`Up to ${s.helpers.most} tasks and helpers at work at once`} width={width} height={CROWD_HEIGHT} />
+              </Box>
+            ) : null}
           </Box>
         ) : (
           note(ui, 'timeline-too-big', `${s.pieces.length.toLocaleString('en-US')} tasks are too many to draw here. Choose Today or This chat to see fewer.`)
@@ -1129,6 +1252,25 @@ export function statsView(invalidate: () => void, ui: Ui, reload: (scope: Scope)
         {s.models[0] ? line(ui, 'time-model', 'Favourite model', nameOf(s.models[0][0])) : null}
       </Box>
       {note(ui, 'time-how', 'Efficiency is how much work got done for each hour on the clock: 3 weeks of work in 1 week is 3×. Only tasks running at the same time save time. Claudopus leaves out quiet gaps over 15 minutes.')}
+    </Box>,
+  )
+  // Each task and each helper it started, at any depth, counted as itself
+  const helpers = band(
+    ui,
+    'stats-helpers',
+    'Helpers',
+    '',
+    <Box flexDirection="column" gap={1}>
+      <Box flexDirection="column" flexShrink={0}>
+        {line(ui, 'helpers-count', 'Helpers that worked', count(s.helpers.count))}
+        {line(ui, 'helpers-most', 'Tasks and helpers at work at once, at most', count(s.helpers.most), true)}
+        {line(ui, 'helpers-own', 'Time of tasks, on their own', hours(s.helpers.own))}
+        {line(ui, 'helpers-time', 'Time of helpers', hours(s.helpers.time))}
+        {line(ui, 'helpers-all', 'Tasks and helpers, added up', hours(s.helpers.own + s.helpers.time), true)}
+        {line(ui, 'helpers-tokens-tasks', 'Tokens of tasks', tokensText(s.by.work))}
+        {line(ui, 'helpers-tokens', 'Tokens of helpers', tokensText(s.by.helpers + s.by.flows))}
+      </Box>
+      {note(ui, 'helpers-how', 'A helper is a Claude a task starts, and each helper that one starts in turn. A workflow’s Claudes count as helpers. At work at once counts every task and helper working at the same moment.')}
     </Box>,
   )
   const work = band(
@@ -1205,5 +1347,5 @@ export function statsView(invalidate: () => void, ui: Ui, reload: (scope: Scope)
       ? `Claudopus counts this from Claude’s own logs of ${chats} chats, their tasks, helpers and workflows.`
       : 'Claudopus counts this from Claude’s own logs of this chat, its tasks, helpers and workflows.',
   )
-  return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), hero, timeline, time, work, tokens, cost, ...(mem ? [mem] : []), off]
+  return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), hero, timeline, time, helpers, work, tokens, cost, ...(mem ? [mem] : []), off]
 }

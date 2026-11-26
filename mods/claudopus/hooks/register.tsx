@@ -3348,8 +3348,9 @@ async function shardsWrite<T, H>($: EngineInterface, kept: Shards<T, H>, epoch: 
 
 type Head = { folder: string; sought?: number; cells: Record<string, TokenSums>; months: number[]; old?: 1 }
 const headNew = (): Head => ({ folder: '', cells: {}, months: [] })
-type AllKept = { v: number; epoch: string; at: number; swept: number; cursor: string; counted: number; recent: Record<string, number>; days: Record<string, { rev: number; c: TokenSums }>; months: Record<string, { rev: number; part: Part }> }
-const allNew = (now: number): AllKept => ({ v: CACHE_V, epoch: `${now.toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`, at: 0, swept: 0, cursor: '', counted: 0, recent: {}, days: {}, months: {} })
+const MONTHS_V = 1
+type AllKept = { v: number; mv?: number; epoch: string; at: number; swept: number; cursor: string; counted: number; recent: Record<string, number>; days: Record<string, { rev: number; c: TokenSums }>; months: Record<string, { rev: number; part: Part }> }
+const allNew = (now: number): AllKept => ({ v: CACHE_V, mv: MONTHS_V, epoch: `${now.toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`, at: 0, swept: 0, cursor: '', counted: 0, recent: {}, days: {}, months: {} })
 async function allRead($: EngineInterface, memory: string) {
   const all = parsed<AllKept | undefined>(await statsText($, `${memory}/stats/all.json`), undefined)
   return all && all.v === CACHE_V && typeof all.epoch === 'string' && all.days && all.months ? all : undefined
@@ -3404,7 +3405,7 @@ async function whatOf($: EngineInterface, f: Looked, flowTitle: string): Promise
 const OLD_KEPT_FOR = 3 * 86_400_000
 type Checked = { id: string; index: Shards<Kept, Head>; days: { day: number; key: string; entry: DayEntry | undefined }[]; isChanged: boolean; last: number; hadMain: boolean }
 const HOUR = 3_600_000
-async function chatCheck($: EngineInterface, home: string, memory: string, chatId: string, hint: string, epoch: string, now: number, isThorough: boolean): Promise<Checked> {
+async function chatCheck($: EngineInterface, home: string, memory: string, chatId: string, hint: string, epoch: string, now: number, isThorough: boolean, isRemade = false): Promise<Checked> {
   const index = await shardsRead<Kept, Head>($, `${memory}/stats/chats/${chatId}`, epoch, headNew())
   const oldPath = `${memory}/stats/${chatId}.json`
   const carried = index.of.size ? undefined : parsed<Cache | undefined>(await statsText($, oldPath), undefined)
@@ -3463,9 +3464,10 @@ async function chatCheck($: EngineInterface, home: string, memory: string, chatI
   }
   for (let at = 0; at < files.length; at += 12) await Promise.all(files.slice(at, at + 12).map(look))
   checked.last = files.reduce((last, f) => Math.max(last, f.mtime), 0)
+  if (isRemade && index.of.size) checked.isChanged = true
   return checked
 }
-async function statsApply($: EngineInterface, memory: string, all: AllKept, checked: Checked[], now: number) {
+async function statsApply($: EngineInterface, memory: string, all: AllKept, checked: Checked[], now: number, isRemade = false) {
   const byDay = new Map<number, Checked['days']>()
   for (const one of checked) for (const change of one.days) byDay.set(change.day, [...(byDay.get(change.day) ?? []), change])
   for (const [day, changes] of byDay) {
@@ -3499,6 +3501,7 @@ async function statsApply($: EngineInterface, memory: string, all: AllKept, chec
     one.index.head.months = [...next.keys()]
     one.index.dirty.add(0)
   }
+  if (isRemade) for (const month of Object.keys(all.months)) months.add(Number(month))
   for (const month of months) {
     const open = await monthRead($, memory, all, month)
     const { pieces, turns } = monthPieces(open)
@@ -3539,15 +3542,17 @@ async function refreshNow($: EngineInterface, home: string, memory: string, chat
   if (!(await statsLock($, memory, now))) return 'busy'
   const pass = async (all: AllKept, isNew: boolean) => {
     const isThorough = scope === 'all' && (!all.swept || (isLooking && now - all.swept >= SWEEP_EVERY))
-    const ids = scope === 'all' ? await chatsDue($, memory, chatId, all, now, isThorough) : [chatId]
+    const isRemade = all.mv !== MONTHS_V
+    const ids = isRemade ? await chatsKept($, memory, chatId) : scope === 'all' ? await chatsDue($, memory, chatId, all, now, isThorough) : [chatId]
     let saidAt = now
     for (let at = 0; at < ids.length; at += STATS_BATCH) {
-      const checked = await Promise.all(ids.slice(at, at + STATS_BATCH).map(id => chatCheck($, home, memory, id, id === chatId ? hint : '', all.epoch, now, isThorough || scope === 'chat')))
-      await statsApply($, memory, all, checked, now)
+      const checked = await Promise.all(ids.slice(at, at + STATS_BATCH).map(id => chatCheck($, home, memory, id, id === chatId ? hint : '', all.epoch, now, isThorough || (scope === 'chat' && id === chatId), isRemade)))
+      await statsApply($, memory, all, checked, now, isRemade && at + STATS_BATCH >= ids.length)
       const clock = await $.clock.now()
       if (clock - saidAt >= LOCK_STALE / 4) ((saidAt = clock), await $.fs.write(`${memory}/stats/lock/at`, String(clock)).catch(() => undefined))
     }
-    if (scope !== 'all') return void (isNew && (await $.fs.write(`${memory}/stats/all.json`, JSON.stringify(all))))
+    if (isRemade) ((all.mv = MONTHS_V), await log($, `stats: the months were made again from ${ids.length} chats, with each helper's time`))
+    if (scope !== 'all') return void ((isNew || isRemade) && (await $.fs.write(`${memory}/stats/all.json`, JSON.stringify(all))))
     ;((all.at = now), isThorough && (all.swept = now))
     await $.fs.write(`${memory}/stats/all.json`, JSON.stringify(all))
   }

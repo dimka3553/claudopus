@@ -1,0 +1,2 @@
+- The Stats tab counts each task's helpers, and their helpers, as Claudes of their own: a new Helpers part says how many worked, the most tasks and helpers at work at once, their time and their tokens, apart from the tasks'.
+- Under the timeline, a strip shows how many tasks and helpers were at work at each moment, the tasks below and their helpers above them.
