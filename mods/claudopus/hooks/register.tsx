@@ -278,6 +278,7 @@ let loadMark = 0
 const talks = new Map<string, { key: string; lines: Line[] | undefined; at?: number }>()
 const folds = new Map<string, number[]>()
 let dir = ''
+let claudeDir = ''
 let said = ''
 let heard: string[] = []
 let isOff = false
@@ -4539,11 +4540,12 @@ const loadTheirs = async ($: EngineInterface, one: Todo) => {
     const now = await $.clock.now()
     const was = talks.get(id)
     if (was?.key === key && (was.lines || now - (was.at ?? 0) < RETRY_READ)) return
+    const projects = `${claudeDir || (await configDir($))}/projects`
     const slug = c.folder.replace(/[^A-Za-z0-9]/g, '-')
     const name = `${c.id}/subagents/agent-${c.agent}.jsonl`
     during("read another chat's task")
     const r = await $.process
-      .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', `${await configDir($)}/projects`, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
+      .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', projects, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
       .catch(() => undefined)
     const rows = r?.exitCode === 0 ? rowsOfTranscript(r.stdout) : undefined
     talks.set(id, { key, lines: rows?.length ? withSteers(talkOf(rows), one.entries) : undefined, at: now })
@@ -10703,6 +10705,7 @@ const chatHooks = (on: On) => {
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
+    claudeDir = await configDir($)
     holdAt = 0
     const timing = (await $.env.get('CLAUDOPUS_TIMING')) ?? ''
     isTimed = !/^test\b/.test(timing)

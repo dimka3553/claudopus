@@ -161,6 +161,7 @@ const chatHooks = (on: On) => {
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
+    claudeDir = await configDir($)
     // How late the mod's own timer comes: behind, it does less until it has caught up (lookHold). From the start of the load, so a
     // long hold in the load's own reads is logged with them too
     holdAt = 0

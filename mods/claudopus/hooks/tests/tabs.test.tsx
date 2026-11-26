@@ -1044,9 +1044,15 @@ test('the leaderboard is sent the work in the records where Claude Code keeps th
   await clock.advance(4 * M)
   expect(await until(async () => tokens().at(-1))).toBe(300)
   // A chat whose records were nowhere when it was looked for comes to count once they are there, with no Stats tab open: a look the
-  // leaderboard makes every few minutes finds them within a day
+  // leaderboard makes every few minutes looks for them again once the last was a day ago
   at('-elsewhere', 'late-chat', 400)
-  for (let hour = 0; hour < 25 && tokens().at(-1) !== 700; hour++) await clock.advance(60 * M)
+  const late = `${MEMORY}/stats/chats/late-chat.json`
+  const kept = JSON.parse(files.get(late) ?? '{}') as { head: { folder: string; sought?: number } }
+  expect(kept.head).toMatchObject({ folder: '', sought: expect.any(Number) })
+  await clock.advance(4 * M)
+  expect(tokens().at(-1)).toBe(300)
+  files.set(late, JSON.stringify({ ...kept, head: { ...kept.head, sought: now - 1441 * M } }))
+  await clock.advance(4 * M)
   expect(await until(async () => (tokens().at(-1) === 700 ? true : undefined))).toBe(true)
 })
 
