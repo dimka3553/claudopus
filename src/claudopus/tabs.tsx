@@ -55,7 +55,7 @@ const tabHooks = (on: On) => {
     return drawing
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
-  // Progress, in a pane of its own: the wheel, the areas, and an area opened; drawn again when the progress folder changes
+  // Progress, in a pane of its own: the goals' rings, the areas, and an area opened; drawn again when the progress folder changes
   on('ui.render', { component: 'Pane', requestId: PROGRESS_PANE }, async ($, e) => progressTab($, uiOf($, e), Math.max(300, Math.floor(e.props.bodyColumns * 7.4 - 32)), e.props.scroll.bodyRows)).catch(($, e, next) =>
     next.called ? next(e) : tabFailed($, e, next.error),
   )

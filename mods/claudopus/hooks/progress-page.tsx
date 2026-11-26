@@ -1,4 +1,4 @@
-// The Progress tab's drawing: the wheel of the bigger picture, each area's row under its goal, and an area's own page with its next
+// The Progress tab's drawing: a ring for each goal of the bigger picture, each area's row under its goal, and an area's own page with its next
 // steps and timeline. Pure: register.tsx's progress-tab part reads the progress folder and the pictures, and hands them here
 import type { ElementTable } from 'claude-code'
 
@@ -73,19 +73,9 @@ export const grouped = (data: ProgressData) => {
   return groups.filter(group => group.areas.length)
 }
 
-// ---- The wheel: the north star in the centre, a ring of goals, a ring of areas under them, a band of their last 8 weeks ----
-export type WheelArea = { id: string; name: string; color: string; goal: string } & AreaFigures
-// Where a point at radius r and angle deg (0 at the top, clockwise) lies
-export const polarOf = (cx: number, cy: number, r: number, deg: number) => {
-  const rad = ((deg - 90) * Math.PI) / 180
-  return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)] as const
-}
-export const sectorOf = (cx: number, cy: number, r0: number, r1: number, a0: number, a1: number) => {
-  const end = Math.min(a1, a0 + 359.9)
-  const big = end - a0 > 180 ? 1 : 0
-  const [p, q, s, t] = [polarOf(cx, cy, r1, a0), polarOf(cx, cy, r1, end), polarOf(cx, cy, r0, end), polarOf(cx, cy, r0, a0)]
-  return `M${n1(p[0])} ${n1(p[1])}A${n1(r1)} ${n1(r1)} 0 ${big} 1 ${n1(q[0])} ${n1(q[1])}L${n1(s[0])} ${n1(s[1])}A${n1(r0)} ${n1(r0)} 0 ${big} 0 ${n1(t[0])} ${n1(t[1])}Z`
-}
+// ---- The chart: a ring for each goal, filled with what its areas have done, set aside and have next ----
+export type ChartArea = { id: string; name: string; color: string; goal: string } & AreaFigures
+export const countsSaid = (f: { done: number; aside: number; next: number }) => [`${f.done} done`, f.aside ? `${f.aside} aside` : '', `${f.next} next`].filter(Boolean).join(', ')
 // Words wrapped to lines of at most `most` letters
 export const wrapped = (text: string, most: number) => {
   const lines: string[] = []
@@ -96,157 +86,57 @@ export const wrapped = (text: string, most: number) => {
   }
   return lines
 }
-export const countsSaid = (f: { done: number; aside: number; next: number }) => [`${f.done} done`, f.aside ? `${f.aside} aside` : '', `${f.next} next`].filter(Boolean).join(', ')
-// The wheel as one Svg, `width` wide: its source, size and words for a screen reader
-export const wheelOf = (star: string, goals: ProgressGoal[], areas: WheelArea[], width: number) => {
+// An arc of a ring from `from` to `to` (shares of the whole, 0 at the top, clockwise)
+const arcOf = (cx: number, cy: number, r: number, from: number, to: number) => {
+  const at = (share: number) => [cx + r * Math.sin(2 * Math.PI * share), cy - r * Math.cos(2 * Math.PI * share)] as const
+  const end = Math.min(to, from + 0.9999)
+  const [p, q] = [at(from), at(end)]
+  return `M${n1(p[0])} ${n1(p[1])}A${n1(r)} ${n1(r)} 0 ${end - from > 0.5 ? 1 : 0} 1 ${n1(q[0])} ${n1(q[1])}`
+}
+// The chart as one Svg, `width` wide: the north star on top, then one ring per goal in rows, each with its name under it
+export const chartOf = (star: string, goals: ProgressGoal[], areas: ChartArea[], width: number) => {
+  const used = [...goals, OTHER_GOAL].filter(goal => areas.some(area => area.goal === goal.id))
   const isWide = width >= 560
-  const room = isWide ? 150 : 88
-  const R = Math.max(80, Math.min(isWide ? 168 : 120, Math.floor((width - 2 * room) / 2)))
-  const top = isWide ? 30 : 24
-  const H = 2 * R + 2 * top
-  const cx = width / 2
-  const cy = top + R
-  const [rC, g0, g1, a0r, a1r, b0, b1] = [R * 0.47, R * 0.5, R * 0.59, R * 0.615, R * 0.85, R * 0.875, R]
-  const order = [...goals, OTHER_GOAL].flatMap(goal => areas.filter(area => area.goal === goal.id))
-  const used = [...goals, OTHER_GOAL].filter(goal => order.some(area => area.goal === goal.id))
-  const total = order.reduce((sum, area) => sum + area.month, 0)
-  const base = Math.max(1, total * 0.03)
-  const [gapArea, gapGoal] = [order.length > 1 ? 1.2 : 0, used.length > 1 ? 3.2 : order.length > 1 ? 1.2 : 0]
-  const free = 360 - used.length * gapGoal - Math.max(0, order.length - used.length) * gapArea
-  const weight = order.reduce((sum, area) => sum + area.month + base, 0)
-  // Each area's span, goal by goal, from the top clockwise
-  let at = gapGoal / 2
-  const spans = new Map<string, [number, number]>()
-  for (const goal of used) {
-    const mine = order.filter(area => area.goal === goal.id)
-    mine.forEach((area, i) => {
-      const span = (free * (area.month + base)) / weight
-      spans.set(area.id, [at, at + span])
-      at += span + (i < mine.length - 1 ? gapArea : gapGoal)
-    })
-  }
-  const parts: string[] = []
-  const defs = `<defs><pattern id="pw-aside" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="4" fill="${P_ASIDE}"/></pattern><filter id="pw-glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="${isWide ? 4 : 3}"/></filter><radialGradient id="pw-core"><stop offset="0" stop-color="#8080801f"/><stop offset="1" stop-color="#8080800a"/></radialGradient></defs>`
-  // The centre, and a faint ring under the band
-  parts.push(`<circle cx="${n1(cx)}" cy="${n1(cy)}" r="${n1(rC)}" fill="url(#pw-core)"/>`, `<circle cx="${n1(cx)}" cy="${n1(cy)}" r="${n1(b0)}" fill="none" stroke="currentColor" stroke-opacity="0.12" stroke-width="1"/>`)
-  // The goals' ring: each goal's arc as wide as its areas', so as this month's tasks
-  for (const goal of used) {
-    const mine = order.filter(area => area.goal === goal.id).map(area => spans.get(area.id) ?? [0, 0])
-    const [s, e] = [mine[0]?.[0] ?? 0, mine.at(-1)?.[1] ?? 0]
-    parts.push(`<path d="${sectorOf(cx, cy, g0, g1, s, e)}" fill="${goal.color}"/>`)
-  }
-  // The areas being built now glow purple beneath their arc
-  for (const area of order.filter(one => one.live)) {
-    const [s, e] = spans.get(area.id) ?? [0, 0]
-    parts.push(`<path d="${sectorOf(cx, cy, a0r - 1, b1 + 3, s - 0.4, e + 0.4)}" fill="${LIVE}" fill-opacity="0.45" filter="url(#pw-glow)"/>`)
-  }
-  // The areas' ring: done in green from the start of the arc, then set aside hatched, then what is next in the goal's colour, faint
-  for (const area of order) {
-    const [s, e] = spans.get(area.id) ?? [0, 0]
-    const color = goals.find(goal => goal.id === area.goal)?.color ?? OTHER_GOAL.color
-    const all = area.done + area.aside + area.next
-    parts.push(`<path d="${sectorOf(cx, cy, a0r, a1r, s, e)}" fill="${color}" fill-opacity="0.24"/>`)
-    if (all) {
-      const [d, a] = [((e - s) * area.done) / all, ((e - s) * area.aside) / all]
-      if (d > 0.05) parts.push(`<path d="${sectorOf(cx, cy, a0r, a1r, s, s + d)}" fill="${P_GREEN}"/>`)
-      if (a > 0.05) parts.push(`<path d="${sectorOf(cx, cy, a0r, a1r, s + d, s + d + a)}" fill="url(#pw-aside)"/>`)
-    }
-    if (area.live) parts.push(`<path d="${sectorOf(cx, cy, a0r, a1r, s, e)}" fill="none" stroke="${LIVE}" stroke-width="1.6"/>`)
-  }
-  // The band: each area's tasks a week over the last 8 weeks, a small range of hills along its arc
-  const most = Math.max(1, ...order.flatMap(area => area.weeks))
-  for (const area of order) {
-    if (!area.weeks.some(Boolean)) continue
-    const [s, e] = spans.get(area.id) ?? [0, 0]
-    const color = goals.find(goal => goal.id === area.goal)?.color ?? OTHER_GOAL.color
-    const knots = [[s, 0], ...area.weeks.map((v, i) => [s + ((e - s) * (i + 0.5)) / 8, Math.sqrt(v / most)]), [e, 0]] as [number, number][]
-    const points: string[] = []
-    for (let i = 0; i < knots.length - 1; i++) {
-      const [p0, p1, p2, p3] = [knots[Math.max(0, i - 1)], knots[i], knots[i + 1], knots[Math.min(knots.length - 1, i + 2)]] as [[number, number], [number, number], [number, number], [number, number]]
-      for (let k = 0; k < 6; k++) {
-        const t = k / 6
-        const v = 0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t * t + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t * t * t)
-        const [x, y] = polarOf(cx, cy, b0 + (b1 - b0) * Math.max(0, Math.min(1, v)), p1[0] + (p2[0] - p1[0]) * t)
-        points.push(`${n1(x)} ${n1(y)}`)
-      }
-    }
-    const [ex, ey] = polarOf(cx, cy, b0, e)
-    const [sx, sy] = polarOf(cx, cy, b0, s)
-    parts.push(`<path d="M${n1(sx)} ${n1(sy)}L${points.join('L')}L${n1(ex)} ${n1(ey)}A${n1(b0)} ${n1(b0)} 0 ${e - s > 180 ? 1 : 0} 0 ${n1(sx)} ${n1(sy)}Z" fill="${color}" fill-opacity="0.62"/>`)
-  }
-  // Each area's name in a column beside the wheel, on its side, pushed apart so none meet, a line to its arc; the smallest go
-  // first where there is no room for all
-  const lh = isWide ? 30 : 15
-  const nameSize = isWide ? 12.5 : 10.5
-  for (const side of [1, -1]) {
-    const mid = (area: WheelArea) => {
-      const [s, e] = spans.get(area.id) ?? [0, 0]
-      return (s + e) / 2
-    }
-    const x = cx + side * (R + (isWide ? 22 : 14))
-    const fits = Math.max(4, Math.floor((side > 0 ? width - x - 2 : x - 2) / (nameSize * 0.56)))
-    // A narrow wheel's long name takes two lines, cut short past them
-    const linesOf = (name: string) => {
-      if (isWide || name.length <= fits) return [name.length > fits ? `${name.slice(0, fits - 1).trimEnd()}…` : name]
-      const [one = '', ...rest] = wrapped(name, fits)
-      const two = rest.join(' ')
-      return [one.length > fits ? `${one.slice(0, fits - 1)}…` : one, two.length > fits ? `${two.slice(0, fits - 1).trimEnd()}…` : two].filter(Boolean)
-    }
-    const heightOf = (area: WheelArea) => (isWide ? lh : linesOf(area.name).length * 12.5 + 3)
-    let mine = order.filter(area => (Math.sin((mid(area) * Math.PI) / 180) >= 0 ? 1 : -1) === side)
-    while (mine.reduce((sum, area) => sum + heightOf(area), 0) > H - 8) {
-      const least = mine.reduce((a, b) => (b.month < a.month ? b : a))
-      mine = mine.filter(area => area !== least)
-    }
-    const placed = mine.map(area => ({ area, h: heightOf(area), y: cy - (R + 12) * Math.cos((mid(area) * Math.PI) / 180) })).sort((a, b) => a.y - b.y)
-    placed.forEach((one, i) => {
-      const before = placed[i - 1]
-      one.y = Math.max(one.y, before ? before.y + (before.h + one.h) / 2 : one.h / 2 + 2)
-    })
-    for (let i = placed.length - 1; i >= 0; i--) {
-      const [one, after] = [placed[i], placed[i + 1]]
-      if (one) one.y = Math.min(one.y, after ? after.y - (after.h + one.h) / 2 : H - one.h / 2 - 2)
-    }
-    for (const { area, y } of placed) {
-      const color = goals.find(goal => goal.id === area.goal)?.color ?? OTHER_GOAL.color
-      const [px, py] = polarOf(cx, cy, b1 + 2, mid(area))
-      const [qx, qy] = polarOf(cx, cy, b1 + 7, mid(area))
-      parts.push(`<path d="M${n1(px)} ${n1(py)}L${n1(qx)} ${n1(qy)}L${n1(x - side * 4)} ${n1(isWide ? y - 6 : y)}" fill="none" stroke="${color}" stroke-opacity="0.8" stroke-width="1"/>`)
-      const lines = linesOf(area.name)
-      const anchor = side > 0 ? 'start' : 'end'
-      const look = area.live ? `fill="${LIVE}" font-weight="600"` : 'fill="currentColor"'
-      if (!isWide) {
-        lines.forEach((line, i) => parts.push(`<text x="${n1(x)}" y="${n1(y + 3.8 + (i - (lines.length - 1) / 2) * 12.5)}" text-anchor="${anchor}" ${P_FONT} font-size="${nameSize}" ${look}>${xmlSafe(line)}</text>`))
-        continue
-      }
-      parts.push(`<text x="${n1(x)}" y="${n1(y - 2)}" text-anchor="${anchor}" ${P_FONT} font-size="${nameSize}" ${look}>${xmlSafe(lines[0] ?? '')}</text>`)
-      const counts = [`<tspan fill="${P_GREEN}">${area.done} done</tspan>`, area.aside ? `<tspan fill="${P_ASIDE}">${area.aside} aside</tspan>` : '', `<tspan fill="${P_DIM}">${area.next} next</tspan>`].filter(Boolean)
-      parts.push(`<text x="${n1(x)}" y="${n1(y + 11.5)}" text-anchor="${anchor}" ${P_FONT} font-size="10.5" fill="${P_DIM}">${counts.join(`<tspan fill="${P_DIM}"> · </tspan>`)}</text>`)
-    }
-  }
-  // The north star in the centre, as large as fits, and what is done and next over every area beneath it
-  const sums = order.reduce((s, a) => ({ done: s.done + a.done, aside: s.aside + a.aside, next: s.next + a.next }), { done: 0, aside: 0, next: 0 })
-  const sumsSize = isWide ? 11.5 : 9.5
-  const quoted = star.trim() ? `“${star.trim().replace(/^["“]+|["”]+$/g, '')}”` : ''
-  let size = isWide ? 15 : 11.5
-  let lines = wrapped(quoted, Math.floor((rC * 1.6) / (size * 0.52)))
-  while (quoted && size > 8 && lines.length * size * 1.22 > rC * 1.25) {
-    size -= 0.5
-    lines = wrapped(quoted, Math.floor((rC * 1.6) / (size * 0.52)))
-  }
-  const block = (quoted ? lines.length * size * 1.22 : 0) + sumsSize * 1.6
-  let y = cy - block / 2 + size * 0.9
-  for (const line of quoted ? lines : []) {
-    parts.push(`<text x="${n1(cx)}" y="${n1(y)}" text-anchor="middle" ${P_FONT} font-size="${n1(size)}" fill="currentColor">${xmlSafe(line)}</text>`)
-    y += size * 1.22
-  }
-  // (set aside only where the line fits inside the centre)
-  const isAsideSaid = sums.aside > 0 && countsSaid(sums).replace(/,/g, ' ·').length * sumsSize * 0.56 < rC * 1.7
-  const sumsParts = [`<tspan fill="${P_GREEN}">${sums.done} done</tspan>`, isAsideSaid ? `<tspan fill="${P_ASIDE}">${sums.aside} aside</tspan>` : '', `<tspan fill="${P_DIM}">${sums.next} next</tspan>`].filter(Boolean)
-  parts.push(`<text x="${n1(cx)}" y="${n1(y + sumsSize * (quoted ? 0.55 : 0.3))}" text-anchor="middle" ${P_FONT} font-size="${sumsSize}" fill="${P_DIM}">${sumsParts.join(' · ')}</text>`)
-  const shares = used.map(goal => `${goal.name} ${total ? Math.round((100 * order.filter(a => a.goal === goal.id).reduce((s, a) => s + a.month, 0)) / total) : 0}%`)
-  const alt = cutTo([quoted, `Goals by this month's tasks: ${shares.join(', ')}.`, ...order.map(area => `${area.name}: ${countsSaid(area)}${area.live ? ', working now' : ''}.`)].filter(Boolean).join(' '), 900)
-  return { source: svgDoc(width, H, defs + parts.join('')), width, height: H, alt }
+  const cell = isWide ? 112 : 92
+  const perRow = Math.max(1, Math.min(used.length, Math.floor(width / cell)))
+  const rows = Math.ceil(used.length / perRow)
+  const r = isWide ? 32 : 26
+  const stroke = isWide ? 9 : 7.5
+  const quoted = star.trim() ? `\u201c${star.trim().replace(/^["\u201c]+|["\u201d]+$/g, '')}\u201d` : ''
+  const starSize = isWide ? 15 : 12.5
+  const starLines = quoted ? wrapped(quoted, Math.floor((width - 16) / (starSize * 0.53))).slice(0, 2) : []
+  const top = starLines.length ? starLines.length * starSize * 1.3 + 16 : 4
+  const rowH = 2 * r + stroke + (isWide ? 58 : 52)
+  const H = Math.ceil(top + rows * rowH)
+  const parts: string[] = [`<defs><pattern id="pc-aside" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="4" fill="${P_ASIDE}"/></pattern></defs>`]
+  starLines.forEach((line, i) => parts.push(`<text x="${n1(width / 2)}" y="${n1(starSize * 1.05 + i * starSize * 1.3)}" text-anchor="middle" ${P_FONT} font-size="${starSize}" fill="currentColor">${xmlSafe(line)}</text>`))
+  const said: string[] = []
+  used.forEach((goal, i) => {
+    const mine = areas.filter(area => area.goal === goal.id)
+    const f = mine.reduce((s, a) => ({ done: s.done + a.done, aside: s.aside + a.aside, next: s.next + a.next }), { done: 0, aside: 0, next: 0 })
+    const all = f.done + f.aside + f.next
+    const live = mine.some(area => area.live)
+    const row = Math.floor(i / perRow)
+    const inRow = Math.min(perRow, used.length - row * perRow)
+    const cx = width / 2 + ((i % perRow) - (inRow - 1) / 2) * (width / perRow)
+    const cy = top + row * rowH + r + stroke / 2
+    parts.push(`<circle cx="${n1(cx)}" cy="${n1(cy)}" r="${r}" fill="none" stroke="${goal.color}" stroke-opacity="0.22" stroke-width="${stroke}"/>`)
+    if (all && f.done) parts.push(`<path d="${arcOf(cx, cy, r, 0, f.done / all)}" fill="none" stroke="${P_GREEN}" stroke-width="${stroke}"/>`)
+    if (all && f.aside) parts.push(`<path d="${arcOf(cx, cy, r, f.done / all, (f.done + f.aside) / all)}" fill="none" stroke="url(#pc-aside)" stroke-width="${stroke}"/>`)
+    parts.push(`<text x="${n1(cx)}" y="${n1(cy + (isWide ? 6 : 5))}" text-anchor="middle" ${P_FONT} font-size="${isWide ? 17 : 14}" font-weight="600" fill="currentColor">${f.done}<tspan fill="${P_DIM}" font-size="${isWide ? 12 : 10}" font-weight="400">/${all}</tspan></text>`)
+    const nameY = cy + r + stroke / 2 + (isWide ? 18 : 16)
+    const nameSize = isWide ? 12 : 10.5
+    const most = Math.max(6, Math.floor((width / perRow - 8) / (nameSize * 0.55)))
+    // A long name takes two lines, cut short past them
+    const [one = '', ...rest] = wrapped(goal.name, most)
+    const two = rest.join(' ')
+    const lines = [one, two.length > most ? `${two.slice(0, most - 1).trimEnd()}\u2026` : two].filter(Boolean)
+    lines.forEach((line, k) => parts.push(`<text x="${n1(cx)}" y="${n1(nameY + k * nameSize * 1.25)}" text-anchor="middle" ${P_FONT} font-size="${nameSize}" ${live ? `fill="${LIVE}" font-weight="600"` : 'fill="currentColor"'}>${xmlSafe(line)}</text>`))
+    if (live) parts.push(`<circle cx="${n1(cx + r * 0.72)}" cy="${n1(cy - r * 0.72)}" r="${isWide ? 4.5 : 3.8}" fill="${LIVE}"/>`)
+    said.push(`${goal.name}: ${countsSaid(f)}.`)
+  })
+  const alt = cutTo([quoted, ...said, ...areas.map(area => `${area.name}: ${countsSaid(area)}${area.live ? ', working now' : ''}.`)].filter(Boolean).join(' '), 900)
+  return { source: svgDoc(width, H, parts.join('')), width, height: H, alt }
 }
 
 // ---- Small drawings of the rows ----
@@ -335,7 +225,7 @@ export type ProgressActs = {
 }
 export type ProgressLook = { width: number; now: number; gen: string; pictures: (entry: PageEntry) => ProgressPictureRef[]; hasResult: (entry: PageEntry) => boolean; small: (ref: ProgressPictureRef) => ProgressThumb; large: (ref: ProgressPictureRef) => ProgressThumb; acts: ProgressActs }
 
-// ---- The overview: the wheel, then each goal's areas as rows ----
+// ---- The overview: the goals' rings, then each goal's areas as rows ----
 export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook) => {
   const { Box, Text, Button } = ui as unknown as Parts
   const Svg = (ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSXEl }).Svg
@@ -348,9 +238,8 @@ export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook)
         <Text dimColor wrap="wrap">Claudopus sorts each task into its area as it finishes, and shows here what each area has done and what comes next.</Text>
       </Box>
     )
-  const wheelAreas: WheelArea[] = data.areas.map(area => ({ id: area.id, name: area.name, color: goalOf(data, area).color, goal: goalOf(data, area).id, ...(figures.get(area.id) as AreaFigures) }))
-  const wheel = wheelOf(data.star, data.goals, wheelAreas, Math.floor(look.width))
-  const month = wheelAreas.reduce((sum, area) => sum + area.month, 0)
+  const chartAreas: ChartArea[] = data.areas.map(area => ({ id: area.id, name: area.name, color: goalOf(data, area).color, goal: goalOf(data, area).id, ...(figures.get(area.id) as AreaFigures) }))
+  const chart = chartOf(data.star, data.goals, chartAreas, Math.floor(look.width))
   const groups = grouped(data)
   const tw = isWide ? 64 : 52
   const th = isWide ? 48 : 39
@@ -415,21 +304,7 @@ export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook)
   return (
     <Box key="progress-overview" flexDirection="column" gap={2.5}>
       <Box key="progress-top" flexDirection="column" gap={1} flexShrink={0}>
-        {Svg ? <Svg key="progress-wheel" source={wheel.source} alt={wheel.alt} width={wheel.width} height={wheel.height} /> : data.star ? <Text wrap="wrap">{`“${data.star}”`}</Text> : null}
-        <Box key="progress-legend" flexDirection="row" flexWrap="wrap" columnGap={2.5} rowGap={0} justifyContent="center">
-          {groups.map(({ goal, areas }) => (
-            <Box key={`progress-legend-${goal.id || 'other'}`} flexDirection="row" gap={0.75} alignItems="center" flexShrink={0}>
-              {Svg ? <Svg source={dotOf(goal.color)} alt="" width={8} height={20} /> : null}
-              <Text>{goal.name}</Text>
-              {month ? <Text dimColor>{`${Math.round((100 * areas.reduce((sum, area) => sum + (figures.get(area.id)?.month ?? 0), 0)) / month)}%`}</Text> : null}
-            </Box>
-          ))}
-        </Box>
-        {month ? (
-          <Box key="progress-caption" flexDirection="row" justifyContent="center">
-            <Text dimColor>{'Tasks in the last 30 days · outer band: 8 weeks'}</Text>
-          </Box>
-        ) : null}
+        {Svg ? <Svg key="progress-chart" source={chart.source} alt={chart.alt} width={chart.width} height={chart.height} /> : data.star ? <Text wrap="wrap">{`“${data.star}”`}</Text> : null}
       </Box>
       {groups.map(({ goal, areas }) =>
         goal === OTHER_GOAL && groups.length > 1 ? (

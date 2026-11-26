@@ -1056,7 +1056,7 @@ const progressFiles = (files: Map<string, string>) => {
   }
 }
 
-test('the Progress tab opens from its button beside Results: the wheel of the north star, goals and areas, each area a row under its goal, an area opened with its next steps and timeline, a step ticked, and nothing says anything waits', async ($, on) => {
+test('the Progress tab opens from its button beside Results: a ring for each goal under the north star, each area a row under its goal, an area opened with its next steps and timeline, a step ticked, and nothing says anything waits', async ($, on) => {
   const sips = (argv: string[]) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 480\npixelHeight: 300' : '')
   const bytes = (path: string) => (path.includes('/thumbs/') ? 'B'.repeat(path.endsWith('.small.jpg') ? 4_000 : 30_000) : undefined)
   const { files, opened, tabs, submitted } = world(on, { sips, bytes })
@@ -1070,13 +1070,13 @@ test('the Progress tab opens from its button beside Results: the wheel of the no
   expect(tabs).toContain('progress: Progress')
   const tab = await $.ui.mount({ ...LIST, requestId: 'progress', props: { ...LIST.props, title: 'Progress', bodyColumns: 104 }, surface: 'desktop' } as never)
   const texts = async () => (await tab.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
-  // The wheel: one Svg the app draws, the north star in its centre, each area named around it, the area at work in purple
-  const wheel = await until(async () => (await tab.findAll({ type: 'Svg' })).find(one => String(one.props.alt).includes('A shop that sells seeds')))
-  const source = String(wheel?.props.source)
+  // The chart: one Svg the app draws, the north star on top and a ring for each goal named under it, the goal at work in purple
+  const chart = await until(async () => (await tab.findAll({ type: 'Svg' })).find(one => String(one.props.alt).includes('A shop that sells seeds')))
+  const source = String(chart?.props.source)
   expect(source.length).toBeLessThanOrEqual(131_072)
-  for (const name of ['Seed shop', 'Bookkeeping', 'Cafe menu']) expect(source).toContain(`>${name}</text>`)
-  expect(source).toMatch(/fill="#8A63F0" font-weight="600">Seed shop</)
-  expect(String(wheel?.props.alt)).toContain('Seed shop: 2 done, 2 aside, 1 next, working now.')
+  for (const name of ['A calm company', 'Other']) expect(source).toContain(`>${name}</text>`)
+  expect(source).toMatch(/fill="#8A63F0" font-weight="600">More gardens</)
+  expect(String(chart?.props.alt)).toContain('Seed shop: 2 done, 2 aside, 1 next, working now.')
   // Under it each goal's areas, and those under no goal folded as Other
   for (const text of ['More gardens', 'A calm company', 'Other', 'Working', 'Seed photos on every page', 'October books closed', '1 area']) expect(await texts()).toContain(text)
   expect((await tab.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Seed shop' && String(one.props.source).includes('base64,BBBB'))).toBe(true)

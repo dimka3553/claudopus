@@ -1,4 +1,4 @@
-// The Progress tab: the wheel of the bigger picture at the top, each area as a row under its goal, and an area's own page with its
+// The Progress tab: a ring for each goal of the bigger picture at the top, each area as a row under its goal, and an area's own page with its
 // next steps and its timeline. Read from the progress folder (progress.tsx) and drawn by mods/claudopus/hooks/progress-page.tsx
 
 const PROGRESS_PANE = 'progress'
