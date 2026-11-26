@@ -21,7 +21,7 @@ const PARTS = [
   'common.tsx', 'recorder.tsx', 'rules.tsx', 'settings.tsx', 'subjects.tsx', 'progress.tsx', 'cards.tsx', 'state.tsx', 'talk.tsx', 'servers.tsx', 'reports.tsx', 'welcome.tsx',
   'results-tab.tsx', 'memory.tsx', 'stats-tab.tsx', 'about.tsx', 'art.tsx', 'term-art.tsx', 'pictures.tsx', 'files.tsx', 'workflows.tsx', 'notify.tsx',
   'updating.tsx', 'changelog.tsx', 'asking.tsx', 'sharing.tsx', 'macs.tsx', 'afar.tsx', 'boxes.tsx', 'gate.tsx', 'prompts.tsx', 'runit.tsx', 'lean.tsx', 'needs.tsx', 'typed.tsx', 'chat.tsx', 'stuck.tsx', 'jobs.tsx', 'naming.tsx', 'heavy.tsx', 'tidy.tsx', 'steps.tsx', 'keep.tsx', 'keys.tsx', 'crossing.tsx', 'work.tsx', 'commands.tsx', 'tools.tsx', 'usage.tsx', 'pace.tsx', 'band.tsx',
-  'panel.tsx', 'tabs.tsx', 'register.tsx',
+  'progress-tab.tsx', 'panel.tsx', 'tabs.tsx', 'register.tsx',
 ]
 const TEST_PARTS = [
   'world.tsx', 'chat.test.tsx', 'cards.test.tsx', 'left.test.tsx', 'finish.test.tsx', 'notify.test.tsx', 'commands.test.tsx', 'servers.test.tsx',

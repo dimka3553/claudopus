@@ -94,7 +94,7 @@ const panelHooks = (on: On) => {
     const id = e.requestId ?? ''
     // Every ask for a tab's drawing passes here first, and is noted (watchTabs)
     await noteTabAsked($, id)
-    const isTab = [REPORTS_PANE, STATS_PANE, BOARD_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, LOG_PANE, DIFF_PANE, 'report-'].some(start => id.startsWith(start))
+    const isTab = [REPORTS_PANE, PROGRESS_PANE, STATS_PANE, BOARD_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, LOG_PANE, DIFF_PANE, 'report-'].some(start => id.startsWith(start))
     // A tab of the mod's on the desktop, Settings, About, Results and the rest, but for a work's or a workflow's Details, which are
     // drawn with the panel below: every drawing of the panel draws it again too, so under load its buttons went as the panel's did
     // (16 Nov: Settings' Reset pressed, never reached the mod). Held the same way: given again through a click, and while its
@@ -2104,6 +2104,7 @@ const panelHooks = (on: On) => {
             {/* Wrapped rows keep the same gap as the buttons beside each other; a terminal's gap would be a whole blank line, so it has none */}
             <Box key="head-buttons" flexDirection="row" flexWrap="wrap" columnGap={isKeyed ? 2 : 1} rowGap={e.surface === 'terminal' ? 0 : 1}>
               {reportsButton($, ui, kept, isKeyed)}
+              {progressButton($, ui, isKeyed)}
               {statsButton($, ui, isKeyed)}
               {boardButton($, ui, isKeyed)}
               {memoryButton($, ui, isKeyed)}

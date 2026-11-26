@@ -13,6 +13,8 @@ import * as M10 from '../../mods/claudopus/hooks/jobs'
 import * as M11 from '../../mods/claudopus/hooks/naming'
 import * as M12 from '../../mods/claudopus/hooks/usage'
 import * as M13 from '../../mods/claudopus/hooks/pace'
+import * as M14 from '../../mods/claudopus/hooks/progress-page'
+import * as M15 from '../../mods/claudopus/hooks/progress'
 
 declare global {
   export import atom = M0.atom
@@ -337,4 +339,43 @@ declare global {
   export import PACE_SET = M13.PACE_SET
   export import paceLookOf = M13.paceLookOf
   export import paceOf = M13.paceOf
+  export import daysOf = M14.daysOf
+  export import fewerProgress = M14.fewerProgress
+  export import goalsOf = M14.goalsOf
+  export import progressArea = M14.progressArea
+  export import progressOverview = M14.progressOverview
+  export import PROGRESS_PICTURES_MOST = M14.PROGRESS_PICTURES_MOST
+  export import progressView = M14.progressView
+  export import ProgressActs = M14.ProgressActs
+  export import ProgressData = M14.ProgressData
+  export import ProgressLook = M14.ProgressLook
+  export import ProgressPictureRef = M14.ProgressPictureRef
+  export import ProgressThumb = M14.ProgressThumb
+  export import answerJson = M15.answerJson
+  export import applyProgress = M15.applyProgress
+  export import areasFrom = M15.areasFrom
+  export import asideLines = M15.asideLines
+  export import entriesFrom = M15.entriesFrom
+  export import ENTRIES_MOST = M15.ENTRIES_MOST
+  export import EVENT_CHARS = M15.EVENT_CHARS
+  export import isAreaId = M15.isAreaId
+  export import pickUpText = M15.pickUpText
+  export import PICK_UP_AGAIN = M15.PICK_UP_AGAIN
+  export import PICTURE_SYSTEM = M15.PICTURE_SYSTEM
+  export import pictureFrom = M15.pictureFrom
+  export import pictureOf = M15.pictureOf
+  export import picturePrompt = M15.picturePrompt
+  export import PROGRESS_SYSTEM = M15.PROGRESS_SYSTEM
+  export import progressLine = M15.progressLine
+  export import progressPrompt = M15.progressPrompt
+  export import progressThumb = M15.progressThumb
+  export import SET_ASIDE = M15.SET_ASIDE
+  export import setAsideTold = M15.setAsideTold
+  export import withSetAside = M15.withSetAside
+  export import wordsIn = M15.wordsIn
+  export import ProgressArea = M15.ProgressArea
+  export import ProgressEntry = M15.ProgressEntry
+  export import ProgressEvent = M15.ProgressEvent
+  export import ProgressNext = M15.ProgressNext
+  export import ProgressPicture = M15.ProgressPicture
 }

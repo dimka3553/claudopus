@@ -1,3 +1,4 @@
 - Claudopus now sorts each task into an area of your work in the background, as it starts and when its result comes. It keeps each area's next steps up to date from your messages and answers.
 - Every question a task asks has a Set aside button. It drops that work and keeps it in Progress as set aside, with why, and a later task in that area is told about it.
 - Ask the chat where some work stands or what's next, and it answers at once from Progress.
+- A Progress tab beside Results shows a wheel of your north star, your goals and the areas under them, with what's done, set aside and next in each and which areas have a task at work. Each area opens on its next steps, which you tick, and its timeline of results and pictures, newest first.

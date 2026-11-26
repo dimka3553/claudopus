@@ -143,6 +143,87 @@ test('Stats keeps what it summed in files the engine reads whole, however much a
   expect(await until(async () => (files.has(`${MEMORY}/stats/engine-id.json`) ? undefined : true))).toBe(true)
 })
 
+// The progress folder of a made-up shop: a north star, two goals, three areas (one under no goal), and one area's entries: a task at
+// work, a result set aside with its reason, a milestone with its picture, and two tasks of a day
+const progressFiles = (files: Map<string, string>) => {
+  const P = `${MEMORY}/progress`
+  files.set(`${P}/picture.json`, JSON.stringify({ star: { text: 'A shop that sells seeds to every garden', said: '2023-11-01' }, goals: [{ id: 'g-grow', name: 'More gardens', words: '', said: '' }, { id: 'g-calm', name: 'A calm company', words: '', said: '' }], updated: '' }))
+  const next = (id: string, text: string, state: string) => ({ id, text, state, at: '' })
+  files.set(`${P}/areas.json`, JSON.stringify({ areas: [
+    { id: 'seed-shop', name: 'Seed shop', goal: 'g-grow', aim: 'Seeds bought in two taps.', next: [next('n1', 'Card form works on phones', 'open'), next('n2', 'Saved addresses show first', 'done'), next('n3', 'Seeds by post abroad', 'aside')], updated: '' },
+    { id: 'books', name: 'Bookkeeping', goal: 'g-calm', aim: 'The books close each month.', next: [next('n4', 'Monthly report sent by itself', 'open')], updated: '' },
+    { id: 'cafe', name: 'Cafe menu', goal: '', aim: '', next: [], updated: '' },
+  ] }))
+  const entry = (task: string, title: string, at: string, kind: string, more: Record<string, unknown> = {}) => ({ task, title, at, kind, outcome: '', report: '', pictures: [], live: '', reason: '', ...more })
+  files.set(`${P}/areas/seed-shop.json`, JSON.stringify({ entries: [
+    entry('a1', 'Seed photos on every page', '2023-11-14T20:00:00Z', 'task'),
+    entry('t2', 'Seed scanner tried in the shed', '2023-11-13T12:00:00Z', 'aside', { report: 'r-scan', reason: 'Good data, but not now.' }),
+    entry('t3', 'Checkout in two taps', '2023-11-12T12:00:00Z', 'milestone', { report: 'r-pay', pictures: [`${MEMORY}/reports/r-pay/checkout.png`], live: 'https://example.com/shop', outcome: 'Most buyers pay in under a minute' }),
+    entry('t4', 'Read the old orders', '2023-11-12T10:00:00Z', 'task'),
+    entry('t5', 'Plan the seed pages', '2023-11-12T09:00:00Z', 'task'),
+  ] }))
+  files.set(`${P}/areas/books.json`, JSON.stringify({ entries: [entry('t6', 'October books closed', '2023-11-02T12:00:00Z', 'milestone')] }))
+  files.set(`${P}/areas/cafe.json`, JSON.stringify({ entries: [entry('t7', 'Menu printed', '2023-10-20T12:00:00Z', 'task')] }))
+  for (const [id, title, picture] of [['r-pay', 'Checkout in two taps', 'checkout.png'], ['r-scan', 'Seed scanner tried', '']]) {
+    files.set(`${MEMORY}/reports/${id}/meta.json`, JSON.stringify({ id, title, subject: 'Shop', at: 1_699_000_000_000, chat: 'c', chatId: 'c', folder: '/repo', gist: 'Done.', files: picture ? [picture] : [], agent: '' }))
+    files.set(`${MEMORY}/reports/${id}/report.md`, 'Done.\n')
+    // with the result's small copy, and the smaller one a row shows
+    if (picture) for (const path of [picture, `thumbs/${picture}.jpg`, `thumbs/${picture}.small.jpg`]) files.set(`${MEMORY}/reports/${id}/${path}`, 'jpg')
+  }
+}
+
+test('the Progress tab opens from its button beside Results: the wheel of the north star, goals and areas, each area a row under its goal, an area opened with its next steps and timeline, a step ticked, and nothing says anything waits', async ($, on) => {
+  const sips = (argv: string[]) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 480\npixelHeight: 300' : '')
+  const bytes = (path: string) => (path.includes('/thumbs/') ? 'B'.repeat(path.endsWith('.small.jpg') ? 4_000 : 30_000) : undefined)
+  const { files, opened, tabs, submitted } = world(on, { sips, bytes })
+  progressFiles(files)
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Seed photos on every page', prompt: 'Put seed photos on every page.' } as never)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  expect((await keyed(pane, 'progress-open'))?.props.label).toBe('Progress')
+  await pressed(pane, 'progress-open')
+  expect(opened).toContain('progress')
+  expect(tabs).toContain('progress: Progress')
+  const tab = await $.ui.mount({ ...LIST, requestId: 'progress', props: { ...LIST.props, title: 'Progress', bodyColumns: 104 }, surface: 'desktop' } as never)
+  const texts = async () => (await tab.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  // The wheel: one Svg the app draws, the north star in its centre, each area named around it, the area at work in purple
+  const wheel = await until(async () => (await tab.findAll({ type: 'Svg' })).find(one => String(one.props.alt).includes('A shop that sells seeds')))
+  const source = String(wheel?.props.source)
+  expect(source.length).toBeLessThanOrEqual(131_072)
+  for (const name of ['Seed shop', 'Bookkeeping', 'Cafe menu']) expect(source).toContain(`>${name}</text>`)
+  expect(source).toMatch(/fill="#8A63F0" font-weight="600">Seed shop</)
+  expect(String(wheel?.props.alt)).toContain('Seed shop: 2 done, 2 aside, 1 next, working now.')
+  // Under it each goal's areas, and those under no goal folded as Other
+  for (const text of ['More gardens', 'A calm company', 'Other', 'Working', 'Seed photos on every page', 'October books closed', '1 area']) expect(await texts()).toContain(text)
+  expect((await tab.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Seed shop' && String(one.props.source).includes('base64,BBBB'))).toBe(true)
+  // Nothing on the page says it waits on the person
+  const said = async () => JSON.stringify(await tab.drawn())
+  expect(await said()).not.toMatch(/wait/i)
+  expect((await said()).length).toBeLessThan(230_000)
+  // An area opened: its aim, its next steps, and its timeline with the task at work, what was set aside and why, and the milestone
+  await pressed(tab, 'progress-area-seed-shop')
+  expect(await until(async () => ((await texts()).includes('Seeds bought in two taps.') ? true : undefined))).toBe(true)
+  for (const text of ['Next', 'Card form works on phones', 'Saved addresses show first', 'Done', 'set aside', 'Good data, but not now.', 'Checkout in two taps', 'live', 'Most buyers pay in under a minute']) expect(await texts()).toContain(text)
+  expect((await tab.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Checkout in two taps' && String(one.props.source).includes('base64,BBBB'))).toBe(true)
+  // The two other tasks of that day are folded, and open
+  expect(await texts()).not.toContain('Read the old orders')
+  await tab.press({ key: String((await tab.findAll({ type: 'Button' })).find(one => /^progress-day-.*-shut-\d+$/.test(one.key ?? ''))?.key) })
+  expect(await until(async () => ((await texts()).includes('Read the old orders') ? true : undefined))).toBe(true)
+  // The step set aside sits under what was set aside, folded, not among the next steps
+  expect(await texts()).not.toContain('Seeds by post abroad')
+  expect((await tab.findAll({ type: 'Button' })).some(one => one.props.label === '+ 1 next step set aside')).toBe(true)
+  expect(await said()).not.toMatch(/wait/i)
+  // A next step pressed is done, by hand, in the file
+  await pressed(tab, 'progress-tick-n1-open')
+  expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/progress/areas.json`) ?? '{}').areas[0].next[0].state === 'done' ? true : undefined))).toBe(true)
+  // Pick up again sends the chat the person's words naming what was set aside and its result
+  await tab.press({ key: String((await tab.findAll({ type: 'Button' })).find(one => one.props.label === 'Pick up again')?.key) })
+  expect(await until(async () => submitted.find(text => text.startsWith('Pick up again: Seed scanner tried in the shed (') && text.includes('/reports/r-scan/report.md')))).toBeDefined()
+  // Back to every area
+  await pressed(tab, 'progress-back')
+  expect(await until(async () => ((await texts()).includes('More gardens') ? true : undefined))).toBe(true)
+})
+
 test('the Leaderboard tab shows the board and is where you join with a username nobody has; nothing is sent before, then your sums go every few minutes, public or private, until you leave', async ($, on) => {
   const { files, boarded, clock, shown, opened, tabs, held: holding } = world(on)
   const M = 60_000
@@ -307,7 +388,7 @@ test('the bar keeps its buttons whole on a row of their own under the header, wr
   // A terminal's gap would be a whole blank line between the rows, so it has none
   const term = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 30 }, surface: 'terminal' } as never)
   expect((await term.findAll({ type: 'Box' })).find(one => one.key === 'head-buttons')?.props.rowGap).toBe(0)
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Leaderboard', 'Memory', 'Config', 'About'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Memory', 'Config', 'About'])
   // The chat's size is no longer squeezed beside the buttons
   expect(await pane.find({ type: 'Text', text: /^This chat /})).toBeDefined()
 })
