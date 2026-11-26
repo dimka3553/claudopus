@@ -1,0 +1,1 @@
+- Tasks and their helpers keep their prompt cache for an hour, as the chat does, instead of 5 minutes: a task that waited longer than that used to pay to read everything it had read again. The installer and Claudopus itself add this to your Claude Code settings, by either way of installing, and keep any value you set there yourself.
