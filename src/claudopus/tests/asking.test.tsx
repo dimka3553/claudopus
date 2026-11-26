@@ -235,8 +235,10 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   const second = await until(async () => shown.slice(before2).find(argv => String(argv[1]).endsWith('/open.command')))
   expect(files.get(String(second?.[1]))).toContain("cd '/repo/it'\\''s here'")
 
-  // A reply written into work that then ends without another step was never read: it starts the work again
+  // A reply written into work that then ends without another step was never read: it starts the work again (its questions before
+  // taken back first, as they stay on the card until answered)
   ended.delete('a2')
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k8c', agentId: 'a2', text: '' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k9', agentId: 'a2', text: 'Which branch?', choices: ['main'] } as never)
   await inWords(ears, bar, 'a2', 'main')
   expect(await until(async () => ears.find({ type: 'Text', text: '✓ You answered “main”' }))).toBeDefined()
@@ -915,6 +917,59 @@ test('a button answer pressed by mistake is taken back from its card while the c
   await list.unmount()
 })
 
+test('a task that asks one question after another keeps every one open on its card, each with its own buttons, box or key box, until each is answered, and each answer goes to its own question; the chat is told each one, naming the others still open: the 26 Nov security task whose five questions in a quarter of an hour each took the place of the one before', async ($, on) => {
+  const { appended, clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the security findings', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fix the security findings', prompt: 'fix the security findings' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const SANDBOX = 'Release the sandbox lock?'
+  const CONSENT = 'Release the consent wording?'
+  const DOMAIN = 'Which domain gets the mail record first?'
+  const KEY = 'You paste a Cloudflare token for the mail record'
+  const ask = (id: string, fields: Record<string, unknown>) => $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: id, agentId: 'a1', ...fields } as never)
+  await ask('q1', { text: SANDBOX, details: 'Only this Mac reaches the sandbox.', choices: ['Release it'] })
+  await clock.advance(1000)
+  const second = await ask('q2', { text: CONSENT, details: 'The consent screen says what is kept.', choices: ['Release it', "Don't release"] })
+  expect(second.result).toContain('Your card now holds 2 open questions')
+  await clock.advance(1000)
+  await ask('q3', { text: KEY, key: 'CLOUDFLARE_DNS_TOKEN', from: 'https://dash.cloudflare.com/profile/api-tokens, then press Create Token' })
+  await clock.advance(1000)
+  await ask('q4', { text: DOMAIN })
+  // Every question stands on the card, the oldest first, each with its own buttons; the key keeps its box
+  const texts = async () => (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+  expect(await until(async () => ((await texts()).includes(DOMAIN) ? (await texts()).filter(one => [SANDBOX, CONSENT, KEY, DOMAIN].includes(one)) : undefined))).toEqual([SANDBOX, CONSENT, KEY, DOMAIN])
+  expect(await askButtons(list, 'a1')).toEqual(['Release it', 'Answer in words', 'Release it', "Don't release", 'Answer in words', 'Answer in words'])
+  expect((await list.findAll({ type: 'Button' })).some(one => one.props.label === 'Paste it')).toBe(true)
+  // The chat's model is told each question once, the newest naming the ones still open beside it
+  const relays = () => appended.filter(line => line.startsWith('undefined: In the background task'))
+  expect(await until(async () => (relays().length === 3 ? relays().map(line => [SANDBOX, CONSENT, DOMAIN].find(one => line.includes(`nothing of it in this chat: ${one} (`))) : undefined))).toEqual([SANDBOX, CONSENT, DOMAIN])
+  expect(relays()[2]).toContain(`Its card also still shows 2 other questions, each answered on its own: "${SANDBOX}", "${CONSENT}".`)
+  // The first question's own Release it answers it alone: the task hears which, and the others stay with their buttons
+  await clock.advance(2000)
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(one => one.props.label === 'Release it')?.key ?? '' })
+  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it"')))).toContain(`in answer to your question: ${SANDBOX}`)
+  expect(await until(async () => ((await texts()).includes(SANDBOX) ? undefined : (await texts()).filter(one => [SANDBOX, CONSENT, KEY, DOMAIN].includes(one))))).toEqual([CONSENT, KEY, DOMAIN])
+  expect(await askButtons(list, 'a1')).toEqual(['Release it', "Don't release", 'Answer in words', 'Answer in words'])
+  // An answer in words to the newest goes to that one, named above the box, and the one before it still waits, amber
+  await pressed(list, 'ask-a1-inbar')
+  const box = await until(async () => (await bar.findAll({ type: 'Input' })).find(one => (one.key ?? '').startsWith('band-a1-reply-answer-')))
+  expect((await oneBox(bar)).head).toBe(`↳ Your answer to “Fix the security findings”: “${DOMAIN}”`)
+  await bar.input({ key: box?.key ?? '', text: 'claudopus.ai' })
+  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('claudopus.ai')))).toContain(`replied to your question ("${DOMAIN}")`)
+  expect(await until(async () => ((await texts()).includes(DOMAIN) ? undefined : true))).toBe(true)
+  expect((await list.find({ type: 'Text', text: CONSENT }))?.props.color).toBe(AMBER)
+  expect(await askButtons(list, 'a1')).toEqual(['Release it', "Don't release", 'Answer in words'])
+  expect(await list.find({ type: 'Text', text: KEY })).toBeDefined()
+  // The same question asked again takes its own place, never a second block
+  await clock.advance(1000)
+  await ask('q5', { text: CONSENT, details: 'The consent screen says what is kept.', choices: ['Release it', "Don't release"] })
+  await clock.advance(1000)
+  expect((await texts()).filter(one => one === CONSENT)).toHaveLength(1)
+  await Promise.all([list.unmount(), bar.unmount()])
+})
+
 test('work acting on a reply in words to an ask it keeps open is purple, in the panel and the terminal, with no buttons, its question folded to the reply on the card and whole in Details and the terminal\'s band; stopped again it is amber with them: the 13 Nov "Explain to me the exact differences first." to "Release PR 54 to production?"', async ($, on) => {
   // What the engine lists of the work, as the terminal's engine does: running while it waits on a command it left running
   const agents: Record<string, string> = {}
@@ -1107,7 +1162,7 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4b', agentId: 'a1', text: 'Keep the old logo too?', choices: ['Keep it', 'Delete it'] } as never)
   expect(made).toHaveLength(1)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k5', agentId: 'a1', text: '' } as never)
-  expect(appended.some(line => line === 'undefined: Claude took back its question in "Redraw the logo". You don\'t need to answer it.')).toBe(true)
+  expect(appended.some(line => line === 'undefined: Claude took back its question in "Redraw the logo" (Keep the old logo too?). You don\'t need to answer it.')).toBe(true)
   expect(logged.some(line => line.startsWith('Claude took back its question'))).toBe(false)
   expect(submitted).toEqual([])
   await list.unmount()
@@ -1135,7 +1190,9 @@ test('an ask carries what it is about, whole, on the small card, in Details and 
   // A go-ahead with nothing under it is shown, and said back to the work
   const bare = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1b', agentId: 'a1', text: 'Release the demo change?', choices: ['Release it'] } as never)
   expect(String(bare.result)).toContain('It carries no details')
-  // Asked again with its explanation: shown whole under the question on the small card and in Details
+  // Asked again with its explanation, the questions before it taken back: shown whole under the question on the small card and in
+  // Details
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1c', agentId: 'a1', text: '' } as never)
   const differences = '**Refunds**\n\n- Today: a refund blocks every payout.\n- After: it is taken off the balance.\n\n**Screens**\n\n- "Compensation credits" becomes "Referral earnings".'
   const asked = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Release PR 54 to production?', details: differences, choices: ['Release it'] } as never)
   expect(String(asked.result)).toContain('what it is about under it')
@@ -2195,8 +2252,8 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   expect(await until(async () => ((await boxesIn(list))[0]?.props.value === 'Nov' ? true : undefined))).toBe(true)
   await surveyed.unmount()
   await clock.advance(2000)
-  // The bar back and the box opened, a reply half typed: a new question from the same work leaves the box as it is, the same box
-  // with what was typed. Only the person closes or moves it (16 Nov)
+  // The bar back and the box opened, a reply half typed: a new question from the same work goes beside the one the box is for, and
+  // the box stays as it is, with what was typed. Only the person closes or moves it (16 Nov)
   const again = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   expect(await until(async () => ((await labelled(list, OPEN)).length === 1 ? true : undefined))).toBe(true)
   await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
@@ -2206,15 +2263,16 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   await clock.advance(2000)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a2', text: 'Which year?', choices: ['2025', '2026'] } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Which year?' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Which month?' })).toBeDefined()
   expect((await boxesIn(again)).map(one => one.key)).toEqual([typedIn?.key])
-  expect((await labelled(list, CLOSE)).length).toBe(1)
-  // Closed and opened again under the new question, what was typed is still there
+  expect([(await labelled(list, CLOSE)).length, (await labelled(list, OPEN)).length]).toEqual([1, 1])
+  // Closed and opened again on its question, what was typed is still there
   await list.press({ key: (await labelled(list, CLOSE))[0]?.key ?? '' })
   expect(await until(async () => ((await boxesIn(again)).length === 0 ? true : undefined))).toBe(true)
   await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
   expect(await until(async () => ((await boxesIn(again))[0]?.props.value === 'Nov 20' ? true : undefined))).toBe(true)
-  // Sent from a box drawn before yet another question came, it answers what the work asks now, and the box goes; the same work
-  // asking again finds it closed
+  // Sent after yet another question came, it answers the question it was opened on, and the box goes (26 Nov: each answer goes
+  // to its own question); the work's other questions stay until it takes them back
   const [second] = await boxesIn(again)
   await again.input({ key: second?.key ?? '', text: 'Nov 202', kind: 'change' } as never)
   await clock.advance(2000)
@@ -2222,8 +2280,10 @@ test("where the bar above the prompt takes a box, a card's answers end with Answ
   expect(await until(async () => list.find({ type: 'Text', text: 'Which decade?' }))).toBeDefined()
   expect((await boxesIn(again)).map(one => one.key)).toEqual([second?.key])
   await again.input({ key: second?.key ?? '', text: 'November 2026' })
-  expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('in their own words: November 2026')))).toBeDefined()
+  expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('in their own words: November 2026')))).toContain('("Which month?")')
   expect(await until(async () => ((await boxesIn(again)).length === 0 ? true : undefined))).toBe(true)
+  expect((await list.findAll({ type: 'Text' })).map(one => one.text).filter(text => ['Which month?', 'Which year?', 'Which decade?'].includes(String(text)))).toEqual(['Which year?', 'Which decade?'])
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3c', agentId: 'a2', text: '' } as never)
   await clock.advance(2000)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a2', text: 'Which day?', choices: ['Monday', 'Friday'] } as never)
   expect(await until(async () => ((await labelled(list, OPEN)).length === 1 ? true : undefined))).toBe(true)

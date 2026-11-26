@@ -175,7 +175,7 @@ const carryText = async ($: EngineInterface, one: Todo, answer: string) => {
   const { id: chat } = await read($, me)
   const brief = (await readOr($, ledgerPart(chat, one.id, 'brief'))).trim()
   const transcript = `${await agentsFolder($, chat)}/agent-${one.id}.jsonl`
-  const worktree = one.worktree || one.ask?.release || one.admins?.find(gate => gate.folder)?.folder || ''
+  const worktree = one.worktree || asksOf(one).findLast(ask => ask.release)?.release || one.admins?.find(gate => gate.folder)?.folder || ''
   const when = (at: number) => new Date(at).toISOString().slice(0, 16).replace('T', ' ')
   const items = one.items.map(item => `- [${item.state}] ${item.text}`)
   const notes = one.entries.slice(-12).map(entry => `- ${when(entry.at)} ${entry.kind === 'steer' ? `${who(true)} said: ` : ''}${entry.text}`)
@@ -199,7 +199,7 @@ const carryText = async ($: EngineInterface, one: Todo, answer: string) => {
     '',
     '## Its last notes',
     ...(notes.length ? notes : ['None.']),
-    ...(one.ask ? ['', named('## What it was asking {name}'), one.ask.text, ...(one.ask.details ? [one.ask.details] : [])] : []),
+    ...(one.ask ? ['', named('## What it was asking {name}'), ...asksOf(one).flatMap((ask, n) => [...(n ? [''] : []), ask.text, ...(ask.details ? [ask.details] : [])])] : []),
     ...(answer ? ['', named("## {Name}'s answer"), answer] : []),
     '',
   ]

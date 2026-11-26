@@ -247,7 +247,7 @@ const panelHooks = (on: On) => {
     const otherChats = await read($, others)
     // A reply in words left here holds its ask as acted on until that chat's own file carries it; from then its file says
     for (const one of cardsOf(otherChats)) if (one.ask?.replied && actingOn.get(`${one.id}:${one.ask.at}`) === one.ask.replied.text) actingOn.delete(`${one.id}:${one.ask.at}`)
-    const elsewhere = cardsOf(otherChats).map(one => (one.ask && answeredHere.has(`${one.id}:${one.ask.at}`) ? { ...one, ask: undefined } : one))
+    const elsewhere = cardsOf(otherChats).map(one => (asksOf(one).some(ask => answeredHere.has(`${one.id}:${ask.at}`)) ? withAsks(one, asksOf(one).filter(ask => !answeredHere.has(`${one.id}:${ask.at}`))) : one))
     // Their helpers, which only a Details tab lists
     const helpersThere = helpersOf(otherChats)
     const chat = await read($, me)
@@ -450,7 +450,7 @@ const panelHooks = (on: On) => {
       const blocks = cardNeeds(one, isWhole).map(need => {
         const isOwnField = Boolean(need.field && need.card)
         const autoFocus = isOwnField && e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : false
-        const node = needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(one, need.id, isWhole) : null, autoFocus, isMoving: isListed && !isWhole })
+        const node = needBlock($, table, need, { isWhole, room, surface: e.surface, pictures: need.card ? askPictures(need.card, need.id, isWhole) : null, autoFocus, isMoving: isListed && !isWhole })
         // (on the small card each block starts at the title's left edge; the grey line is a press, which the app moves in itself)
         return isWhole ? node : <Box key={`lead-${need.id}`} flexDirection="column" paddingLeft={lead}>{node}</Box>
       })
@@ -459,7 +459,7 @@ const panelHooks = (on: On) => {
     // What the person last pressed or answered on a small card, in one grey line cut to one row, with the press that takes a
     // button's answer back. The line opens the card's Details, where the question and the answer are whole
     const answeredRow = (one: Todo) =>
-      (!one.ask || isActingOnReply(one)) && sentLine(one, at) ? (
+      isAnswerShown(one) && sentLine(one, at) ? (
         <Box key={`pressed-${one.id}`} flexDirection="row" gap={2} height={1} overflow="hidden">
           <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
             <Button key={`answered-${one.id}-${presses}`} plain dimColor hover={{ scope: `answered-${one.id}`, underline: true }} onPress={() => openWork($, one.id)}>
@@ -1701,7 +1701,7 @@ const panelHooks = (on: On) => {
           ) : null}
           {/* The question just answered, whole, and the answer whole under it (what the small card's grey line opens) */}
           {/* (a message to the task is in its list under Message, never here as well) */}
-          {!one.ask && sentLine(one, at) && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (
+          {isAnswerShown(one) && !isActingOnReply(one) && sentLine(one, at) && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (
             <Box key="part-answered" flexDirection="column" gap={1} backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
               {sentReplies.get(one.id)?.ask && sentReplies.get(one.id)?.ask !== CHANGE_WHAT ? (
                 <Box key="answered-question" flexDirection="column" gap={1} minWidth={0}>
@@ -1991,8 +1991,8 @@ const panelHooks = (on: On) => {
     // adds what it shows under them too. Of a card's own blocks, its question's is left out (`isOwn`), pictures and all: that one
     // changing is the question itself, there before the person's eyes
     const blocksSign = (one: Todo, isOwn = false) => {
-      const isKept = (need: string) => !isOwn || need !== `ask-${one.id}`
-      const rows = cardNeeds(one).filter(need => isKept(need.id)).map(need => ({ at: need.at, rows: blockRows(need) }))
+      const isKept = (need: Need) => !isOwn || !isAskOf(need, one.id)
+      const rows = cardNeeds(one).filter(isKept).map(need => ({ at: need.at, rows: blockRows(need) }))
       const made = madeNow($, one)
       return [one.id, made?.made.length || made?.code ? 'made' : '', one.items.some(item => item.state === 'doing') ? 'doing' : '', rows.sort((a, b) => a.at - b.at).map(block => block.rows).join(','), isOwn ? '' : (picsShown.get(one.id) ?? []).join('')].join(':')
     }
@@ -2000,7 +2000,7 @@ const panelHooks = (on: On) => {
       [
         blocksSign(one),
         runsShownOn(one, at).length,
-        (!one.ask || isActingOnReply(one)) && sentLine(one, at) ? 'answered' : '',
+        isAnswerShown(one) && sentLine(one, at) ? 'answered' : '',
         needsPerson(one) ? 0 : looksDelivered(one) ? 1 : 2,
         treeRows.get(one.id) ?? 0,
         looksDelivered(one) ? `asks ${one.questions?.length ?? 0}` : '',

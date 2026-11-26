@@ -15,6 +15,8 @@ const YES_CHOICE = /^(?:yes|ok|okay|allow|approve|go ahead|release|deploy|ship|p
 // Words around a task's name that are not of it
 const TYPED_FILLER = new Set(['it', 'this', 'that', 'one', 'now', 'please', 'pls', 'the', 'task', 'card', 'for', 'on', 'to', 'in', 'of', 'thanks', 'thank', 'you'])
 
+// Whether a block is one of a card's own questions
+const isAskOf = (need: Need, card: string) => need.id === `ask-${card}` || need.id.startsWith(`ask-${card}-`)
 type Typed = { need: Need; card?: Todo; title: string; isPressOnly: boolean }
 // What waits for an answer in this chat: its own cards' blocks, and its own thread's, as drawn with no box of their own (surface ''),
 // with what a press there already answered left out. Keys, passwords and the disk are never answered in words
@@ -22,7 +24,7 @@ const typedWaiting = async ($: EngineInterface): Promise<Typed[]> => {
   const now = await $.clock.now()
   const cards = (await read($, todos)).filter(one => !one.parentId && !one.chat)
   const own = new Set(cards.map(one => one.id))
-  const onCards = cards.flatMap(one => needsOf($, asPressed(one), '', now).map(need => ({ need, card: one, title: titleOf(one), isPressOnly: Boolean(need.id === `ask-${one.id}` && one.ask?.refused) })))
+  const onCards = cards.flatMap(one => needsOf($, asPressed(one), '', now).map(need => ({ need, card: one, title: titleOf(one), isPressOnly: Boolean(isAskOf(need, one.id) && need.card?.ask?.refused) })))
   const loose = [
     ...looseGates.filter(gate => !gatePressed.has(gate.id)).map(gate => gateNeed($, gate, '', false, 'This chat')),
     ...waiting.filter(p => !p.card || !own.has(p.card)).map(p => promptNeed($, p)),
@@ -38,8 +40,9 @@ const typedButton = (one: Typed, words: string): { button: NeedButton; rest: str
   }
   const yes = TYPED_YES.exec(words)
   if (!yes) return undefined
-  const ask = one.card?.ask
-  const isAsk = one.need.id === `ask-${one.card?.id}`
+  // (the question of the block, of those its card holds)
+  const ask = one.need.card?.ask
+  const isAsk = Boolean(one.card && isAskOf(one.need, one.card.id))
   // A question's yes: the first button of a go-ahead to release, else its one button that says yes
   const choices = isAsk && !ask?.refused ? (ask?.release && ask.choices?.[0] ? [ask.choices[0]] : (ask?.choices ?? []).filter(choice => YES_CHOICE.test(plainWords(choice)))) : [ALLOW]
   const button = choices.length === 1 ? buttons.find(b => b.label === choices[0]) : undefined

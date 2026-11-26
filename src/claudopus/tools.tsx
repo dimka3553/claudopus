@@ -125,7 +125,8 @@ const toolHooks = (on: On) => {
       const like = same ? undefined : saved.find(one => sameKey(one.name, keyName))
       const about = cut(keyAskDetails([text === asked ? '' : asked, given1].filter(Boolean).join('\n\n'), from, keyName, same, like), ASK_DETAILS)
       const keyAt = await $.clock.now()
-      await change($, e.agentId, one => ({ ...one, keyAsk: { name: keyName, text, details: about, from: e.agentId ?? '', at: keyAt } }))
+      // (beside the task's other questions for keys: the same key asked again takes the place of its earlier question)
+      await change($, e.agentId, one => withKeyAsks(one, [...keyAsksOf(one).filter(other => other.name !== keyName), { name: keyName, text, details: about, from: e.agentId ?? '', at: keyAt }]))
       const cards = await read($, todos)
       const card = cards.find(one => one.id === topOf(cards, e.agentId ?? ''))
       await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
@@ -176,11 +177,11 @@ const toolHooks = (on: On) => {
     // words, never as a question of its own, so Allow and Don't allow stay where they were (gate.tsx, wordsOnGate)
     const own = before.find(one => one.id === topOf(before, e.agentId ?? ''))
     const parked = own && !own.chat ? own.admins?.find(gate => gateParked.has(gate.id) && gate.talk?.at(-1)?.by === 'you') : undefined
-    const refused = own?.ask?.refused && own.ask.replied ? own.ask : undefined
+    const refused = own ? asksOf(own).findLast(ask => ask.refused && ask.replied) : undefined
     if (own && text && !choices.length && (parked || refused)) {
       const answer = { by: 'task' as const, text: cut([asked, given1].filter(Boolean).join('\n\n'), ASK_DETAILS) }
       if (parked) await setGates($, own.id, list => list.map(gate => (gate.id === parked.id ? { ...gate, talk: [...(gate.talk ?? []), answer].slice(-PERMIT_TALK_KEPT) } : gate)))
-      else await changeTodos($, list => list.map(one => (one.id === own.id && one.ask && one.ask.at === refused?.at ? { ...one, ask: { ...one.ask, talk: [...(one.ask.talk ?? []), answer].slice(-PERMIT_TALK_KEPT), replied: undefined } } : one)))
+      else if (refused) await changeTodos($, list => list.map(one => (one.id === own.id ? mapAsk(one, refused, ask => ({ ...ask, talk: [...(ask.talk ?? []), answer].slice(-PERMIT_TALK_KEPT), replied: undefined })) : one)))
       // The block is back with its buttons, so the grey line of what the person wrote goes: the block shows their words
       sentReplies.delete(own.id)
       redraw($)
@@ -189,13 +190,23 @@ const toolHooks = (on: On) => {
     }
     const releaseGiven = typeof input.release === 'string' ? input.release.trim() : ''
     const release = releaseGiven.startsWith('/') && choices.length && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(releaseGiven).catch(() => undefined))?.kind === 'dir' ? releaseGiven : ''
-    await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(release ? { release } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices } : {}), from: e.agentId, ...(pictures.length ? { pictures } : {}), at } : undefined }))
+    // A new question goes beside every other one still open on the card, each answered on its own. Only the asker's own earlier
+    // question it now asks again takes its place: the same words, one the person replied to in words (asked again once acted on), or
+    // what its result asked. Empty text clears the asker's own questions, never a helper's or its task's
+    const asker = e.agentId
+    const isOwnAsk = (one: Todo, ask: Ask) => (ask.from ?? one.id) === asker
+    let cleared: Ask[] = []
+    await change($, asker, one => {
+      if (!text) return ((cleared = asksOf(one).filter(ask => isOwnAsk(one, ask))), withAsks(one, asksOf(one).filter(ask => !isOwnAsk(one, ask))))
+      const kept = asksOf(one).filter(ask => !ask.isResult && !(isOwnAsk(one, ask) && (ask.text === text || (ask.replied && !ask.refused))))
+      return withAsks(one, [...kept, { text, ...(release ? { release } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices } : {}), from: asker, ...(pictures.length ? { pictures } : {}), at }])
+    })
     const list = await read($, todos)
-    const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
+    const card = list.find(one => one.id === topOf(list, asker))
     if (!text) {
-      if (card?.keyAsk) await changeTodos($, all => all.map(one => (one.id === card.id ? { ...one, keyAsk: undefined } : one)))
-      if (card && was) await askGone($, card)
-      return { result: 'Cleared: your card no longer has a question.' }
+      if (card && keyAsksOf(card).some(ask => ask.from === asker)) await changeTodos($, all => all.map(one => (one.id === card.id ? withKeyAsks(one, keyAsksOf(one).filter(ask => ask.from !== asker)) : one)))
+      if (card) for (const ask of cleared) await askGone($, card, undefined, ask)
+      return { result: cleared.length > 1 ? `Cleared: your card no longer has your ${cleared.length} questions.` : 'Cleared: your card no longer has a question.' }
     }
     // The same ask said again is not told again
     if (card && was?.text !== text) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
@@ -216,8 +227,11 @@ const toolHooks = (on: On) => {
     const released = release ? ` A press on ${choices[0]} also allows your runs of the release runner for ${release} until one has gone out, with no second question: run it then, in your background.` : releaseGiven ? ' `release` was left out: it needs buttons, and the full path of a folder that is there.' : ''
     const bare = choices.length && !details && !copy ? ` It carries no details: if deciding it needs more than this one line (what goes out, what it changes), ask it again with that in \`details\`; ${who()} sees the ask before your report.` : ''
     const seen = drawn ? ` Claudopus drew your question and its buttons as one picture, opened it on ${who()}'s screen, and shows it with the question on your card and in the chat: make no picture of it yourself.` : pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} drawn small on the card, each opening large on a press, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
+    // Questions asked before it and still open stay beside it: said back, so the task neither asks them again nor thinks them gone
+    const open = card ? asksOf(card).length : 1
+    const beside = open > 1 ? ` Your card now holds ${open} open questions, this one with the ${open - 1 === 1 ? 'one' : `${open - 1}`} asked before it, each with its own answer, which comes to you naming its question. Put what belongs together into one question, and don't ask again one that is still open.` : ''
     const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : ''
-    return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare}${plain}${leftOut}${released} It stays until ${who()} answers; the answer comes back to you as a message the moment it is given, at your next step or to you paused. Never wait for it with a command or a timer: with nothing else to do, end your step. Ask again if the answer leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
+    return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare}${plain}${leftOut}${released}${beside} It stays until ${who()} answers; the answer comes back to you as a message the moment it is given, at your next step or to you paused. Never wait for it with a command or a timer: with nothing else to do, end your step. Ask again if the answer leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
   })
 
   // A task hands the person a part of its result that is finished while it goes on with the rest (20 Nov: "allow subagents to have

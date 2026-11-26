@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.277 · 26 November 2026
+- A task that asks you one question after another keeps every one on its card, each with its own buttons, box to paste a key into, or blocked command to allow, until you answer it. A new question no longer takes the place of the one before, and each answer goes to the question you gave it to.
+- A command Claude Code blocks while the card already asks you something now shows beside that question, with its Allow, instead of being left off the card.
+- With several questions open on a card, the box above the chat names the one you are answering, and the chat is told each question and which others are still open.
+
 ## 0.2.276 · 26 November 2026
 - The chat passes on a task's result as it did before 0.2.274, with no "From the task" or "From the chat" headings, and your next message is no longer sent to the task above it by itself.
 

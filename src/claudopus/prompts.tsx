@@ -312,10 +312,11 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   const details = [runDetails(runnable, refusal.reason), isRelease ? RELEASE_SECOND_PRESS : '', own?.parentId ? `A helper of this task wanted it: “${titleOf(own)}”.` : '', PRESS_ONLY].filter(Boolean).join('\n\n')
   const asked = isRelease ? BLOCKED_RELEASE_ASK : BLOCKED_ASK
   const at = await $.clock.now()
-  // A question waiting on the person, there already or put up meanwhile, is never replaced: the refusal is in the task's own result
+  // Beside any question waiting on the person, which it never replaces; only the same command already waiting for its Allow is not
+  // put up twice
   let isPut = false
-  await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text: asked, details, copy: runnable.command, isCommand: true, cwd: runnable.cwd, from: agent, at, refused: true } }))
-  if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: its card asks something already`))
+  await change($, agent, one => ((isPut = !asksOf(one).some(ask => ask.refused && ask.copy === runnable.command && !ask.replied)), isPut ? withAsks(one, [...asksOf(one), { text: asked, details, copy: runnable.command, isCommand: true, cwd: runnable.cwd, from: agent, at, refused: true }]) : one))
+  if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: the same command waits on it already`))
   await offerRun($, top.id, agent, at, runnable)
   await log($, `refusal of ${tool} for ${agent} put to the person on its card`)
   const card = (await read($, todos)).find(one => one.id === top.id)
@@ -350,8 +351,8 @@ const refusedConnector = async ($: EngineInterface, agent: string, top: string, 
   ].filter(Boolean).join('\n\n')
   const at = await $.clock.now()
   let isPut = false
-  await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text: CONNECTOR_ASK, details, copy: command, isCommand: true, cwd: home, choices: [TRY_AGAIN, DONT_ALLOW], from: agent, at, rule } }))
-  if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: its card asks something already`))
+  await change($, agent, one => ((isPut = !asksOf(one).some(ask => ask.rule === rule)), isPut ? withAsks(one, [...asksOf(one), { text: CONNECTOR_ASK, details, copy: command, isCommand: true, cwd: home, choices: [TRY_AGAIN, DONT_ALLOW], from: agent, at, rule }]) : one))
+  if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: the same action waits on it already`))
   await log($, `refusal of ${tool} for ${agent} put to the person on its card, with the rule that lets it through`)
   const card = (await read($, todos)).find(one => one.id === top)
   if (card) await askAloud($, card, CONNECTOR_ASK).catch(err => log($, `ask not told: ${String(err)}`))
