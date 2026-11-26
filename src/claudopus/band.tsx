@@ -62,7 +62,10 @@ const barBoxOf = ($: EngineInterface, ui: Ui, cards: Todo[], kept: Report[]): Ba
   }
   if (open.kind === 'answer') {
     const one = barTarget(cards)
-    return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), attachTo: one.id, send: value => void (sent(one.id), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`))) }
+    // (with several questions open on the card, the one it answers is named too)
+    const ask = one ? barAskOf(one) : undefined
+    const which = one && ask && asksOf(one).length > 1 ? `: “${cut(ask.text, 60)}”` : ''
+    return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”${which}`, placeholder: 'Type your answer', draft: barDraft(), attachTo: one.id, send: value => void (((barBoxAt = 0), dropDrafts($, one.id, ask), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($)), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`))) }
   }
   if (open.kind === 'change') {
     const one = changeTarget(cards)

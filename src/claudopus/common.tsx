@@ -148,8 +148,46 @@ const isLingering = (one: { id: string; status: string; endedAt: number }, at: n
 // with the reply under it and nothing to press or type, as the person has answered. So from the moment the reply is sent: ended
 // work being started again with it (isWaking), and another chat's work until its own chat has taken the reply (actingOn). Only
 // once it stops again with the ask open does it wait on the person, with every answer back
-const isActingOnReply = (one: { id?: string; status: string; ask?: { at?: number; replied?: { isWaking?: boolean } } }) =>
-  Boolean(one.ask) && ((Boolean(one.ask?.replied) && (one.status === 'working' || Boolean(one.ask?.replied?.isWaking))) || actingOn.has(`${one.id}:${one.ask?.at}`))
+// A card with several questions open acts on a reply only while it acts on one to each: one of them still waiting keeps it amber
+type AskLike = { at?: number; replied?: { isWaking?: boolean } }
+const isActingOn = (one: { id?: string; status: string }, ask: AskLike) => (Boolean(ask.replied) && (one.status === 'working' || Boolean(ask.replied?.isWaking))) || actingOn.has(`${one.id}:${ask.at}`)
+const isActingOnReply = (one: { id?: string; status: string; ask?: AskLike; asksBefore?: AskLike[] }) => {
+  const all = [...(one.asksBefore ?? []), ...(one.ask ? [one.ask] : [])]
+  return all.length > 0 && all.every(ask => isActingOn(one, ask))
+}
+// Every question a card holds open, the oldest first: a task that asks again never takes an earlier question off its card, which
+// stays with its own buttons, box or command until it is answered (26 Nov: five questions of one task asked in a quarter of an
+// hour, each new one put in place of the one before, so only the last could be answered). `ask` is always the newest of them, and
+// `asksBefore` the rest; whatever takes `ask` away brings the newest of the rest up in its place (changeTodos, keepAsks)
+type Ask = NonNullable<Todo['ask']>
+type KeyAsk = NonNullable<Todo['keyAsk']>
+const asksOf = (one: { ask?: Ask; asksBefore?: Ask[] }): Ask[] => [...(one.asksBefore ?? []), ...(one.ask ? [one.ask] : [])]
+const isSameAsk = (a: { at: number; text: string }, b: { at: number; text: string }) => a.at === b.at && a.text === b.text
+const withAsks = <T extends Todo>(one: T, list: Ask[]): T => {
+  // (stable: asks made at the same moment keep the order they were given in, the last given the newest)
+  const sorted = list.map((ask, n) => ({ ask, n })).sort((a, b) => a.ask.at - b.ask.at || a.n - b.n).map(one => one.ask)
+  const before = sorted.slice(0, -1)
+  return { ...one, ask: sorted.at(-1), asksBefore: before.length ? before : undefined }
+}
+const hasAsk = (one: Todo, ask: Ask) => asksOf(one).some(other => isSameAsk(other, ask))
+const dropAsk = <T extends Todo>(one: T, ask: Ask): T => withAsks(one, asksOf(one).filter(other => !isSameAsk(other, ask)))
+const mapAsk = <T extends Todo>(one: T, ask: Ask, fn: (ask: Ask) => Ask): T => withAsks(one, asksOf(one).map(other => (isSameAsk(other, ask) ? fn(other) : other)))
+const mapAsks = <T extends Todo>(one: T, fn: (ask: Ask) => Ask): T => (one.ask || one.asksBefore ? withAsks(one, asksOf(one).map(fn)) : one)
+// One question of a card, as its block, its answer and its line read it: the card with that question alone
+const askView = (one: Todo, ask: Ask | undefined = one.ask): Todo => ({ ...one, ask, asksBefore: undefined })
+// The same for a task's questions for a key: `keyAsk` the newest, `keyAsksBefore` the rest
+const keyAsksOf = (one: Todo): KeyAsk[] => [...(one.keyAsksBefore ?? []), ...(one.keyAsk ? [one.keyAsk] : [])]
+const withKeyAsks = <T extends Todo>(one: T, list: KeyAsk[]): T => {
+  const sorted = list.map((ask, n) => ({ ask, n })).sort((a, b) => a.ask.at - b.ask.at || a.n - b.n).map(one => one.ask)
+  const before = sorted.slice(0, -1)
+  return { ...one, keyAsk: sorted.at(-1), keyAsksBefore: before.length ? before : undefined }
+}
+// A card whose newest question went brings up the newest of those before it
+const keepAsks = (list: Todo[]) =>
+  list.map(one => {
+    const asks = !one.ask && one.asksBefore?.length ? withAsks(one, one.asksBefore) : one
+    return !asks.keyAsk && asks.keyAsksBefore?.length ? withKeyAsks(asks, asks.keyAsksBefore) : asks
+  })
 // The words of the buttons every block of the panel answers with (docs/words.md)
 const ALLOW = 'Allow'
 const DONT_ALLOW = "Don't allow"
@@ -165,7 +203,7 @@ const ANSWER_IN_WORDS = 'Answer in words'
 // call of its own, and the password or key box of a command of its own (needs.tsx). Another chat's card is read from its file
 // A permission the person answered in words, whose task is answering them: nothing to press until it has (gate.tsx, wordsOnGate)
 const isGateActing = (gate: { talk?: { by: string }[] }) => gate.talk?.at(-1)?.by === 'you'
-const needsPerson = (one: { id?: string; status: string; chat?: unknown; ask?: { at?: number; replied?: { isWaking?: boolean } }; keyAsk?: unknown; admins?: { talk?: { by: string }[] }[] }) =>
+const needsPerson = (one: { id?: string; status: string; chat?: unknown; ask?: AskLike; asksBefore?: AskLike[]; keyAsk?: unknown; admins?: { talk?: { by: string }[] }[] }) =>
   Boolean(one.admins?.some(gate => !isGateActing(gate))) || (Boolean(one.ask) && !isActingOnReply(one)) || Boolean(one.keyAsk) || (!one.chat && Boolean(one.id) && (waiting.some(p => p.card === one.id) || boxes.some(box => box.card === one.id)))
 // The moments a pause ends that a redraw is already set for, so each pause gets one
 const lingerSet = new Set<string>()
@@ -203,7 +241,8 @@ const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => 
   const now = await read($, todos)
   const before = JSON.stringify(now)
   // (a task's card ends done only with its result: holdDone; and keeps what each of its results named: saidKept)
-  const hold = (list: Todo[]) => saidKept(list, holdDone(list, fn(list)))
+  // (and every question a card holds: the newest of those before comes up as one goes, keepAsks)
+  const hold = (list: Todo[]) => keepAsks(saidKept(list, holdDone(list, fn(list))))
   const next = hold(now)
   if (JSON.stringify(next) === before) return now
   const written = await update($, todos, list => (JSON.stringify(list) === before ? next : hold(list)))

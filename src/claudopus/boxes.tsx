@@ -163,10 +163,9 @@ const lookBoxes = async ($: EngineInterface) => {
     }
   }
   // Each task's own question for a key, on its card, while it is not answered
-  for (const card of cards) {
-    const ask = card.keyAsk
-    const id = ask ? ownBoxId(card.id, ask.at) : ''
-    if (ask && !card.chat && !boxSent.has(id)) found.push({ id, kind: 'key', name: ask.name, text: ask.text, details: ask.details, at: ask.at, chat: boxChat, agent: ask.from, card: card.id, isOwn: true })
+  for (const card of cards) for (const ask of keyAsksOf(card)) {
+    const id = ownBoxId(card.id, ask.at)
+    if (!card.chat && !boxSent.has(id)) found.push({ id, kind: 'key', name: ask.name, text: ask.text, details: ask.details, at: ask.at, chat: boxChat, agent: ask.from, card: card.id, isOwn: true })
   }
   found.sort((a, b) => a.at - b.at)
   for (const one of found) {
@@ -290,7 +289,7 @@ const keepOwnKey = async ($: EngineInterface, one: Asked, value: string) => {
 // A task's own key question answered: gone from its card, and its task told what was done
 const ownKeyDone = async ($: EngineInterface, one: Asked, text: string, label: string) => {
   const card = one.card ?? ''
-  await changeTodos($, list => list.map(other => (other.id === card && other.keyAsk && ownBoxId(card, other.keyAsk.at) === one.id ? { ...other, keyAsk: undefined } : other)))
+  await changeTodos($, list => list.map(other => (other.id === card && keyAsksOf(other).some(ask => ownBoxId(card, ask.at) === one.id) ? withKeyAsks(other, keyAsksOf(other).filter(ask => ownBoxId(card, ask.at) !== one.id)) : other)))
   await toTask($, card, one.agent ?? card, text, label, one.text).catch(err => log($, `task not told of its key: ${String(err)}`))
 }
 const KEY_GIVEN = (root: string, name: string) => `{Name} pasted ${name} in its box on your card, and it is saved in Claudopus's keychain. Use it now through \`${root}/bin/secret ${name} here '<command using $${name}>'\`.`

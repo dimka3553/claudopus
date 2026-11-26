@@ -1,0 +1,3 @@
+- A task that asks you one question after another keeps every one on its card, each with its own buttons, box to paste a key into, or blocked command to allow, until you answer it. A new question no longer takes the place of the one before, and each answer goes to the question you gave it to.
+- A command Claude Code blocks while the card already asks you something now shows beside that question, with its Allow, instead of being left off the card.
+- With several questions open on a card, the box above the chat names the one you are answering, and the chat is told each question and which others are still open.

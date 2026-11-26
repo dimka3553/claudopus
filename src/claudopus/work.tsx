@@ -54,7 +54,7 @@ const isPersonWait = (call: { tool: string; command?: unknown; description?: unk
 }
 const asksNow = (list: Todo[], agent: string) => {
   const top = topOf(list, agent)
-  return list.some(one => (one.id === agent || one.id === top) && Boolean(one.ask) && !one.ask?.replied)
+  return list.some(one => (one.id === agent || one.id === top) && asksOf(one).some(ask => !ask.replied))
 }
 const NO_PERSON_WAIT = (name: string) =>
   `Not run: this command waits for ${name}, and a wait with a time limit gives them one. Don't wait for ${name} with a command at all. End your step now: your question stays on the card for as long as it takes, and ${name}'s answer comes to you as a message the moment they give it. Anything you need to see of what they did (a recording, a file, a page), look at once their answer has come.`
@@ -442,12 +442,18 @@ const workHooks = (on: On) => {
       }
       // The person's words passed on to work whose card asks them something answer that ask, as a press on the card does: the card's
       // own work, or the helper that asked. Marked at once, so a press on the card at the same moment counts once; undone if refused
-      const asking = target && words && e.agentId === undefined ? (list.find(one => one.id === target.id && one.ask) ?? list.find(one => one.ask?.from === target.id)) : undefined
-      const asked = asking?.ask ? `${asking.id}:${asking.ask.at}:${asking.ask.text}` : ''
-      if (asking?.ask && !answeredAsks.has(asked)) {
+      const asking = target && words && e.agentId === undefined ? (list.find(one => one.id === target.id && one.ask) ?? list.find(one => asksOf(one).some(ask => ask.from === target.id))) : undefined
+      // Of the card's open questions, the one the words answer: one whose button they begin with, else one the message names, else
+      // the newest that waits on the person
+      const open = asking ? asksOf(asking).filter(ask => asking.id === target?.id || ask.from === target?.id) : []
+      const waits = open.filter(ask => !isActingOnReply(askView(asking ?? ({} as Todo), ask)))
+      const isOfButton = (ask: Ask) => (ask.choices ?? []).some(choice => plainWords(choice) && `${plainWords(words)} `.startsWith(`${plainWords(choice)} `))
+      const which = waits.find(isOfButton) ?? waits.find(ask => plainWords(ask.text) && plainWords(message).includes(plainWords(ask.text))) ?? waits.at(-1) ?? open.at(-1)
+      const asked = asking && which ? `${asking.id}:${which.at}:${which.text}` : ''
+      if (asking && which && !answeredAsks.has(asked)) {
         answeredAsks.add(asked)
-        answered = asking.ask.text
-        answer = { card: asking, ask: asking.ask, key: asked, words, at: now }
+        answered = which.text
+        answer = { card: asking, ask: which, key: asked, words, at: now }
       }
       if (target) {
         woken = target.id

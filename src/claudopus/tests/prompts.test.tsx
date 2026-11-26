@@ -325,7 +325,7 @@ test("another chat's held prompt has no Allow or Don't allow here, only where to
   await list.unmount()
 })
 
-test("a call Claude Code refuses a background task with no prompt, as auto mode does, asks nothing when it is no command the person could run: nothing waits on the card and the task is told nothing more; a failing call whose output only holds those words is no refusal; a blocked command never replaces a question already on the card; Don't allow tells the task to carry on without it and never to reach it by other means, and pressed once the task has ended it does not start it again; and Claudopus never lets the call through itself", async ($, on) => {
+test("a call Claude Code refuses a background task with no prompt, as auto mode does, asks nothing when it is no command the person could run: nothing waits on the card and the task is told nothing more; a failing call whose output only holds those words is no refusal; a blocked command goes beside a question already on the card, never in its place, and the same command is not put up twice; Don't allow tells the task to carry on without it and never to reach it by other means, and pressed once the task has ended it does not start it again; and Claudopus never lets the call through itself", async ($, on) => {
   const agents: Record<string, string> = { a1: 'running' }
   const ended = new Set<string>()
   const { files, clock, resumed, appended, pressRuns } = world(on, { agents, ended })
@@ -360,22 +360,29 @@ test("a call Claude Code refuses a background task with no prompt, as auto mode 
   expect(mine()).toEqual([])
   const check = (id: string) => $.tool.check({ tool: 'Edit', input: { file_path: '/repo/notes.md', old_string: 'old line', new_string: 'new line' }, agentId: 'a1', tool_use_id: id } as never) as Promise<{ decision?: string }>
   expect((await check('chk-2')).decision).toBe('ask')
-  // A command it blocked while the card asks the task's own question never replaces that question
+  // A command it blocked while the card asks the task's own question goes beside that question, which keeps its own button; the
+  // same command blocked again while it waits is not put up a second time
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which notes first?', choices: ['The old ones'] } as never)
   files.set('auto-refuse', 'Bash')
   await $.tool.call({ tool: 'Bash', agentId: 'a1', tool_use_id: 'b0', command: 'wc -l notes.md', description: 'Count the lines' } as never)
   await clock.advance(1000)
-  expect(await until(async () => (logLines('not put on its card: its card asks something already').length ? true : undefined))).toBe(true)
+  expect(await until(async () => list.find({ type: 'Text', text: BLOCKED }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Which notes first?' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: BLOCKED })).toBeUndefined()
+  expect((await labelsOf(list)).filter(one => ['The old ones', 'Allow', "Don't allow"].includes(one))).toEqual(['The old ones', 'Allow', "Don't allow"])
+  await $.tool.call({ tool: 'Bash', agentId: 'a1', tool_use_id: 'b0b', command: 'wc -l notes.md', description: 'Count the lines' } as never)
+  await clock.advance(1000)
+  expect(await until(async () => (logLines('not put on its card: the same command waits on it already').length ? true : undefined))).toBe(true)
+  expect((await textsOf(list)).filter(one => one === BLOCKED)).toHaveLength(1)
+  // (its empty question takes away both, the task's own)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: '' } as never)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: BLOCKED })) ? undefined : true))).toBe(true)
   // A command it blocked with nothing asked on the card is asked; Don't allow tells the task, still at work, to carry on without
   // it, never to get there another way, and runs nothing
   const deny = async () => list.press({ key: (await until(async () => (await list.findAll({ type: 'Button' })).find(one => /^ask-a1-deny-/.test(one.key ?? ''))))?.key ?? '' })
   await $.tool.call({ tool: 'Bash', agentId: 'a1', tool_use_id: 'b1', command: 'wc -l notes.md', description: 'Count the lines' } as never)
   await clock.advance(1000)
   expect(['asked for the command', Boolean(await until(async () => list.find({ type: 'Text', text: BLOCKED })))]).toEqual(['asked for the command', true])
-  expect(logLines('put to the person on its card')).toHaveLength(1)
+  expect(logLines('put to the person on its card')).toHaveLength(2)
   // Words on it go to the task, which answers inside the same block; it stays, waiting for the press, and runs nothing
   const field = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith('ask-a1-words-field-')))
   await list.input({ key: field?.key ?? '', text: 'Why count them?' } as never)
