@@ -1978,7 +1978,8 @@ test('a command is named in plain words by a small model, asked in the backgroun
   // Asked of the small model, never waited for by the panel
   const naming = () => completed.filter(e => e.system?.includes(NAMES))
   expect(naming().length).toBeGreaterThan(0)
-  expect(naming().every(e => e.model === 'claude-haiku-5-5')).toBe(true)
+  // on Sonnet, as every model call of the mod's: never Haiku
+  expect(naming().every(e => e.model === 'sonnet')).toBe(true)
   // As its log moves, its second line says what it does now in the model's words
   for (let n = 0; n < 6; n++) await advance(20_000)
   expect(await until(async () => (await texts()).find(text => text === 'Waiting for the cloud machine to start'))).toBeDefined()

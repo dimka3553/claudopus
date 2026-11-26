@@ -125,8 +125,9 @@ const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<
   if (!dir) return ''
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
   if (e.tool === 'Bash') {
-    // The command as written and unquoted, and each script it runs
+    // The command as written and unquoted, and each script it runs; one that only reads passes (reads.ts)
     const command = String(input.command ?? '')
+    if (readsOnly(command, { home: dir.replace(/\/\.claude\/claudopus$/, ''), folder: '', memory: dir }, shellWords, commandAt)) return ''
     const texts = [command, ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
     if (texts.some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
     if (texts.some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
@@ -171,7 +172,7 @@ const touchesKeyring = (e: { tool: string }) => {
 // work's own rules, and its panel's. They are its rules for as long as it runs: a change made since reaches the next task
 const workRules = async ($: EngineInterface) => {
   const work = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).replace(/\{pane-file\}/g, `${$.plugin.root}/bin/pane-file`).trim()
-  const words = `- The chat's saved words, ${who()}'s messages word for word: ${dir}/words/${(await read($, me)).id}.md`
+  const words = `- ${WORDS_LINE((await read($, me)).id)}. What ${who()} said of each area of Progress: ${dir}/progress/areas/<area id>.said.md`
   return `${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}`
 }
 // Claudopus's own checkout, when a command would change what is checked out there (changesOf), or nothing. Its own checkout is the

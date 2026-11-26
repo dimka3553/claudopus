@@ -81,26 +81,27 @@ const takeLock = async ($: EngineInterface, name: string, stale: number) => {
   return (await take()) ? lock : ''
 }
 const freeLock = ($: EngineInterface, lock: string) => $.process.run(['rm', '-rf', lock]).then(() => undefined, () => undefined)
-// Every write of progress/'s files: one at a time in this chat, and across chats through locks/progress, waiting a moment for
-// another chat's write
-let writing: Promise<unknown> = Promise.resolve()
-const withProgressFiles = <T,>($: EngineInterface, fn: () => Promise<T>): Promise<T> => {
-  const run = writing.then(async () => {
+// Files written under a lock of their name (locks/<name>): one at a time in this chat, and across chats, waiting a moment for
+// another chat's write. Every write of progress/'s files goes under locks/progress
+const writing = new Map<string, Promise<unknown>>()
+const withLock = <T,>($: EngineInterface, name: string, fn: () => Promise<T>): Promise<T> => {
+  const run = (writing.get(name) ?? Promise.resolve()).then(async () => {
     let lock = ''
     for (let tries = 0; tries < 20 && !lock; tries += 1) {
-      lock = await takeLock($, 'progress', FILES_STALE)
+      lock = await takeLock($, name, FILES_STALE)
       if (!lock) await new Promise(done => $.clock.after(250, () => done(undefined)))
     }
-    if (!lock) throw new Error('another chat is writing the progress files')
+    if (!lock) throw new Error(`another chat is writing the files of ${name}`)
     try {
       return await fn()
     } finally {
       await freeLock($, lock)
     }
   })
-  writing = run.catch(() => undefined)
+  writing.set(name, run.catch(() => undefined))
   return run
 }
+const withProgressFiles = <T,>($: EngineInterface, fn: () => Promise<T>) => withLock($, 'progress', fn)
 const writeAreas = ($: EngineInterface, areas: ProgressArea[]) => $.fs.write(`${progressDir()}/areas.json`, `${JSON.stringify({ areas }, null, 2)}\n`)
 const writeEntries = ($: EngineInterface, areaId: string, entries: ProgressEntry[]) => $.fs.write(`${progressDir()}/areas/${areaId}.json`, `${JSON.stringify({ entries: entries.slice(0, ENTRIES_MOST) }, null, 2)}\n`)
 const progressMoved = ($: EngineInterface) => update($, progressChanged, n => n + 1).then(() => redraw($))
@@ -166,6 +167,24 @@ const readEvent = async ($: EngineInterface, name: string): Promise<ProgressEven
 }
 const dropEvent = ($: EngineInterface, name: string) => $.process.run(['rm', '-f', `${queueDir()}/${name}`]).then(() => undefined, () => undefined)
 
+// What an indexed event keeps up beside progress/: a result's topic gets its state line in the index from the model's answer and,
+// at the top of its page, the Latest block of the areas it went into; the person's words go into each area's own log of them
+const keepUp = async ($: EngineInterface, event: ProgressEvent, answer: Record<string, unknown>, places: string[]) => {
+  if (event.kind === 'said') for (const id of places) await appendTo($, `${progressDir()}/areas/${id}.said.md`, saidEntry(event.at, '', event.text))
+  const topic = event.kind === 'result' && event.topic ? await topicNamed($, event.topic) : ''
+  if (!topic || !places.length) return
+  const areas = (await readAreas($)).filter(area => places.includes(area.id)).slice(0, 2)
+  const block = latestBlock(await Promise.all(areas.map(async area => ({ area, entries: await readEntries($, area.id) }))), reportsDir(), await $.clock.now())
+  const state = topicState(answer)
+  await withTopics($, async () => {
+    const list = await readIndex($)
+    const known = list.find(one => slug(one.name) === slug(topic))
+    if (!known) return
+    if (state && state !== known.state) await writeIndex($, list.map(one => (one === known ? { ...one, state } : one)))
+    await $.fs.write(pageOf(known.name), withLatest(await readOr($, pageOf(known.name)), block))
+  })
+}
+
 // The queue drained oldest first by the one chat holding locks/progress-drain; the history read in first, at most BACKFILL_AT_ONCE
 // of its events at a time. An answer that does not come leaves its event for a later look
 const drainProgress = async ($: EngineInterface) => {
@@ -176,6 +195,7 @@ const drainProgress = async ($: EngineInterface) => {
   let isLate = false
   try {
     await refreshPicture($).catch(err => indexLog($, `picture not written: ${String(err)}`))
+    await tidyIndex($).catch(err => indexLog($, `topics not tidied: ${String(err)}`))
     await backfillProgress($).catch(err => indexLog($, `history not queued: ${String(err)}`))
     while (!isLate) {
       const names = (await $.fs.list(queueDir()).catch(() => []))
@@ -204,6 +224,7 @@ const drainProgress = async ($: EngineInterface) => {
         const what = `${event.kind}${event.task ? ` of ${event.task}` : ''}${event.report ? ` (${event.report})` : ''}`
         if (got?.answer) {
           const done = await applyEvent($, event, got.answer, picture)
+          await keepUp($, event, got.answer, done.places).catch(err => indexLog($, `${what}: topic not kept up: ${String(err)}`))
           await dropEvent($, name)
           await indexLog($, `${what} indexed: ${done.touched.size ? [...done.touched].join(', ') : 'nothing changed'}`)
           if (done.isChanged) await progressMoved($)
@@ -233,7 +254,7 @@ const backfillProgress = async ($: EngineInterface) => {
   for (const r of all) {
     const text = (await readOr($, `${reportPath(r)}/report.md`)).trim()
     if (!text) continue
-    const one: ProgressEvent = { kind: 'result', at: r.at, chat: r.chatId ?? '', task: r.agent ?? '', report: r.id, title: r.title, files: r.files.filter(file => PICTURE.test(file)), text: hideKeys(clip(text, EVENT_CHARS.result / 2)), isBackfill: true }
+    const one: ProgressEvent = { kind: 'result', at: r.at, chat: r.chatId ?? '', task: r.agent ?? '', report: r.id, title: r.title, topic: r.subject, files: r.files.filter(file => PICTURE.test(file)), text: hideKeys(clip(text, EVENT_CHARS.result / 2)), isBackfill: true }
     await $.fs.write(`${queueDir()}/${queueName(r.at)}`, `${JSON.stringify(one)}\n`)
   }
   await $.fs.write(`${progressDir()}/backfilled`, `${new Date(now).toISOString()}\n`)
@@ -253,8 +274,11 @@ const refreshPicture = async ($: EngineInterface) => {
   if (isKnown && now - updated < PICTURE_EVERY) return
   const since = isKnown ? updated : now - BACKFILL_DAYS * 86_400_000
   const words: { at: string; text: string }[] = []
-  for (const entry of await $.fs.list(`${dir}/words`).catch(() => []))
-    if (entry.kind === 'file' && entry.name.endsWith('.md') && !(entry.mtimeMs && entry.mtimeMs < since)) words.push(...wordsIn(await fileEnd($, `${dir}/words/${entry.name}`), since))
+  // (a chat's own words alone, where they are kept apart from Claude's replies)
+  const listed = (await $.fs.list(`${dir}/words`).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.md'))
+  const names = new Set(listed.map(entry => entry.name))
+  for (const entry of listed)
+    if (!(!entry.name.endsWith('.said.md') && names.has(entry.name.replace(/\.md$/, '.said.md'))) && !(entry.mtimeMs && entry.mtimeMs < since)) words.push(...wordsIn(await fileEnd($, `${dir}/words/${entry.name}`), since))
   if (!words.length) return
   words.sort((a, b) => (a.at < b.at ? -1 : 1))
   const r = await $.model.complete({ model: 'sonnet', system: PICTURE_SYSTEM, prompt: picturePrompt(was, words, now, PICTURE_READ), maxTokens: 1500, timeoutMs: 120_000 }).catch(() => undefined)

@@ -216,6 +216,8 @@ const NO_PAGES = /^(postgres|redis-server|mysqld|mongod)\b/
 
 const me = atom({ plugin: 'claudopus', key: 'me' } as const, { id: '', title: '', tokens: 0, isChat: false, needsContext: false, isListOpened: false, window: 0 }, { shape: 'me-6' })
 const todos = atom({ plugin: 'claudopus', key: 'todos' } as const, [], { shape: 'todos-3' })
+// The topics and areas, by name and state, as the chat was last told them (topics.ts listKeys)
+const listSeen = atom({ plugin: 'claudopus', key: 'listSeen' } as const, [] as string[], { shape: 'list-seen-1' })
 const view = atom({ plugin: 'claudopus', key: 'view' } as const, { openId: '' }, { shape: 'view-5' })
 const servers = atom({ plugin: 'claudopus', key: 'servers' } as const, [], { shape: 'servers-2' })
 // Counts the passes that bring the screen up to date: each one redraws what reads it
