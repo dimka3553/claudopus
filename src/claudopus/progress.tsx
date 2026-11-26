@@ -48,6 +48,8 @@ const queueSoon = ($: EngineInterface, event: Parameters<typeof queueProgress>[1
 // How soon after an event it looks, and again after an answer that did not come
 const PROGRESS_AFTER = 3000
 const PROGRESS_RETRY = 5 * 60_000
+// The first look after a chat loads: half a minute after the catch-up starts, so the two never start in the same moment
+const PROGRESS_LOAD_AFTER = 90_000
 // An event the model could not answer this many times is dropped, and index.log says so
 const PROGRESS_TRIES = 3
 // How many model calls go at once while the history is read in, and how far back it goes

@@ -1076,7 +1076,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.props.color).toBe('#4C9AFF')
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.text).toBe('1 delivered')
   // Its helper, ended in the same moment, stays in its card for the same pause
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Leaderboard', 'Memory', 'Config', 'About', 'Fix the nose', 'Search the docs', 'Mark as done'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Memory', 'Config', 'About', 'Fix the nose', 'Search the docs', 'Mark as done'])
   await clock.advance(1_000)
   expect(await pane.find({ type: 'Text', text: '◐ Delivered' })).toBeDefined()
   await clock.advance(1_100)
@@ -1086,12 +1086,12 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: '◐ Delivered' }))?.props.color).toBe('#4C9AFF')
   expect((await pane.find({ type: 'Text', text: /^ · I am reading/ }))?.text).toBe(' · I am reading how the other model draws outlines.')
   expect((await pane.find({ type: 'Text', text: /delivered$/ }))?.text).toBe('1 delivered')
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Leaderboard', 'Memory', 'Config', 'About', 'Fix the nose', '1 helper ended', 'Mark as done'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Memory', 'Config', 'About', 'Fix the nose', '1 helper ended', 'Mark as done'])
   await pressed(pane, 'dismiss-a1')
   await clock.advance(2_100)
   // Dismissed, it is one folded row, "Finished", under the running cards; unfolded, a card as running work has, with Details and no Stop
   const buttons = (await until(async () => ((await pane.findAll({ type: 'Button' })).some(b => b.props.label === '▸ Finished 1') ? pane.findAll({ type: 'Button' }) : undefined))) ?? []
-  expect(buttons.map(b => b.props.label)).toEqual(['Stats', 'Leaderboard', 'Memory', 'Config', 'About', '▸ Finished 1'])
+  expect(buttons.map(b => b.props.label)).toEqual(['Progress', 'Stats', 'Leaderboard', 'Memory', 'Config', 'About', '▸ Finished 1'])
   await pane.press({ key: String(buttons.find(b => b.props.label === '▸ Finished 1')?.key) })
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.wrap).toBe('truncate-end')
   // its top row only its facts, the line under it how it ended

@@ -322,7 +322,7 @@ const chatHooks = (on: On) => {
     // A topic page grown past what a fresh task reads whole is made short in the background, the whole of it kept in its history
     afterLoad($, CATCH_UP_AFTER, () => void shortenPages($).catch(err => log($, `pages not made short: ${String(err)}`)))
     // and what waits in the queue of progress/ is indexed, the picture written when it is due, the history read in once (progress.tsx)
-    afterLoad($, CATCH_UP_AFTER, () => void drainProgress($).catch(err => log($, `progress not indexed: ${String(err)}`)))
+    afterLoad($, PROGRESS_LOAD_AFTER, () => void drainProgress($).catch(err => log($, `progress not indexed: ${String(err)}`)))
     // What the person had typed into a reply box before a reload of the mod is in its box again
     await readDrafts($).catch(() => undefined)
     // Work that is running when the chat loads brings the panel up, if it has never opened
