@@ -932,6 +932,25 @@ test('each chat beats for the watcher that brings Claudopus back, naming its pro
   expect(files.get(beat)).toContain('4242')
 })
 
+test("each chat's start gives its tasks the hour's prompt cache in the person's own Claude Code settings, every other key as it was; a value of theirs, or a file that is not a plain JSON object, stays as it is", async ($, on) => {
+  const { files } = world(on)
+  const settings = `${HOME}/.claude/settings.json`
+  const theirs = { model: 'opus', env: { SOME_SETTING: '1' }, permissions: { allow: ['Bash(ls:*)'] }, enabledPlugins: { 'claudopus@claudopus': true }, statusLine: { text: 'café' } }
+  files.set(settings, JSON.stringify(theirs))
+  await $.session.start(start)
+  expect(files.get(settings)).toBe(`${JSON.stringify({ ...theirs, subagentPromptCacheTtl: '1h' }, null, 2)}\n`)
+  // (5 minutes chosen by the person, a file cut off half way, a number JavaScript would change, and a list)
+  for (const text of [JSON.stringify({ ...theirs, subagentPromptCacheTtl: '5m' }), '{ "model": "opus", ', '{ "id": 12345678901234567 }', '[]']) {
+    files.set(settings, text)
+    await $.session.start(start)
+    expect(files.get(settings)).toBe(text)
+  }
+  // A Mac with no settings file yet has one with only this
+  files.delete(settings)
+  await $.session.start(start)
+  expect(JSON.parse(files.get(settings) ?? '{}')).toEqual({ subagentPromptCacheTtl: '1h' })
+})
+
 test("after the chat's process was replaced, as when the app quits or drops the chat, every task comes back from the ledger: one that was at work, or stopped by no one as the process ended, is Interrupted with Carry on, never done; a question still waits and its answer carries it on; delivered and stopped by the person stay so; what Claude Code runs again stays at work; nothing starts by itself, and a reload in the same process cuts nothing", SLOW, async ($, on) => {
   // a8 is run again by Claude Code itself in the new process
   const { files, clock, resumed, submitted } = world(on, { agents: { a8: 'running' } })

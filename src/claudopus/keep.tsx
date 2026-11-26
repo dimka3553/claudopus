@@ -349,4 +349,23 @@ const endBeat = async ($: EngineInterface, id: string) => {
   if (dir && SAFE_CHAT.test(id)) await $.process.run(['rm', '-f', beatFile(id)]).catch(() => undefined)
 }
 const SAFE_CHAT = /^[A-Za-z0-9-]{1,80}$/
+
+// ---- Tasks keep their prompt cache an hour, as the chat does ----
+
+// With Claude Code's 5 minutes, a task or helper that waits longer on a command or a helper pays to read its whole context again (a
+// person's tasks woken after a wait rewrote theirs 82 times, a fifth of what Claudopus cost them). So each chat's start sets
+// subagentPromptCacheTtl to "1h" in the person's own settings.json, every other key as it was, as site/install.sh does for an install
+// from claudopus.ai, here for one made from the marketplace. A value already there, whatever it is, is the person's and stays; so
+// does a file that cannot be read, is not a JSON object, or holds a number of more than 15 digits, which would come back changed
+const TASK_CACHE = 'subagentPromptCacheTtl'
+const setTaskCache = async ($: EngineInterface) => {
+  const settings = `${await configDir($)}/settings.json`
+  const isThere = await $.fs.exists(settings).catch(() => true)
+  const text = isThere ? await $.fs.read(settings).catch(() => undefined) : ''
+  if (text === undefined || /[-:[,\s]\d{16,}|\d\.\d{16,}/.test(text)) return
+  const d = parsedOr<unknown>(text.trim() ? text : '{}', undefined)
+  if (!d || typeof d !== 'object' || Array.isArray(d) || TASK_CACHE in d) return
+  await $.fs.write(settings, `${JSON.stringify({ ...d, [TASK_CACHE]: '1h' }, null, 2)}\n`)
+  await log($, `tasks keep their prompt cache an hour: ${TASK_CACHE} set to "1h" in ${settings}`)
+}
 const REVIVED_KEY = 'claudopus.revived'

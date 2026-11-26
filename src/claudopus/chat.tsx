@@ -408,6 +408,8 @@ const chatHooks = (on: On) => {
     isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
     // Every chat has a watcher that brings Claudopus back should Claude switch it off
     await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
+    // and its tasks keep their prompt cache an hour, as the chat does, unless the person's settings say otherwise
+    await setTaskCache($).catch(err => log($, `the hour's cache for tasks was not set: ${String(err)}`))
     if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
     // What no chat on this Mac saved itself, caught up into memory a minute after the load and then every while

@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.280 · 27 November 2026
+- Tasks and their helpers keep their prompt cache for an hour, as the chat does, instead of 5 minutes: a task that waited longer than that used to pay to read everything it had read again. The installer and Claudopus itself add this to your Claude Code settings, by either way of installing, and keep any value you set there yourself.
+
 ## 0.2.279 · 26 November 2026
 - The Stats tab counts each task's helpers, and their helpers, as Claudes of their own: a new Helpers part says how many worked, the most tasks and helpers at work at once, their time and their tokens, apart from the tasks'.
 - Under the timeline, a strip shows how many tasks and helpers were at work at each moment, the tasks below and their helpers above them.

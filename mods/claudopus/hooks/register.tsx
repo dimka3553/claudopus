@@ -11240,6 +11240,7 @@ await unshare($, true).catch(() => undefined)
 if (macs.length) everyLoad($, FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
 isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
 await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
+await setTaskCache($).catch(err => log($, `the hour's cache for tasks was not set: ${String(err)}`))
 if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
 if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
 afterLoad($, CATCH_UP_AFTER, () => startCatchUp($).catch(err => log($, `chats not caught up: ${String(err)}`)))
@@ -12629,6 +12630,19 @@ if (dir && SAFE_CHAT.test(id) && enginePid) await $.fs.write(`${dir}/keep/${id}.
 if (dir && SAFE_CHAT.test(id)) await $.process.run(['rm', '-f', beatFile(id)]).catch(() => undefined)
 }
 const SAFE_CHAT = /^[A-Za-z0-9-]{1,80}$/
+
+
+const TASK_CACHE = 'subagentPromptCacheTtl'
+const setTaskCache = async ($: EngineInterface) => {
+const settings = `${await configDir($)}/settings.json`
+const isThere = await $.fs.exists(settings).catch(() => true)
+const text = isThere ? await $.fs.read(settings).catch(() => undefined) : ''
+if (text === undefined || /[-:[,\s]\d{16,}|\d\.\d{16,}/.test(text)) return
+const d = parsedOr<unknown>(text.trim() ? text : '{}', undefined)
+if (!d || typeof d !== 'object' || Array.isArray(d) || TASK_CACHE in d) return
+await $.fs.write(settings, `${JSON.stringify({ ...d, [TASK_CACHE]: '1h' }, null, 2)}\n`)
+await log($, `tasks keep their prompt cache an hour: ${TASK_CACHE} set to "1h" in ${settings}`)
+}
 const REVIVED_KEY = 'claudopus.revived'
 
 
