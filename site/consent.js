@@ -10,8 +10,7 @@
     '/plugin marketplace add dimka3553/claudopus': 'copy_marketplace_add',
     '/plugin install claudopus@claudopus': 'copy_install',
     '/claudopus': 'copy_open_panel',
-    'claude plugin marketplace add dimka3553/claudopus': 'copy_terminal_marketplace_add',
-    'claude plugin install claudopus@claudopus': 'copy_terminal_install',
+    'curl -fsSL https://www.claudopus.ai/install.sh | sh': 'copy_install_line',
   }
 
   const load = () => { try { return localStorage.getItem(KEY) } catch { return null } }

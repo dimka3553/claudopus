@@ -9,14 +9,20 @@
 
 ## Install
 
-At the Claude Code prompt:
+In Terminal, on a Mac or Linux, one line:
+
+```
+curl -fsSL https://www.claudopus.ai/install.sh | sh
+```
+
+It finds Claude Code (the Claude desktop app's own copy, or `claude` in a terminal), installs Claudopus from GitHub (dimka3553/claudopus) and switches it on, keeping the rest of `~/.claude/settings.json`. On a Mac without Apple's command line tools, it opens their installer and carries on once they are in. Then open a new chat in the desktop app's Code tab, or type `/reload-plugins` in one that is open; `/claudopus` opens the panel.
+
+At the prompt of Claude Code in a terminal, the same in two lines:
 
 ```
 /plugin marketplace add dimka3553/claudopus
 /plugin install claudopus@claudopus
 ```
-
-Then `/claudopus` opens the panel. In the Claude desktop app: + next to the prompt box, Plugins, Add marketplace `dimka3553/claudopus`, then add `claudopus`.
 
 ## What it does
 
