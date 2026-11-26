@@ -389,6 +389,8 @@ const talks = new Map<string, { key: string; lines: Line[] | undefined; at?: num
 const folds = new Map<string, number[]>()
 // The memory folder, ~/.claude/claudopus; set when the session starts
 let dir = ''
+// Claude Code's own folder, ~/.claude or CLAUDE_CONFIG_DIR's (configDir); set when the session starts
+let claudeDir = ''
 // The person's last message, for the pass that runs after the reply
 let said = ''
 // Each message of the person's in the chat's turn under way: only a message that carries one of them is their steer

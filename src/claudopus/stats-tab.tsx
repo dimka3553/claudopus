@@ -25,9 +25,10 @@ async function sumOf($: EngineInterface, path: string): Promise<FileSum> {
     else jqBusy -= 1
   }
 }
-// Where a chat's records are: its own folder under ~/.claude/projects, found by its id
-async function chatFolderOf($: EngineInterface, home: string, chatId: string) {
-  const root = `${home}/.claude/projects`
+// Where a chat's records are: its own folder under the engine's projects folder (in ~/.claude, or in CLAUDE_CONFIG_DIR when the
+// person keeps Claude Code elsewhere: until 0.2.281 only ~/.claude was looked in, and such a Mac counted nothing), found by its id
+async function chatFolderOf($: EngineInterface, chatId: string) {
+  const root = `${await configDir($)}/projects`
   for (const entry of await $.fs.list(root).catch(() => [])) {
     if (entry.kind !== 'dir') continue
     if (await $.fs.stat(`${root}/${entry.name}/${chatId}.jsonl`).catch(() => undefined)) return `${root}/${entry.name}`
@@ -166,7 +167,7 @@ const HOUR = 3_600_000
 // Looks at one chat's transcripts: one whose file is as it was is not read, and one that changed is summed again, once. A
 // transcript no longer there keeps what was kept of it. `isThorough` also reads again what an unfinished one that has been quiet
 // for an hour says it was, and looks again for a chat whose records were not found
-async function chatCheck($: EngineInterface, home: string, memory: string, chatId: string, hint: string, epoch: string, now: number, isThorough: boolean, isRemade = false): Promise<Checked> {
+async function chatCheck($: EngineInterface, memory: string, chatId: string, hint: string, epoch: string, now: number, isThorough: boolean, isRemade = false): Promise<Checked> {
   const index = await shardsRead<Kept, Head>($, `${memory}/stats/chats/${chatId}`, epoch, headNew())
   // Sums kept the old way (stats/<chat>.json) are carried over the first time: none of what they hold is summed again. The file
   // is left as it is, as a chat still on an older Claudopus goes on reading and writing it, and removed once nothing has for days
@@ -185,10 +186,12 @@ async function chatCheck($: EngineInterface, home: string, memory: string, chatI
   let folder = hint
   let main = await mainAt(folder)
   for (const known of [head.folder, old?.folder ?? '']) if (!main && known && known !== folder) main = await mainAt((folder = known))
-  if (!main && (isThorough || !head.sought) && !head.folder) main = await mainAt((folder = await chatFolderOf($, home, chatId)))
+  // A chat whose records were not found is looked for again a day later, so records that were elsewhere still come to count
+  const isSought = !main && !head.folder && (isThorough || !head.sought || now - head.sought >= DAY)
+  if (isSought) main = await mainAt((folder = await chatFolderOf($, chatId)))
   if (!main) folder = head.folder
   if (!folder) {
-    if (!head.sought) ((head.sought = now), index.dirty.add(0))
+    if (!head.sought || isSought) ((head.sought = now), index.dirty.add(0))
     return checked
   }
   if (head.folder !== folder || head.sought) ((index.head = { ...head, folder, sought: undefined }), index.dirty.add(0))
@@ -307,12 +310,12 @@ async function chatsDue($: EngineInterface, memory: string, chatId: string, all:
 // Looks at Claude's records again and keeps what changed: this chat's alone, or the chats that may have changed. 'busy' when
 // another chat is looking: what is kept is as new as that chat makes it
 let statsLooking: Promise<unknown> = Promise.resolve()
-const statsRefresh = ($: EngineInterface, home: string, memory: string, chatId: string, hint: string, scope: Scope, now: number, isLooking = false): Promise<'done' | 'busy'> => {
-  const next = statsLooking.then(() => refreshNow($, home, memory, chatId, hint, scope, now, isLooking))
+const statsRefresh = ($: EngineInterface, memory: string, chatId: string, hint: string, scope: Scope, now: number, isLooking = false): Promise<'done' | 'busy'> => {
+  const next = statsLooking.then(() => refreshNow($, memory, chatId, hint, scope, now, isLooking))
   statsLooking = next.catch(() => undefined)
   return next
 }
-async function refreshNow($: EngineInterface, home: string, memory: string, chatId: string, hint: string, scope: Scope, now: number, isLooking: boolean): Promise<'done' | 'busy'> {
+async function refreshNow($: EngineInterface, memory: string, chatId: string, hint: string, scope: Scope, now: number, isLooking: boolean): Promise<'done' | 'busy'> {
   if (!(await statsLock($, memory, now))) return 'busy'
   const pass = async (all: AllKept, isNew: boolean) => {
     // Every chat the first time; and again when Stats is open on all of them and that was not done in the last ten minutes
@@ -322,7 +325,7 @@ async function refreshNow($: EngineInterface, home: string, memory: string, chat
     const ids = isRemade ? await chatsKept($, memory, chatId) : scope === 'all' ? await chatsDue($, memory, chatId, all, now, isThorough) : [chatId]
     let saidAt = now
     for (let at = 0; at < ids.length; at += STATS_BATCH) {
-      const checked = await Promise.all(ids.slice(at, at + STATS_BATCH).map(id => chatCheck($, home, memory, id, id === chatId ? hint : '', all.epoch, now, isThorough || (scope === 'chat' && id === chatId), isRemade)))
+      const checked = await Promise.all(ids.slice(at, at + STATS_BATCH).map(id => chatCheck($, memory, id, id === chatId ? hint : '', all.epoch, now, isThorough || (scope === 'chat' && id === chatId), isRemade)))
       await statsApply($, memory, all, checked, now, isRemade && at + STATS_BATCH >= ids.length)
       // A long look says it is still at it, so no other chat takes it over
       const clock = await $.clock.now()
@@ -395,7 +398,7 @@ async function statsShow($: EngineInterface, scope: Scope, memory: string, chatI
 // figures drawn again from what that changed
 const MEMORY_EVERY = 5 * 60_000
 let memoryReadAt = 0
-async function loadStats($: EngineInterface, scope: Scope, home: string, memory: string, chatId: string, hint: string, now: number) {
+async function loadStats($: EngineInterface, scope: Scope, memory: string, chatId: string, hint: string, now: number) {
   if (reading.has(scope) || !chatId) return
   const was = held.get(scope)
   const isDue = !was || now - was.at >= READ_EVERY
@@ -405,7 +408,7 @@ async function loadStats($: EngineInterface, scope: Scope, home: string, memory:
     if (now - memoryReadAt >= MEMORY_EVERY) ((memoryReadAt = now), void loadMemorySizes($, memory).then(() => drawAgain($), () => undefined))
     if (!was?.shown[statsShown.range] && (await statsShow($, scope, memory, chatId, now))) drawAgain($)
     if (!isDue) return
-    const looked = await statsRefresh($, home, memory, chatId, hint, scope, now, true)
+    const looked = await statsRefresh($, memory, chatId, hint, scope, now, true)
     await statsShow($, scope, memory, chatId, now)
     // While another chat is looking, this one asks again in a few seconds
     held.set(scope, { ...(held.get(scope) ?? { shown: {}, svgs: new Map(), chats: 0 }), at: looked === 'busy' ? now - READ_EVERY + 5000 : now, error: undefined })
@@ -442,11 +445,10 @@ async function loadMemorySizes($: EngineInterface, memory: string) {
 // Stats: what the work added up to, in a tab of its own, opened in front like Results
 const STATS_PANE = 'stats'
 const STATS_TITLE = 'Stats'
-const statsHint = (home: string) => `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}`
+const statsHint = async ($: EngineInterface) => `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}`
 const statsRead = async ($: EngineInterface, scope: 'chat' | 'all') => {
-  const home = (await $.env.get('HOME')) ?? ''
   const { id } = await read($, me)
-  await loadStats($, scope, home, dir, id, statsHint(home), await $.clock.now())
+  await loadStats($, scope, dir, id, await statsHint($), await $.clock.now())
 }
 const openStats = async ($: EngineInterface) => {
   presses += 1
@@ -489,10 +491,9 @@ const boardCall = async ($: EngineInterface, fn: string, args: Record<string, un
 // The person's sums over every range, from what is kept of every chat's records, looked at again first unless `isHeld`; the
 // timeline only while they make it public. Undefined while the records have never all been read (another chat is at it)
 const boardFigures = async ($: EngineInterface, isTimelinePublic: boolean, isHeld = false): Promise<BoardSent | undefined> => {
-  const home = (await $.env.get('HOME')) ?? ''
   const { id } = await read($, me)
   const now = await $.clock.now()
-  if (!isHeld) await statsRefresh($, home, dir, id, statsHint(home), 'all', now).catch(err => log($, `stats not read for the leaderboard: ${String(err)}`))
+  if (!isHeld) await statsRefresh($, dir, id, await statsHint($), 'all', now).catch(err => log($, `stats not read for the leaderboard: ${String(err)}`))
   const since = await installedAt($)
   const got = await statsFor($, dir, id, 'all', RANGES.map(range => boardFrom(range, now, since)), now, false)
   if (!got) return undefined

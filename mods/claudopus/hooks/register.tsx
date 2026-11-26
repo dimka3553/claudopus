@@ -285,6 +285,7 @@ let loadMark = 0
 const talks = new Map<string, { key: string; lines: Line[] | undefined; at?: number }>()
 const folds = new Map<string, number[]>()
 let dir = ''
+let claudeDir = ''
 let said = ''
 let heard: string[] = []
 let isOff = false
@@ -1884,7 +1885,7 @@ await lookEnds($)
 await saveKeep($).catch(err => log($, `work at work not kept: ${String(err)}`))
 }
 
-const agentsFolder = async ($: EngineInterface, chat: string) => `${(await $.env.get('HOME')) ?? ''}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${chat}/subagents`
+const agentsFolder = async ($: EngineInterface, chat: string) => `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${chat}/subagents`
 const lastWordsOf = async ($: EngineInterface, folder: string, agent: string, now: number) => {
 const path = `${folder}/agent-${agent}.jsonl`
 const stat = await $.fs.stat(path).catch(() => undefined)
@@ -2176,8 +2177,7 @@ const { id } = await read($, me)
 const list = await read($, todos)
 if (!id) return
 const live = await $.agent.list().catch(() => [])
-const home = (await $.env.get('HOME')) ?? ''
-const folder = `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}/subagents`
+const folder = `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}/subagents`
 type Meta = { description?: string; agentType?: string; finished?: boolean; spawnDepth?: number }
 const ids = (await $.fs.list(folder).catch(() => [])).map(entry => /^agent-(\w+)\.meta\.json$/.exec(entry.name)?.[1] ?? '').filter(Boolean)
 const metas = await Promise.all(
@@ -2699,9 +2699,9 @@ return 0
 }
 
 const chats = new Map<string, string>()
-for (const entry of await $.fs.list(`${home}/.claude/sessions`).catch(() => [])) {
+for (const entry of await $.fs.list(`${await configDir($)}/sessions`).catch(() => [])) {
 if (!entry.name.endsWith('.json')) continue
-const one = JSON.parse((await readOr($, `${home}/.claude/sessions/${entry.name}`)) || '{}') as { pid?: number; sessionId?: string; name?: string; cwd?: string }
+const one = JSON.parse((await readOr($, `${await configDir($)}/sessions/${entry.name}`)) || '{}') as { pid?: number; sessionId?: string; name?: string; cwd?: string }
 const name = one.name || (one.cwd ?? '').split('/').pop() || 'unnamed'
 if (one.pid) chats.set(String(one.pid), name)
 if (one.sessionId) chats.set(one.sessionId, name)
@@ -3620,8 +3620,8 @@ if (next) next()
 else jqBusy -= 1
 }
 }
-async function chatFolderOf($: EngineInterface, home: string, chatId: string) {
-const root = `${home}/.claude/projects`
+async function chatFolderOf($: EngineInterface, chatId: string) {
+const root = `${await configDir($)}/projects`
 for (const entry of await $.fs.list(root).catch(() => [])) {
 if (entry.kind !== 'dir') continue
 if (await $.fs.stat(`${root}/${entry.name}/${chatId}.jsonl`).catch(() => undefined)) return `${root}/${entry.name}`
@@ -3735,7 +3735,7 @@ return { kind: (meta.spawnDepth ?? 1) > 1 ? 'helper' : 'work', parent: meta.pare
 const OLD_KEPT_FOR = 3 * 86_400_000
 type Checked = { id: string; index: Shards<Kept, Head>; days: { day: number; key: string; entry: DayEntry | undefined }[]; isChanged: boolean; last: number; hadMain: boolean }
 const HOUR = 3_600_000
-async function chatCheck($: EngineInterface, home: string, memory: string, chatId: string, hint: string, epoch: string, now: number, isThorough: boolean, isRemade = false): Promise<Checked> {
+async function chatCheck($: EngineInterface, memory: string, chatId: string, hint: string, epoch: string, now: number, isThorough: boolean, isRemade = false): Promise<Checked> {
 const index = await shardsRead<Kept, Head>($, `${memory}/stats/chats/${chatId}`, epoch, headNew())
 const oldPath = `${memory}/stats/${chatId}.json`
 const carried = index.of.size ? undefined : parsed<Cache | undefined>(await statsText($, oldPath), undefined)
@@ -3752,10 +3752,11 @@ const mainAt = (folder: string) => (folder ? $.fs.stat(`${folder}/${chatId}.json
 let folder = hint
 let main = await mainAt(folder)
 for (const known of [head.folder, old?.folder ?? '']) if (!main && known && known !== folder) main = await mainAt((folder = known))
-if (!main && (isThorough || !head.sought) && !head.folder) main = await mainAt((folder = await chatFolderOf($, home, chatId)))
+const isSought = !main && !head.folder && (isThorough || !head.sought || now - head.sought >= DAY)
+if (isSought) main = await mainAt((folder = await chatFolderOf($, chatId)))
 if (!main) folder = head.folder
 if (!folder) {
-if (!head.sought) ((head.sought = now), index.dirty.add(0))
+if (!head.sought || isSought) ((head.sought = now), index.dirty.add(0))
 return checked
 }
 if (head.folder !== folder || head.sought) ((index.head = { ...head, folder, sought: undefined }), index.dirty.add(0))
@@ -3863,12 +3864,12 @@ all.cursor = [...turn].at(-1) ?? ''
 return ids.filter(id => id === chatId || open.has(id) || !have.has(id) || (all.recent[id] ?? 0) > now - DAY || turn.has(id))
 }
 let statsLooking: Promise<unknown> = Promise.resolve()
-const statsRefresh = ($: EngineInterface, home: string, memory: string, chatId: string, hint: string, scope: Scope, now: number, isLooking = false): Promise<'done' | 'busy'> => {
-const next = statsLooking.then(() => refreshNow($, home, memory, chatId, hint, scope, now, isLooking))
+const statsRefresh = ($: EngineInterface, memory: string, chatId: string, hint: string, scope: Scope, now: number, isLooking = false): Promise<'done' | 'busy'> => {
+const next = statsLooking.then(() => refreshNow($, memory, chatId, hint, scope, now, isLooking))
 statsLooking = next.catch(() => undefined)
 return next
 }
-async function refreshNow($: EngineInterface, home: string, memory: string, chatId: string, hint: string, scope: Scope, now: number, isLooking: boolean): Promise<'done' | 'busy'> {
+async function refreshNow($: EngineInterface, memory: string, chatId: string, hint: string, scope: Scope, now: number, isLooking: boolean): Promise<'done' | 'busy'> {
 if (!(await statsLock($, memory, now))) return 'busy'
 const pass = async (all: AllKept, isNew: boolean) => {
 const isThorough = scope === 'all' && (!all.swept || (isLooking && now - all.swept >= SWEEP_EVERY))
@@ -3876,7 +3877,7 @@ const isRemade = all.mv !== MONTHS_V
 const ids = isRemade ? await chatsKept($, memory, chatId) : scope === 'all' ? await chatsDue($, memory, chatId, all, now, isThorough) : [chatId]
 let saidAt = now
 for (let at = 0; at < ids.length; at += STATS_BATCH) {
-const checked = await Promise.all(ids.slice(at, at + STATS_BATCH).map(id => chatCheck($, home, memory, id, id === chatId ? hint : '', all.epoch, now, isThorough || (scope === 'chat' && id === chatId), isRemade)))
+const checked = await Promise.all(ids.slice(at, at + STATS_BATCH).map(id => chatCheck($, memory, id, id === chatId ? hint : '', all.epoch, now, isThorough || (scope === 'chat' && id === chatId), isRemade)))
 await statsApply($, memory, all, checked, now, isRemade && at + STATS_BATCH >= ids.length)
 const clock = await $.clock.now()
 if (clock - saidAt >= LOCK_STALE / 4) ((saidAt = clock), await $.fs.write(`${memory}/stats/lock/at`, String(clock)).catch(() => undefined))
@@ -3939,7 +3940,7 @@ return true
 }
 const MEMORY_EVERY = 5 * 60_000
 let memoryReadAt = 0
-async function loadStats($: EngineInterface, scope: Scope, home: string, memory: string, chatId: string, hint: string, now: number) {
+async function loadStats($: EngineInterface, scope: Scope, memory: string, chatId: string, hint: string, now: number) {
 if (reading.has(scope) || !chatId) return
 const was = held.get(scope)
 const isDue = !was || now - was.at >= READ_EVERY
@@ -3949,7 +3950,7 @@ try {
 if (now - memoryReadAt >= MEMORY_EVERY) ((memoryReadAt = now), void loadMemorySizes($, memory).then(() => drawAgain($), () => undefined))
 if (!was?.shown[statsShown.range] && (await statsShow($, scope, memory, chatId, now))) drawAgain($)
 if (!isDue) return
-const looked = await statsRefresh($, home, memory, chatId, hint, scope, now, true)
+const looked = await statsRefresh($, memory, chatId, hint, scope, now, true)
 await statsShow($, scope, memory, chatId, now)
 held.set(scope, { ...(held.get(scope) ?? { shown: {}, svgs: new Map(), chats: 0 }), at: looked === 'busy' ? now - READ_EVERY + 5000 : now, error: undefined })
 if (looked === 'busy') $.clock.after(5000, () => drawAgain($))
@@ -3983,11 +3984,10 @@ memoryHeld.now = { parts, bytes }
 
 const STATS_PANE = 'stats'
 const STATS_TITLE = 'Stats'
-const statsHint = (home: string) => `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}`
+const statsHint = async ($: EngineInterface) => `${await configDir($)}/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}`
 const statsRead = async ($: EngineInterface, scope: 'chat' | 'all') => {
-const home = (await $.env.get('HOME')) ?? ''
 const { id } = await read($, me)
-await loadStats($, scope, home, dir, id, statsHint(home), await $.clock.now())
+await loadStats($, scope, dir, id, await statsHint($), await $.clock.now())
 }
 const openStats = async ($: EngineInterface) => {
 presses += 1
@@ -4022,10 +4022,9 @@ const status = Number(text.slice(cut + 1)) || 0
 return { ok: r.exitCode === 0 && status >= 200 && status < 300, status, body: parsed<unknown>(cut > 0 ? text.slice(0, cut) : '', undefined) }
 }
 const boardFigures = async ($: EngineInterface, isTimelinePublic: boolean, isHeld = false): Promise<BoardSent | undefined> => {
-const home = (await $.env.get('HOME')) ?? ''
 const { id } = await read($, me)
 const now = await $.clock.now()
-if (!isHeld) await statsRefresh($, home, dir, id, statsHint(home), 'all', now).catch(err => log($, `stats not read for the leaderboard: ${String(err)}`))
+if (!isHeld) await statsRefresh($, dir, id, await statsHint($), 'all', now).catch(err => log($, `stats not read for the leaderboard: ${String(err)}`))
 const since = await installedAt($)
 const got = await statsFor($, dir, id, 'all', RANGES.map(range => boardFrom(range, now, since)), now, false)
 if (!got) return undefined
@@ -4871,12 +4870,12 @@ const key = [one.steps ?? 0, one.entries.at(-1)?.text ?? '', one.entries.filter(
 const now = await $.clock.now()
 const was = talks.get(id)
 if (was?.key === key && (was.lines || now - (was.at ?? 0) < RETRY_READ)) return
-const home = (await $.env.get('HOME')) ?? ''
+const projects = `${claudeDir || (await configDir($))}/projects`
 const slug = c.folder.replace(/[^A-Za-z0-9]/g, '-')
 const name = `${c.id}/subagents/agent-${c.agent}.jsonl`
 during("read another chat's task")
 const r = await $.process
-.run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', `${home}/.claude/projects`, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
+.run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', projects, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
 .catch(() => undefined)
 const rows = r?.exitCode === 0 ? rowsOfTranscript(r.stdout) : undefined
 talks.set(id, { key, lines: rows?.length ? withSteers(talkOf(rows), one.entries) : undefined, at: now })
@@ -7927,7 +7926,7 @@ let myLink: Link | undefined
 let linkReadAt = 0
 let linkFile = ''
 const readLink = async ($: EngineInterface, id: string): Promise<Link | undefined> => {
-const folder = `${(await $.env.get('HOME')) ?? ''}/.claude/sessions`
+const folder = `${await configDir($)}/sessions`
 type Entry = { sessionId?: string; hostSessionId?: string; bridgeSessionId?: string; updatedAt?: number }
 const entryOf = async (name: string) => JSON.parse((await readOr($, `${folder}/${name}`)) || '{}') as Entry
 let found = linkFile ? await entryOf(linkFile).catch(() => ({}) as Entry) : ({} as Entry)
@@ -11043,6 +11042,7 @@ knownSeen = undefined
 const begun = await next(e)
 const home = (await $.env.get('HOME')) ?? ''
 dir = `${home}/.claude/claudopus`
+claudeDir = await configDir($)
 holdAt = 0
 const timing = (await $.env.get('CLAUDOPUS_TIMING')) ?? ''
 isTimed = !/^test\b/.test(timing)
