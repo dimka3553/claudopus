@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.279 · 26 November 2026
+- The Stats tab counts each task's helpers, and their helpers, as Claudes of their own: a new Helpers part says how many worked, the most tasks and helpers at work at once, their time and their tokens, apart from the tasks'.
+- Under the timeline, a strip shows how many tasks and helpers were at work at each moment, the tasks below and their helpers above them.
+
 ## 0.2.278 · 26 November 2026
 - Claudopus installs with one line in Terminal: `curl -fsSL https://www.claudopus.ai/install.sh | sh`. It finds Claude Code (the desktop app's own copy, or `claude` in a terminal), installs Claudopus and switches it on, keeping the rest of your settings, and on a Mac without Apple's command line tools it opens their installer first and carries on once they are in. The README, claudopus.ai and the release notes lead with that line, as typing `/plugin` in the desktop app opens its plugin screen instead of installing.
 

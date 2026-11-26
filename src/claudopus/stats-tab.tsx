@@ -95,9 +95,12 @@ type Head = { folder: string; sought?: number; cells: Record<string, TokenSums>;
 const headNew = (): Head => ({ folder: '', cells: {}, months: [] })
 // stats/all.json: the keeping's mark; when the chats were last looked at, and all of them; where the look at a few quiet chats
 // each time has got to; how many chats are counted; the chats changed in the last two days; every whole day's tokens and every
-// whole month's sums, each with when its file was last written, so a copy held in a chat is known to be old
-type AllKept = { v: number; epoch: string; at: number; swept: number; cursor: string; counted: number; recent: Record<string, number>; days: Record<string, { rev: number; c: TokenSums }>; months: Record<string, { rev: number; part: Part }> }
-const allNew = (now: number): AllKept => ({ v: CACHE_V, epoch: `${now.toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`, at: 0, swept: 0, cursor: '', counted: 0, recent: {}, days: {}, months: {} })
+// whole month's sums, each with when its file was last written, so a copy held in a chat is known to be old; and how the months'
+// files were made (`mv`): a keeping made before they held each helper's time has them made again from the chats' files, once
+// (nothing is summed again)
+const MONTHS_V = 1
+type AllKept = { v: number; mv?: number; epoch: string; at: number; swept: number; cursor: string; counted: number; recent: Record<string, number>; days: Record<string, { rev: number; c: TokenSums }>; months: Record<string, { rev: number; part: Part }> }
+const allNew = (now: number): AllKept => ({ v: CACHE_V, mv: MONTHS_V, epoch: `${now.toString(36)}${Math.floor(Math.random() * 1e9).toString(36)}`, at: 0, swept: 0, cursor: '', counted: 0, recent: {}, days: {}, months: {} })
 async function allRead($: EngineInterface, memory: string) {
   const all = parsed<AllKept | undefined>(await statsText($, `${memory}/stats/all.json`), undefined)
   return all && all.v === CACHE_V && typeof all.epoch === 'string' && all.days && all.months ? all : undefined
@@ -163,7 +166,7 @@ const HOUR = 3_600_000
 // Looks at one chat's transcripts: one whose file is as it was is not read, and one that changed is summed again, once. A
 // transcript no longer there keeps what was kept of it. `isThorough` also reads again what an unfinished one that has been quiet
 // for an hour says it was, and looks again for a chat whose records were not found
-async function chatCheck($: EngineInterface, home: string, memory: string, chatId: string, hint: string, epoch: string, now: number, isThorough: boolean): Promise<Checked> {
+async function chatCheck($: EngineInterface, home: string, memory: string, chatId: string, hint: string, epoch: string, now: number, isThorough: boolean, isRemade = false): Promise<Checked> {
   const index = await shardsRead<Kept, Head>($, `${memory}/stats/chats/${chatId}`, epoch, headNew())
   // Sums kept the old way (stats/<chat>.json) are carried over the first time: none of what they hold is summed again. The file
   // is left as it is, as a chat still on an older Claudopus goes on reading and writing it, and removed once nothing has for days
@@ -225,11 +228,13 @@ async function chatCheck($: EngineInterface, home: string, memory: string, chatI
   }
   for (let at = 0; at < files.length; at += 12) await Promise.all(files.slice(at, at + 12).map(look))
   checked.last = files.reduce((last, f) => Math.max(last, f.mtime), 0)
+  // (its months made again from what is kept of it)
+  if (isRemade && index.of.size) checked.isChanged = true
   return checked
 }
 // Puts what a few chats' looks found into the kept files: each changed day's responses and its tokens, each changed month's pieces
 // and its sums, then all.json, then the chats' own files, in that order, so a look cut short is only made again
-async function statsApply($: EngineInterface, memory: string, all: AllKept, checked: Checked[], now: number) {
+async function statsApply($: EngineInterface, memory: string, all: AllKept, checked: Checked[], now: number, isRemade = false) {
   const byDay = new Map<number, Checked['days']>()
   for (const one of checked) for (const change of one.days) byDay.set(change.day, [...(byDay.get(change.day) ?? []), change])
   for (const [day, changes] of byDay) {
@@ -264,6 +269,8 @@ async function statsApply($: EngineInterface, memory: string, all: AllKept, chec
     one.index.head.months = [...next.keys()]
     one.index.dirty.add(0)
   }
+  // Every month's sums made again, those of chats whose files are gone too
+  if (isRemade) for (const month of Object.keys(all.months)) months.add(Number(month))
   for (const month of months) {
     const open = await monthRead($, memory, all, month)
     const { pieces, turns } = monthPieces(open)
@@ -310,17 +317,20 @@ async function refreshNow($: EngineInterface, home: string, memory: string, chat
   const pass = async (all: AllKept, isNew: boolean) => {
     // Every chat the first time; and again when Stats is open on all of them and that was not done in the last ten minutes
     const isThorough = scope === 'all' && (!all.swept || (isLooking && now - all.swept >= SWEEP_EVERY))
-    const ids = scope === 'all' ? await chatsDue($, memory, chatId, all, now, isThorough) : [chatId]
+    // Months made before they held each helper's time are made again from every chat's file, once
+    const isRemade = all.mv !== MONTHS_V
+    const ids = isRemade ? await chatsKept($, memory, chatId) : scope === 'all' ? await chatsDue($, memory, chatId, all, now, isThorough) : [chatId]
     let saidAt = now
     for (let at = 0; at < ids.length; at += STATS_BATCH) {
-      const checked = await Promise.all(ids.slice(at, at + STATS_BATCH).map(id => chatCheck($, home, memory, id, id === chatId ? hint : '', all.epoch, now, isThorough || scope === 'chat')))
-      await statsApply($, memory, all, checked, now)
+      const checked = await Promise.all(ids.slice(at, at + STATS_BATCH).map(id => chatCheck($, home, memory, id, id === chatId ? hint : '', all.epoch, now, isThorough || (scope === 'chat' && id === chatId), isRemade)))
+      await statsApply($, memory, all, checked, now, isRemade && at + STATS_BATCH >= ids.length)
       // A long look says it is still at it, so no other chat takes it over
       const clock = await $.clock.now()
       if (clock - saidAt >= LOCK_STALE / 4) ((saidAt = clock), await $.fs.write(`${memory}/stats/lock/at`, String(clock)).catch(() => undefined))
     }
+    if (isRemade) ((all.mv = MONTHS_V), await log($, `stats: the months were made again from ${ids.length} chats, with each helper's time`))
     // A chat with nothing to keep yet still has its figures: none
-    if (scope !== 'all') return void (isNew && (await $.fs.write(`${memory}/stats/all.json`, JSON.stringify(all))))
+    if (scope !== 'all') return void ((isNew || isRemade) && (await $.fs.write(`${memory}/stats/all.json`, JSON.stringify(all))))
     ;((all.at = now), isThorough && (all.swept = now))
     await $.fs.write(`${memory}/stats/all.json`, JSON.stringify(all))
   }
