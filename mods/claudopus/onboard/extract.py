@@ -1,6 +1,6 @@
 """Onboarding, step 1: every old chat's messages and replies into the memory.
 
-Reads the transcripts under ~/.claude/projects and adds each chat to a digest for
+Reads the transcripts under ~/.claude/projects (or CLAUDE_CONFIG_DIR's) and adds each chat to a digest for
 its project in <out dir>, which the stream analysis reads. Each chat's words are
 saved by Claudopus itself (bin/catch-up), never here, so nothing it saved is
 written over.
@@ -17,7 +17,9 @@ import re
 import sys
 
 HOME = os.path.expanduser('~')
-PROJECTS = f'{HOME}/.claude/projects'
+# Claude Code's own folder: ~/.claude, or the one CLAUDE_CONFIG_DIR names
+PROJECTS = os.environ.get('CLAUDE_CONFIG_DIR') or f'{HOME}/.claude'
+PROJECTS = f'{PROJECTS.rstrip("/")}/projects'
 # The folder that holds one folder per repo; GitHub Desktop's default unless CLAUDOPUS_REPOS names another
 REPOS = os.environ.get('CLAUDOPUS_REPOS', f'{HOME}/Documents/GitHub').rstrip('/')
 # Folders that hold no work of mine: test runs and the app's spare sessions

@@ -1,0 +1,2 @@
+- Stats and the leaderboard now count your work when Claude Code keeps its files somewhere other than ~/.claude (set by CLAUDE_CONFIG_DIR). Before, such a Mac counted nothing, so its leaderboard row stayed at 0 hours. Its past hours, back to the day Claudopus was first installed, now show up too, within a day of updating.
+- Task cards, the Details tab, chat links and Bring in old chats read their files from that same place.

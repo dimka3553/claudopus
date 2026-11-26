@@ -14,13 +14,13 @@ let sharedAt = 0
 const ownLive = (id: string) => `${liveDir()}/${id}.json`
 // Set as the session ends, so a beat due after it does not write the file again
 let isEnded = false
-// What opens this chat in the Claude app, read off the engine's own file of this session in ~/.claude/sessions (its Remote Control id
+// What opens this chat in the Claude app, read off the engine's own file of this session in its sessions folder (~/.claude/sessions, or CLAUDE_CONFIG_DIR's) (its Remote Control id
 // appears there once Remote Control is on) at most once a beat; the file found is read again alone until it no longer names this chat
 let myLink: Link | undefined
 let linkReadAt = 0
 let linkFile = ''
 const readLink = async ($: EngineInterface, id: string): Promise<Link | undefined> => {
-  const folder = `${(await $.env.get('HOME')) ?? ''}/.claude/sessions`
+  const folder = `${await configDir($)}/sessions`
   type Entry = { sessionId?: string; hostSessionId?: string; bridgeSessionId?: string; updatedAt?: number }
   const entryOf = async (name: string) => JSON.parse((await readOr($, `${folder}/${name}`)) || '{}') as Entry
   let found = linkFile ? await entryOf(linkFile).catch(() => ({}) as Entry) : ({} as Entry)

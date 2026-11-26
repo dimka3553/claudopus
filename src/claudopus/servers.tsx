@@ -59,9 +59,9 @@ const scanServers = async ($: EngineInterface) => {
 
   // The chats open now, named by their engine process and by their session id
   const chats = new Map<string, string>()
-  for (const entry of await $.fs.list(`${home}/.claude/sessions`).catch(() => [])) {
+  for (const entry of await $.fs.list(`${await configDir($)}/sessions`).catch(() => [])) {
     if (!entry.name.endsWith('.json')) continue
-    const one = JSON.parse((await readOr($, `${home}/.claude/sessions/${entry.name}`)) || '{}') as { pid?: number; sessionId?: string; name?: string; cwd?: string }
+    const one = JSON.parse((await readOr($, `${await configDir($)}/sessions/${entry.name}`)) || '{}') as { pid?: number; sessionId?: string; name?: string; cwd?: string }
     const name = one.name || (one.cwd ?? '').split('/').pop() || 'unnamed'
     if (one.pid) chats.set(String(one.pid), name)
     if (one.sessionId) chats.set(one.sessionId, name)
