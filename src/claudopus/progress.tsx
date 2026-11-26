@@ -29,14 +29,16 @@ const PROGRESS_LINE = () => progressLine(who(), dir)
 // ---- The queue: each hook only adds an event, at once, and never waits for the indexer ----
 
 const queueDir = () => `${progressDir()}/queue`
-// Named by when it happened, so the oldest is drained first
-const queueName = (at: number) => `${String(at).padStart(15, '0')}-${Math.random().toString(36).slice(2, 8)}.json`
+// Named by when it happened, so the oldest is drained first (of one moment in this chat, the first queued)
+let queued = 0
+const queueName = (at: number, seq = (queued += 1)) => `${String(at).padStart(15, '0')}-${String(seq % 1e6).padStart(6, '0')}${Math.random().toString(36).slice(2, 6)}.json`
 const queueProgress = async ($: EngineInterface, event: Omit<ProgressEvent, 'at' | 'chat'> & { at?: number; chat?: string }) => {
   if (!dir || !event.text.trim()) return
+  const seq = (queued += 1)
   const at = event.at ?? (await $.clock.now())
   const chat = event.chat ?? (await read($, me)).id
   const one: ProgressEvent = { ...event, at, chat, text: hideKeys(clip(event.text.trim(), EVENT_CHARS[event.kind] / 2)) }
-  await $.fs.write(`${queueDir()}/${queueName(at)}`, `${JSON.stringify(one)}\n`)
+  await $.fs.write(`${queueDir()}/${queueName(at, seq)}`, `${JSON.stringify(one)}\n`)
   drainSoon($)
 }
 const queueSoon = ($: EngineInterface, event: Parameters<typeof queueProgress>[1]) => void queueProgress($, event).catch(err => log($, `progress event not queued: ${String(err)}`))

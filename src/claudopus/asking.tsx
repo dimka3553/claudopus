@@ -978,7 +978,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   const run = ask.refused && !isReply && said === ALLOW ? runAsked.get(one.id) : undefined
   const isRun = Boolean(run && run.askAt === ask.at && run.command === ask.copy)
   // Set aside, the press every question has beside the task's own choices (progress.tsx), unless the task gave that choice itself
-  const isAside = !isReply && !ask.refused && said === SET_ASIDE && !(ask.choices ?? []).includes(SET_ASIDE)
+  const isAside = !isReply && !ask.refused && !ask.rule && said === SET_ASIDE && !(ask.choices ?? []).includes(SET_ASIDE)
   const back = isReply || isRelease || ask.refused ? {} : { asked: ask, target }
   const sent = { text: said, ask: ask.text, ...(ask.details ? { details: ask.details } : {}), at, line, isCard: true, askAt: ask.at, ...(ask.refused && !isReply ? { isPress: true } : {}), ...back }
   sentReplies.set(one.id, { ...sent, to: 'sending' })

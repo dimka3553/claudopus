@@ -890,6 +890,8 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   expect(first.context?.join('\n')).toContain('CHAT ROLE')
   expect(first.context?.join('\n')).toContain('Topics so far')
   expect(first.context?.join('\n')).toContain(`This chat's saved words: ${MEMORY}/words/engine-id.md`)
+  // and where the progress of the work is, so a question of how some work stands is answered from it at once
+  expect(first.context?.join('\n')).toContain(`Progress of the person's work, kept by Claudopus: ${MEMORY}/progress/areas.json`)
   expect(first.context?.join('\n')).toContain('start a fresh agent')
   expect(first.context?.join('\n')).toContain('Only a message that changes what a listed task is already doing')
   expect(first.context?.join('\n')).toContain('A fault, a question or a new request gets its own agent')

@@ -1472,3 +1472,53 @@ test('every button of the results list and of a result takes a new key whenever 
   expect(await until(async () => ((await tab.find({ type: 'Text', text: 'Reopen the M4 chat?' })) ? undefined : true))).toBe(true)
   expect((await tab.findAll({ type: 'Button' })).map(one => String(one.key)).filter(key => tabKeys.includes(key))).toEqual([])
 })
+
+test("each task is sorted into an area of the work in the background: its start gives it its area while it works, its result becomes that area's entry with its own pictures and the step it delivers done, the person's words add a step; with no answer from the model the events wait and nothing changes, and a result never sets anything aside", async ($, on) => {
+  const AREAS = `${MEMORY}/progress/areas.json`
+  const NOSE = `${MEMORY}/progress/areas/nose.json`
+  let isDown = true
+  const asked: string[] = []
+  const answers = {
+    start: { areas: ['nose'], entry: { title: 'Fix the nose' } },
+    said: { areas: ['nose'], next: { add: ['A nose that moves with the mouth'] } },
+    result: { areas: ['nose'], entry: { title: 'Fixed the nose', kind: 'milestone', outcome: 'The nose fits side faces', pictures: ['nose.png', 'other.png'] }, next: { done: ['n1'], aside: ['n1'] }, aside: { task: 'a1', reason: 'Not needed' } },
+  }
+  const { files, clock } = world(on, {
+    complete: e => {
+      if (!e.system?.includes('map of one person')) return undefined
+      asked.push(e.prompt)
+      if (isDown) return null
+      return JSON.stringify(e.prompt.includes('A task starts') ? answers.start : e.prompt.includes("A task's result") ? answers.result : answers.said)
+    },
+  })
+  files.set(AREAS, JSON.stringify({ areas: [{ id: 'nose', name: 'Nose', goal: '', aim: 'A nose that fits every face', next: [{ id: 'n1', text: 'A nose that fits side faces', state: 'open', at: '' }] }] }))
+  files.set('/private/tmp/s/scratchpad/nose.png', 'PNG')
+  const queued = () => [...files.keys()].filter(path => path.startsWith(`${MEMORY}/progress/queue/`)).map(path => String(JSON.parse(files.get(path) ?? '{}').kind)).sort()
+  const entries = () => (JSON.parse(files.get(NOSE) ?? '{"entries":[]}') as { entries: { task: string; title: string; kind: string; report: string; pictures: string[]; outcome: string; reason: string }[] }).entries
+  const steps = () => (JSON.parse(files.get(AREAS) ?? '{}') as { areas: { next: { id: string; text: string; state: string }[] }[] }).areas[0]?.next ?? []
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose on side faces', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fix the nose', prompt: 'fix the nose on side faces' } as never)
+  // Each hook only queues; with no answer from the model the oldest waits for a later look, and nothing changes
+  expect(await until(async () => (queued().length === 2 ? queued() : undefined))).toEqual(['said', 'start'])
+  await clock.advance(5_000)
+  await until(async () => asked.length || undefined)
+  expect(files.has(NOSE)).toBe(false)
+  expect(queued()).toEqual(['said', 'start'])
+  expect(files.get(`${MEMORY}/progress/index.log`)).toContain('said failed: no answer, to try again')
+  // Answered, the person's words add a step, and the start gives the task its area while it works
+  isDown = false
+  await clock.advance(5 * 60_000)
+  expect(await until(async () => entries()[0])).toMatchObject({ task: 'a1', title: 'Fix the nose', kind: 'task', report: '' })
+  expect(steps().map(n => [n.text, n.state])).toEqual([['A nose that fits side faces', 'open'], ['A nose that moves with the mouth', 'open']])
+  expect(asked.at(-1)).toContain('- nose: Nose · A nose that fits every face\n  Next steps:\n    - n1 [open] A nose that fits side faces')
+  expect(queued()).toEqual([])
+  // Its result takes that entry's place, with only its own pictures; the step it delivers is done, never set aside by it
+  await $.turn.complete({ agentId: 'a1', answer: `The nose now fits side faces.\n\nThe picture: /private/tmp/s/scratchpad/nose.png\n`, durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.advance(10)
+  const folder = (await until(async () => [...files.keys()].find(path => path.startsWith(`${MEMORY}/reports/`) && path.endsWith('/meta.json'))) ?? '').replace('/meta.json', '')
+  await clock.advance(5_000)
+  expect(await until(async () => (entries()[0]?.report ? entries() : undefined))).toEqual([{ task: 'a1', title: 'Fixed the nose', at: expect.any(String), kind: 'milestone', outcome: 'The nose fits side faces', report: folder.split('/').pop(), pictures: [`${folder}/nose.png`], live: '', reason: '' }])
+  expect(asked.at(-1)).toContain('This task is already in: nose')
+  expect(steps().map(n => n.state)).toEqual(['done', 'open'])
+})
