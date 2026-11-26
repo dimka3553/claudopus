@@ -4,6 +4,10 @@ import type { ElementTable } from 'claude-code'
 
 type Ui = ElementTable
 type JSXEl = ReturnType<Ui['Box']>
+// The parts this page draws with, by the props it gives them: checked against the engine's whole table of every part's props, the
+// type check of the mod ran past its memory
+type Part = (props: Record<string, unknown>) => JSXEl
+type Parts = { Box: Part; Text: Part; Button: Part }
 // The shapes of the progress folder (progress.tsx in the parts keeps the same)
 export type PageNext = { id: string; text: string; state: 'open' | 'done' | 'aside'; at: string }
 export type PageArea = { id: string; name: string; goal: string; aim: string; next: PageNext[] }
@@ -158,7 +162,7 @@ export const wheelOf = (star: string, goals: ProgressGoal[], areas: WheelArea[],
     const knots = [[s, 0], ...area.weeks.map((v, i) => [s + ((e - s) * (i + 0.5)) / 8, Math.sqrt(v / most)]), [e, 0]] as [number, number][]
     const points: string[] = []
     for (let i = 0; i < knots.length - 1; i++) {
-      const [p0, p1, p2, p3] = [knots[Math.max(0, i - 1)], knots[i], knots[i + 1], knots[Math.min(knots.length - 1, i + 2)]] as [number, number][]
+      const [p0, p1, p2, p3] = [knots[Math.max(0, i - 1)], knots[i], knots[i + 1], knots[Math.min(knots.length - 1, i + 2)]] as [[number, number], [number, number], [number, number], [number, number]]
       for (let k = 0; k < 6; k++) {
         const t = k / 6
         const v = 0.5 * (2 * p1[1] + (-p0[1] + p2[1]) * t + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t * t + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t * t * t)
@@ -333,7 +337,7 @@ export type ProgressLook = { width: number; now: number; gen: string; pictures: 
 
 // ---- The overview: the wheel, then each goal's areas as rows ----
 export const progressOverview = (ui: Ui, data: ProgressData, look: ProgressLook) => {
-  const { Box, Text, Button } = ui
+  const { Box, Text, Button } = ui as unknown as Parts
   const Svg = (ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSXEl }).Svg
   const isWide = look.width >= 560
   const figures = new Map(data.areas.map(area => [area.id, figuresOf(area, data.entries.get(area.id) ?? [], data.working, look.now)]))
@@ -461,7 +465,7 @@ export const daysOf = (entries: PageEntry[], working: Set<string>, now: number) 
   return days
 }
 export const progressArea = (ui: Ui, data: ProgressData, area: PageArea, look: ProgressLook) => {
-  const { Box, Text, Button } = ui
+  const { Box, Text, Button } = ui as unknown as Parts
   const Svg = (ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSXEl }).Svg
   const isWide = look.width >= 560
   const entries = data.entries.get(area.id) ?? []
@@ -693,7 +697,7 @@ export const progressArea = (ui: Ui, data: ProgressData, area: PageArea, look: P
                 </Box>
               ) : (
                 <Box key={`progress-step-${step.id}`} flexDirection="row" gap={1.25} alignItems="flex-start" flexShrink={0}>
-                  {Svg ? <Box flexShrink={0}><Svg source={boxOf(step.state)} alt={step.state === 'done' ? 'Done' : 'Set aside'} width={16} height={22} /></Box> : <Text dimColor>{step.state === 'done' ? '☑' : '–'}</Text>}
+                  {Svg ? <Box flexShrink={0}><Svg source={boxOf(step.state)} alt="Set aside" width={16} height={22} /></Box> : <Text dimColor>–</Text>}
                   <Box flexGrow={1} flexShrink={1} minWidth={0}><Text dimColor wrap="wrap">{step.text}</Text></Box>
                 </Box>
               ),
