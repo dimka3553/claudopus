@@ -1,0 +1,1 @@
+- A task's card shows the pages, pictures and documents its result names, even in a folder with spaces in its name or made earlier in the task, ahead of web links; a page the result only cites is no longer shown as one it made.

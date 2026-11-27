@@ -1,13 +1,18 @@
 "use strict";
 // Everything that waits for the person: one record, one list of them for a card, and one drawing
 const NEED_LABEL = { permission: 'Permission', question: 'Question', password: 'Password', key: 'Key', disk: 'Disk space' };
-// A task's own question, or the command Claude Code blocked it from running
-const askNeed = ($, one, surface, now) => {
-    const ask = one.ask;
+// A task's own question, or the command Claude Code blocked it from running: `ask` one of the card's open questions, its newest
+// unless said. Each is a block of its own, answered on its own: what its buttons, its box and its line read is the card with that
+// question alone (askView), and the newest keeps the card's own name for its block
+const askNeed = ($, card, surface, now, ask = card.ask) => {
     if (!ask)
         return undefined;
-    const id = `ask-${one.id}`;
-    const line = sentLine(one, now);
+    const one = askView(card, ask);
+    const id = card.ask && isSameAsk(card.ask, ask) ? `ask-${card.id}` : `ask-${card.id}-${askMark(ask)}`;
+    // (the line of what was last answered on the card, under this question only when it was this question's)
+    const sent = sentReplies.get(card.id);
+    const isOwnLine = !sent || sent.ask === ask.text || Boolean(ask.replied) || (!sent.ask && Boolean(card.ask && isSameAsk(card.ask, ask)));
+    const line = isOwnLine ? sentLine(one, now) : '';
     const base = { id, at: ask.at, text: ask.text, ...(ask.details ? { details: ask.details } : {}), ...(ask.copy ? { command: ask.copy } : {}), card: one, ...(line ? { line, wholeLine: sentLine(one, now, Infinity) } : {}) };
     // Another chat's is answered only in its own chat: no file carries an answer there
     const elsewhere = one.chat ? `Answer it in its own chat, “${one.chat.title || 'another chat'}”${one.chat.host ? `, on ${one.chat.host}` : ''}.` : '';
@@ -16,7 +21,7 @@ const askNeed = ($, one, surface, now) => {
         const run = offeredRun(one);
         const talk = talkText(ask.talk);
         // Words go to the task, which answers inside this block; only Allow runs the command
-        const words = wordsOn($, `${id}-words`, one.id, inBar, isReplyOpen(one), { kind: 'answer', id: one.id, one }, value => void sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)));
+        const words = wordsOn($, `${id}-words`, one.id, inBar, isReplyOpen(card, ask), { kind: 'answer', id: one.id, one }, value => void sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)));
         // Answered in words: nothing to press while the task answers; Allow and Don't allow come back with its answer
         if (isActingOnReply(one))
             return { ...base, ...(talk ? { details: [ask.details, talk].filter(Boolean).join('\n\n') } : {}), kind: 'permission', isActing: true, buttons: [] };
@@ -40,14 +45,16 @@ const askNeed = ($, one, surface, now) => {
     if (elsewhere)
         return { ...base, kind: 'question', where: elsewhere, buttons: [] };
     const mark = askMark(ask);
-    const send = (value) => void (value.trim() && (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`))));
+    const send = (value) => void (value.trim() && (dropDrafts($, one.id, ask), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`))));
     return {
         ...base,
         kind: 'question',
         buttons: [
-            ...(ask.choices ?? []).map((choice, n) => ({ key: `${id}-choice-${n}-${mark}-${loadMark}`, label: choice, onPress: () => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`))) })),
+            // (and Set aside, after the task's own: the person drops it and it is kept as a data point, progress.tsx; a connector's
+            // question, answered only by the person's own settings, has none)
+            ...(ask.rule ? (ask.choices ?? []) : withSetAside(ask.choices ?? [])).map((choice, n) => ({ key: `${id}-choice-${n}-${mark}-${loadMark}`, label: choice, onPress: () => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`))) })),
             // The last answer opens the box above the chat for this card, and closes it again
-            ...(inBar ? [isReplyOpen(one) ? { key: `${id}-inbar-close-${presses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press) => openBar($, undefined, press.surface) } : { key: `${id}-inbar-${presses}`, label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: (press) => openBar($, { kind: 'answer', id: one.id, one }, press.surface) }] : []),
+            ...(inBar ? [isReplyOpen(card, ask) ? { key: `${id}-inbar-close-${presses}`, label: 'Close', isPlain: true, isOpener: true, onPress: (press) => openBar($, undefined, press.surface) } : { key: `${id}-inbar-${presses}`, label: ANSWER_IN_WORDS, isPlain: true, isOpener: true, onPress: (press) => openBar($, { kind: 'answer', id: one.id, one }, press.surface) }] : []),
         ],
         // Where the bar draws no field, the block has the one field itself
         ...(inBar
@@ -208,10 +215,11 @@ const boxNeed = ($, one, surface, canFocus = false) => {
 // The box whose field takes the keys where a block has its own (the terminal): this chat's own first request
 const firstBox = () => [...boxes.filter(box => box.chat === boxChat), ...boxes.filter(box => box.chat !== boxChat)][0];
 const needsOf = ($, one, surface, now, canFocus = false) => {
-    const ask = askNeed($, one, surface, now);
+    // (every question the card holds open, each a block of its own)
+    const asks = asksOf(one).flatMap(ask => askNeed($, one, surface, now, ask) ?? []);
     const own = one.chat ? [] : [...waiting.filter(p => p.card === one.id).map(p => promptNeed($, p, undefined, true)), ...boxes.filter(box => box.card === one.id).map(box => boxNeed($, box, surface, canFocus && box === firstBox()))];
     const gates = (one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).map(gate => gateNeed($, gate, one.chat ? '' : one.id, Boolean(one.chat), '', surface));
-    return [...(ask ? [ask] : []), ...gates, ...own].sort((a, b) => a.at - b.at);
+    return [...asks, ...gates, ...own].sort((a, b) => a.at - b.at);
 };
 // The needs that belong to no card drawn here: the chat's own thread's, a task's whose card is not shown, and other chats' prompts
 const looseNeeds = ($, surface, shown, chats, canFocus = false) => {
@@ -251,7 +259,7 @@ const needBlock = ($, ui, need, opts = {}) => {
     const one = need.card;
     const ask = one?.ask;
     const Link = ui.Link;
-    const copyButton = one && ask?.copy && !ask.refused ? <ui.Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)}/> : null;
+    const copyButton = one && ask?.copy && !ask.refused ? <ui.Button key={`${need.id}-copy-${presses}`} label={copiedKey === `${one.id}:${ask.at}` ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, `${one.id}:${ask.at}`, ask.copy ?? '', press.surface)}/> : null;
     const terminalButton = one && ask && !ask.refused && canOpenTerminal(one) ? <ui.Button key={`${need.id}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Typed, not run yet' : 'Open in Terminal'} plain onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))}/> : null;
     return squareOutline(ui.Box, opts.isCompact ? undefined : need.isActing ? LIVE : NEEDS, `need-outline-${need.id}`, (
     // (compact, in the terminal's bar above the prompt, which has a few rows: no outline and no gaps)

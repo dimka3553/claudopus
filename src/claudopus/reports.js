@@ -74,8 +74,18 @@ const loadReports = async ($) => {
         await update($, reports, () => found);
     return found;
 };
-// The absolute paths a report names, as written, without the punctuation after them
-const namedPaths = (text) => [...new Set((text.match(/\/(?:Users|private|tmp|var)\/[^\s`'"()<>[\]{}|,;*]+/g) ?? []).map(path => path.replace(/[.:!?]+$/, '').replace(/\/$/, '')))];
+// The absolute paths a report names, as written, without the punctuation after them. A folder's name may hold spaces ("FaceIQ email
+// lifecycle"), and so may a whole path on a line of its own or between backticks; the shorter readings stay beside the longer, for
+// whoever looks a path up to keep the one that is there (27 Nov: a board in a folder with spaces was named as "/Users/…/FaceIQ")
+const PATH_PLAIN = /\/(?:Users|private|tmp|var)\/[^\s`'"()<>[\]{}|,;*]+/g;
+const PATH_SPACED = /\/(?:Users|private|tmp|var)\/(?:[^\s/`'"()<>[\]{}|,;*]+(?: [^\s/`'"()<>[\]{}|,;*]+)*\/)+[^\s/`'"()<>[\]{}|,;*]+/g;
+const PATH_TICKED = /`(\/(?:Users|private|tmp|var)\/[^`\n]+)`/g;
+const PATH_LINE = /^[ \t]*(?:[-*•][ \t]+)?(?:\*\*)?(\/(?:Users|private|tmp|var)\/[^\n`'"<>|*]+?)(?:\*\*)?[ \t]*$/gm;
+const namedPaths = (text) => {
+    const found = [PATH_LINE, PATH_TICKED, PATH_SPACED, PATH_PLAIN].flatMap(re => [...text.matchAll(re)].map(one => ({ at: one.index + one[0].indexOf(one[1] ?? one[0]), path: one[1] ?? one[0] })));
+    found.sort((a, b) => a.at - b.at || b.path.length - a.path.length);
+    return [...new Set(found.map(one => one.path.replace(/[.:!?]+$/, '').replace(/\/$/, '')))];
+};
 // What a report found, in plain words: its first sentences that say something. A heading, a path, a line that only leads in to
 // what follows ("Here is the sheet:", "The answer is back. As it came:") or repeats the title says nothing
 const gistOf = (text, title = '') => {
@@ -109,7 +119,9 @@ const copyNamed = async ($, text, into) => {
             return;
         const to = `${into}/${name}`;
         await $.process.run(['mkdir', '-p', to.slice(0, to.lastIndexOf('/'))]);
-        if ((await $.process.run(['cp', '-p', from, to])).exitCode === 0)
+        // A copy that shares the file's space until either changes, where the disk allows it (the Mac's), so the same picture in a task's
+        // several results takes its room once; elsewhere a plain copy
+        if ((await $.process.run(['cp', '-cp', from, to]).catch(() => ({ exitCode: 1 }))).exitCode === 0 || (await $.process.run(['cp', '-p', from, to])).exitCode === 0)
             copies.push(name);
     };
     for (const path of namedPaths(text)) {
@@ -169,6 +181,8 @@ const saveReport = async ($, card, text, isPart = false) => {
     };
     await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`);
     await loadReports($);
+    // and goes into the queue of progress/, which makes it its area's entry (progress.tsx)
+    queueSoon($, { kind: 'result', task: one.id, report: id, title, topic: one.subject ?? '', files: files.filter(file => PICTURE.test(file)), text });
 };
 // The small copy of a picture the panel draws, kept beside the report
 const thumbPath = (r, file) => `${reportPath(r)}/thumbs/${file.replaceAll('/', '--')}.jpg`;
@@ -230,7 +244,12 @@ const markReport = ($, r, patch) => {
 };
 // What the chat is told of with each message: the newest results, so a question one answers is answered from it. One put away is
 // left out
-const reportsTold = (all, now, list = all.filter(r => !r.archived)) => list.length
+// One task's results handed in again (a part, then the whole; a second round) are told once, the newest (the list is newest first)
+const newestPerTask = (all) => {
+    const told = new Set();
+    return all.filter(r => !r.archived && !(r.agent && told.has(r.agent)) && (r.agent ? told.add(r.agent) : true));
+};
+const reportsTold = (all, now, list = newestPerTask(all)) => list.length
     ? `Results saved (what finished tasks left for ${who()} to read or act on), newest first (title · topic · when · its file):\n${list
         .slice(0, REPORTS_TOLD)
         .map(r => `- ${[cut(r.title, 70), cut(r.subject, 40), `${dated(r.at, now)} (${ago(r.at, now)})`, `${reportPath(r)}/report.md`].join(' · ')}`)

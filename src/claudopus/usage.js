@@ -61,6 +61,8 @@ const keepUsage = async ($, kept) => {
 };
 // The figures to show, when a look has been had lately
 const usageNow = (now) => (usageKept && now - usageKept.at < USAGE_EVERY * 6 ? usageKept.figures : undefined);
+// The looks of the last minutes for the cards' charts, ending at the newest look, so a drawing between looks draws the same charts
+const usageHistory = () => ({ points: usageKept?.history ?? [], at: usageKept?.at ?? 0 });
 // Claude's own part of each figure, named the same in every place: Claude and every command it started
 const CLAUDE_ALL = 'Claude and what it started';
 // What each figure says in words, for a reader that cannot see the drawings
@@ -83,14 +85,40 @@ const batteryNote = (read, b = batteryShown(read)) => b.state === 'battery'
     : b.state === 'charging'
         ? b.left ? `charging · about ${leftText(b.left)} to full` : b.pct >= 100 ? (b.finishing ? 'finishing the charge · the system calls it full and still tops it up' : 'charging · the system calls it full') : 'charging · the system is still working out the time to full'
         : b.state === 'unknown' ? "the system doesn't say if it's charging" : b.pct >= 100 ? 'full · on power' : 'on power · not charging';
-const usageCards = (f) => {
+const usageCards = (f, history = { points: [], at: 0 }) => {
     const most = (top, text) => (top?.length ? top.map(([name, n]) => [name, text(n)]) : undefined);
     const b = f.battery;
+    // Each card's chart of the last ten minutes: the whole in grey, Claude's part in purple, and the highest it went. A part of the
+    // whole reads to its top; a speed or a power to a little over its highest, so a quiet one is not drawn as nothing
+    const chart = (title, pick, text, room) => {
+        const points = history.points.flatMap(p => {
+            const v = pick(p);
+            return v ? [[p.at, v[0], v[1]]] : [];
+        });
+        const peak = points.filter(p => history.at - p[0] <= HISTORY_SPAN).reduce((most, p) => Math.max(most, p[1]), 0);
+        const svg = chartSvg(points, history.at, room === undefined ? 1 : Math.max(room, peak * 1.15));
+        return svg ? { ...svg, alt: `${title}, last 10 minutes: up to ${text(peak)}`, caption: [title === 'Power use' || title === 'Charge' ? `${title}, last 10 minutes` : 'Last 10 minutes', `up to ${text(peak)}`] } : undefined;
+    };
+    const pct = (n) => `${pctText(n)}%`;
+    const isPowerShown = history.points.some(p => p.watts);
+    // Into the battery, or out of it while the system says it charges; what the charger gives, of what it can
+    const isDraining = !!b && b.state === 'charging' && f.battIn !== undefined && f.battIn < -0.5;
+    const charge = !b || b.state === 'battery' || f.battIn === undefined
+        ? []
+        : f.battIn > 0.5 ? [['Into the battery', `${wattText(f.battIn)} W`]] : f.battIn < -0.5 ? [['Out of the battery', `${wattText(-f.battIn)} W`]] : [];
+    const charger = !b || b.state === 'battery' || f.powerIn === undefined ? [] : [['From the charger', f.adapter ? `${wattText(f.powerIn)} of ${wattText(f.adapter)} W` : `${wattText(f.powerIn)} W`]];
     return {
-        memory: { title: 'Memory', value: `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB`, rows: [[CLAUDE_ALL, `${gbText(f.memClaude)} GB`]], most: most(f.memTop, n => `${gbText(n)} GB`) },
+        memory: {
+            title: 'Memory',
+            value: `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB`,
+            chart: chart('Memory', p => p.mem, n => `${gbText(n * f.memTotal)} GB`),
+            rows: [[CLAUDE_ALL, `${gbText(f.memClaude)} GB`]],
+            most: most(f.memTop, n => `${gbText(n)} GB`),
+        },
         cpu: f.cpu === undefined ? undefined : {
             title: 'Processor',
             value: `${pctText(f.cpu)}% busy`,
+            chart: chart('Processor', p => p.cpu, pct),
             rows: [...(f.ncpu && f.ncpu > 1 ? [['Cores', `${f.ncpu}`]] : []), [CLAUDE_ALL, `${pctText(f.cpuClaude ?? 0)}%`]],
             most: most(f.cpuTop, n => `${pctText(n)}%`),
         },
@@ -100,6 +128,7 @@ const usageCards = (f) => {
         gpu: f.gpu === undefined ? undefined : {
             title: 'Graphics processor',
             value: `${pctText(f.gpu)}% busy`,
+            chart: chart('Graphics processor', p => p.gpu, pct),
             rows: [
                 ...(f.gpuClaude !== undefined ? [[CLAUDE_ALL, `${pctText(f.gpuClaude)}%`]] : []),
                 ...(f.wattsGpu !== undefined ? [['Power use', `${wattText(f.wattsGpu)} W`]] : []),
@@ -110,11 +139,15 @@ const usageCards = (f) => {
         battery: !b ? undefined : {
             title: 'Battery',
             value: `${batteryShown(b).pct}%`,
-            note: upperFirst(batteryNote(b)),
+            note: isDraining ? 'Charging, but the battery drains · the Mac uses more than the charger gives' : upperFirst(batteryNote(b)),
+            // What the Mac draws over time, Claude's part purple; the charge where the Mac tells no power
+            chart: isPowerShown ? chart('Power use', p => p.watts, n => `${wattText(n)} W`, 10) : chart('Charge', p => (p.batt !== undefined ? [p.batt / 100, 0] : undefined), pct),
             // The strain on it: what the whole Mac draws, the processors and the graphics processor each, and Claude's part of each. The
             // Mac counts each process's own processor energy, not its graphics power: Claude's graphics is its share of the graphics
             // processor's time times what that draws, and says it is estimated. The screen, memory and storage are no one's part
             rows: [
+                ...charge,
+                ...charger,
                 ...(f.watts !== undefined ? [['Power use, whole Mac', `${wattText(f.watts)} W`]] : []),
                 ...(f.wattsCpu !== undefined ? [['Power use, processors', `${wattText(f.wattsCpu)} W`]] : []),
                 ...(f.wattsClaude !== undefined ? [['Claude, processors', `${wattText(f.wattsClaude)} W`]] : []),
@@ -125,11 +158,13 @@ const usageCards = (f) => {
         disk: f.disk === undefined ? undefined : {
             title: 'Disk, read and written',
             value: rateText(f.disk).join(' '),
+            chart: chart('Disk', p => p.disk, rateFine, 1024 * 1024),
             rows: f.diskClaude !== undefined ? [[CLAUDE_ALL, rateFine(Math.min(f.diskClaude, f.disk))]] : [],
         },
         net: f.net === undefined ? undefined : {
             title: 'Network',
             value: rateText(f.net).join(' '),
+            chart: chart('Network', p => p.net, rateFine, 100 * 1024),
             rows: [
                 ...(f.netIn !== undefined && f.netOut !== undefined ? [['Download', rateFine(f.netIn)], ['Upload', rateFine(f.netOut)]] : []),
                 // Claude's own, never past the Mac's: nettop counts every interface, tunnels and loopback too, where the totals count the Mac's ports
@@ -146,10 +181,11 @@ const wattText = (w) => (w >= 10 ? `${Math.round(w)}` : `${Math.round(w * 10) / 
 // A figure's card: one Box placed absolutely and drawn hidden inside the figure's keyed Box, which the desktop app lifts over the
 // chat as its own floating card above the figure, kept in the window and shifted sideways at its edges, so showing it moves nothing
 // in the chat or the bar (in the bar's column it took room: the chat was pushed up and sprang back, and a tall card hid the figures).
-// What it says is shown by the figure's hover group, which the pointer lights and puts out at once, so as the pointer goes on to
-// the next figure this card's words are gone before the next card shows, though the app keeps the lifted card itself a moment for
-// a pointer on its way into it
-const usageCardDrawn = (ui, key, card) => {
+// It holds its words from the start: the app measures a card once as it shows it, and again at each drawing of the bar under a
+// resting pointer, and puts it below the figure when it is taller than the room above. A card whose words waited for the figure's
+// hover group to light was measured empty, placed just above the figure, then grew down over the figures and the prompt (25 Nov:
+// "sometimes on hover it goes below the chat"). Whole, it is placed above whenever the room above is the larger
+const usageCardDrawn = (ui, key, card, Svg) => {
     const { Box, Text } = ui;
     const row = (name, value, n, kind) => (<Box key={`${key}-${kind}-${n}`} flexDirection="row" justifyContent="space-between" gap={3}>
       <Text dimColor wrap="truncate-end">{name}</Text>
@@ -158,12 +194,16 @@ const usageCardDrawn = (ui, key, card) => {
     return (
     // No key and no hover group of its own: the app lifts only a hidden absolute Box shown by the hover of its keyed Box
     <Box position="absolute" top={-1} left={0} display="none" hover={{ display: 'flex' }} flexDirection="column">
-      <Box key={`${key}-card`} display="none" hover={{ scope: key, display: 'flex' }} flexDirection="column" gap={1}>
+      <Box key={`${key}-card`} flexDirection="column" gap={1}>
         <Box key={`${key}-card-head`} flexDirection="row" justifyContent="space-between" gap={3}>
           <Text bold>{card.title}</Text>
           <Text bold>{card.value}</Text>
         </Box>
         {card.note ? <Text key={`${key}-card-note`} dimColor>{card.note}</Text> : null}
+        {card.chart && Svg ? (<Box key={`${key}-card-chart`} flexDirection="column">
+            <Svg key={`${key}-chart-${hashOf(card.chart.source)}`} source={card.chart.source} alt={card.chart.alt} width={card.chart.width} height={card.chart.height}/>
+            {row(card.chart.caption[0], card.chart.caption[1], 0, 'chart')}
+          </Box>) : null}
         {card.rows.length ? <Box key={`${key}-card-rows`} flexDirection="column">{card.rows.map(([name, value], n) => row(name, value, n, 'row'))}</Box> : null}
         {card.most?.length ? (<Box key={`${key}-card-most`} flexDirection="column">
             <Text dimColor>Using the most</Text>
@@ -174,23 +214,25 @@ const usageCardDrawn = (ui, key, card) => {
 };
 // The desktop app draws the bar anew whenever anything in it changes (new figures, the work under it, the octopus), and shows again
 // each lifted card whose figure's place (its count among the keyed Boxes drawn) held a card that was up as the old drawing went: so
-// a card the pointer had just left stayed up with nothing under the pointer to put it away, and one shown again before its words
-// were lit was placed too low, over the figures. A run of hidden keyed Boxes before the figures, there in every other drawing, moves every figure past the places the last drawing had, more than all the keyed Boxes of the figures and
-// their cards, so no card is shown again but the one under the pointer, which the app measures whole
+// a card the pointer had just left stayed up with nothing under the pointer to put it away. A run of hidden keyed Boxes before the
+// figures, there in every other drawing each bar gets, moves every figure past the places its last drawing had, more than all the
+// keyed Boxes of the figures and their cards, so no card is shown again but the one under the pointer. Each bar (a window's, by its
+// request) takes turns of its own: with one turn for all, a second bar's drawing in between gave a bar two drawings alike in a row
 const USAGE_SPACERS = 120;
-let usageSpaced = false;
-const usageSpacersDrawn = (ui) => {
+const usageSpaced = new Map();
+const usageSpacersDrawn = (ui, bar = '') => {
     const { Box, Text } = ui;
-    usageSpaced = !usageSpaced;
-    return usageSpaced ? (<Box display="none">
+    if (usageSpaced.size > 50 && !usageSpaced.has(bar))
+        usageSpaced.clear();
+    const isSpaced = !usageSpaced.get(bar);
+    usageSpaced.set(bar, isSpaced);
+    return isSpaced ? (<Box display="none">
       {Array.from({ length: USAGE_SPACERS }, (_, n) => (<Box key={`usage-spacer-${n}`}>
           <Text> </Text>
         </Box>))}
     </Box>) : null;
 };
-// The line on a surface that draws SVG: an icon and its meter, then the figure, for memory and the processor; an icon and the speed
-// for the disk and the network. The pointer resting on a figure lights its group: a faint fill under it, and its card above
-const usageDrawn = (ui, f) => {
+const usageDrawn = (ui, f, history = usageHistory()) => {
     const table = ui;
     const { Box, Text } = ui;
     if (!table.Svg)
@@ -198,7 +240,7 @@ const usageDrawn = (ui, f) => {
     const Svg = table.Svg;
     const isHigh = isMemoryHigh(f);
     const words = usageWords(f);
-    const cards = usageCards(f);
+    const cards = usageCards(f, history);
     const one = (key, card, svg, alt, value, unit, color) => (
     // A member of a group must change how it looks, or the desktop app never wires it to the pointer: hence the fill
     <Box key={`usage-${key}`} flexDirection="row" flexShrink={0} alignItems="center" hover={{ scope: `usage-${key}`, backgroundColor: FILL }}>
@@ -207,7 +249,7 @@ const usageDrawn = (ui, f) => {
         {value}
         <Text dimColor={!color} color={color}>{unit}</Text>
       </Text>
-      {card ? usageCardDrawn(ui, `usage-${key}`, card) : null}
+      {card ? usageCardDrawn(ui, `usage-${key}`, card, Svg) : null}
     </Box>);
     return [
         one('memory', cards.memory, usageSvg('memory', { claude: f.memClaude / f.memTotal, used: f.memUsed / f.memTotal, isHigh }), words.memory, gbText(f.memUsed), ' GB', isHigh ? USAGE_AMBER : undefined),

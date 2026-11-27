@@ -39,11 +39,14 @@ const barBoxOf = ($, ui, cards, kept) => {
     };
     if (open.kind === 'answer') {
         const one = barTarget(cards);
-        return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), attachTo: one.id, send: value => void (sent(one.id), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`))) };
+        // (with several questions open on the card, the one it answers is named too)
+        const ask = one ? barAskOf(one) : undefined;
+        const which = one && ask && asksOf(one).length > 1 ? `: “${cut(ask.text, 60)}”` : '';
+        return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”${which}`, task: one.id, placeholder: 'Type your answer', draft: barDraft(), attachTo: one.id, send: value => void (((barBoxAt = 0), dropDrafts($, one.id, ask), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($)), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`))) };
     }
     if (open.kind === 'change') {
         const one = changeTarget(cards);
-        return one && { head: `↳ ${stageOf(cards, one) === 'delivered' && one.questions?.length ? 'Reply' : 'Message'} to “${cut(titleOf(one), 50)}”`, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) };
+        return one && { head: `↳ ${stageOf(cards, one) === 'delivered' && one.questions?.length ? 'Reply' : 'Message'} to “${cut(titleOf(one), 50)}”`, task: one.id, placeholder: 'Type your message', draft: messageDraft(one.id), message: one, send: value => sendMessageFrom($, one.id, value, false) };
     }
     // Words on a permission of a task's card: they go to that task, and the block keeps Allow and Don't allow (gate.tsx, wordsOnGate)
     if (open.kind === 'permission') {
@@ -59,11 +62,11 @@ const barBoxOf = ($, ui, cards, kept) => {
             ((barBoxAt = 0), drafts.delete(barDraft()), keepDraft($, barDraft(), undefined), replies.set(open.id, (replies.get(open.id) ?? 0) + 1), (barOpen = undefined), freeTimes($), redraw($));
             void wordsOnGate($, one.id, open.id, shown, filesNote(files));
         };
-        return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, placeholder: 'Type your answer', draft: barDraft(), attachTo: open.id, send: sendWords };
+        return one && { head: `↳ Your answer to “${cut(titleOf(one), 60)}”`, task: one.id, placeholder: 'Type your answer', draft: barDraft(), attachTo: open.id, send: sendWords };
     }
     if (open.kind === 'continue') {
         const r = kept.find(one => one.id === open.id);
-        return r && { head: `↳ Message to “${cut(r.title, 50)}”`, placeholder: 'Type your message', draft: barDraft(), attachTo: r.id, send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value, takeAttached(r.id)).catch(err => log($, `message from a result not sent: ${String(err)}`))) };
+        return r && { head: `↳ Message to “${cut(r.title, 50)}”`, task: r.agent, placeholder: 'Type your message', draft: barDraft(), attachTo: r.id, send: value => void (sent(r.id), (barOpen = undefined), redraw($), continueFrom($, r.id, value, takeAttached(r.id)).catch(err => log($, `message from a result not sent: ${String(err)}`))) };
     }
     const box = boxes.find(one => one.id === open.id);
     if (!box)
@@ -78,6 +81,7 @@ const barBoxOf = ($, ui, cards, kept) => {
                 : `↳ The key's name`;
     return {
         head,
+        task: box.card,
         placeholder: open.kind === 'words' ? 'Type your answer' : open.kind === 'password' || !box.name ? 'Type it here' : 'Paste it here',
         secret: box.id,
         ...(boxSaid.get(box.id) ? { said: boxSaid.get(box.id) } : {}),
@@ -91,8 +95,10 @@ const barBox = ($, ui, box) => {
     // (pictures or files attached are an answer by themselves, with no words)
     const send = (value) => void ((value.trim() || (box.attachTo && attached.get(box.attachTo)?.length)) && box.send(value));
     return (<ui.Box key="band-box" flexDirection="column" flexShrink={0} width="100%">
+      {/* With task colours on, the box takes its task's colour, the colour of its card and of its replies in the chat (colours.tsx) */}
       <ui.Box flexDirection="row" height={1} overflow="hidden">
-        <ui.Text color={NEEDS} bold wrap="truncate-end">{box.head}</ui.Text>
+        {box.task && taskColour(box.task) ? <ui.Text key="band-box-dot" color={taskColour(box.task)}>● </ui.Text> : null}
+        <ui.Text color={(box.task && taskColour(box.task)) || NEEDS} bold wrap="truncate-end">{box.head}</ui.Text>
       </ui.Box>
       {'Input' in ui ? (<ui.Box flexDirection="column" width="100%" flexShrink={0}>
           <ui.Input key={barBoxKey()} placeholder={box.placeholder} {...(box.draft ? { value: draftDrawn(box.draft) } : {})} rows={BOX_ROWS} autoFocus onInput={value => {
@@ -166,6 +172,13 @@ const settleBar = ($) => {
     // (the panes' own drawings are still good: they are given again as they were)
     void drawFresh($, true);
 };
+// The bar's figures as last made, by bar, and how to make them again with the other run of spacers: a drawing given again as it
+// was would show again a card the pointer had left. Its buttons keep their keys and look, so the engine keeps their numbers
+const barRemakes = new Map();
+const barAgain = (bar, recent) => {
+    const one = barRemakes.get(bar);
+    return one && one.drawing === recent ? one.remake() : recent;
+};
 // When this surface's bar last asked for the cards to be drawn again as its box came or went: at most once a second, so two
 // windows of one chat that differ never ask in turn without end
 let barFlipAt = 0;
@@ -178,7 +191,7 @@ const bandHooks = (on) => {
     // into or holds the cursor: a bar with a box open keeps a drawing of its own (barHeld)
     on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
         // A message that waits for a hook to start a task again goes from this drawing (sendHeld)
-        if (heldSends.length || heldPrompts.length)
+        if (heldSends.length)
             await sendHeld($).catch(err => log($, `message not sent: ${String(err)}`));
         const drawBar = () => drawBarNow();
         if (e.surface !== 'desktop' || e.props.hasSurvey)
@@ -190,8 +203,9 @@ const bandHooks = (on) => {
         const isBarHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD);
         if (recent && !isBarHeld && isPressHeld(at))
             return ((isPressMissed = true), recent);
+        // Given again, the figures still move past the places they had, so the app shows again no card the pointer left (barAgain)
         if (recent && !isBarHeld && isFreshTooSoon($, key, at, isPanelSlow(at)))
-            return recent;
+            return barAgain(line, recent);
         freshBegins(key, at);
         const madeFrom = Date.now();
         let made;
@@ -267,7 +281,7 @@ const bandHooks = (on) => {
                 const ask = first?.ask;
                 if (first && ask) {
                     // The same block as on its card (needBlock), compact: its own buttons numbered, and nothing typed here
-                    const answers = (ask.choices ?? []).slice(0, 9);
+                    const answers = ask.refused ? [] : ask.rule ? (ask.choices ?? []).slice(0, 9) : withSetAside((ask.choices ?? []).slice(0, 8));
                     const id = `${first.id}:${ask.at}`;
                     const picked = bandPick?.id === id ? bandPick.n : -1;
                     const press = (n, choice) => {
@@ -360,7 +374,14 @@ const bandHooks = (on) => {
         </Box>) : (row);
             };
             // Where the app lifts the figures' cards, each drawing moves them past the places they had in the last
-            return drawing(drawn ? usageSpacersDrawn(ui) : null);
+            const bar = `bar|${e.requestId ?? ''}|${e.surface}`;
+            const remake = () => drawing(drawn ? usageSpacersDrawn(ui, bar) : null);
+            const made = remake();
+            if (drawn)
+                barRemakes.set(bar, { drawing: made, remake });
+            else
+                barRemakes.delete(bar);
+            return made;
         }
     });
 };
