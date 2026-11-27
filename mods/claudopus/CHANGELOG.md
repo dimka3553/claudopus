@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.313 · 28 November 2026
+- With tasks at work the panel and the bar are asked for far less often, so buttons stay put under the pointer and a busy chat uses less of the processor: a change that shows nothing new (a task's tokens or steps) no longer draws them again.
+- Each change to the list of tasks and each look at the panel costs less in a chat with many tasks.
+- On battery, Claudopus looks at your other Mac for presses every 15 seconds, not every 5.
+
 ## 0.2.312 · 28 November 2026
 - A panel drawn again with nothing new in it costs less in a chat with many tasks: what its cards say is put together once for each change, not at every drawing.
 - The panel's recorder, switched on to find faults, also notes how often each part of Claudopus ran and for how long, so what slows a busy chat can be found in the real app.
