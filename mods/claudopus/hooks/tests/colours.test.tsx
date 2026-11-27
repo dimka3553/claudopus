@@ -915,6 +915,8 @@ test("with Task colours on in Config, a reply about a task sits in its colour's 
     // A reply about no task gets no box
     const plain = await $.ui.mount({ ...MSG, requestId: 'r2', props: { text: 'I cannot see the weather from here.', isFirstOfReply: true }, surface } as never)
     expect(await plain.find({ type: 'Text', text: /●/ })).toBeUndefined()
+    await reply.unmount()
+    await plain.unmount()
   }
   // Its name opens its Details, which lists its links; its card leads with the same colour
   const reply = await $.ui.mount({ ...MSG, surface: 'desktop' } as never)
@@ -931,6 +933,7 @@ test("with Task colours on in Config, a reply about a task sits in its colour's 
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   expect(await config.find({ type: 'Text', text: 'Task colours' })).toBeDefined()
   expect(await config.find({ type: 'Text', text: 'Links at the end' })).toBeDefined()
+  await reply.unmount()
   await pressed(config, 'config-taskColours-off')
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
   const uncoloured = await $.ui.mount({ ...MSG, surface: 'desktop' } as never)
@@ -938,6 +941,7 @@ test("with Task colours on in Config, a reply about a task sits in its colour's 
   expect(await uncoloured.find({ type: 'Text', text: 'Links' })).toBeDefined()
   expect(await dotOf()).toBeUndefined()
 
+  await uncoloured.unmount()
   // Links at the end off: the reply is the engine's alone
   await pressed(config, 'config-replyLinks-off')
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ replyLinks: false })

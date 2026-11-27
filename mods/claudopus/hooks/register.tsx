@@ -3497,7 +3497,11 @@ if (!isColoured) return undefined
 const slot = colourIndex.tasks[id]?.colour ?? colourBuilder?.colours[id]
 return slot === undefined ? undefined : colourHex(slot)
 }
-const taskLinks = (id: string) => (isLinked ? (colourIndex.tasks[id]?.links ?? []) : [])
+const taskLinks = ($: EngineInterface, id: string) => {
+if (!isLinked) return []
+colourSoon($, 10_000)
+return colourIndex.tasks[id]?.links ?? []
+}
 const isColourRead = () => isColoured || isLinked
 
 const replyTasks = (requestId: string, text: string) =>
@@ -3538,9 +3542,18 @@ colourRunning = undefined
 })
 return colourRunning
 }
-const colourSoon = ($: EngineInterface) => {
-colourTimer?.cancel()
-colourTimer = $.clock.after(400, () => void colourBuild($, false))
+let colourPassAt = 0
+const colourAsked = new Set<string>()
+const colourSoon = ($: EngineInterface, gap = 400) => {
+if (colourTimer || !isColourRead()) return
+colourTimer = $.clock.after(400, () => {
+colourTimer = undefined
+void $.clock.now().then(now => {
+if (now - colourPassAt < gap) return
+colourPassAt = now
+return colourBuild($, false)
+})
+})
 }
 
 const replyToTask = async ($: EngineInterface, id: string, surface: string) => {
@@ -3555,6 +3568,8 @@ const withTaskBox = async ($: EngineInterface, e: { requestId: string; surface: 
 if (e.props.isSummary || e.props.text.trim() === NO_ANSWER) return reply
 const given = isLinked ? replyLinksIn(e.props.text) : []
 const ids = isColoured ? replyTasks(e.requestId, e.props.text) : []
+const hash = colourTextHash(e.props.text)
+if (isColoured && !ids.length && !colourIndex.texts[hash] && !colourAsked.has(hash)) (colourAsked.add(hash), colourSoon($))
 const [first] = ids
 if (!first && !given.length) return reply
 const { Box, Button, Markdown, Text } = ui
@@ -3594,14 +3609,6 @@ return (
 {links}
 </Box>
 )
-}
-
-const colourHooks = (on: On) => {
-on('session.append', async ($, e, next) => {
-const kept = await next(e)
-if (isColourRead() && e.agentId === undefined && (e.message.type === 'user' || e.message.type === 'assistant')) colourSoon($)
-return kept
-})
 }
 
 
@@ -16459,7 +16466,7 @@ return (
 ? part('part-chat', 'Conversation', '', theirChat(one, one.chat))
 : part('part-chat', 'Conversation', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading the conversation…</Text>)}
 {/* Every link the chat's replies about it gave, newest first, while links at the end are on (colours.tsx) */}
-{taskLinks(one.id).length ? part('part-links', 'Links', '', <Markdown text={linkList(taskLinks(one.id))} />) : null}
+{taskLinks($, one.id).length ? part('part-links', 'Links', '', <Markdown text={linkList(taskLinks($, one.id))} />) : null}
 {/* At the bottom, under its conversation, a box to write to it, for a task of this chat's that works or has finished and
               asks nothing (one that asks is answered in its block above): the same message as the box Message opens above the chat */}
 {canChange(one) && 'Input' in table ? <Box key="message-gap" flexGrow={1} /> : null}
@@ -17066,7 +17073,6 @@ bandHooks(on)
 panelHooks(on)
 tabHooks(on)
 memoryHooks(on)
-colourHooks(on)
 serversTabHooks(on)
 workflowHooks(on)
 }

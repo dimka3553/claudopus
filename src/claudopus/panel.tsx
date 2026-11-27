@@ -1728,7 +1728,7 @@ const panelHooks = (on: On) => {
             ? part('part-chat', 'Conversation', '', theirChat(one, one.chat))
             : part('part-chat', 'Conversation', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading the conversation…</Text>)}
           {/* Every link the chat's replies about it gave, newest first, while links at the end are on (colours.tsx) */}
-          {taskLinks(one.id).length ? part('part-links', 'Links', '', <Markdown text={linkList(taskLinks(one.id))} />) : null}
+          {taskLinks($, one.id).length ? part('part-links', 'Links', '', <Markdown text={linkList(taskLinks($, one.id))} />) : null}
           {/* At the bottom, under its conversation, a box to write to it, for a task of this chat's that works or has finished and
               asks nothing (one that asks is answered in its block above): the same message as the box Message opens above the chat */}
           {canChange(one) && 'Input' in table ? <Box key="message-gap" flexGrow={1} /> : null}

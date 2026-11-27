@@ -295,7 +295,7 @@ export class Builder {
   private assistant(row: SessionMessage) {
     this.saidLast = true
     const turn = this.open()
-    if (row.text.trim()) turn.replies.push({ uuid: idOf(row), text: row.text })
+    if ((row.text ?? '').trim()) turn.replies.push({ uuid: idOf(row), text: row.text ?? '' })
     for (const use of row.toolUses ?? []) this.used(use, turn)
   }
 
